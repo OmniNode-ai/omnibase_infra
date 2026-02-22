@@ -250,3 +250,34 @@ handler_routing:
         assert EnumInfraTransportType.DATABASE in merged.transport_types
         assert EnumInfraTransportType.CONSUL in merged.transport_types
         assert len(merged.contract_paths) == 2
+
+
+class TestTransportAliasesNewEntries:
+    """Parametrized tests for the 12 new aliases added to _TRANSPORT_ALIASES."""
+
+    @pytest.mark.parametrize(
+        ("alias", "expected_transport"),
+        [
+            ("architecture_validation", EnumInfraTransportType.RUNTIME),
+            ("auth_gate", EnumInfraTransportType.RUNTIME),
+            ("ledger_projection", EnumInfraTransportType.RUNTIME),
+            ("validation_ledger_projection", EnumInfraTransportType.RUNTIME),
+            ("rrh_validate", EnumInfraTransportType.RUNTIME),
+            ("runtime_target", EnumInfraTransportType.RUNTIME),
+            ("toolchain", EnumInfraTransportType.RUNTIME),
+            ("mock", EnumInfraTransportType.INMEMORY),
+            ("intent", EnumInfraTransportType.GRAPH),
+            ("memgraph", EnumInfraTransportType.GRAPH),
+            ("repo_state", EnumInfraTransportType.FILESYSTEM),
+            ("rrh_storage", EnumInfraTransportType.FILESYSTEM),
+        ],
+    )
+    def test_alias_resolves_to_expected_transport(
+        self, alias: str, expected_transport: EnumInfraTransportType
+    ) -> None:
+        """Each new alias should resolve to its expected transport type."""
+        assert _resolve_transport(alias) == expected_transport
+
+    def test_routing_state_not_in_aliases(self) -> None:
+        """routing_state should NOT be in aliases (intentionally excluded)."""
+        assert _resolve_transport("routing_state") is None

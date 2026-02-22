@@ -34,6 +34,7 @@ Portability:
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -48,6 +49,11 @@ ALLOWED_ROOT_FILES: frozenset[str] = frozenset(
     {
         # Version control
         ".gitignore",
+        # NOTE: `.env.*` variants (e.g. .env.local, .env.staging) are intentionally
+        # NOT in this allowlist. The Infisical provisioning plan requires all non-example
+        # env files to live in ~/.omnibase/ (shared) or be managed by Infisical at
+        # runtime. Any such file in the repo root is a misconfiguration — it should
+        # either be a committed .env.example template or sourced from ~/.omnibase/.env.
         ".gitattributes",
         ".gitmodules",
         # Python packaging (required)
@@ -88,7 +94,6 @@ ALLOWED_ROOT_FILES: frozenset[str] = frozenset(
         "CLAUDE.md",
         # Environment
         ".env.example",
-        ".env.template",
         # Docker (if needed at root)
         "Dockerfile",
         "docker-compose.yml",
@@ -123,6 +128,7 @@ ALLOWED_ROOT_DIRECTORIES: frozenset[str] = frozenset(
         "docs",
         "scripts",
         # Common optional directories
+        "config",
         "contracts",
         "docker",
         "examples",
@@ -163,7 +169,6 @@ ALLOWED_ROOT_DIRECTORIES: frozenset[str] = frozenset(
 
 # Pattern-based allowlist for files that match patterns
 ALLOWED_ROOT_PATTERNS: tuple[str, ...] = (
-    ".env.*",  # .env.local, .env.production, etc.
     "*.egg-info",  # Build artifacts (should be gitignored)
 )
 
@@ -202,6 +207,50 @@ def _matches_pattern(name: str, patterns: tuple[str, ...]) -> bool:
     import fnmatch
 
     return any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
+
+
+def _get_gitignored_set(items: list[Path]) -> set[Path]:
+    """Return the set of paths from *items* that are gitignored.
+
+    Uses a single ``git check-ignore`` invocation for all paths instead of
+    one subprocess per path, which keeps validation fast even in large repos.
+
+    Gitignored files (e.g. .env, __pycache__, .venv) are expected to exist on
+    the developer's machine but must not be committed. The validator should not
+    flag them as violations — only files that ARE committed (not ignored) matter.
+    """
+    if not items:
+        return set()
+    try:
+        result = subprocess.run(
+            ["git", "check-ignore", "--", *[str(p) for p in items]],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=5,
+            # All items originate from repo_path.iterdir(), so they all share
+            # the same parent directory.  Using items[0].parent as cwd is safe
+            # at this call site.  Callers must not pass items from multiple
+            # different parent directories, as only the first item's parent
+            # would be used and the git check-ignore output might be incorrect.
+            cwd=items[0].parent.resolve(),
+        )
+        # git check-ignore prints one ignored path per line.  Because we pass
+        # absolute paths, the output lines are also absolute paths — so we
+        # match against str(p) directly.
+        ignored_paths: set[str] = {
+            line.strip()
+            for line in result.stdout.decode("utf-8", errors="replace").splitlines()
+            if line.strip()
+        }
+        return {p for p in items if str(p) in ignored_paths}
+    except FileNotFoundError:
+        # git not available — treat nothing as ignored
+        return set()
+    except subprocess.TimeoutExpired:
+        # git timed out (network FS, maintenance lock) — err on the side of
+        # false positives rather than blocking the commit indefinitely
+        return set()
 
 
 def _suggest_action(item: Path) -> str:
@@ -274,8 +323,12 @@ def validate_root_directory(
     if not repo_path.is_dir():
         raise ValueError(f"Repository path is not a directory: {repo_path}")
 
-    # Check all items in root directory
-    for item in sorted(repo_path.iterdir()):
+    # Collect all root items first so we can batch the gitignore check.
+    all_items = sorted(repo_path.iterdir())
+
+    # Items that pass the allowlist checks immediately — no git call needed.
+    unresolved: list[Path] = []
+    for item in all_items:
         result.checked_items += 1
         name = item.name
 
@@ -304,6 +357,20 @@ def validate_root_directory(
                 if verbose:
                     print(f"  ✓ {name}/ (allowed directory)")
                 continue
+
+        # Not on the explicit allowlist — defer to a single batched git call.
+        unresolved.append(item)
+
+    # Batch all gitignore checks into ONE subprocess call (N paths → 1 spawn).
+    # Gitignored files are expected to exist locally (e.g. .env, build dirs)
+    # but must not be committed. Skip them — they are not a repo violation.
+    gitignored = _get_gitignored_set(unresolved)
+
+    for item in unresolved:
+        if item in gitignored:
+            if verbose:
+                print(f"  ~ {item.name} (gitignored, skipped)")
+            continue
 
         # This is a violation
         result.violations.append(

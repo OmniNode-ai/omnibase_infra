@@ -19,8 +19,10 @@ This module tests:
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -41,6 +43,7 @@ validate_root_directory = validate_clean_root_module.validate_root_directory
 generate_report = validate_clean_root_module.generate_report
 _matches_pattern = validate_clean_root_module._matches_pattern
 _suggest_action = validate_clean_root_module._suggest_action
+_get_gitignored_set = validate_clean_root_module._get_gitignored_set
 ValidationResult = validate_clean_root_module.ValidationResult
 RootViolation = validate_clean_root_module.RootViolation
 ALLOWED_ROOT_FILES = validate_clean_root_module.ALLOWED_ROOT_FILES
@@ -327,16 +330,26 @@ class TestViolationsDetected:
 class TestPatternMatching:
     """Test pattern-based allowlist matching."""
 
-    def test_env_pattern_matches(self, tmp_path: Path) -> None:
-        """Test that .env.* pattern matches environment files."""
+    def test_env_pattern_is_violation(self, tmp_path: Path) -> None:
+        """Test that .env.* files are violations (not in ALLOWED_ROOT_PATTERNS).
+
+        .env variants like .env.local, .env.production are intentionally excluded
+        from the allowlist. These files must live in ~/.omnibase/ or be managed
+        by Infisical. Only .env.example is explicitly allowed.
+
+        _get_gitignored_set is patched to return an empty set so the test
+        exercises only pattern-matching logic and is not affected by whether
+        the tmp_path happens to be inside a git repo with these paths gitignored.
+        """
         env_files = [".env.local", ".env.production", ".env.test"]
         for env_file in env_files:
             (tmp_path / env_file).touch()
 
-        result = validate_root_directory(tmp_path)
+        with patch("validate_clean_root._get_gitignored_set", return_value=set()):
+            result = validate_root_directory(tmp_path)
 
-        assert result.is_valid
-        assert len(result.violations) == 0
+        assert not result.is_valid
+        assert len(result.violations) == len(env_files)
 
     def test_egg_info_pattern_matches(self, tmp_path: Path) -> None:
         """Test that *.egg-info pattern matches build artifacts."""
@@ -350,22 +363,17 @@ class TestPatternMatching:
 
     def test_matches_pattern_function_positive(self) -> None:
         """Test _matches_pattern returns True for matching patterns."""
-        assert _matches_pattern(".env.local", (".env.*",))
-        assert _matches_pattern(".env.production", (".env.*",))
         assert _matches_pattern("package.egg-info", ("*.egg-info",))
         assert _matches_pattern("my_package.egg-info", ("*.egg-info",))
 
     def test_matches_pattern_function_negative(self) -> None:
         """Test _matches_pattern returns False for non-matching patterns."""
-        assert not _matches_pattern(".env", (".env.*",))  # .env without suffix
-        assert not _matches_pattern("env.local", (".env.*",))  # missing leading dot
         assert not _matches_pattern("random.txt", ("*.egg-info",))
         assert not _matches_pattern("egg-info", ("*.egg-info",))  # no prefix
 
     def test_matches_pattern_multiple_patterns(self) -> None:
         """Test _matches_pattern with multiple patterns."""
-        patterns = (".env.*", "*.egg-info", "*.tmp")
-        assert _matches_pattern(".env.local", patterns)
+        patterns = ("*.egg-info", "*.tmp")
         assert _matches_pattern("package.egg-info", patterns)
         assert _matches_pattern("temp.tmp", patterns)
         assert not _matches_pattern("random.txt", patterns)
@@ -686,9 +694,13 @@ class TestAllowlistCompleteness:
         for dir_name in common_dirs:
             assert dir_name in ALLOWED_ROOT_DIRECTORIES, f"{dir_name} should be allowed"
 
-    def test_env_pattern_in_patterns(self) -> None:
-        """Test that .env.* pattern is in ALLOWED_ROOT_PATTERNS."""
-        assert ".env.*" in ALLOWED_ROOT_PATTERNS
+    def test_env_pattern_not_in_patterns(self) -> None:
+        """Test that .env.* pattern is NOT in ALLOWED_ROOT_PATTERNS.
+
+        .env variants are intentionally excluded — they must live in
+        ~/.omnibase/ or be managed by Infisical at runtime.
+        """
+        assert ".env.*" not in ALLOWED_ROOT_PATTERNS
 
     def test_egg_info_pattern_in_patterns(self) -> None:
         """Test that *.egg-info pattern is in ALLOWED_ROOT_PATTERNS."""
@@ -812,3 +824,50 @@ class TestEnvFileEnforcement:
     def test_env_not_in_allowed_root_directories(self) -> None:
         """Test that .env is not in ALLOWED_ROOT_DIRECTORIES allowlist."""
         assert ".env" not in ALLOWED_ROOT_DIRECTORIES
+
+
+class TestGetGitIgnoredSet:
+    """Tests for the _get_gitignored_set helper."""
+
+    def test_gitignored_path_included_in_result(self, tmp_path: Path) -> None:
+        """Test that a path returned by git check-ignore is included in the set."""
+        item = tmp_path / ".env"
+        item.touch()
+
+        mock_result = subprocess.CompletedProcess(
+            args=["git", "check-ignore", "--", str(item)],
+            returncode=0,
+            stdout=str(item).encode("utf-8"),
+            stderr=b"",
+        )
+
+        with patch("validate_clean_root.subprocess.run", return_value=mock_result):
+            ignored = _get_gitignored_set([item])
+
+        assert item in ignored
+
+    def test_git_not_found_returns_empty_set(self, tmp_path: Path) -> None:
+        """Test that FileNotFoundError (git not found) returns an empty set."""
+        item = tmp_path / "some_file.txt"
+        item.touch()
+
+        with patch("validate_clean_root.subprocess.run", side_effect=FileNotFoundError):
+            ignored = _get_gitignored_set([item])
+
+        assert ignored == set()
+
+    def test_git_timeout_returns_empty_set(self, tmp_path: Path) -> None:
+        """Test that TimeoutExpired returns an empty set instead of blocking."""
+        item = tmp_path / "some_file.txt"
+        item.touch()
+
+        with patch(
+            "validate_clean_root.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="git", timeout=5),
+        ):
+            ignored = _get_gitignored_set([item])
+
+        assert ignored == set()
+
+    def test_empty_items_returns_empty_set(self) -> None:
+        assert _get_gitignored_set([]) == set()
