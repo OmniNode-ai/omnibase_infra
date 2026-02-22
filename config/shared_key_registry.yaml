@@ -6,8 +6,7 @@
 #
 # Semantics:
 #   shared            — eligible for Infisical seeding + repo .env stripping;
-#                       maps directly to SHARED_PLATFORM_SECRETS in
-#                       scripts/register-repo.py (keep in sync)
+#                       loaded by _load_registry() in scripts/register-repo.py
 #   bootstrap_only    — excluded from Infisical seeding (circular bootstrap dep);
 #                       listed here for awareness only; must never be in any repo
 #                       .env; maps to BOOTSTRAP_KEYS frozenset in register-repo.py

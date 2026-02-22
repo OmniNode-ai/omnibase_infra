@@ -93,7 +93,13 @@ def _load_registry() -> dict[str, list[str]]:
         raise FileNotFoundError(f"Registry not found: {registry_path}")
     with open(registry_path) as f:
         data = yaml.safe_load(f)
-    return dict(data["shared"].items())
+    shared = data["shared"]
+    if not isinstance(shared, dict):
+        raise ValueError(
+            f"Expected 'shared' in {registry_path} to be a mapping, "
+            f"got {type(shared).__name__!r}. Check that 'shared:' is not null or a list."
+        )
+    return shared
 
 
 def _bootstrap_keys() -> frozenset[str]:
@@ -103,6 +109,8 @@ def _bootstrap_keys() -> frozenset[str]:
     dependency — Infisical needs them to start).
     """
     registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
+    if not registry_path.exists():
+        raise FileNotFoundError(f"Registry not found: {registry_path}")
     with open(registry_path) as f:
         data = yaml.safe_load(f)
     return frozenset(data["bootstrap_only"])
@@ -115,6 +123,8 @@ def _identity_defaults() -> frozenset[str]:
     must NOT be seeded into Infisical.
     """
     registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
+    if not registry_path.exists():
+        raise FileNotFoundError(f"Registry not found: {registry_path}")
     with open(registry_path) as f:
         data = yaml.safe_load(f)
     return frozenset(data["identity_defaults"])
