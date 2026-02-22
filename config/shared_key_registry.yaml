@@ -85,6 +85,8 @@ shared:
 # They must never appear in any repo .env file.
 bootstrap_only:
   - POSTGRES_PASSWORD
+  # Moved from shared/kafka to bootstrap_only. Migration: any existing /shared/kafka/KAFKA_BOOTSTRAP_SERVERS
+  # entry in a provisioned Infisical instance is now stale and can be deleted manually.
   - KAFKA_BOOTSTRAP_SERVERS # circular bootstrap dep: containers need this BEFORE Infisical is reachable
   - INFISICAL_ADDR
   - INFISICAL_CLIENT_ID
