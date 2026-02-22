@@ -35,6 +35,7 @@ shared:
     - POSTGRES_POOL_MIN_SIZE
     - POSTGRES_POOL_MAX_SIZE
     - POSTGRES_TIMEOUT_MS
+    - QUERY_TIMEOUT_SECONDS
   "/shared/kafka/":
     - KAFKA_REQUEST_TIMEOUT_MS
   "/shared/consul/":
@@ -71,6 +72,9 @@ shared:
     - SERVICE_AUTH_TOKEN
     - GH_PAT
   "/shared/valkey/":
+    - VALKEY_HOST
+    - VALKEY_PORT
+    - VALKEY_DB
     - VALKEY_PASSWORD
   "/shared/qdrant/":
     - QDRANT_HOST
