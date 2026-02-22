@@ -17,7 +17,7 @@ from __future__ import annotations
 import ipaddress
 from urllib.parse import quote_plus
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,6 +34,21 @@ class ConfigSessionStorage(BaseSettings):
     environment (e.g. by a test runner or CI matrix) will be used here. This is an
     intentional trade-off of the zero-repo-env policy; ensure POSTGRES_* variables
     in the shell match the intended session storage target.
+
+    Environment variable mapping:
+
+    - ``postgres_host``      ← ``POSTGRES_HOST``
+    - ``postgres_port``      ← ``POSTGRES_PORT``
+    - ``postgres_database``  ← ``POSTGRES_DATABASE``
+    - ``postgres_user``      ← ``POSTGRES_USER``
+    - ``postgres_password``  ← ``POSTGRES_PASSWORD``
+    - ``pool_min_size``      ← ``POSTGRES_POOL_MIN_SIZE`` (primary) or ``pool_min_size`` (fallback)
+    - ``pool_max_size``      ← ``POSTGRES_POOL_MAX_SIZE`` (primary) or ``pool_max_size`` (fallback)
+    - ``query_timeout_seconds`` ← ``QUERY_TIMEOUT_SECONDS``
+
+    The pool fields use ``AliasChoices`` so that both the canonical shared key
+    (e.g. ``POSTGRES_POOL_MIN_SIZE``, as declared in
+    ``config/shared_key_registry.yaml``) and the bare field name work.
 
     Example: export POSTGRES_HOST=db.example.com
     """
@@ -71,17 +86,22 @@ class ConfigSessionStorage(BaseSettings):
     )
 
     # Connection pool
+    # AliasChoices maps POSTGRES_POOL_MIN_SIZE (canonical shared key per
+    # config/shared_key_registry.yaml) first, then the bare field name as
+    # a fallback so that direct construction (e.g. in tests) still works.
     pool_min_size: int = Field(
         default=2,
         ge=1,
         le=100,
-        description="Minimum connection pool size",
+        description="Minimum connection pool size (env: POSTGRES_POOL_MIN_SIZE)",
+        validation_alias=AliasChoices("POSTGRES_POOL_MIN_SIZE", "pool_min_size"),
     )
     pool_max_size: int = Field(
         default=10,
         ge=1,
         le=100,
-        description="Maximum connection pool size",
+        description="Maximum connection pool size (env: POSTGRES_POOL_MAX_SIZE)",
+        validation_alias=AliasChoices("POSTGRES_POOL_MAX_SIZE", "pool_max_size"),
     )
 
     # Query timeouts
