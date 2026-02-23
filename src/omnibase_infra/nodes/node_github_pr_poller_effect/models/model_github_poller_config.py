@@ -28,7 +28,7 @@ class ModelGitHubPollerConfig(BaseModel):
             personal access token or app installation token.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     repos: list[str] = Field(
         default_factory=list,

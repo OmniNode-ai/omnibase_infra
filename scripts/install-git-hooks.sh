@@ -59,7 +59,9 @@ if [ -f "${PRE_COMMIT_HOOK}" ] && ! grep -q "onex-git-hook-relay" "${PRE_COMMIT_
 
 # onex-git-hook-relay — emit pre-commit event to ONEX event bus
 _ONEX_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "detached")
-_ONEX_AUTHOR=$(git config user.name 2>/dev/null | tr ' ' '_' || echo "unknown")
+# Prefer GITHUB_USER env var or git config github.user (GitHub username, not PII)
+_ONEX_AUTHOR="${GITHUB_USER:-$(git config github.user 2>/dev/null || echo "")}"
+if [ -z "${_ONEX_AUTHOR}" ]; then _ONEX_AUTHOR="unknown"; fi
 if command -v onex-git-hook-relay >/dev/null 2>&1; then
     onex-git-hook-relay emit \
         --hook pre-commit \
@@ -81,7 +83,9 @@ else
 set -euo pipefail
 
 _ONEX_BRANCH=\$(git symbolic-ref --short HEAD 2>/dev/null || echo "detached")
-_ONEX_AUTHOR=\$(git config user.name 2>/dev/null | tr ' ' '_' || echo "unknown")
+# Prefer GITHUB_USER env var or git config github.user (GitHub username, not PII)
+_ONEX_AUTHOR="\${GITHUB_USER:-\$(git config github.user 2>/dev/null || echo "")}"
+if [ -z "\${_ONEX_AUTHOR}" ]; then _ONEX_AUTHOR="unknown"; fi
 
 if command -v onex-git-hook-relay >/dev/null 2>&1; then
     onex-git-hook-relay emit \\

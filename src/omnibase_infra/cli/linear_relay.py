@@ -81,8 +81,12 @@ async def _publish_event(
         from omnibase_core.container import ModelONEXContainer
         from omnibase_infra.event_bus.adapters import AdapterProtocolEventPublisherKafka
         from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+        from omnibase_infra.event_bus.models.config.model_kafka_event_bus_config import (
+            ModelKafkaEventBusConfig,
+        )
 
-        bus = EventBusKafka.default()
+        config = ModelKafkaEventBusConfig(bootstrap_servers=bootstrap_servers)
+        bus = EventBusKafka.from_config(config)
         await asyncio.wait_for(bus.start(), timeout=_KAFKA_TIMEOUT_SECONDS)
         try:
             container = ModelONEXContainer()

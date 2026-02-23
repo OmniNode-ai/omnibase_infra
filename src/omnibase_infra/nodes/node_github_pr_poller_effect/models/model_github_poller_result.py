@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.types import JsonType
+
 __all__ = ["ModelGitHubPollerResult"]
 
 
@@ -21,9 +23,10 @@ class ModelGitHubPollerResult(BaseModel):
         repos_polled: Repository identifiers polled in this cycle.
         prs_polled: Total number of PRs polled.
         errors: Non-fatal error messages encountered during polling.
+        pending_events: Event payloads pending publication by the runtime/node.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     events_published: int = Field(
         default=0,
@@ -42,4 +45,8 @@ class ModelGitHubPollerResult(BaseModel):
     errors: list[str] = Field(
         default_factory=list,
         description="Non-fatal error messages encountered during polling.",
+    )
+    pending_events: list[JsonType] = Field(
+        default_factory=list,
+        description="Event payloads pending publication by the runtime/node shell.",
     )

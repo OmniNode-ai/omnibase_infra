@@ -28,6 +28,7 @@ from omnibase_infra.cli.git_hook_relay import (
     _validate_repo,
     cli,
 )
+from omnibase_infra.errors import ProtocolConfigurationError
 
 
 class TestValidateRepo:
@@ -41,17 +42,17 @@ class TestValidateRepo:
 
     @pytest.mark.unit
     def test_rejects_absolute_path(self) -> None:
-        with pytest.raises(ValueError, match="Invalid repo format"):
+        with pytest.raises(ProtocolConfigurationError, match="Invalid repo format"):
             _validate_repo("/home/user/repos/omniclaude")
 
     @pytest.mark.unit
     def test_rejects_bare_name(self) -> None:
-        with pytest.raises(ValueError, match="Invalid repo format"):
+        with pytest.raises(ProtocolConfigurationError, match="Invalid repo format"):
             _validate_repo("omniclaude")
 
     @pytest.mark.unit
     def test_rejects_three_segments(self) -> None:
-        with pytest.raises(ValueError, match="Invalid repo format"):
+        with pytest.raises(ProtocolConfigurationError, match="Invalid repo format"):
             _validate_repo("org/repo/extra")
 
 

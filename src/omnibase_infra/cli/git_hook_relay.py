@@ -114,9 +114,11 @@ class ModelGitHookEmitParams(BaseModel):
 
 
 def _validate_repo(repo: str) -> None:
-    """Raise ValueError if repo is not in {owner}/{name} format."""
+    """Raise ProtocolConfigurationError if repo is not in {owner}/{name} format."""
     if not _REPO_PATTERN.match(repo):
-        raise ValueError(
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        raise ProtocolConfigurationError(
             f"Invalid repo format: {repo!r}. "
             "Must be '{owner}/{name}' (e.g. 'OmniNode-ai/omniclaude'). "
             "Never use absolute paths or bare repo names."
@@ -151,8 +153,12 @@ async def _publish_event(
         from omnibase_core.container import ModelONEXContainer
         from omnibase_infra.event_bus.adapters import AdapterProtocolEventPublisherKafka
         from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+        from omnibase_infra.event_bus.models.config.model_kafka_event_bus_config import (
+            ModelKafkaEventBusConfig,
+        )
 
-        bus = EventBusKafka.default()
+        config = ModelKafkaEventBusConfig(bootstrap_servers=bootstrap_servers)
+        bus = EventBusKafka.from_config(config)
         await asyncio.wait_for(bus.start(), timeout=_KAFKA_TIMEOUT_SECONDS)
         try:
             container = ModelONEXContainer()
@@ -315,7 +321,7 @@ def emit(ctx: click.Context, /, **kwargs: object) -> None:
     # Validate repo format
     try:
         _validate_repo(repo)
-    except ValueError as exc:
+    except Exception as exc:
         click.echo(f"ERROR: {exc}", err=True)
         sys.exit(1)
 

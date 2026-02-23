@@ -28,6 +28,13 @@ The handler uses ``httpx.AsyncClient`` with a configurable timeout.
 GitHub API errors are logged and surfaced in ``ModelGitHubPollerResult.errors``
 rather than raising — the poller must not block the runtime tick loop.
 
+Handler Purity
+--------------
+The handler does NOT publish events directly. Instead it returns
+``ModelGitHubPollerResult.pending_events`` — a list of event payloads
+for the node shell / runtime to publish. This follows the ONEX contract
+that handlers must not access the event bus.
+
 Related Tickets:
     - OMN-2656: Phase 2 — Effect Nodes & CLIs (omnibase_infra)
 """
@@ -37,32 +44,17 @@ from __future__ import annotations
 import logging
 import os
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
 
 import httpx
 
 from omnibase_core.types import JsonType
-
-
-class ProtocolEventPublisherBase(Protocol):
-    """Minimal protocol for the event publisher used by HandlerGitHubApiPoll."""
-
-    async def publish(
-        self,
-        event_type: str,
-        payload: JsonType,
-        partition_key: str | None = None,
-    ) -> bool:
-        """Publish an event; returns True on success."""
-        ...
-
-
 from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_poller_config import (
     ModelGitHubPollerConfig,
 )
 from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_poller_result import (
     ModelGitHubPollerResult,
 )
+from omnibase_infra.utils import sanitize_error_string
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +66,7 @@ TriageState = str
 
 _BLOCKING_LABELS = frozenset({"blocked", "do-not-merge", "wip"})
 
-__all__ = ["HandlerGitHubApiPoll", "ProtocolEventPublisherBase", "compute_triage_state"]
+__all__ = ["HandlerGitHubApiPoll", "compute_triage_state"]
 
 
 def compute_triage_state(
@@ -173,18 +165,25 @@ class HandlerGitHubApiPoll:
     """Handler for the ``github.poll.prs`` operation.
 
     Fetches open PRs from the GitHub REST API for each configured repository,
-    classifies their triage state via ``compute_triage_state``, and publishes
-    ``ModelGitHubPRStatusEvent`` instances to ``onex.evt.github.pr-status.v1``.
+    classifies their triage state via ``compute_triage_state``, and returns
+    event payloads in ``ModelGitHubPollerResult.pending_events`` for the
+    node shell / runtime to publish.
+
+    Handler Purity:
+        This handler does NOT publish events directly. All event payloads are
+        returned in ``ModelGitHubPollerResult.pending_events`` for the runtime
+        to publish. Handlers must not access the event bus directly.
+
+    Throttling:
+        The handler tracks the last poll time per repo (``self._last_polled``)
+        and skips repos whose ``poll_interval_seconds`` has not elapsed yet.
 
     Non-blocking contract:
         Errors from individual repo/PR lookups are collected in
-        ``ModelGitHubPollerResult.errors`` rather than raised. The handler
-        always returns a result, even on partial failure.
+        ``ModelGitHubPollerResult.errors`` (sanitized) rather than raised.
+        The handler always returns a result, even on partial failure.
 
     Args:
-        publisher: An object implementing ``async def publish(event_type, payload,
-            partition_key)`` — typically
-            ``AdapterProtocolEventPublisherKafka``.
         api_base: GitHub API base URL (default: https://api.github.com).
             Override in tests.
         http_timeout: HTTP client timeout in seconds (default: 15).
@@ -192,13 +191,13 @@ class HandlerGitHubApiPoll:
 
     def __init__(
         self,
-        publisher: ProtocolEventPublisherBase,
         api_base: str = GITHUB_API_BASE,
         http_timeout: float = 15.0,
     ) -> None:
-        self._publisher = publisher
         self._api_base = api_base
         self._http_timeout = http_timeout
+        # Per-repo throttle tracker — maps repo identifier to last poll time
+        self._last_polled: dict[str, datetime] = {}
 
     async def handle(
         self,
@@ -206,12 +205,16 @@ class HandlerGitHubApiPoll:
     ) -> ModelGitHubPollerResult:
         """Execute one poll cycle for all configured repositories.
 
+        Repos whose ``poll_interval_seconds`` has not elapsed since the last
+        successful poll are skipped silently.
+
         Args:
             config: Poller configuration (repos, interval, stale threshold,
                 token env var).
 
         Returns:
-            ``ModelGitHubPollerResult`` with counts and any non-fatal errors.
+            ``ModelGitHubPollerResult`` with counts, pending events, and any
+            non-fatal errors.
         """
         token = os.environ.get(config.github_token_env_var, "")
         headers: dict[str, str] = {
@@ -222,81 +225,79 @@ class HandlerGitHubApiPoll:
             headers["Authorization"] = f"Bearer {token}"
 
         errors: list[str] = []
-        events_published = 0
+        pending_events: list[JsonType] = []
         repos_polled: list[str] = []
         prs_polled = 0
+        now = datetime.now(tz=UTC)
+        interval = timedelta(seconds=max(0, config.poll_interval_seconds))
 
         async with httpx.AsyncClient(
             headers=headers, timeout=self._http_timeout
         ) as client:
             for repo in config.repos:
+                # Throttle: skip if interval has not elapsed
+                last = self._last_polled.get(repo)
+                if last is not None and (now - last) < interval:
+                    continue
+
                 try:
                     pr_events, repo_prs, repo_errors = await self._poll_repo(
                         client=client,
                         repo=repo,
                         stale_hours=config.stale_threshold_hours,
                     )
+                    self._last_polled[repo] = datetime.now(tz=UTC)
                     repos_polled.append(repo)
                     prs_polled += repo_prs
                     errors.extend(repo_errors)
-
-                    for event_payload, partition_key in pr_events:
-                        published = await self._publish_event(
-                            event_payload=event_payload,
-                            partition_key=partition_key,
-                        )
-                        if published:
-                            events_published += 1
-                        else:
-                            errors.append(
-                                f"Failed to publish event for {partition_key}"
-                            )
+                    pending_events.extend(pr_events)
                 except Exception as exc:
-                    msg = f"Error polling repo {repo}: {exc}"
-                    logger.warning(msg)
-                    errors.append(msg)
+                    sanitized = sanitize_error_string(
+                        f"Error polling repo {repo}: {type(exc).__name__}"
+                    )
+                    logger.warning("%s", sanitized)
+                    errors.append(sanitized)
 
         return ModelGitHubPollerResult(
-            events_published=events_published,
+            events_published=0,  # Runtime publishes from pending_events
             repos_polled=repos_polled,
             prs_polled=prs_polled,
             errors=errors,
+            pending_events=pending_events,
         )
-
-    async def _publish_event(
-        self,
-        event_payload: JsonType,
-        partition_key: str,
-    ) -> bool:
-        """Publish a single event via the publisher."""
-        result = await self._publisher.publish(
-            event_type="onex.evt.github.pr-status.v1",
-            payload=event_payload,
-            partition_key=partition_key,
-        )
-        return bool(result)
 
     async def _poll_repo(
         self,
         client: httpx.AsyncClient,
         repo: str,
         stale_hours: int,
-    ) -> tuple[list[tuple[JsonType, str]], int, list[str]]:
-        """Poll all open PRs for a single repository.
+    ) -> tuple[list[JsonType], int, list[str]]:
+        """Poll all open PRs for a single repository with pagination.
 
         Returns:
-            Tuple of (event_payload_and_key_pairs, total_prs_polled, errors).
+            Tuple of (event_payloads, total_prs_polled, errors).
         """
         errors: list[str] = []
-        pr_events: list[tuple[JsonType, str]] = []
-
-        # Fetch open PRs
+        pr_events: list[JsonType] = []
         prs_url = f"{self._api_base}/repos/{repo}/pulls"
-        response = await client.get(prs_url, params={"state": "open", "per_page": 100})
-        response.raise_for_status()
-        prs: list[dict[str, JsonType]] = response.json()
+        per_page = 100
 
-        for pr in prs:
+        # Paginate: accumulate all open PRs
+        all_prs: list[dict[str, JsonType]] = []
+        page = 1
+        while True:
+            response = await client.get(
+                prs_url,
+                params={"state": "open", "per_page": per_page, "page": page},
+            )
+            response.raise_for_status()
+            batch: list[dict[str, JsonType]] = response.json()
+            all_prs.extend(batch)
+            if len(batch) < per_page:
+                break
+            page += 1
+
+        for pr in all_prs:
             pr_number = pr["number"]
             if not isinstance(pr_number, int):
                 continue
@@ -313,21 +314,23 @@ class HandlerGitHubApiPoll:
                 pr["review_states"] = list(review_states_raw)
 
                 triage = compute_triage_state(pr, stale_hours)
-                partition_key = f"{repo}:{pr_number}"
                 event_payload: JsonType = {
                     "event_type": "onex.evt.github.pr-status.v1",
                     "repo": repo,
                     "pr_number": pr_number,
                     "triage_state": triage,
                     "title": str(pr.get("title", "")),
+                    "partition_key": f"{repo}:{pr_number}",
                 }
-                pr_events.append((event_payload, partition_key))
+                pr_events.append(event_payload)
             except Exception as exc:
-                msg = f"Error processing PR {repo}#{pr_number}: {exc}"
-                logger.warning(msg)
-                errors.append(msg)
+                sanitized = sanitize_error_string(
+                    f"Error processing PR {repo}#{pr_number}: {type(exc).__name__}"
+                )
+                logger.warning("%s", sanitized)
+                errors.append(sanitized)
 
-        return pr_events, len(prs), errors
+        return pr_events, len(all_prs), errors
 
     async def _get_combined_status(
         self, client: httpx.AsyncClient, repo: str, sha: str
