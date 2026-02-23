@@ -7,12 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.10.0] - 2026-02-23
 
+### Added
+
+#### Zero-Repo-Env Policy (OMN-2287)
+
+- **`scripts/register-repo.py`** — central Infisical onboarding CLI with `seed-shared` and `onboard-repo` subcommands; dry-run by default, `--execute` required to write; replaces ~80 lines of hardcoded secret declarations with YAML-driven loading (#387, #400)
+- **`config/shared_key_registry.yaml`** — versioned authoritative registry of 39 shared platform keys across 8 transport folders (`db`, `kafka`, `consul`, `vault`, `llm`, `auth`, `valkey`, `env`); single source of truth replacing the hardcoded `SHARED_PLATFORM_SECRETS` dict (#393, #400)
+- **`contract_config_extractor.py`**: extended `_TRANSPORT_ALIASES` to cover 13 previously unmapped keys (#387)
+- **Pre-commit hook** (OMN-2476): rejects `.env` files anywhere in the repo tree; `.env` removed from the allowed root file list, enforcing the zero-repo-env policy (#388, #389)
+
+#### LLM Metrics Observability (OMN-2443)
+
+- **`ServiceLlmMetricsPublisher`** — service-layer wrapper around `HandlerLlmOpenaiCompatible` that reads `last_call_metrics` after each inference call and publishes to `onex.evt.omniintelligence.llm-call-completed.v1`; fixes zero-data `/cost-trends` dashboard (#390)
+- **`register_openai_compatible_with_metrics()`** and **`register_ollama_with_metrics()`** factory methods on `RegistryInfraLlmInferenceEffect` for wiring the publisher at container bootstrap time (#390)
+
+### Fixed
+
+- **`ConfigSessionStorage`** (session): removed `env_prefix="OMNIBASE_INFRA_SESSION_STORAGE_"` so the config reads standard `POSTGRES_*` vars rather than the non-existent prefixed variants (#391)
+- **`config_store.py`**: set `env_file=None` to prevent stale `.env` file reads after zero-repo-env migration (#400)
+
 ### Changed
 
 #### Dependencies
 
 - **Bump `omnibase-core`** from `>=0.18.1,<0.19.0` → `>=0.19.0,<0.20.0` (DecisionRecord, NodeReducer projection effect)
 - **Bump `omnibase-spi`** from `>=0.10.0,<0.11.0` → `>=0.12.0,<0.13.0` (ProtocolEffect, ProtocolNodeProjectionEffect, ContractProjectionResult — OMN-2508)
+- **Bump `omniintelligence`** from `0.4.0` → `0.5.0` in `docker/Dockerfile.runtime` (#386)
 - Bumped version to 0.10.0
 
 ## [0.9.0] - 2026-02-20
