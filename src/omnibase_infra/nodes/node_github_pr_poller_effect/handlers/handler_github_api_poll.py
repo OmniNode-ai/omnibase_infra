@@ -48,6 +48,10 @@ from datetime import UTC, datetime, timedelta
 import httpx
 
 from omnibase_core.types import JsonType
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_poller_config import (
     ModelGitHubPollerConfig,
 )
@@ -252,8 +256,14 @@ class HandlerGitHubApiPoll:
                     errors.extend(repo_errors)
                     pending_events.extend(pr_events)
                 except Exception as exc:
+                    error_ctx = ModelInfraErrorContext.with_correlation(
+                        transport_type=EnumInfraTransportType.RUNTIME,
+                        operation="poll_repo",
+                        target_name=repo,
+                    )
                     sanitized = sanitize_error_string(
-                        f"Error polling repo {repo}: {type(exc).__name__}"
+                        f"Error polling repo {repo}: {type(exc).__name__} "
+                        f"[correlation_id={error_ctx.correlation_id}]"
                     )
                     logger.warning("%s", sanitized)
                     errors.append(sanitized)
@@ -324,8 +334,14 @@ class HandlerGitHubApiPoll:
                 }
                 pr_events.append(event_payload)
             except Exception as exc:
+                error_ctx = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="process_pr",
+                    target_name=f"{repo}#{pr_number}",
+                )
                 sanitized = sanitize_error_string(
-                    f"Error processing PR {repo}#{pr_number}: {type(exc).__name__}"
+                    f"Error processing PR {repo}#{pr_number}: {type(exc).__name__} "
+                    f"[correlation_id={error_ctx.correlation_id}]"
                 )
                 logger.warning("%s", sanitized)
                 errors.append(sanitized)

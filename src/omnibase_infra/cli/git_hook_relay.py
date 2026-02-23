@@ -116,12 +116,21 @@ class ModelGitHookEmitParams(BaseModel):
 def _validate_repo(repo: str) -> None:
     """Raise ProtocolConfigurationError if repo is not in {owner}/{name} format."""
     if not _REPO_PATTERN.match(repo):
+        from omnibase_infra.enums import EnumInfraTransportType
         from omnibase_infra.errors import ProtocolConfigurationError
+        from omnibase_infra.models.errors.model_infra_error_context import (
+            ModelInfraErrorContext,
+        )
 
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="validate_repo",
+        )
         raise ProtocolConfigurationError(
             f"Invalid repo format: {repo!r}. "
             "Must be '{owner}/{name}' (e.g. 'OmniNode-ai/omniclaude'). "
-            "Never use absolute paths or bare repo names."
+            "Never use absolute paths or bare repo names.",
+            context=context,
         )
 
 
