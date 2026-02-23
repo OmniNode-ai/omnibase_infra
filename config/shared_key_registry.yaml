@@ -73,15 +73,30 @@ shared:
     # scoped to its required paths.
     - VAULT_ADDR
   "/shared/llm/":
+    # IP of the remote GPU/inference server (used to construct LLM endpoint URLs).
     - REMOTE_SERVER_IP
+    # Canonical LLM endpoint keys (defined in CLAUDE.md LLM topology):
+    #   LLM_CODER_URL        — Qwen3-Coder-30B-A3B AWQ-4bit (RTX 5090, 64K ctx, port 8000)
+    #   LLM_CODER_FAST_URL   — Qwen3-14B-AWQ (RTX 4090, 40K ctx, port 8001)
+    #   LLM_EMBEDDING_URL    — Qwen3-Embedding-8B-4bit (M2 Ultra, port 8100)
+    #   LLM_DEEPSEEK_R1_URL  — DeepSeek-R1-Distill-Qwen-32B-bf16 (M2 Ultra, port 8101)
     - LLM_CODER_URL
     - LLM_CODER_FAST_URL
     - LLM_EMBEDDING_URL
     - LLM_DEEPSEEK_R1_URL
+    # Legacy / alias keys — kept for backward compatibility with services that
+    # reference these names before migrating to the canonical LLM_* names above.
+    # New code should use the canonical LLM_* keys from CLAUDE.md instead.
+    #   EMBEDDING_MODEL_URL  — alias for LLM_EMBEDDING_URL
+    #   VLLM_SERVICE_URL     — generic vLLM service endpoint (pre-canonical naming)
+    #   VLLM_DEEPSEEK_URL    — alias for LLM_DEEPSEEK_R1_URL
+    #   VLLM_LLAMA_URL       — Llama model endpoint (separate from DeepSeek/Coder stack)
     - EMBEDDING_MODEL_URL
     - VLLM_SERVICE_URL
     - VLLM_DEEPSEEK_URL
     - VLLM_LLAMA_URL
+    # ONEX platform service URLs (not LLM models — kept here as they are co-located
+    # on the same inference infrastructure and share the REMOTE_SERVER_IP base).
     - ONEX_TREE_SERVICE_URL
     - METADATA_STAMPING_SERVICE_URL
   # NOT prefetched by ConfigPrefetcher — no EnumInfraTransportType.AUTH entry; keys resolved via shell env fallback.

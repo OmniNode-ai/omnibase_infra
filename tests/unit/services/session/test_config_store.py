@@ -31,7 +31,6 @@ class TestConfigSessionStorageAliasChoices:
             "POSTGRES_POOL_MIN_SIZE",
             "POSTGRES_POOL_MAX_SIZE",
             "QUERY_TIMEOUT_SECONDS",
-            "POSTGRES_QUERY_TIMEOUT_SECONDS",
         ):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("POSTGRES_POOL_MIN_SIZE", "3")
@@ -54,7 +53,6 @@ class TestConfigSessionStorageAliasChoices:
             "POSTGRES_POOL_MIN_SIZE",
             "POSTGRES_POOL_MAX_SIZE",
             "QUERY_TIMEOUT_SECONDS",
-            "POSTGRES_QUERY_TIMEOUT_SECONDS",
         ):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("POSTGRES_POOL_MIN_SIZE", "3")
@@ -77,7 +75,6 @@ class TestConfigSessionStorageAliasChoices:
             "POSTGRES_POOL_MIN_SIZE",
             "POSTGRES_POOL_MAX_SIZE",
             "QUERY_TIMEOUT_SECONDS",
-            "POSTGRES_QUERY_TIMEOUT_SECONDS",
         ):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("POSTGRES_POOL_MIN_SIZE", "3")
@@ -98,7 +95,6 @@ class TestConfigSessionStorageAliasChoices:
         monkeypatch.delenv("pool_min_size", raising=False)
         monkeypatch.delenv("pool_max_size", raising=False)
         monkeypatch.delenv("QUERY_TIMEOUT_SECONDS", raising=False)
-        monkeypatch.delenv("POSTGRES_QUERY_TIMEOUT_SECONDS", raising=False)
         monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")
         # Clear ambient connection vars so CI environments don't silently pollute the
@@ -138,7 +134,6 @@ class TestConfigSessionStorageAliasChoices:
         ):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.delenv("QUERY_TIMEOUT_SECONDS", raising=False)
-        monkeypatch.delenv("POSTGRES_QUERY_TIMEOUT_SECONDS", raising=False)
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")  # required field
         config = ConfigSessionStorage(
             pool_min_size=5,
@@ -174,7 +169,6 @@ class TestConfigSessionStorageAliasChoices:
             "POSTGRES_POOL_MIN_SIZE",
             "POSTGRES_POOL_MAX_SIZE",
             "QUERY_TIMEOUT_SECONDS",
-            "POSTGRES_QUERY_TIMEOUT_SECONDS",
         ):
             monkeypatch.delenv(key, raising=False)
         with pytest.raises(ValidationError):
@@ -192,7 +186,6 @@ class TestConfigSessionStorageAliasChoices:
             "POSTGRES_POOL_MIN_SIZE",
             "POSTGRES_POOL_MAX_SIZE",
             "QUERY_TIMEOUT_SECONDS",
-            "POSTGRES_QUERY_TIMEOUT_SECONDS",
         ):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
@@ -212,7 +205,6 @@ class TestConfigSessionStorageAliasChoices:
             "POSTGRES_POOL_MIN_SIZE",
             "POSTGRES_POOL_MAX_SIZE",
             "QUERY_TIMEOUT_SECONDS",
-            "POSTGRES_QUERY_TIMEOUT_SECONDS",
         ):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
@@ -231,7 +223,6 @@ class TestConfigSessionStorageAliasChoices:
             "POSTGRES_POOL_MIN_SIZE",
             "POSTGRES_POOL_MAX_SIZE",
             "QUERY_TIMEOUT_SECONDS",
-            "POSTGRES_QUERY_TIMEOUT_SECONDS",
         ):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
@@ -248,3 +239,99 @@ class TestConfigSessionStorageAliasChoices:
         assert "db.example.com" in safe
         assert "5436" in safe
         assert "omnibase_infra" in safe
+
+    def test_dsn_returns_postgresql_url_with_password(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify dsn returns a postgresql:// URL with password included."""
+        for key in (
+            "POSTGRES_HOST",
+            "POSTGRES_PORT",
+            "POSTGRES_USER",
+            "POSTGRES_DATABASE",
+            "POSTGRES_POOL_MIN_SIZE",
+            "POSTGRES_POOL_MAX_SIZE",
+            "QUERY_TIMEOUT_SECONDS",
+        ):
+            monkeypatch.delenv(key, raising=False)
+        monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
+        monkeypatch.setenv("POSTGRES_HOST", "db.example.com")
+        monkeypatch.setenv("POSTGRES_PORT", "5436")
+        monkeypatch.setenv("POSTGRES_DATABASE", "omnibase_infra")
+        monkeypatch.setenv("POSTGRES_PASSWORD", "mypassword")
+
+        config = ConfigSessionStorage()
+        dsn = config.dsn
+
+        assert dsn.startswith("postgresql://")
+        assert "mypassword" in dsn
+        assert "db.example.com" in dsn
+        assert "5436" in dsn
+        assert "omnibase_infra" in dsn
+        assert "***" not in dsn
+
+    def test_dsn_async_returns_asyncpg_url(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify dsn_async returns a postgresql+asyncpg:// URL with password included."""
+        for key in (
+            "POSTGRES_HOST",
+            "POSTGRES_PORT",
+            "POSTGRES_USER",
+            "POSTGRES_DATABASE",
+            "POSTGRES_POOL_MIN_SIZE",
+            "POSTGRES_POOL_MAX_SIZE",
+            "QUERY_TIMEOUT_SECONDS",
+        ):
+            monkeypatch.delenv(key, raising=False)
+        monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
+        monkeypatch.setenv("POSTGRES_HOST", "db.example.com")
+        monkeypatch.setenv("POSTGRES_PORT", "5436")
+        monkeypatch.setenv("POSTGRES_DATABASE", "omnibase_infra")
+        monkeypatch.setenv("POSTGRES_PASSWORD", "mypassword")
+
+        config = ConfigSessionStorage()
+        dsn_async = config.dsn_async
+
+        assert dsn_async.startswith("postgresql+asyncpg://")
+        assert "mypassword" in dsn_async
+        assert "db.example.com" in dsn_async
+        assert "5436" in dsn_async
+        assert "omnibase_infra" in dsn_async
+        assert "***" not in dsn_async
+
+    def test_dsn_url_encodes_special_characters_in_password(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify dsn and dsn_async URL-encode special characters in the password.
+
+        A password containing characters like @, /, ?, #, or spaces would
+        break DSN parsing if not encoded. The implementation uses quote_plus()
+        so these are percent-encoded and the resulting DSN is safe to pass to
+        asyncpg or SQLAlchemy without manual escaping.
+        """
+        for key in (
+            "POSTGRES_HOST",
+            "POSTGRES_PORT",
+            "POSTGRES_USER",
+            "POSTGRES_DATABASE",
+            "POSTGRES_POOL_MIN_SIZE",
+            "POSTGRES_POOL_MAX_SIZE",
+            "QUERY_TIMEOUT_SECONDS",
+        ):
+            monkeypatch.delenv(key, raising=False)
+        monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
+        monkeypatch.setenv("POSTGRES_HOST", "localhost")
+        monkeypatch.setenv("POSTGRES_DATABASE", "mydb")
+        monkeypatch.setenv("POSTGRES_PASSWORD", "p@ss/word?foo#bar")
+
+        config = ConfigSessionStorage()
+
+        # The raw password must NOT appear unencoded in either DSN — an
+        # unencoded '@' or '/' would cause the driver to misparse the URL.
+        assert "p@ss/word?foo#bar" not in config.dsn
+        assert "p@ss/word?foo#bar" not in config.dsn_async
+
+        # Encoded form: '@' → '%40', '/' → '%2F', '?' → '%3F', '#' → '%23'
+        assert "%40" in config.dsn
+        assert "%40" in config.dsn_async

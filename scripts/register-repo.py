@@ -323,6 +323,14 @@ REPO_TRANSPORT_FOLDERS = ("db", "kafka", "env")
 # Each service uses POSTGRES_DATABASE (identity default) combined with the
 # shared POSTGRES_HOST / POSTGRES_PORT / POSTGRES_USER / POSTGRES_PASSWORD
 # keys from /shared/db/ instead.
+#
+# CONSTRAINT: All keys added here MUST be DATABASE transport keys only.
+# The loop in cmd_onboard_repo that iterates over REPO_SECRET_KEYS hardcodes
+# the destination path as /services/<repo>/db/ (see: plan.append(..."/db/"...)).
+# Adding non-DB keys here (e.g. Kafka, HTTP, or LLM keys) would silently store
+# them under /db/ instead of their correct transport path. Non-DB repo-specific
+# keys should be handled via the `extra` list in cmd_onboard_repo (which buckets
+# them under /services/<repo>/env/) or added to shared_key_registry.yaml.
 REPO_SECRET_KEYS: list[str] = []
 
 
@@ -485,7 +493,18 @@ def _upsert_secret(
     overwrite: bool,
     sanitize: Callable[[Exception], str],
 ) -> str:
-    """Create or update a secret. Returns 'created', 'updated', or 'skipped'."""
+    """Create or update a secret. Returns 'created', 'updated', or 'skipped'.
+
+    Note:
+        The ``sanitize`` parameter is accepted for API consistency with the
+        calling loops in ``cmd_seed_shared`` and ``cmd_onboard_repo``, but it
+        is **not called inside this function**.  All error-message sanitization
+        happens in the caller's ``except`` block (e.g.
+        ``logger.warning("... %s", sanitize(exc))``).  This function raises
+        exceptions as-is so the caller retains full control over how errors are
+        formatted and logged.  Do not add ``sanitize(exc)`` calls inside this
+        function without also updating all callers.
+    """
     from omnibase_infra.errors import (
         InfraConnectionError,
         RuntimeHostError,
@@ -700,11 +719,13 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
         raise SystemExit(1)
     project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
     if not project_id:
-        raise SystemExit(
+        print(
             "ERROR: INFISICAL_PROJECT_ID is not set. "
             "Set it in your environment or ~/.omnibase/.env before running seed-shared. "
-            "You can find the project ID after running scripts/provision-infisical.py."
+            "You can find the project ID after running scripts/provision-infisical.py.",
+            file=sys.stderr,
         )
+        raise SystemExit(1)
     try:
         UUID(project_id)
     except ValueError:

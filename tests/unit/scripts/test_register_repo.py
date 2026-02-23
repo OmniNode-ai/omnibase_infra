@@ -100,7 +100,7 @@ class TestCmdSeedSharedPreflightValidation:
 
     @pytest.mark.unit
     def test_dry_run_exits_nonzero_when_infisical_project_id_unset(
-        self, tmp_path: Path
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """Should exit non-zero when INFISICAL_ADDR is set but INFISICAL_PROJECT_ID is
         missing, even in dry-run mode."""
@@ -122,8 +122,15 @@ class TestCmdSeedSharedPreflightValidation:
             with pytest.raises(SystemExit) as exc_info:
                 rr.cmd_seed_shared(args)  # type: ignore[attr-defined]
 
-        assert exc_info.value.code != 0, (
-            "cmd_seed_shared must exit non-zero when INFISICAL_PROJECT_ID is unset"
+        assert exc_info.value.code == 1, (
+            "cmd_seed_shared must exit with integer code 1 when INFISICAL_PROJECT_ID is unset; "
+            f"got {exc_info.value.code!r}"
+        )
+
+        captured = capsys.readouterr()
+        assert "INFISICAL_PROJECT_ID" in captured.err, (
+            "Error output must mention INFISICAL_PROJECT_ID so the operator knows what to fix; "
+            f"got stderr: {captured.err!r}"
         )
 
     @pytest.mark.unit

@@ -179,6 +179,15 @@ class TestTransportConfigMap:
         with pytest.raises(Exception):
             spec.infisical_folder = "/modified/"  # type: ignore[misc]
 
+    def test_llm_has_canonical_keys(self) -> None:
+        """LLM transport should return canonical LLM endpoint keys from CLAUDE.md."""
+        keys = TransportConfigMap.keys_for_transport(EnumInfraTransportType.LLM)
+        assert "LLM_CODER_URL" in keys
+        assert "LLM_CODER_FAST_URL" in keys
+        assert "LLM_EMBEDDING_URL" in keys
+        assert "LLM_DEEPSEEK_R1_URL" in keys
+        assert len(keys) > 0
+
     def test_all_transport_types_have_mapping(self) -> None:
         """Every EnumInfraTransportType should be handled (even if empty keys)."""
         for transport in EnumInfraTransportType:

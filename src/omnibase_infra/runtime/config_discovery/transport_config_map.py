@@ -59,6 +59,17 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
         "CONSUL_ACL_TOKEN",
         "CONSUL_ENABLED",
     ),
+    # INFISICAL is listed here for completeness (so introspection tools can
+    # enumerate all known keys), but these keys MUST NEVER be fetched from
+    # Infisical — they form the bootstrap credentials that Infisical itself
+    # needs to start.  Fetching them from Infisical would create a circular
+    # dependency.
+    #
+    # EnumInfraTransportType.INFISICAL is in _BOOTSTRAP_TRANSPORTS, so
+    # specs_for_transports() and all_shared_specs() already skip it.
+    # If you call keys_for_transport(INFISICAL) directly, check
+    # is_bootstrap_transport(INFISICAL) first and resolve from the
+    # environment (e.g. .env file), NOT from Infisical.
     EnumInfraTransportType.INFISICAL: (
         "INFISICAL_ADDR",
         "INFISICAL_CLIENT_ID",
@@ -198,6 +209,21 @@ class TransportConfigMap:
         Returns:
             Tuple of expected key names. Empty tuple for transports
             that have no external configuration (INMEMORY, RUNTIME).
+
+        Warning:
+            ``INFISICAL`` is included in the key map for completeness, but its
+            keys (``INFISICAL_ADDR``, ``INFISICAL_CLIENT_ID``, etc.) must
+            **never** be resolved from Infisical.  They are bootstrap
+            credentials that Infisical needs to start; fetching them from
+            Infisical creates a circular dependency.
+
+            Before calling this method for a transport that originates from
+            contract scanning or dynamic dispatch, check
+            ``is_bootstrap_transport(transport)`` and resolve bootstrap
+            transports from the environment (e.g. ``.env`` file) instead.
+            The higher-level helpers ``specs_for_transports()`` and
+            ``all_shared_specs()`` already skip bootstrap transports
+            automatically.
         """
         return _TRANSPORT_KEYS.get(transport, ())
 
