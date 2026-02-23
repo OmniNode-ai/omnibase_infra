@@ -87,7 +87,7 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
         "HTTP_TIMEOUT_MS",
         "HTTP_MAX_RETRIES",
     ),
-    EnumInfraTransportType.LLM: (
+    EnumInfraTransportType.LLM: (  # /shared/llm/ — Infisical-sourced, not bootstrap
         "REMOTE_SERVER_IP",
         "LLM_CODER_URL",
         "LLM_CODER_FAST_URL",

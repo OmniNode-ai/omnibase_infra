@@ -494,19 +494,13 @@ def _upsert_secret(
     folder: str,
     *,
     overwrite: bool,
-    sanitize: Callable[[Exception], str],
 ) -> str:
     """Create or update a secret. Returns 'created', 'updated', or 'skipped'.
 
     Note:
-        The ``sanitize`` parameter is accepted for API consistency with the
-        calling loops in ``cmd_seed_shared`` and ``cmd_onboard_repo``, but it
-        is **not called inside this function**.  All error-message sanitization
-        happens in the caller's ``except`` block (e.g.
-        ``logger.warning("... %s", sanitize(exc))``).  This function raises
-        exceptions as-is so the caller retains full control over how errors are
-        formatted and logged.  Do not add ``sanitize(exc)`` calls inside this
-        function without also updating all callers.
+        Error-message sanitization is the caller's responsibility.  This
+        function raises exceptions as-is so callers retain full control over
+        how errors are formatted and logged via their own ``sanitize`` callable.
     """
     from omnibase_infra.errors import (
         InfraConnectionError,
@@ -679,7 +673,14 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
     plan: list[tuple[str, str, str]] = []  # (folder, key, value)
     missing_value: list[tuple[str, str]] = []  # (folder, key) with no value
 
-    registry_data = _read_registry_data()
+    try:
+        registry_data = _read_registry_data()
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
     shared_secrets = _load_registry(registry_data)
     bootstrap = _bootstrap_keys(registry_data)
     identity = _identity_defaults(registry_data)
@@ -791,7 +792,6 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                     value,
                     folder,
                     overwrite=args.overwrite,
-                    sanitize=sanitize,
                 )
                 counts[outcome] += 1
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)
@@ -825,7 +825,6 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                     "",
                     folder,
                     overwrite=False,
-                    sanitize=sanitize,
                 )
                 counts[outcome] += 1
                 logger.info("  [%s] %s%s (placeholder)", outcome.upper(), folder, key)
@@ -1034,7 +1033,6 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
                     value,
                     folder,
                     overwrite=args.overwrite,
-                    sanitize=sanitize,
                 )
                 counts[outcome] += 1
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)

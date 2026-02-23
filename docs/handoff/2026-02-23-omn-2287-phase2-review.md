@@ -163,8 +163,8 @@ A local review cycle (23 iterations, 41 `fix(review):` commits) was run against 
 
 | Priority | Status | Task |
 |----------|--------|------|
-| P0 | **NOT DONE** | Remove `.env` from `validate_clean_root.py` allowed files |
-| P0 | **NOT DONE** | Add `no-env-file` pre-commit hook |
+| P0 | **NOT DONE** | Remove `.env` from `validate_clean_root.py` allowed files — TODO: create Linear ticket |
+| P0 | **NOT DONE** | Add `no-env-file` pre-commit hook — TODO: create Linear ticket |
 | P5 | **PENDING** | Smoke test: verify services boot without repo `.env` |
 | — | **PENDING** | Delete repo `.env` (only after smoke test passes) |
 | — | **PENDING** | Run `onboard-repo` for omniclaude, omniintelligence, omnidash |

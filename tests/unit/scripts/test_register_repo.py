@@ -319,12 +319,15 @@ class TestUpsertSecretBareExceptionWrapping:
             InfraConnectionError=mock_infra_connection_error,
         )
 
-        # Patch sys.modules and restore "register-repo" to _module after the
-        # context exits so _module remains the canonical reference for all other
-        # tests.  The reload is performed inside the patch so _upsert_secret's
-        # local-import of omnibase_infra.errors picks up the mock classes; the
-        # extra "register-repo": _module entry ensures the patch.dict restore
-        # puts _module back, not the reloaded object.
+        # patch.dict restores sys.modules to its original state on exit,
+        # regardless of whether the body raises or not (it uses a try/finally
+        # internally).  The "register-repo": _module entry seeds the original
+        # module object back so that on exit, sys.modules["register-repo"] is
+        # restored to _module rather than the reloaded object produced by the
+        # importlib.reload() call below.  This means _module remains the
+        # canonical reference for all other tests even if this test fails with
+        # an assertion error or unexpected exception — no explicit finally or
+        # backup/restore is required.
         with patch.dict(
             "sys.modules",
             {
@@ -342,7 +345,6 @@ class TestUpsertSecretBareExceptionWrapping:
                     "value",
                     "/shared/db/",
                     overwrite=False,
-                    sanitize=str,
                 )
 
         # The cause chain should preserve the original exception.
