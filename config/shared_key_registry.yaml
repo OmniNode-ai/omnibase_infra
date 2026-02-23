@@ -36,7 +36,7 @@ shared:
     - POSTGRES_POOL_MIN_SIZE
     - POSTGRES_POOL_MAX_SIZE
     - POSTGRES_TIMEOUT_MS
-    - QUERY_TIMEOUT_SECONDS # ConfigSessionStorage.query_timeout_seconds
+    - QUERY_TIMEOUT_SECONDS # query-level timeout (seconds); cf. POSTGRES_TIMEOUT_MS (transport-level, ms)
   "/shared/kafka/":
     # KAFKA_HOST_SERVERS intentionally excluded — removed as dead code (see commit 45f6ae65)
     - KAFKA_GROUP_ID
