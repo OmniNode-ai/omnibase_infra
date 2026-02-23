@@ -281,8 +281,15 @@ def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
         )
         raise SystemExit(1)
 
-    # Defense-in-depth: command entry points also validate this before calling here.
-    # This guard protects callers that bypass the entry-point pre-flight.
+    # Defense-in-depth: command entry points also validate both INFISICAL_ADDR and
+    # INFISICAL_PROJECT_ID before calling here. These guards protect callers that
+    # bypass the entry-point pre-flight.
+    if infisical_addr and not infisical_addr.startswith(("http://", "https://")):
+        logger.error(
+            "INFISICAL_ADDR must start with http:// or https://: got %r", infisical_addr
+        )
+        raise SystemExit(1)
+
     try:
         project_uuid = UUID(project_id)
     except ValueError:
@@ -559,7 +566,8 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)
             except Exception as exc:
                 # Intentionally continues on non-auth errors: seed remaining keys even if one fails.
-                # Auth errors from _upsert_secret propagate immediately (re-raised by the function).
+                # Auth errors re-raised by _upsert_secret propagate here and are logged as errors,
+                # not warnings. Non-auth errors (timeouts, API failures) are logged as warnings.
                 counts["error"] += 1
                 logger.warning("  [ERROR] %s%s: %s", folder, key, sanitize(exc))
 
@@ -749,7 +757,8 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)
             except Exception as exc:
                 # Intentionally continues on non-auth errors: seed remaining keys even if one fails.
-                # Auth errors from _upsert_secret propagate immediately (re-raised by the function).
+                # Auth errors re-raised by _upsert_secret propagate here and are logged as errors,
+                # not warnings. Non-auth errors (timeouts, API failures) are logged as warnings.
                 counts["error"] += 1
                 logger.warning("  [ERROR] %s%s: %s", folder, key, sanitize(exc))
     finally:
