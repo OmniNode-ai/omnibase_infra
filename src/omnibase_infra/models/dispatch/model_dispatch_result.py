@@ -95,6 +95,9 @@ from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_infra.enums import EnumDispatchStatus, EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
 from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
+from omnibase_infra.models.projection.model_projection_intent import (
+    ModelProjectionIntent,
+)
 
 
 class ModelDispatchResult(BaseModel):
@@ -226,6 +229,15 @@ class ModelDispatchResult(BaseModel):
         description=(
             "Intents produced by the handler for effect layer execution. "
             "These are routed by IntentExecutor after dispatch."
+        ),
+    )
+    projection_intents: tuple[ModelProjectionIntent, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Projection intents emitted by the reducer (OMN-2509 / OMN-2510). "
+            "The runtime executes NodeProjectionEffect synchronously for each "
+            "intent before publishing any Kafka messages, ensuring projection "
+            "persistence precedes event emission (ordering guarantee)."
         ),
     )
 

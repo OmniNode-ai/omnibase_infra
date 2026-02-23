@@ -184,6 +184,14 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (ONEX Architecture - Protocol Resolution section)
     ticket: null
+  - file_pattern: 'protocol_projection_effect\.py'
+    violation_pattern: "Function name 'execute' is too generic"
+    reason: >
+      Synchronous projection effect protocol - execute is the standard entry point for NodeProjectionEffect, matching the protocol pattern used by protocol_plugin_compute.py. The method name is intentionally generic as it is the protocol-defined synchronous effect execution contract.
+
+    documentation:
+      - CLAUDE.md (ONEX Architecture - Protocol Resolution section)
+    ticket: OMN-2510
   # ==========================================================================
   # RuntimeHostProcess Exemptions (OMN-756)
   # ==========================================================================
