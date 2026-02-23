@@ -8,9 +8,8 @@
 #   shared            — eligible for Infisical seeding + repo .env stripping;
 #                       loaded by _load_registry() in scripts/register-repo.py.
 #                       A shared key represents the canonical platform-wide value.
-#                       Some shared keys (e.g. POSTGRES_DSN) may also be seeded
-#                       per-service under /services/<repo>/ via REPO_SECRET_KEYS
-#                       in register-repo.py — those per-service entries are
+#                       Keys may also be seeded per-service under /services/<repo>/
+#                       via REPO_SECRET_KEYS — those per-service entries are
 #                       intentional overrides that take precedence at runtime.
 #   bootstrap_only    — excluded from Infisical seeding (circular bootstrap dep);
 #                       listed here for awareness only; must never be in any repo
@@ -31,8 +30,9 @@ shared:
     - POSTGRES_HOST
     - POSTGRES_PORT
     - POSTGRES_USER
-    # per-service override also seeded via REPO_SECRET_KEYS (see header)
-    - POSTGRES_DSN
+    # POSTGRES_DSN intentionally removed — a shared DSN with a hardcoded
+    # database name silently routes all services to the wrong database.
+    # Each repo sets POSTGRES_DATABASE and builds its own connection string.
     - POSTGRES_POOL_MIN_SIZE
     - POSTGRES_POOL_MAX_SIZE
     - POSTGRES_TIMEOUT_MS
