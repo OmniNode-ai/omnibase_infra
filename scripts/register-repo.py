@@ -659,6 +659,10 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
     # misconfigured before seeing the plan. Dry-run never contacts Infisical — it
     # exits after printing the plan without making any network calls. The validation
     # here is not a functional requirement of dry-run; it is a usability guard.
+    # Note: this differs from cmd_onboard_repo, which defers validation to the
+    # --execute path. The asymmetry is intentional — seed-shared is a platform-wide
+    # operation where an early credential check is more valuable than dry-run
+    # accessibility without credentials. Do not "fix" this to match cmd_onboard_repo.
     infisical_addr = os.environ.get("INFISICAL_ADDR")
     if not infisical_addr:
         print(
@@ -853,6 +857,12 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
             continue
         if key in planned_keys:
             continue
+        # Extra keys not matching any transport folder are bucketed into /env/.
+        # If a key belongs to a specific transport (e.g. kafka, db, http), add it
+        # to shared_key_registry.yaml under the appropriate folder, or handle it
+        # via onboard-repo per-service overrides. Leaving transport-specific keys
+        # here will cause them to be stored under /env/ instead of their transport
+        # path, which may confuse config consumers expecting a known Infisical path.
         extra.append((f"{path_prefix}/env/", key, value))
 
     print(f"\n=== onboard-repo: {repo_name} ===")

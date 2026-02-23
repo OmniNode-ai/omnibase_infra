@@ -168,7 +168,7 @@ A local review cycle (23 iterations, 41 `fix(review):` commits) was run against 
 | P5 | **PENDING** | Smoke test: verify services boot without repo `.env` |
 | — | **PENDING** | Delete repo `.env` (only after smoke test passes) |
 | — | **PENDING** | Run `onboard-repo` for omniclaude, omniintelligence, omnidash |
-| — | **PENDING** | Migrate `ConfigSessionStorage` to read `POSTGRES_DSN` from Infisical (OMN-2065) |
+| — | **CANCELLED** | ~~Migrate `ConfigSessionStorage` to read `POSTGRES_DSN` from Infisical (OMN-2065)~~ — superseded: `POSTGRES_DSN` removed entirely; each service uses `POSTGRES_DATABASE` + individual host/port/user keys |
 | — | **PENDING** | Add 13 unmapped handler types to `TransportConfigMap` |
 | — | **PENDING** | Wire `ConfigPrefetcher.prefetch_for_contracts()` into actual startup path |
 | — | **FUTURE** | Shrink `~/.omnibase/.env` back to 5 bootstrap lines (Task 7B — after all containers read Infisical directly) |
