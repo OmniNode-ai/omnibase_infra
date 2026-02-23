@@ -39,6 +39,7 @@ shared:
     - QUERY_TIMEOUT_SECONDS # shared default; override per-service at /services/<repo>/db/
   "/shared/kafka/":
     # KAFKA_HOST_SERVERS intentionally excluded — removed as dead code (see commit 45f6ae65)
+    # WARNING: services MUST override this per /services/<repo>/kafka/KAFKA_GROUP_ID — shared consumer groups break message delivery
     - KAFKA_GROUP_ID
     - KAFKA_ACKS
     - KAFKA_REQUEST_TIMEOUT_MS

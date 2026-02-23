@@ -281,6 +281,8 @@ def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
         )
         raise SystemExit(1)
 
+    # Defense-in-depth: command entry points also validate this before calling here.
+    # This guard protects callers that bypass the entry-point pre-flight.
     try:
         project_uuid = UUID(project_id)
     except ValueError:
@@ -553,6 +555,8 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                 counts[outcome] += 1
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)
             except Exception as exc:
+                # Intentionally continues on non-auth errors: seed remaining keys even if one fails.
+                # Auth errors from _upsert_secret propagate immediately (re-raised by the function).
                 counts["error"] += 1
                 logger.warning("  [ERROR] %s%s: %s", folder, key, sanitize(exc))
 
@@ -737,6 +741,8 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
                 counts[outcome] += 1
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)
             except Exception as exc:
+                # Intentionally continues on non-auth errors: seed remaining keys even if one fails.
+                # Auth errors from _upsert_secret propagate immediately (re-raised by the function).
                 counts["error"] += 1
                 logger.warning("  [ERROR] %s%s: %s", folder, key, sanitize(exc))
     finally:

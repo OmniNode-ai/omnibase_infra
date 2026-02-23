@@ -15,7 +15,7 @@
 | **Total commits on branch** | 43 (2 foundational + 41 review fixes) |
 | **Pre-commit hooks** | Passing on every commit |
 
-**What this branch does:** Implements the registry-driven, zero-repo-env architecture from `docs/plans/2026-02-21-zero-repo-env-files.md`. Specifically: removes the `OMNIBASE_INFRA_SESSION_STORAGE_` env prefix from `ConfigSessionStorage`, creates `config/shared_key_registry.yaml` as the authoritative key list, rewrites `scripts/register-repo.py` to read the registry, adds `QUERY_TIMEOUT_SECONDS` and `CONSUL_ENABLED` to the transport map, adds valkey/qdrant keys to the registry, and hardcodes `INFISICAL_ADDR=http://infisical:8080` in `docker-compose.infra.yml`.
+**What this branch does:** Implements the registry-driven, zero-repo-env architecture from `docs/plans/2026-02-21-zero-repo-env-files.md`. Specifically: removes the `OMNIBASE_INFRA_SESSION_STORAGE_` env prefix from `ConfigSessionStorage`, creates `config/shared_key_registry.yaml` as the authoritative key list, rewrites `scripts/register-repo.py` to read the registry, adds `QUERY_TIMEOUT_SECONDS` and `CONSUL_ENABLED` to the transport map, adds valkey/qdrant keys to the registry, and sets runtime service containers to use `${INFISICAL_ADDR:-}` (opt-in empty default) in `docker-compose.infra.yml`.
 
 ---
 
@@ -82,7 +82,7 @@ A local review cycle (23 iterations, 41 `fix(review):` commits) was run against 
 | File | Lines +/- | What changed |
 |------|-----------|--------------|
 | `config/shared_key_registry.yaml` | +133 | **New file.** Authoritative YAML definition of all 39 shared keys across 8 Infisical folders, plus `bootstrap_only` and `identity_defaults` sections. |
-| `docker/docker-compose.infra.yml` | +33/-0 | Hardcodes `INFISICAL_ADDR=http://infisical:8080` so containers don't read it from a repo-local `.env`; adds clarifying comments on URL-encoding for DSN vars. |
+| `docker/docker-compose.infra.yml` | +33/-0 | Runtime service containers use `${INFISICAL_ADDR:-}` (empty default — Infisical is opt-in); operators set `INFISICAL_ADDR` in `~/.omnibase/.env` to enable Infisical at runtime. Adds clarifying comments on URL-encoding requirements for DSN variables. |
 | `docs/plans/2026-02-21-zero-repo-env-files.md` | +35/-0 | Status updates: Task 3 marked COMPLETED, migration re-seed note added, plan doc completion note added. |
 | `scripts/register-repo.py` | +412/-182 | Rewrote to read `shared_key_registry.yaml` instead of a hardcoded dict; added `_load_registry()`, `_bootstrap_keys()`, `_identity_defaults()`; added INFISICAL_PROJECT_ID pre-flight check; narrowed exception handling; added mypy type annotations; refactored `cmd_seed_shared` and `cmd_onboard_repo`. |
 | `src/.../runtime/config_discovery/transport_config_map.py` | +8/-1 | Added `CONSUL_ENABLED` to CONSUL keys, `QUERY_TIMEOUT_SECONDS` to DATABASE keys, `QDRANT_URL` to QDRANT keys, `KAFKA_GROUP_ID`/`KAFKA_ACKS` to KAFKA keys; removed `KAFKA_BOOTSTRAP_SERVERS` (bootstrap-only, not Infisical-sourced). |

@@ -58,6 +58,8 @@ class ConfigSessionStorage(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="",
         env_file=None,  # No .env file — reads from shell env (sourced via ~/.omnibase/.env)
+        # case_sensitive=False: POSTGRES_HOST, postgres_host, and Postgres_Host
+        # all resolve the same field. This is intentional — shell env conventions vary.
         case_sensitive=False,
         extra="ignore",
         populate_by_name=True,  # Required for AliasChoices on pool fields to pass mypy [pydantic-alias]
