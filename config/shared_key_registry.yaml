@@ -1,0 +1,66 @@
+# shared_key_registry.yaml
+#
+# Authoritative definition of which environment variables are "shared across
+# all OmniNode repos." Tooling reads this file — it must never read
+# ~/.omnibase/.env to determine key names.
+#
+# Schema version: 1.0.0
+#
+# Semantics:
+#   shared        — eligible for Infisical seeding AND for stripping from repo
+#                   .env files; these vars appear in ~/.omnibase/.env (transitional)
+#                   and will eventually come from Infisical on boot
+#   bootstrap_only — excluded from Infisical seeding (circular dep); lives
+#                   outside repos (home dir / deployment secrets); never
+#                   stripped because it must never be in a repo .env in the
+#                   first place
+#   identity_defaults — never in any .env; always as default= in Settings
+#                   class code; each repo has its own database name baked in
+schema_version: "1.0.0"
+shared:
+  db:
+    - POSTGRES_HOST
+    - POSTGRES_PORT
+    - POSTGRES_USER
+  kafka:
+    - KAFKA_BOOTSTRAP_SERVERS
+    - KAFKA_ENVIRONMENT
+  consul:
+    - CONSUL_HTTP_ADDR
+    - CONSUL_HTTP_TOKEN
+  vault:
+    - VAULT_ADDR
+    - VAULT_TOKEN
+    - VAULT_NAMESPACE
+  llm:
+    - OPENAI_API_KEY
+    - ANTHROPIC_API_KEY
+    - OPENAI_API_BASE
+  auth:
+    - JWT_SECRET_KEY
+    - JWT_ALGORITHM
+    - JWT_EXPIRY_SECONDS
+  valkey:
+    - VALKEY_HOST
+    - VALKEY_PORT
+    - VALKEY_PASSWORD
+  env:
+    - ENVIRONMENT
+    - LOG_LEVEL
+    - DEBUG
+# bootstrap_only: lives outside repos (home dir / deployment secrets)
+# These keys are NOT eligible for Infisical seeding — they are needed to
+# authenticate TO Infisical, so they must be available before Infisical is
+# contacted. They live in ~/.omnibase/.env and are never committed to any repo.
+bootstrap_only:
+  - POSTGRES_PASSWORD
+  - INFISICAL_ADDR
+  - INFISICAL_CLIENT_ID
+  - INFISICAL_CLIENT_SECRET
+  - INFISICAL_PROJECT_ID
+  - INFISICAL_ENCRYPTION_KEY
+  - INFISICAL_AUTH_SECRET
+# identity_defaults: each repo sets its own database name as a code-level
+# default= in its Settings class. Never in any .env file.
+identity_defaults:
+  - POSTGRES_DATABASE
