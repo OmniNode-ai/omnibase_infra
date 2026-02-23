@@ -288,8 +288,6 @@ class TestUpsertSecretBareExceptionWrapping:
         """A bare Exception from get_secret (not RuntimeHostError) should be
         re-raised as InfraConnectionError so the outer loop's _is_abort_error
         check correctly triggers an abort."""
-        rr = _module
-
         adapter = self._make_mock_adapter()
         adapter.get_secret.side_effect = ConnectionError("SDK connection refused")
 
@@ -302,17 +300,27 @@ class TestUpsertSecretBareExceptionWrapping:
             "InfraConnectionError", (mock_runtime_host_error,), {}
         )
 
+        mock_errors_module = MagicMock(
+            RuntimeHostError=mock_runtime_host_error,
+            SecretResolutionError=mock_secret_resolution_error,
+            InfraConnectionError=mock_infra_connection_error,
+        )
+
+        # Patch sys.modules and restore "register-repo" to _module after the
+        # context exits so _module remains the canonical reference for all other
+        # tests.  The reload is performed inside the patch so _upsert_secret's
+        # local-import of omnibase_infra.errors picks up the mock classes; the
+        # extra "register-repo": _module entry ensures the patch.dict restore
+        # puts _module back, not the reloaded object.
         with patch.dict(
             "sys.modules",
             {
-                "omnibase_infra.errors": MagicMock(
-                    RuntimeHostError=mock_runtime_host_error,
-                    SecretResolutionError=mock_secret_resolution_error,
-                    InfraConnectionError=mock_infra_connection_error,
-                ),
+                "omnibase_infra.errors": mock_errors_module,
+                "register-repo": _module,
             },
         ):
-            # Re-import after patching so the function picks up the mock errors.
+            # Reload inside the patch so the function body re-executes its
+            # local `from omnibase_infra.errors import ...` against the mock.
             rr2 = importlib.reload(importlib.import_module("register-repo"))
             with pytest.raises(mock_infra_connection_error) as exc_info:
                 rr2._upsert_secret(  # type: ignore[attr-defined]

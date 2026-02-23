@@ -356,7 +356,7 @@ def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
             "or ~/.omnibase/.env before calling this function.",
             file=sys.stderr,
         )
-        sys.exit(1)
+        raise SystemExit(1)
     client_id = os.environ.get("INFISICAL_CLIENT_ID", "")
     client_secret = os.environ.get("INFISICAL_CLIENT_SECRET", "")
     project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
@@ -416,43 +416,58 @@ def _create_folders_via_admin(
     import httpx
 
     headers = {"Authorization": f"Bearer {token}"}
-    with httpx.Client(timeout=30) as client:
-        for env in environments:
-            # Ensure parent exists first
-            parts = path_prefix.strip("/").split("/")
-            current = "/"
-            for part in parts:
-                if not part:
-                    continue
-                part_resp = client.post(
-                    f"{addr}/api/v1/folders",
-                    headers=headers,
-                    json={
-                        "workspaceId": project_id,
-                        "environment": env,
-                        "name": part,
-                        "path": current,
-                    },
-                )
-                # 409 = folder already exists (idempotent). 400 = bad request — surfaces as real error.
-                if part_resp.status_code not in (200, 201, 409):
-                    part_resp.raise_for_status()
-                current = f"{current}{part}/"
+    try:
+        with httpx.Client(timeout=30) as client:
+            for env in environments:
+                # Ensure parent exists first
+                parts = path_prefix.strip("/").split("/")
+                current = "/"
+                for part in parts:
+                    if not part:
+                        continue
+                    part_resp = client.post(
+                        f"{addr}/api/v1/folders",
+                        headers=headers,
+                        json={
+                            "workspaceId": project_id,
+                            "environment": env,
+                            "name": part,
+                            "path": current,
+                        },
+                    )
+                    # 409 = folder already exists (idempotent). 400 = bad request — surfaces as real error.
+                    if part_resp.status_code not in (200, 201, 409):
+                        part_resp.raise_for_status()
+                    current = f"{current}{part}/"
 
-            for folder in folder_names:
-                resp = client.post(
-                    f"{addr}/api/v1/folders",
-                    headers=headers,
-                    json={
-                        "workspaceId": project_id,
-                        "environment": env,
-                        "name": folder,
-                        "path": path_prefix.rstrip("/") or "/",
-                    },
-                )
-                # 409 = folder already exists (idempotent). 400 = bad request — surfaces as real error.
-                if resp.status_code not in (200, 201, 409):
-                    resp.raise_for_status()
+                for folder in folder_names:
+                    resp = client.post(
+                        f"{addr}/api/v1/folders",
+                        headers=headers,
+                        json={
+                            "workspaceId": project_id,
+                            "environment": env,
+                            "name": folder,
+                            "path": path_prefix.rstrip("/") or "/",
+                        },
+                    )
+                    # 409 = folder already exists (idempotent). 400 = bad request — surfaces as real error.
+                    if resp.status_code not in (200, 201, 409):
+                        resp.raise_for_status()
+    except httpx.HTTPError as e:
+        logger.exception(
+            "Failed to create Infisical folder '%s': %s",
+            path_prefix,
+            e,
+        )
+        raise SystemExit(1) from e
+    except Exception as e:
+        logger.exception(
+            "Unexpected error creating Infisical folder '%s': %s",
+            path_prefix,
+            e,
+        )
+        raise SystemExit(1) from e
     logger.info(
         "Folders created: %s/[%s] in %s",
         path_prefix,
