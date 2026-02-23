@@ -76,6 +76,7 @@ dependencies = [
     # CLI Dependencies
     "click>=8.1.0,<9.0.0",
     "rich>=13.7.0,<14.0.0",
+    "textual>=0.89.0,<1.0.0",  # Terminal UI framework for onex-status TUI (OMN-2657)
 
     # System utilities
     # cryptography: Transitive dependency (via omnibase_core -> paramiko/pyopenssl).
@@ -123,6 +124,7 @@ onex-runtime = "omnibase_infra.runtime.kernel:main"
 onex-infra-test = "omnibase_infra.cli.infra_test.cli:cli"
 onex-git-hook-relay = "omnibase_infra.cli.git_hook_relay:main"
 onex-linear-relay = "omnibase_infra.cli.linear_relay:main"
+onex-status = "omnibase_infra.tui.__main__:run_status_tui"
 
 [project.entry-points."onex.domain_plugins"]
 registration = "omnibase_infra.nodes.node_registration_orchestrator.plugin:PluginRegistration"
