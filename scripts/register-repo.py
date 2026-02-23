@@ -300,7 +300,10 @@ def _service_override_required(
             f"[ERROR] registry 'service_override_required' must be a list in {_REGISTRY_PATH}"
         )
     if not keys:
-        raise ValueError("service_override_required section must not be empty")
+        # An empty list is treated the same as an absent section — the registry
+        # was intentionally cleaned up and no overrides are currently required.
+        # Only non-list/non-None types are invalid.
+        return frozenset()
     if not all(isinstance(k, str) for k in keys):
         raise ValueError(
             f"[ERROR] registry 'service_override_required' entries must be strings in {_REGISTRY_PATH}"
@@ -457,7 +460,11 @@ def _upsert_secret(
     sanitize: Callable[[Exception], str],
 ) -> str:
     """Create or update a secret. Returns 'created', 'updated', or 'skipped'."""
-    from omnibase_infra.errors import RuntimeHostError, SecretResolutionError
+    from omnibase_infra.errors import (
+        InfraConnectionError,
+        RuntimeHostError,
+        SecretResolutionError,
+    )
 
     existing = None
     try:
@@ -536,6 +543,21 @@ def _upsert_secret(
             #   3. Any other unexpected SecretResolutionError that is not "not found".
             # All three must propagate; only the "not found" branch (is_not_found=True) is safe to swallow.
             raise  # Re-raise: not-initialized / unexpected error
+    except Exception as _bare_exc:
+        # Bare SDK exception (not wrapped as RuntimeHostError).  Wrap it in
+        # InfraConnectionError so the outer loop's _is_abort_error check
+        # correctly classifies it as an infrastructure-level abort rather than
+        # silently counting it as a per-key error.  Auth errors are preserved
+        # via the cause chain and the outer loop's string-based fallback check.
+        logger.debug(
+            "Wrapping bare SDK exception from get_secret(%s, %s) as InfraConnectionError: %s",
+            folder,
+            key,
+            _bare_exc,
+        )
+        raise InfraConnectionError(
+            f"SDK raised unexpected error fetching secret {folder}{key}: {_bare_exc}"
+        ) from _bare_exc
 
     if existing is not None:
         if not overwrite:
