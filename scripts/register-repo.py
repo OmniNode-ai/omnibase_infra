@@ -388,38 +388,43 @@ def _upsert_secret(
         # SecretNotFoundError subclass.  Track against the SDK changelog
         # (https://github.com/Infisical/infisical-python) and remove the
         # string-matching blocks when a stable typed API is available.
+
+        # Step 1: Check for auth indicators — always re-raise these immediately,
+        # before attempting any "not found" classification.  Auth errors must
+        # never be silently swallowed, regardless of what the message also says.
         err_msg = str(_get_exc).lower()
-        # An auth/forbidden substring in the message means the call was
-        # rejected by the server — it must not be treated as "not found".
         has_auth_indicator = any(tok in err_msg for tok in _AUTH_INDICATORS)
-        is_not_found = not has_auth_indicator and (
+
+        # Also inspect the cause chain: an auth error wrapping a 404-style
+        # message must still propagate (e.g. SDK wraps HTTP 401 with a generic
+        # "not found" outer message).
+        cause = getattr(_get_exc, "__cause__", None)
+        cause_msg = str(cause).lower() if cause is not None else ""
+        cause_has_auth = (
+            any(tok in cause_msg for tok in _AUTH_INDICATORS) if cause_msg else False
+        )
+
+        if has_auth_indicator or cause_has_auth:
+            raise  # explicit: auth errors always propagate
+
+        # Step 2: Determine if this is "secret not found" (only reached when
+        # no auth indicator was detected above).
+        is_not_found = (
             "not found" in err_msg
             or "404" in err_msg
             or "does not exist" in err_msg
             or "secret not found" in err_msg
         )
-        # Check cause chain for two purposes:
-        # 1. If is_not_found is True: maybe the cause says auth error → demote
-        #    back to re-raise so an auth error wrapping a 404 message is not
-        #    silently swallowed.
-        # 2. If is_not_found is False: maybe the cause says "not found" →
-        #    promote so we can create the secret below.
-        cause = getattr(_get_exc, "__cause__", None)
-        if cause is not None:
-            cause_msg = str(cause).lower()
-            cause_has_auth = any(tok in cause_msg for tok in _AUTH_INDICATORS)
-            if cause_has_auth:
-                is_not_found = False  # auth error in cause chain — re-raise regardless
-            elif not is_not_found:
-                # top-level wasn't "not found" — check if cause says "not found"
-                is_not_found = (
-                    "not found" in cause_msg
-                    or "404" in cause_msg
-                    or "does not exist" in cause_msg
-                    or "secret not found" in cause_msg
-                )
+        if not is_not_found and cause_msg:
+            # top-level wasn't "not found" — check if cause says "not found"
+            is_not_found = (
+                "not found" in cause_msg
+                or "404" in cause_msg
+                or "does not exist" in cause_msg
+                or "secret not found" in cause_msg
+            )
         if not is_not_found:
-            raise  # Re-raise: not-initialized / auth / unexpected error
+            raise  # Re-raise: not-initialized / unexpected error
 
     if existing is not None:
         if not overwrite:
