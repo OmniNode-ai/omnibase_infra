@@ -121,6 +121,8 @@ packages = ["src/omnibase_infra"]
 omni-infra = "omnibase_infra.cli.commands:cli"
 onex-runtime = "omnibase_infra.runtime.kernel:main"
 onex-infra-test = "omnibase_infra.cli.infra_test.cli:cli"
+onex-git-hook-relay = "omnibase_infra.cli.git_hook_relay:main"
+onex-linear-relay = "omnibase_infra.cli.linear_relay:main"
 
 [project.entry-points."onex.domain_plugins"]
 registration = "omnibase_infra.nodes.node_registration_orchestrator.plugin:PluginRegistration"
