@@ -676,6 +676,11 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
             "Set it in your environment or ~/.omnibase/.env before running onboard-repo. "
             "You can find the project ID after running scripts/provision-infisical.py."
         )
+    try:
+        UUID(project_id)
+    except ValueError:
+        logger.exception("INFISICAL_PROJECT_ID is not a valid UUID: %s", project_id)
+        return 1
 
     # Need admin token to create folders
     if not _ADMIN_TOKEN_FILE.is_file():

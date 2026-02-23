@@ -23,6 +23,17 @@ class TestConfigSessionStorageAliasChoices:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """POSTGRES_POOL_MIN_SIZE (canonical shared key) resolves to pool_min_size."""
+        for key in (
+            "POSTGRES_HOST",
+            "POSTGRES_PORT",
+            "POSTGRES_USER",
+            "POSTGRES_DATABASE",
+            "POSTGRES_POOL_MIN_SIZE",
+            "POSTGRES_POOL_MAX_SIZE",
+            "POSTGRES_POOL_MIN",
+            "POSTGRES_POOL_MAX",
+        ):
+            monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("POSTGRES_POOL_MIN_SIZE", "3")
         monkeypatch.setenv("POSTGRES_POOL_MAX_SIZE", "20")
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")
@@ -35,6 +46,17 @@ class TestConfigSessionStorageAliasChoices:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """POSTGRES_POOL_MAX_SIZE (canonical shared key) resolves to pool_max_size."""
+        for key in (
+            "POSTGRES_HOST",
+            "POSTGRES_PORT",
+            "POSTGRES_USER",
+            "POSTGRES_DATABASE",
+            "POSTGRES_POOL_MIN_SIZE",
+            "POSTGRES_POOL_MAX_SIZE",
+            "POSTGRES_POOL_MIN",
+            "POSTGRES_POOL_MAX",
+        ):
+            monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("POSTGRES_POOL_MIN_SIZE", "3")
         monkeypatch.setenv("POSTGRES_POOL_MAX_SIZE", "8")
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")
@@ -47,6 +69,17 @@ class TestConfigSessionStorageAliasChoices:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Both POSTGRES_POOL_MIN_SIZE and POSTGRES_POOL_MAX_SIZE resolve correctly."""
+        for key in (
+            "POSTGRES_HOST",
+            "POSTGRES_PORT",
+            "POSTGRES_USER",
+            "POSTGRES_DATABASE",
+            "POSTGRES_POOL_MIN_SIZE",
+            "POSTGRES_POOL_MAX_SIZE",
+            "POSTGRES_POOL_MIN",
+            "POSTGRES_POOL_MAX",
+        ):
+            monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("POSTGRES_POOL_MIN_SIZE", "3")
         monkeypatch.setenv("POSTGRES_POOL_MAX_SIZE", "8")
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")
