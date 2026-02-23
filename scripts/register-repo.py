@@ -94,6 +94,12 @@ _AUTH_INDICATORS = (
 # In dry-run output, values for matching keys are shown as "***" to avoid
 # leaking credentials to the terminal.  Non-matching keys show their actual
 # value so operators can verify the correct config will be seeded.
+#
+# NOTE: Keys ending in "_URL" are intentionally NOT included here.  URL-type
+# keys (e.g. LLM_CODER_URL, Z_AI_API_URL, INFISICAL_ADDR) are service endpoint
+# addresses, not credentials.  A name like "Z_AI_API_URL" may look sensitive by
+# name, but "_URL" denotes the server address, not a token or key — masking it
+# would reduce operator visibility without any security benefit.
 _SENSITIVE_KEY_PATTERNS = frozenset(
     {
         "PASSWORD",
@@ -557,10 +563,10 @@ def _upsert_secret(
         # message must still propagate (e.g. SDK wraps HTTP 401 with a generic
         # "not found" outer message).
         cause = getattr(_get_exc, "__cause__", None)
+        # cause_msg is always a str: either str(cause) or "" — the any() call on
+        # an empty string returns False, so no guard is needed.
         cause_msg = str(cause).lower() if cause is not None else ""
-        cause_has_auth = (
-            any(tok in cause_msg for tok in _AUTH_INDICATORS) if cause_msg else False
-        )
+        cause_has_auth = any(tok in cause_msg for tok in _AUTH_INDICATORS)
 
         if has_auth_indicator or cause_has_auth:
             raise  # explicit: auth errors always propagate
@@ -812,7 +818,7 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                         key,
                         sanitize(exc),
                     )
-                    raise
+                    raise SystemExit(1)
                 counts["error"] += 1
                 logger.warning("  [ERROR] %s%s: %s", folder, key, sanitize(exc))
 
@@ -836,7 +842,7 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                         key,
                         sanitize(exc),
                     )
-                    raise
+                    raise SystemExit(1)
                 counts["error"] += 1
                 logger.warning(
                     "  [ERROR placeholder] %s%s: %s", folder, key, sanitize(exc)
@@ -1044,7 +1050,7 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
                         key,
                         sanitize(exc),
                     )
-                    raise
+                    raise SystemExit(1)
                 counts["error"] += 1
                 logger.warning("  [ERROR] %s%s: %s", folder, key, sanitize(exc))
     finally:

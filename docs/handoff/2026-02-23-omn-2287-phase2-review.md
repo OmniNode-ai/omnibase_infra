@@ -161,10 +161,14 @@ A local review cycle (23 iterations, 41 `fix(review):` commits) was run against 
 
 ## Pending Work (from the Plan)
 
-| Priority | Status | Task |
-|----------|--------|------|
-| P0 | **NOT DONE** | Remove `.env` from `validate_clean_root.py` allowed files — TODO: create Linear ticket |
-| P0 | **NOT DONE** | Add `no-env-file` pre-commit hook — TODO: create Linear ticket |
+> **PR GATE: Linear tickets for both P0 tasks MUST be created before PR review begins.**
+> Opening a PR without tickets in place violates this gate. Do not request review until
+> both P0 Linear tickets exist and their IDs are recorded in this table.
+
+| Priority | Status | Task | Linear Ticket |
+|----------|--------|------|---------------|
+| P0 | **NOT DONE** | Remove `.env` from `validate_clean_root.py` allowed files | **REQUIRED — create before PR review** |
+| P0 | **NOT DONE** | Add `no-env-file` pre-commit hook | **REQUIRED — create before PR review** |
 | P5 | **PENDING** | Smoke test: verify services boot without repo `.env` |
 | — | **PENDING** | Delete repo `.env` (only after smoke test passes) |
 | — | **PENDING** | Run `onboard-repo` for omniclaude, omniintelligence, omnidash |
