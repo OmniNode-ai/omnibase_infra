@@ -503,6 +503,13 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         raise SystemExit(1)
+    project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
+    if not project_id:
+        raise SystemExit(
+            "ERROR: INFISICAL_PROJECT_ID is not set. "
+            "Set it in your environment or ~/.omnibase/.env before running seed-shared. "
+            "You can find the project ID after running scripts/provision-infisical.py."
+        )
 
     print("\nWriting to Infisical...")
     try:
