@@ -169,13 +169,15 @@ A local review cycle (23 iterations, 41 `fix(review):` commits) was run against 
 |----------|--------|------|---------------|
 | P0 | **NOT DONE** | Remove `.env` from `validate_clean_root.py` allowed files | [OMN-2662](https://linear.app/omninode/issue/OMN-2662) |
 | P0 | **NOT DONE** | Add `no-env-file` pre-commit hook | [OMN-2663](https://linear.app/omninode/issue/OMN-2663) |
-| P5 | **PENDING** | Smoke test: verify services boot without repo `.env` |
-| — | **PENDING** | Delete repo `.env` (only after smoke test passes) |
-| — | **PENDING** | Run `onboard-repo` for omniclaude, omniintelligence, omnidash |
-| — | **CANCELLED** | ~~Migrate `ConfigSessionStorage` to read `POSTGRES_DSN` from Infisical (OMN-2065)~~ — superseded: `POSTGRES_DSN` removed entirely; each service uses `POSTGRES_DATABASE` + individual host/port/user keys |
-| — | **PENDING** | Add 13 unmapped handler types to `TransportConfigMap` |
-| — | **PENDING** | Wire `ConfigPrefetcher.prefetch_for_contracts()` into actual startup path |
-| — | **FUTURE** | Shrink `~/.omnibase/.env` back to 5 bootstrap lines (Task 7B — after all containers read Infisical directly) |
+| P5 | **PENDING** | Smoke test: verify services boot without repo `.env` | |
+| — | **PENDING** | Delete repo `.env` (only after smoke test passes) | |
+| — | **PENDING** | Run `onboard-repo` for omniclaude, omniintelligence, omnidash | |
+| — | **CANCELLED** | ~~Migrate `ConfigSessionStorage` to read `POSTGRES_DSN` from Infisical (OMN-2065)~~ — superseded: `POSTGRES_DSN` removed entirely; each service uses `POSTGRES_DATABASE` + individual host/port/user keys | |
+| — | **PENDING** | Add 13 unmapped handler types to `TransportConfigMap` | |
+| — | **PENDING** | Wire `ConfigPrefetcher.prefetch_for_contracts()` into actual startup path | |
+| — | **FUTURE** | Shrink `~/.omnibase/.env` back to 5 bootstrap lines (Task 7B — after all containers read Infisical directly) | |
+
+> **Note:** Both OMN-2662 and OMN-2663 are currently in `Backlog` state. They must be moved to `In Progress` and completed before requesting a merge review.
 
 > **BLOCKING REQUIREMENT — P0 enforcement tasks must land on `main` before this branch merges.**
 > Without these two tasks the zero-repo-env policy declared by this branch is active but completely unenforced: a developer can commit a `.env` file and no hook will catch it. Both tasks ("Remove `.env` from `validate_clean_root.py` allowed files" and "Add `no-env-file` pre-commit hook") MUST land on `main` before this branch merges. They are independent of this branch and have no runtime impact, so there is no technical reason to delay them. Do not merge this branch while either P0 task remains open.

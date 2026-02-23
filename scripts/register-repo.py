@@ -100,6 +100,13 @@ _AUTH_INDICATORS = (
 # addresses, not credentials.  A name like "Z_AI_API_URL" may look sensitive by
 # name, but "_URL" denotes the server address, not a token or key — masking it
 # would reduce operator visibility without any security benefit.
+#
+# CONSTRAINT: URL-type keys registered in shared_key_registry.yaml MUST NOT
+# embed credentials as query parameters (e.g. "?token=secret" or ":password@host").
+# Because _URL keys are excluded from masking, any embedded credential would be
+# printed in plaintext during dry-run output.  Store the credential separately
+# under its own key (e.g. Z_AI_API_KEY) and let the caller assemble the full URL
+# at runtime.
 _SENSITIVE_KEY_PATTERNS = frozenset(
     {
         "PASSWORD",
@@ -236,6 +243,14 @@ def _bootstrap_keys(
             f"[ERROR] registry 'bootstrap_only' entries must be strings in {_REGISTRY_PATH}"
         )
     result = frozenset(keys)
+    # POSTGRES_PASSWORD is the single explicitly validated bootstrap key because it is
+    # the most critical circular-dependency guard: if it were accidentally seeded into
+    # Infisical, the entire bootstrap sequence would deadlock.  The other bootstrap_only
+    # keys (KAFKA_BOOTSTRAP_SERVERS, INFISICAL_CLIENT_ID, INFISICAL_CLIENT_SECRET, etc.)
+    # are protected implicitly — they live in the bootstrap_only YAML section, which is
+    # never iterated for seeding, so they can never reach Infisical regardless of whether
+    # we check for them here.  A missing POSTGRES_PASSWORD, by contrast, is a registry
+    # authoring error that warrants a hard failure.
     if "POSTGRES_PASSWORD" not in result:
         raise ValueError(
             "POSTGRES_PASSWORD must be in bootstrap_only — check shared_key_registry.yaml"
@@ -873,18 +888,22 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     # Infisical paths.  Allow only alphanumeric characters, hyphens, and
     # underscores (e.g. "omniclaude", "omni-bridge", "my_repo").
     if not re.fullmatch(r"[A-Za-z0-9_-]+", repo_name):
-        raise SystemExit(
+        print(
             f"ERROR: Invalid repo name '{repo_name}'. "
             "Only alphanumeric characters, hyphens (-), and underscores (_) are allowed. "
-            "Slashes, dots, and other path characters are not permitted."
+            "Slashes, dots, and other path characters are not permitted.",
+            file=sys.stderr,
         )
+        raise SystemExit(1)
 
     env_path = Path(args.env_file).expanduser()
     if not env_path.is_file():
-        raise SystemExit(
+        print(
             f"ERROR: env file not found: {env_path}\n"
-            "Provide a valid path via --env-file."
+            "Provide a valid path via --env-file.",
+            file=sys.stderr,
         )
+        raise SystemExit(1)
     env_values = _parse_env_file(env_path)
 
     path_prefix = f"/services/{repo_name}"
