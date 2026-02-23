@@ -76,6 +76,17 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
         "HTTP_BASE_URL",
         "HTTP_TIMEOUT_MS",
         "HTTP_MAX_RETRIES",
+        # LLM service endpoints (served over HTTP; live under /shared/llm/ in Infisical)
+        "LLM_CODER_URL",
+        "LLM_CODER_FAST_URL",
+        "LLM_EMBEDDING_URL",
+        "LLM_DEEPSEEK_R1_URL",
+        "EMBEDDING_MODEL_URL",
+        "VLLM_SERVICE_URL",
+        "VLLM_DEEPSEEK_URL",
+        "VLLM_LLAMA_URL",
+        "ONEX_TREE_SERVICE_URL",
+        "METADATA_STAMPING_SERVICE_URL",
     ),
     EnumInfraTransportType.GRPC: (
         "GRPC_HOST",

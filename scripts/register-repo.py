@@ -808,9 +808,8 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     # Any extra keys in the env file that are NOT in shared, NOT bootstrap,
     # and NOT an identity default (per-repo value baked into Settings.default=).
     registry_data = _read_registry_data()
-    shared_keys_flat = {
-        k for keys in _load_registry(registry_data).values() for k in keys
-    }
+    registry = _load_registry(registry_data)
+    shared_keys_flat = {k for keys in registry.values() for k in keys}
     bootstrap = _bootstrap_keys(registry_data)
     identity = _identity_defaults(registry_data)
     # Build a set of keys already in the plan (from REPO_SECRET_KEYS) for O(1)
@@ -827,39 +826,6 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
         if key in planned_keys:
             continue
         extra.append((f"{path_prefix}/env/", key, value))
-
-    # Validate Infisical connection config before the dry-run early return so that
-    # operators with invalid config get an error even in dry-run mode. It would be
-    # confusing to see "dry-run OK" and then fail immediately on --execute due to a
-    # bad INFISICAL_ADDR or INFISICAL_PROJECT_ID.
-    infisical_addr = os.environ.get("INFISICAL_ADDR")
-    if not infisical_addr:
-        print(
-            "ERROR: INFISICAL_ADDR is not set. "
-            "Set it to the Infisical URL before seeding.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-    if not infisical_addr.startswith(("http://", "https://")):
-        print(
-            f"ERROR: INFISICAL_ADDR is not a valid URL: {infisical_addr!r}\n"
-            "It must start with http:// or https:// (e.g. http://localhost:8880).",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-    project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
-    if not project_id:
-        raise SystemExit(
-            "ERROR: INFISICAL_PROJECT_ID is not set. "
-            "Set it in your environment or ~/.omnibase/.env before running onboard-repo. "
-            "You can find the project ID after running scripts/provision-infisical.py."
-        )
-    try:
-        UUID(project_id)
-    except ValueError:
-        # ValueError here is user input, not a system error — no stacktrace needed
-        logger.error("INFISICAL_PROJECT_ID is not a valid UUID: %s", project_id)  # noqa: TRY400
-        return 1
 
     print(f"\n=== onboard-repo: {repo_name} ===")
     print(f"  Infisical path: {path_prefix}/")
@@ -892,6 +858,38 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     if not args.execute:
         print("\n[dry-run] Pass --execute to create folders and write secrets.")
         return 0
+
+    # Validate Infisical connection config after the dry-run gate — INFISICAL_ADDR
+    # and INFISICAL_PROJECT_ID are only required when actually writing to Infisical,
+    # so dry-run can work offline without a live Infisical instance.
+    infisical_addr = os.environ.get("INFISICAL_ADDR")
+    if not infisical_addr:
+        print(
+            "ERROR: INFISICAL_ADDR is not set. "
+            "Set it to the Infisical URL before seeding.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if not infisical_addr.startswith(("http://", "https://")):
+        print(
+            f"ERROR: INFISICAL_ADDR is not a valid URL: {infisical_addr!r}\n"
+            "It must start with http:// or https:// (e.g. http://localhost:8880).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
+    if not project_id:
+        raise SystemExit(
+            "ERROR: INFISICAL_PROJECT_ID is not set. "
+            "Set it in your environment or ~/.omnibase/.env before running onboard-repo. "
+            "You can find the project ID after running scripts/provision-infisical.py."
+        )
+    try:
+        UUID(project_id)
+    except ValueError:
+        # ValueError here is user input, not a system error — no stacktrace needed
+        logger.error("INFISICAL_PROJECT_ID is not a valid UUID: %s", project_id)  # noqa: TRY400
+        return 1
 
     # Need admin token to create folders
     if not _ADMIN_TOKEN_FILE.is_file():
@@ -1013,14 +1011,13 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
         # its own value before starting.
         all_plan_keys: set[str] = {pk for _, pk, _ in all_secrets}
         override_required = _service_override_required(registry_data)
-        shared_registry = _load_registry(registry_data)
         for override_key in sorted(override_required - all_plan_keys):
             # Determine the most likely transport folder for this key by scanning
             # the shared registry for which folder it belongs to.
             transport_folder = next(
                 (
                     folder.split("/")[2]  # e.g. "/shared/kafka/" → "kafka"
-                    for folder, keys in shared_registry.items()
+                    for folder, keys in registry.items()
                     if override_key in keys
                 ),
                 "<unknown>",  # fallback if key is not found in shared registry
