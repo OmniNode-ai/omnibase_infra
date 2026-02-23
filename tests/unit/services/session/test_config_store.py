@@ -109,3 +109,12 @@ class TestConfigSessionStorageAliasChoices:
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")
         with pytest.raises(ValidationError):
             ConfigSessionStorage(pool_min_size=10, pool_max_size=5)
+
+    def test_query_timeout_resolved_from_env_var(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify QUERY_TIMEOUT_SECONDS env var resolves to query_timeout_seconds."""
+        monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")
+        monkeypatch.setenv("QUERY_TIMEOUT_SECONDS", "60")
+        config = ConfigSessionStorage()
+        assert config.query_timeout_seconds == 60
