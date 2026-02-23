@@ -566,8 +566,18 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)
             except Exception as exc:
                 # Intentionally continues on non-auth errors: seed remaining keys even if one fails.
-                # Auth errors re-raised by _upsert_secret propagate here and are logged as errors,
-                # not warnings. Non-auth errors (timeouts, API failures) are logged as warnings.
+                # Auth errors (unauthorized, forbidden, invalid token, etc.) abort the loop
+                # immediately — silently swallowing them would hide a systemic credential failure
+                # and corrupt the seed run with misleading per-key error counts.
+                err_msg = str(exc).lower()
+                if any(indicator in err_msg for indicator in _AUTH_INDICATORS):
+                    logger.exception(
+                        "Authentication failure seeding %s%s — aborting: %s",
+                        folder,
+                        key,
+                        sanitize(exc),
+                    )
+                    raise
                 counts["error"] += 1
                 logger.warning("  [ERROR] %s%s: %s", folder, key, sanitize(exc))
 
@@ -757,8 +767,18 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)
             except Exception as exc:
                 # Intentionally continues on non-auth errors: seed remaining keys even if one fails.
-                # Auth errors re-raised by _upsert_secret propagate here and are logged as errors,
-                # not warnings. Non-auth errors (timeouts, API failures) are logged as warnings.
+                # Auth errors (unauthorized, forbidden, invalid token, etc.) abort the loop
+                # immediately — silently swallowing them would hide a systemic credential failure
+                # and corrupt the seed run with misleading per-key error counts.
+                err_msg = str(exc).lower()
+                if any(indicator in err_msg for indicator in _AUTH_INDICATORS):
+                    logger.exception(
+                        "Authentication failure seeding %s%s — aborting: %s",
+                        folder,
+                        key,
+                        sanitize(exc),
+                    )
+                    raise
                 counts["error"] += 1
                 logger.warning("  [ERROR] %s%s: %s", folder, key, sanitize(exc))
     finally:

@@ -449,6 +449,11 @@ python3 ~/.omnibase/scripts/onboard-repo.py /Volumes/PRO-G40/Code/omnidash
 
 Verify only shared keys are flagged.
 
+**Note on KAFKA_GROUP_ID:** After onboarding, set `KAFKA_GROUP_ID` manually per service under
+`/services/<repo>/kafka/KAFKA_GROUP_ID`. The shared value at `/shared/kafka/KAFKA_GROUP_ID`
+is a placeholder only — sharing a consumer group ID across services causes message delivery
+failures (each service must have a unique group ID so Kafka delivers messages to all of them).
+
 **Step 4: No commit** — this file lives in `~/.omnibase/scripts/`, not in the repo.
 
 ---

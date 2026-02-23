@@ -111,10 +111,18 @@ class TestConfigSessionStorageAliasChoices:
         assert config.pool_min_size == 2
         assert config.pool_max_size == 10
 
-    def test_direct_construction_uses_field_name_fallback(
+    def test_direct_kwarg_construction_with_populate_by_name(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Direct kwarg construction bypasses env var resolution and uses the value directly."""
+        """Direct Python kwargs use the field name when populate_by_name=True.
+
+        This test verifies that ConfigSessionStorage accepts ``pool_min_size`` and
+        ``pool_max_size`` as direct constructor kwargs.  It does NOT test env var
+        resolution — AliasChoices aliases (POSTGRES_POOL_MIN_SIZE, etc.) are
+        irrelevant here because direct kwargs bypass env var lookup entirely.
+        The ``populate_by_name=True`` setting is what allows the Python field name
+        to be used instead of the first AliasChoices alias.
+        """
         # Clear ambient POSTGRES_* env vars so CI environments with these set
         # do not silently influence AliasChoices resolution and make the assertion
         # pass for the wrong reason (e.g. ambient POSTGRES_POOL_MIN_SIZE=5).
