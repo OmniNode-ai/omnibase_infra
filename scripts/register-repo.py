@@ -523,12 +523,17 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
             "Set it in your environment or ~/.omnibase/.env before running seed-shared. "
             "You can find the project ID after running scripts/provision-infisical.py."
         )
+    try:
+        UUID(project_id)
+    except ValueError:
+        logger.exception("INFISICAL_PROJECT_ID is not a valid UUID: %s", project_id)
+        return 1
 
     print("\nWriting to Infisical...")
     try:
         adapter, sanitize = _load_infisical_adapter()
     except SystemExit as e:
-        if e.code:
+        if isinstance(e.code, str):
             print(e.code, file=sys.stderr)
         return 1
 
@@ -706,7 +711,7 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     try:
         adapter, sanitize = _load_infisical_adapter()
     except SystemExit as e:
-        if e.code:
+        if isinstance(e.code, str):
             print(e.code, file=sys.stderr)
         return 1
 
