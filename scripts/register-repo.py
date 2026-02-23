@@ -526,6 +526,8 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
     try:
         adapter, sanitize = _load_infisical_adapter()
     except SystemExit as e:
+        if isinstance(e.code, str):
+            print(e.code, file=sys.stderr)
         return int(e.code) if isinstance(e.code, int) else 1
 
     counts = {"created": 0, "updated": 0, "skipped": 0, "error": 0}
@@ -702,6 +704,8 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     try:
         adapter, sanitize = _load_infisical_adapter()
     except SystemExit as e:
+        if isinstance(e.code, str):
+            print(e.code, file=sys.stderr)
         return int(e.code) if isinstance(e.code, int) else 1
 
     all_secrets = plan + extra
