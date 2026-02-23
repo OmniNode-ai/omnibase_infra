@@ -56,7 +56,8 @@ class ConfigSessionStorage(BaseSettings):
     - ``pool_max_size``      ← ``POSTGRES_POOL_MAX_SIZE`` (primary) or ``pool_max_size`` (fallback)
     - ``query_timeout_seconds`` ← ``QUERY_TIMEOUT_SECONDS`` (seconds; intentionally
       distinct from ``POSTGRES_TIMEOUT_MS`` in ``transport_config_map.py``, which is
-      the shared platform key expressed in milliseconds — different unit and scope)
+      the shared platform key expressed in milliseconds — different unit and scope.
+      Resolved via ``validation_alias="QUERY_TIMEOUT_SECONDS"``)
 
     The pool fields use ``AliasChoices`` so that both the canonical shared key
     (e.g. ``POSTGRES_POOL_MIN_SIZE``, as declared in
@@ -134,26 +135,12 @@ class ConfigSessionStorage(BaseSettings):
     )
 
     # Query timeouts
-    # AliasChoices maps QUERY_TIMEOUT_SECONDS (existing primary env var) first,
-    # then POSTGRES_QUERY_TIMEOUT_SECONDS as a forward-compat alias in case the key
-    # gains a POSTGRES_ prefix in a future shared_key_registry.yaml rename.
-    # The primary alias QUERY_TIMEOUT_SECONDS must remain first so existing env
-    # configs continue to work without any changes.
     query_timeout_seconds: int = Field(
         default=30,
         ge=1,
         le=300,
-        description="Query timeout in seconds. Env vars: QUERY_TIMEOUT_SECONDS (primary) or POSTGRES_QUERY_TIMEOUT_SECONDS (legacy alias, not seeded by register-repo).",
-        validation_alias=AliasChoices(
-            "QUERY_TIMEOUT_SECONDS",
-            # POSTGRES_QUERY_TIMEOUT_SECONDS is a provisional forward-compat alias only.
-            # It is NOT seeded in Infisical (/shared/db/ holds QUERY_TIMEOUT_SECONDS, not
-            # this prefixed variant) and does NOT appear in config/shared_key_registry.yaml
-            # or runtime/config_discovery/transport_config_map.py.  If QUERY_TIMEOUT_SECONDS
-            # is ever renamed in the registry, this alias should be promoted to primary and
-            # the old name retired.
-            "POSTGRES_QUERY_TIMEOUT_SECONDS",  # forward-compat alias — not in registry/Infisical  # TODO(OMN-2065): promote POSTGRES_QUERY_TIMEOUT_SECONDS to registry or remove alias
-        ),
+        description="Query timeout in seconds (env: QUERY_TIMEOUT_SECONDS).",
+        validation_alias="QUERY_TIMEOUT_SECONDS",
     )
 
     @model_validator(mode="after")

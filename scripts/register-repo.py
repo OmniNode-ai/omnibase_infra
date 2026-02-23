@@ -55,6 +55,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -97,7 +98,10 @@ _SENSITIVE_KEY_PATTERNS = frozenset(
     {
         "PASSWORD",
         "SECRET",
-        "KEY",
+        # "_KEY" matches keys where KEY appears as a word segment (ENCRYPTION_KEY,
+        # REDIS_KEY, SIGNING_KEY, etc.) but does NOT match VALKEY_HOST/PORT/DB
+        # where "KEY" is an interior substring of the word "VALKEY".
+        "_KEY",
         "TOKEN",
         "CREDENTIAL",
         # NOTE: "AUTH" is broad by design (AUTH_TOKEN, etc.) but may mask
@@ -550,6 +554,32 @@ def _upsert_secret(
     return "created"
 
 
+def _is_abort_error(exc: Exception) -> bool:
+    """Return True if *exc* is an infrastructure-level error that must abort a seed run.
+
+    Two categories trigger an abort:
+
+    1. ``RuntimeHostError`` (or any subclass) — typed infra failures raised by
+       ``_upsert_secret`` for connection, timeout, auth, and unavailability errors.
+       Any ``RuntimeHostError`` that reaches the outer loop was not suppressed
+       inside ``_upsert_secret``, which means it is systemic.
+
+    2. Auth-indicator strings — defence-in-depth for SDK exceptions that may not
+       be typed as ``RuntimeHostError`` but whose message contains a token from
+       ``_AUTH_INDICATORS`` (e.g. ``"unauthorized"``, ``"forbidden"``).
+
+    Returns:
+        ``True`` when the caller should re-raise *exc* and abort; ``False`` when
+        the error is a per-key failure that can be counted and logged.
+    """
+    from omnibase_infra.errors import RuntimeHostError
+
+    if isinstance(exc, RuntimeHostError):
+        return True
+    err_msg = str(exc).lower()
+    return any(indicator in err_msg for indicator in _AUTH_INDICATORS)
+
+
 # ---------------------------------------------------------------------------
 # seed-shared subcommand
 # ---------------------------------------------------------------------------
@@ -587,10 +617,12 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
             else:
                 missing_value.append((folder, key))
 
-    # Validate Infisical connection config before the dry-run early return so that
-    # operators with invalid config get an error even in dry-run mode. It would be
-    # confusing to see "dry-run OK" and then fail immediately on --execute due to a
-    # bad INFISICAL_ADDR or INFISICAL_PROJECT_ID.
+    # NOTE: Intentionally validates before dry-run gate (unlike cmd_onboard_repo)
+    # because seed-shared always requires a live Infisical instance. Unlike
+    # onboard-repo, there is no meaningful offline dry-run: every seed-shared
+    # invocation is preparing to write to Infisical, and an operator with a bad
+    # INFISICAL_ADDR or INFISICAL_PROJECT_ID should get a clear error immediately
+    # rather than seeing "dry-run OK" and then failing on --execute.
     infisical_addr = os.environ.get("INFISICAL_ADDR")
     if not infisical_addr:
         print(
@@ -680,33 +712,9 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                         "  to avoid shared consumer group collisions."
                     )
             except Exception as exc:
-                # Infrastructure-level errors (connection, timeout, unavailable, auth,
-                # etc.) must abort the entire seed run immediately — continuing would
-                # silently count transient failures as per-key errors and potentially
-                # attempt subsequent writes against an unreachable server.
-                #
-                # RuntimeHostError is the base class for all infra errors
-                # (InfraConnectionError, InfraTimeoutError, InfraUnavailableError,
-                # InfraAuthenticationError, etc.).  Any such error reaching here means
-                # _upsert_secret did not suppress it (it only suppresses genuine
-                # "secret not found" SecretResolutionErrors), so it is systemic.
-                #
-                # The auth-indicator string check below is kept as defense-in-depth
-                # for SDK exceptions that may not be typed as RuntimeHostError.
-                from omnibase_infra.errors import RuntimeHostError
-
-                if isinstance(exc, RuntimeHostError):
+                if _is_abort_error(exc):
                     logger.exception(
                         "Infrastructure error seeding %s%s — aborting: %s",
-                        folder,
-                        key,
-                        sanitize(exc),
-                    )
-                    raise
-                err_msg = str(exc).lower()
-                if any(indicator in err_msg for indicator in _AUTH_INDICATORS):
-                    logger.exception(
-                        "Authentication failure seeding %s%s — aborting: %s",
                         folder,
                         key,
                         sanitize(exc),
@@ -729,23 +737,9 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                 counts[outcome] += 1
                 logger.info("  [%s] %s%s (placeholder)", outcome.upper(), folder, key)
             except Exception as exc:
-                # Mirror the abort logic from the plan loop above: infrastructure
-                # errors must not be silently swallowed — they indicate a systemic
-                # failure and the entire seed run should stop immediately.
-                from omnibase_infra.errors import RuntimeHostError
-
-                if isinstance(exc, RuntimeHostError):
+                if _is_abort_error(exc):
                     logger.exception(
                         "Infrastructure error seeding %s%s — aborting: %s",
-                        folder,
-                        key,
-                        sanitize(exc),
-                    )
-                    raise
-                err_msg = str(exc).lower()
-                if any(indicator in err_msg for indicator in _AUTH_INDICATORS):
-                    logger.exception(
-                        "Authentication failure seeding %s%s — aborting: %s",
                         folder,
                         key,
                         sanitize(exc),
@@ -772,8 +766,6 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
 
 def cmd_onboard_repo(args: argparse.Namespace) -> int:
     """Create /services/<repo>/ folder structure and seed repo-specific secrets."""
-    import re
-
     repo_name = args.repo
     # Reject names that could be used for path traversal or produce invalid
     # Infisical paths.  Allow only alphanumeric characters, hyphens, and
@@ -948,33 +940,9 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
                 counts[outcome] += 1
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)
             except Exception as exc:
-                # Infrastructure-level errors (connection, timeout, unavailable, auth,
-                # etc.) must abort the entire seed run immediately — continuing would
-                # silently count transient failures as per-key errors and potentially
-                # attempt subsequent writes against an unreachable server.
-                #
-                # RuntimeHostError is the base class for all infra errors
-                # (InfraConnectionError, InfraTimeoutError, InfraUnavailableError,
-                # InfraAuthenticationError, etc.).  Any such error reaching here means
-                # _upsert_secret did not suppress it (it only suppresses genuine
-                # "secret not found" SecretResolutionErrors), so it is systemic.
-                #
-                # The auth-indicator string check below is kept as defense-in-depth
-                # for SDK exceptions that may not be typed as RuntimeHostError.
-                from omnibase_infra.errors import RuntimeHostError
-
-                if isinstance(exc, RuntimeHostError):
+                if _is_abort_error(exc):
                     logger.exception(
                         "Infrastructure error seeding %s%s — aborting: %s",
-                        folder,
-                        key,
-                        sanitize(exc),
-                    )
-                    raise
-                err_msg = str(exc).lower()
-                if any(indicator in err_msg for indicator in _AUTH_INDICATORS):
-                    logger.exception(
-                        "Authentication failure seeding %s%s — aborting: %s",
                         folder,
                         key,
                         sanitize(exc),

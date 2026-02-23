@@ -11,9 +11,9 @@
 #
 #   ${VAR:-outer-default-${INNER:-inner-default}}
 #
-# This syntax requires Docker Compose v2.20+ and will SILENTLY produce malformed
-# values (e.g. literal "${POSTGRES_USER:-postgres}" in the DSN) on older versions.
-# Verify your version with: docker compose version
+# This syntax requires Docker Compose v2.20.0 or later and will SILENTLY produce
+# malformed values (e.g. literal "${POSTGRES_USER:-postgres}" in the DSN) on older
+# versions. Verify your version with: docker compose version
 #
 # RECOMMENDED: Set these *_URL / *_DSN variables explicitly in your .env file so
 # that nested expansion is never exercised and the DSN is always correct regardless
@@ -70,7 +70,7 @@
 #     - intelligence-api: 8053 [runtime profile]
 name: omnibase-infra
 # ==========================================================================
-# IMPORTANT: Requires Docker Compose v2.20+ (nested variable expansion).
+# IMPORTANT: Requires Docker Compose v2.20.0 or later (nested variable expansion).
 # Older versions will SILENTLY produce malformed DSNs.
 # Verify: docker compose version
 # ==========================================================================

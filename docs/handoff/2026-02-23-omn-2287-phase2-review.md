@@ -173,6 +173,9 @@ A local review cycle (23 iterations, 41 `fix(review):` commits) was run against 
 | — | **PENDING** | Wire `ConfigPrefetcher.prefetch_for_contracts()` into actual startup path |
 | — | **FUTURE** | Shrink `~/.omnibase/.env` back to 5 bootstrap lines (Task 7B — after all containers read Infisical directly) |
 
+> **BLOCKING REQUIREMENT — P0 enforcement tasks must not slip to a follow-up PR.**
+> Without these two tasks the zero-repo-env policy declared by this branch is active but completely unenforced: a developer can commit a `.env` file and no hook will catch it. Both tasks ("Remove `.env` from `validate_clean_root.py` allowed files" and "Add `no-env-file` pre-commit hook") MUST land on `main` before or concurrently with this branch merging. They are independent of this branch and have no runtime impact, so there is no technical reason to delay them. Do not merge this branch while either P0 task remains open.
+
 **Notes on P0 tasks:** Tasks 1 and 2 from the plan (enforcement hooks) were scoped out of this branch. They are pure enforcement additions with no runtime impact and can land independently on `main` before or after this branch merges.
 
 **On the 13 unmapped handler types:** `TransportConfigMap` currently maps 12 transport types. The following `EnumInfraTransportType` members have no entry and return an empty key tuple: `HTTP` (partial), `GRPC`, `MCP`, `FILESYSTEM`, `GRAPH`, `RUNTIME`, `INMEMORY`. Of these, `INMEMORY` and `RUNTIME` are intentionally empty. The others need real keys defined.
