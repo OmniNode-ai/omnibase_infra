@@ -42,6 +42,12 @@ shared:
     # KAFKA_HOST_SERVERS intentionally excluded — removed as dead code (see commit 45f6ae65)
     # Placeholder: each service MUST set /services/<repo>/kafka/KAFKA_GROUP_ID via onboard-repo.
     # Shared consumer groups cause unintended load-balancing across topics — never rely on this shared value in production.
+    #
+    # Policy: missing per-service override is an advisory warning (not a hard error) to avoid
+    # blocking onboard-repo when the override has already been set via other means (e.g. manual
+    # Infisical UI). A hard error would be a false positive in that case and would prevent valid
+    # onboarding runs from completing. The warning is sufficient to alert operators who have
+    # not yet set the override.
     - KAFKA_GROUP_ID
     - KAFKA_ACKS
     - KAFKA_REQUEST_TIMEOUT_MS

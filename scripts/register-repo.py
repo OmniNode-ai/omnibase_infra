@@ -163,6 +163,11 @@ def _load_registry(
             f"got {type(shared).__name__!r}. Check that 'shared:' is not null or a list."
         )
     for folder, keys in shared.items():
+        # A null YAML value (e.g. "consul:" with no items) is parsed by
+        # yaml.safe_load as None.  The isinstance(keys, list) guard below
+        # catches NoneType before the empty-list check and raises ValueError
+        # with 'got NoneType', so null folder entries are treated as an
+        # invalid type rather than silently skipped.
         if not isinstance(keys, list):
             raise ValueError(
                 f"Expected 'shared.{folder}' in {_REGISTRY_PATH} to be a list, "
@@ -526,8 +531,8 @@ def _upsert_secret(
                 secret_path=folder,
                 secret_value=value,
             )
-        except RuntimeHostError:
-            raise  # infrastructure failure — let the outer loop handle it
+        except Exception:
+            raise  # write failure is always systemic — let the outer loop handle it
         return "updated"
 
     try:
@@ -536,8 +541,8 @@ def _upsert_secret(
             secret_path=folder,
             secret_value=value,
         )
-    except RuntimeHostError:
-        raise  # infrastructure failure — let the outer loop handle it
+    except Exception:
+        raise  # write failure is always systemic — let the outer loop handle it
     return "created"
 
 
@@ -977,38 +982,46 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     )
     print("  (Infisical creds come from ~/.omnibase/.env via shell env)")
 
-    # Warn for any keys declared as service_override_required that are NOT
-    # included in the onboarding plan.  These keys have shared platform defaults
-    # that are intentionally wrong for production use; each service must supply
-    # its own value before starting.
-    all_plan_keys: set[str] = {pk for _, pk, _ in all_secrets}
-    override_required = _service_override_required(registry_data)
-    shared_registry = _load_registry(registry_data)
-    for override_key in sorted(override_required - all_plan_keys):
-        # Determine the most likely transport folder for this key by scanning
-        # the shared registry for which folder it belongs to.
-        transport_folder = next(
-            (
-                folder.split("/")[2]  # e.g. "/shared/kafka/" → "kafka"
-                for folder, keys in shared_registry.items()
-                if override_key in keys
-            ),
-            "kafka",  # fallback if key is not found in shared registry
-        )
-        logger.warning(
-            "ACTION REQUIRED: '%s' is declared service_override_required but was not "
-            "included in the onboarding plan for repo '%s'. "
-            "You MUST manually add /services/%s/%s/%s to Infisical before the service starts. "
-            "The shared /shared/%s/%s value is a placeholder default only — "
-            "relying on it in production is a misconfiguration.",
-            override_key,
-            repo_name,
-            repo_name,
-            transport_folder,
-            override_key,
-            transport_folder,
-            override_key,
-        )
+    # Only emit the service_override_required warning block when the seed
+    # completed without errors.  If the loop was aborted by a re-raised
+    # exception the finally block already ran adapter.shutdown() and the
+    # exception is propagating — this code is unreachable in that case.
+    # For the non-exception path, gate on zero errors so that a partially
+    # failed seed (per-key errors counted but run not aborted) does not
+    # print misleading "ACTION REQUIRED" guidance after a broken run.
+    if counts.get("error", 0) == 0:
+        # Warn for any keys declared as service_override_required that are NOT
+        # included in the onboarding plan.  These keys have shared platform defaults
+        # that are intentionally wrong for production use; each service must supply
+        # its own value before starting.
+        all_plan_keys: set[str] = {pk for _, pk, _ in all_secrets}
+        override_required = _service_override_required(registry_data)
+        shared_registry = _load_registry(registry_data)
+        for override_key in sorted(override_required - all_plan_keys):
+            # Determine the most likely transport folder for this key by scanning
+            # the shared registry for which folder it belongs to.
+            transport_folder = next(
+                (
+                    folder.split("/")[2]  # e.g. "/shared/kafka/" → "kafka"
+                    for folder, keys in shared_registry.items()
+                    if override_key in keys
+                ),
+                "kafka",  # fallback if key is not found in shared registry
+            )
+            logger.warning(
+                "ACTION REQUIRED: '%s' is declared service_override_required but was not "
+                "included in the onboarding plan for repo '%s'. "
+                "You MUST manually add /services/%s/%s/%s to Infisical before the service starts. "
+                "The shared /shared/%s/%s value is a placeholder default only — "
+                "relying on it in production is a misconfiguration.",
+                override_key,
+                repo_name,
+                repo_name,
+                transport_folder,
+                override_key,
+                transport_folder,
+                override_key,
+            )
 
     return 1 if counts["error"] else 0
 
