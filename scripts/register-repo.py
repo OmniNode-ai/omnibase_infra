@@ -525,24 +525,20 @@ def _upsert_secret(
     if existing is not None:
         if not overwrite:
             return "skipped"
-        try:
-            adapter.update_secret(  # type: ignore[attr-defined]
-                secret_name=key,
-                secret_path=folder,
-                secret_value=value,
-            )
-        except Exception:
-            raise  # write failure is always systemic — let the outer loop handle it
-        return "updated"
-
-    try:
-        adapter.create_secret(  # type: ignore[attr-defined]
+        # Write errors propagate naturally to the outer loop.
+        adapter.update_secret(  # type: ignore[attr-defined]
             secret_name=key,
             secret_path=folder,
             secret_value=value,
         )
-    except Exception:
-        raise  # write failure is always systemic — let the outer loop handle it
+        return "updated"
+
+    # Write errors propagate naturally to the outer loop.
+    adapter.create_secret(  # type: ignore[attr-defined]
+        secret_name=key,
+        secret_path=folder,
+        secret_value=value,
+    )
     return "created"
 
 
@@ -1006,7 +1002,7 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
                     for folder, keys in shared_registry.items()
                     if override_key in keys
                 ),
-                "kafka",  # fallback if key is not found in shared registry
+                "<unknown>",  # fallback if key is not found in shared registry
             )
             logger.warning(
                 "ACTION REQUIRED: '%s' is declared service_override_required but was not "

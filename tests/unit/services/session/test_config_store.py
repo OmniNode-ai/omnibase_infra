@@ -93,6 +93,7 @@ class TestConfigSessionStorageAliasChoices:
         monkeypatch.delenv("pool_max_size", raising=False)
         monkeypatch.delenv("QUERY_TIMEOUT_SECONDS", raising=False)
         monkeypatch.delenv("POSTGRES_QUERY_TIMEOUT_SECONDS", raising=False)
+        monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")
         # Clear ambient connection vars so CI environments don't silently pollute the
         # constructed config and cause misleading failures if the test is extended.
