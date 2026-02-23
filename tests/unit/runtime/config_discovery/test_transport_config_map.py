@@ -72,6 +72,14 @@ class TestTransportConfigMap:
         assert "CONSUL_HOST" in spec.keys
         assert "CONSUL_ENABLED" in spec.keys
 
+    def test_shared_spec_qdrant(self) -> None:
+        """Qdrant shared spec should include QDRANT_URL alongside host/port keys."""
+        spec = self.tcm.shared_spec(EnumInfraTransportType.QDRANT)
+        assert spec.infisical_folder == "/shared/qdrant/"
+        assert "QDRANT_HOST" in spec.keys
+        assert "QDRANT_PORT" in spec.keys
+        assert "QDRANT_URL" in spec.keys
+
     def test_shared_spec_required(self) -> None:
         """Shared spec should propagate required flag."""
         spec = self.tcm.shared_spec(EnumInfraTransportType.DATABASE, required=True)
