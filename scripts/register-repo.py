@@ -399,14 +399,21 @@ def _upsert_secret(
             or "does not exist" in err_msg
             or "secret not found" in err_msg
         )
-        if not is_not_found:
-            # Check the cause chain — the raw SDK exception may carry a more
-            # informative status code or message.
-            cause = getattr(_get_exc, "__cause__", None)
-            if cause is not None:
-                cause_msg = str(cause).lower()
-                cause_has_auth = any(tok in cause_msg for tok in _AUTH_INDICATORS)
-                is_not_found = not cause_has_auth and (
+        # Check cause chain for two purposes:
+        # 1. If is_not_found is True: maybe the cause says auth error → demote
+        #    back to re-raise so an auth error wrapping a 404 message is not
+        #    silently swallowed.
+        # 2. If is_not_found is False: maybe the cause says "not found" →
+        #    promote so we can create the secret below.
+        cause = getattr(_get_exc, "__cause__", None)
+        if cause is not None:
+            cause_msg = str(cause).lower()
+            cause_has_auth = any(tok in cause_msg for tok in _AUTH_INDICATORS)
+            if cause_has_auth:
+                is_not_found = False  # auth error in cause chain — re-raise regardless
+            elif not is_not_found:
+                # top-level wasn't "not found" — check if cause says "not found"
+                is_not_found = (
                     "not found" in cause_msg
                     or "404" in cause_msg
                     or "does not exist" in cause_msg
