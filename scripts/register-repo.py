@@ -254,11 +254,6 @@ def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
     from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
     infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
-    if not infisical_addr or not infisical_addr.startswith(("http://", "https://")):
-        raise ValueError(
-            f"INFISICAL_ADDR is not a valid URL: {infisical_addr!r}\n"
-            "It must start with http:// or https:// (e.g. http://localhost:8880)."
-        )
     client_id = os.environ.get("INFISICAL_CLIENT_ID", "")
     client_secret = os.environ.get("INFISICAL_CLIENT_SECRET", "")
     project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
@@ -494,6 +489,15 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
     if not args.execute:
         print("\n[dry-run] Pass --execute to write to Infisical.")
         return 0
+
+    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
+    if not infisical_addr or not infisical_addr.startswith(("http://", "https://")):
+        print(
+            f"ERROR: INFISICAL_ADDR is not a valid URL: {infisical_addr!r}\n"
+            "It must start with http:// or https:// (e.g. http://localhost:8880).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
     print("\nWriting to Infisical...")
     try:
