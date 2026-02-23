@@ -48,6 +48,8 @@ shared:
     - CONSUL_SCHEME
     - CONSUL_ACL_TOKEN
     - CONSUL_ENABLED
+  # NOTE: No VAULT transport type in EnumInfraTransportType yet — VAULT_ADDR is seeded
+  # but cannot be prefetched via ConfigPrefetcher until VAULT is added to the enum.
   "/shared/vault/":
     # NOTE: VAULT_TOKEN intentionally excluded — it is per-service and must be
     # provisioned per repo under /services/<repo>/vault/VAULT_TOKEN, not shared
