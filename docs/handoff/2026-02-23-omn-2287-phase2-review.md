@@ -173,10 +173,10 @@ A local review cycle (23 iterations, 41 `fix(review):` commits) was run against 
 | — | **PENDING** | Wire `ConfigPrefetcher.prefetch_for_contracts()` into actual startup path |
 | — | **FUTURE** | Shrink `~/.omnibase/.env` back to 5 bootstrap lines (Task 7B — after all containers read Infisical directly) |
 
-> **BLOCKING REQUIREMENT — P0 enforcement tasks must not slip to a follow-up PR.**
-> Without these two tasks the zero-repo-env policy declared by this branch is active but completely unenforced: a developer can commit a `.env` file and no hook will catch it. Both tasks ("Remove `.env` from `validate_clean_root.py` allowed files" and "Add `no-env-file` pre-commit hook") MUST land on `main` before or concurrently with this branch merging. They are independent of this branch and have no runtime impact, so there is no technical reason to delay them. Do not merge this branch while either P0 task remains open.
+> **BLOCKING REQUIREMENT — P0 enforcement tasks must land on `main` before this branch merges.**
+> Without these two tasks the zero-repo-env policy declared by this branch is active but completely unenforced: a developer can commit a `.env` file and no hook will catch it. Both tasks ("Remove `.env` from `validate_clean_root.py` allowed files" and "Add `no-env-file` pre-commit hook") MUST land on `main` before this branch merges. They are independent of this branch and have no runtime impact, so there is no technical reason to delay them. Do not merge this branch while either P0 task remains open.
 
-**Notes on P0 tasks:** Tasks 1 and 2 from the plan (enforcement hooks) were scoped out of this branch. They are pure enforcement additions with no runtime impact and can land independently on `main` before or after this branch merges.
+**Notes on P0 tasks:** Tasks 1 and 2 from the plan (enforcement hooks) were scoped out of this branch. They are pure enforcement additions with no runtime impact and must land on `main` before this branch merges.
 
 **On the 13 unmapped handler types:** `TransportConfigMap` currently maps 12 transport types. The following `EnumInfraTransportType` members have no entry and return an empty key tuple: `HTTP` (partial), `GRPC`, `MCP`, `FILESYSTEM`, `GRAPH`, `RUNTIME`, `INMEMORY`. Of these, `INMEMORY` and `RUNTIME` are intentionally empty. The others need real keys defined.
 
@@ -187,7 +187,7 @@ A local review cycle (23 iterations, 41 `fix(review):` commits) was run against 
 In priority order:
 
 1. **Open PR for this branch** — all hooks pass, 43 commits, ready for review.
-   > **Note:** P0 enforcement tasks (adding the `no-env-file` pre-commit hook and removing `.env` from `validate_clean_root.py`) must land before or immediately after this branch merges to close the enforcement gap. Without P0, the zero-repo-env policy is active but unenforced — developers could commit a `.env` file and the hook would not catch it.
+   > **Note:** P0 enforcement tasks (adding the `no-env-file` pre-commit hook and removing `.env` from `validate_clean_root.py`) must land on `main` before this branch merges to close the enforcement gap. Without P0, the zero-repo-env policy is active but unenforced — developers could commit a `.env` file and the hook would not catch it.
 2. **P0 enforcement (separate PR)** — add `no-env-file` pre-commit hook and remove `.env` from `validate_clean_root.py`. These are independent of this branch and should not be blocked on it.
 3. **Smoke test (P5)** — start the compose stack with `--env-file ~/.omnibase/.env` and no repo `.env`. Verify `ConfigSessionStorage` instantiates correctly from shell env. See `docs/plans/2026-02-21-zero-repo-env-files.md` Task 9 for the step-by-step.
 4. **Delete repo `.env`** — only after smoke test passes. Run `~/.omnibase/scripts/onboard-repo.py` first (dry-run, then `--apply`) to strip shared keys from omniclaude, omniintelligence, omnidash.

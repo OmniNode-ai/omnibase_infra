@@ -345,8 +345,11 @@ def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
     Returns (adapter, sanitize_fn).
 
     Note:
-        INFISICAL_ADDR validation (scheme check) is the caller's responsibility;
-        cmd_seed_shared and cmd_onboard_repo both validate before calling this function.
+        INFISICAL_ADDR is validated at two layers (defense-in-depth): command
+        entry points (cmd_seed_shared and cmd_onboard_repo) both check for
+        presence and a valid scheme before calling this function, AND this
+        function repeats those checks to guard callers that bypass the
+        entry-point pre-flight.
     """
     from pydantic import SecretStr
 
@@ -692,16 +695,25 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
             else:
                 missing_value.append((folder, key))
 
-    # NOTE: Intentionally validates before the dry-run gate (unlike cmd_onboard_repo).
+    # NOTE: Intentionally validates BEFORE the dry-run gate (unlike cmd_onboard_repo).
     # This is a design choice for early failure: we always validate credentials even
     # for a preview run, so the operator knows immediately if the connection is
-    # misconfigured before seeing the plan. Dry-run never contacts Infisical — it
-    # exits after printing the plan without making any network calls. The validation
-    # here is not a functional requirement of dry-run; it is a usability guard.
-    # Note: this differs from cmd_onboard_repo, which defers validation to the
-    # --execute path. The asymmetry is intentional — seed-shared is a platform-wide
-    # operation where an early credential check is more valuable than dry-run
-    # accessibility without credentials. Do not "fix" this to match cmd_onboard_repo.
+    # misconfigured before seeing the plan.
+    #
+    # The pre-flight checks below (INFISICAL_ADDR, INFISICAL_PROJECT_ID) will fail
+    # fast even when --dry-run is passed — if credentials are missing, the command
+    # exits non-zero before printing the plan. This is intentional: dry-run is meant
+    # to preview what *would* be seeded, and that preview is only meaningful if the
+    # operator has a valid Infisical configuration.
+    #
+    # Actual Infisical network calls (upsert, folder creation) are still skipped in
+    # dry-run — only the credential presence/format is checked here, not connectivity.
+    #
+    # This differs from cmd_onboard_repo, which defers INFISICAL_ADDR validation to
+    # the --execute path so dry-run works without a live Infisical instance. The
+    # asymmetry is intentional — seed-shared is a platform-wide operation where an
+    # early credential check is more valuable than dry-run accessibility without
+    # credentials. Do not "fix" this to match cmd_onboard_repo.
     infisical_addr = os.environ.get("INFISICAL_ADDR")
     if not infisical_addr:
         print(

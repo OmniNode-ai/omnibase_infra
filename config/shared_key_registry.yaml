@@ -84,17 +84,6 @@ shared:
     - LLM_CODER_FAST_URL
     - LLM_EMBEDDING_URL
     - LLM_DEEPSEEK_R1_URL
-    # Legacy / alias keys — kept for backward compatibility with services that
-    # reference these names before migrating to the canonical LLM_* names above.
-    # New code should use the canonical LLM_* keys from CLAUDE.md instead.
-    #   EMBEDDING_MODEL_URL  — alias for LLM_EMBEDDING_URL
-    #   VLLM_SERVICE_URL     — generic vLLM service endpoint (pre-canonical naming)
-    #   VLLM_DEEPSEEK_URL    — alias for LLM_DEEPSEEK_R1_URL
-    #   VLLM_LLAMA_URL       — Llama model endpoint (separate from DeepSeek/Coder stack)
-    - EMBEDDING_MODEL_URL
-    - VLLM_SERVICE_URL
-    - VLLM_DEEPSEEK_URL
-    - VLLM_LLAMA_URL
     # ONEX platform service URLs (not LLM models — kept here as they are co-located
     # on the same inference infrastructure and share the REMOTE_SERVER_IP base).
     - ONEX_TREE_SERVICE_URL
