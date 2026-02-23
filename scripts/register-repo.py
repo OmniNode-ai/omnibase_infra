@@ -89,6 +89,23 @@ _AUTH_INDICATORS = (
     "access denied",
 )
 
+# Substrings (case-insensitive) that indicate a key holds sensitive material.
+# In dry-run output, values for matching keys are shown as "***" to avoid
+# leaking credentials to the terminal.  Non-matching keys show their actual
+# value so operators can verify the correct config will be seeded.
+_SENSITIVE_KEY_PATTERNS = frozenset(
+    {
+        "PASSWORD",
+        "SECRET",
+        "KEY",
+        "TOKEN",
+        "CREDENTIAL",
+        "AUTH",
+        "CERT",
+        "PEM",
+    }
+)
+
 sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
 # Shared utility — avoids duplicating the parser in every Infisical script.
@@ -196,11 +213,10 @@ def _bootstrap_keys(
             f"[ERROR] registry 'bootstrap_only' entries must be strings in {_REGISTRY_PATH}"
         )
     result = frozenset(keys)
-    assert "POSTGRES_PASSWORD" in result, (
-        "POSTGRES_PASSWORD must always be in bootstrap_only keys — "
-        "it is a circular-startup-dep that must never be seeded into Infisical. "
-        "Check config/shared_key_registry.yaml bootstrap_only section."
-    )
+    if "POSTGRES_PASSWORD" not in result:
+        raise ValueError(
+            "POSTGRES_PASSWORD must be in bootstrap_only — check shared_key_registry.yaml"
+        )
     return result
 
 
@@ -561,7 +577,14 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
 
     print("\n  Keys to seed:")
     for folder, key, value in sorted(plan):
-        display = "***" if value else "(empty)"
+        key_upper = key.upper()
+        is_sensitive = any(pat in key_upper for pat in _SENSITIVE_KEY_PATTERNS)
+        if not value:
+            display = "(empty)"
+        elif is_sensitive:
+            display = "***"
+        else:
+            display = value
         print(f"    {folder}{key} = {display}")
 
     if not args.execute:
