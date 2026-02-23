@@ -136,7 +136,7 @@ def _read_registry_data() -> dict[str, object]:
         raise ValueError(
             f"Registry file is empty or not a YAML mapping: {registry_path}"
         )
-    return data  # type: ignore[no-any-return]  # yaml.safe_load returns Any; runtime isinstance guard above ensures dict
+    return data  # type: ignore[no-any-return]  # yaml.safe_load returns Any; runtime isinstance guard above ensures dict, not dict[str, list[str]] — inner types are validated by the _load_registry loop
 
 
 def _load_registry(
@@ -252,6 +252,38 @@ def _identity_defaults(
     if not all(isinstance(k, str) for k in keys):
         raise ValueError(
             f"[ERROR] registry 'identity_defaults' entries must be strings in {_REGISTRY_PATH}"
+        )
+    return frozenset(keys)
+
+
+def _service_override_required(
+    data: dict[str, object] | None = None,
+) -> frozenset[str]:
+    """Load keys from the ``service_override_required`` section of the registry.
+
+    These keys are present in ``/shared/`` as platform-wide defaults but MUST
+    be overridden per-service under ``/services/<repo>/<transport>/<KEY>``
+    before the service starts.  The ``onboard-repo`` command warns if any of
+    these keys are absent from the onboarding plan.
+
+    Args:
+        data: Pre-loaded registry dict from :func:`_read_registry_data`.  When
+            provided the file is not re-read; when omitted the file is read
+            once inside this function.
+    """
+    if data is None:
+        data = _read_registry_data()
+    if "service_override_required" not in data:
+        # Section is optional — older registry files without it are valid.
+        return frozenset()
+    keys = data["service_override_required"]
+    if not isinstance(keys, list):
+        raise ValueError(
+            f"[ERROR] registry 'service_override_required' must be a list in {_REGISTRY_PATH}"
+        )
+    if not all(isinstance(k, str) for k in keys):
+        raise ValueError(
+            f"[ERROR] registry 'service_override_required' entries must be strings in {_REGISTRY_PATH}"
         )
     return frozenset(keys)
 
@@ -488,18 +520,24 @@ def _upsert_secret(
     if existing is not None:
         if not overwrite:
             return "skipped"
-        adapter.update_secret(  # type: ignore[attr-defined]
+        try:
+            adapter.update_secret(  # type: ignore[attr-defined]
+                secret_name=key,
+                secret_path=folder,
+                secret_value=value,
+            )
+        except RuntimeHostError:
+            raise  # infrastructure failure — let the outer loop handle it
+        return "updated"
+
+    try:
+        adapter.create_secret(  # type: ignore[attr-defined]
             secret_name=key,
             secret_path=folder,
             secret_value=value,
         )
-        return "updated"
-
-    adapter.create_secret(  # type: ignore[attr-defined]
-        secret_name=key,
-        secret_path=folder,
-        secret_value=value,
-    )
+    except RuntimeHostError:
+        raise  # infrastructure failure — let the outer loop handle it
     return "created"
 
 
@@ -925,21 +963,38 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     )
     print("  (Infisical creds come from ~/.omnibase/.env via shell env)")
 
-    # Remind operator to set a per-service KAFKA_GROUP_ID.
-    # The shared /shared/kafka/KAFKA_GROUP_ID is a placeholder default only —
-    # each service MUST have its own consumer group ID to avoid shared consumer
-    # group collisions (multiple services consuming from the same group would
-    # cause unintended load-balancing across topics).
-    # There is no automated enforcement: this warning is the only guardrail.
-    logger.warning(
-        "ACTION REQUIRED: Set KAFKA_GROUP_ID for repo '%s' in Infisical at "
-        "/services/%s/kafka/KAFKA_GROUP_ID. "
-        "The shared /shared/kafka/KAFKA_GROUP_ID is a placeholder default — "
-        "each service must override it with a unique consumer group ID to avoid "
-        "shared consumer group collisions.",
-        repo_name,
-        repo_name,
-    )
+    # Warn for any keys declared as service_override_required that are NOT
+    # included in the onboarding plan.  These keys have shared platform defaults
+    # that are intentionally wrong for production use; each service must supply
+    # its own value before starting.
+    all_plan_keys: set[str] = {pk for _, pk, _ in all_secrets}
+    override_required = _service_override_required(registry_data)
+    for override_key in sorted(override_required - all_plan_keys):
+        # Determine the most likely transport folder for this key by scanning
+        # the shared registry for which folder it belongs to.
+        shared_registry = _load_registry(registry_data)
+        transport_folder = next(
+            (
+                folder.split("/")[2]  # e.g. "/shared/kafka/" → "kafka"
+                for folder, keys in shared_registry.items()
+                if override_key in keys
+            ),
+            "kafka",  # fallback if key is not found in shared registry
+        )
+        logger.warning(
+            "ACTION REQUIRED: '%s' is declared service_override_required but was not "
+            "included in the onboarding plan for repo '%s'. "
+            "You MUST manually add /services/%s/%s/%s to Infisical before the service starts. "
+            "The shared /shared/%s/%s value is a placeholder default only — "
+            "relying on it in production is a misconfiguration.",
+            override_key,
+            repo_name,
+            repo_name,
+            transport_folder,
+            override_key,
+            transport_folder,
+            override_key,
+        )
 
     return 1 if counts["error"] else 0
 

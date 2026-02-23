@@ -30,8 +30,6 @@ class TestConfigSessionStorageAliasChoices:
             "POSTGRES_DATABASE",
             "POSTGRES_POOL_MIN_SIZE",
             "POSTGRES_POOL_MAX_SIZE",
-            "POSTGRES_POOL_MIN",
-            "POSTGRES_POOL_MAX",
         ):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("POSTGRES_POOL_MIN_SIZE", "3")
@@ -53,8 +51,6 @@ class TestConfigSessionStorageAliasChoices:
             "POSTGRES_DATABASE",
             "POSTGRES_POOL_MIN_SIZE",
             "POSTGRES_POOL_MAX_SIZE",
-            "POSTGRES_POOL_MIN",
-            "POSTGRES_POOL_MAX",
         ):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("POSTGRES_POOL_MIN_SIZE", "3")
@@ -76,8 +72,6 @@ class TestConfigSessionStorageAliasChoices:
             "POSTGRES_DATABASE",
             "POSTGRES_POOL_MIN_SIZE",
             "POSTGRES_POOL_MAX_SIZE",
-            "POSTGRES_POOL_MIN",
-            "POSTGRES_POOL_MAX",
         ):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("POSTGRES_POOL_MIN_SIZE", "3")
@@ -134,8 +128,6 @@ class TestConfigSessionStorageAliasChoices:
             "POSTGRES_DATABASE",
             "POSTGRES_POOL_MIN_SIZE",
             "POSTGRES_POOL_MAX_SIZE",
-            "POSTGRES_POOL_MIN",
-            "POSTGRES_POOL_MAX",
         ):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")  # required field
@@ -190,8 +182,6 @@ class TestConfigSessionStorageAliasChoices:
             "POSTGRES_DATABASE",
             "POSTGRES_POOL_MIN_SIZE",
             "POSTGRES_POOL_MAX_SIZE",
-            "POSTGRES_POOL_MIN",
-            "POSTGRES_POOL_MAX",
             "QUERY_TIMEOUT_SECONDS",
             "POSTGRES_QUERY_TIMEOUT_SECONDS",
         ):
@@ -212,8 +202,6 @@ class TestConfigSessionStorageAliasChoices:
             "POSTGRES_DATABASE",
             "POSTGRES_POOL_MIN_SIZE",
             "POSTGRES_POOL_MAX_SIZE",
-            "POSTGRES_POOL_MIN",
-            "POSTGRES_POOL_MAX",
             "QUERY_TIMEOUT_SECONDS",
             "POSTGRES_QUERY_TIMEOUT_SECONDS",
         ):
@@ -233,8 +221,6 @@ class TestConfigSessionStorageAliasChoices:
             "POSTGRES_DATABASE",
             "POSTGRES_POOL_MIN_SIZE",
             "POSTGRES_POOL_MAX_SIZE",
-            "POSTGRES_POOL_MIN",
-            "POSTGRES_POOL_MAX",
             "QUERY_TIMEOUT_SECONDS",
             "POSTGRES_QUERY_TIMEOUT_SECONDS",
         ):

@@ -135,3 +135,11 @@ bootstrap_only:
 # Must NEVER appear in any .env file — hardcoded as default= in Settings classes.
 identity_defaults:
   - POSTGRES_DATABASE
+# Keys that exist in /shared/ as platform-wide defaults but MUST be overridden
+# per-service under /services/<repo>/<transport>/<KEY> before the service starts.
+# Relying on the shared value in production is a misconfiguration.
+# register-repo.py onboard-repo will warn if any of these are absent from the plan.
+service_override_required:
+  # Each service must set its own consumer group ID to avoid unintended
+  # load-balancing across topics when multiple services share a group.
+  - KAFKA_GROUP_ID

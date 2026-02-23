@@ -152,7 +152,7 @@ class ConfigSessionStorage(BaseSettings):
             # or runtime/config_discovery/transport_config_map.py.  If QUERY_TIMEOUT_SECONDS
             # is ever renamed in the registry, this alias should be promoted to primary and
             # the old name retired.
-            "POSTGRES_QUERY_TIMEOUT_SECONDS",  # forward-compat alias — not in registry/Infisical
+            "POSTGRES_QUERY_TIMEOUT_SECONDS",  # forward-compat alias — not in registry/Infisical  # TODO(OMN-2065): promote POSTGRES_QUERY_TIMEOUT_SECONDS to registry or remove alias
         ),
     )
 

@@ -98,10 +98,7 @@ x-runtime-env: &runtime-env
   # --- Bootstrap essentials (always needed) ---
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
-  # WARNING: The fallback DSN uses nested variable expansion. Requires Compose v2.20+
-  # (older versions silently produce malformed/empty DSNs; run `docker compose version` to verify).
-  # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
-  # shell-special characters ($, `, \, !), the expansion may produce incorrect results.
+  # See top-of-file note re: nested variable expansion.
   # RECOMMENDED: Set OMNIBASE_INFRA_DB_URL explicitly in .env instead.
   OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for DB URL fallback}@postgres:5432/omnibase_infra}
   KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
@@ -133,10 +130,7 @@ x-runtime-env: &runtime-env
   VALKEY_PORT: ${VALKEY_PORT:-6379}
   VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
   # OmniIntelligence domain plugin
-  # WARNING: The fallback DSN uses nested variable expansion. Requires Compose v2.20+
-  # (older versions silently produce malformed/empty DSNs; run `docker compose version` to verify).
-  # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
-  # shell-special characters ($, `, \, !), the expansion may produce incorrect results.
+  # See top-of-file note re: nested variable expansion.
   # RECOMMENDED: Set OMNIINTELLIGENCE_DB_URL explicitly in .env instead.
   OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for intelligence DB URL fallback}@postgres:5432/omniintelligence}
 # ==========================================================================
@@ -470,10 +464,7 @@ services:
       # NOTE: Uses dedicated OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN rather than
       # OMNIBASE_INFRA_DB_URL because this consumer uses pydantic-settings with the
       # OMNIBASE_INFRA_AGENT_ACTIONS_ prefix and may use a different DB role.
-      # WARNING: The fallback DSN uses nested variable expansion. Requires Compose v2.20+;
-      # older versions silently produce malformed/empty DSNs (see top-of-file note).
-      # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
-      # shell-special characters ($, `, \, !), the expansion may produce incorrect results.
+      # See top-of-file note re: nested variable expansion.
       # RECOMMENDED: Set OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN explicitly in .env instead.
       OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: ${OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for agent-actions DSN}@postgres:5432/omnibase_infra}
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_SIZE: ${AGENT_ACTIONS_BATCH_SIZE:-100}
