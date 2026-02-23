@@ -5,6 +5,16 @@ All notable changes to the ONEX Infrastructure (omnibase_infra) will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-02-23
+
+### Changed
+
+#### Dependencies
+
+- **Bump `omnibase-core`** from `>=0.18.1,<0.19.0` → `>=0.19.0,<0.20.0` (DecisionRecord, NodeReducer projection effect)
+- **Bump `omnibase-spi`** from `>=0.10.0,<0.11.0` → `>=0.12.0,<0.13.0` (ProtocolEffect, ProtocolNodeProjectionEffect, ContractProjectionResult — OMN-2508)
+- Bumped version to 0.10.0
+
 ## [0.9.0] - 2026-02-20
 
 ### Added
