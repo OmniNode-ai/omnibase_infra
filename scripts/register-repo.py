@@ -146,14 +146,13 @@ def _read_registry_data() -> dict[str, object]:
     ``_identity_defaults`` via their ``data`` parameter so the file is only
     read a single time per invocation.
     """
-    registry_path = _REGISTRY_PATH
-    if not registry_path.exists():
-        raise FileNotFoundError(f"Registry not found: {registry_path}")
-    with open(registry_path, encoding="utf-8") as f:
+    if not _REGISTRY_PATH.exists():
+        raise FileNotFoundError(f"Registry not found: {_REGISTRY_PATH}")
+    with open(_REGISTRY_PATH, encoding="utf-8") as f:
         data = yaml.safe_load(f)
     if data is None or not isinstance(data, dict):
         raise ValueError(
-            f"Registry file is empty or not a YAML mapping: {registry_path}"
+            f"Registry file is empty or not a YAML mapping: {_REGISTRY_PATH}"
         )
     return data  # type: ignore[no-any-return]  # yaml.safe_load returns Any; runtime isinstance guard above ensures dict, not dict[str, list[str]] — inner types are validated by the _load_registry loop
 
@@ -900,7 +899,14 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
 
     # Any extra keys in the env file that are NOT in shared, NOT bootstrap,
     # and NOT an identity default (per-repo value baked into Settings.default=).
-    registry_data = _read_registry_data()
+    try:
+        registry_data = _read_registry_data()
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
     registry = _load_registry(registry_data)
     shared_keys_flat = {k for keys in registry.values() for k in keys}
     bootstrap = _bootstrap_keys(registry_data)

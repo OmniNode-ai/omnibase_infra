@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -80,7 +81,7 @@ class TestCmdSeedSharedPreflightValidation:
 
         # Strip INFISICAL_ADDR from the environment entirely.
         env_without_addr = {
-            k: v for k, v in __import__("os").environ.items() if k != "INFISICAL_ADDR"
+            k: v for k, v in os.environ.items() if k != "INFISICAL_ADDR"
         }
         env_without_addr.pop("INFISICAL_PROJECT_ID", None)
 
@@ -114,9 +115,7 @@ class TestCmdSeedSharedPreflightValidation:
         args = _make_dry_run_args(str(env_file))
 
         env_with_addr_no_project = {
-            k: v
-            for k, v in __import__("os").environ.items()
-            if k not in ("INFISICAL_PROJECT_ID",)
+            k: v for k, v in os.environ.items() if k not in ("INFISICAL_PROJECT_ID",)
         }
         env_with_addr_no_project["INFISICAL_ADDR"] = "http://localhost:8880"
 
@@ -149,7 +148,7 @@ class TestCmdSeedSharedPreflightValidation:
 
         bad_env = {
             k: v
-            for k, v in __import__("os").environ.items()
+            for k, v in os.environ.items()
             if k not in ("INFISICAL_ADDR", "INFISICAL_PROJECT_ID")
         }
         bad_env["INFISICAL_ADDR"] = "localhost:8880"  # missing scheme
@@ -184,7 +183,7 @@ class TestCmdSeedSharedPreflightValidation:
 
         valid_env = {
             k: v
-            for k, v in __import__("os").environ.items()
+            for k, v in os.environ.items()
             if k not in ("INFISICAL_ADDR", "INFISICAL_PROJECT_ID")
         }
         valid_env["INFISICAL_ADDR"] = "http://localhost:8880"
