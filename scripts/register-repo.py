@@ -185,15 +185,15 @@ def _bootstrap_keys(
         raise ValueError(
             f"[ERROR] registry 'bootstrap_only' must be a list in {_REGISTRY_PATH}"
         )
-    if not all(isinstance(k, str) for k in keys):
-        raise ValueError(
-            f"[ERROR] registry 'bootstrap_only' entries must be strings in {_REGISTRY_PATH}"
-        )
     if not keys:
         raise ValueError(
             "bootstrap_only section is empty in shared_key_registry.yaml — "
             "this would allow bootstrap credentials (POSTGRES_PASSWORD, etc.) "
             "to be seeded into Infisical. Add the bootstrap-only keys or remove the section."
+        )
+    if not all(isinstance(k, str) for k in keys):
+        raise ValueError(
+            f"[ERROR] registry 'bootstrap_only' entries must be strings in {_REGISTRY_PATH}"
         )
     return frozenset(keys)
 
@@ -222,14 +222,14 @@ def _identity_defaults(
         raise ValueError(
             f"[ERROR] registry 'identity_defaults' must be a list in {_REGISTRY_PATH}"
         )
-    if not all(isinstance(k, str) for k in keys):
-        raise ValueError(
-            f"[ERROR] registry 'identity_defaults' entries must be strings in {_REGISTRY_PATH}"
-        )
     if not keys:
         raise ValueError(
             "identity_defaults section is empty in shared_key_registry.yaml — "
             "at least one identity default key (e.g. POSTGRES_DATABASE) is required."
+        )
+    if not all(isinstance(k, str) for k in keys):
+        raise ValueError(
+            f"[ERROR] registry 'identity_defaults' entries must be strings in {_REGISTRY_PATH}"
         )
     return frozenset(keys)
 
