@@ -653,12 +653,12 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
             else:
                 missing_value.append((folder, key))
 
-    # NOTE: Intentionally validates before dry-run gate (unlike cmd_onboard_repo).
-    # seed-shared always requires a live Infisical instance because it reads back
-    # existing keys to skip secrets that are already present — that live read is
-    # needed even for a dry-run preview, so offline use is not supported.
-    # Operators who want to preview the plan must run with --dry-run while connected
-    # to a live Infisical instance; there is no fully-offline dry-run mode.
+    # NOTE: Intentionally validates before the dry-run gate (unlike cmd_onboard_repo).
+    # This is a design choice for early failure: we always validate credentials even
+    # for a preview run, so the operator knows immediately if the connection is
+    # misconfigured before seeing the plan. Dry-run never contacts Infisical — it
+    # exits after printing the plan without making any network calls. The validation
+    # here is not a functional requirement of dry-run; it is a usability guard.
     infisical_addr = os.environ.get("INFISICAL_ADDR")
     if not infisical_addr:
         print(
