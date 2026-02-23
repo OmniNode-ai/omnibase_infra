@@ -265,11 +265,11 @@ class TestServiceOverrideRequired:
         rr = _module
 
         data: dict[str, object] = {
-            "service_override_required": ["KAFKA_GROUP_ID", "POSTGRES_DSN"],
+            "service_override_required": ["KAFKA_GROUP_ID", "KAFKA_CLIENT_ID"],
         }
 
         result = rr._service_override_required(data)  # type: ignore[attr-defined]
-        assert result == frozenset({"KAFKA_GROUP_ID", "POSTGRES_DSN"})
+        assert result == frozenset({"KAFKA_GROUP_ID", "KAFKA_CLIENT_ID"})
 
     @pytest.mark.unit
     def test_non_list_type_raises_value_error(self) -> None:

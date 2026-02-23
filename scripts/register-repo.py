@@ -129,6 +129,11 @@ _SENSITIVE_KEY_PATTERNS = frozenset(
         "PEM",
         "_PAT",
         "WEBHOOK",
+        # "_CLIENT_ID" masks machine identity IDs (e.g. INFISICAL_CLIENT_ID).
+        # Although a UUID alone is not a credential, machine identity IDs should
+        # not be displayed in dry-run output — they identify the machine identity
+        # and, combined with context, could aid impersonation.
+        "_CLIENT_ID",
     }
 )
 
@@ -820,10 +825,7 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                 )
                 counts[outcome] += 1
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)
-                if key == "KAFKA_GROUP_ID" and outcome in (
-                    "created",
-                    "updated",
-                ):
+                if key == "KAFKA_GROUP_ID" and outcome == "created":
                     logger.warning(
                         "  KAFKA_GROUP_ID seeded to /shared/kafka/ as a placeholder default.\n"
                         "  Each service MUST override this at /services/<repo>/kafka/KAFKA_GROUP_ID\n"
@@ -1133,7 +1135,7 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
                     for parts in [folder.strip("/").split("/")]
                     if len(parts) >= 2
                 ),
-                "<unknown>",  # fallback if key is not found in shared registry
+                "<check registry path>",  # fallback if key is not found in shared registry
             )
             logger.warning(
                 "ACTION REQUIRED: '%s' is declared service_override_required but was not "
