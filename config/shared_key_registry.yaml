@@ -40,8 +40,12 @@ shared:
     - QUERY_TIMEOUT_SECONDS
   "/shared/kafka/":
     # KAFKA_HOST_SERVERS intentionally excluded — removed as dead code (see commit 45f6ae65)
-    # Placeholder: each service MUST set /services/<repo>/kafka/KAFKA_GROUP_ID via onboard-repo.
-    # Shared consumer groups cause unintended load-balancing across topics — never rely on this shared value in production.
+    #
+    # WARNING: PLACEHOLDER ONLY — DO NOT USE IN PRODUCTION.
+    # KAFKA_GROUP_ID is seeded to /shared/kafka/ solely as a platform-wide placeholder.
+    # Each service MUST override this at /services/<repo>/kafka/KAFKA_GROUP_ID via onboard-repo
+    # before the service starts. Shared consumer groups cause unintended load-balancing across
+    # topics — relying on this shared value in production is a misconfiguration.
     #
     # Policy: missing per-service override is an advisory warning (not a hard error) to avoid
     # blocking onboard-repo when the override has already been set via other means (e.g. manual

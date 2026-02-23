@@ -90,9 +90,7 @@ class TestConfigPrefetcher:
 
     def test_prefetch_database_keys(self) -> None:
         """Should prefetch database transport keys."""
-        handler = self._make_handler(
-            secrets={"POSTGRES_DSN": "postgresql://test:5432/db"}
-        )
+        handler = self._make_handler(secrets={"POSTGRES_HOST": "db.example.com"})
         prefetcher = ConfigPrefetcher(handler=handler)
         reqs = self._make_requirements(
             transport_types=[EnumInfraTransportType.DATABASE]
@@ -101,11 +99,8 @@ class TestConfigPrefetcher:
         result = prefetcher.prefetch(reqs)
 
         assert result.specs_attempted == 1
-        assert "POSTGRES_DSN" in result.resolved
-        assert (
-            result.resolved["POSTGRES_DSN"].get_secret_value()
-            == "postgresql://test:5432/db"
-        )
+        assert "POSTGRES_HOST" in result.resolved
+        assert result.resolved["POSTGRES_HOST"].get_secret_value() == "db.example.com"
 
     def test_prefetch_missing_keys(self) -> None:
         """Should report missing keys when handler returns None."""
@@ -118,11 +113,11 @@ class TestConfigPrefetcher:
         result = prefetcher.prefetch(reqs)
 
         assert len(result.missing) > 0
-        assert "POSTGRES_DSN" in result.missing
+        assert "POSTGRES_HOST" in result.missing
 
     def test_prefetch_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Keys already in environment should skip Infisical fetch."""
-        monkeypatch.setenv("POSTGRES_DSN", "from-env")
+        monkeypatch.setenv("POSTGRES_HOST", "from-env")
         handler = self._make_handler(secrets={})
         prefetcher = ConfigPrefetcher(handler=handler)
         reqs = self._make_requirements(
@@ -131,16 +126,16 @@ class TestConfigPrefetcher:
 
         result = prefetcher.prefetch(reqs)
 
-        assert "POSTGRES_DSN" in result.resolved
-        assert result.resolved["POSTGRES_DSN"].get_secret_value() == "from-env"
-        # Handler should NOT have been called for POSTGRES_DSN
-        postgres_dsn_calls = [
+        assert "POSTGRES_HOST" in result.resolved
+        assert result.resolved["POSTGRES_HOST"].get_secret_value() == "from-env"
+        # Handler should NOT have been called for POSTGRES_HOST
+        postgres_host_calls = [
             call
             for call in handler.get_secret_sync.call_args_list
-            if call.kwargs.get("secret_name") == "POSTGRES_DSN"
+            if call.kwargs.get("secret_name") == "POSTGRES_HOST"
         ]
-        assert len(postgres_dsn_calls) == 0, (
-            "POSTGRES_DSN should not be fetched from Infisical when present in env"
+        assert len(postgres_host_calls) == 0, (
+            "POSTGRES_HOST should not be fetched from Infisical when present in env"
         )
 
     def test_prefetch_env_dependencies(self) -> None:

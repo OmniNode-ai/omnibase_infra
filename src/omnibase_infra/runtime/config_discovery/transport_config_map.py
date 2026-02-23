@@ -17,8 +17,8 @@ path is ``/shared/db/KEY``.
 Multiple instances of the same transport are handled via service namespacing.
 For example, two PostgreSQL connections (one for the main runtime, one for
 intelligence) would live at:
-    ``/services/omnibase-runtime/db/POSTGRES_DSN``
-    ``/services/omniintelligence/db/POSTGRES_DSN``
+    ``/services/omnibase-runtime/db/POSTGRES_DATABASE``
+    ``/services/omniintelligence/db/POSTGRES_DATABASE``
 
 .. versionadded:: 0.10.0
     Created as part of OMN-2287.
@@ -42,7 +42,6 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
         "POSTGRES_HOST",
         "POSTGRES_PORT",
         "POSTGRES_USER",
-        "POSTGRES_DSN",
         "POSTGRES_POOL_MIN_SIZE",
         "POSTGRES_POOL_MAX_SIZE",
         "POSTGRES_TIMEOUT_MS",
@@ -135,14 +134,14 @@ class TransportConfigMap:
 
         # Shared config for database (slug "db" from EnumInfraTransportType.DATABASE.value)
         spec = tcm.shared_spec(EnumInfraTransportType.DATABASE)
-        # -> folder=/shared/db/, keys=(POSTGRES_DSN, ...)
+        # -> folder=/shared/db/, keys=(POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, ...)
 
         # Per-service config
         spec = tcm.service_spec(
             EnumInfraTransportType.DATABASE,
             service_slug="omnibase-runtime",
         )
-        # -> folder=/services/omnibase-runtime/db/, keys=(POSTGRES_DSN, ...)
+        # -> folder=/services/omnibase-runtime/db/, keys=(POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, ...)
 
         # All specs for a list of transport types
         specs = tcm.specs_for_transports(

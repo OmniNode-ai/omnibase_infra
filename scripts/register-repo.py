@@ -345,7 +345,13 @@ def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
     )
     from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
-    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
+    infisical_addr = os.environ.get("INFISICAL_ADDR", "")
+    if not infisical_addr:
+        raise ValueError(
+            "INFISICAL_ADDR must be set. "
+            "Set it to the Infisical URL (e.g. http://localhost:8880) in your environment "
+            "or ~/.omnibase/.env before calling this function."
+        )
     client_id = os.environ.get("INFISICAL_CLIENT_ID", "")
     client_secret = os.environ.get("INFISICAL_CLIENT_SECRET", "")
     project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
@@ -361,7 +367,7 @@ def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
     # Defense-in-depth: command entry points also validate both INFISICAL_ADDR and
     # INFISICAL_PROJECT_ID before calling here. These guards protect callers that
     # bypass the entry-point pre-flight.
-    if infisical_addr and not infisical_addr.startswith(("http://", "https://")):
+    if not infisical_addr.startswith(("http://", "https://")):
         logger.error(
             "INFISICAL_ADDR must start with http:// or https://: got %r", infisical_addr
         )

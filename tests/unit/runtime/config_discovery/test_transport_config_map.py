@@ -29,7 +29,9 @@ class TestTransportConfigMap:
         assert "POSTGRES_HOST" in keys
         assert "POSTGRES_PORT" in keys
         assert "POSTGRES_USER" in keys
-        assert "POSTGRES_DSN" in keys
+        assert (
+            "POSTGRES_DSN" not in keys
+        )  # intentionally removed — shared DSN silently routes to wrong DB
         assert "POSTGRES_POOL_MIN_SIZE" in keys
         assert "POSTGRES_POOL_MAX_SIZE" in keys
         assert "QUERY_TIMEOUT_SECONDS" in keys

@@ -28,6 +28,10 @@ def _import_register_repo() -> object:
     return importlib.import_module("register-repo")
 
 
+# Import once at module level so all test classes share the same module object.
+_module = _import_register_repo()
+
+
 def _make_dry_run_args(env_file: str) -> argparse.Namespace:
     """Build a minimal Namespace that mimics --dry-run (no --execute)."""
     return argparse.Namespace(
@@ -57,7 +61,7 @@ class TestCmdSeedSharedPreflightValidation:
     ) -> None:
         """Should exit non-zero with an informative message when INFISICAL_ADDR is
         unset, even when --execute is not passed (dry-run mode)."""
-        rr = _import_register_repo()
+        rr = _module
 
         env_file = tmp_path / ".env"
         env_file.write_text(
@@ -96,7 +100,7 @@ class TestCmdSeedSharedPreflightValidation:
     ) -> None:
         """Should exit non-zero when INFISICAL_ADDR is set but INFISICAL_PROJECT_ID is
         missing, even in dry-run mode."""
-        rr = _import_register_repo()
+        rr = _module
 
         env_file = tmp_path / ".env"
         env_file.write_text("POSTGRES_HOST=192.168.86.200\n")
@@ -123,7 +127,7 @@ class TestCmdSeedSharedPreflightValidation:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """Should exit non-zero when INFISICAL_ADDR is set but has no http/https scheme."""
-        rr = _import_register_repo()
+        rr = _module
 
         env_file = tmp_path / ".env"
         env_file.write_text("POSTGRES_HOST=192.168.86.200\n")
@@ -157,7 +161,7 @@ class TestCmdSeedSharedPreflightValidation:
         """Should return 0 (dry-run success) when INFISICAL_ADDR and
         INFISICAL_PROJECT_ID are both valid — confirming that preflight passes
         and execution stops at the dry-run gate."""
-        rr = _import_register_repo()
+        rr = _module
 
         env_file = tmp_path / ".env"
         # Provide at least one real-looking value so env_values is non-empty.
@@ -211,7 +215,7 @@ class TestServiceOverrideRequired:
     @pytest.mark.unit
     def test_empty_list_returns_empty_frozenset(self) -> None:
         """An empty service_override_required list should return frozenset(), not raise."""
-        rr = _import_register_repo()
+        rr = _module
 
         data: dict[str, object] = {
             "shared": {"/shared/db/": ["POSTGRES_HOST"]},
@@ -229,7 +233,7 @@ class TestServiceOverrideRequired:
     @pytest.mark.unit
     def test_absent_section_returns_empty_frozenset(self) -> None:
         """A missing service_override_required section should return frozenset()."""
-        rr = _import_register_repo()
+        rr = _module
 
         data: dict[str, object] = {
             "shared": {"/shared/db/": ["POSTGRES_HOST"]},
@@ -243,7 +247,7 @@ class TestServiceOverrideRequired:
     @pytest.mark.unit
     def test_non_empty_list_returns_frozenset_of_keys(self) -> None:
         """A non-empty list should return the expected frozenset."""
-        rr = _import_register_repo()
+        rr = _module
 
         data: dict[str, object] = {
             "service_override_required": ["KAFKA_GROUP_ID", "POSTGRES_DSN"],
@@ -255,7 +259,7 @@ class TestServiceOverrideRequired:
     @pytest.mark.unit
     def test_non_list_type_raises_value_error(self) -> None:
         """A non-list value for service_override_required should still raise ValueError."""
-        rr = _import_register_repo()
+        rr = _module
 
         data: dict[str, object] = {
             "service_override_required": "KAFKA_GROUP_ID",  # string, not list
@@ -284,7 +288,7 @@ class TestUpsertSecretBareExceptionWrapping:
         """A bare Exception from get_secret (not RuntimeHostError) should be
         re-raised as InfraConnectionError so the outer loop's _is_abort_error
         check correctly triggers an abort."""
-        rr = _import_register_repo()
+        rr = _module
 
         adapter = self._make_mock_adapter()
         adapter.get_secret.side_effect = ConnectionError("SDK connection refused")
@@ -328,7 +332,7 @@ class TestUpsertSecretBareExceptionWrapping:
     def test_bare_sdk_exception_is_abort_error(self) -> None:
         """After wrapping, the outer loop's _is_abort_error should return True
         because InfraConnectionError is a RuntimeHostError subclass."""
-        rr = _import_register_repo()
+        rr = _module
 
         # _is_abort_error checks isinstance(exc, RuntimeHostError).
         # Simulate what happens when the wrapped exception reaches the outer loop.
