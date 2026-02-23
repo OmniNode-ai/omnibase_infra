@@ -379,9 +379,11 @@ def _upsert_secret(
         # swallowed, because the subsequent create_secret call will also fail
         # and the root cause will be lost.
         #
-        # The adapter is expected to re-raise InfraAuthenticationError, InfraTimeoutError, and
-        # InfraUnavailableError directly (see adapter_infisical.py) (bypassing this except
-        # clause entirely), so we only reach here for SecretResolutionError, which the adapter uses
+        # The auth-indicator check at step 1 is the authoritative guard here.
+        # The adapter is expected to re-raise InfraAuthenticationError, InfraTimeoutError,
+        # and InfraUnavailableError directly (see adapter_infisical.py), but even if the
+        # adapter wraps those, the indicator check above will catch them.
+        # We only reach here for SecretResolutionError, which the adapter uses
         # for two cases:
         #   1. "Adapter not initialized" — should re-raise (programming error)
         #   2. "Secret not found" — treat as None so we can create it below
@@ -526,9 +528,9 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
     try:
         adapter, sanitize = _load_infisical_adapter()
     except SystemExit as e:
-        if isinstance(e.code, str):
+        if e.code:
             print(e.code, file=sys.stderr)
-        return int(e.code) if isinstance(e.code, int) else 1
+        return 1
 
     counts = {"created": 0, "updated": 0, "skipped": 0, "error": 0}
 
@@ -704,9 +706,9 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     try:
         adapter, sanitize = _load_infisical_adapter()
     except SystemExit as e:
-        if isinstance(e.code, str):
+        if e.code:
             print(e.code, file=sys.stderr)
-        return int(e.code) if isinstance(e.code, int) else 1
+        return 1
 
     all_secrets = plan + extra
     counts = {"created": 0, "updated": 0, "skipped": 0, "error": 0}
