@@ -137,6 +137,8 @@ class TestConfigSessionStorageAliasChoices:
             "POSTGRES_POOL_MAX_SIZE",
         ):
             monkeypatch.delenv(key, raising=False)
+        monkeypatch.delenv("QUERY_TIMEOUT_SECONDS", raising=False)
+        monkeypatch.delenv("POSTGRES_QUERY_TIMEOUT_SECONDS", raising=False)
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")  # required field
         config = ConfigSessionStorage(
             pool_min_size=5,

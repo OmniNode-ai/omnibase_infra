@@ -4,6 +4,21 @@
 # This compose file provides the complete ONEX platform: infrastructure services
 # (PostgreSQL, Redpanda, Valkey) and runtime services (kernel, effects, workers).
 #
+# NOTE: Nested variable expansion caveat
+# --------------------------------------
+# Several DSN/URL values (OMNIBASE_INFRA_DB_URL, OMNIINTELLIGENCE_DB_URL,
+# OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN) use nested variable expansion, e.g.:
+#
+#   ${VAR:-outer-default-${INNER:-inner-default}}
+#
+# This syntax requires Docker Compose v2.20+ and will SILENTLY produce malformed
+# values (e.g. literal "${POSTGRES_USER:-postgres}" in the DSN) on older versions.
+# Verify your version with: docker compose version
+#
+# RECOMMENDED: Set these *_URL / *_DSN variables explicitly in your .env file so
+# that nested expansion is never exercised and the DSN is always correct regardless
+# of the Compose version in use.
+#
 # Usage:
 #   # Core infrastructure only (postgres, redpanda, valkey)
 #   docker compose -f docker/docker-compose.infra.yml up -d

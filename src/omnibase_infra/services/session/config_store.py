@@ -143,7 +143,7 @@ class ConfigSessionStorage(BaseSettings):
         default=30,
         ge=1,
         le=300,
-        description="Query timeout in seconds (env: QUERY_TIMEOUT_SECONDS or POSTGRES_QUERY_TIMEOUT_SECONDS)",
+        description="Query timeout in seconds (env: QUERY_TIMEOUT_SECONDS or POSTGRES_QUERY_TIMEOUT_SECONDS) (alias for QUERY_TIMEOUT_SECONDS; not seeded by register-repo — use QUERY_TIMEOUT_SECONDS in production)",
         validation_alias=AliasChoices(
             "QUERY_TIMEOUT_SECONDS",
             # POSTGRES_QUERY_TIMEOUT_SECONDS is a provisional forward-compat alias only.

@@ -100,6 +100,10 @@ _SENSITIVE_KEY_PATTERNS = frozenset(
         "KEY",
         "TOKEN",
         "CREDENTIAL",
+        # NOTE: "AUTH" is broad by design (AUTH_TOKEN, etc.) but may mask
+        # non-secret keys containing "AUTH" (e.g. AUTH_PROXY_URL, OAUTH_CLIENT_ID).
+        # Contrast with _AUTH_INDICATORS above, where bare "auth" was intentionally
+        # excluded to avoid false positives in error message classification.
         "AUTH",
         "CERT",
         "PEM",
@@ -288,6 +292,8 @@ def _service_override_required(
         raise ValueError(
             f"[ERROR] registry 'service_override_required' must be a list in {_REGISTRY_PATH}"
         )
+    if not keys:
+        raise ValueError("service_override_required section must not be empty")
     if not all(isinstance(k, str) for k in keys):
         raise ValueError(
             f"[ERROR] registry 'service_override_required' entries must be strings in {_REGISTRY_PATH}"
@@ -585,8 +591,15 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
     # operators with invalid config get an error even in dry-run mode. It would be
     # confusing to see "dry-run OK" and then fail immediately on --execute due to a
     # bad INFISICAL_ADDR or INFISICAL_PROJECT_ID.
-    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
-    if not infisical_addr or not infisical_addr.startswith(("http://", "https://")):
+    infisical_addr = os.environ.get("INFISICAL_ADDR")
+    if not infisical_addr:
+        print(
+            "ERROR: INFISICAL_ADDR is not set. "
+            "Set it to the Infisical URL before seeding.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if not infisical_addr.startswith(("http://", "https://")):
         print(
             f"ERROR: INFISICAL_ADDR is not a valid URL: {infisical_addr!r}\n"
             "It must start with http:// or https:// (e.g. http://localhost:8880).",
@@ -660,7 +673,6 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                 if key == "KAFKA_GROUP_ID" and outcome in (
                     "created",
                     "updated",
-                    "skipped",
                 ):
                     logger.warning(
                         "  KAFKA_GROUP_ID seeded to /shared/kafka/ as a placeholder default.\n"
@@ -820,8 +832,15 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     # operators with invalid config get an error even in dry-run mode. It would be
     # confusing to see "dry-run OK" and then fail immediately on --execute due to a
     # bad INFISICAL_ADDR or INFISICAL_PROJECT_ID.
-    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
-    if not infisical_addr or not infisical_addr.startswith(("http://", "https://")):
+    infisical_addr = os.environ.get("INFISICAL_ADDR")
+    if not infisical_addr:
+        print(
+            "ERROR: INFISICAL_ADDR is not set. "
+            "Set it to the Infisical URL before seeding.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if not infisical_addr.startswith(("http://", "https://")):
         print(
             f"ERROR: INFISICAL_ADDR is not a valid URL: {infisical_addr!r}\n"
             "It must start with http:// or https:// (e.g. http://localhost:8880).",
