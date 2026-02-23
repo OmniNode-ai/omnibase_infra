@@ -674,33 +674,6 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
         logger.error("No values found in %s", env_path)
         return 1
 
-    # Build the work list, skipping bootstrap keys
-    plan: list[tuple[str, str, str]] = []  # (folder, key, value)
-    missing_value: list[tuple[str, str]] = []  # (folder, key) with no value
-
-    try:
-        registry_data = _read_registry_data()
-    except FileNotFoundError as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        raise SystemExit(1) from e
-    except ValueError as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        raise SystemExit(1) from e
-    shared_secrets = _load_registry(registry_data)
-    bootstrap = _bootstrap_keys(registry_data)
-    identity = _identity_defaults(registry_data)
-    for folder, keys in shared_secrets.items():
-        for key in keys:
-            if key in bootstrap:
-                continue
-            if key in identity:
-                continue
-            value = env_values.get(key, "")
-            if value:
-                plan.append((folder, key, value))
-            else:
-                missing_value.append((folder, key))
-
     # NOTE: Intentionally validates BEFORE the dry-run gate (unlike cmd_onboard_repo).
     # This is a design choice for early failure: we always validate credentials even
     # for a preview run, so the operator knows immediately if the connection is
@@ -753,6 +726,33 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
         # ValueError here is user input, not a system error — no stacktrace needed
         logger.error("INFISICAL_PROJECT_ID is not a valid UUID: %s", project_id)  # noqa: TRY400
         return 1
+
+    # Build the work list, skipping bootstrap keys
+    plan: list[tuple[str, str, str]] = []  # (folder, key, value)
+    missing_value: list[tuple[str, str]] = []  # (folder, key) with no value
+
+    try:
+        registry_data = _read_registry_data()
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
+    shared_secrets = _load_registry(registry_data)
+    bootstrap = _bootstrap_keys(registry_data)
+    identity = _identity_defaults(registry_data)
+    for folder, keys in shared_secrets.items():
+        for key in keys:
+            if key in bootstrap:
+                continue
+            if key in identity:
+                continue
+            value = env_values.get(key, "")
+            if value:
+                plan.append((folder, key, value))
+            else:
+                missing_value.append((folder, key))
 
     print(f"\n=== seed-shared (env: {env_path}) ===")
     print(f"  {len(plan)} keys with values to write")
