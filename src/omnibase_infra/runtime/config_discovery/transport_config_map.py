@@ -39,6 +39,9 @@ logger = logging.getLogger(__name__)
 # These represent the standard keys each transport expects in Infisical.
 _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
     EnumInfraTransportType.DATABASE: (
+        "POSTGRES_HOST",
+        "POSTGRES_PORT",
+        "POSTGRES_USER",
         "POSTGRES_DSN",
         "POSTGRES_POOL_MIN_SIZE",
         "POSTGRES_POOL_MAX_SIZE",

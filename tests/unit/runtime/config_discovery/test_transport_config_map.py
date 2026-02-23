@@ -26,6 +26,9 @@ class TestTransportConfigMap:
     def test_database_has_keys(self) -> None:
         """DATABASE transport should have standard PostgreSQL keys."""
         keys = TransportConfigMap.keys_for_transport(EnumInfraTransportType.DATABASE)
+        assert "POSTGRES_HOST" in keys
+        assert "POSTGRES_PORT" in keys
+        assert "POSTGRES_USER" in keys
         assert "POSTGRES_DSN" in keys
         assert "POSTGRES_POOL_MIN_SIZE" in keys
         assert "POSTGRES_POOL_MAX_SIZE" in keys

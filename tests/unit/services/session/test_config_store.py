@@ -171,7 +171,51 @@ class TestConfigSessionStorageAliasChoices:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Verify QUERY_TIMEOUT_SECONDS env var resolves to query_timeout_seconds."""
+        for key in (
+            "POSTGRES_HOST",
+            "POSTGRES_PORT",
+            "POSTGRES_USER",
+            "POSTGRES_DATABASE",
+            "POSTGRES_POOL_MIN_SIZE",
+            "POSTGRES_POOL_MAX_SIZE",
+            "POSTGRES_POOL_MIN",
+            "POSTGRES_POOL_MAX",
+            "QUERY_TIMEOUT_SECONDS",
+            "POSTGRES_QUERY_TIMEOUT_SECONDS",
+        ):
+            monkeypatch.delenv(key, raising=False)
+        monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")
         monkeypatch.setenv("QUERY_TIMEOUT_SECONDS", "60")
         config = ConfigSessionStorage()
         assert config.query_timeout_seconds == 60
+
+    def test_dsn_safe_masks_password(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verify dsn_safe masks the password but retains host, port, and database."""
+        for key in (
+            "POSTGRES_HOST",
+            "POSTGRES_PORT",
+            "POSTGRES_USER",
+            "POSTGRES_DATABASE",
+            "POSTGRES_POOL_MIN_SIZE",
+            "POSTGRES_POOL_MAX_SIZE",
+            "POSTGRES_POOL_MIN",
+            "POSTGRES_POOL_MAX",
+            "QUERY_TIMEOUT_SECONDS",
+            "POSTGRES_QUERY_TIMEOUT_SECONDS",
+        ):
+            monkeypatch.delenv(key, raising=False)
+        monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
+        monkeypatch.setenv("POSTGRES_HOST", "db.example.com")
+        monkeypatch.setenv("POSTGRES_PORT", "5436")
+        monkeypatch.setenv("POSTGRES_DATABASE", "omnibase_infra")
+        monkeypatch.setenv("POSTGRES_PASSWORD", "supersecretpassword")
+
+        config = ConfigSessionStorage()
+        safe = config.dsn_safe
+
+        assert "supersecretpassword" not in safe
+        assert "***" in safe
+        assert "db.example.com" in safe
+        assert "5436" in safe
+        assert "omnibase_infra" in safe
