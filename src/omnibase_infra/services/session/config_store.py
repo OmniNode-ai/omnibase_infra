@@ -35,6 +35,16 @@ class ConfigSessionStorage(BaseSettings):
     intentional trade-off of the zero-repo-env policy; ensure POSTGRES_* variables
     in the shell match the intended session storage target.
 
+    Warning: Ambient environment risk — callers (including tests) that construct
+    ``ConfigSessionStorage()`` without explicitly controlling the process environment
+    may silently pick up POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_DATABASE,
+    or POSTGRES_PASSWORD from an unrelated source (e.g. a CI matrix job, a sourced
+    ~/.omnibase/.env, or a parent test fixture). Always isolate the environment before
+    constructing this class in tests — use ``monkeypatch.delenv`` for every POSTGRES_*
+    field listed in the environment variable mapping above, and ``monkeypatch.setenv``
+    for the values under test. See ``tests/unit/services/session/test_config_store.py``
+    for examples of correct isolation.
+
     Environment variable mapping:
 
     - ``postgres_host``      ← ``POSTGRES_HOST``

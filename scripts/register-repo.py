@@ -296,11 +296,15 @@ def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
     try:
         project_uuid = UUID(project_id)
     except ValueError:
+        # Suppress the ValueError cause chain — this is a user-input validation error and
+        # the internal ValueError detail (from UUID.__init__) is not useful to the operator.
+        # Consistent with the entry-point validation style (logger.error + return 1) which
+        # also does not propagate the ValueError.
         raise SystemExit(
             f"ERROR: INFISICAL_PROJECT_ID is not a valid UUID: {project_id!r}\n"
             "Check the INFISICAL_PROJECT_ID value in ~/.omnibase/.env or your shell environment.\n"
             "The expected format is: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-        )
+        ) from None
     config = ModelInfisicalAdapterConfig(
         host=infisical_addr,
         client_id=SecretStr(client_id),
@@ -502,24 +506,10 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
             else:
                 missing_value.append((folder, key))
 
-    print(f"\n=== seed-shared (env: {env_path}) ===")
-    print(f"  {len(plan)} keys with values to write")
-    print(f"  {len(missing_value)} keys with no value (will create empty slots)")
-
-    if missing_value:
-        print("\n  Keys with no value (empty placeholders):")
-        for folder, key in missing_value:
-            print(f"    {folder}{key}")
-
-    print("\n  Keys to seed:")
-    for folder, key, value in sorted(plan):
-        display = "***" if value else "(empty)"
-        print(f"    {folder}{key} = {display}")
-
-    if not args.execute:
-        print("\n[dry-run] Pass --execute to write to Infisical.")
-        return 0
-
+    # Validate Infisical connection config before the dry-run early return so that
+    # operators with invalid config get an error even in dry-run mode. It would be
+    # confusing to see "dry-run OK" and then fail immediately on --execute due to a
+    # bad INFISICAL_ADDR or INFISICAL_PROJECT_ID.
     infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
     if not infisical_addr or not infisical_addr.startswith(("http://", "https://")):
         print(
@@ -541,6 +531,24 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
         # ValueError here is user input, not a system error — no stacktrace needed
         logger.error("INFISICAL_PROJECT_ID is not a valid UUID: %s", project_id)  # noqa: TRY400
         return 1
+
+    print(f"\n=== seed-shared (env: {env_path}) ===")
+    print(f"  {len(plan)} keys with values to write")
+    print(f"  {len(missing_value)} keys with no value (will create empty slots)")
+
+    if missing_value:
+        print("\n  Keys with no value (empty placeholders):")
+        for folder, key in missing_value:
+            print(f"    {folder}{key}")
+
+    print("\n  Keys to seed:")
+    for folder, key, value in sorted(plan):
+        display = "***" if value else "(empty)"
+        print(f"    {folder}{key} = {display}")
+
+    if not args.execute:
+        print("\n[dry-run] Pass --execute to write to Infisical.")
+        return 0
 
     print("\nWriting to Infisical...")
     try:
@@ -574,10 +582,29 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                         "  to avoid shared consumer group collisions."
                     )
             except Exception as exc:
-                # Intentionally continues on non-auth errors: seed remaining keys even if one fails.
-                # Auth errors (unauthorized, forbidden, invalid token, etc.) abort the loop
-                # immediately — silently swallowing them would hide a systemic credential failure
-                # and corrupt the seed run with misleading per-key error counts.
+                # Infrastructure-level errors (connection, timeout, unavailable, auth,
+                # etc.) must abort the entire seed run immediately — continuing would
+                # silently count transient failures as per-key errors and potentially
+                # attempt subsequent writes against an unreachable server.
+                #
+                # RuntimeHostError is the base class for all infra errors
+                # (InfraConnectionError, InfraTimeoutError, InfraUnavailableError,
+                # InfraAuthenticationError, etc.).  Any such error reaching here means
+                # _upsert_secret did not suppress it (it only suppresses genuine
+                # "secret not found" SecretResolutionErrors), so it is systemic.
+                #
+                # The auth-indicator string check below is kept as defense-in-depth
+                # for SDK exceptions that may not be typed as RuntimeHostError.
+                from omnibase_infra.errors import RuntimeHostError
+
+                if isinstance(exc, RuntimeHostError):
+                    logger.exception(
+                        "Infrastructure error seeding %s%s — aborting: %s",
+                        folder,
+                        key,
+                        sanitize(exc),
+                    )
+                    raise
                 err_msg = str(exc).lower()
                 if any(indicator in err_msg for indicator in _AUTH_INDICATORS):
                     logger.exception(
@@ -604,9 +631,19 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                 counts[outcome] += 1
                 logger.info("  [%s] %s%s (placeholder)", outcome.upper(), folder, key)
             except Exception as exc:
-                # Mirror the auth-abort logic from the plan loop above: auth failures
-                # must not be silently swallowed — they indicate a systemic credential
-                # problem and the entire seed run should stop immediately.
+                # Mirror the abort logic from the plan loop above: infrastructure
+                # errors must not be silently swallowed — they indicate a systemic
+                # failure and the entire seed run should stop immediately.
+                from omnibase_infra.errors import RuntimeHostError
+
+                if isinstance(exc, RuntimeHostError):
+                    logger.exception(
+                        "Infrastructure error seeding %s%s — aborting: %s",
+                        folder,
+                        key,
+                        sanitize(exc),
+                    )
+                    raise
                 err_msg = str(exc).lower()
                 if any(indicator in err_msg for indicator in _AUTH_INDICATORS):
                     logger.exception(
@@ -690,24 +727,10 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
             continue
         extra.append((f"{path_prefix}/env/", key, value))
 
-    print(f"\n=== onboard-repo: {repo_name} ===")
-    print(f"  Infisical path: {path_prefix}/")
-    print(f"  Env file: {env_path}")
-    print("\n  Repo-specific keys:")
-    for folder, key, value in plan:
-        display = "***" if value else "(empty)"
-        print(f"    {folder}{key} = {display}")
-
-    if extra:
-        print(f"\n  Additional repo-only keys ({len(extra)}):")
-        for folder, key, value in extra:
-            display = "***" if value else "(empty)"
-            print(f"    {folder}{key} = {display}")
-
-    if not args.execute:
-        print("\n[dry-run] Pass --execute to create folders and write secrets.")
-        return 0
-
+    # Validate Infisical connection config before the dry-run early return so that
+    # operators with invalid config get an error even in dry-run mode. It would be
+    # confusing to see "dry-run OK" and then fail immediately on --execute due to a
+    # bad INFISICAL_ADDR or INFISICAL_PROJECT_ID.
     infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
     if not infisical_addr or not infisical_addr.startswith(("http://", "https://")):
         print(
@@ -729,6 +752,24 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
         # ValueError here is user input, not a system error — no stacktrace needed
         logger.error("INFISICAL_PROJECT_ID is not a valid UUID: %s", project_id)  # noqa: TRY400
         return 1
+
+    print(f"\n=== onboard-repo: {repo_name} ===")
+    print(f"  Infisical path: {path_prefix}/")
+    print(f"  Env file: {env_path}")
+    print("\n  Repo-specific keys:")
+    for folder, key, value in plan:
+        display = "***" if value else "(empty)"
+        print(f"    {folder}{key} = {display}")
+
+    if extra:
+        print(f"\n  Additional repo-only keys ({len(extra)}):")
+        for folder, key, value in extra:
+            display = "***" if value else "(empty)"
+            print(f"    {folder}{key} = {display}")
+
+    if not args.execute:
+        print("\n[dry-run] Pass --execute to create folders and write secrets.")
+        return 0
 
     # Need admin token to create folders
     if not _ADMIN_TOKEN_FILE.is_file():
@@ -787,10 +828,29 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
                 counts[outcome] += 1
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)
             except Exception as exc:
-                # Intentionally continues on non-auth errors: seed remaining keys even if one fails.
-                # Auth errors (unauthorized, forbidden, invalid token, etc.) abort the loop
-                # immediately — silently swallowing them would hide a systemic credential failure
-                # and corrupt the seed run with misleading per-key error counts.
+                # Infrastructure-level errors (connection, timeout, unavailable, auth,
+                # etc.) must abort the entire seed run immediately — continuing would
+                # silently count transient failures as per-key errors and potentially
+                # attempt subsequent writes against an unreachable server.
+                #
+                # RuntimeHostError is the base class for all infra errors
+                # (InfraConnectionError, InfraTimeoutError, InfraUnavailableError,
+                # InfraAuthenticationError, etc.).  Any such error reaching here means
+                # _upsert_secret did not suppress it (it only suppresses genuine
+                # "secret not found" SecretResolutionErrors), so it is systemic.
+                #
+                # The auth-indicator string check below is kept as defense-in-depth
+                # for SDK exceptions that may not be typed as RuntimeHostError.
+                from omnibase_infra.errors import RuntimeHostError
+
+                if isinstance(exc, RuntimeHostError):
+                    logger.exception(
+                        "Infrastructure error seeding %s%s — aborting: %s",
+                        folder,
+                        key,
+                        sanitize(exc),
+                    )
+                    raise
                 err_msg = str(exc).lower()
                 if any(indicator in err_msg for indicator in _AUTH_INDICATORS):
                     logger.exception(
@@ -816,6 +876,23 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
         f"  POSTGRES_DATABASE={repo_name.replace('-', '_')}  # suggested value — verify this matches your actual .env"
     )
     print("  (Infisical creds come from ~/.omnibase/.env via shell env)")
+
+    # Remind operator to set a per-service KAFKA_GROUP_ID.
+    # The shared /shared/kafka/KAFKA_GROUP_ID is a placeholder default only —
+    # each service MUST have its own consumer group ID to avoid shared consumer
+    # group collisions (multiple services consuming from the same group would
+    # cause unintended load-balancing across topics).
+    # There is no automated enforcement: this warning is the only guardrail.
+    logger.warning(
+        "ACTION REQUIRED: Set KAFKA_GROUP_ID for repo '%s' in Infisical at "
+        "/services/%s/kafka/KAFKA_GROUP_ID. "
+        "The shared /shared/kafka/KAFKA_GROUP_ID is a placeholder default — "
+        "each service must override it with a unique consumer group ID to avoid "
+        "shared consumer group collisions.",
+        repo_name,
+        repo_name,
+    )
+
     return 1 if counts["error"] else 0
 
 

@@ -150,11 +150,31 @@ class TestConfigSessionStorageAliasChoices:
     def test_construction_fails_without_postgres_password(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Verify that missing POSTGRES_PASSWORD raises ValidationError."""
-        # Explicitly clear POSTGRES_PASSWORD so an ambient value from the test
-        # runner (e.g. ~/.omnibase/.env sourced in shell) does not satisfy the
-        # required field and make the test pass for the wrong reason.
-        monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
+        """Verify that missing POSTGRES_PASSWORD raises ValidationError.
+
+        Note: ConfigSessionStorage uses env_prefix="" and case_sensitive=False,
+        which means ANY ambient POSTGRES_* variable already present in the process
+        environment (e.g. from a CI matrix job or a sourced ~/.omnibase/.env) will
+        be silently consumed. All POSTGRES_* fields are cleared here to ensure the
+        test only exercises the missing-password code path and is not accidentally
+        satisfied by a password injected from an unrelated env var.
+        """
+        # Clear all POSTGRES_* vars that ConfigSessionStorage reads so that no
+        # ambient value from the CI environment or sourced .env silently satisfies
+        # the required postgres_password field (or changes host/port/user/database
+        # in ways that mask the failure being tested here).
+        for key in (
+            "POSTGRES_PASSWORD",
+            "POSTGRES_HOST",
+            "POSTGRES_PORT",
+            "POSTGRES_USER",
+            "POSTGRES_DATABASE",
+            "POSTGRES_POOL_MIN_SIZE",
+            "POSTGRES_POOL_MAX_SIZE",
+            "QUERY_TIMEOUT_SECONDS",
+            "POSTGRES_QUERY_TIMEOUT_SECONDS",
+        ):
+            monkeypatch.delenv(key, raising=False)
         with pytest.raises(ValidationError):
             ConfigSessionStorage()
 
