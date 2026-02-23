@@ -318,9 +318,12 @@ REPO_TRANSPORT_FOLDERS = ("db", "kafka", "env")
 # NOTE: POSTGRES_DATABASE is intentionally excluded — it is an identity_default
 # (hardcoded as a Settings class default per repo) and must NOT be seeded into
 # Infisical.
-REPO_SECRET_KEYS = [
-    "POSTGRES_DSN",
-]
+# NOTE: POSTGRES_DSN is intentionally excluded — a composite DSN with a
+# hardcoded database name silently routes all services to the same database.
+# Each service uses POSTGRES_DATABASE (identity default) combined with the
+# shared POSTGRES_HOST / POSTGRES_PORT / POSTGRES_USER / POSTGRES_PASSWORD
+# keys from /shared/db/ instead.
+REPO_SECRET_KEYS: list[str] = []
 
 
 # ---------------------------------------------------------------------------
@@ -347,11 +350,13 @@ def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
 
     infisical_addr = os.environ.get("INFISICAL_ADDR", "")
     if not infisical_addr:
-        raise ValueError(
-            "INFISICAL_ADDR must be set. "
+        print(
+            "Error: INFISICAL_ADDR is not set. "
             "Set it to the Infisical URL (e.g. http://localhost:8880) in your environment "
-            "or ~/.omnibase/.env before calling this function."
+            "or ~/.omnibase/.env before calling this function.",
+            file=sys.stderr,
         )
+        sys.exit(1)
     client_id = os.environ.get("INFISICAL_CLIENT_ID", "")
     client_secret = os.environ.get("INFISICAL_CLIENT_SECRET", "")
     project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
@@ -819,10 +824,10 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     path_prefix = f"/services/{repo_name}"
 
     # Identify repo-specific secrets to seed.
-    # Keys missing from the env file (e.g. POSTGRES_DSN, which is assembled and
-    # written by the runtime after the DB is reachable) are intentionally seeded
-    # as empty strings — they reserve the Infisical slot so the runtime can
-    # update_secret without a prior create step.
+    # Keys missing from the env file are intentionally seeded as empty strings —
+    # they reserve the Infisical slot so the runtime can update_secret without a
+    # prior create step. Per-service identity (e.g. POSTGRES_DATABASE) is baked
+    # into each repo's Settings class as a default= and is NOT seeded here.
     plan: list[tuple[str, str, str]] = []
     for key in REPO_SECRET_KEYS:
         value = env_values.get(key, "")
