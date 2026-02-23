@@ -623,7 +623,12 @@ def _is_abort_error(exc: Exception) -> bool:
         ``True`` when the caller should re-raise *exc* and abort; ``False`` when
         the error is a per-key failure that can be counted and logged.
     """
-    from omnibase_infra.errors import RuntimeHostError
+    try:
+        from omnibase_infra.errors import RuntimeHostError
+    except ImportError:
+        # omnibase_infra not installed (e.g. script run without uv sync).
+        # Fall back to conservative check: only abort on explicit SystemExit.
+        return isinstance(exc, SystemExit)
 
     if isinstance(exc, RuntimeHostError):
         return True

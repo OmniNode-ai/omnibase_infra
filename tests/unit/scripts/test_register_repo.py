@@ -20,6 +20,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "scripts"
+# scripts/ is on sys.path so importlib can find 'register-repo' by filename.
+# Hyphenated names can't shadow normal imports (not valid Python identifiers),
+# so this path insertion has no effect on the rest of the test suite.
 sys.path.insert(0, str(_SCRIPTS_DIR))
 
 

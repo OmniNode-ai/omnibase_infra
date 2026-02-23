@@ -104,7 +104,10 @@ class ConfigSessionStorage(BaseSettings):
     )
     postgres_database: str = Field(
         default="omnibase_infra",
-        description="PostgreSQL database name",
+        description=(
+            "PostgreSQL database name. Default is infra-service specific; "
+            "MUST be overridden via POSTGRES_DATABASE env var for any other service."
+        ),
     )
     postgres_user: str = Field(
         default="postgres",
