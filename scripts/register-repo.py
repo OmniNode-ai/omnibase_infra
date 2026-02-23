@@ -55,6 +55,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -89,6 +90,41 @@ _AUTH_INDICATORS = (
     "access denied",
 )
 
+# Substrings (case-insensitive) that indicate a key holds sensitive material.
+# In dry-run output, values for matching keys are shown as "***" to avoid
+# leaking credentials to the terminal.  Non-matching keys show their actual
+# value so operators can verify the correct config will be seeded.
+#
+# NOTE: Keys ending in "_URL" are intentionally NOT included here.  URL-type
+# keys (e.g. LLM_CODER_URL, Z_AI_API_URL, INFISICAL_ADDR) are service endpoint
+# addresses, not credentials.  A name like "Z_AI_API_URL" may look sensitive by
+# name, but "_URL" denotes the server address, not a token or key — masking it
+# would reduce operator visibility without any security benefit.
+_SENSITIVE_KEY_PATTERNS = frozenset(
+    {
+        "PASSWORD",
+        "SECRET",
+        # "_KEY" matches keys where KEY appears as a word segment (ENCRYPTION_KEY,
+        # REDIS_KEY, SIGNING_KEY, etc.) but does NOT match VALKEY_HOST/PORT/DB
+        # where "KEY" is an interior substring of the word "VALKEY".
+        "_KEY",
+        "TOKEN",
+        "CREDENTIAL",
+        # "_AUTH" matches keys where AUTH appears as an interior segment
+        # (INFISICAL_AUTH_SECRET, VAULT_AUTH_TOKEN, SERVICE_AUTH_TOKEN, etc.)
+        # but does NOT match keys where AUTH is a leading word
+        # (e.g. AUTH_PROXY_URL) or an interior substring of another word
+        # (e.g. OAUTH_CLIENT_ID). Contrast with _AUTH_INDICATORS above, where
+        # bare "auth" was intentionally excluded to avoid false positives in
+        # error message classification.
+        "_AUTH",
+        "CERT",
+        "PEM",
+        "_PAT",
+        "WEBHOOK",
+    }
+)
+
 sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
 # Shared utility — avoids duplicating the parser in every Infisical script.
@@ -110,16 +146,15 @@ def _read_registry_data() -> dict[str, object]:
     ``_identity_defaults`` via their ``data`` parameter so the file is only
     read a single time per invocation.
     """
-    registry_path = _REGISTRY_PATH
-    if not registry_path.exists():
-        raise FileNotFoundError(f"Registry not found: {registry_path}")
-    with open(registry_path, encoding="utf-8") as f:
+    if not _REGISTRY_PATH.exists():
+        raise FileNotFoundError(f"Registry not found: {_REGISTRY_PATH}")
+    with open(_REGISTRY_PATH, encoding="utf-8") as f:
         data = yaml.safe_load(f)
     if data is None or not isinstance(data, dict):
         raise ValueError(
-            f"Registry file is empty or not a YAML mapping: {registry_path}"
+            f"Registry file is empty or not a YAML mapping: {_REGISTRY_PATH}"
         )
-    return data  # type: ignore[no-any-return]  # yaml.safe_load returns Any; runtime isinstance guard above ensures dict
+    return data  # type: ignore[no-any-return]  # yaml.safe_load returns Any; runtime isinstance guard above ensures dict, not dict[str, list[str]] — inner types are validated by the _load_registry loop
 
 
 def _load_registry(
@@ -146,6 +181,11 @@ def _load_registry(
             f"got {type(shared).__name__!r}. Check that 'shared:' is not null or a list."
         )
     for folder, keys in shared.items():
+        # A null YAML value (e.g. "consul:" with no items) is parsed by
+        # yaml.safe_load as None.  The isinstance(keys, list) guard below
+        # catches NoneType before the empty-list check and raises ValueError
+        # with 'got NoneType', so null folder entries are treated as an
+        # invalid type rather than silently skipped.
         if not isinstance(keys, list):
             raise ValueError(
                 f"Expected 'shared.{folder}' in {_REGISTRY_PATH} to be a list, "
@@ -195,7 +235,12 @@ def _bootstrap_keys(
         raise ValueError(
             f"[ERROR] registry 'bootstrap_only' entries must be strings in {_REGISTRY_PATH}"
         )
-    return frozenset(keys)
+    result = frozenset(keys)
+    if "POSTGRES_PASSWORD" not in result:
+        raise ValueError(
+            "POSTGRES_PASSWORD must be in bootstrap_only — check shared_key_registry.yaml"
+        )
+    return result
 
 
 def _identity_defaults(
@@ -234,6 +279,43 @@ def _identity_defaults(
     return frozenset(keys)
 
 
+def _service_override_required(
+    data: dict[str, object] | None = None,
+) -> frozenset[str]:
+    """Load keys from the ``service_override_required`` section of the registry.
+
+    These keys are present in ``/shared/`` as platform-wide defaults but MUST
+    be overridden per-service under ``/services/<repo>/<transport>/<KEY>``
+    before the service starts.  The ``onboard-repo`` command warns if any of
+    these keys are absent from the onboarding plan.
+
+    Args:
+        data: Pre-loaded registry dict from :func:`_read_registry_data`.  When
+            provided the file is not re-read; when omitted the file is read
+            once inside this function.
+    """
+    if data is None:
+        data = _read_registry_data()
+    if "service_override_required" not in data:
+        # Section is optional — older registry files without it are valid.
+        return frozenset()
+    keys = data["service_override_required"]
+    if not isinstance(keys, list):
+        raise ValueError(
+            f"[ERROR] registry 'service_override_required' must be a list in {_REGISTRY_PATH}"
+        )
+    if not keys:
+        # An empty list is treated the same as an absent section — the registry
+        # was intentionally cleaned up and no overrides are currently required.
+        # Only non-list/non-None types are invalid.
+        return frozenset()
+    if not all(isinstance(k, str) for k in keys):
+        raise ValueError(
+            f"[ERROR] registry 'service_override_required' entries must be strings in {_REGISTRY_PATH}"
+        )
+    return frozenset(keys)
+
+
 # Per-repo folders to create under /services/<repo>/
 REPO_TRANSPORT_FOLDERS = ("db", "kafka", "env")
 
@@ -241,9 +323,20 @@ REPO_TRANSPORT_FOLDERS = ("db", "kafka", "env")
 # NOTE: POSTGRES_DATABASE is intentionally excluded — it is an identity_default
 # (hardcoded as a Settings class default per repo) and must NOT be seeded into
 # Infisical.
-REPO_SECRET_KEYS = [
-    "POSTGRES_DSN",
-]
+# NOTE: POSTGRES_DSN is intentionally excluded — a composite DSN with a
+# hardcoded database name silently routes all services to the same database.
+# Each service uses POSTGRES_DATABASE (identity default) combined with the
+# shared POSTGRES_HOST / POSTGRES_PORT / POSTGRES_USER / POSTGRES_PASSWORD
+# keys from /shared/db/ instead.
+#
+# CONSTRAINT: All keys added here MUST be DATABASE transport keys only.
+# The loop in cmd_onboard_repo that iterates over REPO_SECRET_KEYS hardcodes
+# the destination path as /services/<repo>/db/ (see: plan.append(..."/db/"...)).
+# Adding non-DB keys here (e.g. Kafka, HTTP, or LLM keys) would silently store
+# them under /db/ instead of their correct transport path. Non-DB repo-specific
+# keys should be handled via the `extra` list in cmd_onboard_repo (which buckets
+# them under /services/<repo>/env/) or added to shared_key_registry.yaml.
+REPO_SECRET_KEYS: list[str] = []
 
 
 # ---------------------------------------------------------------------------
@@ -257,8 +350,11 @@ def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
     Returns (adapter, sanitize_fn).
 
     Note:
-        INFISICAL_ADDR validation (scheme check) is the caller's responsibility;
-        cmd_seed_shared and cmd_onboard_repo both validate before calling this function.
+        INFISICAL_ADDR is validated at two layers (defense-in-depth): command
+        entry points (cmd_seed_shared and cmd_onboard_repo) both check for
+        presence and a valid scheme before calling this function, AND this
+        function repeats those checks to guard callers that bypass the
+        entry-point pre-flight.
     """
     from pydantic import SecretStr
 
@@ -268,7 +364,15 @@ def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
     )
     from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
-    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
+    infisical_addr = os.environ.get("INFISICAL_ADDR", "")
+    if not infisical_addr:
+        print(
+            "Error: INFISICAL_ADDR is not set. "
+            "Set it to the Infisical URL (e.g. http://localhost:8880) in your environment "
+            "or ~/.omnibase/.env before calling this function.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     client_id = os.environ.get("INFISICAL_CLIENT_ID", "")
     client_secret = os.environ.get("INFISICAL_CLIENT_SECRET", "")
     project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
@@ -281,9 +385,25 @@ def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
         )
         raise SystemExit(1)
 
+    # Defense-in-depth: command entry points also validate both INFISICAL_ADDR and
+    # INFISICAL_PROJECT_ID before calling here. These guards protect callers that
+    # bypass the entry-point pre-flight.
+    if not infisical_addr.startswith(("http://", "https://")):
+        logger.error(
+            "INFISICAL_ADDR must start with http:// or https://: got %r", infisical_addr
+        )
+        raise SystemExit(1)
+
+    # Both command entry points pre-validate INFISICAL_PROJECT_ID UUID format and return 1
+    # before reaching here. This re-validates as defense-in-depth for non-command callers;
+    # it produces a SystemExit (not return 1) for callers that bypass entry-point validation.
     try:
         project_uuid = UUID(project_id)
     except ValueError:
+        # Suppress the ValueError cause chain — this is a user-input validation error and
+        # the internal ValueError detail (from UUID.__init__) is not useful to the operator.
+        # Consistent with the entry-point validation style (logger.error + return 1) which
+        # also does not propagate the ValueError.
         raise SystemExit(
             f"ERROR: INFISICAL_PROJECT_ID is not a valid UUID: {project_id!r}\n"
             "Check the INFISICAL_PROJECT_ID value in ~/.omnibase/.env or your shell environment.\n"
@@ -312,43 +432,58 @@ def _create_folders_via_admin(
     import httpx
 
     headers = {"Authorization": f"Bearer {token}"}
-    with httpx.Client(timeout=30) as client:
-        for env in environments:
-            # Ensure parent exists first
-            parts = path_prefix.strip("/").split("/")
-            current = "/"
-            for part in parts:
-                if not part:
-                    continue
-                part_resp = client.post(
-                    f"{addr}/api/v1/folders",
-                    headers=headers,
-                    json={
-                        "workspaceId": project_id,
-                        "environment": env,
-                        "name": part,
-                        "path": current,
-                    },
-                )
-                # 409 = folder already exists (idempotent). 400 = bad request — surfaces as real error.
-                if part_resp.status_code not in (200, 201, 409):
-                    part_resp.raise_for_status()
-                current = f"{current}{part}/"
+    try:
+        with httpx.Client(timeout=30) as client:
+            for env in environments:
+                # Ensure parent exists first
+                parts = path_prefix.strip("/").split("/")
+                current = "/"
+                for part in parts:
+                    if not part:
+                        continue
+                    part_resp = client.post(
+                        f"{addr}/api/v1/folders",
+                        headers=headers,
+                        json={
+                            "workspaceId": project_id,
+                            "environment": env,
+                            "name": part,
+                            "path": current,
+                        },
+                    )
+                    # 409 = folder already exists (idempotent). 400 = bad request — surfaces as real error.
+                    if part_resp.status_code not in (200, 201, 409):
+                        part_resp.raise_for_status()
+                    current = f"{current}{part}/"
 
-            for folder in folder_names:
-                resp = client.post(
-                    f"{addr}/api/v1/folders",
-                    headers=headers,
-                    json={
-                        "workspaceId": project_id,
-                        "environment": env,
-                        "name": folder,
-                        "path": path_prefix.rstrip("/") or "/",
-                    },
-                )
-                # 409 = folder already exists (idempotent). 400 = bad request — surfaces as real error.
-                if resp.status_code not in (200, 201, 409):
-                    resp.raise_for_status()
+                for folder in folder_names:
+                    resp = client.post(
+                        f"{addr}/api/v1/folders",
+                        headers=headers,
+                        json={
+                            "workspaceId": project_id,
+                            "environment": env,
+                            "name": folder,
+                            "path": path_prefix.rstrip("/") or "/",
+                        },
+                    )
+                    # 409 = folder already exists (idempotent). 400 = bad request — surfaces as real error.
+                    if resp.status_code not in (200, 201, 409):
+                        resp.raise_for_status()
+    except httpx.HTTPError as e:
+        logger.exception(
+            "Failed to create Infisical folder '%s': %s",
+            path_prefix,
+            e,
+        )
+        raise SystemExit(1) from e
+    except Exception as e:
+        logger.exception(
+            "Unexpected error creating Infisical folder '%s': %s",
+            path_prefix,
+            e,
+        )
+        raise SystemExit(1) from e
     logger.info(
         "Folders created: %s/[%s] in %s",
         path_prefix,
@@ -364,29 +499,44 @@ def _upsert_secret(
     folder: str,
     *,
     overwrite: bool,
-    sanitize: Callable[[Exception], str],
 ) -> str:
-    """Create or update a secret. Returns 'created', 'updated', or 'skipped'."""
-    from omnibase_infra.errors import SecretResolutionError
+    """Create or update a secret. Returns 'created', 'updated', or 'skipped'.
+
+    Note:
+        Error-message sanitization is the caller's responsibility.  This
+        function raises exceptions as-is so callers retain full control over
+        how errors are formatted and logged via their own ``sanitize`` callable.
+    """
+    from omnibase_infra.errors import (
+        InfraConnectionError,
+        RuntimeHostError,
+        SecretResolutionError,
+    )
 
     existing = None
     try:
         existing = adapter.get_secret(secret_name=key, secret_path=folder)  # type: ignore[attr-defined]
-    except SecretResolutionError as _get_exc:
+    except RuntimeHostError as _get_exc:
+        # The adapter may raise either:
+        #   - A RuntimeHostError subclass that is NOT SecretResolutionError
+        #     (e.g. InfraAuthenticationError, InfraTimeoutError,
+        #     InfraUnavailableError).  These are infrastructure failures that
+        #     the outer loop must handle — re-raise immediately so the caller
+        #     can abort the seed run.  The auth-indicator string check below
+        #     would be dead code for these typed errors without this guard.
+        #   - SecretResolutionError (a RuntimeHostError subclass) for two cases:
+        #       1. "Adapter not initialized" — programming error, re-raise.
+        #       2. "Secret not found" — treat as None so we can create it.
+        if not isinstance(_get_exc, SecretResolutionError):
+            raise  # infrastructure failure — let the outer loop handle it
+
+        # We are now handling SecretResolutionError only.
+        #
         # Only suppress the error when the secret genuinely does not exist yet.
         # Re-raise for any exception that indicates a connection problem, auth
         # failure, or other infrastructure error — those must not be silently
         # swallowed, because the subsequent create_secret call will also fail
         # and the root cause will be lost.
-        #
-        # The auth-indicator check at step 1 is the authoritative guard here.
-        # The adapter is expected to re-raise InfraAuthenticationError, InfraTimeoutError,
-        # and InfraUnavailableError directly (see adapter_infisical.py), but even if the
-        # adapter wraps those, the indicator check above will catch them.
-        # We only reach here for SecretResolutionError, which the adapter uses
-        # for two cases:
-        #   1. "Adapter not initialized" — should re-raise (programming error)
-        #   2. "Secret not found" — treat as None so we can create it below
         #
         # WORKAROUND: The Infisical Python SDK does not expose typed error
         # codes (e.g. an HTTP status attribute or a structured exception
@@ -412,10 +562,10 @@ def _upsert_secret(
         # message must still propagate (e.g. SDK wraps HTTP 401 with a generic
         # "not found" outer message).
         cause = getattr(_get_exc, "__cause__", None)
+        # cause_msg is always a str: either str(cause) or "" — the any() call on
+        # an empty string returns False, so no guard is needed.
         cause_msg = str(cause).lower() if cause is not None else ""
-        cause_has_auth = (
-            any(tok in cause_msg for tok in _AUTH_INDICATORS) if cause_msg else False
-        )
+        cause_has_auth = any(tok in cause_msg for tok in _AUTH_INDICATORS)
 
         if has_auth_indicator or cause_has_auth:
             raise  # explicit: auth errors always propagate
@@ -433,11 +583,33 @@ def _upsert_secret(
                 or "does not exist" in cause_msg
             )
         if not is_not_found:
+            # Three cases reach this raise:
+            #   1. "Adapter not initialized" — programming error (adapter.initialize() was not called).
+            #   2. Auth/connection failure — not caught by the auth-indicator check above
+            #      (e.g. SDK wraps the HTTP error without standard auth wording).
+            #   3. Any other unexpected SecretResolutionError that is not "not found".
+            # All three must propagate; only the "not found" branch (is_not_found=True) is safe to swallow.
             raise  # Re-raise: not-initialized / unexpected error
+    except Exception as _bare_exc:
+        # Bare SDK exception (not wrapped as RuntimeHostError).  Wrap it in
+        # InfraConnectionError so the outer loop's _is_abort_error check
+        # correctly classifies it as an infrastructure-level abort rather than
+        # silently counting it as a per-key error.  Auth errors are preserved
+        # via the cause chain and the outer loop's string-based fallback check.
+        logger.debug(
+            "Wrapping bare SDK exception from get_secret(%s, %s) as InfraConnectionError: %s",
+            folder,
+            key,
+            _bare_exc,
+        )
+        raise InfraConnectionError(
+            f"SDK raised unexpected error fetching secret {folder}{key}: {_bare_exc}"
+        ) from _bare_exc
 
     if existing is not None:
         if not overwrite:
             return "skipped"
+        # Write errors propagate naturally to the outer loop.
         adapter.update_secret(  # type: ignore[attr-defined]
             secret_name=key,
             secret_path=folder,
@@ -445,12 +617,44 @@ def _upsert_secret(
         )
         return "updated"
 
+    # Write errors propagate naturally to the outer loop.
     adapter.create_secret(  # type: ignore[attr-defined]
         secret_name=key,
         secret_path=folder,
         secret_value=value,
     )
     return "created"
+
+
+def _is_abort_error(exc: Exception) -> bool:
+    """Return True if *exc* is an infrastructure-level error that must abort a seed run.
+
+    Two categories trigger an abort:
+
+    1. ``RuntimeHostError`` (or any subclass) — typed infra failures raised by
+       ``_upsert_secret`` for connection, timeout, auth, and unavailability errors.
+       Any ``RuntimeHostError`` that reaches the outer loop was not suppressed
+       inside ``_upsert_secret``, which means it is systemic.
+
+    2. Auth-indicator strings — defence-in-depth for SDK exceptions that may not
+       be typed as ``RuntimeHostError`` but whose message contains a token from
+       ``_AUTH_INDICATORS`` (e.g. ``"unauthorized"``, ``"forbidden"``).
+
+    Returns:
+        ``True`` when the caller should re-raise *exc* and abort; ``False`` when
+        the error is a per-key failure that can be counted and logged.
+    """
+    try:
+        from omnibase_infra.errors import RuntimeHostError
+    except ImportError:
+        # omnibase_infra not installed (e.g. script run without uv sync).
+        # Fall back to conservative check: only abort on explicit SystemExit.
+        return isinstance(exc, SystemExit)
+
+    if isinstance(exc, RuntimeHostError):
+        return True
+    err_msg = str(exc).lower()
+    return any(indicator in err_msg for indicator in _AUTH_INDICATORS)
 
 
 # ---------------------------------------------------------------------------
@@ -470,11 +674,71 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
         logger.error("No values found in %s", env_path)
         return 1
 
+    # NOTE: Intentionally validates BEFORE the dry-run gate (unlike cmd_onboard_repo).
+    # This is a design choice for early failure: we always validate credentials even
+    # for a preview run, so the operator knows immediately if the connection is
+    # misconfigured before seeing the plan.
+    #
+    # The pre-flight checks below (INFISICAL_ADDR, INFISICAL_PROJECT_ID) will fail
+    # fast even when --dry-run is passed — if credentials are missing, the command
+    # exits non-zero before printing the plan. This is intentional: dry-run is meant
+    # to preview what *would* be seeded, and that preview is only meaningful if the
+    # operator has a valid Infisical configuration.
+    #
+    # Actual Infisical network calls (upsert, folder creation) are still skipped in
+    # dry-run — only the credential presence/format is checked here, not connectivity.
+    #
+    # This differs from cmd_onboard_repo, which defers INFISICAL_ADDR validation to
+    # the --execute path so dry-run works without a live Infisical instance. The
+    # asymmetry is intentional — seed-shared is a platform-wide operation where an
+    # early credential check is more valuable than dry-run accessibility without
+    # credentials. Do not "fix" this to match cmd_onboard_repo.
+    infisical_addr = os.environ.get("INFISICAL_ADDR")
+    if not infisical_addr:
+        print(
+            "ERROR: INFISICAL_ADDR is not set. "
+            "Set it to the Infisical URL before seeding.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if not infisical_addr.startswith(("http://", "https://")):
+        print(
+            f"ERROR: INFISICAL_ADDR is not a valid URL: {infisical_addr!r}\n"
+            "It must start with http:// or https:// (e.g. http://localhost:8880).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
+    if not project_id:
+        print(
+            "ERROR: INFISICAL_PROJECT_ID is not set. "
+            "Set it in your environment or ~/.omnibase/.env before running seed-shared. "
+            "You can find the project ID after running scripts/provision-infisical.py.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    # Entry-point validation: return 1 on bad UUID (user input error, no stacktrace).
+    # _load_infisical_adapter() repeats this check as defense-in-depth and raises
+    # SystemExit (not return 1) to abort callers that bypass entry-point pre-flight.
+    try:
+        UUID(project_id)
+    except ValueError:
+        # ValueError here is user input, not a system error — no stacktrace needed
+        logger.error("INFISICAL_PROJECT_ID is not a valid UUID: %s", project_id)  # noqa: TRY400
+        return 1
+
     # Build the work list, skipping bootstrap keys
     plan: list[tuple[str, str, str]] = []  # (folder, key, value)
     missing_value: list[tuple[str, str]] = []  # (folder, key) with no value
 
-    registry_data = _read_registry_data()
+    try:
+        registry_data = _read_registry_data()
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
     shared_secrets = _load_registry(registry_data)
     bootstrap = _bootstrap_keys(registry_data)
     identity = _identity_defaults(registry_data)
@@ -501,34 +765,27 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
 
     print("\n  Keys to seed:")
     for folder, key, value in sorted(plan):
-        display = "***" if value else "(empty)"
+        key_upper = key.upper()
+        is_sensitive = any(pat in key_upper for pat in _SENSITIVE_KEY_PATTERNS)
+        if not value:
+            display = "(empty)"
+        elif is_sensitive:
+            display = "***"
+        else:
+            display = value
         print(f"    {folder}{key} = {display}")
 
     if not args.execute:
         print("\n[dry-run] Pass --execute to write to Infisical.")
         return 0
 
-    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
-    if not infisical_addr or not infisical_addr.startswith(("http://", "https://")):
-        print(
-            f"ERROR: INFISICAL_ADDR is not a valid URL: {infisical_addr!r}\n"
-            "It must start with http:// or https:// (e.g. http://localhost:8880).",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-    project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
-    if not project_id:
-        raise SystemExit(
-            "ERROR: INFISICAL_PROJECT_ID is not set. "
-            "Set it in your environment or ~/.omnibase/.env before running seed-shared. "
-            "You can find the project ID after running scripts/provision-infisical.py."
-        )
-
     print("\nWriting to Infisical...")
     try:
         adapter, sanitize = _load_infisical_adapter()
     except SystemExit as e:
-        if e.code:
+        # Integer exit codes (e.g. SystemExit(1)) are not printed — the preceding
+        # logger.error already describes the failure. Only string messages add context.
+        if isinstance(e.code, str):
             print(e.code, file=sys.stderr)
         return 1
 
@@ -543,11 +800,27 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                     value,
                     folder,
                     overwrite=args.overwrite,
-                    sanitize=sanitize,
                 )
                 counts[outcome] += 1
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)
+                if key == "KAFKA_GROUP_ID" and outcome in (
+                    "created",
+                    "updated",
+                ):
+                    logger.warning(
+                        "  KAFKA_GROUP_ID seeded to /shared/kafka/ as a placeholder default.\n"
+                        "  Each service MUST override this at /services/<repo>/kafka/KAFKA_GROUP_ID\n"
+                        "  to avoid shared consumer group collisions."
+                    )
             except Exception as exc:
+                if _is_abort_error(exc):
+                    logger.exception(
+                        "Infrastructure error seeding %s%s — aborting: %s",
+                        folder,
+                        key,
+                        sanitize(exc),
+                    )
+                    raise SystemExit(1)
                 counts["error"] += 1
                 logger.warning("  [ERROR] %s%s: %s", folder, key, sanitize(exc))
 
@@ -560,10 +833,18 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                     "",
                     folder,
                     overwrite=False,
-                    sanitize=sanitize,
                 )
                 counts[outcome] += 1
+                logger.info("  [%s] %s%s (placeholder)", outcome.upper(), folder, key)
             except Exception as exc:
+                if _is_abort_error(exc):
+                    logger.exception(
+                        "Infrastructure error seeding %s%s — aborting: %s",
+                        folder,
+                        key,
+                        sanitize(exc),
+                    )
+                    raise SystemExit(1)
                 counts["error"] += 1
                 logger.warning(
                     "  [ERROR placeholder] %s%s: %s", folder, key, sanitize(exc)
@@ -585,8 +866,6 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
 
 def cmd_onboard_repo(args: argparse.Namespace) -> int:
     """Create /services/<repo>/ folder structure and seed repo-specific secrets."""
-    import re
-
     repo_name = args.repo
     # Reject names that could be used for path traversal or produce invalid
     # Infisical paths.  Allow only alphanumeric characters, hyphens, and
@@ -609,10 +888,10 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     path_prefix = f"/services/{repo_name}"
 
     # Identify repo-specific secrets to seed.
-    # Keys missing from the env file (e.g. POSTGRES_DSN, which is assembled and
-    # written by the runtime after the DB is reachable) are intentionally seeded
-    # as empty strings — they reserve the Infisical slot so the runtime can
-    # update_secret without a prior create step.
+    # Keys missing from the env file are intentionally seeded as empty strings —
+    # they reserve the Infisical slot so the runtime can update_secret without a
+    # prior create step. Per-service identity (e.g. POSTGRES_DATABASE) is baked
+    # into each repo's Settings class as a default= and is NOT seeded here.
     plan: list[tuple[str, str, str]] = []
     for key in REPO_SECRET_KEYS:
         value = env_values.get(key, "")
@@ -620,12 +899,21 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
 
     # Any extra keys in the env file that are NOT in shared, NOT bootstrap,
     # and NOT an identity default (per-repo value baked into Settings.default=).
-    registry_data = _read_registry_data()
-    shared_keys_flat = {
-        k for keys in _load_registry(registry_data).values() for k in keys
-    }
+    try:
+        registry_data = _read_registry_data()
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
+    registry = _load_registry(registry_data)
+    shared_keys_flat = {k for keys in registry.values() for k in keys}
     bootstrap = _bootstrap_keys(registry_data)
     identity = _identity_defaults(registry_data)
+    # Build a set of keys already in the plan (from REPO_SECRET_KEYS) for O(1)
+    # duplicate detection.  Without this, the inner check would be O(n*m).
+    planned_keys: set[str] = {pk for _, pk, _ in plan}
     extra: list[tuple[str, str, str]] = []
     for key, value in env_values.items():
         if key in bootstrap:
@@ -634,8 +922,14 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
             continue
         if key in shared_keys_flat:
             continue
-        if any(key == pk for _, pk, _ in plan):
+        if key in planned_keys:
             continue
+        # Extra keys not matching any transport folder are bucketed into /env/.
+        # If a key belongs to a specific transport (e.g. kafka, db, http), add it
+        # to shared_key_registry.yaml under the appropriate folder, or handle it
+        # via onboard-repo per-service overrides. Leaving transport-specific keys
+        # here will cause them to be stored under /env/ instead of their transport
+        # path, which may confuse config consumers expecting a known Infisical path.
         extra.append((f"{path_prefix}/env/", key, value))
 
     print(f"\n=== onboard-repo: {repo_name} ===")
@@ -643,21 +937,45 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     print(f"  Env file: {env_path}")
     print("\n  Repo-specific keys:")
     for folder, key, value in plan:
-        display = "***" if value else "(empty)"
+        key_upper = key.upper()
+        is_sensitive = any(pat in key_upper for pat in _SENSITIVE_KEY_PATTERNS)
+        if not value:
+            display = "(empty)"
+        elif is_sensitive:
+            display = "***"
+        else:
+            display = value
         print(f"    {folder}{key} = {display}")
 
     if extra:
         print(f"\n  Additional repo-only keys ({len(extra)}):")
         for folder, key, value in extra:
-            display = "***" if value else "(empty)"
+            key_upper = key.upper()
+            is_sensitive = any(pat in key_upper for pat in _SENSITIVE_KEY_PATTERNS)
+            if not value:
+                display = "(empty)"
+            elif is_sensitive:
+                display = "***"
+            else:
+                display = value
             print(f"    {folder}{key} = {display}")
 
     if not args.execute:
         print("\n[dry-run] Pass --execute to create folders and write secrets.")
         return 0
 
-    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
-    if not infisical_addr or not infisical_addr.startswith(("http://", "https://")):
+    # Validate Infisical connection config after the dry-run gate — INFISICAL_ADDR
+    # and INFISICAL_PROJECT_ID are only required when actually writing to Infisical,
+    # so dry-run can work offline without a live Infisical instance.
+    infisical_addr = os.environ.get("INFISICAL_ADDR")
+    if not infisical_addr:
+        print(
+            "ERROR: INFISICAL_ADDR is not set. "
+            "Set it to the Infisical URL before seeding.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if not infisical_addr.startswith(("http://", "https://")):
         print(
             f"ERROR: INFISICAL_ADDR is not a valid URL: {infisical_addr!r}\n"
             "It must start with http:// or https:// (e.g. http://localhost:8880).",
@@ -671,6 +989,15 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
             "Set it in your environment or ~/.omnibase/.env before running onboard-repo. "
             "You can find the project ID after running scripts/provision-infisical.py."
         )
+    # Entry-point validation: return 1 on bad UUID (user input error, no stacktrace).
+    # _load_infisical_adapter() repeats this check as defense-in-depth and raises
+    # SystemExit (not return 1) to abort callers that bypass entry-point pre-flight.
+    try:
+        UUID(project_id)
+    except ValueError:
+        # ValueError here is user input, not a system error — no stacktrace needed
+        logger.error("INFISICAL_PROJECT_ID is not a valid UUID: %s", project_id)  # noqa: TRY400
+        return 1
 
     # Need admin token to create folders
     if not _ADMIN_TOKEN_FILE.is_file():
@@ -706,7 +1033,9 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     try:
         adapter, sanitize = _load_infisical_adapter()
     except SystemExit as e:
-        if e.code:
+        # Integer exit codes (e.g. SystemExit(1)) are not printed — the preceding
+        # logger.error already describes the failure. Only string messages add context.
+        if isinstance(e.code, str):
             print(e.code, file=sys.stderr)
         return 1
 
@@ -722,11 +1051,18 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
                     value,
                     folder,
                     overwrite=args.overwrite,
-                    sanitize=sanitize,
                 )
                 counts[outcome] += 1
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)
             except Exception as exc:
+                if _is_abort_error(exc):
+                    logger.exception(
+                        "Infrastructure error seeding %s%s — aborting: %s",
+                        folder,
+                        key,
+                        sanitize(exc),
+                    )
+                    raise SystemExit(1)
                 counts["error"] += 1
                 logger.warning("  [ERROR] %s%s: %s", folder, key, sanitize(exc))
     finally:
@@ -743,6 +1079,51 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
         f"  POSTGRES_DATABASE={repo_name.replace('-', '_')}  # suggested value — verify this matches your actual .env"
     )
     print("  (Infisical creds come from ~/.omnibase/.env via shell env)")
+
+    # Only emit the service_override_required warning block when the seed
+    # completed without errors.  If the loop was aborted by a re-raised
+    # exception the finally block already ran adapter.shutdown() and the
+    # exception is propagating — this code is unreachable in that case.
+    # For the non-exception path, gate on zero errors so that a partially
+    # failed seed (per-key errors counted but run not aborted) does not
+    # print misleading "ACTION REQUIRED" guidance after a broken run.
+    if counts.get("error", 0) == 0:
+        # Warn for any keys declared as service_override_required that are NOT
+        # included in the onboarding plan.  These keys have shared platform defaults
+        # that are intentionally wrong for production use; each service must supply
+        # its own value before starting.
+        all_plan_keys: set[str] = {pk for _, pk, _ in all_secrets}
+        override_required = _service_override_required(registry_data)
+        for override_key in sorted(override_required - all_plan_keys):
+            # Determine the most likely transport folder for this key by scanning
+            # the shared registry for which folder it belongs to.
+            transport_folder = next(
+                (
+                    parts[
+                        1
+                    ]  # e.g. "/shared/kafka/" → parts=["shared","kafka"] → "kafka"
+                    for folder, keys in registry.items()
+                    if override_key in keys
+                    for parts in [folder.strip("/").split("/")]
+                    if len(parts) >= 2
+                ),
+                "<unknown>",  # fallback if key is not found in shared registry
+            )
+            logger.warning(
+                "ACTION REQUIRED: '%s' is declared service_override_required but was not "
+                "included in the onboarding plan for repo '%s'. "
+                "You MUST manually add /services/%s/%s/%s to Infisical before the service starts. "
+                "The shared /shared/%s/%s value is a placeholder default only — "
+                "relying on it in production is a misconfiguration.",
+                override_key,
+                repo_name,
+                repo_name,
+                transport_folder,
+                override_key,
+                transport_folder,
+                override_key,
+            )
+
     return 1 if counts["error"] else 0
 
 

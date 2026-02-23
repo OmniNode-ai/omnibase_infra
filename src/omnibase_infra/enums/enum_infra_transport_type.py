@@ -19,6 +19,7 @@ Supported transport types:
     - INMEMORY: In-memory transport for testing/local development
     - QDRANT: Qdrant vector database operations
     - GRAPH: Graph database (Memgraph/Neo4j) operations
+    - LLM: LLM service endpoints (vLLM, embedding servers, etc.)
 
 Each transport type has a corresponding handler implementation:
     - HandlerConsul: Service registration, health checks, KV store operations
@@ -53,6 +54,7 @@ class EnumInfraTransportType(str, Enum):
         INMEMORY: In-memory transport for testing and local development
         QDRANT: Qdrant vector database transport
         GRAPH: Graph database (Memgraph/Neo4j) transport
+        LLM: LLM service endpoint transport (vLLM, embedding servers, etc.)
     """
 
     HTTP = "http"
@@ -68,6 +70,7 @@ class EnumInfraTransportType(str, Enum):
     INMEMORY = "inmemory"
     QDRANT = "qdrant"
     GRAPH = "graph"
+    LLM = "llm"
 
 
 __all__ = ["EnumInfraTransportType"]
