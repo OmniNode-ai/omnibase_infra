@@ -60,6 +60,7 @@ shared:
   # NOTE: No VAULT transport type in EnumInfraTransportType yet — VAULT_ADDR is seeded
   # but cannot be prefetched via ConfigPrefetcher until VAULT is added to the enum.
   # TODO: add VAULT to EnumInfraTransportType and transport_config_map.py to enable ConfigPrefetcher support
+  # NOT prefetched by ConfigPrefetcher — no EnumInfraTransportType.VAULT entry; keys resolved via shell env fallback.
   "/shared/vault/":
     # NOTE: VAULT_TOKEN intentionally excluded — it is per-service and must be
     # provisioned per repo under /services/<repo>/vault/VAULT_TOKEN, not shared
@@ -79,6 +80,7 @@ shared:
     - VLLM_LLAMA_URL
     - ONEX_TREE_SERVICE_URL
     - METADATA_STAMPING_SERVICE_URL
+  # NOT prefetched by ConfigPrefetcher — no EnumInfraTransportType.AUTH entry; keys resolved via shell env fallback.
   "/shared/auth/":
     - OPENAI_API_KEY
     - GOOGLE_API_KEY
@@ -97,6 +99,7 @@ shared:
     - QDRANT_PORT
     - QDRANT_API_KEY
     - QDRANT_URL
+  # NOT prefetched by ConfigPrefetcher — no EnumInfraTransportType.ENV entry; keys resolved via shell env fallback.
   "/shared/env/":
     - SLACK_WEBHOOK_URL
     - SLACK_BOT_TOKEN

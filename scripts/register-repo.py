@@ -104,11 +104,14 @@ _SENSITIVE_KEY_PATTERNS = frozenset(
         "_KEY",
         "TOKEN",
         "CREDENTIAL",
-        # NOTE: "AUTH" is broad by design (AUTH_TOKEN, etc.) but may mask
-        # non-secret keys containing "AUTH" (e.g. AUTH_PROXY_URL, OAUTH_CLIENT_ID).
-        # Contrast with _AUTH_INDICATORS above, where bare "auth" was intentionally
-        # excluded to avoid false positives in error message classification.
-        "AUTH",
+        # "_AUTH" matches keys where AUTH appears as an interior segment
+        # (INFISICAL_AUTH_SECRET, VAULT_AUTH_TOKEN, SERVICE_AUTH_TOKEN, etc.)
+        # but does NOT match keys where AUTH is a leading word
+        # (e.g. AUTH_PROXY_URL) or an interior substring of another word
+        # (e.g. OAUTH_CLIENT_ID). Contrast with _AUTH_INDICATORS above, where
+        # bare "auth" was intentionally excluded to avoid false positives in
+        # error message classification.
+        "_AUTH",
         "CERT",
         "PEM",
         "_PAT",
@@ -617,12 +620,12 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
             else:
                 missing_value.append((folder, key))
 
-    # NOTE: Intentionally validates before dry-run gate (unlike cmd_onboard_repo)
-    # because seed-shared always requires a live Infisical instance. Unlike
-    # onboard-repo, there is no meaningful offline dry-run: every seed-shared
-    # invocation is preparing to write to Infisical, and an operator with a bad
-    # INFISICAL_ADDR or INFISICAL_PROJECT_ID should get a clear error immediately
-    # rather than seeing "dry-run OK" and then failing on --execute.
+    # NOTE: Intentionally validates before dry-run gate (unlike cmd_onboard_repo).
+    # seed-shared always requires a live Infisical instance because it reads back
+    # existing keys to skip secrets that are already present — that live read is
+    # needed even for a dry-run preview, so offline use is not supported.
+    # Operators who want to preview the plan must run with --dry-run while connected
+    # to a live Infisical instance; there is no fully-offline dry-run mode.
     infisical_addr = os.environ.get("INFISICAL_ADDR")
     if not infisical_addr:
         print(
@@ -984,9 +987,13 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
             # the shared registry for which folder it belongs to.
             transport_folder = next(
                 (
-                    folder.split("/")[2]  # e.g. "/shared/kafka/" → "kafka"
+                    parts[
+                        1
+                    ]  # e.g. "/shared/kafka/" → parts=["shared","kafka"] → "kafka"
                     for folder, keys in registry.items()
                     if override_key in keys
+                    for parts in [folder.strip("/").split("/")]
+                    if len(parts) >= 2
                 ),
                 "<unknown>",  # fallback if key is not found in shared registry
             )
