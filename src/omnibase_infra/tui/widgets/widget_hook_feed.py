@@ -104,10 +104,14 @@ class WidgetHookFeed(Static):
         log.write(_format_hook_line(payload))
 
     def refresh_all(self) -> None:
-        """Rebuild the full log from the in-memory deque (used after [r] refresh)."""
+        """Rebuild the full log from the in-memory deque (used after [r] refresh).
+
+        Iterates in reverse so oldest events are written first and newest appears
+        at the bottom of the RichLog, consistent with add_event behavior.
+        """
         log: RichLog = self.query_one("#hook-feed-log", RichLog)
         log.clear()
-        for payload in self._events:
+        for payload in reversed(self._events):
             log.write(_format_hook_line(payload))
 
 

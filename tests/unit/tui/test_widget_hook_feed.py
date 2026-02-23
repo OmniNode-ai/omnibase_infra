@@ -83,8 +83,8 @@ class TestFormatHookLine:
         """Missing fields fall back to defaults gracefully."""
         line = _format_hook_line({})
         assert line is not None
-        # Should contain fallback values
-        assert "UNKNOWN" in line.plain or len(line.plain) > 0
+        # hook defaults to "unknown" → uppercased to "UNKNOWN"
+        assert "UNKNOWN" in line.plain
 
     @pytest.mark.unit
     def test_emitted_at_truncated_to_19_chars(self) -> None:

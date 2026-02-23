@@ -16,7 +16,10 @@ Related Tickets:
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
+from aiokafka.errors import KafkaError
 
 from omnibase_infra.tui.consumers.consumer_status import (
     TOPIC_GIT_HOOK,
@@ -25,6 +28,7 @@ from omnibase_infra.tui.consumers.consumer_status import (
     HookEventReceived,
     PRStatusReceived,
     SnapshotReceived,
+    consume_all,
 )
 
 
@@ -104,3 +108,54 @@ class TestMessageClasses:
     def test_snapshot_received_empty_payload(self) -> None:
         msg = SnapshotReceived({})
         assert msg.payload == {}
+
+
+class TestConsumeAll:
+    @pytest.mark.unit
+    async def test_consume_all_handles_kafka_error_gracefully(self) -> None:
+        """consume_all should return cleanly when Kafka is unreachable."""
+        mock_app = MagicMock()
+        with patch(
+            "omnibase_infra.tui.consumers.consumer_status.AIOKafkaConsumer"
+        ) as mock_consumer_cls:
+            mock_consumer = AsyncMock()
+            mock_consumer.start.side_effect = KafkaError("broker unavailable")
+            mock_consumer.stop = AsyncMock()
+            mock_consumer_cls.return_value = mock_consumer
+
+            # Should not raise
+            await consume_all(mock_app)
+
+        # App should not have received any messages
+        mock_app.post_message.assert_not_called()
+
+    @pytest.mark.unit
+    async def test_consume_all_handles_json_decode_error(self) -> None:
+        """consume_all should skip messages with invalid JSON and continue."""
+        mock_app = MagicMock()
+
+        # Create a mock message with invalid JSON bytes
+        bad_msg = MagicMock()
+        bad_msg.topic = TOPIC_PR_STATUS
+        bad_msg.value = b"not-valid-json"
+
+        with patch(
+            "omnibase_infra.tui.consumers.consumer_status.AIOKafkaConsumer"
+        ) as mock_consumer_cls:
+            mock_consumer = AsyncMock()
+            mock_consumer.start = AsyncMock()
+            mock_consumer.stop = AsyncMock()
+
+            # Yield one bad message then raise to exit loop
+            async def _aiter() -> object:
+                yield bad_msg
+                raise KafkaError("done")
+
+            mock_consumer.__aiter__ = _aiter
+            mock_consumer_cls.return_value = mock_consumer
+
+            # Should not raise
+            await consume_all(mock_app)
+
+        # Bad message should be skipped — no post_message call
+        mock_app.post_message.assert_not_called()

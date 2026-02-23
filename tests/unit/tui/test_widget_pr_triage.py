@@ -26,7 +26,8 @@ from omnibase_infra.tui.widgets.widget_pr_triage import (
 
 class TestTriageOrder:
     @pytest.mark.unit
-    def test_all_eight_states_in_order(self) -> None:
+    def test_all_eight_states_present(self) -> None:
+        """Verify all 8 triage states are present (set membership, not order)."""
         expected = {
             "draft",
             "stale",
@@ -52,6 +53,16 @@ class TestTriageOrder:
     @pytest.mark.unit
     def test_no_duplicates_in_order(self) -> None:
         assert len(_TRIAGE_ORDER) == len(set(_TRIAGE_ORDER))
+
+
+class TestTriageOrderComplete:
+    @pytest.mark.unit
+    def test_triage_order_length(self) -> None:
+        assert len(_TRIAGE_ORDER) == 8
+
+    @pytest.mark.unit
+    def test_triage_order_is_tuple(self) -> None:
+        assert isinstance(_TRIAGE_ORDER, tuple)
 
 
 class TestTriageLabel:

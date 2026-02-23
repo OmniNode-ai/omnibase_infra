@@ -76,7 +76,7 @@ dependencies = [
     # CLI Dependencies
     "click>=8.1.0,<9.0.0",
     "rich>=13.7.0,<14.0.0",
-    "textual>=0.89.0,<1.0.0",  # Terminal UI framework for onex-status TUI (OMN-2657)
+    "textual>=0.89.0,<8.0.0",  # Terminal UI framework for onex-status TUI (OMN-2657)
 
     # System utilities
     # cryptography: Transitive dependency (via omnibase_core -> paramiko/pyopenssl).

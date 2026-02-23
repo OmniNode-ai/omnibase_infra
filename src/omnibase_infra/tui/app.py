@@ -104,17 +104,17 @@ class StatusApp(App[None]):
             ws: WidgetWorkstreams = self.query_one("#workstreams", WidgetWorkstreams)
             ws.refresh_display()
         except Exception:
-            pass
+            logger.debug("Failed to refresh workstreams panel", exc_info=True)
         try:
             hf: WidgetHookFeed = self.query_one("#hook-feed", WidgetHookFeed)
             hf.refresh_all()
         except Exception:
-            pass
+            logger.debug("Failed to refresh hook feed panel", exc_info=True)
         try:
             pt: WidgetPRTriage = self.query_one("#pr-triage", WidgetPRTriage)
-            pt._refresh_table()
+            pt.refresh_table()
         except Exception:
-            pass
+            logger.debug("Failed to refresh PR triage panel", exc_info=True)
 
     def action_open_pr(self) -> None:
         """[o] Open the selected PR in the browser."""
@@ -122,7 +122,7 @@ class StatusApp(App[None]):
             pt: WidgetPRTriage = self.query_one("#pr-triage", WidgetPRTriage)
             pt.open_selected_pr()
         except Exception:
-            pass
+            logger.debug("Failed to open selected PR", exc_info=True)
 
 
 __all__ = ["StatusApp"]

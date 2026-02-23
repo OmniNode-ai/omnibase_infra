@@ -66,9 +66,7 @@ class WidgetPRTriage(Static):
     COMPONENT_CLASSES: ClassVar[set[str]] = set()
 
     # Map: (repo, pr_number) -> latest payload
-    _prs: reactive[dict[tuple[str, int], dict[str, JsonType]]] = reactive(
-        {}, recompose=True
-    )
+    _prs: reactive[dict[tuple[str, int], dict[str, JsonType]]] = reactive({})
 
     def compose(self) -> ComposeResult:
         yield Label("[b]PR Triage[/b]", id="pr-triage-header")
@@ -140,6 +138,10 @@ class WidgetPRTriage(Static):
                         Text(pr_number),
                         Text(title),
                     )
+
+    def refresh_table(self) -> None:
+        """Public alias for _refresh_table — re-render table from in-memory state."""
+        self._refresh_table()
 
     def open_selected_pr(self) -> None:
         """Open the currently selected PR in the browser via [o] keybinding."""

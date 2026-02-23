@@ -121,8 +121,8 @@ class WidgetWorkstreams(Static):
             done = int(done_raw) if isinstance(done_raw, (int, float)) else 0
 
             if total > 0:
-                pct = int(100 * done / total)
-                bar_filled = int(pct / 5)  # 20-char bar
+                pct = max(0, min(100, int(100 * done / total)))
+                bar_filled = min(20, int(pct / 5))  # 20-char bar, clamped
                 bar_empty = 20 - bar_filled
                 bar = f"[green]{'█' * bar_filled}[/green][dim]{'░' * bar_empty}[/dim]"
                 lines.append(f"[bold]{ws}[/bold]  {bar}  {done}/{total} ({pct}%)")
