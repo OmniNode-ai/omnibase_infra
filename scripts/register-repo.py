@@ -244,6 +244,10 @@ def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
     """Load and initialise the Infisical adapter using env credentials.
 
     Returns (adapter, sanitize_fn).
+
+    Note:
+        INFISICAL_ADDR validation (scheme check) is the caller's responsibility;
+        cmd_seed_shared and cmd_onboard_repo both validate before calling this function.
     """
     from pydantic import SecretStr
 
