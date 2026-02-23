@@ -404,11 +404,13 @@ def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
         # the internal ValueError detail (from UUID.__init__) is not useful to the operator.
         # Consistent with the entry-point validation style (logger.error + return 1) which
         # also does not propagate the ValueError.
-        raise SystemExit(
+        print(
             f"ERROR: INFISICAL_PROJECT_ID is not a valid UUID: {project_id!r}\n"
             "Check the INFISICAL_PROJECT_ID value in ~/.omnibase/.env or your shell environment.\n"
-            "The expected format is: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-        ) from None
+            "The expected format is: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from None
     config = ModelInfisicalAdapterConfig(
         host=infisical_addr,
         client_id=SecretStr(client_id),
@@ -984,11 +986,13 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
         raise SystemExit(1)
     project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
     if not project_id:
-        raise SystemExit(
+        print(
             "ERROR: INFISICAL_PROJECT_ID is not set. "
             "Set it in your environment or ~/.omnibase/.env before running onboard-repo. "
-            "You can find the project ID after running scripts/provision-infisical.py."
+            "You can find the project ID after running scripts/provision-infisical.py.",
+            file=sys.stderr,
         )
+        raise SystemExit(1)
     # Entry-point validation: return 1 on bad UUID (user input error, no stacktrace).
     # _load_infisical_adapter() repeats this check as defense-in-depth and raises
     # SystemExit (not return 1) to abort callers that bypass entry-point pre-flight.
@@ -1097,6 +1101,9 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
         for override_key in sorted(override_required - all_plan_keys):
             # Determine the most likely transport folder for this key by scanning
             # the shared registry for which folder it belongs to.
+            # Note: `registry` is guaranteed to be defined here — it was assigned
+            # via _load_registry(registry_data) near the top of this function
+            # (line ~912), before the dry-run gate and before the seeding loop.
             transport_folder = next(
                 (
                     parts[

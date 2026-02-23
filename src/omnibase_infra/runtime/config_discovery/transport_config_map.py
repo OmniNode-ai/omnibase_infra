@@ -94,8 +94,13 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
         "LLM_EMBEDDING_URL",
         "LLM_DEEPSEEK_R1_URL",
         # "LLM_SMALL_URL",  # Port TBD — add when port is assigned (Qwen2.5-Coder-7B MLX)
-        "ONEX_TREE_SERVICE_URL",
-        "METADATA_STAMPING_SERVICE_URL",
+        # NOTE: ONEX_TREE_SERVICE_URL and METADATA_STAMPING_SERVICE_URL have been
+        # moved to /shared/platform/ in shared_key_registry.yaml.  They are ONEX
+        # microservice URLs, not LLM inference endpoints.  They are intentionally
+        # excluded from this map because EnumInfraTransportType has no PLATFORM
+        # member yet; add a PLATFORM entry to the enum and this map once that
+        # transport type is introduced.  Until then, these keys resolve via shell
+        # env fallback only.
     ),
     EnumInfraTransportType.GRPC: (
         "GRPC_HOST",

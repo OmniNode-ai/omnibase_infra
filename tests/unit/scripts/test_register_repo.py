@@ -368,3 +368,116 @@ class TestUpsertSecretBareExceptionWrapping:
         )
         assert rr._is_abort_error(wrapped) is True  # type: ignore[attr-defined]
         assert isinstance(wrapped, RuntimeHostError)
+
+
+# ---------------------------------------------------------------------------
+# cmd_onboard_repo tests
+# ---------------------------------------------------------------------------
+
+
+def _make_onboard_args(
+    repo: str, env_file: str, execute: bool = False
+) -> argparse.Namespace:
+    """Build a minimal Namespace for cmd_onboard_repo."""
+    return argparse.Namespace(
+        repo=repo,
+        env_file=env_file,
+        execute=execute,
+        overwrite=False,
+    )
+
+
+class TestCmdOnboardRepoDryRun:
+    """cmd_onboard_repo dry-run behaviour: succeeds without Infisical credentials.
+
+    Unlike cmd_seed_shared, cmd_onboard_repo validates INFISICAL_ADDR *after*
+    the dry-run gate — so --dry-run (no --execute) can succeed even when no
+    Infisical credentials are present in the environment.
+    """
+
+    @pytest.mark.unit
+    def test_dry_run_prints_plan_without_credentials(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """--dry-run should return 0 and print the onboarding plan without
+        requiring INFISICAL_ADDR or INFISICAL_PROJECT_ID."""
+        rr = _module
+
+        env_file = tmp_path / ".env"
+        # Provide one plausible repo-specific key so the plan is non-empty.
+        env_file.write_text("POSTGRES_DATABASE=myrepo\n")
+
+        args = _make_onboard_args("myrepo", str(env_file), execute=False)
+
+        # Strip Infisical credentials completely to confirm they are not needed.
+        env_no_creds = {
+            k: v
+            for k, v in os.environ.items()
+            if k
+            not in (
+                "INFISICAL_ADDR",
+                "INFISICAL_PROJECT_ID",
+                "INFISICAL_CLIENT_ID",
+                "INFISICAL_CLIENT_SECRET",
+            )
+        }
+
+        minimal_registry: dict[str, object] = {
+            "shared": {"/shared/db/": ["POSTGRES_HOST"]},
+            "bootstrap_only": ["POSTGRES_PASSWORD", "KAFKA_BOOTSTRAP_SERVERS"],
+            "identity_defaults": ["POSTGRES_DATABASE"],
+            "service_override_required": [],
+        }
+
+        with (
+            patch.dict("os.environ", env_no_creds, clear=True),
+            patch.object(
+                rr,  # type: ignore[arg-type]
+                "_read_registry_data",
+                return_value=minimal_registry,
+            ),
+        ):
+            result = rr.cmd_onboard_repo(args)  # type: ignore[attr-defined]
+
+        assert result == 0, (
+            "cmd_onboard_repo should return 0 in dry-run regardless of Infisical credentials; "
+            f"got {result}"
+        )
+
+        captured = capsys.readouterr()
+        # The plan header must appear in stdout.
+        assert "onboard-repo" in captured.out, (
+            f"Expected plan output on stdout; got {captured.out!r}"
+        )
+        assert "dry-run" in captured.out.lower(), (
+            f"Expected dry-run notice on stdout; got {captured.out!r}"
+        )
+
+
+class TestCmdOnboardRepoRequiredArgs:
+    """cmd_onboard_repo enforces required arguments at the argparse level."""
+
+    @pytest.mark.unit
+    def test_exits_nonzero_when_repo_not_provided(self, tmp_path: Path) -> None:
+        """Invoking the CLI via main() without --repo should exit non-zero.
+
+        argparse marks --repo as required=True for the onboard-repo subcommand,
+        so omitting it produces a non-zero exit before cmd_onboard_repo is called.
+        """
+        rr = _module
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("POSTGRES_DATABASE=myrepo\n")
+
+        # Drive through main() with argv patched to omit --repo.
+        with patch(
+            "sys.argv",
+            ["register-repo", "onboard-repo", "--env-file", str(env_file)],
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                rr.main()  # type: ignore[attr-defined]
+
+        assert exc_info.value.code != 0, (
+            "main() must exit non-zero when --repo is not provided to onboard-repo; "
+            f"got exit code {exc_info.value.code!r}"
+        )

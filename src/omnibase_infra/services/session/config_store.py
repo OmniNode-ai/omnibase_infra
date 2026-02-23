@@ -57,7 +57,7 @@ class ConfigSessionStorage(BaseSettings):
     - ``query_timeout_seconds`` ← ``QUERY_TIMEOUT_SECONDS`` (primary) or ``query_timeout_seconds`` (fallback);
       intentionally distinct from ``POSTGRES_TIMEOUT_MS`` in ``transport_config_map.py``, which is
       the shared platform key expressed in milliseconds — different unit and scope.
-      Resolved via ``AliasChoices("QUERY_TIMEOUT_SECONDS", "query_timeout_seconds")``)
+      Resolved via ``AliasChoices("QUERY_TIMEOUT_SECONDS", "query_timeout_seconds")``.
 
     The pool fields use ``AliasChoices`` so that both the canonical shared key
     (e.g. ``POSTGRES_POOL_MIN_SIZE``, as declared in

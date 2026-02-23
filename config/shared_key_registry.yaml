@@ -85,17 +85,20 @@ shared:
     - LLM_EMBEDDING_URL
     - LLM_DEEPSEEK_R1_URL
     # - LLM_SMALL_URL  # Port TBD — add when port is assigned (Qwen2.5-Coder-7B MLX)
-    # ONEX platform service URLs (not LLM models — kept here as they are co-located
-    # on the same inference infrastructure and share the REMOTE_SERVER_IP base).
-    # TODO: move ONEX_TREE_SERVICE_URL and METADATA_STAMPING_SERVICE_URL to a
-    # /shared/platform/ or /shared/services/ folder in a future cleanup ticket.
-    # They are ONEX microservice URLs, not LLM inference endpoints, and belong in
-    # a dedicated platform transport rather than /shared/llm/.
+  # ONEX platform microservice URLs — distinct from LLM inference endpoints.
+  # NOT prefetched by ConfigPrefetcher — EnumInfraTransportType has no PLATFORM member;
+  # these keys are excluded from transport_config_map.py until a PLATFORM transport is
+  # added to the enum.  They resolve via shell env fallback only.
+  "/shared/platform/":
+    # ONEX internal microservice URLs (not LLM models).  Co-located on the same
+    # inference infrastructure but semantically belong in a platform transport,
+    # not /shared/llm/.
     - ONEX_TREE_SERVICE_URL
     - METADATA_STAMPING_SERVICE_URL
   # NOT prefetched by ConfigPrefetcher — no EnumInfraTransportType.AUTH entry; keys resolved via shell env fallback.
   "/shared/auth/":
     - OPENAI_API_KEY
+    - ANTHROPIC_API_KEY
     - GOOGLE_API_KEY
     - GEMINI_API_KEY
     - Z_AI_API_KEY
