@@ -844,13 +844,27 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     print(f"  Env file: {env_path}")
     print("\n  Repo-specific keys:")
     for folder, key, value in plan:
-        display = "***" if value else "(empty)"
+        key_upper = key.upper()
+        is_sensitive = any(pat in key_upper for pat in _SENSITIVE_KEY_PATTERNS)
+        if not value:
+            display = "(empty)"
+        elif is_sensitive:
+            display = "***"
+        else:
+            display = value
         print(f"    {folder}{key} = {display}")
 
     if extra:
         print(f"\n  Additional repo-only keys ({len(extra)}):")
         for folder, key, value in extra:
-            display = "***" if value else "(empty)"
+            key_upper = key.upper()
+            is_sensitive = any(pat in key_upper for pat in _SENSITIVE_KEY_PATTERNS)
+            if not value:
+                display = "(empty)"
+            elif is_sensitive:
+                display = "***"
+            else:
+                display = value
             print(f"    {folder}{key} = {display}")
 
     if not args.execute:
@@ -969,10 +983,10 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     # its own value before starting.
     all_plan_keys: set[str] = {pk for _, pk, _ in all_secrets}
     override_required = _service_override_required(registry_data)
+    shared_registry = _load_registry(registry_data)
     for override_key in sorted(override_required - all_plan_keys):
         # Determine the most likely transport folder for this key by scanning
         # the shared registry for which folder it belongs to.
-        shared_registry = _load_registry(registry_data)
         transport_folder = next(
             (
                 folder.split("/")[2]  # e.g. "/shared/kafka/" → "kafka"
