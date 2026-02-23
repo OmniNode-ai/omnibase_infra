@@ -78,16 +78,24 @@ async def _publish_event(
     Returns True on success, False if Kafka is unreachable or times out.
     """
     try:
+        from omnibase_core.container import ModelONEXContainer
+        from omnibase_infra.event_bus.adapters import AdapterProtocolEventPublisherKafka
         from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 
         bus = EventBusKafka.default()
         await asyncio.wait_for(bus.start(), timeout=_KAFKA_TIMEOUT_SECONDS)
         try:
+            container = ModelONEXContainer()
+            adapter = AdapterProtocolEventPublisherKafka(
+                container=container,
+                bus=bus,
+                service_name="onex-linear-relay",
+            )
             success = await asyncio.wait_for(
-                bus.publish(
-                    topic=TOPIC_LINEAR_SNAPSHOT_EVENT,
-                    message=json.dumps(event).encode("utf-8"),
-                    key=partition_key.encode("utf-8"),
+                adapter.publish(
+                    event_type=TOPIC_LINEAR_SNAPSHOT_EVENT,
+                    payload=event,
+                    partition_key=partition_key,
                 ),
                 timeout=_KAFKA_TIMEOUT_SECONDS,
             )
@@ -123,14 +131,15 @@ def _build_event(
         JsonType event payload dict.
     """
     raw_workstreams = snapshot_data.get("workstreams", [])
-    workstreams: list[str] = (
+    workstreams_list: list[str] = (
         [str(w) for w in raw_workstreams] if isinstance(raw_workstreams, list) else []
     )
+    workstreams_value: JsonType = list(workstreams_list)
 
     return {
         "event_type": TOPIC_LINEAR_SNAPSHOT_EVENT,
         "snapshot_id": snapshot_id,
-        "workstreams": workstreams,
+        "workstreams": workstreams_value,
         "snapshot": snapshot_data,
         "emitted_at": datetime.now(tz=UTC).isoformat(),
     }

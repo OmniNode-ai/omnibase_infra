@@ -37,10 +37,26 @@ from __future__ import annotations
 import logging
 import os
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 
 import httpx
 
 from omnibase_core.types import JsonType
+
+
+class ProtocolEventPublisherBase(Protocol):
+    """Minimal protocol for the event publisher used by HandlerGitHubApiPoll."""
+
+    async def publish(
+        self,
+        event_type: str,
+        payload: JsonType,
+        partition_key: str | None = None,
+    ) -> bool:
+        """Publish an event; returns True on success."""
+        ...
+
+
 from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_poller_config import (
     ModelGitHubPollerConfig,
 )
@@ -58,7 +74,7 @@ TriageState = str
 
 _BLOCKING_LABELS = frozenset({"blocked", "do-not-merge", "wip"})
 
-__all__ = ["HandlerGitHubApiPoll", "compute_triage_state"]
+__all__ = ["HandlerGitHubApiPoll", "ProtocolEventPublisherBase", "compute_triage_state"]
 
 
 def compute_triage_state(
@@ -102,9 +118,7 @@ def compute_triage_state(
 
     # 2. blocked — any blocking label present
     raw_labels = pr.get("labels", [])
-    labels: list[dict[str, JsonType]] = (
-        raw_labels if isinstance(raw_labels, list) else []
-    )
+    labels = raw_labels if isinstance(raw_labels, list) else []
     label_names = {
         str(lbl.get("name", "")).lower() for lbl in labels if isinstance(lbl, dict)
     }
@@ -178,7 +192,7 @@ class HandlerGitHubApiPoll:
 
     def __init__(
         self,
-        publisher: object,
+        publisher: ProtocolEventPublisherBase,
         api_base: str = GITHUB_API_BASE,
         http_timeout: float = 15.0,
     ) -> None:
@@ -255,7 +269,7 @@ class HandlerGitHubApiPoll:
         partition_key: str,
     ) -> bool:
         """Publish a single event via the publisher."""
-        result = await self._publisher.publish(  # type: ignore[union-attr]
+        result = await self._publisher.publish(
             event_type="onex.evt.github.pr-status.v1",
             payload=event_payload,
             partition_key=partition_key,
@@ -288,14 +302,15 @@ class HandlerGitHubApiPoll:
                 continue
             try:
                 # Augment with combined status and review states
+                head = pr.get("head", {})
+                sha = str(head.get("sha", "")) if isinstance(head, dict) else ""
                 pr["combined_status"] = await self._get_combined_status(
-                    client,
-                    repo,
-                    str(pr.get("head", {}) and pr["head"]),  # type: ignore[arg-type]
+                    client, repo, sha
                 )
-                pr["review_states"] = await self._get_review_states(
+                review_states_raw = await self._get_review_states(
                     client, repo, pr_number
                 )
+                pr["review_states"] = list(review_states_raw)
 
                 triage = compute_triage_state(pr, stale_hours)
                 partition_key = f"{repo}:{pr_number}"

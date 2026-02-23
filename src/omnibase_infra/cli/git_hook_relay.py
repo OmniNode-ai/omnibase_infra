@@ -148,16 +148,24 @@ async def _publish_event(
     The timeout ensures the CLI never blocks git operations.
     """
     try:
+        from omnibase_core.container import ModelONEXContainer
+        from omnibase_infra.event_bus.adapters import AdapterProtocolEventPublisherKafka
         from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 
         bus = EventBusKafka.default()
         await asyncio.wait_for(bus.start(), timeout=_KAFKA_TIMEOUT_SECONDS)
         try:
+            container = ModelONEXContainer()
+            adapter = AdapterProtocolEventPublisherKafka(
+                container=container,
+                bus=bus,
+                service_name="onex-git-hook-relay",
+            )
             success = await asyncio.wait_for(
-                bus.publish(
-                    topic=TOPIC_GIT_HOOK_EVENT,
-                    message=json.dumps(event).encode("utf-8"),
-                    key=partition_key.encode("utf-8"),
+                adapter.publish(
+                    event_type=TOPIC_GIT_HOOK_EVENT,
+                    payload=event,
+                    partition_key=partition_key,
                 ),
                 timeout=_KAFKA_TIMEOUT_SECONDS,
             )
@@ -184,6 +192,7 @@ def _build_event(params: ModelGitHookEmitParams) -> JsonType:
     Returns:
         JsonType event payload dict.
     """
+    gates_json_value: JsonType = list(params.gates)
     return {
         "event_type": TOPIC_GIT_HOOK_EVENT,
         "hook": params.hook,
@@ -191,7 +200,7 @@ def _build_event(params: ModelGitHookEmitParams) -> JsonType:
         "branch": params.branch,
         "author": params.author,
         "outcome": params.outcome,
-        "gates": params.gates,
+        "gates": gates_json_value,
         "correlation_id": str(uuid4()),
         "emitted_at": datetime.now(tz=UTC).isoformat(),
     }
@@ -281,7 +290,7 @@ def cli(ctx: click.Context, bootstrap_servers: str) -> None:
     help="Path to JSON file containing gate names array.",
 )
 @click.pass_context
-def emit(ctx: click.Context, **kwargs: object) -> None:  # type: ignore[misc]
+def emit(ctx: click.Context, /, **kwargs: object) -> None:
     """Emit a git hook event to Kafka.
 
     Provide gate names via --gates-json or --gates-file (mutually exclusive).
