@@ -255,7 +255,7 @@ class InfraConnectionError(RuntimeHostError):
     in the context:
         - DATABASE -> DATABASE_CONNECTION_ERROR
         - HTTP, GRPC -> NETWORK_ERROR
-        - KAFKA, CONSUL, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP -> SERVICE_UNAVAILABLE
+        - KAFKA, CONSUL, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP, LLM -> SERVICE_UNAVAILABLE
         - None (no context) -> SERVICE_UNAVAILABLE
 
     Example:
@@ -306,6 +306,7 @@ class InfraConnectionError(RuntimeHostError):
         EnumInfraTransportType.MCP: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.QDRANT: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.GRAPH: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
+        EnumInfraTransportType.LLM: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         None: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
     }
 
@@ -322,7 +323,7 @@ class InfraConnectionError(RuntimeHostError):
             Appropriate EnumCoreErrorCode for the transport type:
                 - DATABASE -> DATABASE_CONNECTION_ERROR
                 - HTTP, GRPC -> NETWORK_ERROR
-                - KAFKA, CONSUL, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP, None -> SERVICE_UNAVAILABLE
+                - KAFKA, CONSUL, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP, LLM, None -> SERVICE_UNAVAILABLE
         """
         if context is None:
             return cls._TRANSPORT_ERROR_CODE_MAP[None]

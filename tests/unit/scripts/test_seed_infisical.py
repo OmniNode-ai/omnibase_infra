@@ -123,7 +123,7 @@ metadata:
 
         reqs, _errors = seed._extract_requirements(tmp_path)
         assert len(reqs) > 0
-        assert any(r["key"] == "POSTGRES_DSN" for r in reqs)
+        assert any(r["key"] == "POSTGRES_HOST" for r in reqs)
         assert any(r["transport_type"] == "db" for r in reqs)
 
     def test_extract_empty_dir(self, tmp_path: Path) -> None:
