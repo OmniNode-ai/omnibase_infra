@@ -88,8 +88,11 @@ class TestConfigPrefetcher:
             contract_paths=(Path("/test/contract.yaml"),),
         )
 
-    def test_prefetch_database_keys(self) -> None:
+    def test_prefetch_database_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Should prefetch database transport keys."""
+        monkeypatch.delenv("POSTGRES_HOST", raising=False)
+        monkeypatch.delenv("POSTGRES_PORT", raising=False)
+        monkeypatch.delenv("POSTGRES_USER", raising=False)
         handler = self._make_handler(secrets={"POSTGRES_HOST": "db.example.com"})
         prefetcher = ConfigPrefetcher(handler=handler)
         reqs = self._make_requirements(
@@ -102,8 +105,11 @@ class TestConfigPrefetcher:
         assert "POSTGRES_HOST" in result.resolved
         assert result.resolved["POSTGRES_HOST"].get_secret_value() == "db.example.com"
 
-    def test_prefetch_missing_keys(self) -> None:
+    def test_prefetch_missing_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Should report missing keys when handler returns None."""
+        monkeypatch.delenv("POSTGRES_HOST", raising=False)
+        monkeypatch.delenv("POSTGRES_PORT", raising=False)
+        monkeypatch.delenv("POSTGRES_USER", raising=False)
         handler = self._make_handler(secrets={})
         prefetcher = ConfigPrefetcher(handler=handler)
         reqs = self._make_requirements(
