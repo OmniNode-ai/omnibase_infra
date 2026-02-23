@@ -162,6 +162,7 @@ class TestConfigSessionStorageAliasChoices:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Verify that pool_min_size > pool_max_size raises ValidationError."""
+        monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")
         with pytest.raises(ValidationError):
             ConfigSessionStorage(pool_min_size=10, pool_max_size=5)

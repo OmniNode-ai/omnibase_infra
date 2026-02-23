@@ -184,6 +184,7 @@ A local review cycle (23 iterations, 41 `fix(review):` commits) was run against 
 In priority order:
 
 1. **Open PR for this branch** — all hooks pass, 43 commits, ready for review.
+   > **Note:** P0 enforcement tasks (adding the `no-env-file` pre-commit hook and removing `.env` from `validate_clean_root.py`) must land before or immediately after this branch merges to close the enforcement gap. Without P0, the zero-repo-env policy is active but unenforced — developers could commit a `.env` file and the hook would not catch it.
 2. **P0 enforcement (separate PR)** — add `no-env-file` pre-commit hook and remove `.env` from `validate_clean_root.py`. These are independent of this branch and should not be blocked on it.
 3. **Smoke test (P5)** — start the compose stack with `--env-file ~/.omnibase/.env` and no repo `.env`. Verify `ConfigSessionStorage` instantiates correctly from shell env. See `docs/plans/2026-02-21-zero-repo-env-files.md` Task 9 for the step-by-step.
 4. **Delete repo `.env`** — only after smoke test passes. Run `~/.omnibase/scripts/onboard-repo.py` first (dry-run, then `--apply`) to strip shared keys from omniclaude, omniintelligence, omnidash.

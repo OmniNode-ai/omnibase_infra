@@ -124,11 +124,20 @@ class ConfigSessionStorage(BaseSettings):
     )
 
     # Query timeouts
+    # AliasChoices maps QUERY_TIMEOUT_SECONDS (existing primary env var) first,
+    # then POSTGRES_QUERY_TIMEOUT_SECONDS as a forward-compat alias in case the key
+    # gains a POSTGRES_ prefix in a future shared_key_registry.yaml rename.
+    # The primary alias QUERY_TIMEOUT_SECONDS must remain first so existing env
+    # configs continue to work without any changes.
     query_timeout_seconds: int = Field(
         default=30,
         ge=1,
         le=300,
-        description="Query timeout in seconds",
+        description="Query timeout in seconds (env: QUERY_TIMEOUT_SECONDS or POSTGRES_QUERY_TIMEOUT_SECONDS)",
+        validation_alias=AliasChoices(
+            "QUERY_TIMEOUT_SECONDS",
+            "POSTGRES_QUERY_TIMEOUT_SECONDS",  # forward-compat alias
+        ),
     )
 
     @model_validator(mode="after")

@@ -290,6 +290,9 @@ def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
         )
         raise SystemExit(1)
 
+    # Both command entry points pre-validate INFISICAL_PROJECT_ID UUID format and return 1
+    # before reaching here. This re-validates as defense-in-depth for non-command callers;
+    # it produces a SystemExit (not return 1) for callers that bypass entry-point validation.
     try:
         project_uuid = UUID(project_id)
     except ValueError:
@@ -297,7 +300,7 @@ def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
             f"ERROR: INFISICAL_PROJECT_ID is not a valid UUID: {project_id!r}\n"
             "Check the INFISICAL_PROJECT_ID value in ~/.omnibase/.env or your shell environment.\n"
             "The expected format is: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-        ) from None
+        )
     config = ModelInfisicalAdapterConfig(
         host=infisical_addr,
         client_id=SecretStr(client_id),
@@ -564,6 +567,12 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                 )
                 counts[outcome] += 1
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)
+                if key == "KAFKA_GROUP_ID" and outcome in ("created", "updated"):
+                    logger.warning(
+                        "  KAFKA_GROUP_ID seeded to /shared/kafka/ as a placeholder default.\n"
+                        "  Each service MUST override this at /services/<repo>/kafka/KAFKA_GROUP_ID\n"
+                        "  to avoid shared consumer group collisions."
+                    )
             except Exception as exc:
                 # Intentionally continues on non-auth errors: seed remaining keys even if one fails.
                 # Auth errors (unauthorized, forbidden, invalid token, etc.) abort the loop
@@ -595,6 +604,18 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                 counts[outcome] += 1
                 logger.info("  [%s] %s%s (placeholder)", outcome.upper(), folder, key)
             except Exception as exc:
+                # Mirror the auth-abort logic from the plan loop above: auth failures
+                # must not be silently swallowed — they indicate a systemic credential
+                # problem and the entire seed run should stop immediately.
+                err_msg = str(exc).lower()
+                if any(indicator in err_msg for indicator in _AUTH_INDICATORS):
+                    logger.exception(
+                        "Authentication failure seeding %s%s — aborting: %s",
+                        folder,
+                        key,
+                        sanitize(exc),
+                    )
+                    raise
                 counts["error"] += 1
                 logger.warning(
                     "  [ERROR placeholder] %s%s: %s", folder, key, sanitize(exc)
