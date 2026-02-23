@@ -103,6 +103,8 @@ _SENSITIVE_KEY_PATTERNS = frozenset(
         "AUTH",
         "CERT",
         "PEM",
+        "_PAT",
+        "WEBHOOK",
     }
 )
 
