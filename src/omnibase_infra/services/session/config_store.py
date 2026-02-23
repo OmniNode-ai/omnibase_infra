@@ -146,7 +146,13 @@ class ConfigSessionStorage(BaseSettings):
         description="Query timeout in seconds (env: QUERY_TIMEOUT_SECONDS or POSTGRES_QUERY_TIMEOUT_SECONDS)",
         validation_alias=AliasChoices(
             "QUERY_TIMEOUT_SECONDS",
-            "POSTGRES_QUERY_TIMEOUT_SECONDS",  # forward-compat alias
+            # POSTGRES_QUERY_TIMEOUT_SECONDS is a provisional forward-compat alias only.
+            # It is NOT seeded in Infisical (/shared/db/ holds QUERY_TIMEOUT_SECONDS, not
+            # this prefixed variant) and does NOT appear in config/shared_key_registry.yaml
+            # or runtime/config_discovery/transport_config_map.py.  If QUERY_TIMEOUT_SECONDS
+            # is ever renamed in the registry, this alias should be promoted to primary and
+            # the old name retired.
+            "POSTGRES_QUERY_TIMEOUT_SECONDS",  # forward-compat alias — not in registry/Infisical
         ),
     )
 

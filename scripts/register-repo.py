@@ -195,7 +195,13 @@ def _bootstrap_keys(
         raise ValueError(
             f"[ERROR] registry 'bootstrap_only' entries must be strings in {_REGISTRY_PATH}"
         )
-    return frozenset(keys)
+    result = frozenset(keys)
+    assert "POSTGRES_PASSWORD" in result, (
+        "POSTGRES_PASSWORD must always be in bootstrap_only keys — "
+        "it is a circular-startup-dep that must never be seeded into Infisical. "
+        "Check config/shared_key_registry.yaml bootstrap_only section."
+    )
+    return result
 
 
 def _identity_defaults(
@@ -383,26 +389,32 @@ def _upsert_secret(
     sanitize: Callable[[Exception], str],
 ) -> str:
     """Create or update a secret. Returns 'created', 'updated', or 'skipped'."""
-    from omnibase_infra.errors import SecretResolutionError
+    from omnibase_infra.errors import RuntimeHostError, SecretResolutionError
 
     existing = None
     try:
         existing = adapter.get_secret(secret_name=key, secret_path=folder)  # type: ignore[attr-defined]
-    except SecretResolutionError as _get_exc:
+    except RuntimeHostError as _get_exc:
+        # The adapter may raise either:
+        #   - A RuntimeHostError subclass that is NOT SecretResolutionError
+        #     (e.g. InfraAuthenticationError, InfraTimeoutError,
+        #     InfraUnavailableError).  These are infrastructure failures that
+        #     the outer loop must handle — re-raise immediately so the caller
+        #     can abort the seed run.  The auth-indicator string check below
+        #     would be dead code for these typed errors without this guard.
+        #   - SecretResolutionError (a RuntimeHostError subclass) for two cases:
+        #       1. "Adapter not initialized" — programming error, re-raise.
+        #       2. "Secret not found" — treat as None so we can create it.
+        if not isinstance(_get_exc, SecretResolutionError):
+            raise  # infrastructure failure — let the outer loop handle it
+
+        # We are now handling SecretResolutionError only.
+        #
         # Only suppress the error when the secret genuinely does not exist yet.
         # Re-raise for any exception that indicates a connection problem, auth
         # failure, or other infrastructure error — those must not be silently
         # swallowed, because the subsequent create_secret call will also fail
         # and the root cause will be lost.
-        #
-        # The auth-indicator check at step 1 is the authoritative guard here.
-        # The adapter is expected to re-raise InfraAuthenticationError, InfraTimeoutError,
-        # and InfraUnavailableError directly (see adapter_infisical.py), but even if the
-        # adapter wraps those, the indicator check above will catch them.
-        # We only reach here for SecretResolutionError, which the adapter uses
-        # for two cases:
-        #   1. "Adapter not initialized" — should re-raise (programming error)
-        #   2. "Secret not found" — treat as None so we can create it below
         #
         # WORKAROUND: The Infisical Python SDK does not expose typed error
         # codes (e.g. an HTTP status attribute or a structured exception
@@ -449,6 +461,12 @@ def _upsert_secret(
                 or "does not exist" in cause_msg
             )
         if not is_not_found:
+            # Three cases reach this raise:
+            #   1. "Adapter not initialized" — programming error (adapter.initialize() was not called).
+            #   2. Auth/connection failure — not caught by the auth-indicator check above
+            #      (e.g. SDK wraps the HTTP error without standard auth wording).
+            #   3. Any other unexpected SecretResolutionError that is not "not found".
+            # All three must propagate; only the "not found" branch (is_not_found=True) is safe to swallow.
             raise  # Re-raise: not-initialized / unexpected error
 
     if existing is not None:
@@ -575,7 +593,11 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                 )
                 counts[outcome] += 1
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)
-                if key == "KAFKA_GROUP_ID" and outcome in ("created", "updated"):
+                if key == "KAFKA_GROUP_ID" and outcome in (
+                    "created",
+                    "updated",
+                    "skipped",
+                ):
                     logger.warning(
                         "  KAFKA_GROUP_ID seeded to /shared/kafka/ as a placeholder default.\n"
                         "  Each service MUST override this at /services/<repo>/kafka/KAFKA_GROUP_ID\n"
@@ -715,6 +737,9 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     }
     bootstrap = _bootstrap_keys(registry_data)
     identity = _identity_defaults(registry_data)
+    # Build a set of keys already in the plan (from REPO_SECRET_KEYS) for O(1)
+    # duplicate detection.  Without this, the inner check would be O(n*m).
+    planned_keys: set[str] = {pk for _, pk, _ in plan}
     extra: list[tuple[str, str, str]] = []
     for key, value in env_values.items():
         if key in bootstrap:
@@ -723,7 +748,7 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
             continue
         if key in shared_keys_flat:
             continue
-        if any(key == pk for _, pk, _ in plan):
+        if key in planned_keys:
             continue
         extra.append((f"{path_prefix}/env/", key, value))
 

@@ -182,6 +182,19 @@ class TestConfigSessionStorageAliasChoices:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Verify that pool_min_size > pool_max_size raises ValidationError."""
+        for key in (
+            "POSTGRES_HOST",
+            "POSTGRES_PORT",
+            "POSTGRES_USER",
+            "POSTGRES_DATABASE",
+            "POSTGRES_POOL_MIN_SIZE",
+            "POSTGRES_POOL_MAX_SIZE",
+            "POSTGRES_POOL_MIN",
+            "POSTGRES_POOL_MAX",
+            "QUERY_TIMEOUT_SECONDS",
+            "POSTGRES_QUERY_TIMEOUT_SECONDS",
+        ):
+            monkeypatch.delenv(key, raising=False)
         monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")
         with pytest.raises(ValidationError):

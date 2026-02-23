@@ -40,7 +40,8 @@ shared:
     - QUERY_TIMEOUT_SECONDS
   "/shared/kafka/":
     # KAFKA_HOST_SERVERS intentionally excluded — removed as dead code (see commit 45f6ae65)
-    # WARNING: services MUST override this per /services/<repo>/kafka/KAFKA_GROUP_ID — shared consumer groups break message delivery
+    # Placeholder: each service MUST set /services/<repo>/kafka/KAFKA_GROUP_ID via onboard-repo.
+    # Shared consumer groups cause unintended load-balancing across topics — never rely on this shared value in production.
     - KAFKA_GROUP_ID
     - KAFKA_ACKS
     - KAFKA_REQUEST_TIMEOUT_MS
@@ -117,6 +118,7 @@ bootstrap_only:
   # If upgrading from a prior Infisical seed: delete the stale
   # /shared/kafka/KAFKA_BOOTSTRAP_SERVERS entry from Infisical manually
   # (one-time cleanup; tracked in docs/plans/2026-02-21-zero-repo-env-files.md).
+  # Infisical path to delete if migrating to bootstrap-only: /shared/kafka/KAFKA_BOOTSTRAP_SERVERS
   - KAFKA_BOOTSTRAP_SERVERS
   # [circular-startup-dep] Infisical connection details — needed to reach Infisical
   # itself; cannot be fetched from Infisical.
