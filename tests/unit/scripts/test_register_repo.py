@@ -21,13 +21,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "scripts"
-# scripts/ is appended to sys.path at module import time so importlib can
-# find 'register-repo' by filename. This sys.path modification is a side-effect
-# of loading this test module and persists for the entire test session.
-# Hyphenated names can't shadow normal imports (not valid Python identifiers),
-# so the insertion does not conflict with any other importable module.
-# append() is used instead of insert(0, ...) to avoid giving scripts/ highest
-# priority in module resolution, which could shadow stdlib or installed packages.
+# Accepted risk: sys.path.append() at module import time persists for the entire
+# test session (there is no cleanup).  This is a deliberate decision because
+# hyphenated module names (like 'register-repo') are not valid Python identifiers
+# and therefore cannot be imported by any other module via a normal `import`
+# statement.  They cannot shadow stdlib, installed packages, or any other
+# importable name in sys.path.  The risk of import confusion is negligible.
+# append() (not insert(0, ...)) is used so scripts/ gets lowest priority in
+# module resolution, further reducing any hypothetical conflict.
 sys.path.append(str(_SCRIPTS_DIR))
 
 

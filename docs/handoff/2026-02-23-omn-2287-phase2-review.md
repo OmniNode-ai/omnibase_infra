@@ -167,8 +167,8 @@ A local review cycle (23 iterations, 41 `fix(review):` commits) was run against 
 
 | Priority | Status | Task | Linear Ticket |
 |----------|--------|------|---------------|
-| P0 | **NOT DONE** | Remove `.env` from `validate_clean_root.py` allowed files | **REQUIRED — create before PR review** |
-| P0 | **NOT DONE** | Add `no-env-file` pre-commit hook | **REQUIRED — create before PR review** |
+| P0 | **NOT DONE** | Remove `.env` from `validate_clean_root.py` allowed files | [OMN-2662](https://linear.app/omninode/issue/OMN-2662) |
+| P0 | **NOT DONE** | Add `no-env-file` pre-commit hook | [OMN-2663](https://linear.app/omninode/issue/OMN-2663) |
 | P5 | **PENDING** | Smoke test: verify services boot without repo `.env` |
 | — | **PENDING** | Delete repo `.env` (only after smoke test passes) |
 | — | **PENDING** | Run `onboard-repo` for omniclaude, omniintelligence, omnidash |

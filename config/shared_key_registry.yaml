@@ -102,6 +102,10 @@ shared:
     - Z_AI_API_URL
     - SERVICE_AUTH_TOKEN
     - GH_PAT
+  # NOT prefetched by ConfigPrefetcher — the prefetch pipeline is not yet wired
+  # to call prefetch_for_contracts() at runtime, so VALKEY keys resolve via shell
+  # env fallback only.  (EnumInfraTransportType.VALKEY and the transport_config_map
+  # entry exist; the gap is in the runtime wiring, not the enum or map.)
   "/shared/valkey/":
     - VALKEY_HOST
     - VALKEY_PORT

@@ -120,6 +120,12 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
     ),
     EnumInfraTransportType.INMEMORY: (),
     EnumInfraTransportType.RUNTIME: (),
+    # NOTE: All enum members above have transport map entries, but ConfigPrefetcher
+    # is not yet wired to call prefetch_for_contracts() at runtime (OMN-2287 P5).
+    # As a result, ALL transport keys — including VALKEY, AUTH (/shared/auth/), and
+    # ENV (/shared/env/) — currently resolve via shell env fallback only.
+    # The /shared/valkey/, /shared/auth/, and /shared/env/ sections in
+    # shared_key_registry.yaml document this gap with per-section notes.
 }
 
 
