@@ -52,9 +52,10 @@ def _make_dry_run_args(env_file: str) -> argparse.Namespace:
 class TestCmdSeedSharedPreflightValidation:
     """cmd_seed_shared validates INFISICAL_ADDR before the dry-run gate.
 
-    The comment at line ~623 of register-repo.py explicitly documents that
-    seed-shared requires a live Infisical instance even for dry-run preview
-    (to read back existing keys).  Operators with INFISICAL_ADDR unset must
+    Validation fires before the dry-run gate as a usability guard (early
+    failure so the operator sees a misconfiguration immediately).  Dry-run
+    itself never contacts Infisical — it exits after printing the plan
+    without any network calls.  Operators with INFISICAL_ADDR unset must
     receive a clear error, not a silent zero exit.
     """
 
