@@ -745,6 +745,9 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         raise SystemExit(1)
+    # Entry-point validation: return 1 on bad UUID (user input error, no stacktrace).
+    # _load_infisical_adapter() repeats this check as defense-in-depth and raises
+    # SystemExit (not return 1) to abort callers that bypass entry-point pre-flight.
     try:
         UUID(project_id)
     except ValueError:
@@ -980,6 +983,9 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
             "Set it in your environment or ~/.omnibase/.env before running onboard-repo. "
             "You can find the project ID after running scripts/provision-infisical.py."
         )
+    # Entry-point validation: return 1 on bad UUID (user input error, no stacktrace).
+    # _load_infisical_adapter() repeats this check as defense-in-depth and raises
+    # SystemExit (not return 1) to abort callers that bypass entry-point pre-flight.
     try:
         UUID(project_id)
     except ValueError:

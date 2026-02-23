@@ -93,6 +93,7 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
         "LLM_CODER_FAST_URL",
         "LLM_EMBEDDING_URL",
         "LLM_DEEPSEEK_R1_URL",
+        # "LLM_SMALL_URL",  # Port TBD — add when port is assigned (Qwen2.5-Coder-7B MLX)
         "ONEX_TREE_SERVICE_URL",
         "METADATA_STAMPING_SERVICE_URL",
     ),
