@@ -477,11 +477,11 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                                 await conn.execute(
                                     """
                                     INSERT INTO llm_cost_aggregates (
-                                        aggregation_key, window,
+                                        aggregation_key, "window",
                                         total_cost_usd, total_tokens, call_count,
                                         estimated_coverage_pct
                                     ) VALUES ($1, $2::cost_aggregation_window, $3, $4, $5, $6)
-                                    ON CONFLICT (aggregation_key, window)
+                                    ON CONFLICT (aggregation_key, "window")
                                     DO UPDATE SET
                                         total_cost_usd = llm_cost_aggregates.total_cost_usd + EXCLUDED.total_cost_usd,
                                         total_tokens = llm_cost_aggregates.total_tokens + EXCLUDED.total_tokens,
