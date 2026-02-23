@@ -57,7 +57,8 @@ class ConfigSessionStorage(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="",
-        env_file=None,  # No .env file — reads from shell env (sourced via ~/.omnibase/.env)
+        env_file=None,  # Disable .env file discovery — reads from process env only (sourced via ~/.omnibase/.env).
+        # A .env file in the CWD would NOT be read even if present.
         # case_sensitive=False: POSTGRES_HOST, postgres_host, and Postgres_Host
         # all resolve the same field. This is intentional — shell env conventions vary.
         case_sensitive=False,

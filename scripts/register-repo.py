@@ -528,13 +528,16 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
     try:
         UUID(project_id)
     except ValueError:
-        logger.exception("INFISICAL_PROJECT_ID is not a valid UUID: %s", project_id)
+        # ValueError here is user input, not a system error — no stacktrace needed
+        logger.error("INFISICAL_PROJECT_ID is not a valid UUID: %s", project_id)  # noqa: TRY400
         return 1
 
     print("\nWriting to Infisical...")
     try:
         adapter, sanitize = _load_infisical_adapter()
     except SystemExit as e:
+        # Integer exit codes (e.g. SystemExit(1)) are not printed — the preceding
+        # logger.error already describes the failure. Only string messages add context.
         if isinstance(e.code, str):
             print(e.code, file=sys.stderr)
         return 1
@@ -572,6 +575,7 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                     sanitize=sanitize,
                 )
                 counts[outcome] += 1
+                logger.info("  [%s] %s%s (placeholder)", outcome.upper(), folder, key)
             except Exception as exc:
                 counts["error"] += 1
                 logger.warning(
@@ -683,7 +687,8 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     try:
         UUID(project_id)
     except ValueError:
-        logger.exception("INFISICAL_PROJECT_ID is not a valid UUID: %s", project_id)
+        # ValueError here is user input, not a system error — no stacktrace needed
+        logger.error("INFISICAL_PROJECT_ID is not a valid UUID: %s", project_id)  # noqa: TRY400
         return 1
 
     # Need admin token to create folders
@@ -720,6 +725,8 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     try:
         adapter, sanitize = _load_infisical_adapter()
     except SystemExit as e:
+        # Integer exit codes (e.g. SystemExit(1)) are not printed — the preceding
+        # logger.error already describes the failure. Only string messages add context.
         if isinstance(e.code, str):
             print(e.code, file=sys.stderr)
         return 1

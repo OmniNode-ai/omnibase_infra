@@ -115,9 +115,21 @@ class TestConfigSessionStorageAliasChoices:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Direct kwarg construction bypasses env var resolution and uses the value directly."""
+        # Clear ambient POSTGRES_* env vars so CI environments with these set
+        # do not silently influence AliasChoices resolution and make the assertion
+        # pass for the wrong reason (e.g. ambient POSTGRES_POOL_MIN_SIZE=5).
+        for key in (
+            "POSTGRES_HOST",
+            "POSTGRES_PORT",
+            "POSTGRES_USER",
+            "POSTGRES_DATABASE",
+            "POSTGRES_POOL_MIN_SIZE",
+            "POSTGRES_POOL_MAX_SIZE",
+            "POSTGRES_POOL_MIN",
+            "POSTGRES_POOL_MAX",
+        ):
+            monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")  # required field
-        monkeypatch.delenv("POSTGRES_POOL_MIN_SIZE", raising=False)
-        monkeypatch.delenv("POSTGRES_POOL_MAX_SIZE", raising=False)
         config = ConfigSessionStorage(
             pool_min_size=5,
             pool_max_size=15,
@@ -131,6 +143,9 @@ class TestConfigSessionStorageAliasChoices:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Verify that missing POSTGRES_PASSWORD raises ValidationError."""
+        # Explicitly clear POSTGRES_PASSWORD so an ambient value from the test
+        # runner (e.g. ~/.omnibase/.env sourced in shell) does not satisfy the
+        # required field and make the test pass for the wrong reason.
         monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
         with pytest.raises(ValidationError):
             ConfigSessionStorage()
