@@ -88,6 +88,7 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
         "QDRANT_HOST",
         "QDRANT_PORT",
         "QDRANT_API_KEY",
+        "QDRANT_URL",
     ),
     EnumInfraTransportType.GRAPH: (
         "GRAPH_HOST",

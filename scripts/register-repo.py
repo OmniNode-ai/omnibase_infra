@@ -410,10 +410,7 @@ def _upsert_secret(
         # Step 2: Determine if this is "secret not found" (only reached when
         # no auth indicator was detected above).
         is_not_found = (
-            "not found" in err_msg
-            or "404" in err_msg
-            or "does not exist" in err_msg
-            or "secret not found" in err_msg
+            "not found" in err_msg or "404" in err_msg or "does not exist" in err_msg
         )
         if not is_not_found and cause_msg:
             # top-level wasn't "not found" — check if cause says "not found"
@@ -421,7 +418,6 @@ def _upsert_secret(
                 "not found" in cause_msg
                 or "404" in cause_msg
                 or "does not exist" in cause_msg
-                or "secret not found" in cause_msg
             )
         if not is_not_found:
             raise  # Re-raise: not-initialized / unexpected error

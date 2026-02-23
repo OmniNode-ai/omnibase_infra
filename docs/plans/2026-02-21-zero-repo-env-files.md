@@ -604,6 +604,21 @@ SLACK_BOT_TOKEN=
 SLACK_CHANNEL_ID=
 ```
 
+> **Migration note for operators who have already run `seed-shared --execute`:** The registry
+> has since grown. Re-run the seed to pick up new keys that were not present in the original run:
+>
+> - `/shared/valkey/VALKEY_HOST`, `/shared/valkey/VALKEY_PORT`, `/shared/valkey/VALKEY_DB` —
+>   the initial template listed only `VALKEY_PASSWORD`; the other three valkey keys were added
+>   to the registry afterward.
+> - `/shared/qdrant/QDRANT_URL` — added to the registry after the initial seed run; the original
+>   qdrant section had only `QDRANT_HOST`, `QDRANT_PORT`, and `QDRANT_API_KEY`.
+>
+> Re-seed command (only writes missing keys by default; use `--overwrite` to update existing):
+> ```bash
+> set -a; source ~/.omnibase/.env; set +a
+> uv run python scripts/register-repo.py seed-shared --execute
+> ```
+
 **Step 2: Verify the file is sourced in a new shell**
 
 ```bash
