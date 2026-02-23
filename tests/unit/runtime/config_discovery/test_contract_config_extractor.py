@@ -76,7 +76,7 @@ metadata:
         reqs = self.extractor.extract_from_yaml(contract)
 
         assert EnumInfraTransportType.DATABASE in reqs.transport_types
-        assert any(r.key == "POSTGRES_DSN" for r in reqs.requirements)
+        assert any(r.key == "POSTGRES_HOST" for r in reqs.requirements)
         assert contract in reqs.contract_paths
         assert len(reqs.errors) == 0
 

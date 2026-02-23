@@ -17,8 +17,8 @@ path is ``/shared/db/KEY``.
 Multiple instances of the same transport are handled via service namespacing.
 For example, two PostgreSQL connections (one for the main runtime, one for
 intelligence) would live at:
-    ``/services/omnibase-runtime/db/POSTGRES_DSN``
-    ``/services/omniintelligence/db/POSTGRES_DSN``
+    ``/services/omnibase-runtime/db/POSTGRES_DATABASE``
+    ``/services/omniintelligence/db/POSTGRES_DATABASE``
 
 .. versionadded:: 0.10.0
     Created as part of OMN-2287.
@@ -39,7 +39,9 @@ logger = logging.getLogger(__name__)
 # These represent the standard keys each transport expects in Infisical.
 _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
     EnumInfraTransportType.DATABASE: (
-        "POSTGRES_DSN",
+        "POSTGRES_HOST",
+        "POSTGRES_PORT",
+        "POSTGRES_USER",
         "POSTGRES_POOL_MIN_SIZE",
         "POSTGRES_POOL_MAX_SIZE",
         "POSTGRES_TIMEOUT_MS",
@@ -57,6 +59,17 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
         "CONSUL_ACL_TOKEN",
         "CONSUL_ENABLED",
     ),
+    # INFISICAL is listed here for completeness (so introspection tools can
+    # enumerate all known keys), but these keys MUST NEVER be fetched from
+    # Infisical — they form the bootstrap credentials that Infisical itself
+    # needs to start.  Fetching them from Infisical would create a circular
+    # dependency.
+    #
+    # EnumInfraTransportType.INFISICAL is in _BOOTSTRAP_TRANSPORTS, so
+    # specs_for_transports() and all_shared_specs() already skip it.
+    # If you call keys_for_transport(INFISICAL) directly, check
+    # is_bootstrap_transport(INFISICAL) first and resolve from the
+    # environment (e.g. .env file), NOT from Infisical.
     EnumInfraTransportType.INFISICAL: (
         "INFISICAL_ADDR",
         "INFISICAL_CLIENT_ID",
@@ -73,6 +86,16 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
         "HTTP_BASE_URL",
         "HTTP_TIMEOUT_MS",
         "HTTP_MAX_RETRIES",
+    ),
+    EnumInfraTransportType.LLM: (  # /shared/llm/ — Infisical-sourced, not bootstrap
+        "REMOTE_SERVER_IP",
+        "LLM_CODER_URL",
+        "LLM_CODER_FAST_URL",
+        "LLM_EMBEDDING_URL",
+        "LLM_DEEPSEEK_R1_URL",
+        # "LLM_SMALL_URL",  # Port TBD — add when port is assigned (Qwen2.5-Coder-7B MLX)
+        "ONEX_TREE_SERVICE_URL",
+        "METADATA_STAMPING_SERVICE_URL",
     ),
     EnumInfraTransportType.GRPC: (
         "GRPC_HOST",
@@ -97,6 +120,12 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
     ),
     EnumInfraTransportType.INMEMORY: (),
     EnumInfraTransportType.RUNTIME: (),
+    # NOTE: All enum members above have transport map entries, but ConfigPrefetcher
+    # is not yet wired to call prefetch_for_contracts() at runtime (OMN-2287 P5).
+    # As a result, ALL transport keys — including VALKEY, AUTH (/shared/auth/), and
+    # ENV (/shared/env/) — currently resolve via shell env fallback only.
+    # The /shared/valkey/, /shared/auth/, and /shared/env/ sections in
+    # shared_key_registry.yaml document this gap with per-section notes.
 }
 
 
@@ -119,14 +148,14 @@ class TransportConfigMap:
 
         # Shared config for database (slug "db" from EnumInfraTransportType.DATABASE.value)
         spec = tcm.shared_spec(EnumInfraTransportType.DATABASE)
-        # -> folder=/shared/db/, keys=(POSTGRES_DSN, ...)
+        # -> folder=/shared/db/, keys=(POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, ...)
 
         # Per-service config
         spec = tcm.service_spec(
             EnumInfraTransportType.DATABASE,
             service_slug="omnibase-runtime",
         )
-        # -> folder=/services/omnibase-runtime/db/, keys=(POSTGRES_DSN, ...)
+        # -> folder=/services/omnibase-runtime/db/, keys=(POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, ...)
 
         # All specs for a list of transport types
         specs = tcm.specs_for_transports(
@@ -183,6 +212,21 @@ class TransportConfigMap:
         Returns:
             Tuple of expected key names. Empty tuple for transports
             that have no external configuration (INMEMORY, RUNTIME).
+
+        Warning:
+            ``INFISICAL`` is included in the key map for completeness, but its
+            keys (``INFISICAL_ADDR``, ``INFISICAL_CLIENT_ID``, etc.) must
+            **never** be resolved from Infisical.  They are bootstrap
+            credentials that Infisical needs to start; fetching them from
+            Infisical creates a circular dependency.
+
+            Before calling this method for a transport that originates from
+            contract scanning or dynamic dispatch, check
+            ``is_bootstrap_transport(transport)`` and resolve bootstrap
+            transports from the environment (e.g. ``.env`` file) instead.
+            The higher-level helpers ``specs_for_transports()`` and
+            ``all_shared_specs()`` already skip bootstrap transports
+            automatically.
         """
         return _TRANSPORT_KEYS.get(transport, ())
 

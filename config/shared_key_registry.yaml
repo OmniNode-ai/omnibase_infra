@@ -8,9 +8,8 @@
 #   shared            — eligible for Infisical seeding + repo .env stripping;
 #                       loaded by _load_registry() in scripts/register-repo.py.
 #                       A shared key represents the canonical platform-wide value.
-#                       Some shared keys (e.g. POSTGRES_DSN) may also be seeded
-#                       per-service under /services/<repo>/ via REPO_SECRET_KEYS
-#                       in register-repo.py — those per-service entries are
+#                       Keys may also be seeded per-service under /services/<repo>/
+#                       via REPO_SECRET_KEYS — those per-service entries are
 #                       intentional overrides that take precedence at runtime.
 #   bootstrap_only    — excluded from Infisical seeding (circular bootstrap dep);
 #                       listed here for awareness only; must never be in any repo
@@ -31,14 +30,28 @@ shared:
     - POSTGRES_HOST
     - POSTGRES_PORT
     - POSTGRES_USER
-    # per-service override also seeded via REPO_SECRET_KEYS (see header)
-    - POSTGRES_DSN
+    # POSTGRES_DSN intentionally removed — a shared DSN with a hardcoded
+    # database name silently routes all services to the wrong database.
+    # Each repo sets POSTGRES_DATABASE and builds its own connection string.
     - POSTGRES_POOL_MIN_SIZE
     - POSTGRES_POOL_MAX_SIZE
     - POSTGRES_TIMEOUT_MS
-    - QUERY_TIMEOUT_SECONDS # query-level timeout (seconds); cf. POSTGRES_TIMEOUT_MS (transport-level, ms)
+    # Shared default; override per-service at /services/<repo>/db/
+    - QUERY_TIMEOUT_SECONDS
   "/shared/kafka/":
     # KAFKA_HOST_SERVERS intentionally excluded — removed as dead code (see commit 45f6ae65)
+    #
+    # WARNING: PLACEHOLDER ONLY — DO NOT USE IN PRODUCTION.
+    # KAFKA_GROUP_ID is seeded to /shared/kafka/ solely as a platform-wide placeholder.
+    # Each service MUST override this at /services/<repo>/kafka/KAFKA_GROUP_ID via onboard-repo
+    # before the service starts. Shared consumer groups cause unintended load-balancing across
+    # topics — relying on this shared value in production is a misconfiguration.
+    #
+    # Policy: missing per-service override is an advisory warning (not a hard error) to avoid
+    # blocking onboard-repo when the override has already been set via other means (e.g. manual
+    # Infisical UI). A hard error would be a false positive in that case and would prevent valid
+    # onboarding runs from completing. The warning is sufficient to alert operators who have
+    # not yet set the override.
     - KAFKA_GROUP_ID
     - KAFKA_ACKS
     - KAFKA_REQUEST_TIMEOUT_MS
@@ -50,6 +63,8 @@ shared:
     - CONSUL_ENABLED
   # NOTE: No VAULT transport type in EnumInfraTransportType yet — VAULT_ADDR is seeded
   # but cannot be prefetched via ConfigPrefetcher until VAULT is added to the enum.
+  # TODO: add VAULT to EnumInfraTransportType and transport_config_map.py to enable ConfigPrefetcher support
+  # NOT prefetched by ConfigPrefetcher — no EnumInfraTransportType.VAULT entry; keys resolved via shell env fallback.
   "/shared/vault/":
     # NOTE: VAULT_TOKEN intentionally excluded — it is per-service and must be
     # provisioned per repo under /services/<repo>/vault/VAULT_TOKEN, not shared
@@ -58,17 +73,27 @@ shared:
     # scoped to its required paths.
     - VAULT_ADDR
   "/shared/llm/":
+    # IP of the remote GPU/inference server (used to construct LLM endpoint URLs).
     - REMOTE_SERVER_IP
+    # Canonical LLM endpoint keys (defined in CLAUDE.md LLM topology):
+    #   LLM_CODER_URL        — Qwen3-Coder-30B-A3B AWQ-4bit (RTX 5090, 64K ctx, port 8000)
+    #   LLM_CODER_FAST_URL   — Qwen3-14B-AWQ (RTX 4090, 40K ctx, port 8001)
+    #   LLM_EMBEDDING_URL    — Qwen3-Embedding-8B-4bit (M2 Ultra, port 8100)
+    #   LLM_DEEPSEEK_R1_URL  — DeepSeek-R1-Distill-Qwen-32B-bf16 (M2 Ultra, port 8101)
     - LLM_CODER_URL
     - LLM_CODER_FAST_URL
     - LLM_EMBEDDING_URL
     - LLM_DEEPSEEK_R1_URL
-    - EMBEDDING_MODEL_URL
-    - VLLM_SERVICE_URL
-    - VLLM_DEEPSEEK_URL
-    - VLLM_LLAMA_URL
+    # - LLM_SMALL_URL  # Port TBD — add when port is assigned (Qwen2.5-Coder-7B MLX)
+    # ONEX platform service URLs (not LLM models — kept here as they are co-located
+    # on the same inference infrastructure and share the REMOTE_SERVER_IP base).
+    # TODO: move ONEX_TREE_SERVICE_URL and METADATA_STAMPING_SERVICE_URL to a
+    # /shared/platform/ or /shared/services/ folder in a future cleanup ticket.
+    # They are ONEX microservice URLs, not LLM inference endpoints, and belong in
+    # a dedicated platform transport rather than /shared/llm/.
     - ONEX_TREE_SERVICE_URL
     - METADATA_STAMPING_SERVICE_URL
+  # NOT prefetched by ConfigPrefetcher — no EnumInfraTransportType.AUTH entry; keys resolved via shell env fallback.
   "/shared/auth/":
     - OPENAI_API_KEY
     - GOOGLE_API_KEY
@@ -77,6 +102,10 @@ shared:
     - Z_AI_API_URL
     - SERVICE_AUTH_TOKEN
     - GH_PAT
+  # NOT prefetched by ConfigPrefetcher — the prefetch pipeline is not yet wired
+  # to call prefetch_for_contracts() at runtime, so VALKEY keys resolve via shell
+  # env fallback only.  (EnumInfraTransportType.VALKEY and the transport_config_map
+  # entry exist; the gap is in the runtime wiring, not the enum or map.)
   "/shared/valkey/":
     - VALKEY_HOST
     - VALKEY_PORT
@@ -87,6 +116,7 @@ shared:
     - QDRANT_PORT
     - QDRANT_API_KEY
     - QDRANT_URL
+  # NOT prefetched by ConfigPrefetcher — no EnumInfraTransportType.ENV entry; keys resolved via shell env fallback.
   "/shared/env/":
     - SLACK_WEBHOOK_URL
     - SLACK_BOT_TOKEN
@@ -115,6 +145,7 @@ bootstrap_only:
   # If upgrading from a prior Infisical seed: delete the stale
   # /shared/kafka/KAFKA_BOOTSTRAP_SERVERS entry from Infisical manually
   # (one-time cleanup; tracked in docs/plans/2026-02-21-zero-repo-env-files.md).
+  # Infisical path to delete if migrating to bootstrap-only: /shared/kafka/KAFKA_BOOTSTRAP_SERVERS
   - KAFKA_BOOTSTRAP_SERVERS
   # [circular-startup-dep] Infisical connection details — needed to reach Infisical
   # itself; cannot be fetched from Infisical.
@@ -131,3 +162,11 @@ bootstrap_only:
 # Must NEVER appear in any .env file — hardcoded as default= in Settings classes.
 identity_defaults:
   - POSTGRES_DATABASE
+# Keys that exist in /shared/ as platform-wide defaults but MUST be overridden
+# per-service under /services/<repo>/<transport>/<KEY> before the service starts.
+# Relying on the shared value in production is a misconfiguration.
+# register-repo.py onboard-repo will warn if any of these are absent from the plan.
+service_override_required:
+  # Each service must set its own consumer group ID to avoid unintended
+  # load-balancing across topics when multiple services share a group.
+  - KAFKA_GROUP_ID

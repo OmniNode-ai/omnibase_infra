@@ -35,6 +35,16 @@ class ConfigSessionStorage(BaseSettings):
     intentional trade-off of the zero-repo-env policy; ensure POSTGRES_* variables
     in the shell match the intended session storage target.
 
+    Warning: Ambient environment risk — callers (including tests) that construct
+    ``ConfigSessionStorage()`` without explicitly controlling the process environment
+    may silently pick up POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_DATABASE,
+    or POSTGRES_PASSWORD from an unrelated source (e.g. a CI matrix job, a sourced
+    ~/.omnibase/.env, or a parent test fixture). Always isolate the environment before
+    constructing this class in tests — use ``monkeypatch.delenv`` for every POSTGRES_*
+    field listed in the environment variable mapping above, and ``monkeypatch.setenv``
+    for the values under test. See ``tests/unit/services/session/test_config_store.py``
+    for examples of correct isolation.
+
     Environment variable mapping:
 
     - ``postgres_host``      ← ``POSTGRES_HOST``
@@ -44,9 +54,10 @@ class ConfigSessionStorage(BaseSettings):
     - ``postgres_password``  ← ``POSTGRES_PASSWORD``
     - ``pool_min_size``      ← ``POSTGRES_POOL_MIN_SIZE`` (primary) or ``pool_min_size`` (fallback)
     - ``pool_max_size``      ← ``POSTGRES_POOL_MAX_SIZE`` (primary) or ``pool_max_size`` (fallback)
-    - ``query_timeout_seconds`` ← ``QUERY_TIMEOUT_SECONDS`` (seconds; intentionally
-      distinct from ``POSTGRES_TIMEOUT_MS`` in ``transport_config_map.py``, which is
-      the shared platform key expressed in milliseconds — different unit and scope)
+    - ``query_timeout_seconds`` ← ``QUERY_TIMEOUT_SECONDS`` (primary) or ``query_timeout_seconds`` (fallback);
+      intentionally distinct from ``POSTGRES_TIMEOUT_MS`` in ``transport_config_map.py``, which is
+      the shared platform key expressed in milliseconds — different unit and scope.
+      Resolved via ``AliasChoices("QUERY_TIMEOUT_SECONDS", "query_timeout_seconds")``)
 
     The pool fields use ``AliasChoices`` so that both the canonical shared key
     (e.g. ``POSTGRES_POOL_MIN_SIZE``, as declared in
@@ -57,7 +68,10 @@ class ConfigSessionStorage(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="",
-        env_file=None,  # No .env file — reads from shell env (sourced via ~/.omnibase/.env)
+        env_file=None,  # Disable .env file discovery — reads from process env only (sourced via ~/.omnibase/.env).
+        # A .env file in the CWD would NOT be read even if present.
+        # case_sensitive=False: POSTGRES_HOST, postgres_host, and Postgres_Host
+        # all resolve the same field. This is intentional — shell env conventions vary.
         case_sensitive=False,
         extra="ignore",
         populate_by_name=True,  # Required for AliasChoices on pool fields to pass mypy [pydantic-alias]
@@ -90,7 +104,10 @@ class ConfigSessionStorage(BaseSettings):
     )
     postgres_database: str = Field(
         default="omnibase_infra",
-        description="PostgreSQL database name",
+        description=(
+            "PostgreSQL database name. Default is infra-service specific; "
+            "MUST be overridden via POSTGRES_DATABASE env var for any other service."
+        ),
     )
     postgres_user: str = Field(
         default="postgres",
@@ -125,7 +142,8 @@ class ConfigSessionStorage(BaseSettings):
         default=30,
         ge=1,
         le=300,
-        description="Query timeout in seconds",
+        description="Query timeout in seconds (env: QUERY_TIMEOUT_SECONDS).",
+        validation_alias=AliasChoices("QUERY_TIMEOUT_SECONDS", "query_timeout_seconds"),
     )
 
     @model_validator(mode="after")

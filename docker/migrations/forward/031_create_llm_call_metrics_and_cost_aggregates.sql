@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS llm_cost_aggregates (
 
     -- Aggregation dimensions
     aggregation_key VARCHAR(512) NOT NULL,
-    window cost_aggregation_window NOT NULL,
+    "window" cost_aggregation_window NOT NULL,
 
     -- Aggregated metrics
     total_cost_usd NUMERIC(14, 6) NOT NULL DEFAULT 0,
@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS llm_cost_aggregates (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     -- One row per aggregation_key + window (upsert target)
-    CONSTRAINT unique_aggregation_key_window UNIQUE (aggregation_key, window),
+    CONSTRAINT unique_aggregation_key_window UNIQUE (aggregation_key, "window"),
 
     -- Constraints
     CONSTRAINT non_negative_total_cost_usd CHECK (total_cost_usd >= 0),
@@ -217,7 +217,7 @@ CREATE INDEX IF NOT EXISTS idx_llm_cost_aggregates_aggregation_key
 
 -- Window-based queries (e.g., "all 24h aggregations")
 CREATE INDEX IF NOT EXISTS idx_llm_cost_aggregates_window
-    ON llm_cost_aggregates (window);
+    ON llm_cost_aggregates ("window");
 
 -- Time-based queries and TTL cleanup
 CREATE INDEX IF NOT EXISTS idx_llm_cost_aggregates_updated_at
@@ -301,7 +301,7 @@ COMMENT ON COLUMN llm_cost_aggregates.id IS
     'Auto-generated primary key (UUID)';
 COMMENT ON COLUMN llm_cost_aggregates.aggregation_key IS
     'Composite grouping key (e.g., session:<id>, model:<name>, repo:<path>, pattern:<id>)';
-COMMENT ON COLUMN llm_cost_aggregates.window IS
+COMMENT ON COLUMN llm_cost_aggregates."window" IS
     'Aggregation time window: 24h, 7d, or 30d';
 COMMENT ON COLUMN llm_cost_aggregates.total_cost_usd IS
     'Total estimated cost in USD for this aggregation key and window';

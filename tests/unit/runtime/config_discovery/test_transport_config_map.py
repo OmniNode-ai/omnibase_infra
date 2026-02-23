@@ -26,7 +26,12 @@ class TestTransportConfigMap:
     def test_database_has_keys(self) -> None:
         """DATABASE transport should have standard PostgreSQL keys."""
         keys = TransportConfigMap.keys_for_transport(EnumInfraTransportType.DATABASE)
-        assert "POSTGRES_DSN" in keys
+        assert "POSTGRES_HOST" in keys
+        assert "POSTGRES_PORT" in keys
+        assert "POSTGRES_USER" in keys
+        assert (
+            "POSTGRES_DSN" not in keys
+        )  # intentionally removed — shared DSN silently routes to wrong DB
         assert "POSTGRES_POOL_MIN_SIZE" in keys
         assert "POSTGRES_POOL_MAX_SIZE" in keys
         assert "QUERY_TIMEOUT_SECONDS" in keys
@@ -173,6 +178,15 @@ class TestTransportConfigMap:
         spec = self.tcm.shared_spec(EnumInfraTransportType.DATABASE)
         with pytest.raises(Exception):
             spec.infisical_folder = "/modified/"  # type: ignore[misc]
+
+    def test_llm_has_canonical_keys(self) -> None:
+        """LLM transport should return canonical LLM endpoint keys from CLAUDE.md."""
+        keys = TransportConfigMap.keys_for_transport(EnumInfraTransportType.LLM)
+        assert "LLM_CODER_URL" in keys
+        assert "LLM_CODER_FAST_URL" in keys
+        assert "LLM_EMBEDDING_URL" in keys
+        assert "LLM_DEEPSEEK_R1_URL" in keys
+        assert len(keys) > 0
 
     def test_all_transport_types_have_mapping(self) -> None:
         """Every EnumInfraTransportType should be handled (even if empty keys)."""
