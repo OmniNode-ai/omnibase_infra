@@ -76,7 +76,9 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
         "HTTP_BASE_URL",
         "HTTP_TIMEOUT_MS",
         "HTTP_MAX_RETRIES",
-        # LLM service endpoints (served over HTTP; live under /shared/llm/ in Infisical)
+    ),
+    EnumInfraTransportType.LLM: (
+        "REMOTE_SERVER_IP",
         "LLM_CODER_URL",
         "LLM_CODER_FAST_URL",
         "LLM_EMBEDDING_URL",

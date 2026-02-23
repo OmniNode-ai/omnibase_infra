@@ -54,10 +54,10 @@ class ConfigSessionStorage(BaseSettings):
     - ``postgres_password``  ← ``POSTGRES_PASSWORD``
     - ``pool_min_size``      ← ``POSTGRES_POOL_MIN_SIZE`` (primary) or ``pool_min_size`` (fallback)
     - ``pool_max_size``      ← ``POSTGRES_POOL_MAX_SIZE`` (primary) or ``pool_max_size`` (fallback)
-    - ``query_timeout_seconds`` ← ``QUERY_TIMEOUT_SECONDS`` (seconds; intentionally
-      distinct from ``POSTGRES_TIMEOUT_MS`` in ``transport_config_map.py``, which is
+    - ``query_timeout_seconds`` ← ``QUERY_TIMEOUT_SECONDS`` (primary) or ``query_timeout_seconds`` (fallback);
+      intentionally distinct from ``POSTGRES_TIMEOUT_MS`` in ``transport_config_map.py``, which is
       the shared platform key expressed in milliseconds — different unit and scope.
-      Resolved via ``validation_alias="QUERY_TIMEOUT_SECONDS"``)
+      Resolved via ``AliasChoices("QUERY_TIMEOUT_SECONDS", "query_timeout_seconds")``)
 
     The pool fields use ``AliasChoices`` so that both the canonical shared key
     (e.g. ``POSTGRES_POOL_MIN_SIZE``, as declared in
@@ -140,7 +140,7 @@ class ConfigSessionStorage(BaseSettings):
         ge=1,
         le=300,
         description="Query timeout in seconds (env: QUERY_TIMEOUT_SECONDS).",
-        validation_alias="QUERY_TIMEOUT_SECONDS",
+        validation_alias=AliasChoices("QUERY_TIMEOUT_SECONDS", "query_timeout_seconds"),
     )
 
     @model_validator(mode="after")

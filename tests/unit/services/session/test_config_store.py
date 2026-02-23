@@ -221,35 +221,6 @@ class TestConfigSessionStorageAliasChoices:
         config = ConfigSessionStorage()
         assert config.query_timeout_seconds == 60
 
-    def test_query_timeout_primary_alias_takes_precedence_over_compat_alias(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """QUERY_TIMEOUT_SECONDS (primary alias) wins when both aliases are set.
-
-        AliasChoices resolves the first matching alias in order.  When both
-        QUERY_TIMEOUT_SECONDS and POSTGRES_QUERY_TIMEOUT_SECONDS are present in
-        the environment, the primary alias (QUERY_TIMEOUT_SECONDS, listed first)
-        must win over the forward-compat alias (POSTGRES_QUERY_TIMEOUT_SECONDS).
-        """
-        for key in (
-            "POSTGRES_HOST",
-            "POSTGRES_PORT",
-            "POSTGRES_USER",
-            "POSTGRES_DATABASE",
-            "POSTGRES_POOL_MIN_SIZE",
-            "POSTGRES_POOL_MAX_SIZE",
-            "QUERY_TIMEOUT_SECONDS",
-            "POSTGRES_QUERY_TIMEOUT_SECONDS",
-        ):
-            monkeypatch.delenv(key, raising=False)
-        monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")
-        monkeypatch.setenv("QUERY_TIMEOUT_SECONDS", "30")
-        monkeypatch.setenv("POSTGRES_QUERY_TIMEOUT_SECONDS", "99")
-
-        config = ConfigSessionStorage()
-
-        assert config.query_timeout_seconds == 30
-
     def test_dsn_safe_masks_password(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify dsn_safe masks the password but retains host, port, and database."""
         for key in (
