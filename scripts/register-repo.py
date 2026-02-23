@@ -583,21 +583,6 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
         )
     env_values = _parse_env_file(env_path)
 
-    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
-    if not infisical_addr or not infisical_addr.startswith(("http://", "https://")):
-        print(
-            f"ERROR: INFISICAL_ADDR is not a valid URL: {infisical_addr!r}\n"
-            "It must start with http:// or https:// (e.g. http://localhost:8880).",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-    project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
-    if not project_id:
-        raise SystemExit(
-            "ERROR: INFISICAL_PROJECT_ID is not set. "
-            "Set it in your environment or ~/.omnibase/.env before running onboard-repo. "
-            "You can find the project ID after running scripts/provision-infisical.py."
-        )
     path_prefix = f"/services/{repo_name}"
 
     # Identify repo-specific secrets to seed.
@@ -647,6 +632,22 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     if not args.execute:
         print("\n[dry-run] Pass --execute to create folders and write secrets.")
         return 0
+
+    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
+    if not infisical_addr or not infisical_addr.startswith(("http://", "https://")):
+        print(
+            f"ERROR: INFISICAL_ADDR is not a valid URL: {infisical_addr!r}\n"
+            "It must start with http:// or https:// (e.g. http://localhost:8880).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
+    if not project_id:
+        raise SystemExit(
+            "ERROR: INFISICAL_PROJECT_ID is not set. "
+            "Set it in your environment or ~/.omnibase/.env before running onboard-repo. "
+            "You can find the project ID after running scripts/provision-infisical.py."
+        )
 
     # Need admin token to create folders
     if not _ADMIN_TOKEN_FILE.is_file():

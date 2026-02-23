@@ -43,6 +43,7 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
         "POSTGRES_POOL_MIN_SIZE",
         "POSTGRES_POOL_MAX_SIZE",
         "POSTGRES_TIMEOUT_MS",
+        "QUERY_TIMEOUT_SECONDS",
     ),
     EnumInfraTransportType.KAFKA: (
         "KAFKA_GROUP_ID",

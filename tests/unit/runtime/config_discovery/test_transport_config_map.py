@@ -29,6 +29,7 @@ class TestTransportConfigMap:
         assert "POSTGRES_DSN" in keys
         assert "POSTGRES_POOL_MIN_SIZE" in keys
         assert "POSTGRES_POOL_MAX_SIZE" in keys
+        assert "QUERY_TIMEOUT_SECONDS" in keys
         assert len(keys) > 0
 
     def test_kafka_has_keys(self) -> None:
