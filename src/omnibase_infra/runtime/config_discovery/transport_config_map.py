@@ -40,12 +40,12 @@ logger = logging.getLogger(__name__)
 _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
     EnumInfraTransportType.DATABASE: (
         "POSTGRES_DSN",
-        "POSTGRES_POOL_MIN",
-        "POSTGRES_POOL_MAX",
+        "POSTGRES_POOL_MIN_SIZE",
+        "POSTGRES_POOL_MAX_SIZE",
         "POSTGRES_TIMEOUT_MS",
+        "QUERY_TIMEOUT_SECONDS",
     ),
     EnumInfraTransportType.KAFKA: (
-        "KAFKA_BOOTSTRAP_SERVERS",
         "KAFKA_GROUP_ID",
         "KAFKA_ACKS",
         "KAFKA_REQUEST_TIMEOUT_MS",
@@ -55,6 +55,7 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
         "CONSUL_PORT",
         "CONSUL_SCHEME",
         "CONSUL_ACL_TOKEN",
+        "CONSUL_ENABLED",
     ),
     EnumInfraTransportType.INFISICAL: (
         "INFISICAL_ADDR",
@@ -87,6 +88,7 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
         "QDRANT_HOST",
         "QDRANT_PORT",
         "QDRANT_API_KEY",
+        "QDRANT_URL",
     ),
     EnumInfraTransportType.GRAPH: (
         "GRAPH_HOST",

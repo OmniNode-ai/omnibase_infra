@@ -27,14 +27,17 @@ class TestTransportConfigMap:
         """DATABASE transport should have standard PostgreSQL keys."""
         keys = TransportConfigMap.keys_for_transport(EnumInfraTransportType.DATABASE)
         assert "POSTGRES_DSN" in keys
-        assert "POSTGRES_POOL_MIN" in keys
+        assert "POSTGRES_POOL_MIN_SIZE" in keys
+        assert "POSTGRES_POOL_MAX_SIZE" in keys
+        assert "QUERY_TIMEOUT_SECONDS" in keys
         assert len(keys) > 0
 
     def test_kafka_has_keys(self) -> None:
-        """KAFKA transport should have bootstrap servers and group ID."""
+        """KAFKA transport should have timeout and group ID keys."""
         keys = TransportConfigMap.keys_for_transport(EnumInfraTransportType.KAFKA)
-        assert "KAFKA_BOOTSTRAP_SERVERS" in keys
+        assert "KAFKA_REQUEST_TIMEOUT_MS" in keys
         assert "KAFKA_GROUP_ID" in keys
+        assert "KAFKA_BOOTSTRAP_SERVERS" not in keys
 
     def test_inmemory_has_no_keys(self) -> None:
         """INMEMORY transport has no external config."""
@@ -67,6 +70,15 @@ class TestTransportConfigMap:
         spec = self.tcm.shared_spec(EnumInfraTransportType.CONSUL)
         assert spec.infisical_folder == "/shared/consul/"
         assert "CONSUL_HOST" in spec.keys
+        assert "CONSUL_ENABLED" in spec.keys
+
+    def test_shared_spec_qdrant(self) -> None:
+        """Qdrant shared spec should include QDRANT_URL alongside host/port keys."""
+        spec = self.tcm.shared_spec(EnumInfraTransportType.QDRANT)
+        assert spec.infisical_folder == "/shared/qdrant/"
+        assert "QDRANT_HOST" in spec.keys
+        assert "QDRANT_PORT" in spec.keys
+        assert "QDRANT_URL" in spec.keys
 
     def test_shared_spec_required(self) -> None:
         """Shared spec should propagate required flag."""

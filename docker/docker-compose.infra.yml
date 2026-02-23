@@ -98,25 +98,26 @@ x-runtime-env: &runtime-env
   # --- Bootstrap essentials (always needed) ---
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  # WARNING: The fallback DSN uses nested variable expansion. Requires Compose v2.20+
+  # (older versions silently produce malformed/empty DSNs; run `docker compose version` to verify).
+  # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
+  # shell-special characters ($, `, \, !), the expansion may produce incorrect results.
+  # RECOMMENDED: Set OMNIBASE_INFRA_DB_URL explicitly in .env instead.
   OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for DB URL fallback}@postgres:5432/omnibase_infra}
   KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
   ONEX_CONTRACTS_DIR: /app/contracts
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
   ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-development}
   # --- Infisical config prefetch (OMN-2287) ---
-  # When INFISICAL_ADDR is set, runtime prefetches transport config from Infisical
-  # before handler initialization. Remaining keys (Consul, Valkey, OTEL, etc.)
-  # are resolved from Infisical at startup rather than being hardcoded here.
+  # Opt-in: config prefetch only activates when INFISICAL_ADDR is non-empty.
+  # When the secrets profile IS active, set INFISICAL_ADDR=http://infisical:8080
+  # in your .env or via --env-file so containers reach the Infisical service on
+  # the compose network. Do NOT use http://localhost:8880 here — that is the
+  # host-accessible port and is unreachable inside the container.
   #
-  # INTENTIONALLY opt-in: INFISICAL_ADDR defaults to empty string, which
-  # disables config prefetch. Services fall back to standard environment
-  # variable resolution when this is unset.
-  #
-  # MIGRATION NOTE: If your deployment previously relied on the Infisical
-  # service container bundled in this compose file (docker-compose.infra.yml),
-  # you must explicitly set INFISICAL_ADDR=http://infisical:8080 in your
-  # .env file to restore the prior behaviour. The empty default is intentional
-  # to avoid breaking deployments that do not use Infisical.
+  # When the secrets profile is NOT active (Infisical container absent), leave
+  # INFISICAL_ADDR unset (or empty) and the runtime falls back to standard
+  # environment variable resolution without attempting to contact Infisical.
   INFISICAL_ADDR: ${INFISICAL_ADDR:-}
   INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID:-}
   INFISICAL_CLIENT_SECRET: ${INFISICAL_CLIENT_SECRET:-}
@@ -132,6 +133,11 @@ x-runtime-env: &runtime-env
   VALKEY_PORT: ${VALKEY_PORT:-6379}
   VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
   # OmniIntelligence domain plugin
+  # WARNING: The fallback DSN uses nested variable expansion. Requires Compose v2.20+
+  # (older versions silently produce malformed/empty DSNs; run `docker compose version` to verify).
+  # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
+  # shell-special characters ($, `, \, !), the expansion may produce incorrect results.
+  # RECOMMENDED: Set OMNIINTELLIGENCE_DB_URL explicitly in .env instead.
   OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for intelligence DB URL fallback}@postgres:5432/omniintelligence}
 # ==========================================================================
 # Services
@@ -464,7 +470,8 @@ services:
       # NOTE: Uses dedicated OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN rather than
       # OMNIBASE_INFRA_DB_URL because this consumer uses pydantic-settings with the
       # OMNIBASE_INFRA_AGENT_ACTIONS_ prefix and may use a different DB role.
-      # WARNING: The fallback DSN uses nested variable expansion (requires recent Compose v2).
+      # WARNING: The fallback DSN uses nested variable expansion. Requires Compose v2.20+;
+      # older versions silently produce malformed/empty DSNs (see top-of-file note).
       # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
       # shell-special characters ($, `, \, !), the expansion may produce incorrect results.
       # RECOMMENDED: Set OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN explicitly in .env instead.

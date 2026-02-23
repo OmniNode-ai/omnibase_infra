@@ -144,6 +144,12 @@ git commit -m "chore: add pre-commit hook to reject committed .env files"
 
 ## Task 3 (P1): Fix `ConfigSessionStorage` Env Prefix — Identity Defaults in Code
 
+> **STATUS: COMPLETED** — The `env_prefix` removal has been implemented on branch
+> `jonah/omn-2287-zero-repo-env-phase2`. `ConfigSessionStorage` now uses `env_prefix=""`
+> and `env_file=None`, so it reads standard `POSTGRES_*` vars from the shell environment.
+> Tests were updated to use unprefixed env var names. The historical plan text below is
+> preserved for reference.
+
 **Files:**
 - Modify: `src/omnibase_infra/services/session/config_store.py`
 
@@ -285,8 +291,8 @@ shared:
     - POSTGRES_PORT
     - POSTGRES_USER
     - POSTGRES_DSN
-    - POSTGRES_POOL_MIN
-    - POSTGRES_POOL_MAX
+    - POSTGRES_POOL_MIN_SIZE  # renamed; was POSTGRES_POOL_MIN
+    - POSTGRES_POOL_MAX_SIZE  # renamed; was POSTGRES_POOL_MAX
     - POSTGRES_TIMEOUT_MS
 
   "/shared/kafka/":
@@ -303,7 +309,9 @@ shared:
 
   "/shared/vault/":
     - VAULT_ADDR
-    - VAULT_TOKEN
+    # VAULT_TOKEN: per-service only — excluded from /shared/. Each service must be
+    # provisioned under /services/<repo>/vault/VAULT_TOKEN with a token scoped to
+    # its own Vault policy. See shared_key_registry.yaml for the rationale.
 
   "/shared/llm/":
     - LLM_CODER_URL
@@ -551,9 +559,11 @@ CONSUL_HOST=192.168.86.200
 CONSUL_PORT=28500
 CONSUL_ENABLED=true
 
-# Vault
+# Vault (VAULT_ADDR is shared platform-wide; VAULT_TOKEN is per-developer/per-service
+# and NOT seeded to Infisical /shared/ — each service gets its own token scoped to
+# its Vault policy, provisioned under /services/<repo>/vault/VAULT_TOKEN)
 VAULT_ADDR=http://omninode-bridge-vault:8200
-VAULT_TOKEN=<set from secure source>
+VAULT_TOKEN=<set from secure source — this is YOUR developer token, not a shared value>
 
 # Infisical (shared across all repos — same project, same machine identity)
 INFISICAL_ADDR=http://localhost:8880
@@ -593,6 +603,21 @@ SLACK_WEBHOOK_URL=
 SLACK_BOT_TOKEN=
 SLACK_CHANNEL_ID=
 ```
+
+> **Migration note for operators who have already run `seed-shared --execute`:** The registry
+> has since grown. Re-run the seed to pick up new keys that were not present in the original run:
+>
+> - `/shared/valkey/VALKEY_HOST`, `/shared/valkey/VALKEY_PORT`, `/shared/valkey/VALKEY_DB` —
+>   the initial template listed only `VALKEY_PASSWORD`; the other three valkey keys were added
+>   to the registry afterward.
+> - `/shared/qdrant/QDRANT_URL` — added to the registry after the initial seed run; the original
+>   qdrant section had only `QDRANT_HOST`, `QDRANT_PORT`, and `QDRANT_API_KEY`.
+>
+> Re-seed command (only writes missing keys by default; use `--overwrite` to update existing):
+> ```bash
+> set -a; source ~/.omnibase/.env; set +a
+> uv run python scripts/register-repo.py seed-shared --execute
+> ```
 
 **Step 2: Verify the file is sourced in a new shell**
 

@@ -17,14 +17,15 @@ Infisical-based secret management system. It has two subcommands:
 
 Both subcommands are dry-run by default. Pass --execute to write.
 
-The end state for ~/.omnibase/.env (5 bootstrap lines only):
+~/.omnibase/.env contains bootstrap credentials plus shared platform keys.
+Bootstrap-only lines (circular Infisical dependency — must stay in .env):
     POSTGRES_PASSWORD=...
     INFISICAL_ADDR=http://localhost:8880
     INFISICAL_CLIENT_ID=...
     INFISICAL_CLIENT_SECRET=...
     INFISICAL_PROJECT_ID=...
 
-Everything else lives in Infisical.
+All other platform-wide configuration lives in Infisical under /shared/*.
 
 Usage:
     # Populate /shared/ paths from the platform env file (dry-run)
@@ -55,8 +56,12 @@ import argparse
 import logging
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 from uuid import UUID
+
+import yaml
 
 logging.basicConfig(
     level=logging.INFO,
@@ -65,8 +70,24 @@ logging.basicConfig(
 logger = logging.getLogger("register-repo")
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_REGISTRY_PATH = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
 _ADMIN_TOKEN_FILE = _PROJECT_ROOT / ".infisical-admin-token"
 _BOOTSTRAP_ENV = Path.home() / ".omnibase" / ".env"
+
+# Auth-related substrings that indicate a server-rejected request.
+# Used in _upsert_secret to distinguish "secret not found" (recoverable)
+# from auth/connection failures (must re-raise).
+# NOTE: bare "auth" is intentionally excluded — it is a 4-letter substring
+# that matches false positives like "OAuth", "path not found in database auth
+# schema", etc.  The specific phrases below are sufficient.
+_AUTH_INDICATORS = (
+    "unauthorized",
+    "forbidden",
+    "invalid token",
+    "expired token",
+    "authentication failed",
+    "access denied",
+)
 
 sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
@@ -76,100 +97,142 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _infisical_util import _parse_env_file
 
 # ---------------------------------------------------------------------------
-# Keys that are NEVER seeded into Infisical (circular bootstrap dependency).
-# These must come from the environment / .env file directly.
+# Registry loaders — load key lists from config/shared_key_registry.yaml.
 # ---------------------------------------------------------------------------
-BOOTSTRAP_KEYS = frozenset(
-    {
-        "POSTGRES_PASSWORD",
-        "INFISICAL_ADDR",
-        "INFISICAL_CLIENT_ID",
-        "INFISICAL_CLIENT_SECRET",
-        "INFISICAL_PROJECT_ID",
-        "INFISICAL_ENCRYPTION_KEY",
-        "INFISICAL_AUTH_SECRET",
-    }
-)
 
-# ---------------------------------------------------------------------------
-# Per-repo identity defaults — keys whose values are baked into each repo's
-# Settings class as `default=` and must NOT be seeded into Infisical.
-# Storing them in Infisical would cause the /services/<repo>/ path to diverge
-# from the code-level default and create a split-brain configuration.
-# ---------------------------------------------------------------------------
-IDENTITY_DEFAULTS = frozenset(
-    {
-        "POSTGRES_DATABASE",
-    }
-)
 
-# ---------------------------------------------------------------------------
-# Platform-wide shared secrets and their Infisical paths.
-# Keys not in any node contract are declared here explicitly.
-#
-# TODO (Task 6): This hardcoded dict is a transitional placeholder. It should
-# be migrated to config/shared_key_registry.yaml once that registry file is
-# implemented as part of the OMN-2287 plan. The script should load this
-# mapping from YAML rather than maintaining it inline here. Until that file
-# exists, keep this dict in sync with the platform's actual secret layout.
-# ---------------------------------------------------------------------------
-SHARED_PLATFORM_SECRETS: dict[str, list[str]] = {
-    "/shared/db/": [
-        "POSTGRES_HOST",
-        "POSTGRES_PORT",
-        "POSTGRES_USER",
-        "POSTGRES_DSN",
-        "POSTGRES_POOL_MIN",
-        "POSTGRES_POOL_MAX",
-        "POSTGRES_TIMEOUT_MS",
-    ],
-    "/shared/kafka/": [
-        "KAFKA_BOOTSTRAP_SERVERS",
-        "KAFKA_HOST_SERVERS",
-        "KAFKA_REQUEST_TIMEOUT_MS",
-    ],
-    "/shared/consul/": [
-        "CONSUL_HOST",
-        "CONSUL_PORT",
-        "CONSUL_SCHEME",
-        "CONSUL_ACL_TOKEN",
-        "CONSUL_ENABLED",
-    ],
-    "/shared/vault/": [
-        "VAULT_ADDR",
-        "VAULT_TOKEN",
-    ],
-    "/shared/llm/": [
-        "REMOTE_SERVER_IP",
-        "LLM_CODER_URL",
-        "LLM_CODER_FAST_URL",
-        "LLM_EMBEDDING_URL",
-        "LLM_DEEPSEEK_R1_URL",
-        "EMBEDDING_MODEL_URL",
-        "VLLM_SERVICE_URL",
-        "VLLM_DEEPSEEK_URL",
-        "VLLM_LLAMA_URL",
-        "ONEX_TREE_SERVICE_URL",
-        "METADATA_STAMPING_SERVICE_URL",
-    ],
-    "/shared/auth/": [
-        "OPENAI_API_KEY",
-        "GOOGLE_API_KEY",
-        "GEMINI_API_KEY",
-        "Z_AI_API_KEY",
-        "Z_AI_API_URL",
-        "SERVICE_AUTH_TOKEN",
-        "GH_PAT",
-    ],
-    "/shared/valkey/": [
-        "VALKEY_PASSWORD",
-    ],
-    "/shared/env/": [
-        "SLACK_WEBHOOK_URL",
-        "SLACK_BOT_TOKEN",
-        "SLACK_CHANNEL_ID",
-    ],
-}
+def _read_registry_data() -> dict[str, object]:
+    """Open and parse config/shared_key_registry.yaml.
+
+    Returns the raw parsed dict from the YAML file.  Command functions
+    (``cmd_seed_shared``, ``cmd_onboard_repo``) call this once and pass the
+    result to ``_load_registry``, ``_bootstrap_keys``, and
+    ``_identity_defaults`` via their ``data`` parameter so the file is only
+    read a single time per invocation.
+    """
+    registry_path = _REGISTRY_PATH
+    if not registry_path.exists():
+        raise FileNotFoundError(f"Registry not found: {registry_path}")
+    with open(registry_path, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    if data is None or not isinstance(data, dict):
+        raise ValueError(
+            f"Registry file is empty or not a YAML mapping: {registry_path}"
+        )
+    return data  # type: ignore[no-any-return]  # yaml.safe_load returns Any; runtime isinstance guard above ensures dict
+
+
+def _load_registry(
+    data: dict[str, object] | None = None,
+) -> dict[str, list[str]]:
+    """Load shared platform secrets from config/shared_key_registry.yaml.
+
+    Returns a mapping of ``{infisical_folder_path: [key, ...]}`` identical in
+    shape to the former ``SHARED_PLATFORM_SECRETS`` dict.
+
+    Args:
+        data: Pre-loaded registry dict from :func:`_read_registry_data`.  When
+            provided the file is not re-read; when omitted the file is read
+            once inside this function.
+    """
+    if data is None:
+        data = _read_registry_data()
+    shared = data.get("shared")
+    if shared is None:
+        raise ValueError(f"Registry missing 'shared' section: {_REGISTRY_PATH}")
+    if not isinstance(shared, dict):
+        raise ValueError(
+            f"Expected 'shared' in {_REGISTRY_PATH} to be a mapping, "
+            f"got {type(shared).__name__!r}. Check that 'shared:' is not null or a list."
+        )
+    for folder, keys in shared.items():
+        if not isinstance(keys, list):
+            raise ValueError(
+                f"Expected 'shared.{folder}' in {_REGISTRY_PATH} to be a list, "
+                f"got {type(keys).__name__!r}."
+            )
+        if not keys:
+            raise ValueError(
+                f"Folder '{folder}' has an empty key list in registry — "
+                "this is likely an authoring error"
+            )
+        if not all(isinstance(k, str) for k in keys):
+            raise ValueError(
+                f"[ERROR] registry 'shared.{folder}' must be a list of strings in {_REGISTRY_PATH}"
+            )
+    return cast("dict[str, list[str]]", shared)
+
+
+def _bootstrap_keys(
+    data: dict[str, object] | None = None,
+) -> frozenset[str]:
+    """Load bootstrap-only keys from registry.
+
+    These keys must never be written to Infisical (circular bootstrap
+    dependency — Infisical needs them to start).
+
+    Args:
+        data: Pre-loaded registry dict from :func:`_read_registry_data`.  When
+            provided the file is not re-read; when omitted the file is read
+            once inside this function.
+    """
+    if data is None:
+        data = _read_registry_data()
+    if "bootstrap_only" not in data:
+        raise ValueError(f"Registry missing 'bootstrap_only' section: {_REGISTRY_PATH}")
+    keys = data["bootstrap_only"]
+    if not isinstance(keys, list):
+        raise ValueError(
+            f"[ERROR] registry 'bootstrap_only' must be a list in {_REGISTRY_PATH}"
+        )
+    if not keys:
+        raise ValueError(
+            "bootstrap_only section is empty in shared_key_registry.yaml — "
+            "this would allow bootstrap credentials (POSTGRES_PASSWORD, etc.) "
+            "to be seeded into Infisical. Add the bootstrap-only keys or remove the section."
+        )
+    if not all(isinstance(k, str) for k in keys):
+        raise ValueError(
+            f"[ERROR] registry 'bootstrap_only' entries must be strings in {_REGISTRY_PATH}"
+        )
+    return frozenset(keys)
+
+
+def _identity_defaults(
+    data: dict[str, object] | None = None,
+) -> frozenset[str]:
+    """Load identity-default keys from registry.
+
+    These keys are baked into each repo's Settings class as ``default=`` and
+    must NOT be seeded into Infisical.
+
+    Args:
+        data: Pre-loaded registry dict from :func:`_read_registry_data`.  When
+            provided the file is not re-read; when omitted the file is read
+            once inside this function.
+    """
+    if data is None:
+        data = _read_registry_data()
+    if "identity_defaults" not in data:
+        raise ValueError(
+            f"Registry missing 'identity_defaults' section: {_REGISTRY_PATH}"
+        )
+    keys = data["identity_defaults"]
+    if not isinstance(keys, list):
+        raise ValueError(
+            f"[ERROR] registry 'identity_defaults' must be a list in {_REGISTRY_PATH}"
+        )
+    if not keys:
+        raise ValueError(
+            "identity_defaults section is empty in shared_key_registry.yaml — "
+            "at least one identity default key (e.g. POSTGRES_DATABASE) is required."
+        )
+    if not all(isinstance(k, str) for k in keys):
+        raise ValueError(
+            f"[ERROR] registry 'identity_defaults' entries must be strings in {_REGISTRY_PATH}"
+        )
+    return frozenset(keys)
+
 
 # Per-repo folders to create under /services/<repo>/
 REPO_TRANSPORT_FOLDERS = ("db", "kafka", "env")
@@ -188,10 +251,14 @@ REPO_SECRET_KEYS = [
 # ---------------------------------------------------------------------------
 
 
-def _load_infisical_adapter() -> tuple[object, object]:
+def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
     """Load and initialise the Infisical adapter using env credentials.
 
     Returns (adapter, sanitize_fn).
+
+    Note:
+        INFISICAL_ADDR validation (scheme check) is the caller's responsibility;
+        cmd_seed_shared and cmd_onboard_repo both validate before calling this function.
     """
     from pydantic import SecretStr
 
@@ -263,7 +330,8 @@ def _create_folders_via_admin(
                         "path": current,
                     },
                 )
-                if part_resp.status_code not in (200, 201, 400, 409):
+                # 409 = folder already exists (idempotent). 400 = bad request — surfaces as real error.
+                if part_resp.status_code not in (200, 201, 409):
                     part_resp.raise_for_status()
                 current = f"{current}{part}/"
 
@@ -278,7 +346,8 @@ def _create_folders_via_admin(
                         "path": path_prefix.rstrip("/") or "/",
                     },
                 )
-                if resp.status_code not in (200, 201, 400, 409):
+                # 409 = folder already exists (idempotent). 400 = bad request — surfaces as real error.
+                if resp.status_code not in (200, 201, 409):
                     resp.raise_for_status()
     logger.info(
         "Folders created: %s/[%s] in %s",
@@ -295,22 +364,29 @@ def _upsert_secret(
     folder: str,
     *,
     overwrite: bool,
-    sanitize: object,
+    sanitize: Callable[[Exception], str],
 ) -> str:
     """Create or update a secret. Returns 'created', 'updated', or 'skipped'."""
+    from omnibase_infra.errors import SecretResolutionError
+
     existing = None
     try:
         existing = adapter.get_secret(secret_name=key, secret_path=folder)  # type: ignore[attr-defined]
-    except Exception as _get_exc:
+    except SecretResolutionError as _get_exc:
         # Only suppress the error when the secret genuinely does not exist yet.
         # Re-raise for any exception that indicates a connection problem, auth
         # failure, or other infrastructure error — those must not be silently
         # swallowed, because the subsequent create_secret call will also fail
         # and the root cause will be lost.
         #
-        # The Infisical adapter wraps all get_secret failures (including 404s)
-        # as SecretResolutionError.  We distinguish "not found" from "real
-        # error" by inspecting the exception message and cause chain.
+        # The auth-indicator check at step 1 is the authoritative guard here.
+        # The adapter is expected to re-raise InfraAuthenticationError, InfraTimeoutError,
+        # and InfraUnavailableError directly (see adapter_infisical.py), but even if the
+        # adapter wraps those, the indicator check above will catch them.
+        # We only reach here for SecretResolutionError, which the adapter uses
+        # for two cases:
+        #   1. "Adapter not initialized" — should re-raise (programming error)
+        #   2. "Secret not found" — treat as None so we can create it below
         #
         # WORKAROUND: The Infisical Python SDK does not expose typed error
         # codes (e.g. an HTTP status attribute or a structured exception
@@ -325,26 +401,39 @@ def _upsert_secret(
         # SecretNotFoundError subclass.  Track against the SDK changelog
         # (https://github.com/Infisical/infisical-python) and remove the
         # string-matching blocks when a stable typed API is available.
+
+        # Step 1: Check for auth indicators — always re-raise these immediately,
+        # before attempting any "not found" classification.  Auth errors must
+        # never be silently swallowed, regardless of what the message also says.
         err_msg = str(_get_exc).lower()
-        is_not_found = (
-            "not found" in err_msg
-            or "404" in err_msg
-            or "does not exist" in err_msg
-            or "secret not found" in err_msg
+        has_auth_indicator = any(tok in err_msg for tok in _AUTH_INDICATORS)
+
+        # Also inspect the cause chain: an auth error wrapping a 404-style
+        # message must still propagate (e.g. SDK wraps HTTP 401 with a generic
+        # "not found" outer message).
+        cause = getattr(_get_exc, "__cause__", None)
+        cause_msg = str(cause).lower() if cause is not None else ""
+        cause_has_auth = (
+            any(tok in cause_msg for tok in _AUTH_INDICATORS) if cause_msg else False
         )
+
+        if has_auth_indicator or cause_has_auth:
+            raise  # explicit: auth errors always propagate
+
+        # Step 2: Determine if this is "secret not found" (only reached when
+        # no auth indicator was detected above).
+        is_not_found = (
+            "not found" in err_msg or "404" in err_msg or "does not exist" in err_msg
+        )
+        if not is_not_found and cause_msg:
+            # top-level wasn't "not found" — check if cause says "not found"
+            is_not_found = (
+                "not found" in cause_msg
+                or "404" in cause_msg
+                or "does not exist" in cause_msg
+            )
         if not is_not_found:
-            # Check the cause chain — the raw SDK exception may carry a more
-            # informative status code or message.
-            cause = getattr(_get_exc, "__cause__", None)
-            if cause is not None:
-                cause_msg = str(cause).lower()
-                is_not_found = (
-                    "not found" in cause_msg
-                    or "404" in cause_msg
-                    or "does not exist" in cause_msg
-                )
-        if not is_not_found:
-            raise  # Re-raise: connection/auth/unexpected error, not a missing key
+            raise  # Re-raise: not-initialized / unexpected error
 
     if existing is not None:
         if not overwrite:
@@ -385,9 +474,15 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
     plan: list[tuple[str, str, str]] = []  # (folder, key, value)
     missing_value: list[tuple[str, str]] = []  # (folder, key) with no value
 
-    for folder, keys in SHARED_PLATFORM_SECRETS.items():
+    registry_data = _read_registry_data()
+    shared_secrets = _load_registry(registry_data)
+    bootstrap = _bootstrap_keys(registry_data)
+    identity = _identity_defaults(registry_data)
+    for folder, keys in shared_secrets.items():
         for key in keys:
-            if key in BOOTSTRAP_KEYS:
+            if key in bootstrap:
+                continue
+            if key in identity:
                 continue
             value = env_values.get(key, "")
             if value:
@@ -413,11 +508,29 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
         print("\n[dry-run] Pass --execute to write to Infisical.")
         return 0
 
+    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
+    if not infisical_addr or not infisical_addr.startswith(("http://", "https://")):
+        print(
+            f"ERROR: INFISICAL_ADDR is not a valid URL: {infisical_addr!r}\n"
+            "It must start with http:// or https:// (e.g. http://localhost:8880).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
+    if not project_id:
+        raise SystemExit(
+            "ERROR: INFISICAL_PROJECT_ID is not set. "
+            "Set it in your environment or ~/.omnibase/.env before running seed-shared. "
+            "You can find the project ID after running scripts/provision-infisical.py."
+        )
+
     print("\nWriting to Infisical...")
     try:
         adapter, sanitize = _load_infisical_adapter()
     except SystemExit as e:
-        return e.code or 1
+        if e.code:
+            print(e.code, file=sys.stderr)
+        return 1
 
     counts = {"created": 0, "updated": 0, "skipped": 0, "error": 0}
 
@@ -436,7 +549,7 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)
             except Exception as exc:
                 counts["error"] += 1
-                logger.warning("  [ERROR] %s%s: %s", folder, key, sanitize(exc))  # type: ignore[operator]
+                logger.warning("  [ERROR] %s%s: %s", folder, key, sanitize(exc))
 
         # Also create empty placeholders for keys with no value
         for folder, key in missing_value:
@@ -454,7 +567,7 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                 counts["error"] += 1
                 logger.warning(
                     "  [ERROR placeholder] %s%s: %s", folder, key, sanitize(exc)
-                )  # type: ignore[operator]
+                )
     finally:
         adapter.shutdown()  # type: ignore[attr-defined]
 
@@ -493,21 +606,6 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
         )
     env_values = _parse_env_file(env_path)
 
-    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
-    if not infisical_addr or not infisical_addr.startswith(("http://", "https://")):
-        print(
-            f"ERROR: INFISICAL_ADDR is not a valid URL: {infisical_addr!r}\n"
-            "It must start with http:// or https:// (e.g. http://localhost:8880).",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-    project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
-    if not project_id:
-        raise SystemExit(
-            "ERROR: INFISICAL_PROJECT_ID is not set. "
-            "Set it in your environment or ~/.omnibase/.env before running onboard-repo. "
-            "You can find the project ID after running scripts/provision-infisical.py."
-        )
     path_prefix = f"/services/{repo_name}"
 
     # Identify repo-specific secrets to seed.
@@ -522,12 +620,17 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
 
     # Any extra keys in the env file that are NOT in shared, NOT bootstrap,
     # and NOT an identity default (per-repo value baked into Settings.default=).
-    shared_keys_flat = {k for keys in SHARED_PLATFORM_SECRETS.values() for k in keys}
+    registry_data = _read_registry_data()
+    shared_keys_flat = {
+        k for keys in _load_registry(registry_data).values() for k in keys
+    }
+    bootstrap = _bootstrap_keys(registry_data)
+    identity = _identity_defaults(registry_data)
     extra: list[tuple[str, str, str]] = []
     for key, value in env_values.items():
-        if key in BOOTSTRAP_KEYS:
+        if key in bootstrap:
             continue
-        if key in IDENTITY_DEFAULTS:
+        if key in identity:
             continue
         if key in shared_keys_flat:
             continue
@@ -552,6 +655,22 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     if not args.execute:
         print("\n[dry-run] Pass --execute to create folders and write secrets.")
         return 0
+
+    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
+    if not infisical_addr or not infisical_addr.startswith(("http://", "https://")):
+        print(
+            f"ERROR: INFISICAL_ADDR is not a valid URL: {infisical_addr!r}\n"
+            "It must start with http:// or https:// (e.g. http://localhost:8880).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
+    if not project_id:
+        raise SystemExit(
+            "ERROR: INFISICAL_PROJECT_ID is not set. "
+            "Set it in your environment or ~/.omnibase/.env before running onboard-repo. "
+            "You can find the project ID after running scripts/provision-infisical.py."
+        )
 
     # Need admin token to create folders
     if not _ADMIN_TOKEN_FILE.is_file():
@@ -587,7 +706,9 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     try:
         adapter, sanitize = _load_infisical_adapter()
     except SystemExit as e:
-        return e.code or 1
+        if e.code:
+            print(e.code, file=sys.stderr)
+        return 1
 
     all_secrets = plan + extra
     counts = {"created": 0, "updated": 0, "skipped": 0, "error": 0}
@@ -607,7 +728,7 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)
             except Exception as exc:
                 counts["error"] += 1
-                logger.warning("  [ERROR] %s%s: %s", folder, key, sanitize(exc))  # type: ignore[operator]
+                logger.warning("  [ERROR] %s%s: %s", folder, key, sanitize(exc))
     finally:
         adapter.shutdown()  # type: ignore[attr-defined]
 
@@ -662,6 +783,13 @@ def main() -> int:
     p_repo = sub.add_parser(
         "onboard-repo",
         help="Create /services/<repo>/ folders and seed repo-specific secrets",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Note: after onboarding, a suggested POSTGRES_DATABASE value is printed "
+            "as the repo name with hyphens replaced by underscores "
+            "(e.g. 'my-repo' → 'my_repo'). "
+            "Verify this matches the actual database name before using it."
+        ),
     )
     p_repo.add_argument("--repo", required=True, help="Repo name (e.g. omniclaude)")
     p_repo.add_argument(
