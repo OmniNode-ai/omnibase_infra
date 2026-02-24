@@ -50,7 +50,7 @@ Error messages and contexts can inadvertently expose sensitive information. All 
 
 | Category | Examples | Rationale |
 |----------|----------|-----------|
-| Service Names | `postgresql`, `kafka`, `vault` | Generic identifiers |
+| Service Names | `postgresql`, `kafka`, `infisical` | Generic identifiers |
 | Operation Names | `connect`, `query`, `authenticate` | No sensitive data |
 | Correlation IDs | UUID format | Request tracing, no PII |
 | Error Codes | `DATABASE_CONNECTION_ERROR` | Standardized categories |
@@ -160,9 +160,9 @@ def wrap_auth_error(original: Exception, correlation_id: UUID) -> InfraAuthentic
     Extract only safe metadata.
     """
     context = ModelInfraErrorContext(
-        transport_type=EnumInfraTransportType.VAULT,
+        transport_type=EnumInfraTransportType.INFISICAL,
         operation="authenticate",
-        target_name="vault-server",
+        target_name="infisical-primary",
         correlation_id=correlation_id,
     )
 
@@ -454,10 +454,10 @@ class ServiceAuthenticator:
     def __init__(
         self,
         service_id: str,
-        vault_client: object,
+        infisical_client: object,
     ) -> None:
         self._service_id = service_id
-        self._vault = vault_client
+        self._infisical = infisical_client
 
     async def get_service_token(
         self,
@@ -466,7 +466,7 @@ class ServiceAuthenticator:
     ) -> str:
         """Get service token for calling another service.
 
-        Uses Vault's AppRole authentication for service identity.
+        Uses Infisical machine identity authentication for service identity.
 
         Args:
             target_service: Service to authenticate to
@@ -479,35 +479,35 @@ class ServiceAuthenticator:
             InfraAuthenticationError: If token generation fails
         """
         context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.VAULT,
+            transport_type=EnumInfraTransportType.INFISICAL,
             operation="get_service_token",
-            target_name="vault-approle",
+            target_name="infisical-primary",
             correlation_id=correlation_id,
         )
 
         try:
-            response = await self._vault.auth.approle.login(
-                role_id=self._service_id,
-                secret_id=await self._get_secret_id(),
+            response = await self._infisical.auth.universal_auth.login(
+                client_id=self._service_id,
+                client_secret=await self._get_client_secret(),
             )
-            return response["auth"]["client_token"]
+            return response["access_token"]
         except Exception as e:
             raise InfraAuthenticationError(
                 f"Failed to authenticate service {self._service_id}",
                 context=context,
             ) from e
 
-    async def _get_secret_id(self) -> str:
-        """Retrieve secret ID from secure storage.
+    async def _get_client_secret(self) -> str:
+        """Retrieve client secret from secure storage.
 
-        IMPORTANT: Secret ID should be injected via environment
+        IMPORTANT: Client secret should be injected via environment
         or Kubernetes secret, not stored in code.
         """
         import os
-        secret_id = os.environ.get("VAULT_SECRET_ID")
-        if not secret_id:
-            raise ValueError("VAULT_SECRET_ID not configured")
-        return secret_id
+        client_secret = os.environ.get("INFISICAL_CLIENT_SECRET")
+        if not client_secret:
+            raise ValueError("INFISICAL_CLIENT_SECRET not configured")
+        return client_secret
 ```
 
 ### Authorization Patterns
@@ -625,9 +625,9 @@ def get_user_permissions(roles: frozenset[EnumRole]) -> frozenset[EnumPermission
 
 **See Also**: [Secret Resolver Pattern](./secret_resolver.md) - Centralized secret resolution with caching, multiple sources, and migration guide.
 
-### Vault Integration
+### Infisical Integration
 
-ONEX uses HashiCorp Vault for centralized secret management.
+ONEX uses Infisical for centralized secret management (migrated from HashiCorp Vault in OMN-2288).
 
 #### Secret Retrieval Pattern
 
@@ -641,17 +641,17 @@ from omnibase_infra.enums import EnumInfraTransportType
 from uuid import UUID
 
 
-class VaultSecretProvider:
-    """Secure secret retrieval from HashiCorp Vault.
+class InfisicalSecretProvider:
+    """Secure secret retrieval from Infisical.
 
     Features:
-        - Automatic token renewal
+        - Machine identity authentication
         - Secret caching with TTL
         - Error sanitization
     """
 
-    def __init__(self, vault_client: object) -> None:
-        self._vault = vault_client
+    def __init__(self, infisical_client: object) -> None:
+        self._infisical = infisical_client
         self._cache: dict[str, tuple[dict, float]] = {}
         self._cache_ttl = 300.0  # 5 minutes
 
@@ -659,19 +659,19 @@ class VaultSecretProvider:
         self,
         path: str,
         correlation_id: UUID,
-    ) -> dict[str, str]:
-        """Retrieve secret from Vault.
+    ) -> str:
+        """Retrieve secret from Infisical.
 
         Args:
-            path: Secret path (e.g., "secret/data/db/credentials")
+            path: Secret path (e.g., "/shared/database/POSTGRES_PASSWORD")
             correlation_id: Request tracking ID
 
         Returns:
-            Secret data as dictionary
+            Secret value as string
 
         Raises:
             SecretResolutionError: Secret not found or access denied
-            InfraAuthenticationError: Vault authentication failed
+            InfraAuthenticationError: Infisical authentication failed
 
         SECURITY NOTE:
             - Never log the secret values
@@ -679,29 +679,27 @@ class VaultSecretProvider:
             - Use generic error messages
         """
         context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.VAULT,
-            operation="read_secret",
-            target_name="vault-kv-v2",
+            transport_type=EnumInfraTransportType.INFISICAL,
+            operation="get_secret",
+            target_name="infisical-primary",
             correlation_id=correlation_id,
         )
 
         try:
-            response = self._vault.secrets.kv.v2.read_secret_version(
-                path=path
-            )
-            return response["data"]["data"]
+            response = await self._infisical.get_secret(path=path)
+            return response.secret_value
 
-        except self._vault.exceptions.InvalidPath:
+        except SecretNotFoundError:
             # SAFE: Generic message, no path details
             raise SecretResolutionError(
                 "Secret not found",
                 context=context,
             )
 
-        except self._vault.exceptions.Unauthorized:
+        except UnauthorizedError:
             # SAFE: Generic message, no auth details
             raise InfraAuthenticationError(
-                "Vault access denied",
+                "Infisical access denied",
                 context=context,
             )
 
@@ -711,99 +709,21 @@ class VaultSecretProvider:
                 "Failed to retrieve secret",
                 context=context,
             ) from e
-
-    async def get_database_credentials(
-        self,
-        database_name: str,
-        correlation_id: UUID,
-    ) -> tuple[str, str]:
-        """Get database username and password from Vault.
-
-        Uses dynamic secrets for short-lived credentials.
-
-        Returns:
-            Tuple of (username, password)
-        """
-        path = f"database/creds/{database_name}"
-        secret = await self.get_secret(path, correlation_id)
-        return secret["username"], secret["password"]
 ```
 
 #### Secret Rotation
 
+Infisical supports secret rotation via the web UI and API. Secrets are versioned and the runtime automatically fetches the latest value on cache expiry (default 5 minutes for `infisical` source type). No application-side rotation logic is required.
+
 ```python
-from datetime import datetime, timedelta
-from typing import Protocol
+from omnibase_infra.runtime.secret_resolver import SecretResolver
 
+# Cache expires automatically; on expiry, latest value is fetched from Infisical
+resolver = SecretResolver(config=config, infisical_handler=infisical_handler)
 
-class ProtocolSecretRotation(Protocol):
-    """Protocol for automatic secret rotation."""
-
-    async def rotate_secret(self, secret_path: str) -> None:
-        """Rotate secret at specified path."""
-        ...
-
-    async def get_rotation_schedule(
-        self,
-        secret_path: str,
-    ) -> datetime | None:
-        """Get next scheduled rotation time."""
-        ...
-
-
-class DatabaseCredentialRotator:
-    """Automatic database credential rotation via Vault.
-
-    Vault's dynamic secrets provide automatic rotation:
-    - Credentials are generated on-demand
-    - Each credential has a TTL (lease duration)
-    - Vault automatically revokes expired credentials
-    """
-
-    def __init__(
-        self,
-        vault_client: object,
-        rotation_interval: timedelta = timedelta(hours=1),
-    ) -> None:
-        self._vault = vault_client
-        self._rotation_interval = rotation_interval
-        self._current_credentials: dict[str, tuple[str, str, datetime]] = {}
-
-    async def get_credentials(
-        self,
-        database_role: str,
-        correlation_id: UUID,
-    ) -> tuple[str, str]:
-        """Get database credentials, rotating if needed.
-
-        Args:
-            database_role: Vault database role name
-            correlation_id: Request tracking ID
-
-        Returns:
-            Tuple of (username, password)
-        """
-        # Check if we have valid cached credentials
-        if database_role in self._current_credentials:
-            username, password, expires_at = self._current_credentials[database_role]
-
-            # Refresh if expiring within 5 minutes
-            if datetime.utcnow() < expires_at - timedelta(minutes=5):
-                return username, password
-
-        # Generate new credentials
-        response = self._vault.secrets.database.generate_credentials(
-            name=database_role
-        )
-
-        username = response["data"]["username"]
-        password = response["data"]["password"]
-        lease_duration = response["lease_duration"]
-        expires_at = datetime.utcnow() + timedelta(seconds=lease_duration)
-
-        self._current_credentials[database_role] = (username, password, expires_at)
-
-        return username, password
+# After rotation in Infisical UI/API, the resolver will pick up the new
+# value on next cache miss (within 5 minutes by default)
+db_password = await resolver.get_secret_async("database.postgres.password")
 ```
 
 ### YAML Contract Security: No Secrets in Contracts
@@ -832,9 +752,9 @@ config:
 
 | Secret Type | Recommended Storage | Access Pattern |
 |-------------|-------------------|----------------|
-| Database credentials | Vault dynamic secrets | `await vault.get_database_credentials()` |
-| API keys | Vault KV store | `await vault.get_secret("secret/api-keys")` |
-| Service tokens | Vault AppRole | `await vault.auth.approle.login()` |
+| Database credentials | Infisical (`/shared/database/`) | `await resolver.get_secret_async("database.postgres.password")` |
+| API keys | Infisical (`/shared/llm/`) | `await resolver.get_secret_async("llm.openai.api_key")` |
+| Service tokens | Infisical machine identity | `await infisical_handler.authenticate()` |
 | Static secrets | Kubernetes secrets | Environment variable injection |
 
 **See Also**: [Handler Plugin Loader - Contract Content Security](./handler_plugin_loader.md#contract-content-security-no-secrets-in-contracts) for detailed contract security guidelines.
@@ -850,7 +770,8 @@ from typing import Final
 
 # Required secret environment variables
 REQUIRED_SECRETS: Final[frozenset[str]] = frozenset({
-    "VAULT_TOKEN",
+    "INFISICAL_CLIENT_ID",
+    "INFISICAL_CLIENT_SECRET",
     "KAFKA_SASL_PASSWORD",
     "DATABASE_PASSWORD",
 })
@@ -1439,7 +1360,7 @@ Security validation uses structured rule IDs for consistent error tracking:
 | `SECURITY-002` | Credential in signature | Use generic parameter names |
 | `SECURITY-003` | Admin method public | Move to admin module or prefix with _ |
 | `SECURITY-004` | Decrypt method public | Make private or move to crypto module |
-| `SECURITY-100` | Credential in config | Move to Vault/environment |
+| `SECURITY-100` | Credential in config | Move to Infisical/environment |
 | `SECURITY-101` | Hardcoded secret | Use secret management |
 | `SECURITY-102` | Insecure connection | Enable TLS/SSL |
 | `SECURITY-200` | Insecure pattern | Follow security best practices |
@@ -1754,7 +1675,7 @@ Use this checklist before deploying to production:
 
 ### Pre-Deployment
 
-- [ ] All secrets stored in Vault, not in code or environment files
+- [ ] All secrets stored in Infisical, not in code or environment files
 - [ ] **Handler contracts contain NO secrets** (passwords, API keys, tokens)
 - [ ] CI pipeline includes secret scanning for contracts (gitleaks, detect-secrets)
 - [ ] TLS 1.3 configured for all network connections

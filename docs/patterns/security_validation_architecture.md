@@ -425,6 +425,85 @@ if __name__ == "__main__":
 
 ---
 
+## Method Exposure Validator
+
+**Location**: `omnibase_infra.validation.validator_security`
+
+**Purpose**: Static analysis validator that detects sensitive method exposure via introspection. This is a separate, earlier-layer validator from the three-layer registration/metadata/invocation system above. It uses `ModelHandlerValidationError` with `EnumHandlerSourceType.STATIC_ANALYSIS`.
+
+### Usage
+
+```python
+from omnibase_infra.validation import (
+    SecurityRuleId,
+    validate_handler_security,
+    validate_method_exposure,
+    is_sensitive_method_name,
+    has_sensitive_parameters,
+)
+from omnibase_infra.models.handlers import ModelHandlerIdentifier
+
+# Validate exposed method names and signatures
+errors = validate_method_exposure(
+    method_names=["get_api_key", "process_request"],
+    handler_identity=ModelHandlerIdentifier.from_handler_id("auth-handler"),
+    method_signatures={"get_api_key": "() -> str"},
+    file_path="nodes/auth/handlers/handler_authenticate.py",
+)
+
+# Validate handler capabilities dict (from MixinNodeIntrospection.get_capabilities())
+errors = validate_handler_security(
+    handler_identity=handler_identity,
+    capabilities=capabilities,
+    file_path="nodes/auth/node.py",
+)
+```
+
+### Method Exposure Rule IDs
+
+| Rule ID | Trigger | Remediation |
+|---------|---------|-------------|
+| `SECURITY-001` | Method name matches sensitive patterns | Prefix with underscore to exclude from introspection |
+| `SECURITY-002` | Parameter name contains credentials | Use generic parameter names |
+| `SECURITY-003` | Method starts with `admin_` or `internal_` | Make private or move to admin module |
+| `SECURITY-004` | Method starts with `decrypt_` | Make private or move to crypto module |
+| `SECURITY-100` | Credential found in config | Remove credential from config |
+| `SECURITY-101` | Hardcoded secret detected | Use environment variable or Infisical |
+| `SECURITY-102` | Insecure connection pattern | Enforce TLS/secure transport |
+| `SECURITY-200` | Insecure code pattern | Apply secure coding pattern |
+| `SECURITY-201` | Missing authentication check | Add auth check before operation |
+| `SECURITY-202` | Missing input validation | Add input validation |
+
+### Sensitive Method Patterns
+
+```python
+SENSITIVE_METHOD_PATTERNS = (
+    r"^get_password$", r"^get_secret$", r"^get_token$", r"^get_api_key$",
+    r"^get_credential", r"^fetch_password$", r"^fetch_secret$",
+    r"^fetch_token$", r"^decrypt_", r"^admin_", r"^internal_",
+    r"^validate_password$", r"^check_password$", r"^verify_password$",
+)
+
+SENSITIVE_PARAMETER_NAMES = frozenset({
+    "password", "secret", "token", "api_key", "apikey",
+    "access_key", "private_key", "credential", "auth_token",
+    "bearer_token", "decrypt_key", "encryption_key",
+})
+```
+
+### Complete Rule ID Summary
+
+| Range | Validator | Category |
+|-------|-----------|----------|
+| SECURITY-001 to SECURITY-004 | Method Exposure | Handler introspection method names |
+| SECURITY-100 to SECURITY-102 | Method Exposure | Configuration violations |
+| SECURITY-200 to SECURITY-202 | Method Exposure | Code pattern violations |
+| SECURITY-300 to SECURITY-304 | RegistrationSecurityValidator | Policy vs environment |
+| SECURITY-305 to SECURITY-308 | SecurityMetadataValidator | Handler type consistency |
+| SECURITY-310 to SECURITY-312 | InvocationSecurityEnforcer | Runtime enforcement |
+
+---
+
 ## Related Patterns
 
 - [Security Patterns](./security_patterns.md) - Comprehensive security patterns including error sanitization, input validation, and authentication
@@ -437,4 +516,5 @@ if __name__ == "__main__":
 - [SecurityMetadataValidator](../../src/omnibase_infra/runtime/security_metadata_validator.py) - Handler loading validation
 - [RegistrationSecurityValidator](../../src/omnibase_infra/validation/validator_registration_security.py) - Registration validation
 - [InvocationSecurityEnforcer](../../src/omnibase_infra/runtime/invocation_security_enforcer.py) - Runtime enforcement
+- [MethodExposureValidator](../../src/omnibase_infra/validation/validator_security.py) - Static analysis for sensitive methods
 - [Two-Layer Security Tests](../../tests/integration/security/test_two_layer_security_validation.py) - Integration tests demonstrating the full flow

@@ -508,7 +508,7 @@ config:
 ```
 
 ```yaml
-# CORRECT - No secrets, references environment/Vault
+# CORRECT - No secrets, references environment/Infisical
 handler_name: "db.query"
 handler_class: "myapp.handlers.DatabaseHandler"
 handler_type: "effect"
@@ -518,7 +518,7 @@ capability_tags:
   - async
 # Secrets loaded at runtime from:
 # - Environment variables (POSTGRES_PASSWORD)
-# - HashiCorp Vault (secret/data/db/credentials)
+# - Infisical (/shared/database/POSTGRES_PASSWORD)
 # - Kubernetes secrets (mounted as env vars)
 ```
 
@@ -527,7 +527,7 @@ capability_tags:
 | Source | When to Use | Example |
 |--------|-------------|---------|
 | **Environment variables** | Container/pod configuration | `POSTGRES_PASSWORD`, `API_KEY` |
-| **HashiCorp Vault** | Dynamic secrets, rotation | `vault kv get secret/data/db/creds` |
+| **Infisical** | Dynamic secrets, rotation | `/shared/database/POSTGRES_PASSWORD` |
 | **Kubernetes secrets** | Static secrets in K8s | `secretKeyRef` in pod spec |
 | **AWS Secrets Manager** | AWS deployments | `secretsmanager:GetSecretValue` |
 

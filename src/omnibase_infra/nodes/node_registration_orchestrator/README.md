@@ -539,6 +539,5 @@ must generate intents that the effect node will execute.
 
 ## Related Documentation
 
-- [Node Architecture](../../../../docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md) - Complete architectural design
-- [Protocol Architecture](../../../../docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md) - Detailed protocol design
+- [Registration Workflow](../../../../docs/architecture/REGISTRATION_WORKFLOW.md) - Complete registration flow documentation
 - [Validation Exemptions](../../validation/validation_exemptions.yaml) - Exemption for domain-grouped protocols

@@ -377,7 +377,7 @@ config = ModelConsulHandlerConfig(
 - [Error Handling Patterns](./error_handling_patterns.md)
 - [Error Recovery Patterns](./error_recovery_patterns.md)
 - [Security Patterns](./security_patterns.md)
-- [Registration Orchestrator Architecture](../architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md)
+- [Registration Workflow](../architecture/REGISTRATION_WORKFLOW.md)
 - [HashiCorp Consul API Docs](https://developer.hashicorp.com/consul/api-docs)
 
 ## See Also

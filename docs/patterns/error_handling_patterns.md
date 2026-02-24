@@ -13,7 +13,7 @@ Use the appropriate error class based on the failure scenario:
 | Scenario | Error Class | When to Use |
 |----------|-------------|-------------|
 | Config invalid | `ProtocolConfigurationError` | Configuration validation fails, missing required fields, invalid formats |
-| Secret not found | `SecretResolutionError` | Vault secrets unavailable, decryption failures, expired credentials |
+| Secret not found | `SecretResolutionError` | Infisical secrets unavailable, decryption failures, expired credentials |
 | Connection failed | `InfraConnectionError` | Network connectivity issues, service unreachable, DNS resolution failures |
 | Timeout | `InfraTimeoutError` | Operation exceeds deadline, slow response times, hung connections |
 | Auth failed | `InfraAuthenticationError` | Invalid credentials, expired tokens, permission denied |
@@ -41,7 +41,7 @@ raise InfraConnectionError("Failed to connect to database", context=context) fro
 
 | Field | Type | Purpose | Example |
 |-------|------|---------|---------|
-| `transport_type` | `EnumInfraTransportType` | Service category | `DATABASE`, `KAFKA`, `VAULT` |
+| `transport_type` | `EnumInfraTransportType` | Service category | `DATABASE`, `KAFKA`, `INFISICAL` |
 | `operation` | `str` | Specific operation attempted | `"execute_query"`, `"publish_message"` |
 | `target_name` | `str` | Service instance identifier | `"postgresql-primary"`, `"kafka-broker-1"` |
 | `correlation_id` | `UUID` | Request tracking ID | From incoming request envelope |
@@ -67,12 +67,12 @@ ModelOnexError (omnibase_core)
 ```mermaid
 flowchart TB
     accTitle: ONEX Error Class Hierarchy
-    accDescr: Class hierarchy diagram showing the ONEX infrastructure error types. ModelOnexError from omnibase_core is the root. RuntimeHostError extends it, and seven specialized error types extend RuntimeHostError: ProtocolConfigurationError for invalid configs, SecretResolutionError for Vault and secret issues, InfraConnectionError for network failures with transport-aware error codes, InfraTimeoutError for operation timeouts, InfraAuthenticationError for auth failures, InfraRateLimitedError for rate limiting and throttling, and InfraUnavailableError for service outages.
+    accDescr: Class hierarchy diagram showing the ONEX infrastructure error types. ModelOnexError from omnibase_core is the root. RuntimeHostError extends it, and seven specialized error types extend RuntimeHostError: ProtocolConfigurationError for invalid configs, SecretResolutionError for Infisical and secret issues, InfraConnectionError for network failures with transport-aware error codes, InfraTimeoutError for operation timeouts, InfraAuthenticationError for auth failures, InfraRateLimitedError for rate limiting and throttling, and InfraUnavailableError for service outages.
 
     ONEX["ModelOnexError<br/>(omnibase_core)"] --> RH["RuntimeHostError"]
 
     RH --> PCE["ProtocolConfigurationError<br/>Config validation failures"]
-    RH --> SRE["SecretResolutionError<br/>Vault/secret issues"]
+    RH --> SRE["SecretResolutionError<br/>Infisical/secret issues"]
     RH --> ICE["InfraConnectionError<br/>Network failures<br/>(transport-aware codes)"]
     RH --> ITE["InfraTimeoutError<br/>Operation timeouts"]
     RH --> IAE["InfraAuthenticationError<br/>Auth/credential failures"]
@@ -91,7 +91,7 @@ Error codes are automatically selected based on transport type:
 |-----------|-------------------|-----------|
 | DATABASE | `DATABASE_CONNECTION_ERROR` | PostgreSQL connection failures, query timeouts |
 | HTTP/GRPC | `NETWORK_ERROR` | REST API failures, gRPC stream errors |
-| KAFKA/CONSUL/VAULT/VALKEY | `SERVICE_UNAVAILABLE` | Message broker down, service registry unavailable |
+| KAFKA/CONSUL/INFISICAL/VALKEY | `SERVICE_UNAVAILABLE` | Message broker down, service registry unavailable |
 
 ### Transport Type Mapping
 
@@ -108,7 +108,7 @@ EnumInfraTransportType.GRPC      # gRPC services
 # Infrastructure services
 EnumInfraTransportType.KAFKA     # Message broker
 EnumInfraTransportType.CONSUL    # Service discovery
-EnumInfraTransportType.VAULT     # Secret management
+EnumInfraTransportType.INFISICAL  # Secret management
 EnumInfraTransportType.VALKEY    # Cache layer
 ```
 
@@ -222,40 +222,39 @@ async def publish_event(
         ) from e
 ```
 
-### Vault Secret Retrieval Error
+### Infisical Secret Retrieval Error
 
 ```python
 from omnibase_infra.errors import SecretResolutionError, InfraAuthenticationError
 from omnibase_infra.enums import EnumInfraTransportType
-from hvac.exceptions import InvalidPath, Unauthorized
 
 async def get_secret(
     path: str,
     correlation_id: UUID
 ) -> dict[str, str]:
     try:
-        response = vault_client.secrets.kv.v2.read_secret_version(path=path)
-        return response["data"]["data"]
-    except InvalidPath as e:
+        response = infisical_client.get_secret(path=path)
+        return response.secret_value
+    except SecretNotFoundError as e:
         # Secret doesn't exist - don't leak path structure
         raise SecretResolutionError(
             "Secret not found at requested path",
             context=ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="read_secret",
-                target_name="vault-kv-v2",
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="get_secret",
+                target_name="infisical-primary",
                 correlation_id=correlation_id,
             )
         ) from e
-    except Unauthorized as e:
+    except UnauthorizedError as e:
         context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.VAULT,
-            operation="read_secret",
-            target_name="vault-kv-v2",
+            transport_type=EnumInfraTransportType.INFISICAL,
+            operation="get_secret",
+            target_name="infisical-primary",
             correlation_id=correlation_id,
         )
         raise InfraAuthenticationError(
-            "Vault authentication failed",
+            "Infisical authentication failed",
             context=context
         ) from e
 ```

@@ -101,7 +101,7 @@ raise InfraAuthenticationError(
 # AVOID in production errors:
 
 # Full file paths revealing internal structure
-internal_path = "/opt/onex/secrets/vault_token.json"
+internal_path = "/opt/onex/secrets/infisical_token.json"
 raise FileNotFoundError(f"Config not found: {internal_path}")  # AVOID
 
 # Internal hostnames and IPs
@@ -488,7 +488,7 @@ def connect_to_service(
 
         # GOOD: Sanitized error with context
         raise InfraConnectionError(
-            "Authentication failed - verify credentials in Vault",
+            "Authentication failed - verify credentials in Infisical",
             context=context,
             # Include safe metadata
             host=host,
@@ -517,16 +517,16 @@ async def get_database_credentials(
     secret_path: str,
     correlation_id: UUID,
 ) -> dict[str, str]:
-    """Fetch database credentials from Vault with sanitized errors."""
+    """Fetch database credentials from Infisical with sanitized errors."""
     context = ModelInfraErrorContext(
-        transport_type=EnumInfraTransportType.VAULT,
+        transport_type=EnumInfraTransportType.INFISICAL,
         operation="read_secret",
-        target_name="vault-kv-v2",
+        target_name="infisical-primary",
         correlation_id=correlation_id,
     )
 
     try:
-        secret = await vault_client.read(secret_path)
+        secret = await infisical_client.read(secret_path)
         return secret["data"]
     except SecretNotFoundError as e:
         # BAD: Exposes secret path structure
@@ -534,7 +534,7 @@ async def get_database_credentials(
 
         # GOOD: Generic message without path details
         raise SecretResolutionError(
-            "Database credentials not found in Vault",
+            "Database credentials not found in Infisical",
             context=context,
             # Only include sanitized path if absolutely necessary
             secret_type="database_credentials",
