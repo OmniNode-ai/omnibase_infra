@@ -42,6 +42,7 @@ ADRs are immutable once accepted. Superseded decisions are marked but not delete
 | [adr-handler-contract-schema-evolution](adr-handler-contract-schema-evolution.md) | Handler Contract Schema Evolution | Contracts |
 | [adr-handler-plugin-loader-security](adr-handler-plugin-loader-security.md) | Handler Plugin Loader Security | Security |
 | [adr-handler-type-vs-handler-category](adr-handler-type-vs-handler-category.md) | Handler Type vs Handler Category | Architecture |
+| [adr-two-handler-systems](adr-two-handler-systems.md) | Two Handler Systems (Infrastructure vs Orchestrator) | Architecture |
 | [adr-projector-composite-key-upsert-workaround](adr-projector-composite-key-upsert-workaround.md) | Projector Composite Key Upsert Workaround | Data Layer |
 | [adr-protocol-design-guidelines](adr-protocol-design-guidelines.md) | Protocol Design Guidelines | Architecture |
 | [adr-soft-validation-env-parsing](adr-soft-validation-env-parsing.md) | Soft Validation for Environment Parsing | Configuration |
