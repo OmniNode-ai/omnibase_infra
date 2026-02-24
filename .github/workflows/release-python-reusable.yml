@@ -1,0 +1,100 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: Release Python Package (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        type: string
+        default: '3.12'
+      publish:
+        type: boolean
+        default: true
+    secrets:
+      PYPI_PRIVATE_UPLOAD_URL:
+        required: false
+      PYPI_PRIVATE_TOKEN:
+        required: false
+
+permissions:
+  contents: write   # required for softprops/action-gh-release
+
+concurrency:
+  group: release-${{ github.repository }}-${{ github.ref_name }}
+  cancel-in-progress: false   # never cancel a release mid-flight
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Assert clean working tree
+        run: |
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
+
+      - name: Validate tag matches pyproject.toml version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG_VERSION=$(python3 -c "
+          import tomllib, sys
+          with open('pyproject.toml', 'rb') as f:
+              d = tomllib.load(f)
+          v = d.get('project', {}).get('version')
+          if not v:
+              raise SystemExit('ERROR: missing [project].version in pyproject.toml — PEP 621 migration required before releasing')
+          print(v)
+          ")
+          if [ "$TAG" != "$PKG_VERSION" ]; then
+            echo "ERROR: tag $GITHUB_REF_NAME does not match pyproject.toml version $PKG_VERSION"
+            exit 1
+          fi
+          echo "Version validated: $PKG_VERSION"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Build wheel + sdist
+        run: uv build
+
+      - name: Verify dist artifacts exist
+        run: |
+          ls -la dist/
+          ls dist/*.whl dist/*.tar.gz >/dev/null 2>&1 || {
+            echo "ERROR: expected wheel + sdist in dist/ — build may have failed silently"
+            exit 1
+          }
+
+      - name: Publish to private PyPI
+        if: inputs.publish
+        run: |
+          if [ -z "$UV_PUBLISH_URL" ] || [ -z "$UV_PUBLISH_TOKEN" ]; then
+            echo "ERROR: PYPI_PRIVATE_UPLOAD_URL and PYPI_PRIVATE_TOKEN secrets are required when publish is true"
+            exit 1
+          fi
+          uv publish \
+            --publish-url "$UV_PUBLISH_URL" \
+            --token "$UV_PUBLISH_TOKEN" \
+            dist/*.whl dist/*.tar.gz
+        env:
+          UV_PUBLISH_URL: ${{ secrets.PYPI_PRIVATE_UPLOAD_URL }}
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_PRIVATE_TOKEN }}
+
+      - name: Generate checksums
+        run: sha256sum dist/*.whl dist/*.tar.gz > dist/SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS.txt
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, 'rc') }}
