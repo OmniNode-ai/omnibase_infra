@@ -70,6 +70,9 @@ jobs:
       - name: Build wheel and sdist
         run: uv build
 
+      - name: Validate package metadata (twine check)
+        run: uv run --with twine twine check dist/*
+
       - name: Verify dist artifacts
         run: |
           if ! ls dist/*.whl 1>/dev/null 2>&1; then
