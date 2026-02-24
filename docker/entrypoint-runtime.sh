@@ -24,6 +24,24 @@
 
 set -e
 
+# =============================================================================
+# Deployment Identity Banner
+# =============================================================================
+# Print before any service initialization so operators can immediately verify
+# which code is running via: docker logs <container> | head -15
+#
+# RUNTIME_SOURCE_HASH and COMPOSE_PROJECT are stamped at build time from
+# --build-arg values passed by deploy-runtime.sh. They default to "unknown"
+# when the image is built without those args (e.g. manual docker compose up).
+#
+# SOURCE_DIR is the installed package location inside the container.
+echo "=== OmniNode Runtime ==="
+echo "RUNTIME_SOURCE_HASH=${RUNTIME_SOURCE_HASH:-unknown}"
+echo "COMPOSE_PROJECT=${COMPOSE_PROJECT:-unknown}"
+echo "SOURCE_DIR=/app/src"
+echo "BUILD_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+echo "========================"
+
 if [ -n "${OMNIBASE_INFRA_DB_URL:-}" ]; then
   echo "[entrypoint] Stamping schema fingerprint into db_metadata..."
   if python -m omnibase_infra.runtime.util_schema_fingerprint stamp; then

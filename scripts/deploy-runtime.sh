@@ -975,7 +975,10 @@ write_registry() {
 # =============================================================================
 
 build_images() {
-    # Build Docker images with VCS_REF and BUILD_DATE labels.
+    # Build Docker images with VCS_REF, BUILD_DATE, and deployment identity args.
+    # RUNTIME_SOURCE_HASH and COMPOSE_PROJECT are stamped into the image so the
+    # startup banner in entrypoint-runtime.sh can display them on container start.
+    # This makes deployment drift visible in logs without git forensics.
     local deploy_target="$1"
     local compose_project="$2"
     local git_sha="$3"
@@ -1000,9 +1003,11 @@ build_images() {
         build
         --build-arg "VCS_REF=${git_sha}"
         --build-arg "BUILD_DATE=${build_date}"
+        --build-arg "RUNTIME_SOURCE_HASH=${git_sha}"
+        --build-arg "COMPOSE_PROJECT=${compose_project}"
     )
 
-    log_info "Building images with VCS_REF=${git_sha}..."
+    log_info "Building images with VCS_REF=${git_sha} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
     log_cmd "${cmd[*]}"
 
     "${cmd[@]}"
@@ -1155,7 +1160,9 @@ print_compose_commands() {
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    build \\"
     log_info "    --build-arg VCS_REF=${git_sha} \\"
-    log_info "    --build-arg BUILD_DATE=\$(date -u +\"%Y-%m-%dT%H:%M:%SZ\")"
+    log_info "    --build-arg BUILD_DATE=\$(date -u +\"%Y-%m-%dT%H:%M:%SZ\") \\"
+    log_info "    --build-arg RUNTIME_SOURCE_HASH=${git_sha} \\"
+    log_info "    --build-arg COMPOSE_PROJECT=${compose_project}"
     log_info ""
     log_info "Restart runtime services:"
     log_info "  docker compose \\"
