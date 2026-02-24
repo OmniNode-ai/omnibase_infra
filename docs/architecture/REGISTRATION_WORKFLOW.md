@@ -41,7 +41,7 @@ The orchestrator does **not** return a `result`; it publishes events and emits i
 
 ## Complete Flow Diagram
 
-```
+```text
 Node Process                   Kafka                  NodeRegistrationOrchestrator         NodeRegistryEffect
     │                            │                              │                                │
     │  publish introspection      │                              │                                │
@@ -186,7 +186,7 @@ Per-backend circuit breakers (threshold: 5 failures, reset: 60s) protect against
 
 FSM-driven reducer for ONEX-compliant runtime execution via `RuntimeHostProcess`. All state transition logic is driven by `contract.yaml` FSM configuration, not Python code. The FSM states are:
 
-```
+```text
 idle -> pending -> partial -> complete
                            \-> failed -> idle (on reset)
 ```
@@ -207,7 +207,7 @@ Capability-oriented storage node named by what it does (`registration.storage`),
 
 **Handler**: `HandlerNodeIntrospected`
 
-```
+```text
 HandlerNodeIntrospected.handle(envelope):
     1. Extract: event, now, correlation_id from envelope
     2. I/O: ProjectionReaderRegistration.get_entity_state(node_id, "registration")
@@ -243,7 +243,7 @@ HandlerNodeIntrospected.handle(envelope):
 
 The orchestrator dispatches intents from Phase 1 to `NodeRegistryEffect`, which executes both backends in parallel:
 
-```
+```text
 NodeRegistryEffect receives ModelRegistryRequest:
     asyncio.gather(
         HandlerConsulRegister.handle(request, correlation_id),
@@ -278,7 +278,7 @@ NodeRegistryEffect receives ModelRegistryRequest:
 
 **Handler**: `HandlerNodeRegistrationAcked`
 
-```
+```text
 HandlerNodeRegistrationAcked.handle(envelope):
     1. Extract: command, now, correlation_id from envelope
     2. I/O: ProjectionReaderRegistration.get_entity_state(node_id, "registration")
@@ -315,7 +315,7 @@ After the UPDATE intent executes, the node is fully ACTIVE in both Consul and Po
 
 **Handler**: `HandlerNodeHeartbeat`
 
-```
+```text
 HandlerNodeHeartbeat.handle(envelope):
     1. I/O: ProjectionReaderRegistration.get_entity_state(node_id, "registration")
     2. If projection is None: return empty output (unknown node)
@@ -332,7 +332,7 @@ The heartbeat decision emits one intent:
 
 **Timeout detection** runs on each `ModelRuntimeTick` via `HandlerRuntimeTick`:
 
-```
+```text
 HandlerRuntimeTick.handle(envelope):
     1. I/O: Query projection for overdue ack deadlines (state=AWAITING_ACK)
     2. I/O: Query projection for overdue liveness deadlines (state=ACTIVE)

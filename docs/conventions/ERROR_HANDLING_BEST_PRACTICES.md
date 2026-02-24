@@ -13,7 +13,7 @@ Error handling standards for `omnibase_infra`. All infrastructure errors derive 
 3. [Error Class Selection](#error-class-selection)
 4. [Error Sanitization Rules](#error-sanitization-rules)
 5. [Correlation ID Rules](#correlation-id-rules)
-6. [Chaining with `from e`](#chaining-with)
+6. [Chaining with `from e`](#chaining-with-from-e)
 7. [Common Mistakes](#common-mistakes)
 
 ---
@@ -27,8 +27,7 @@ ModelOnexError (omnibase_core)
     ├── ProtocolDependencyResolutionError
     ├── SecretResolutionError
     ├── InfraConnectionError (transport-aware codes)
-    │   ├── InfraConsulError
-    │   └── InfraVaultError
+    │   └── InfraConsulError
     ├── InfraTimeoutError
     ├── InfraAuthenticationError
     ├── InfraRateLimitedError
@@ -105,7 +104,7 @@ Always prefer Pattern 2 when a `correlation_id` is available from the incoming r
 | `operation` | `str \| None` | Yes | Specific operation being attempted |
 | `target_name` | `str \| None` | Recommended | Service instance or endpoint identifier |
 | `correlation_id` | `UUID \| None` | Yes (auto-generated if absent) | Request correlation ID |
-| `namespace` | `str \| None` | When applicable | Vault namespace or service-specific namespace |
+| `namespace` | `str \| None` | When applicable | Service-specific namespace (e.g., Infisical path scope) |
 
 Always provide `transport_type` and `operation`. `target_name` is strongly recommended.
 
@@ -116,7 +115,6 @@ Always provide `transport_type` and `operation`. `target_name` is strongly recom
 | `DATABASE` | PostgreSQL | `"omninode-bridge-postgres"` |
 | `KAFKA` | Redpanda / Kafka | `"omninode-bridge-redpanda"` |
 | `CONSUL` | HashiCorp Consul | `"omninode-bridge-consul"` |
-| `VAULT` | HashiCorp Vault | `"omninode-bridge-vault"` |
 | `HTTP` | REST/HTTP services | `"archon-intelligence:8053"` |
 | `QDRANT` | Qdrant vector DB | `"localhost:6333"` |
 | `MCP` | MCP tool server | `"mcp-tool-server"` |
@@ -133,10 +131,9 @@ Choose the most specific applicable error class:
 | Scenario | Error Class | Notes |
 |----------|-------------|-------|
 | Configuration field invalid / missing | `ProtocolConfigurationError` | Raised at startup or config load |
-| Secret not found or expired | `SecretResolutionError` | Infisical, Vault secrets unavailable |
+| Secret not found or resolution failed | `SecretResolutionError` | Infisical secrets unavailable |
 | Network / TCP connection failed | `InfraConnectionError` | Also use for DNS failures |
 | Consul operation failed | `InfraConsulError` | Subclass of `InfraConnectionError` |
-| Vault operation failed | `InfraVaultError` | Subclass of `InfraConnectionError` |
 | Operation timeout | `InfraTimeoutError` | Set `transport_type` to identify which transport timed out |
 | Auth/credentials rejected | `InfraAuthenticationError` | HTTP 401/403, token expired |
 | Rate limited (HTTP 429) | `InfraRateLimitedError` | Include `Retry-After` if known |

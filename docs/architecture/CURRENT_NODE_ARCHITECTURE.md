@@ -38,10 +38,10 @@ ONEX enforces a strict **4-node architecture** pattern:
 
 **Communication Pattern**:
 
-```
-EFFECT (I/O) → events → REDUCER (FSM) → intents → ORCHESTRATOR → EFFECT
-                                                        │
-                                              handler_routing → COMPUTE
+```text
+EFFECT (I/O) → events → COMPUTE → REDUCER (FSM) → intents → ORCHESTRATOR
+                                                                   │
+                                                         handler_routing → EFFECT
 ```
 
 **Key Invariants**:
@@ -54,7 +54,7 @@ EFFECT (I/O) → events → REDUCER (FSM) → intents → ORCHESTRATOR → EFFEC
 
 ## 2. Standard Directory Structure
 
-```
+```text
 nodes/<node_name>/
 ├── __init__.py           # Public exports
 ├── contract.yaml         # ONEX contract (REQUIRED — source of truth)
@@ -84,7 +84,8 @@ nodes/<node_name>/
 The registration family handles the full lifecycle of ONEX node registration: from introspection through Consul and PostgreSQL backend persistence to state tracking.
 
 **Data flow**:
-```
+
+```text
 INTROSPECTION EVENT → NodeRegistrationOrchestrator
     → NodeRegistrationReducer (emits intents)
     → NodeRegistryEffect (dual-backend: Consul + PostgreSQL)
@@ -120,7 +121,8 @@ INTROSPECTION EVENT → NodeRegistrationOrchestrator
 The validation pipeline implements a multi-node pattern candidate validation workflow: plan → execute → adjudicate → publish verdicts → update pattern lifecycle.
 
 **Data flow**:
-```
+
+```text
 PATTERN CANDIDATE → NodeValidationOrchestrator
     → builds ModelValidationPlan
     → NodeValidationExecutor (runs checks: typecheck, lint, tests, risk, cost)
@@ -150,7 +152,8 @@ PATTERN CANDIDATE → NodeValidationOrchestrator
 The LLM family provides provider-agnostic inference and embedding generation with circuit breaker protection and multi-endpoint routing.
 
 **Data flow**:
-```
+
+```text
 INFERENCE REQUEST → NodeLlmInferenceEffect
     (routes to: OpenAI-compatible / Ollama handlers)
     → returns ModelLlmInferenceResponse (tokens, latency, trace)
@@ -177,7 +180,8 @@ A/B COMPARISON → NodeBaselineComparisonCompute
 The session lifecycle family manages pipeline run state using a filesystem-backed FSM. It tracks the complete run lifecycle from creation through completion.
 
 **Data flow**:
-```
+
+```text
 SESSION EVENT → NodeSessionLifecycleReducer
     (FSM: idle → run_created → run_active → run_ended)
     → emits intents → NodeSessionStateEffect
@@ -208,7 +212,8 @@ SESSION EVENT → NodeSessionLifecycleReducer
 The checkpoint pipeline provides pipeline state persistence across restarts, supporting resumable workflows.
 
 **Data flow**:
-```
+
+```text
 CHECKPOINT WRITE → NodeCheckpointValidateCompute (structural validation)
     → NodeCheckpointEffect (filesystem persistence: ~/.claude/checkpoints/{ticket_id}/{run_id}/)
 
@@ -228,7 +233,8 @@ CHECKPOINT READ → NodeCheckpointEffect (read operation)
 The event ledger provides an immutable audit trail for platform events, enabling complete traceability and deterministic replay.
 
 **Data flow**:
-```
+
+```text
 PLATFORM EVENTS (7 topics) → NodeLedgerProjectionCompute
     (projects events → ModelPayloadLedgerAppend intents)
     → NodeLedgerWriteEffect
@@ -247,7 +253,8 @@ PLATFORM EVENTS (7 topics) → NodeLedgerProjectionCompute
 The RRH family validates that a repository meets release readiness criteria before a deployment proceeds. It gathers multi-dimensional environment data, evaluates 13 rules, and persists results as artifacts.
 
 **Data flow**:
-```
+
+```text
 RRH REQUEST → NodeRrhEmitEffect
     (3 independent handlers: git state, deployment targets, runtime health)
     → ModelRRHEnvironmentData

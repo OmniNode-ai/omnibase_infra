@@ -50,7 +50,7 @@ The integration is currently in MVP state. Tool discovery is manual (via `regist
 
 ## Request and Response Flow
 
-```
+```text
 AI Agent (MCP client)
         |
         | HTTP POST /mcp   (Streamable HTTP, MCP wire format)
@@ -93,7 +93,7 @@ AI Agent (MCP client)
 
 When `HandlerMCP` is invoked through the ONEX envelope system (rather than directly via HTTP), the flow is:
 
-```
+```text
 ONEX runtime envelope
         |
         v
@@ -120,7 +120,7 @@ HandlerMCP.execute(envelope: dict)
 
 ### Initialization sequence
 
-```
+```text
 HandlerMCP.initialize(config: dict) is called
         |
         1. Parse config via ModelMcpHandlerConfig (Pydantic, strict — no fallbacks)
@@ -141,7 +141,7 @@ HandlerMCP.initialize(config: dict) is called
 
 Shutdown is bounded — it never hangs indefinitely:
 
-```
+```text
 HandlerMCP.shutdown()
         |
         1. Signal uvicorn: server.should_exit = True

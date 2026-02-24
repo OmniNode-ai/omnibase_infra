@@ -310,7 +310,7 @@ class ModelRetryConfig(BaseModel):
 
 | Wrong | Correct | Rule |
 |-------|---------|------|
-| `Optional[UUID]` | `UUID \| None` | PEP 604 unions only |
+| `Optional[UUID]` | `UUID | None` | PEP 604 unions only |
 | `frozen=True` without `from_attributes=True` | Add `from_attributes=True` | Required pair for pytest-xdist |
 | `items: list[str] = []` | `items: list[str] = Field(default_factory=list)` | No mutable literals as defaults |
 | `items: list[str] = Field(...)` in frozen model | `items: tuple[str, ...] = Field(...)` | Use tuple in frozen models |

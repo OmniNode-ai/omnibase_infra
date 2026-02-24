@@ -14,7 +14,7 @@ Introduced across OMN-2310 (models), OMN-2311 (ServiceTopicCatalog), OMN-2312 (w
 2. [Component Inventory](#component-inventory)
 3. [Data Flow](#data-flow)
 4. [Consul KV Structure](#consul-kv-structure)
-5. [ServiceTopicCatalog — Design Details](#servicetopiccatalog-design-details)
+5. [ServiceTopicCatalog — Design Details](#servicetopiccatalog--design-details)
 6. [KV Precedence Rules](#kv-precedence-rules)
 7. [In-Process Cache](#in-process-cache)
 8. [Timeout Budget and Partial Results](#timeout-budget-and-partial-results)
@@ -55,7 +55,7 @@ Each ONEX node declares in Consul KV which topics it publishes to and subscribes
 
 ## Data Flow
 
-```
+```text
 Client (dashboard, node, or service)
         |
         | publish ModelTopicCatalogQuery to "platform.topic-catalog-query" topic
@@ -111,7 +111,7 @@ Client receives ModelTopicCatalogResponse on "platform.topic-catalog-response" t
 
 All catalog data lives under the `onex/` namespace:
 
-```
+```text
 onex/catalog/version                                  -- monotonic integer
 onex/nodes/{node_id}/event_bus/subscribe_topics       -- JSON array of topic suffixes (AUTHORITATIVE)
 onex/nodes/{node_id}/event_bus/publish_topics         -- JSON array of topic suffixes (AUTHORITATIVE)
@@ -201,7 +201,7 @@ Cache behavior:
 - **Eviction**: when a newer version is cached, all older versions are evicted to bound memory
 - **Version -1 (unknown)**: caching is disabled; every call performs a full rebuild
 
-```
+```text
 version read from Consul -> 42
 cache contains key 42    -> return _cache[42], re-apply filters
 
@@ -233,7 +233,7 @@ Similarly, a 10,000-key cap (`_MAX_KV_KEYS`) prevents runaway scans. When the ca
 
 `ServiceTopicCatalog.increment_version()` atomically increments the version key using Consul's Check-and-Set (CAS):
 
-```
+```text
 1. Read current value + ModifyIndex via kv_get_with_modify_index()
 2. Compute new_version = current + 1 (or 1 if key absent/corrupt)
 3. Write new_version with cas=ModifyIndex via kv_put_raw_with_cas()

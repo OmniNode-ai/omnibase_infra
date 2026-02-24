@@ -106,17 +106,14 @@ Snapshot topics use **log compaction** (`cleanup.policy=compact`) to retain only
 
 ### Key Format
 
-Snapshot keys follow the format:
+Snapshot keys are the **node UUID only**, as returned by `ModelRegistrationSnapshot.to_kafka_key()`:
 
+```text
+550e8400-e29b-41d4-a716-446655440000
 ```
-{domain}:{entity_id}
-```
-
-Example: `registration:550e8400-e29b-41d4-a716-446655440000`
 
 This ensures:
-- Per-entity compaction (only latest snapshot survives)
-- Multi-domain isolation (different domains have separate keys)
+- Per-node compaction (only latest snapshot per node survives)
 - Consistent ordering within the same entity
 
 ## Snapshot Format
@@ -612,13 +609,11 @@ except InfraConnectionError:
 
 ### Key Format and Compaction Behavior
 
-Kafka compaction uses the message **key** to determine which records to retain. For this topic, the key is the **node_id as a UUID string only** -- not `domain:entity_id`.
+Kafka compaction uses the message **key** to determine which records to retain. For this topic, the key is the **node_id as a UUID string only**.
 
 Example key: `550e8400-e29b-41d4-a716-446655440000`
 
 This means compaction retains exactly one record per node. The key format is defined by `ModelRegistrationSnapshot.to_kafka_key()` which returns `str(self.entity_id)`.
-
-> **Note**: The `ModelRegistrationSnapshot.to_kafka_key()` format (UUID only) differs from the `{domain}:{entity_id}` format shown in the Key Format section above. The UUID-only format is the current implementation.
 
 ### Creating the Topic
 
@@ -747,6 +742,7 @@ Output columns: `CURRENT-OFFSET` (last committed), `LOG-END-OFFSET` (latest), `L
 `cleanup_policy` is intentionally **not overridable** via environment variable because snapshot topics must always use compaction.
 
 **Development .env overrides**:
+
 ```bash
 SNAPSHOT_REPLICATION_FACTOR=1
 SNAPSHOT_MIN_INSYNC_REPLICAS=1

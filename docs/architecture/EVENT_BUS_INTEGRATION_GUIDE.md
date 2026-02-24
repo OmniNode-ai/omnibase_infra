@@ -7,7 +7,7 @@
 This guide provides step-by-step instructions for integrating with the ONEX Event Bus infrastructure. The Event Bus supports both production (Kafka) and development (in-memory) implementations with a consistent API.
 
 **Implementation Files**:
-- **KafkaEventBus**: `src/omnibase_infra/event_bus/kafka_event_bus.py`
+- **EventBusKafka**: `src/omnibase_infra/event_bus/kafka_event_bus.py`
 - **InMemoryEventBus**: `src/omnibase_infra/event_bus/inmemory_event_bus.py`
 - **Models**: `src/omnibase_infra/event_bus/models/`
 
@@ -21,19 +21,19 @@ This guide provides step-by-step instructions for integrating with the ONEX Even
 
 | Environment | Implementation | Use Case |
 |-------------|----------------|----------|
-| Production | `KafkaEventBus` | Real message streaming with Kafka |
+| Production | `EventBusKafka` | Real message streaming with Kafka |
 | Development/Testing | `InMemoryEventBus` | Local development, unit tests |
 
 ### Step 2: Basic Setup
 
 ```python
 import asyncio
-from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+from omnibase_infra.event_bus.kafka_event_bus import EventBusKafka
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.event_bus.models import ModelEventMessage
 
 # Option A: Production (Kafka)
-bus = KafkaEventBus.default()
+bus = EventBusKafka.default()
 
 # Option B: Development (In-Memory)
 bus = InMemoryEventBus(environment="dev", group="my-service")
@@ -63,7 +63,7 @@ asyncio.run(main())
 ### Step 3: Verify It Works
 
 ```bash
-# Set Kafka connection (if using KafkaEventBus)
+# Set Kafka connection (if using EventBusKafka)
 export KAFKA_BOOTSTRAP_SERVERS="localhost:9092"
 
 # Run your code
@@ -74,7 +74,7 @@ python your_script.py
 
 ## Configuration Reference
 
-### Environment Variables (KafkaEventBus)
+### Environment Variables (EventBusKafka)
 
 All environment variables are optional and fall back to defaults if not set.
 
@@ -153,17 +153,17 @@ dead_letter_topic: "dlq-events"
 Load it:
 ```python
 from pathlib import Path
-from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+from omnibase_infra.event_bus.kafka_event_bus import EventBusKafka
 
-bus = KafkaEventBus.from_yaml(Path("kafka_config.yaml"))
+bus = EventBusKafka.from_yaml(Path("kafka_config.yaml"))
 ```
 
 ### Programmatic Configuration
 
 ```python
-from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.event_bus.models.config import ModelEventBusKafkaConfig
 
-config = ModelKafkaEventBusConfig(
+config = ModelEventBusKafkaConfig(
     bootstrap_servers="kafka:9092",
     environment="prod",
     group="order-service",
@@ -171,7 +171,7 @@ config = ModelKafkaEventBusConfig(
     max_retry_attempts=5,
     circuit_breaker_threshold=10,
 )
-bus = KafkaEventBus.from_config(config)
+bus = EventBusKafka.from_config(config)
 ```
 
 ---
@@ -404,11 +404,11 @@ Examples:
 
 ### Built-in Retry with Exponential Backoff
 
-KafkaEventBus automatically retries failed publishes:
+EventBusKafka automatically retries failed publishes:
 
 ```python
 # Configuration
-bus = KafkaEventBus(
+bus = EventBusKafka(
     max_retry_attempts=5,      # Max retries
     retry_backoff_base=2.0,    # 2s, 4s, 8s, 16s, 32s
 )
@@ -499,7 +499,7 @@ Failed messages are published to DLQ with metadata:
 
 ## Circuit Breaker Usage
 
-The KafkaEventBus includes a circuit breaker to prevent cascading failures.
+The EventBusKafka includes a circuit breaker to prevent cascading failures.
 
 ### How It Works
 
@@ -775,7 +775,7 @@ import asyncio
 import signal
 
 async def main():
-    bus = KafkaEventBus.default()
+    bus = EventBusKafka.default()
     await bus.start()
 
     # Set up subscriptions...
@@ -865,17 +865,17 @@ async def main():
 
 ## API Reference
 
-### KafkaEventBus
+### EventBusKafka
 
 ```python
-class KafkaEventBus:
+class EventBusKafka:
     # Factory methods
     @classmethod
-    def default(cls) -> KafkaEventBus: ...
+    def default(cls) -> EventBusKafka: ...
     @classmethod
-    def from_config(cls, config: ModelKafkaEventBusConfig) -> KafkaEventBus: ...
+    def from_config(cls, config: ModelEventBusKafkaConfig) -> EventBusKafka: ...
     @classmethod
-    def from_yaml(cls, path: Path) -> KafkaEventBus: ...
+    def from_yaml(cls, path: Path) -> EventBusKafka: ...
 
     # Lifecycle
     async def start(self) -> None: ...
@@ -907,16 +907,16 @@ class KafkaEventBus:
     @property
     def group(self) -> str: ...
     @property
-    def config(self) -> ModelKafkaEventBusConfig: ...
+    def config(self) -> ModelEventBusKafkaConfig: ...
 ```
 
 ### InMemoryEventBus
 
-Same interface as KafkaEventBus, plus debugging utilities:
+Same interface as EventBusKafka, plus debugging utilities:
 
 ```python
 class InMemoryEventBus:
-    # ... same core API as KafkaEventBus ...
+    # ... same core API as EventBusKafka ...
 
     # Debugging utilities
     async def get_event_history(self, limit: int = 100,
