@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field
 
 
-class ModelRegistryApiResponse(BaseModel, frozen=True):
+class ModelRegistryApiResponse(BaseModel):
     """Output envelope for registry API effect operations.
 
     Generic response envelope.  The ``data`` field carries operation-specific
@@ -47,7 +47,7 @@ class ModelRegistryApiResponse(BaseModel, frozen=True):
         default=None, description="Sanitised error on fatal failure."
     )
 
-    model_config = {"extra": "forbid"}
+    model_config = {"extra": "forbid", "frozen": True}
 
 
 __all__ = ["ModelRegistryApiResponse"]

@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from omnibase_infra.enums import EnumRegistrationState
 
 
-class ModelRegistryApiRequest(BaseModel, frozen=True):
+class ModelRegistryApiRequest(BaseModel):
     """Input envelope for registry API effect operations.
 
     All fields are optional — callers populate only the fields relevant to
@@ -59,7 +59,7 @@ class ModelRegistryApiRequest(BaseModel, frozen=True):
         default=None, description="Topic suffix for single-topic lookup."
     )
 
-    model_config = {"extra": "forbid"}
+    model_config = {"extra": "forbid", "frozen": True}
 
 
 __all__ = ["ModelRegistryApiRequest"]
