@@ -106,17 +106,14 @@ Snapshot topics use **log compaction** (`cleanup.policy=compact`) to retain only
 
 ### Key Format
 
-Snapshot keys follow the format:
+Snapshot keys are the **node UUID only**, as returned by `ModelRegistrationSnapshot.to_kafka_key()`:
 
+```text
+550e8400-e29b-41d4-a716-446655440000
 ```
-{domain}:{entity_id}
-```
-
-Example: `registration:550e8400-e29b-41d4-a716-446655440000`
 
 This ensures:
-- Per-entity compaction (only latest snapshot survives)
-- Multi-domain isolation (different domains have separate keys)
+- Per-node compaction (only latest snapshot per node survives)
 - Consistent ordering within the same entity
 
 ## Snapshot Format
@@ -600,6 +597,183 @@ except InfraConnectionError:
     await asyncio.sleep(backoff_seconds)
 ```
 
+## Operational Reference
+
+### Topic Name and Config Source
+
+**Topic Name**: `onex.snapshot.platform.registration-snapshots.v1`
+
+**Programmatic Config Source**: `src/omnibase_infra/models/projection/model_snapshot_topic_config.py` (`ModelSnapshotTopicConfig`)
+
+**Infrastructure**: Redpanda (Kafka-compatible) running on `192.168.86.200:29092`
+
+### Key Format and Compaction Behavior
+
+Kafka compaction uses the message **key** to determine which records to retain. For this topic, the key is the **node_id as a UUID string only**.
+
+Example key: `550e8400-e29b-41d4-a716-446655440000`
+
+This means compaction retains exactly one record per node. The key format is defined by `ModelRegistrationSnapshot.to_kafka_key()` which returns `str(self.entity_id)`.
+
+### Creating the Topic
+
+**Production (multi-broker cluster)**:
+
+```bash
+rpk topic create onex.snapshot.platform.registration-snapshots.v1 \
+  --brokers 192.168.86.200:29092 \
+  --partitions 12 \
+  --replicas 3 \
+  --topic-config cleanup.policy=compact \
+  --topic-config min.compaction.lag.ms=60000 \
+  --topic-config max.compaction.lag.ms=300000 \
+  --topic-config segment.bytes=104857600 \
+  --topic-config retention.ms=-1 \
+  --topic-config min.insync.replicas=2
+```
+
+**Development (single-node Redpanda)**:
+
+```bash
+rpk topic create onex.snapshot.platform.registration-snapshots.v1 \
+  --brokers 192.168.86.200:29092 \
+  --partitions 12 \
+  --replicas 1 \
+  --topic-config cleanup.policy=compact \
+  --topic-config min.compaction.lag.ms=60000 \
+  --topic-config max.compaction.lag.ms=300000 \
+  --topic-config segment.bytes=104857600 \
+  --topic-config retention.ms=-1 \
+  --topic-config min.insync.replicas=1
+```
+
+Single-node Redpanda cannot honor `replication_factor > 1` or `min.insync.replicas > 1`. Always use `1` for both when targeting a single-node development instance.
+
+### Development vs Production Settings
+
+| Setting | Development (single-node) | Production (multi-broker) |
+|---------|---------------------------|---------------------------|
+| `--replicas` | `1` | `3` |
+| `min.insync.replicas` | `1` | `2` |
+| `--partitions` | `12` | `12` (increase if needed) |
+| All other config | Same | Same |
+
+### Verifying Topic Configuration
+
+```bash
+# Check that the topic exists
+rpk topic list --brokers 192.168.86.200:29092
+
+# Describe topic configuration (full)
+rpk topic describe onex.snapshot.platform.registration-snapshots.v1 \
+  --brokers 192.168.86.200:29092
+
+# Describe topic configuration only
+rpk topic describe onex.snapshot.platform.registration-snapshots.v1 \
+  --brokers 192.168.86.200:29092 \
+  -c
+```
+
+Verify that `cleanup.policy=compact`, `min.compaction.lag.ms=60000`, `max.compaction.lag.ms=300000`, `segment.bytes=104857600`, `retention.ms=-1`, and `min.insync.replicas` matches your environment.
+
+### Debugging: Reading Messages from the Topic
+
+```bash
+# Read all current snapshots
+rpk topic consume onex.snapshot.platform.registration-snapshots.v1 \
+  --brokers 192.168.86.200:29092 \
+  --offset start \
+  --format '%k\t%v\n'
+
+# Read a limited number of messages
+rpk topic consume onex.snapshot.platform.registration-snapshots.v1 \
+  --brokers 192.168.86.200:29092 \
+  --offset start \
+  --num 10 \
+  --format '%k\t%v\n'
+
+# Read messages with full metadata (partition, offset, timestamp)
+rpk topic consume onex.snapshot.platform.registration-snapshots.v1 \
+  --brokers 192.168.86.200:29092 \
+  --offset start \
+  --num 10 \
+  --format 'partition:%p offset:%o timestamp:%d{ms} key:%k value:%v\n'
+
+# Read from a specific partition
+rpk topic consume onex.snapshot.platform.registration-snapshots.v1 \
+  --brokers 192.168.86.200:29092 \
+  --partitions 0 \
+  --offset start \
+  --num 10
+```
+
+Tombstones appear as a key with an empty value.
+
+### Checking Consumer Group Offsets
+
+```bash
+# List all consumer groups
+rpk group list --brokers 192.168.86.200:29092
+
+# Describe a specific consumer group
+rpk group describe <group-id> --brokers 192.168.86.200:29092
+
+# Example: check lag for the snapshot reader group
+rpk group describe snapshot-reader --brokers 192.168.86.200:29092
+```
+
+Output columns: `CURRENT-OFFSET` (last committed), `LOG-END-OFFSET` (latest), `LAG` (difference). A lag of 0 means the consumer is fully caught up.
+
+### Environment Variable Overrides
+
+`ModelSnapshotTopicConfig.default()` applies environment variable overrides on top of the compiled defaults:
+
+| Environment Variable | Config Field | Default |
+|---------------------|--------------|---------|
+| `SNAPSHOT_TOPIC` | `topic` | `onex.snapshot.platform.registration-snapshots.v1` |
+| `SNAPSHOT_PARTITION_COUNT` | `partition_count` | `12` |
+| `SNAPSHOT_REPLICATION_FACTOR` | `replication_factor` | `3` |
+| `SNAPSHOT_MIN_COMPACTION_LAG_MS` | `min_compaction_lag_ms` | `60000` |
+| `SNAPSHOT_MAX_COMPACTION_LAG_MS` | `max_compaction_lag_ms` | `300000` |
+| `SNAPSHOT_SEGMENT_BYTES` | `segment_bytes` | `104857600` |
+| `SNAPSHOT_RETENTION_MS` | `retention_ms` | `-1` |
+| `SNAPSHOT_MIN_INSYNC_REPLICAS` | `min_insync_replicas` | `2` |
+
+`cleanup_policy` is intentionally **not overridable** via environment variable because snapshot topics must always use compaction.
+
+**Development .env overrides**:
+
+```bash
+SNAPSHOT_REPLICATION_FACTOR=1
+SNAPSHOT_MIN_INSYNC_REPLICAS=1
+```
+
+### Modifying Topic Configuration After Creation
+
+```bash
+# Adjust compaction lag on existing topic
+rpk topic alter-config onex.snapshot.platform.registration-snapshots.v1 \
+  --brokers 192.168.86.200:29092 \
+  --set min.compaction.lag.ms=120000 \
+  --set max.compaction.lag.ms=600000
+
+# Increase partition count (can never be decreased)
+rpk topic add-partitions onex.snapshot.platform.registration-snapshots.v1 \
+  --brokers 192.168.86.200:29092 \
+  --num 24
+```
+
+### Deleting the Topic
+
+```bash
+rpk topic delete onex.snapshot.platform.registration-snapshots.v1 \
+  --brokers 192.168.86.200:29092
+```
+
+Snapshots can always be rebuilt from projections, so deleting the snapshot topic does not cause data loss.
+
+---
+
 ## Related Documentation
 
 ### Tickets
@@ -624,5 +798,4 @@ except InfraConnectionError:
 
 ### ONEX Standards
 
-- **Topic Taxonomy**: `docs/standards/onex_topic_taxonomy.md` (if exists)
 - **Event Envelope**: `omnibase_core.models.events.model_event_envelope`

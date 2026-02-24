@@ -6,7 +6,7 @@
 
 This document specifies the formal retry, backoff, and compensation strategies for ONEX infrastructure effects. It provides authoritative guidance for handling transient failures in external I/O operations.
 
-**Scope**: Effect nodes that interact with external systems (database, Kafka, HTTP, Vault, Consul, etc.)
+**Scope**: Effect nodes that interact with external systems (database, Kafka, HTTP, Infisical, Consul, etc.)
 
 **Related Documents**:
 - [Error Recovery Patterns](./error_recovery_patterns.md) - Implementation examples
@@ -896,13 +896,13 @@ class ModelHttpRetryConfig(BaseModel):
 - Status code filtering - only retry transient failures
 - Separate connect/read timeouts - different failure modes
 
-### Vault (Secret Management)
+### Infisical (Secret Management)
 
-Reference implementation: `ModelVaultRetryConfig` in `src/omnibase_infra/handlers/model_vault_retry_config.py`
+Reference implementation: `ModelInfisicalHandlerConfig` in `src/omnibase_infra/handlers/models/infisical/model_infisical_handler_config.py`
 
 ```python
-class ModelVaultRetryConfig(BaseModel):
-    """Configuration for Vault operation retry logic with exponential backoff."""
+class ModelInfisicalRetryConfig(BaseModel):
+    """Configuration for Infisical operation retry logic with exponential backoff."""
 
     max_attempts: int = Field(
         default=3,
@@ -931,9 +931,9 @@ class ModelVaultRetryConfig(BaseModel):
 ```
 
 **Rationale**:
-- Fast initial delay (0.1s) - Vault is usually fast when available
+- Fast initial delay (0.1s) - Infisical is usually fast when available
 - Lower max delay (10s) - secrets are critical, fail fast if unavailable
-- Lower max attempts (3) - Vault issues need investigation
+- Lower max attempts (3) - Infisical issues need investigation
 
 ### Consul (Service Discovery)
 
@@ -981,7 +981,7 @@ class ModelConsulRetryConfig(BaseModel):
 | Database | 3 | 0.5s | 30.0s | 2.0 |
 | Kafka | 5 | 1.0s | 60.0s | 2.0 |
 | HTTP | 3 | 0.5s | 30.0s | 2.0 |
-| Vault | 3 | 0.1s | 10.0s | 2.0 |
+| Infisical | 3 | 0.1s | 10.0s | 2.0 |
 | Consul | 3 | 1.0s | 30.0s | 2.0 |
 
 ---
@@ -1195,7 +1195,7 @@ def log_compensation_action(
 
 ## See Also
 
-- `ModelVaultRetryConfig`: `src/omnibase_infra/handlers/model_vault_retry_config.py`
+- `ModelInfisicalHandlerConfig`: `src/omnibase_infra/handlers/models/infisical/model_infisical_handler_config.py`
 - `ModelConsulRetryConfig`: `src/omnibase_infra/handlers/model_consul_retry_config.py`
 - `ModelKafkaEventBusConfig`: `src/omnibase_infra/event_bus/models/config/model_kafka_event_bus_config.py`
 - `ProtocolPolicy`: `src/omnibase_infra/runtime/protocol_policy.py`

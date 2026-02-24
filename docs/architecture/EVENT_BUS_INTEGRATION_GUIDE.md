@@ -7,7 +7,7 @@
 This guide provides step-by-step instructions for integrating with the ONEX Event Bus infrastructure. The Event Bus supports both production (Kafka) and development (in-memory) implementations with a consistent API.
 
 **Implementation Files**:
-- **KafkaEventBus**: `src/omnibase_infra/event_bus/kafka_event_bus.py`
+- **EventBusKafka**: `src/omnibase_infra/event_bus/kafka_event_bus.py`
 - **InMemoryEventBus**: `src/omnibase_infra/event_bus/inmemory_event_bus.py`
 - **Models**: `src/omnibase_infra/event_bus/models/`
 
@@ -21,19 +21,19 @@ This guide provides step-by-step instructions for integrating with the ONEX Even
 
 | Environment | Implementation | Use Case |
 |-------------|----------------|----------|
-| Production | `KafkaEventBus` | Real message streaming with Kafka |
+| Production | `EventBusKafka` | Real message streaming with Kafka |
 | Development/Testing | `InMemoryEventBus` | Local development, unit tests |
 
 ### Step 2: Basic Setup
 
 ```python
 import asyncio
-from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+from omnibase_infra.event_bus.kafka_event_bus import EventBusKafka
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.event_bus.models import ModelEventMessage
 
 # Option A: Production (Kafka)
-bus = KafkaEventBus.default()
+bus = EventBusKafka.default()
 
 # Option B: Development (In-Memory)
 bus = InMemoryEventBus(environment="dev", group="my-service")
@@ -63,7 +63,7 @@ asyncio.run(main())
 ### Step 3: Verify It Works
 
 ```bash
-# Set Kafka connection (if using KafkaEventBus)
+# Set Kafka connection (if using EventBusKafka)
 export KAFKA_BOOTSTRAP_SERVERS="localhost:9092"
 
 # Run your code
@@ -74,7 +74,7 @@ python your_script.py
 
 ## Configuration Reference
 
-### Environment Variables (KafkaEventBus)
+### Environment Variables (EventBusKafka)
 
 All environment variables are optional and fall back to defaults if not set.
 
@@ -153,17 +153,17 @@ dead_letter_topic: "dlq-events"
 Load it:
 ```python
 from pathlib import Path
-from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+from omnibase_infra.event_bus.kafka_event_bus import EventBusKafka
 
-bus = KafkaEventBus.from_yaml(Path("kafka_config.yaml"))
+bus = EventBusKafka.from_yaml(Path("kafka_config.yaml"))
 ```
 
 ### Programmatic Configuration
 
 ```python
-from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.event_bus.models.config import ModelEventBusKafkaConfig
 
-config = ModelKafkaEventBusConfig(
+config = ModelEventBusKafkaConfig(
     bootstrap_servers="kafka:9092",
     environment="prod",
     group="order-service",
@@ -171,7 +171,7 @@ config = ModelKafkaEventBusConfig(
     max_retry_attempts=5,
     circuit_breaker_threshold=10,
 )
-bus = KafkaEventBus.from_config(config)
+bus = EventBusKafka.from_config(config)
 ```
 
 ---
@@ -404,11 +404,11 @@ Examples:
 
 ### Built-in Retry with Exponential Backoff
 
-KafkaEventBus automatically retries failed publishes:
+EventBusKafka automatically retries failed publishes:
 
 ```python
 # Configuration
-bus = KafkaEventBus(
+bus = EventBusKafka(
     max_retry_attempts=5,      # Max retries
     retry_backoff_base=2.0,    # 2s, 4s, 8s, 16s, 32s
 )
@@ -499,7 +499,7 @@ Failed messages are published to DLQ with metadata:
 
 ## Circuit Breaker Usage
 
-The KafkaEventBus includes a circuit breaker to prevent cascading failures.
+The EventBusKafka includes a circuit breaker to prevent cascading failures.
 
 ### How It Works
 
@@ -775,7 +775,7 @@ import asyncio
 import signal
 
 async def main():
-    bus = KafkaEventBus.default()
+    bus = EventBusKafka.default()
     await bus.start()
 
     # Set up subscriptions...
@@ -865,17 +865,17 @@ async def main():
 
 ## API Reference
 
-### KafkaEventBus
+### EventBusKafka
 
 ```python
-class KafkaEventBus:
+class EventBusKafka:
     # Factory methods
     @classmethod
-    def default(cls) -> KafkaEventBus: ...
+    def default(cls) -> EventBusKafka: ...
     @classmethod
-    def from_config(cls, config: ModelKafkaEventBusConfig) -> KafkaEventBus: ...
+    def from_config(cls, config: ModelEventBusKafkaConfig) -> EventBusKafka: ...
     @classmethod
-    def from_yaml(cls, path: Path) -> KafkaEventBus: ...
+    def from_yaml(cls, path: Path) -> EventBusKafka: ...
 
     # Lifecycle
     async def start(self) -> None: ...
@@ -907,16 +907,16 @@ class KafkaEventBus:
     @property
     def group(self) -> str: ...
     @property
-    def config(self) -> ModelKafkaEventBusConfig: ...
+    def config(self) -> ModelEventBusKafkaConfig: ...
 ```
 
 ### InMemoryEventBus
 
-Same interface as KafkaEventBus, plus debugging utilities:
+Same interface as EventBusKafka, plus debugging utilities:
 
 ```python
 class InMemoryEventBus:
-    # ... same core API as KafkaEventBus ...
+    # ... same core API as EventBusKafka ...
 
     # Debugging utilities
     async def get_event_history(self, limit: int = 100,
@@ -973,10 +973,169 @@ class ModelEventHeaders(BaseModel):
 
 ---
 
+## AdapterProtocolEventPublisherKafka
+
+Production-grade adapter implementing `ProtocolEventPublisher` from `omnibase_spi`. Bridges the SPI protocol to `EventBusKafka` for production event publishing.
+
+**Module**: `omnibase_infra.event_bus.adapters.adapter_protocol_event_publisher_kafka`
+
+### Purpose
+
+This adapter provides a standard interface for event publishing while delegating resilience (circuit breaker, retry, backoff) to the underlying `EventBusKafka`. It implements the `ProtocolEventPublisher` protocol from `omnibase_spi`, enabling consistent event publishing across the ONEX infrastructure.
+
+### Relationship to ProtocolEventPublisher
+
+| Protocol Method | Adapter Implementation |
+|-----------------|------------------------|
+| `publish()` | Builds `ModelEventEnvelope`, serializes to JSON, delegates to `EventBusKafka.publish()` |
+| `get_metrics()` | Returns `ModelPublisherMetrics` with circuit breaker state from underlying bus |
+| `close()` | Marks adapter closed, stops underlying `EventBusKafka` |
+
+### Constructor
+
+```python
+def __init__(
+    self,
+    bus: EventBusKafka,
+    service_name: str = "kafka-publisher",
+    instance_id: str | None = None,
+) -> None
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `bus` | `EventBusKafka` | (required) | The EventBusKafka instance to bridge to. Must be started before publishing. |
+| `service_name` | `str` | `"kafka-publisher"` | Service name included in envelope metadata for tracing. |
+| `instance_id` | `str \| None` | `None` | Instance identifier. Defaults to a generated UUID if not provided. |
+
+### Methods
+
+#### publish()
+
+```python
+async def publish(
+    self,
+    event_type: str,
+    payload: JsonType,
+    correlation_id: str | None = None,
+    causation_id: str | None = None,
+    metadata: dict[str, ContextValue] | None = None,
+    topic: str | None = None,
+    partition_key: str | None = None,
+) -> bool
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `event_type` | `str` | (required) | Fully-qualified event type (e.g., `"omninode.user.event.created.v1"`). |
+| `payload` | `JsonType` | (required) | Event payload data (dict, list, or primitive JSON types). |
+| `correlation_id` | `str \| None` | `None` | Correlation ID for request tracing. Converted to UUID. |
+| `causation_id` | `str \| None` | `None` | Causation ID for event sourcing chains. Stored in metadata tags. |
+| `metadata` | `dict[str, ContextValue] \| None` | `None` | Additional metadata as context values. |
+| `topic` | `str \| None` | `None` | Explicit topic override. When `None`, uses `event_type` as topic. |
+| `partition_key` | `str \| None` | `None` | Partition key for message ordering. Encoded to UTF-8 bytes. |
+
+**Returns**: `bool` — `True` if published successfully, `False` otherwise.
+
+**Raises**: `InfraUnavailableError` if adapter has been closed.
+
+#### get_metrics()
+
+```python
+async def get_metrics(self) -> JsonType
+```
+
+Get publisher metrics including circuit breaker status from underlying bus.
+
+#### reset_metrics()
+
+```python
+async def reset_metrics(self) -> None
+```
+
+Reset all publisher metrics to initial values. Useful for test isolation. Does NOT affect the closed state of the adapter.
+
+#### close()
+
+```python
+async def close(self, timeout_seconds: float = 30.0) -> None
+```
+
+Close the publisher and release resources. After closing, any calls to `publish()` will raise `InfraUnavailableError`.
+
+### Usage Example
+
+```python
+from omnibase_infra.event_bus import EventBusKafka
+from omnibase_infra.event_bus.adapters import AdapterProtocolEventPublisherKafka
+
+bus = EventBusKafka.from_env()
+await bus.start()
+
+adapter = AdapterProtocolEventPublisherKafka(
+    bus=bus,
+    service_name="my-service",
+)
+
+success = await adapter.publish(
+    event_type="user.created.v1",
+    payload={"user_id": "123"},
+    correlation_id="corr-abc",
+)
+
+# Explicit topic and partition key
+success = await adapter.publish(
+    event_type="order.placed.v1",
+    payload={"order_id": "ord-456", "customer_id": "cust-789"},
+    topic="orders.high-priority",
+    partition_key="cust-789",
+    correlation_id="corr-xyz",
+    causation_id="cmd-123",
+)
+
+metrics = await adapter.get_metrics()
+print(f"Published: {metrics['events_published']}")
+
+await adapter.close()
+```
+
+### Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `events_published` | `int` | Total count of successfully published events. |
+| `events_failed` | `int` | Total count of failed publish attempts. |
+| `events_sent_to_dlq` | `int` | Always 0 — publish path does not use DLQ. |
+| `total_publish_time_ms` | `float` | Cumulative publish time in milliseconds. |
+| `avg_publish_time_ms` | `float` | Average publish latency. |
+| `circuit_breaker_opens` | `int` | Count of circuit breaker open events from underlying bus. |
+| `retries_attempted` | `int` | Total retry attempts from underlying bus. |
+| `circuit_breaker_status` | `str` | Current state: `"closed"`, `"open"`, `"half_open"`. |
+| `current_failures` | `int` | Current consecutive failure count. |
+
+### Design Decisions
+
+- **No double circuit breaker**: The adapter does NOT implement its own circuit breaker. Resilience is delegated to `EventBusKafka`.
+- **Publish returns bool**: All exceptions during publish are caught and result in `False`. No exceptions propagate except `InfraUnavailableError` for closed adapter.
+- **Topic routing**: Explicit `topic` parameter takes precedence over `event_type`-derived topic.
+- **Causation ID in tags**: Since `ModelEventEnvelope` has no dedicated `causation_id` field, the adapter stores it in `metadata.tags["causation_id"]`.
+- **Partition key encoding**: The `partition_key` is encoded to UTF-8 bytes per the SPI specification.
+
+### Error Handling
+
+| Scenario | Behavior |
+|----------|----------|
+| Publish succeeds | Returns `True`, increments `events_published` |
+| Publish fails (any exception) | Returns `False`, increments `events_failed`, logs exception |
+| Adapter closed | Raises `InfraUnavailableError("Publisher has been closed")` |
+| Invalid correlation_id format | Generates new UUID, logs warning with original value |
+| Close fails | Logs warning, continues (best-effort cleanup) |
+
+---
+
 ## Related Documentation
 
 - **Message Dispatch Engine**: `docs/architecture/MESSAGE_DISPATCH_ENGINE.md`
-- **Event Bus Shapes**: `docs/as_is/04_EVENT_BUS_SHAPES.md`
 - **Circuit Breaker Thread Safety**: `docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md`
 - **Error Handling Patterns**: `docs/patterns/error_handling_patterns.md`
 - **Error Recovery Patterns**: `docs/patterns/error_recovery_patterns.md`

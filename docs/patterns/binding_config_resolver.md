@@ -2,14 +2,14 @@
 
 ## Overview
 
-The `BindingConfigResolver` provides a unified interface for resolving handler configurations from multiple sources with proper priority ordering. It abstracts configuration loading from environment variables, files, and Vault secrets, applying environment overrides and caching resolved configurations.
+The `BindingConfigResolver` provides a unified interface for resolving handler configurations from multiple sources with proper priority ordering. It abstracts configuration loading from environment variables, files, and Infisical secrets, applying environment overrides and caching resolved configurations.
 
 **Key Features**:
 - Multi-source configuration resolution with priority ordering
 - TTL-based caching with automatic expiration
 - Thread-safe and async-safe operations
 - Environment variable overrides (highest priority)
-- Vault secret integration via SecretResolver
+- Infisical secret integration via SecretResolver
 - Path traversal protection for file-based configs
 - File size limits to prevent memory exhaustion
 
@@ -50,8 +50,8 @@ binding = resolver.resolve(
 
 # Resolve from file reference
 binding = resolver.resolve(
-    handler_type="vault",
-    config_ref="file:configs/vault.yaml"
+    handler_type="infisical",
+    config_ref="file:configs/infisical.yaml"
 )
 
 # Access binding configuration
@@ -79,7 +79,7 @@ Handler configuration in distributed systems often comes from multiple sources:
 - Inline YAML in contract files (development defaults)
 - External files (Kubernetes ConfigMaps)
 - Environment variables (runtime overrides)
-- Vault secrets (production credentials)
+- Infisical secrets (production credentials)
 
 Without centralized resolution:
 - Each handler implements its own config loading logic
@@ -87,6 +87,7 @@ Without centralized resolution:
 - Environment overrides require custom code in each handler
 - No unified caching strategy leads to repeated file/network I/O
 - Security controls (path traversal, size limits) are inconsistently applied
+
 
 The BindingConfigResolver solves these problems with a single resolution interface.
 
@@ -99,7 +100,7 @@ The BindingConfigResolver solves these problems with a single resolution interfa
 | Priority | Source | Description |
 |----------|--------|-------------|
 | 1 (Highest) | Environment Variables | Pattern: `{ENV_PREFIX}_{HANDLER_TYPE}_{FIELD}` |
-| 2 | Vault Secrets | Via SecretResolver for `vault:` references in config values |
+| 2 | Infisical Secrets | Via SecretResolver for `infisical:` references in config values |
 | 3 | File-Based Config | YAML/JSON files referenced via `config_ref` |
 | 4 (Lowest) | Inline Config | Dictionary passed to `resolve()` method |
 
@@ -130,7 +131,7 @@ The BindingConfigResolver solves these problems with a single resolution interfa
 │                                  │                                       │
 │                                  ▼                                       │
 │  ┌───────────────┐   ┌───────────────┐   ┌───────────────────────┐     │
-│  │  File Loader  │   │  Env Loader   │   │  Vault Loader         │     │
+│  │  File Loader  │   │  Env Loader   │   │  Infisical Loader     │     │
 │  │               │   │               │   │  (via SecretResolver) │     │
 │  │ YAML/JSON     │   │ JSON/YAML     │   │                       │     │
 │  │ size limit    │   │ from env var  │   │ Logical name lookup   │     │
@@ -146,7 +147,7 @@ The BindingConfigResolver solves these problems with a single resolution interfa
 │  │  1. Start with config from config_ref (if provided)             │    │
 │  │  2. Overlay inline_config (takes precedence)                    │    │
 │  │  3. Apply environment variable overrides (highest priority)     │    │
-│  │  4. Resolve vault: references in values                         │    │
+│  │  4. Resolve infisical: references in values                     │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │                              │                                           │
 │                              ▼                                           │
@@ -177,8 +178,8 @@ The BindingConfigResolver solves these problems with a single resolution interfa
 | `env_prefix` | `str` | `"HANDLER"` | Prefix for environment variable overrides |
 | `strict_validation` | `bool` | `True` | Fail on unknown fields if True |
 | `strict_env_coercion` | `bool` | `False` | Fail on type conversion errors for env overrides (if False, log warning and skip) |
-| `allowed_schemes` | `frozenset[str]` | `{"file", "env", "vault"}` | Allowed config_ref schemes |
-| `fail_on_vault_error` | `bool` | `False` | Fail when `vault:` references cannot be resolved (set True in production) |
+| `allowed_schemes` | `frozenset[str]` | `{"file", "env", "infisical"}` | Allowed config_ref schemes |
+| `fail_on_infisical_error` | `bool` | `False` | Fail when `infisical:` references cannot be resolved (set True in production) |
 | `max_cache_entries` | `int \| None` | `None` | Max cache entries before LRU eviction (None = unlimited) |
 | `allow_symlinks` | `bool` | `True` | Allow symlinked config files (set False for high-security) |
 | `async_lock_cleanup_threshold` | `int` | `200` | Number of async key locks that triggers cleanup |
@@ -199,8 +200,8 @@ config = ModelBindingConfigResolverConfig(
     env_prefix="ONEX_HANDLER",          # ONEX_HANDLER_DB_TIMEOUT_MS
     strict_validation=True,             # Fail on unknown fields
     strict_env_coercion=False,          # Warn on type conversion errors (default)
-    allowed_schemes=frozenset({"file", "env"}),  # Disable vault: scheme
-    fail_on_vault_error=True,           # Fail on vault: resolution errors
+    allowed_schemes=frozenset({"file", "env"}),  # Disable infisical: scheme
+    fail_on_infisical_error=True,       # Fail on infisical: resolution errors
     max_cache_entries=100,              # LRU eviction after 100 entries
     allow_symlinks=False,               # Reject symlinks for security
     async_lock_cleanup_threshold=200,   # Cleanup after 200 async locks
@@ -215,7 +216,7 @@ config = ModelBindingConfigResolverConfig(
 | File (relative) | `file://configs/handler.yaml` | Relative to `config_dir` |
 | File (shorthand) | `file:config.yaml` | Shorthand relative path |
 | Environment | `env:DB_CONFIG` | JSON/YAML in environment variable |
-| Vault | `vault:secret/data/handlers/db#config` | Via SecretResolver |
+| Infisical | `infisical:/shared/handlers/db/CONFIG` | Via SecretResolver |
 
 **File Reference Examples**:
 
@@ -252,13 +253,13 @@ binding = resolver.resolve(
 # binding.timeout_ms == 10000
 ```
 
-**Vault Reference Example**:
+**Infisical Reference Example**:
 
 ```python
-# Vault contains: {"config": {"pool_size": 20, "timeout_ms": 10000}}
+# Infisical contains the JSON config at /shared/handlers/db/CONFIG
 binding = resolver.resolve(
     handler_type="db",
-    config_ref="vault:secret/data/handlers/db#config",
+    config_ref="infisical:/shared/handlers/db/CONFIG",
 )
 ```
 
@@ -288,7 +289,7 @@ resolver = BindingConfigResolver(container)
 
 # Resolve from inline config only
 binding = resolver.resolve(
-    handler_type="vault",
+    handler_type="infisical",
     inline_config={
         "timeout_ms": 30000,
         "rate_limit_per_second": 100.0,
@@ -387,7 +388,7 @@ binding = resolver.resolve(
 
 ### Async Resolution
 
-For I/O-bound configurations (file or Vault):
+For I/O-bound configurations (file or Infisical):
 
 ```python
 async def resolve_handlers(container: ModelONEXContainer):
@@ -396,8 +397,8 @@ async def resolve_handlers(container: ModelONEXContainer):
 
     # Resolve single config asynchronously
     binding = await resolver.resolve_async(
-        handler_type="vault",
-        config_ref="file:vault.yaml",
+        handler_type="infisical",
+        config_ref="file:infisical.yaml",
     )
 
     return binding
@@ -410,7 +411,7 @@ Resolve multiple configurations in parallel:
 ```python
 async def resolve_all_handlers():
     configs = await resolver.resolve_many_async([
-        {"handler_type": "vault", "config_ref": "file:vault.yaml"},
+        {"handler_type": "infisical", "config_ref": "file:infisical.yaml"},
         {"handler_type": "db", "config_ref": "file:database.yaml"},
         {"handler_type": "consul", "config_ref": "file:consul.yaml"},
         {"handler_type": "kafka", "config": {"timeout_ms": 30000}},
@@ -428,12 +429,12 @@ Pattern: `{ENV_PREFIX}_{HANDLER_TYPE}_{FIELD}`
 
 | Override | Example | Description |
 |----------|---------|-------------|
-| Timeout | `HANDLER_VAULT_TIMEOUT_MS=60000` | Override timeout |
+| Timeout | `HANDLER_INFISICAL_TIMEOUT_MS=60000` | Override timeout |
 | Enabled | `HANDLER_DB_ENABLED=false` | Enable/disable handler |
 | Priority | `HANDLER_CONSUL_PRIORITY=50` | Execution priority |
 | Rate Limit | `HANDLER_HTTP_RATE_LIMIT_PER_SECOND=100.5` | Rate limiting |
 | Name | `HANDLER_DB_NAME=primary-db` | Display name |
-| Max Retries | `HANDLER_VAULT_MAX_RETRIES=5` | Retry policy |
+| Max Retries | `HANDLER_INFISICAL_MAX_RETRIES=5` | Retry policy |
 | Backoff Strategy | `HANDLER_DB_BACKOFF_STRATEGY=fixed` | Retry backoff |
 | Base Delay | `HANDLER_KAFKA_BASE_DELAY_MS=200` | Initial retry delay |
 | Max Delay | `HANDLER_KAFKA_MAX_DELAY_MS=10000` | Max retry delay |
@@ -508,7 +509,7 @@ print(f"Expired evictions: {stats.expired_evictions}")
 print(f"Manual refreshes: {stats.refreshes}")
 print(f"File loads: {stats.file_loads}")
 print(f"Env loads: {stats.env_loads}")
-print(f"Vault loads: {stats.vault_loads}")
+print(f"Infisical loads: {stats.infisical_loads}")
 print(f"Total loads: {stats.total_loads}")
 ```
 
@@ -516,7 +517,7 @@ print(f"Total loads: {stats.total_loads}")
 
 ```python
 # Invalidate specific handler type
-resolver.refresh("vault")
+resolver.refresh("infisical")
 
 # Invalidate all cached configurations
 resolver.refresh_all()
@@ -623,14 +624,14 @@ except ProtocolConfigurationError as e:
 | Scenario | Error Message |
 |----------|---------------|
 | Empty config_ref | `Config reference cannot be empty` |
-| Invalid scheme | `Unknown scheme 'xyz'. Supported: file, env, vault` |
+| Invalid scheme | `Unknown scheme 'xyz'. Supported: file, env, infisical` |
 | File not found | `Configuration file not found` |
 | Permission denied | `Permission denied reading configuration file` |
 | Invalid YAML | `Invalid YAML in configuration file` |
 | File too large | `Configuration file exceeds size limit` |
 | Path traversal | `Configuration file path traversal not allowed` |
 | Missing env var | `Environment variable not set: VAR_NAME` |
-| No SecretResolver | `Vault scheme used but no SecretResolver configured` |
+| No SecretResolver | `Infisical scheme used but no SecretResolver configured` |
 | Validation failure | `Invalid handler configuration: ...` |
 
 ### Error Sanitization
@@ -692,22 +693,22 @@ Restrict which schemes can be used:
 
 ```python
 config = ModelBindingConfigResolverConfig(
-    allowed_schemes=frozenset({"file", "env"}),  # Disable vault: scheme
+    allowed_schemes=frozenset({"file", "env"}),  # Disable infisical: scheme
 )
 
-# Using vault: now raises an error
+# Using infisical: now raises an error
 binding = resolver.resolve(
     handler_type="db",
-    config_ref="vault:secret/db",  # Raises: Scheme 'vault' is not in allowed schemes
+    config_ref="infisical:secret/db",  # Raises: Scheme 'infisical' is not in allowed schemes
 )
 ```
 
-### Vault Integration Security
+### Infisical Integration Security
 
-- Vault access is via SecretResolver only (not direct Vault API)
+- Infisical access is via SecretResolver only (not direct Infisical API)
 - SecretResolver is resolved from the container via dependency injection
 - Inherits SecretResolver's security controls
-- Bootstrap secrets for Vault must come from environment (see SecretResolver docs)
+- Bootstrap secrets for Infisical must come from environment (see SecretResolver docs)
 
 ### Best Practices
 
@@ -719,8 +720,8 @@ binding = resolver.resolve(
 | Use environment overrides for secrets | Put secrets in config files |
 | Set appropriate cache TTLs | Cache forever with `cache_ttl_seconds=86400` |
 | Set `allow_symlinks=False` in high-security environments | Follow symlinks without validation |
-| Set `fail_on_vault_error=True` in production | Silently skip vault errors in production |
-| Register SecretResolver in container for vault: support | Pass SecretResolver directly to config |
+| Set `fail_on_infisical_error=True` in production | Silently skip infisical errors in production |
+| Register SecretResolver in container for infisical: support | Pass SecretResolver directly to config |
 
 ---
 
@@ -740,11 +741,11 @@ class MyOrchestrator(NodeOrchestrator):
         super().__init__(container)
 
         # Register resolver config in container (typically done at bootstrap)
-        # SecretResolver for vault: references is resolved from container via DI
+        # SecretResolver for infisical: references is resolved from container via DI
         config = ModelBindingConfigResolverConfig(
             config_dir=Path("/etc/onex/handlers"),
             cache_ttl_seconds=300.0,
-            fail_on_vault_error=True,  # Recommended for production
+            fail_on_infisical_error=True,  # Recommended for production
         )
         container.service_registry.register_instance(
             interface=ModelBindingConfigResolverConfig,
@@ -774,17 +775,17 @@ class MyOrchestrator(NodeOrchestrator):
 
 ```python
 from omnibase_infra.runtime.binding_config_resolver import BindingConfigResolver
-from omnibase_infra.handlers.handler_vault import HandlerVault
+from omnibase_infra.handlers.handler_infisical import HandlerInfisical
 from omnibase_infra.handlers.handler_db import HandlerDb
 
 # Resolve configuration
 config = resolver.resolve(
-    handler_type="vault",
-    config_ref="file:vault.yaml",
+    handler_type="infisical",
+    config_ref="file:infisical.yaml",
 )
 
 # Create handler with resolved config
-handler = HandlerVault(
+handler = HandlerInfisical(
     timeout_ms=config.timeout_ms,
     retry_policy=config.retry_policy,
 )
@@ -800,8 +801,8 @@ Handler bindings in `contract.yaml`:
 ```yaml
 # contract.yaml
 handler_bindings:
-  - handler_type: vault
-    config_ref: "file:configs/vault.yaml"
+  - handler_type: infisical
+    config_ref: "file:configs/infisical.yaml"
     priority: 10
 
   - handler_type: db
@@ -929,7 +930,7 @@ This is intentional - the resolver is a low-level primitive used by orchestrator
 | `ModelBindingConfigCacheStats` | Cache statistics |
 | `ModelConfigRef` | Parsed config reference |
 | `ModelConfigRefParseResult` | Config reference parse result |
-| `EnumConfigRefScheme` | Config reference schemes (FILE, ENV, VAULT) |
+| `EnumConfigRefScheme` | Config reference schemes (FILE, ENV, INFISICAL) |
 
 ---
 
@@ -962,7 +963,7 @@ class MyHandler:
         config = resolver.resolve(handler_type="db", inline_config={})
         self.timeout_ms = config.timeout_ms
         self.retry_attempts = config.retry_policy.max_retries if config.retry_policy else 3
-        # Connection strings should come from Vault, not env directly
+        # Connection strings should come from Infisical, not env directly
 ```
 
 ### Migrating from Config Files
@@ -1002,19 +1003,19 @@ class MyHandler:
         # pool_size would be in config.config dict if not a standard field
 ```
 
-### Migrating from Vault Direct Access
+### Migrating from Direct Secret Fetching
 
-**Before (direct vault client)**:
+**Before (direct Infisical API call)**:
 ```python
-import hvac
+from infisicalsdk import InfisicalClient
 
 class MyHandler:
     def __init__(self):
-        client = hvac.Client(url="https://vault.example.com")
-        client.token = os.getenv("VAULT_TOKEN")
-        secret = client.secrets.kv.v2.read_secret_version(path="handlers/db")
-        self.db_password = secret["data"]["data"]["password"]
-        self.db_host = secret["data"]["data"]["host"]
+        client = InfisicalClient(client_id="...", client_secret="...")
+        secret = client.get_secret(secret_name="DB_PASSWORD", project_id="...", environment="prod")
+        self.db_password = secret.secret_value
+        host_secret = client.get_secret(secret_name="DB_HOST", project_id="...", environment="prod")
+        self.db_host = host_secret.secret_value
 ```
 
 **After (BindingConfigResolver)**:
@@ -1025,18 +1026,18 @@ from omnibase_infra.runtime.binding_config_resolver import BindingConfigResolver
 class MyHandler:
     def __init__(self, container: ModelONEXContainer):
         # Resolve BindingConfigResolver from container
-        # (SecretResolver should also be registered in container for vault: support)
+        # (SecretResolver should also be registered in container for infisical: support)
         resolver = container.service_registry.resolve_service(BindingConfigResolver)
 
-        # Vault reference resolved automatically via config_ref
+        # Infisical reference resolved automatically via config_ref
         config = resolver.resolve(
             handler_type="db",
-            config_ref="vault:secret/data/handlers/db#config",
+            config_ref="infisical:/shared/handlers/db/CONFIG",
         )
-        # Or use vault: references in inline config values
+        # Or use infisical: references in inline config values
         # config = resolver.resolve(
         #     handler_type="db",
-        #     inline_config={"password": "vault:secret/data/handlers/db#password"},
+        #     inline_config={"password": "infisical:/shared/database/DB_PASSWORD"},
         # )
 ```
 
@@ -1044,7 +1045,7 @@ class MyHandler:
 
 | Aspect | Before | After |
 |--------|--------|-------|
-| **Source Priority** | Manual implementation required | Built-in: Env > Vault > File > Inline |
+| **Source Priority** | Manual implementation required | Built-in: Env > Infisical > File > Inline |
 | **Caching** | None or custom implementation | TTL-based with statistics |
 | **Thread Safety** | Manual locking required | Built-in sync/async safety |
 | **Error Handling** | Inconsistent across handlers | Structured with correlation IDs |
@@ -1060,14 +1061,14 @@ Use this checklist when migrating handlers to `BindingConfigResolver`:
 **Identification Phase**:
 - [ ] Identify all handlers using direct `os.getenv()` calls
 - [ ] Identify all handlers loading config files manually (yaml.safe_load, json.load)
-- [ ] Identify all direct Vault client usage (hvac, vault-cli)
+- [ ] Identify all direct Infisical client usage (infisicalsdk, direct API calls)
 - [ ] Document current environment variable naming conventions
 - [ ] List all config file locations and formats
 
 **Preparation Phase**:
 - [ ] Create `ModelBindingConfigResolverConfig` with appropriate settings
 - [ ] Register `ModelBindingConfigResolverConfig` in container
-- [ ] Register `SecretResolver` in container if Vault integration is needed (resolved via DI)
+- [ ] Register `SecretResolver` in container if Infisical integration is needed (resolved via DI)
 - [ ] Define config file directory structure (`config_dir`)
 - [ ] Establish environment variable prefix convention (`env_prefix`)
 
@@ -1075,7 +1076,7 @@ Use this checklist when migrating handlers to `BindingConfigResolver`:
 - [ ] Update handler constructors to accept `ModelONEXContainer` or resolver
 - [ ] Replace direct `os.getenv()` with resolver calls
 - [ ] Replace manual file loading with `config_ref="file:..."` patterns
-- [ ] Replace direct Vault access with `config_ref="vault:..."` or SecretResolver
+- [ ] Replace direct Infisical access with `config_ref="infisical:..."` or SecretResolver
 - [ ] Convert custom retry logic to use `ModelRetryPolicy`
 
 **Testing Phase**:
@@ -1096,7 +1097,7 @@ Use this checklist when migrating handlers to `BindingConfigResolver`:
 | Pitfall | Solution |
 |---------|----------|
 | Forgetting to set `config_dir` for relative paths | Always configure `config_dir` when using `file:` references |
-| Using `vault:` scheme without `SecretResolver` | Ensure `SecretResolver` is registered in the container (resolved via DI) |
+| Using `infisical:` scheme without `SecretResolver` | Ensure `SecretResolver` is registered in the container (resolved via DI) |
 | Expecting immediate cache updates | Call `refresh()` after external config changes |
 | Mixing old and new patterns | Fully migrate each handler before moving to the next |
 | Ignoring environment override naming | Follow `{PREFIX}_{HANDLER_TYPE}_{FIELD}` convention exactly |
@@ -1105,7 +1106,7 @@ Use this checklist when migrating handlers to `BindingConfigResolver`:
 
 ## Related Documentation
 
-- [`docs/patterns/secret_resolver.md`](./secret_resolver.md) - Secret management for vault: references
+- [`docs/patterns/secret_resolver.md`](./secret_resolver.md) - Secret management for infisical: references
 - [`docs/patterns/error_handling_patterns.md`](./error_handling_patterns.md) - Error context and sanitization
 - [`docs/patterns/security_patterns.md`](./security_patterns.md) - Security guidelines
 - [`docs/patterns/handler_plugin_loader.md`](./handler_plugin_loader.md) - Handler loading from contracts

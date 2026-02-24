@@ -350,7 +350,7 @@ async def get_user_data(
 
 ### Use Cases
 - OAuth token refresh
-- Vault token renewal
+- Infisical machine identity token renewal
 - Service account credential rotation
 - Session management
 
@@ -405,14 +405,13 @@ async def with_credential_refresh(
 
 ```python
 from dataclasses import dataclass
-from hvac import Client as VaultClient
 
 @dataclass
-class VaultCredential:
-    """Vault token credential."""
+class InfisicalCredential:
+    """Infisical machine identity credential."""
 
-    client: VaultClient
-    token: str
+    client: object  # HandlerInfisical instance
+    access_token: str
     expiry: datetime
 
     @property
@@ -421,41 +420,42 @@ class VaultCredential:
         return datetime.utcnow() >= self.expiry - timedelta(minutes=5)
 
     async def refresh(self) -> None:
-        """Renew Vault token."""
-        response = self.client.auth.token.renew_self()
-        self.token = response["auth"]["client_token"]
+        """Renew Infisical machine identity token."""
+        response = await self.client.auth.universal_auth.login(
+            client_id=self.client.client_id,
+            client_secret=self.client.client_secret,
+        )
+        self.access_token = response["access_token"]
         self.expiry = datetime.utcnow() + timedelta(
-            seconds=response["auth"]["lease_duration"]
+            seconds=response["expires_in"]
         )
 
 async def read_secret_with_refresh(
     path: str,
-    vault_cred: VaultCredential,
+    infisical_cred: InfisicalCredential,
     correlation_id: UUID,
-) -> dict[str, str]:
-    """Read Vault secret with automatic token refresh."""
+) -> str:
+    """Read Infisical secret with automatic token refresh."""
 
-    async def _read_secret() -> dict[str, str]:
+    async def _read_secret() -> str:
         try:
-            response = vault_cred.client.secrets.kv.v2.read_secret_version(
-                path=path
-            )
-            return response["data"]["data"]
-        except Unauthorized as e:
+            response = await infisical_cred.client.get_secret(path=path)
+            return response.secret_value
+        except UnauthorizedError as e:
             context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="read_secret",
-                target_name="vault-kv-v2",
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="get_secret",
+                target_name="infisical-primary",
                 correlation_id=correlation_id,
             )
             raise InfraAuthenticationError(
-                "Vault authentication failed",
+                "Infisical authentication failed",
                 context=context
             ) from e
 
     return await with_credential_refresh(
         operation=_read_secret,
-        credential=vault_cred,
+        credential=infisical_cred,
         correlation_id=correlation_id,
     )
 ```

@@ -166,7 +166,7 @@ result = validate_union_usage(
 - `max_unions`: Configured threshold
 
 **Infrastructure Justification**: Infrastructure code needs typed unions for:
-- Protocol implementations (Consul, Kafka, Vault adapters)
+- Protocol implementations (Consul, Kafka, Infisical adapters)
 - Message routing and handler dispatch
 - Service integration type safety
 

@@ -17,7 +17,7 @@ ADRs are immutable once accepted. Superseded decisions are marked but not delete
 
 ## ADR Index
 
-### Numbered ADRs (Legacy)
+### Numbered ADRs
 
 | ADR | Title | Status |
 |-----|-------|--------|
@@ -26,6 +26,10 @@ ADRs are immutable once accepted. Superseded decisions are marked but not delete
 | [ADR-003](adr-003-remove-handler-health-checks.md) | Remove Handler Health Checks | Accepted |
 | [ADR-004](adr-004-performance-baseline-thresholds.md) | Performance Baseline Thresholds | Accepted |
 | [ADR-005](adr-005-denormalize-capability-fields-in-registration-projections.md) | Denormalize Capability Fields in Registration Projections | Accepted |
+| [ADR-006](adr-006-message-dispatch-engine-canonical-routing.md) | MessageDispatchEngine as Canonical Consumer Routing Pattern | Accepted |
+| [ADR-007](adr-007-vault-to-infisical-migration.md) | Vault to Infisical Migration | Accepted |
+| [ADR-008](adr-008-realm-agnostic-topics.md) | Realm-Agnostic Topic Format | Accepted |
+| [ADR-009](adr-009-llm-cost-tracking-spi.md) | LLM Cost Tracking at the Infrastructure Layer | Accepted |
 
 ### Topic-Based ADRs
 
@@ -51,16 +55,26 @@ ADRs are immutable once accepted. Superseded decisions are marked but not delete
 | Category | Description | ADRs |
 |----------|-------------|------|
 | **Type System** | Type safety, generics, Pydantic patterns | 4 |
-| **Security** | Authentication, encryption, plugin security | 3 |
-| **Architecture** | Node types, handlers, protocols, runtime lifecycle | 5 |
+| **Security** | Authentication, encryption, plugin security | 4 |
+| **Architecture** | Node types, handlers, protocols, runtime lifecycle | 6 |
 | **Error Handling** | Error patterns, context, recovery | 1 |
 | **Contracts** | Contract format, evolution | 1 |
-| **Data Layer** | Persistence, projections | 2 |
-| **Configuration** | Environment, settings | 1 |
+| **Data Layer** | Persistence, projections, cost tracking | 3 |
+| **Configuration** | Environment, settings, secret management | 2 |
 | **Performance** | Baselines, thresholds | 1 |
-| **Event Bus** | Kafka, consumer groups, event routing | 1 |
+| **Event Bus** | Kafka, consumer groups, event routing, topic naming | 2 |
 
-**Note**: Numbered ADRs (001-005) are included in these category counts. ADR-001 and ADR-003 are Architecture, ADR-002 is Type System, ADR-004 is Performance, ADR-005 is Data Layer. The canonical publish interface policy ADR is also Architecture.
+**Note**: All numbered ADRs are included in these category counts.
+- ADR-001: Architecture (graceful shutdown)
+- ADR-002: Type System (enum separation)
+- ADR-003: Architecture (remove handler health checks)
+- ADR-004: Performance (baseline thresholds)
+- ADR-005: Data Layer (registration projections)
+- ADR-006: Architecture (MessageDispatchEngine canonical routing)
+- ADR-007: Security + Configuration (Vault to Infisical migration)
+- ADR-008: Event Bus (realm-agnostic topic format)
+- ADR-009: Data Layer (LLM cost tracking SPI)
+- The canonical publish interface policy ADR is also Architecture.
 
 ## Writing ADRs
 

@@ -26,7 +26,7 @@ Use this table to quickly identify mixin requirements and common usage patterns.
 | [`MixinProjectorSqlOperations`](#mixin-index-by-category) | None | None | SQL operations for projectors |
 | [`MixinRetryExecution`](#mixinretryexecution) | `MixinAsyncCircuitBreaker` | None | Retry with exponential backoff |
 | [`MixinConsulInitialization`](#mixinconsulinitialization) | `MixinAsyncCircuitBreaker` | None | Consul client setup and connection |
-| [`MixinVaultInitialization`](#mixinvaultinitialization) | `MixinAsyncCircuitBreaker` | None | Vault client setup and authentication |
+| [`MixinInfisicalInitialization`](#mixininfisicalinitialization) | None | None | Infisical adapter setup and authentication |
 | [`MixinEnvelopeExtraction`](#mixinenvelopeextraction) | None | None | Extract correlation/envelope IDs |
 | [`MixinDictLikeAccessors`](#mixindictlikeaccessors) | None | None | Dict-like access for Pydantic models |
 | [`MixinPolicyValidation`](#mixinpolicyvalidation) | None | None | Policy registration validation |
@@ -44,7 +44,6 @@ When one mixin directly accesses methods/attributes from another mixin via MRO, 
 |-----------------|---------------|----------------|
 | `MixinRetryExecution` | `_circuit_breaker_lock`, `_circuit_breaker_initialized` | `MixinAsyncCircuitBreaker` |
 | `MixinConsulInitialization` | `_init_circuit_breaker()` | `MixinAsyncCircuitBreaker` |
-| `MixinVaultInitialization` | `_init_circuit_breaker()` | `MixinAsyncCircuitBreaker` |
 
 > **Note**: This ordering rule applies ONLY when there is an actual mixin-based dependency (one mixin accesses another mixin's attributes via MRO). If mixins use Protocol-based dependencies instead (requiring attributes from the host class), ordering is flexible. See `EventBusKafka` example below.
 
@@ -470,34 +469,9 @@ def _init_circuit_breaker(
 
 ---
 
-### MixinVaultInitialization
+### MixinInfisicalInitialization
 
-**Location**: `omnibase_infra/handlers/mixins/mixin_vault_initialization.py`
-
-**Dependencies**: **REQUIRES `MixinAsyncCircuitBreaker`**
-
-**Purpose**: Vault client setup, authentication verification, and token TTL tracking.
-
-**Required from Host Class**:
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| `_client` | `hvac.Client \| None` | Vault client instance |
-| `_config` | `ModelVaultHandlerConfig \| None` | Vault configuration |
-| `_token_expires_at` | `float` | Token expiration timestamp |
-| `_executor` | `ThreadPoolExecutor \| None` | Thread pool instance |
-| `_max_workers` | `int` | Max worker count |
-| `_max_queue_size` | `int` | Max queue size |
-| `_circuit_breaker_initialized` | `bool` | Circuit breaker init flag |
-
-**Methods Provided**:
-- `_parse_vault_config()` - Parse and validate config
-- `_create_hvac_client()` - Create hvac client
-- `_verify_vault_auth()` - Verify authentication
-- `_initialize_token_ttl()` - Initialize TTL tracking
-- `_setup_thread_pool()` - Set up thread pool
-- `_setup_circuit_breaker()` - Initialize circuit breaker
-- `_log_init_success()` - Log success
-- `_handle_init_hvac_error()` - Handle hvac errors
+**Note**: The Vault-based `MixinVaultInitialization` was removed as part of the Infisical migration (OMN-2288). Infisical uses an async-native SDK and does not require a dedicated initialization mixin. See `src/omnibase_infra/adapters/_internal/adapter_infisical.py` for the current implementation.
 
 ---
 
@@ -658,12 +632,8 @@ Any class providing these attributes/methods can use `MixinKafkaDlq`.
 | Mixin | File | Purpose |
 |-------|------|---------|
 | `MixinConsulInitialization` | `handlers/mixins/mixin_consul_initialization.py` | Consul client setup |
-| `MixinVaultInitialization` | `handlers/mixins/mixin_vault_initialization.py` | Vault client setup |
 | `MixinConsulKV` | `handlers/mixins/mixin_consul_kv.py` | Consul KV operations |
 | `MixinConsulService` | `handlers/mixins/mixin_consul_service.py` | Consul service ops |
-| `MixinVaultSecrets` | `handlers/mixins/mixin_vault_secrets.py` | Vault secret ops |
-| `MixinVaultToken` | `handlers/mixins/mixin_vault_token.py` | Vault token ops |
-| `MixinVaultRetry` | `handlers/mixins/mixin_vault_retry.py` | Vault retry logic |
 
 ### Runtime/Registry
 | Mixin | File | Purpose |
