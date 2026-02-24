@@ -48,6 +48,10 @@ jobs:
         env:
           TAG_VERSION: ${{ steps.version.outputs.version }}
         run: |
+          if [ ! -f "pyproject.toml" ]; then
+            echo "ERROR: pyproject.toml not found at checkout root"
+            exit 1
+          fi
           PYPROJECT_VERSION=$(uv run python3 -c "
           import tomllib
           with open('pyproject.toml', 'rb') as f:
@@ -86,6 +90,13 @@ jobs:
           cd dist
           sha256sum *.whl *.tar.gz > SHA256SUMS.txt
           cat SHA256SUMS.txt
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ steps.version.outputs.tag }}
+          path: dist/
+          retention-days: 7
 
       - name: DRY RUN complete — skipping publish
         env:
