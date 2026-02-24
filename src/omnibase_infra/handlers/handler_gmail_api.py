@@ -39,6 +39,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from typing import cast
 
 import httpx
 
@@ -60,9 +61,6 @@ _LABEL_CACHE_TTL_SECONDS: int = 300
 
 # Type alias for a raw JSON API response dict
 _ApiDict = dict[str, JsonType]
-
-# Type alias for query parameter dict (values are str, int, or list[str])
-_ParamDict = dict[str, JsonType]
 
 
 class HandlerGmailApi:
@@ -212,7 +210,13 @@ class HandlerGmailApi:
 
             body: _ApiDict = response.json()
             access_token = str(body.get("access_token", ""))
-            expires_in = int(body.get("expires_in", 3600))  # type: ignore[arg-type]
+            raw_expires = body.get("expires_in", 3600)
+            if isinstance(raw_expires, int):
+                expires_in: int = raw_expires
+            elif isinstance(raw_expires, (float, str)):
+                expires_in = int(raw_expires)
+            else:
+                expires_in = 3600
 
             if not access_token:
                 raise RuntimeError("Gmail token refresh returned empty access_token")
@@ -255,7 +259,8 @@ class HandlerGmailApi:
         """
         try:
             token = await self._ensure_token()
-            params: _ParamDict = {
+            # httpx accepts Sequence values for multi-value params
+            params: dict[str, object] = {
                 "maxResults": max_results,
                 "labelIds": label_ids,
             }
@@ -265,9 +270,7 @@ class HandlerGmailApi:
                 token=token,
             )
             raw_messages = result.get("messages", [])
-            messages: list[_ApiDict] = (
-                list(raw_messages) if isinstance(raw_messages, list) else []
-            )
+            messages: list[_ApiDict] = _extract_list_of_dicts(raw_messages)
             return messages
         except Exception as exc:
             logger.warning(
@@ -325,12 +328,14 @@ class HandlerGmailApi:
         """
         try:
             token = await self._ensure_token()
+            # Build body dict with explicit list[str] values
+            body: _ApiDict = {
+                "addLabelIds": list(add_label_ids),
+                "removeLabelIds": list(remove_label_ids),
+            }
             await self._post(
                 f"{_GMAIL_API_BASE}/messages/{message_id}/modify",
-                body={
-                    "addLabelIds": add_label_ids,
-                    "removeLabelIds": remove_label_ids,
-                },
+                body=body,
                 token=token,
             )
             return True
@@ -392,7 +397,7 @@ class HandlerGmailApi:
 
             while len(messages) < max_results:
                 remaining = max_results - len(messages)
-                params: _ParamDict = {
+                params: dict[str, object] = {
                     "q": query,
                     "maxResults": min(page_size, remaining),
                 }
@@ -405,9 +410,7 @@ class HandlerGmailApi:
                     token=token,
                 )
                 raw_page = result.get("messages", [])
-                page_messages: list[_ApiDict] = (
-                    list(raw_page) if isinstance(raw_page, list) else []
-                )
+                page_messages: list[_ApiDict] = _extract_list_of_dicts(raw_page)
                 messages.extend(page_messages)
 
                 next_token = result.get("nextPageToken")
@@ -439,9 +442,7 @@ class HandlerGmailApi:
                 token=token,
             )
             raw_labels = result.get("labels", [])
-            labels: list[_ApiDict] = (
-                list(raw_labels) if isinstance(raw_labels, list) else []
-            )
+            labels: list[_ApiDict] = _extract_list_of_dicts(raw_labels)
             return labels
         except Exception as exc:
             logger.warning(
@@ -498,14 +499,14 @@ class HandlerGmailApi:
     async def _get(
         self,
         url: str,
-        params: _ParamDict,
+        params: dict[str, object],
         token: str,
     ) -> _ApiDict:
         """Execute an authenticated GET request.
 
         Args:
             url: Full URL to request.
-            params: Query parameters.
+            params: Query parameters (str, int, or list[str] values).
             token: OAuth2 access token.
 
         Returns:
@@ -521,9 +522,24 @@ class HandlerGmailApi:
             client = httpx.AsyncClient()
             client_created = True
 
+        # Build httpx-compatible param list, expanding list values for multi-value params.
+        # Coerce to list[tuple[str, str | None]] which httpx accepts; cast for mypy.
+        param_list: list[tuple[str, str | None]] = []
+        for key, val in params.items():
+            if isinstance(val, list):
+                for item in val:
+                    param_list.append((key, str(item)))
+            else:
+                param_list.append((key, str(val) if val is not None else None))
+        # cast: list[tuple[str, str | None]] is a valid subtype of httpx QueryParams
+        httpx_params = cast(
+            "list[tuple[str, str | int | float | bool | None]]",
+            param_list,
+        )
+
         try:
             response = await client.get(
-                url, params=params, headers=headers, timeout=30.0
+                url, params=httpx_params, headers=headers, timeout=30.0
             )
             if response.status_code not in (200, 204):
                 raise RuntimeError(
@@ -610,6 +626,25 @@ class HandlerGmailApi:
         finally:
             if client_created:
                 await client.aclose()
+
+
+def _extract_list_of_dicts(value: JsonType) -> list[_ApiDict]:
+    """Safely extract a list of dicts from a JsonType value.
+
+    Args:
+        value: A JSON value that may be a list of dict objects.
+
+    Returns:
+        List of dict[str, JsonType] items, or empty list if value is not
+        a list or contains non-dict items.
+    """
+    if not isinstance(value, list):
+        return []
+    result: list[_ApiDict] = []
+    for item in value:
+        if isinstance(item, dict):
+            result.append(item)
+    return result
 
 
 __all__: list[str] = ["HandlerGmailApi"]
