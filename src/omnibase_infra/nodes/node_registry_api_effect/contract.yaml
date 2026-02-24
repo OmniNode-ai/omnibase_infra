@@ -1,0 +1,270 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract — Registry API Effect Node
+# Ticket: OMN-1441
+#
+# Refactors the standalone FastAPI Registry API into a proper ONEX EFFECT node,
+# making all configuration contract-driven and eliminating hardcoded constants.
+#
+name: "node_registry_api_effect"
+contract_name: "node_registry_api_effect"
+node_name: "node_registry_api_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  EFFECT node wrapping the Registry Discovery API. Provides contract-driven configuration for the FastAPI service that exposes node registrations and live service instances for dashboard consumption. Combines data from PostgreSQL projections and Consul service discovery with partial-success semantics. All operational limits, paths, and behaviour are defined here rather than as hardcoded constants.
+
+# ---------------------------------------------------------------------------
+# Strongly typed I/O models
+# ---------------------------------------------------------------------------
+input_model:
+  name: "ModelRegistryApiRequest"
+  module: "omnibase_infra.nodes.node_registry_api_effect.models.model_registry_api_request"
+  description: "Input envelope for registry API effect operations."
+output_model:
+  name: "ModelRegistryApiResponse"
+  module: "omnibase_infra.nodes.node_registry_api_effect.models.model_registry_api_response"
+  description: "Output envelope for registry API effect operations."
+# ---------------------------------------------------------------------------
+# Contract-Driven Configuration
+# Replaces all hardcoded constants in services/registry_api/service.py
+# ---------------------------------------------------------------------------
+config:
+  # Maximum records to fetch when node_type filtering requires in-memory pagination.
+  # Previously: MAX_NODE_TYPE_FILTER_FETCH = 10000 in service.py
+  max_node_type_filter_fetch: 10000
+  # Default path to widget mapping YAML, relative to omnibase_infra package root.
+  # Previously: DEFAULT_WIDGET_MAPPING_PATH = Path(__file__).parent... / "widget_mapping.yaml"
+  default_widget_mapping_path: "configs/widget_mapping.yaml"
+  # Pagination defaults
+  default_page_limit: 100
+  max_page_limit: 1000
+  # CORS — defaults suitable for local development; override via environment
+  cors_allow_credentials: true
+  cors_allow_methods:
+    - "GET"
+    - "POST"
+    - "PUT"
+    - "DELETE"
+    - "OPTIONS"
+  cors_allow_headers:
+    - "*"
+  # Backend connection settings
+  consul_connection_timeout_seconds: 10
+  postgres_query_timeout_seconds: 30
+  # Widget mapping cache behaviour
+  widget_mapping_cache_enabled: true
+# ---------------------------------------------------------------------------
+# IO operations (EFFECT node specific)
+# ---------------------------------------------------------------------------
+io_operations:
+  - operation: "list_nodes"
+    description: "List registered nodes with optional state and node_type filters."
+    input_fields:
+      - limit
+      - offset
+      - state
+      - node_type
+      - correlation_id
+    output_fields:
+      - nodes
+      - pagination_info
+      - warnings
+  - operation: "get_node"
+    description: "Fetch a single registered node by UUID."
+    input_fields:
+      - node_id
+      - correlation_id
+    output_fields:
+      - node
+      - warnings
+  - operation: "list_instances"
+    description: "List live service instances from Consul."
+    input_fields:
+      - correlation_id
+    output_fields:
+      - instances
+      - warnings
+  - operation: "get_widget_mapping"
+    description: "Return capability-to-widget mapping configuration."
+    input_fields:
+      - correlation_id
+    output_fields:
+      - widget_mapping
+      - warnings
+  - operation: "get_discovery"
+    description: "Return full dashboard payload combining nodes, instances, and widget mapping."
+    input_fields:
+      - limit
+      - offset
+      - correlation_id
+    output_fields:
+      - discovery_response
+      - warnings
+  - operation: "get_health"
+    description: "Return component-level health status for the registry service."
+    input_fields:
+      - correlation_id
+    output_fields:
+      - health_response
+  - operation: "list_contracts"
+    description: "List contract registrations with pagination."
+    input_fields:
+      - limit
+      - offset
+      - correlation_id
+    output_fields:
+      - contracts
+      - pagination_info
+      - warnings
+  - operation: "get_contract"
+    description: "Fetch a single contract by ID."
+    input_fields:
+      - contract_id
+      - correlation_id
+    output_fields:
+      - contract
+      - warnings
+  - operation: "list_topics"
+    description: "List event topics with pagination."
+    input_fields:
+      - limit
+      - offset
+      - correlation_id
+    output_fields:
+      - topics
+      - pagination_info
+      - warnings
+  - operation: "get_topic"
+    description: "Fetch a single topic by suffix."
+    input_fields:
+      - topic_suffix
+      - correlation_id
+    output_fields:
+      - topic
+      - warnings
+# ---------------------------------------------------------------------------
+# Handler routing (declarative dispatch)
+# ---------------------------------------------------------------------------
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "list_nodes"
+      handler:
+        name: "HandlerRegistryApiListNodes"
+        module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_list_nodes"
+    - operation: "get_node"
+      handler:
+        name: "HandlerRegistryApiGetNode"
+        module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_node"
+    - operation: "list_instances"
+      handler:
+        name: "HandlerRegistryApiListInstances"
+        module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_list_instances"
+    - operation: "get_widget_mapping"
+      handler:
+        name: "HandlerRegistryApiGetWidgetMapping"
+        module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_widget_mapping"
+    - operation: "get_discovery"
+      handler:
+        name: "HandlerRegistryApiGetDiscovery"
+        module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_discovery"
+    - operation: "get_health"
+      handler:
+        name: "HandlerRegistryApiGetHealth"
+        module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_health"
+    - operation: "list_contracts"
+      handler:
+        name: "HandlerRegistryApiListContracts"
+        module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_list_contracts"
+    - operation: "get_contract"
+      handler:
+        name: "HandlerRegistryApiGetContract"
+        module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_contract"
+    - operation: "list_topics"
+      handler:
+        name: "HandlerRegistryApiListTopics"
+        module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_list_topics"
+    - operation: "get_topic"
+      handler:
+        name: "HandlerRegistryApiGetTopic"
+        module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_topic"
+# ---------------------------------------------------------------------------
+# Capabilities
+# ---------------------------------------------------------------------------
+capabilities:
+  - name: "registry.discovery"
+    description: "Provide unified discovery payload for dashboard consumption."
+  - name: "registry.nodes"
+    description: "Query registered node records from PostgreSQL projections."
+  - name: "registry.instances"
+    description: "Query live service instances from Consul."
+  - name: "registry.contracts"
+    description: "Query contract registrations from the contract registry."
+  - name: "registry.topics"
+    description: "Query event topic registrations."
+  - name: "registry.widget_mapping"
+    description: "Serve capability-to-widget rendering configuration."
+  - name: "registry.health"
+    description: "Report component-level health of registry backends."
+# ---------------------------------------------------------------------------
+# Dependencies (protocols this node requires)
+# ---------------------------------------------------------------------------
+dependencies:
+  - name: "protocol_projection_reader_registration"
+    type: "protocol"
+    class_name: "ProjectionReaderRegistration"
+    module: "omnibase_infra.projectors"
+    description: "Reads node registration projections from PostgreSQL."
+    optional: true
+  - name: "protocol_handler_service_discovery_consul"
+    type: "protocol"
+    class_name: "HandlerServiceDiscoveryConsul"
+    module: "omnibase_infra.handlers.service_discovery"
+    description: "Queries live service instances from Consul."
+    optional: true
+  - name: "protocol_projection_reader_contract"
+    type: "protocol"
+    class_name: "ProjectionReaderContract"
+    module: "omnibase_infra.projectors"
+    description: "Reads contract registry projections."
+    optional: true
+# ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+health_check:
+  enabled: true
+  endpoint: "/registry/health"
+  interval_seconds: 30
+  backends:
+    - name: "postgres"
+      check_type: "connection"
+      timeout_ms: 5000
+    - name: "consul"
+      check_type: "http"
+      endpoint: "/v1/status/leader"
+# ---------------------------------------------------------------------------
+# Metadata
+# ---------------------------------------------------------------------------
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  ticket: "OMN-1441"
+  created: "2026-02-24"
+  updated: "2026-02-24"
+  tags:
+    - effect
+    - registry
+    - api
+    - fastapi
+    - dashboard
+    - discovery
+    - contract-driven
