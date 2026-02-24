@@ -20,11 +20,11 @@ Related:
     - OMN-2510: Runtime wires projection before Kafka publish (this ticket)
     - OMN-2508: NodeProjectionEffect stub (omnibase_spi)
     - OMN-2509: Reducer emits ModelProjectionIntent (omnibase_core)
+    - OMN-2718: Remove ModelProjectionIntent local stub, use omnibase_core canonical
 """
 
 from __future__ import annotations
 
-import asyncio
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -34,12 +34,12 @@ import pytest
 from pydantic import BaseModel
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_core.models.projectors.model_projection_intent import (
+    ModelProjectionIntent,
+)
 from omnibase_infra.enums import EnumDispatchStatus
 from omnibase_infra.errors.error_projection import ProjectionError
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
-from omnibase_infra.models.projection.model_projection_intent import (
-    ModelProjectionIntent,
-)
 from omnibase_infra.runtime.models.model_projection_result_local import (
     ModelProjectionResultLocal,
 )
@@ -67,17 +67,15 @@ class _InMemoryProjectionStore:
         """Persist a projection synchronously and record the write."""
         self.writes.append(
             {
-                "subject": intent.subject,
-                "aggregate_id": intent.aggregate_id,
-                "projection_type": intent.projection_type,
-                "payload": intent.payload,
-                "causation_event_id": intent.causation_event_id,
+                "projector_key": intent.projector_key,
+                "event_type": intent.event_type,
+                "envelope": intent.envelope,
                 "correlation_id": intent.correlation_id,
                 "written_at": datetime.now(UTC),
             }
         )
         return ModelProjectionResultLocal.success_result(
-            artifact_ref=f"mem:{intent.projection_type}:{intent.aggregate_id}"
+            artifact_ref=f"mem:{intent.projector_key}:{intent.event_type}"
         )
 
 
@@ -154,6 +152,12 @@ class _FakeOutputEvent(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class _StubEnvelope(BaseModel):
+    """Minimal envelope for integration test projection intents."""
+
+    value: str = "integration-stub"
+
+
 def _make_result(
     projection_intents: tuple[ModelProjectionIntent, ...] = (),
     output_events: list[BaseModel] | None = None,
@@ -173,11 +177,11 @@ def _make_result(
 
 
 def _make_intent(**overrides: object) -> ModelProjectionIntent:
+    """Build a ModelProjectionIntent with canonical omnibase_core fields."""
     defaults: dict[str, object] = {
-        "subject": "NodeRegistration",
-        "aggregate_id": uuid4(),
-        "projection_type": "NodeRegistration",
-        "causation_event_id": uuid4(),
+        "projector_key": "node_registration_projector",
+        "event_type": "node.registration.v1",
+        "envelope": _StubEnvelope(),
         "correlation_id": uuid4(),
     }
     defaults.update(overrides)
@@ -253,18 +257,18 @@ class TestProjectionPersistedBeforeKafka:
         """Verify the correct projection data is written to the store."""
         store = _InMemoryProjectionStore()
         bus = _CapturingEventBus()
-        aggregate_id = uuid4()
-        causation_event_id = uuid4()
         correlation_id = uuid4()
-        payload = {"node_id": str(aggregate_id), "state": "registered"}
 
+        class _NodeRegistrationEnvelope(BaseModel):
+            node_id: str = "node-abc"
+            state: str = "registered"
+
+        envelope = _NodeRegistrationEnvelope()
         proj_intent = _make_intent(
-            subject="NodeRegistration",
-            aggregate_id=aggregate_id,
-            projection_type="NodeRegistration",
-            causation_event_id=causation_event_id,
+            projector_key="node_registration_projector",
+            event_type="node.registration.v1",
+            envelope=envelope,
             correlation_id=correlation_id,
-            payload=payload,
         )
         result = _make_result(projection_intents=(proj_intent,))
 
@@ -277,10 +281,10 @@ class TestProjectionPersistedBeforeKafka:
 
         assert len(store.writes) == 1
         write = store.writes[0]
-        assert write["aggregate_id"] == aggregate_id
-        assert write["projection_type"] == "NodeRegistration"
-        assert write["causation_event_id"] == causation_event_id
-        assert write["payload"] == payload
+        assert write["projector_key"] == "node_registration_projector"
+        assert write["event_type"] == "node.registration.v1"
+        assert write["envelope"] == envelope
+        assert write["correlation_id"] == correlation_id
 
 
 # ---------------------------------------------------------------------------
@@ -319,16 +323,12 @@ class TestProjectionFailureNoKafka:
 
     @pytest.mark.asyncio
     async def test_projection_failure_exception_carries_context(self) -> None:
-        """ProjectionError must carry projection_type and originating_event_id."""
-        aggregate_id = uuid4()
-        causation_event_id = uuid4()
+        """ProjectionError must carry projector_key for operator diagnostics."""
         failing_store = _FailingProjectionStore()
         bus = _CapturingEventBus()
 
         proj_intent = _make_intent(
-            projection_type="NodeRegistration",
-            aggregate_id=aggregate_id,
-            causation_event_id=causation_event_id,
+            projector_key="node_registration_projector",
         )
         result = _make_result(projection_intents=(proj_intent,))
 
@@ -342,8 +342,7 @@ class TestProjectionFailureNoKafka:
             await applier.apply(result)
 
         err = exc_info.value
-        assert err.projection_type == "NodeRegistration"
-        assert err.originating_event_id == causation_event_id
+        assert err.projection_type == "node_registration_projector"
 
     @pytest.mark.asyncio
     async def test_multiple_intents_failure_on_first_no_kafka(self) -> None:
@@ -351,8 +350,8 @@ class TestProjectionFailureNoKafka:
         failing_store = _FailingProjectionStore()
         bus = _CapturingEventBus()
 
-        intent_a = _make_intent(projection_type="TypeA")
-        intent_b = _make_intent(projection_type="TypeB")
+        intent_a = _make_intent(projector_key="type_a_projector")
+        intent_b = _make_intent(projector_key="type_b_projector")
         result = _make_result(
             projection_intents=(intent_a, intent_b),
             output_events=[_FakeOutputEvent()],

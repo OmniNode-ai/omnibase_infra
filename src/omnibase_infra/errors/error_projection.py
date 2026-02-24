@@ -36,8 +36,7 @@ class ProjectionError(RuntimeHostError):
     The runtime catches this error in DispatchResultApplier and:
         1. Skips Kafka publish entirely.
         2. Routes the originating message to retry / dead-letter handling.
-        3. Logs the failure with originating event ID, ModelProjectionIntent,
-           and exception details.
+        3. Logs the failure with projector_key, event_type, and exception details.
 
     Attributes:
         originating_event_id: UUID of the event that triggered the projection.

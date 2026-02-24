@@ -9,7 +9,7 @@ by orchestrators to query current entity state.
 Exports:
     ModelCapabilityFields: Container for capability fields in projection persistence
     ModelContractProjection: Contract projection for Registry API queries
-    ModelProjectionIntent: Intent emitted by reducer to trigger synchronous projection (OMN-2510)
+    ModelProjectionIntent: Intent emitted by reducer to trigger synchronous projection (omnibase_core.models.projectors)
     ModelRegistrationProjection: Registration projection for orchestrator state queries
     ModelRegistrationSnapshot: Compacted snapshot for read optimization
     ModelSequenceInfo: Sequence information for projection ordering and idempotency
@@ -23,16 +23,17 @@ Related Tickets:
     - OMN-944 (F1): Implement Registration Projection Schema
     - OMN-940 (F0): Define Projector Execution Model
     - OMN-2510: Runtime wires NodeProjectionEffect before Kafka publish
+    - OMN-2718: Remove local stub, use omnibase_core canonical ModelProjectionIntent
 """
 
+from omnibase_core.models.projectors.model_projection_intent import (
+    ModelProjectionIntent,
+)
 from omnibase_infra.models.projection.model_capability_fields import (
     ModelCapabilityFields,
 )
 from omnibase_infra.models.projection.model_contract_projection import (
     ModelContractProjection,
-)
-from omnibase_infra.models.projection.model_projection_intent import (
-    ModelProjectionIntent,
 )
 from omnibase_infra.models.projection.model_registration_projection import (
     ModelRegistrationProjection,
