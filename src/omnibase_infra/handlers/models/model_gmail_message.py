@@ -75,11 +75,7 @@ class ModelGmailMessage(BaseModel):
         message_id: str = str(raw.get("id", ""))
         thread_id: str = str(raw.get("threadId", ""))
         raw_label_ids = raw.get("labelIds", [])
-        label_ids: list[str] = (
-            [str(lbl) for lbl in raw_label_ids]
-            if isinstance(raw_label_ids, list)
-            else []
-        )
+        label_ids: list[str] = _extract_string_list(raw_label_ids)
 
         # Parse internalDate (epoch milliseconds → UTC datetime)
         internal_date_ms_str: str = str(raw.get("internalDate", "0"))
@@ -92,10 +88,7 @@ class ModelGmailMessage(BaseModel):
         # Extract headers from payload
         raw_payload = raw.get("payload", {})
         payload: _ApiDict = raw_payload if isinstance(raw_payload, dict) else {}
-        raw_headers = payload.get("headers", [])
-        headers: list[_ApiDict] = (
-            list(raw_headers) if isinstance(raw_headers, list) else []
-        )
+        headers: list[_ApiDict] = _extract_list_of_dicts(payload.get("headers", []))
         subject = ""
         sender = ""
         for header in headers:
@@ -141,12 +134,7 @@ def _extract_body_text(payload: _ApiDict) -> str:
         # Prefer plain text, fall back to HTML
         plain_text = ""
         html_text = ""
-        raw_parts = payload.get("parts", [])
-        parts: list[_ApiDict] = (
-            [p for p in raw_parts if isinstance(p, dict)]
-            if isinstance(raw_parts, list)
-            else []
-        )
+        parts: list[_ApiDict] = _extract_list_of_dicts(payload.get("parts", []))
         for part in parts:
             part_mime = str(part.get("mimeType", ""))
             if part_mime == "text/plain":
@@ -157,12 +145,7 @@ def _extract_body_text(payload: _ApiDict) -> str:
 
     elif mime_type.startswith("multipart/"):
         # For multipart/mixed, multipart/related, etc.: recurse and concatenate
-        raw_parts = payload.get("parts", [])
-        parts = (
-            [p for p in raw_parts if isinstance(p, dict)]
-            if isinstance(raw_parts, list)
-            else []
-        )
+        parts = _extract_list_of_dicts(payload.get("parts", []))
         collected: list[str] = []
         for part in parts:
             text = _extract_body_text(part)
@@ -201,6 +184,39 @@ def _decode_body_data(part: _ApiDict) -> str:
             extra={"error": str(exc)},
         )
         return ""
+
+
+def _extract_list_of_dicts(value: JsonType) -> list[_ApiDict]:
+    """Safely extract a list of dicts from a JsonType value.
+
+    Args:
+        value: A JSON value that may be a list of dict objects.
+
+    Returns:
+        List of dict[str, JsonType] items, or empty list if value is not
+        a list or contains non-dict items.
+    """
+    if not isinstance(value, list):
+        return []
+    result: list[_ApiDict] = []
+    for item in value:
+        if isinstance(item, dict):
+            result.append(item)
+    return result
+
+
+def _extract_string_list(value: JsonType) -> list[str]:
+    """Safely extract a list of strings from a JsonType value.
+
+    Args:
+        value: A JSON value that may be a list of strings.
+
+    Returns:
+        List of strings, or empty list if value is not a list.
+    """
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
 
 
 __all__: list[str] = ["ModelGmailMessage"]
