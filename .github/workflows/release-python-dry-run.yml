@@ -25,20 +25,24 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
-          version: "0.5.x"
+          version: "0.5.27"
 
       - name: Set up Python
         run: uv python install 3.12
 
       - name: Extract version
         id: version
+        env:
+          SIMULATED_TAG: ${{ inputs['simulated-tag'] }}
         run: |
-          TAG="${{ inputs['simulated-tag'] }}"
+          TAG="${SIMULATED_TAG}"
           VERSION="${TAG#v}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Validate pyproject.toml version matches simulated tag
+        env:
+          TAG_VERSION: ${{ steps.version.outputs.version }}
         run: |
           PYPROJECT_VERSION=$(python3 -c "
           import tomllib
@@ -49,7 +53,6 @@ jobs:
               raise SystemExit('ERROR: missing [project].version in pyproject.toml — PEP 621 migration required before releasing')
           print(v)
           ")
-          TAG_VERSION="${{ steps.version.outputs.version }}"
           if [ "$PYPROJECT_VERSION" != "$TAG_VERSION" ]; then
             echo "ERROR: pyproject.toml version ($PYPROJECT_VERSION) does not match simulated tag ($TAG_VERSION)"
             exit 1
@@ -70,11 +73,14 @@ jobs:
       - name: Generate SHA256SUMS
         run: |
           cd dist
-          sha256sum * > SHA256SUMS.txt
+          sha256sum *.whl *.tar.gz > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: DRY RUN complete — skipping publish
+        env:
+          PACKAGE_NAME: ${{ inputs['package-name'] }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
-          echo "DRY RUN: Would publish ${{ inputs['package-name'] }} ${{ steps.version.outputs.tag }} to PyPI"
+          echo "DRY RUN: Would publish ${PACKAGE_NAME} ${RELEASE_TAG} to PyPI"
           echo "Artifacts ready:"
           ls -lh dist/
