@@ -91,13 +91,13 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_core.enums import EnumCoreErrorCode
+from omnibase_core.models.projectors.model_projection_intent import (
+    ModelProjectionIntent,
+)
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_infra.enums import EnumDispatchStatus, EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
 from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
-from omnibase_infra.models.projection.model_projection_intent import (
-    ModelProjectionIntent,
-)
 
 
 class ModelDispatchResult(BaseModel):

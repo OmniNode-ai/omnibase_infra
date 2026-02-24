@@ -15,33 +15,33 @@ Coverage:
     - Slow projection (within timeout) defers publish, does not skip it
     - Multiple projection intents execute sequentially, all must succeed
     - Effect result success=False raises ProjectionError
-    - Projection error logged with originating_event_id, projection_type, correlation_id
+    - Projection error logged with projector_key, event_type, correlation_id
 
 Related:
     - OMN-2363: Projection ordering guarantee epic
     - OMN-2508: NodeProjectionEffect (omnibase_spi) — stubbed here
-    - OMN-2509: Reducer emits ModelProjectionIntent (omnibase_core) — stubbed here
+    - OMN-2509: Reducer emits ModelProjectionIntent (omnibase_core) — canonical model used (OMN-2718)
     - OMN-2510: Runtime wires projection before Kafka publish (this ticket)
+    - OMN-2718: Remove ModelProjectionIntent local stub, use omnibase_core canonical
 """
 
 from __future__ import annotations
 
-import asyncio
 import time
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, call, patch
-from uuid import UUID, uuid4
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 from pydantic import BaseModel
 
+from omnibase_core.models.projectors.model_projection_intent import (
+    ModelProjectionIntent,
+)
 from omnibase_infra.enums import EnumDispatchStatus
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.errors.error_projection import ProjectionError
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
-from omnibase_infra.models.projection.model_projection_intent import (
-    ModelProjectionIntent,
-)
 from omnibase_infra.runtime.models.model_projection_result_local import (
     ModelProjectionResultLocal,
 )
@@ -87,13 +87,22 @@ class _StubProjectionEffect:
         return ModelProjectionResultLocal.success_result(artifact_ref="row:1")
 
 
+class _StubEnvelope(BaseModel):
+    """Minimal envelope for test projection intents."""
+
+    value: str = "stub"
+
+
 def _make_projection_intent(**overrides: object) -> ModelProjectionIntent:
-    """Build a ModelProjectionIntent with sensible defaults."""
+    """Build a ModelProjectionIntent with sensible defaults.
+
+    Uses the canonical omnibase_core model fields:
+        projector_key, event_type, envelope, correlation_id.
+    """
     defaults: dict[str, object] = {
-        "subject": "NodeRegistration",
-        "aggregate_id": uuid4(),
-        "projection_type": "NodeRegistration",
-        "causation_event_id": uuid4(),
+        "projector_key": "node_registration_projector",
+        "event_type": "node.registration.v1",
+        "envelope": _StubEnvelope(),
         "correlation_id": uuid4(),
     }
     defaults.update(overrides)
@@ -308,15 +317,11 @@ class TestProjectionFailureBlocksKafka:
 
     @pytest.mark.asyncio
     async def test_projection_error_contains_projection_type(self) -> None:
-        """ProjectionError must include projection_type for operator diagnostics."""
+        """ProjectionError must include projector_key for operator diagnostics."""
         bus = AsyncMock()
         effect = _StubProjectionEffect(should_fail=True)
-        aggregate_id = uuid4()
-        causation_event_id = uuid4()
         proj_intent = _make_projection_intent(
-            projection_type="NodeRegistration",
-            aggregate_id=aggregate_id,
-            causation_event_id=causation_event_id,
+            projector_key="node_registration_projector",
         )
         result = _make_result(projection_intents=(proj_intent,))
 
@@ -330,8 +335,7 @@ class TestProjectionFailureBlocksKafka:
             await applier.apply(result)
 
         err = exc_info.value
-        assert err.projection_type == "NodeRegistration"
-        assert err.originating_event_id == causation_event_id
+        assert err.projection_type == "node_registration_projector"
 
 
 # ---------------------------------------------------------------------------
@@ -395,8 +399,8 @@ class TestMultipleProjectionIntents:
         effect = _StubProjectionEffect()
         bus = AsyncMock()
 
-        intent_a = _make_projection_intent(projection_type="TypeA")
-        intent_b = _make_projection_intent(projection_type="TypeB")
+        intent_a = _make_projection_intent(projector_key="type_a_projector")
+        intent_b = _make_projection_intent(projector_key="type_b_projector")
         result = _make_result(projection_intents=(intent_a, intent_b))
 
         applier = DispatchResultApplier(
@@ -407,8 +411,8 @@ class TestMultipleProjectionIntents:
         await applier.apply(result)
 
         assert len(effect.calls) == 2
-        assert effect.calls[0].projection_type == "TypeA"
-        assert effect.calls[1].projection_type == "TypeB"
+        assert effect.calls[0].projector_key == "type_a_projector"
+        assert effect.calls[1].projector_key == "type_b_projector"
 
     @pytest.mark.asyncio
     async def test_first_projection_failure_stops_remaining(self) -> None:
@@ -418,8 +422,8 @@ class TestMultipleProjectionIntents:
         )
         bus = AsyncMock()
 
-        intent_a = _make_projection_intent(projection_type="TypeA")
-        intent_b = _make_projection_intent(projection_type="TypeB")
+        intent_a = _make_projection_intent(projector_key="type_a_projector")
+        intent_b = _make_projection_intent(projector_key="type_b_projector")
         result = _make_result(projection_intents=(intent_a, intent_b))
 
         applier = DispatchResultApplier(
@@ -494,7 +498,7 @@ class TestFullPipelineHappyPath:
             def execute(
                 self, intent: ModelProjectionIntent
             ) -> ModelProjectionResultLocal:
-                call_order.append(f"projection:{intent.projection_type}")
+                call_order.append(f"projection:{intent.projector_key}")
                 return ModelProjectionResultLocal.success_result()
 
         executor = MagicMock()
@@ -519,7 +523,9 @@ class TestFullPipelineHappyPath:
         class _FakeEvent(BaseModel):
             value: str = "x"
 
-        proj_intent = _make_projection_intent(projection_type="NodeRegistration")
+        proj_intent = _make_projection_intent(
+            projector_key="node_registration_projector"
+        )
         intent = ModelIntent(
             intent_type="test.intent",
             target="test://target",
@@ -540,7 +546,7 @@ class TestFullPipelineHappyPath:
         await applier.apply(result)
 
         assert call_order == [
-            "projection:NodeRegistration",
+            "projection:node_registration_projector",
             "intents",
             "kafka",
         ], f"Unexpected pipeline order: {call_order}"

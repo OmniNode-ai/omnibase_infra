@@ -21,10 +21,14 @@ Migration note (OMN-2510 follow-up):
     should be replaced by the canonical one from omnibase_spi.  The runtime
     import in service_dispatch_result_applier should then point there.
 
+    ModelProjectionIntent is now imported from omnibase_core.models.projectors
+    (OMN-2718: removed local stub, uses canonical model since omnibase-core>=0.19.0).
+
 Related:
     - OMN-2508: NodeProjectionEffect implementation (omnibase_spi)
     - OMN-2509: Reducer emits ModelProjectionIntent (omnibase_core)
     - OMN-2510: Runtime wires projection before Kafka publish (this ticket)
+    - OMN-2718: Remove ModelProjectionIntent local stub, use omnibase_core canonical
 """
 
 from __future__ import annotations
@@ -32,7 +36,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from omnibase_infra.models.projection.model_projection_intent import (
+    from omnibase_core.models.projectors.model_projection_intent import (
         ModelProjectionIntent,
     )
     from omnibase_infra.runtime.models.model_projection_result_local import (
@@ -74,8 +78,8 @@ class ProtocolProjectionEffect(Protocol):
         the return value and will NOT publish to Kafka if this raises.
 
         Args:
-            intent: The projection intent carrying subject, aggregate_id,
-                projection_type, payload, and causation chain.
+            intent: The projection intent carrying projector_key, event_type,
+                envelope, and correlation_id.
 
         Returns:
             ModelProjectionResultLocal with ``success=True`` and an optional

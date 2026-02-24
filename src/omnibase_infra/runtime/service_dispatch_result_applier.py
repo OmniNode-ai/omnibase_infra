@@ -60,10 +60,10 @@ from omnibase_infra.models.errors.model_infra_error_context import (
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
-    from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
-    from omnibase_infra.models.projection.model_projection_intent import (
+    from omnibase_core.models.projectors.model_projection_intent import (
         ModelProjectionIntent,
     )
+    from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
     from omnibase_infra.protocols import ProtocolEventBusLike
     from omnibase_infra.runtime.protocol_projection_effect import (
         ProtocolProjectionEffect,
@@ -215,16 +215,15 @@ class DispatchResultApplier:
                     operation="dispatch_result_applier.execute_projection",
                 )
                 raise ProjectionError(
-                    f"Projection write failed for {intent.projection_type}: {error_msg}",
+                    f"Projection write failed for {intent.projector_key}: {error_msg}",
                     context=context,
-                    originating_event_id=intent.causation_event_id,
-                    projection_type=intent.projection_type,
+                    projection_type=intent.projector_key,
                 )
             logger.info(
-                "Projection persisted: type=%s aggregate_id=%s artifact_ref=%s "
+                "Projection persisted: projector_key=%s event_type=%s artifact_ref=%s "
                 "dispatcher_id=%s correlation_id=%s",
-                intent.projection_type,
-                str(intent.aggregate_id),
+                intent.projector_key,
+                intent.event_type,
                 result.artifact_ref,
                 dispatcher_id,
                 str(correlation_id),
@@ -238,11 +237,10 @@ class DispatchResultApplier:
                 operation="dispatch_result_applier.execute_projection",
             )
             raise ProjectionError(
-                f"Projection write raised exception for {intent.projection_type}: "
+                f"Projection write raised exception for {intent.projector_key}: "
                 f"{sanitize_error_message(exc)}",
                 context=context,
-                originating_event_id=intent.causation_event_id,
-                projection_type=intent.projection_type,
+                projection_type=intent.projector_key,
             ) from exc
 
     async def apply(
@@ -332,17 +330,16 @@ class DispatchResultApplier:
                 except ProjectionError as proj_err:
                     logger.exception(
                         "Projection failed — Kafka publish blocked: "
-                        "projection_type=%s aggregate_id=%s originating_event_id=%s "
+                        "projector_key=%s event_type=%s "
                         "dispatcher_id=%s correlation_id=%s",
-                        proj_intent.projection_type,
-                        str(proj_intent.aggregate_id),
-                        str(proj_intent.causation_event_id),
+                        proj_intent.projector_key,
+                        proj_intent.event_type,
                         result.dispatcher_id,
                         str(effective_correlation_id),
                         extra={
                             "error_type": type(proj_err).__name__,
-                            "projection_type": proj_intent.projection_type,
-                            "aggregate_id": str(proj_intent.aggregate_id),
+                            "projector_key": proj_intent.projector_key,
+                            "event_type": proj_intent.event_type,
                             "dispatcher_id": result.dispatcher_id,
                         },
                     )
