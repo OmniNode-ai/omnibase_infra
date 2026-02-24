@@ -40,11 +40,17 @@ import pytest
 
 from scripts.check_event_registry_fingerprint import (
     cmd_stamp as event_cmd_stamp,
+)
+from scripts.check_event_registry_fingerprint import (
     cmd_verify as event_cmd_verify,
 )
 from scripts.check_schema_fingerprint import (
     cmd_stamp as schema_cmd_stamp,
+)
+from scripts.check_schema_fingerprint import (
     cmd_verify as schema_cmd_verify,
+)
+from scripts.check_schema_fingerprint import (
     compute_migration_fingerprint,
     write_artifact,
 )
@@ -335,9 +341,7 @@ class TestEventRegistryFingerprintAdversarial:
             "a stale artifact in CI."
         )
 
-    def test_element_hash_mutation_behavior_is_documented(
-        self, tmp_path: Path
-    ) -> None:
+    def test_element_hash_mutation_behavior_is_documented(self, tmp_path: Path) -> None:
         """Documents how the event registry twin handles element-level corruption.
 
         The twin validates by recomputing the fingerprint from ALL_EVENT_REGISTRATIONS
