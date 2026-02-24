@@ -38,6 +38,19 @@ from omnibase_infra.handlers.models.model_slack_alert import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _clear_slack_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove ambient Slack credentials from the environment for test isolation.
+
+    Prevents SLACK_BOT_TOKEN, SLACK_WEBHOOK_URL, and SLACK_CHANNEL_ID present in
+    the developer's shell from leaking into handler constructor env-var lookups and
+    affecting test assertions about mode selection.
+    """
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("SLACK_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("SLACK_CHANNEL_ID", raising=False)
+
+
 class TestModelSlackAlert:
     """Tests for ModelSlackAlert input model."""
 
