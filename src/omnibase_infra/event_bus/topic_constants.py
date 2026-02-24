@@ -553,6 +553,31 @@ Producer: Agent status reporters (claude hooks, runtime)
 Consumer: agent_actions consumer for persistence
 """
 
+# Reward architecture topics (OMN-2552)
+TOPIC_RUN_EVALUATED: Final[str] = "onex.evt.omnimemory.run-evaluated.v1"
+"""Reward run evaluation summary with objective fingerprint.
+
+Producer: NodeRewardBinderEffect
+Consumer: Policy update consumers, analytics
+Ticket: OMN-2552
+"""
+
+TOPIC_REWARD_ASSIGNED: Final[str] = "onex.evt.omnimemory.reward-assigned.v1"
+"""Per-target reward assignment with traceable evidence refs.
+
+Producer: NodeRewardBinderEffect
+Consumer: Tool/model/pattern/agent reward consumers
+Ticket: OMN-2552
+"""
+
+TOPIC_POLICY_STATE_UPDATED: Final[str] = "onex.evt.omnimemory.policy-state-updated.v1"
+"""Policy state transition with old/new snapshots.
+
+Producer: NodeRewardBinderEffect
+Consumer: Policy state consumers, audit log
+Ticket: OMN-2552
+"""
+
 # Grouped constants for wiring health monitoring
 WIRING_HEALTH_MONITORED_TOPICS: Final[tuple[str, ...]] = (
     TOPIC_SESSION_OUTCOME_CURRENT,
@@ -577,6 +602,10 @@ __all__ = [
     "TOPIC_AGENT_STATUS",
     # Effectiveness Invalidation Topics
     "TOPIC_EFFECTIVENESS_INVALIDATION",
+    # Reward Architecture Topics (OMN-2552)
+    "TOPIC_POLICY_STATE_UPDATED",
+    "TOPIC_REWARD_ASSIGNED",
+    "TOPIC_RUN_EVALUATED",
     # LLM Call Metrics Topics
     "TOPIC_LLM_CALL_COMPLETED",
     # Wiring Health Topics
