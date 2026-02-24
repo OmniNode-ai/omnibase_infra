@@ -21,6 +21,7 @@ Available Handlers:
 - HandlerIntent: Intent storage and query handler wrapping HandlerGraph (demo wiring)
 - HandlerQdrant: Qdrant vector database handler (MVP: create, upsert, search, delete)
 - HandlerSlackWebhook: Slack webhook handler for infrastructure alerting
+- HandlerGmailApi: Gmail API handler with OAuth2 token management (OMN-2729)
 
 Response Models:
 - ModelDbQueryPayload: Database query result payload
@@ -35,6 +36,7 @@ Response Models:
 from omnibase_infra.handlers.handler_consul import HandlerConsul
 from omnibase_infra.handlers.handler_db import HandlerDb
 from omnibase_infra.handlers.handler_filesystem import HandlerFileSystem
+from omnibase_infra.handlers.handler_gmail_api import HandlerGmailApi
 from omnibase_infra.handlers.handler_graph import HandlerGraph
 from omnibase_infra.handlers.handler_http import HandlerHttpRest
 from omnibase_infra.handlers.handler_infisical import (
@@ -58,6 +60,7 @@ from omnibase_infra.handlers.models import (
     ModelDbQueryPayload,
     ModelDbQueryResponse,
 )
+from omnibase_infra.handlers.models.model_gmail_message import ModelGmailMessage
 from omnibase_infra.handlers.models.model_graph_handler_response import (
     ModelGraphHandlerResponse,
 )
@@ -69,6 +72,7 @@ __all__: list[str] = [
     "HANDLER_ID_INFISICAL",
     "HANDLER_ID_INTENT",
     "HandlerConsul",
+    "HandlerGmailApi",
     "HandlerDb",
     "HandlerFileSystem",
     "HandlerGraph",
@@ -84,6 +88,7 @@ __all__: list[str] = [
     "ModelDbDescribeResponse",
     "ModelDbQueryPayload",
     "ModelDbQueryResponse",
+    "ModelGmailMessage",
     "ModelGraphHandlerResponse",
     "ModelQdrantHandlerResponse",
 ]
