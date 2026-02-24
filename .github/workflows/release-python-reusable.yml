@@ -13,9 +13,9 @@ on:
         default: true
     secrets:
       PYPI_PRIVATE_UPLOAD_URL:
-        required: true
+        required: false
       PYPI_PRIVATE_TOKEN:
-        required: true
+        required: false
 
 permissions:
   contents: write   # required for softprops/action-gh-release
@@ -33,7 +33,10 @@ jobs:
           fetch-depth: 0
 
       - name: Assert clean working tree
-        run: git diff --exit-code
+        run: |
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
 
       - name: Validate tag matches pyproject.toml version
         run: |
@@ -68,15 +71,23 @@ jobs:
             exit 1
           }
 
-      - name: Generate checksums
-        run: sha256sum dist/*.whl dist/*.tar.gz > dist/SHA256SUMS.txt
-
       - name: Publish to private PyPI
         if: inputs.publish
         run: |
+          if [ -z "$UV_PUBLISH_URL" ] || [ -z "$UV_PUBLISH_TOKEN" ]; then
+            echo "ERROR: PYPI_PRIVATE_UPLOAD_URL and PYPI_PRIVATE_TOKEN secrets are required when publish is true"
+            exit 1
+          fi
           uv publish \
-            --index-url "${{ secrets.PYPI_PRIVATE_UPLOAD_URL }}" \
-            --token "${{ secrets.PYPI_PRIVATE_TOKEN }}"
+            --publish-url "$UV_PUBLISH_URL" \
+            --token "$UV_PUBLISH_TOKEN" \
+            dist/*.whl dist/*.tar.gz
+        env:
+          UV_PUBLISH_URL: ${{ secrets.PYPI_PRIVATE_UPLOAD_URL }}
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_PRIVATE_TOKEN }}
+
+      - name: Generate checksums
+        run: sha256sum dist/*.whl dist/*.tar.gz > dist/SHA256SUMS.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -86,4 +97,4 @@ jobs:
             dist/*.tar.gz
             dist/SHA256SUMS.txt
           generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'post') }}
+          prerelease: ${{ contains(github.ref_name, 'rc') }}
