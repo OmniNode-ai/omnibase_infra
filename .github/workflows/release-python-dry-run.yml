@@ -36,6 +36,10 @@ jobs:
           SIMULATED_TAG: ${{ inputs['simulated-tag'] }}
         run: |
           TAG="${SIMULATED_TAG}"
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: simulated-tag must be in vX.Y.Z format, got: ${TAG}"
+            exit 1
+          fi
           VERSION="${TAG#v}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
@@ -44,7 +48,7 @@ jobs:
         env:
           TAG_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          PYPROJECT_VERSION=$(python3 -c "
+          PYPROJECT_VERSION=$(uv run python3 -c "
           import tomllib
           with open('pyproject.toml', 'rb') as f:
               d = tomllib.load(f)
@@ -64,11 +68,18 @@ jobs:
 
       - name: Verify dist artifacts
         run: |
-          ls -la dist/
-          ls dist/*.whl dist/*.tar.gz >/dev/null 2>&1 || {
-            echo "ERROR: expected wheel + sdist in dist/ — build may have failed silently"
+          if ! ls dist/*.whl 1>/dev/null 2>&1; then
+            echo "ERROR: No .whl artifact found in dist/"
+            ls dist/ || true
             exit 1
-          }
+          fi
+          if ! ls dist/*.tar.gz 1>/dev/null 2>&1; then
+            echo "ERROR: No .tar.gz artifact found in dist/"
+            ls dist/ || true
+            exit 1
+          fi
+          echo "Artifacts:"
+          ls -lh dist/
 
       - name: Generate SHA256SUMS
         run: |
