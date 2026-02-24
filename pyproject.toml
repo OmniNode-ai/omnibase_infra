@@ -244,6 +244,8 @@ ignore = [
                  # Cryptographic hashing uses SHA256+ (cryptography library).
     "S105",      # Hardcoded strings - Allowed for test fixtures and example configurations only
                  # Production secrets managed via Vault adapter (encrypted at rest).
+    "S106",      # Hardcoded password in function arg - Allowed for test fixtures only
+                 # Production secrets managed via Infisical/Vault (OMN-2287, OMN-2736).
     "B019",      # Cached instance method (technical debt)
     "PLW2901",   # Redefined loop name (technical debt)
     "B011",      # Assert false (technical debt)
