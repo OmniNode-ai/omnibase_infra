@@ -1,24 +1,17 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Integration tests for ServiceMCPToolDiscovery via event bus registry.
+"""Mock-based tests for ServiceMCPToolDiscovery via event bus registry.
 
-These tests validate ServiceMCPToolDiscovery behavior against the ONEX
-registration projection (PostgreSQL-backed).  They exercise the live
-database if it is available, and skip gracefully in CI/CD environments
-where the database is not reachable.
-
-CI/CD Graceful Skip Behavior
-=============================
-
-Skip Conditions:
-    - Skips if DATABASE_URL (or OMNIBASE_INFRA_DB_URL) is not set
-    - Skips if TCP connection to the database host fails
+These tests validate ServiceMCPToolDiscovery behavior using mock
+ProjectionReaderRegistration objects — no database or other infrastructure
+is required.  They are placed in the integration suite because they test
+the boundary between the MCP discovery service and the registration
+projection layer.
 
 Test Categories
 ===============
 
-- Unit-style tests using mock ProjectionReaderRegistration (no infra)
-- Integration tests using the real projection reader (infra required)
+- Mock-based tests using MagicMock/AsyncMock (no infra required)
 
 Related Ticket: OMN-2700
 """
@@ -99,7 +92,7 @@ def _make_projection(
 # =============================================================================
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestServiceMCPToolDiscoveryInit:
     """Tests for ServiceMCPToolDiscovery initialization."""
 
@@ -134,7 +127,7 @@ class TestServiceMCPToolDiscoveryInit:
         assert "consul_scheme" not in meta
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 @pytest.mark.asyncio
 class TestDiscoverAll:
     """Tests for ServiceMCPToolDiscovery.discover_all() using mock reader."""
@@ -346,7 +339,7 @@ class TestDiscoverAll:
             await svc.discover_all()
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestProjectionToTool:
     """Tests for ServiceMCPToolDiscovery._projection_to_tool() edge cases."""
 

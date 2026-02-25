@@ -25,7 +25,13 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    InfraTimeoutError,
+    ModelInfraErrorContext,
+    RuntimeHostError,
+)
 from omnibase_infra.models.mcp.model_mcp_tool_definition import ModelMCPToolDefinition
 
 if TYPE_CHECKING:
@@ -115,12 +121,27 @@ class ServiceMCPToolDiscovery:
             },
         )
 
-        projections = await self._reader.get_by_capability_tag(
-            tag=self.CAPABILITY_TAG_MCP_ENABLED,
-            state=EnumRegistrationState.ACTIVE,
-            limit=self._query_limit,
-            correlation_id=correlation_id,
-        )
+        try:
+            projections = await self._reader.get_by_capability_tag(
+                tag=self.CAPABILITY_TAG_MCP_ENABLED,
+                state=EnumRegistrationState.ACTIVE,
+                limit=self._query_limit,
+                correlation_id=correlation_id,
+            )
+        except (InfraConnectionError, InfraTimeoutError, RuntimeHostError):
+            # Already typed infra errors — re-raise with correlation intact.
+            raise
+        except Exception as exc:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="get_by_capability_tag",
+                target_name="ProjectionReaderRegistration",
+            )
+            raise InfraConnectionError(
+                "Unexpected error querying MCP-enabled nodes from event bus registry",
+                context=context,
+            ) from exc
 
         tools: list[ModelMCPToolDefinition] = []
 
