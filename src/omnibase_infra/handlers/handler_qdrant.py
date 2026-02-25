@@ -55,7 +55,7 @@ from omnibase_core.models.vector import (
     ModelVectorStoreResult,
 )
 from omnibase_core.types import JsonType
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumHandlerTypeCategory, EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -151,6 +151,11 @@ class HandlerQdrant(MixinAsyncCircuitBreaker, ProtocolVectorStoreHandler):
             String identifier "vector_store" for this handler type.
         """
         return "vector_store"
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification: EFFECT (Qdrant vector store I/O)."""
+        return EnumHandlerTypeCategory.EFFECT
 
     @property
     def supported_metrics(self) -> list[str]:

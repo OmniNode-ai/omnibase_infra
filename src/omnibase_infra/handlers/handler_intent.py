@@ -25,7 +25,11 @@ from uuid import UUID, uuid4
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.types import JsonType
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import (
     ModelInfraErrorContext,
     RuntimeHostError,
@@ -61,6 +65,26 @@ class HandlerIntent(MixinEnvelopeExtraction):  # DEMO ONLY
         - intent.query_session: Idempotent (read-only query)
         - intent.query_distribution: Idempotent (read-only aggregation)
     """
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Return the architectural role of this handler.
+
+        Returns:
+            EnumHandlerType.INFRA_HANDLER - Infrastructure handler wrapping
+            graph database operations for intent storage.
+        """
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification of this handler.
+
+        Returns:
+            EnumHandlerTypeCategory.EFFECT - Side-effecting I/O operations
+            (graph database reads and writes via HandlerGraph).
+        """
+        return EnumHandlerTypeCategory.EFFECT
 
     def __init__(self, container: ModelONEXContainer) -> None:
         """Initialize HandlerIntent with ONEX container for dependency injection.

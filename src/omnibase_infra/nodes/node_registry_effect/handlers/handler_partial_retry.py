@@ -42,7 +42,11 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
 from omnibase_core.models.primitives import ModelSemVer
-from omnibase_infra.enums import EnumBackendType
+from omnibase_infra.enums import (
+    EnumBackendType,
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+)
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -123,6 +127,16 @@ class HandlerPartialRetry:
         >>> handler = HandlerPartialRetry(consul_client, postgres_adapter)
         >>> # Call handler.handle(request, correlation_id) in async context
     """
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Return the architectural role: NODE_HANDLER (bound to registry effect node)."""
+        return EnumHandlerType.NODE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification: EFFECT (Consul/PostgreSQL I/O)."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def __init__(
         self,

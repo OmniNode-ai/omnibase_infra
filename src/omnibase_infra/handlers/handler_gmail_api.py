@@ -44,6 +44,7 @@ from typing import cast
 import httpx
 
 from omnibase_core.types import JsonType
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +143,26 @@ class HandlerGmailApi:
         self._label_cache: dict[str, str] = {}
         self._label_cache_expires_at: float = 0.0
         self._http_client = http_client
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Return the architectural role of this handler.
+
+        Returns:
+            EnumHandlerType.INFRA_HANDLER - Infrastructure protocol/transport handler
+            managing Gmail OAuth2 REST API connections.
+        """
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification of this handler.
+
+        Returns:
+            EnumHandlerTypeCategory.EFFECT - Side-effecting I/O operations
+            (Gmail API HTTP requests, token refresh).
+        """
+        return EnumHandlerTypeCategory.EFFECT
 
     def __repr__(self) -> str:
         """Mask credentials to prevent accidental exposure in logs."""

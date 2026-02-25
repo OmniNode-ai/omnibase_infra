@@ -63,7 +63,11 @@ from omnibase_core.models.graph import (
     ModelGraphTraversalResult,
 )
 from omnibase_core.types import JsonType
-from omnibase_infra.enums import EnumInfraTransportType, EnumResponseStatus
+from omnibase_infra.enums import (
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+    EnumResponseStatus,
+)
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -190,6 +194,11 @@ class HandlerGraph(
             String "graph_database" as defined by ProtocolGraphDatabaseHandler.
         """
         return "graph_database"
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification: EFFECT (graph database I/O)."""
+        return EnumHandlerTypeCategory.EFFECT
 
     @property
     def supports_transactions(self) -> bool:

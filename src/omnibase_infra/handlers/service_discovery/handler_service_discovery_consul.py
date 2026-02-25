@@ -31,7 +31,7 @@ from uuid import NAMESPACE_DNS, UUID, uuid4, uuid5
 import consul
 
 from omnibase_core.container import ModelONEXContainer
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumHandlerTypeCategory, EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -212,6 +212,11 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
             "consul" identifier string.
         """
         return "consul"
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification: EFFECT (Consul service discovery I/O)."""
+        return EnumHandlerTypeCategory.EFFECT
 
     async def _ensure_executor(self) -> ThreadPoolExecutor:
         """Ensure thread pool executor is initialized.

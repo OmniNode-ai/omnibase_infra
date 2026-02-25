@@ -33,6 +33,7 @@ import time
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -79,6 +80,16 @@ class HandlerConsulDeregister:
         - NodeRegistryEffect: Parent node that uses this handler
         - ProtocolConsulClient: Protocol for Consul operations
     """
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Return the architectural role: NODE_HANDLER (bound to registry effect node)."""
+        return EnumHandlerType.NODE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification: EFFECT (Consul API I/O)."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def __init__(self, consul_client: ProtocolConsulClient) -> None:
         """Initialize handler with Consul client.

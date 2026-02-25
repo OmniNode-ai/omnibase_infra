@@ -51,7 +51,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
@@ -118,6 +122,16 @@ class HandlerArchitectureValidation:
     .. versionadded:: 0.9.0
         Created as part of OMN-1726 declarative refactoring.
     """
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Return the architectural role: COMPUTE_HANDLER (pure validation logic)."""
+        return EnumHandlerType.COMPUTE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification: COMPUTE (pure, deterministic)."""
+        return EnumHandlerTypeCategory.COMPUTE
 
     def __init__(
         self,

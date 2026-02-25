@@ -35,6 +35,7 @@ import time
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -74,6 +75,16 @@ class HandlerPostgresUpsert:
         - NodeRegistryEffect: Parent node that uses this handler
         - ProtocolPostgresAdapter: Protocol for PostgreSQL operations
     """
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Return the architectural role: NODE_HANDLER (bound to registry effect node)."""
+        return EnumHandlerType.NODE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification: EFFECT (PostgreSQL I/O)."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def __init__(self, postgres_adapter: ProtocolPostgresAdapter) -> None:
         """Initialize handler with PostgreSQL adapter.

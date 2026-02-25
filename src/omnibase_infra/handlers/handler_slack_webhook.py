@@ -53,6 +53,7 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.handlers.models.model_slack_alert import (
     EnumAlertSeverity,
     ModelSlackAlert,
@@ -183,6 +184,26 @@ class HandlerSlackWebhook:
         self._max_retries = max_retries
         self._retry_backoff = retry_backoff
         self._timeout = timeout
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Return the architectural role of this handler.
+
+        Returns:
+            EnumHandlerType.INFRA_HANDLER - Infrastructure protocol/transport handler
+            managing Slack webhook/Web API HTTP connections.
+        """
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification of this handler.
+
+        Returns:
+            EnumHandlerTypeCategory.EFFECT - Side-effecting I/O operations
+            (Slack HTTP POST requests with retry logic).
+        """
+        return EnumHandlerTypeCategory.EFFECT
 
     def __repr__(self) -> str:
         """Mask credentials to prevent accidental exposure in logs/tracebacks."""
