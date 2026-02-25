@@ -36,6 +36,7 @@ Exports:
     EnumInfraTransportType: Infrastructure transport type enumeration
     EnumIntrospectionReason: Introspection event reasons (STARTUP, SHUTDOWN, etc.)
     EnumKafkaAcks: Kafka producer acknowledgment policy (ALL, NONE, LEADER, ALL_REPLICAS)
+    EnumKafkaEnvironment: Kafka environment identifiers for topic prefixes (DEV, STAGING, PROD, LOCAL)
     EnumLlmFinishReason: LLM finish reasons (STOP, LENGTH, ERROR, CONTENT_FILTER, TOOL_CALLS, UNKNOWN)
     EnumLlmOperationType: LLM operation types (CHAT_COMPLETION, COMPLETION, EMBEDDING)
     EnumMessageCategory: Message categories (EVENT, COMMAND, INTENT)
@@ -95,6 +96,7 @@ from omnibase_infra.enums.enum_infra_resource_type import EnumInfraResourceType
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.enums.enum_introspection_reason import EnumIntrospectionReason
 from omnibase_infra.enums.enum_kafka_acks import EnumKafkaAcks
+from omnibase_infra.enums.enum_kafka_environment import EnumKafkaEnvironment
 from omnibase_infra.enums.enum_ledger_sink_drop_policy import EnumLedgerSinkDropPolicy
 from omnibase_infra.enums.enum_lifecycle_tier import EnumLifecycleTier
 from omnibase_infra.enums.enum_llm_finish_reason import EnumLlmFinishReason
@@ -155,6 +157,7 @@ __all__: list[str] = [
     "EnumInfraTransportType",
     "EnumIntrospectionReason",
     "EnumKafkaAcks",
+    "EnumKafkaEnvironment",
     "EnumLedgerSinkDropPolicy",
     "EnumLifecycleTier",
     "EnumLlmFinishReason",

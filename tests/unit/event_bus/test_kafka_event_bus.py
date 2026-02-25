@@ -34,7 +34,7 @@ from tests.conftest import make_test_node_identity
 
 # Test constants - use these for assertions to avoid hardcoded values
 TEST_BOOTSTRAP_SERVERS: str = "localhost:9092"
-TEST_ENVIRONMENT: str = "test"
+TEST_ENVIRONMENT: str = "dev"
 
 
 # ---------------------------------------------------------------------------
@@ -957,7 +957,7 @@ class TestKafkaEventBusBroadcast:
 
             # Verify the topic is correct
             call_args = mock_producer.send.call_args
-            assert call_args[0][0] == "test.broadcast"
+            assert call_args[0][0] == f"{TEST_ENVIRONMENT}.broadcast"
 
             # Verify payload
             value = call_args[1]["value"]
@@ -1013,7 +1013,7 @@ class TestKafkaEventBusBroadcast:
 
             # Verify the topic is correct
             call_args = mock_producer.send.call_args
-            assert call_args[0][0] == "test.target-group"
+            assert call_args[0][0] == f"{TEST_ENVIRONMENT}.target-group"
 
             # Verify payload
             value = call_args[1]["value"]
@@ -1942,13 +1942,13 @@ class TestKafkaEventBusConfig:
         )
         bus = EventBusKafka(config=config)
 
-        assert bus.environment == "test"
+        assert bus.environment == TEST_ENVIRONMENT
         assert bus.config.bootstrap_servers == TEST_BOOTSTRAP_SERVERS
 
     def test_from_yaml_creates_bus(self, tmp_path: Path) -> None:
         """Test from_yaml() factory method with a temporary config file."""
         config_content = """bootstrap_servers: "yaml-server:9092"
-environment: "yaml-env"
+environment: "dev"
 timeout_seconds: 45
 max_retry_attempts: 5
 retry_backoff_base: 2.0
@@ -1965,7 +1965,7 @@ enable_auto_commit: false
 
         bus = EventBusKafka.from_yaml(config_file)
 
-        assert bus.environment == "yaml-env"
+        assert bus.environment == "dev"
         assert bus.config.timeout_seconds == 45
         assert bus.config.max_retry_attempts == 5
         assert bus.config.retry_backoff_base == 2.0
@@ -2014,7 +2014,7 @@ enable_auto_commit: false
         """Test config with all parameters explicitly set."""
         config = ModelKafkaEventBusConfig(
             bootstrap_servers="custom-broker:29092",
-            environment="production",
+            environment="prod",
             timeout_seconds=60,
             max_retry_attempts=5,
             retry_backoff_base=2.0,
@@ -2029,7 +2029,7 @@ enable_auto_commit: false
         bus = EventBusKafka.from_config(config)
 
         assert bus.config == config
-        assert bus.environment == "production"
+        assert bus.environment == "prod"
         assert bus.config.acks == "1"
         assert bus.config.enable_idempotence is False
 
@@ -2072,7 +2072,7 @@ class TestKafkaEventBusDLQRouting:
         """Create config with DLQ enabled."""
         return ModelKafkaEventBusConfig(
             bootstrap_servers="localhost:9092",
-            environment="test",
+            environment="dev",
             dead_letter_topic="dlq-events",
         )
 
@@ -2318,7 +2318,7 @@ class TestKafkaEventBusDLQRouting:
         # Config without DLQ
         config = ModelKafkaEventBusConfig(
             bootstrap_servers="localhost:9092",
-            environment="test",
+            environment="dev",
             dead_letter_topic=None,  # No DLQ configured
         )
 

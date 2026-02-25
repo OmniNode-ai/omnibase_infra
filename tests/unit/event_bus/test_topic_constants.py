@@ -330,9 +330,9 @@ class TestModelKafkaEventBusConfigGetDLQTopic:
 
         config = ModelKafkaEventBusConfig(
             bootstrap_servers="localhost:9092",
-            environment="onex",
+            environment="dev",
         )
-        assert config.get_dlq_topic("intelligence") == "onex.dlq.intelligence.v1"
+        assert config.get_dlq_topic("intelligence") == "dev.dlq.intelligence.v1"
 
 
 class TestDLQTopicPattern:

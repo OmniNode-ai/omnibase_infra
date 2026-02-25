@@ -562,7 +562,14 @@ async def bootstrap() -> int:
         # - If config.event_bus.type == "kafka", use EventBusKafka
         # - Otherwise, use EventBusInmemory for local development/testing
         # Environment override takes precedence over config for environment field.
-        environment = os.getenv("ONEX_ENVIRONMENT") or config.event_bus.environment
+        # KAFKA_ENVIRONMENT is the authoritative source for the Kafka topic prefix.
+        # ONEX_ENVIRONMENT is a general environment name (not always a valid Kafka env value)
+        # and is only used as a fallback if KAFKA_ENVIRONMENT is not set.
+        # config.event_bus.environment is the final fallback (default: "local").
+        _kafka_env_from_env = os.getenv("KAFKA_ENVIRONMENT") or os.getenv(
+            "ONEX_ENVIRONMENT"
+        )
+        environment: str = _kafka_env_from_env or config.event_bus.environment
         kafka_bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
 
         # Check for ONEX_EVENT_BUS_TYPE environment variable override
