@@ -338,20 +338,41 @@ class ModelKafkaEventBusConfig(BaseModel):
         """Validate authentication configuration consistency.
 
         Enforces:
+        - If security_protocol is SASL_PLAINTEXT or SASL_SSL, sasl_mechanism must be set
         - If sasl_mechanism is set, security_protocol must be SASL_PLAINTEXT or SASL_SSL
-        - If sasl_mechanism is OAUTHBEARER, all three oauth fields must be present
+        - If sasl_mechanism is OAUTHBEARER, all three OAuth fields must be non-empty
 
         Returns:
             Self after validation
 
         Raises:
-            ValueError: If auth configuration is inconsistent
+            ProtocolConfigurationError: If auth configuration is inconsistent
         """
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="validate_auth_config",
+            target_name="kafka_config",
+        )
+
+        if (
+            self.security_protocol in ("SASL_PLAINTEXT", "SASL_SSL")
+            and self.sasl_mechanism is None
+        ):
+            raise ProtocolConfigurationError(
+                "security_protocol requires sasl_mechanism when using SASL_*",
+                context=context,
+                parameter="sasl_mechanism",
+                value=self.sasl_mechanism,
+            )
+
         if self.sasl_mechanism is not None:
             if self.security_protocol not in ("SASL_PLAINTEXT", "SASL_SSL"):
-                raise ValueError(
+                raise ProtocolConfigurationError(
                     f"sasl_mechanism={self.sasl_mechanism!r} requires security_protocol "
-                    f"to be 'SASL_PLAINTEXT' or 'SASL_SSL', got {self.security_protocol!r}"
+                    f"'SASL_PLAINTEXT' or 'SASL_SSL', got {self.security_protocol!r}",
+                    context=context,
+                    parameter="security_protocol",
+                    value=self.security_protocol,
                 )
             if self.sasl_mechanism == "OAUTHBEARER":
                 missing = [
@@ -367,12 +388,15 @@ class ModelKafkaEventBusConfig(BaseModel):
                             self.sasl_oauthbearer_client_secret,
                         ),
                     )
-                    if val is None
+                    if val is None or (isinstance(val, str) and not val.strip())
                 ]
                 if missing:
-                    raise ValueError(
-                        f"sasl_mechanism='OAUTHBEARER' requires all three OAuth fields: "
-                        f"{', '.join(missing)}"
+                    raise ProtocolConfigurationError(
+                        "sasl_mechanism='OAUTHBEARER' requires non-empty OAuth fields: "
+                        + ", ".join(missing),
+                        context=context,
+                        parameter="sasl_mechanism",
+                        value=self.sasl_mechanism,
                     )
         return self
 

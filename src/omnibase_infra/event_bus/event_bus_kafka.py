@@ -197,7 +197,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import httpx
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+from aiokafka.abc import AbstractTokenProvider
 from aiokafka.errors import KafkaError
 
 from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportType
@@ -225,6 +227,55 @@ from omnibase_infra.utils.util_consumer_group import KAFKA_CONSUMER_GROUP_MAX_LE
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
+
+
+class OAuthBearerTokenProvider(AbstractTokenProvider):
+    """aiokafka-compatible OAUTHBEARER token provider.
+
+    Fetches bearer tokens from an OAuth2 token endpoint using client
+    credentials flow. Implements aiokafka.abc.AbstractTokenProvider so
+    it can be passed directly as sasl_oauth_token_provider to
+    AIOKafkaProducer / AIOKafkaConsumer.
+
+    Args:
+        token_endpoint_url: OAuth2 token endpoint URL
+        client_id: OAuth2 client ID
+        client_secret: OAuth2 client secret
+    """
+
+    def __init__(
+        self,
+        token_endpoint_url: str,
+        client_id: str,
+        client_secret: str,
+    ) -> None:
+        self._token_endpoint_url = token_endpoint_url
+        self._client_id = client_id
+        self._client_secret = client_secret
+
+    async def token(self) -> str:
+        """Fetch a fresh access token from the OAuth2 token endpoint.
+
+        Returns:
+            Bearer token string
+
+        Raises:
+            RuntimeError: If the token request fails or response is malformed
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                self._token_endpoint_url,
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": self._client_id,
+                    "client_secret": self._client_secret,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+            access_token: str = payload["access_token"]
+            return access_token
 
 
 class EventBusKafka(
@@ -519,17 +570,15 @@ class EventBusKafka(
             kwargs["sasl_mechanism"] = self._config.sasl_mechanism
 
         if self._config.sasl_mechanism == "OAUTHBEARER":
-            kwargs["sasl_oauth_token_provider"] = (
-                None  # placeholder; real impl uses token provider
-            )
-            kwargs["sasl_oauthbearer_token_endpoint_url"] = (
-                self._config.sasl_oauthbearer_token_endpoint_url
-            )
-            kwargs["sasl_oauthbearer_client_id"] = (
-                self._config.sasl_oauthbearer_client_id
-            )
-            kwargs["sasl_oauthbearer_client_secret"] = (
-                self._config.sasl_oauthbearer_client_secret
+            # aiokafka only accepts sasl_oauth_token_provider (an AbstractTokenProvider
+            # instance). The individual credential fields are NOT valid aiokafka kwargs
+            # and must not be passed directly.
+            kwargs["sasl_oauth_token_provider"] = OAuthBearerTokenProvider(
+                token_endpoint_url=str(
+                    self._config.sasl_oauthbearer_token_endpoint_url
+                ),
+                client_id=str(self._config.sasl_oauthbearer_client_id),
+                client_secret=str(self._config.sasl_oauthbearer_client_secret),
             )
 
         if self._config.ssl_ca_file is not None:

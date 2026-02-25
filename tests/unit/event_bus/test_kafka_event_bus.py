@@ -3048,13 +3048,17 @@ class TestKafkaAuthConfig:
 
         assert captured_kwargs.get("security_protocol") == "SASL_SSL"
         assert captured_kwargs.get("sasl_mechanism") == "OAUTHBEARER"
-        assert (
-            captured_kwargs.get("sasl_oauthbearer_token_endpoint_url")
-            == "https://auth.example.com/token"
-        )
-        assert captured_kwargs.get("sasl_oauthbearer_client_id") == "my-client-id"
-        assert (
-            captured_kwargs.get("sasl_oauthbearer_client_secret") == "my-client-secret"
-        )
+        # aiokafka only accepts sasl_oauth_token_provider; the individual credential
+        # fields must NOT be passed as kwargs (they are unsupported by aiokafka)
+        assert "sasl_oauthbearer_token_endpoint_url" not in captured_kwargs
+        assert "sasl_oauthbearer_client_id" not in captured_kwargs
+        assert "sasl_oauthbearer_client_secret" not in captured_kwargs
+        from omnibase_infra.event_bus.event_bus_kafka import OAuthBearerTokenProvider
+
+        token_provider = captured_kwargs.get("sasl_oauth_token_provider")
+        assert isinstance(token_provider, OAuthBearerTokenProvider)
+        assert token_provider._token_endpoint_url == "https://auth.example.com/token"
+        assert token_provider._client_id == "my-client-id"
+        assert token_provider._client_secret == "my-client-secret"
 
         await bus.close()
