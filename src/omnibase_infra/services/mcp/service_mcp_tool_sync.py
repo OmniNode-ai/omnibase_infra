@@ -14,6 +14,11 @@ Event Types:
     - updated: Node updated → upsert tool
     - deregistered: Node deregistered → remove tool
     - expired: Node liveness expired → remove tool
+
+Note:
+    This service no longer has a Consul fallback for incomplete events (OMN-2700).
+    When an event payload lacks full MCP metadata, the event is skipped with a
+    warning rather than performing a Consul lookup.
 """
 
 from __future__ import annotations
@@ -35,9 +40,6 @@ from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.event_bus.models import ModelEventMessage
-    from omnibase_infra.services.mcp.service_mcp_tool_discovery import (
-        ServiceMCPToolDiscovery,
-    )
     from omnibase_infra.services.mcp.service_mcp_tool_registry import (
         ServiceMCPToolRegistry,
     )
@@ -57,22 +59,17 @@ class ServiceMCPToolSync:
         Uses event_id (from event payload or Kafka offset) to ensure
         out-of-order and duplicate events are handled correctly.
 
-    Consul Fallback:
-        When registration events don't contain full contract info,
-        the service falls back to Consul discovery to re-fetch the
-        tool definition.
-
     Attributes:
         _registry: Tool registry for storing tool definitions.
-        _discovery: Consul discovery service for fallback lookups.
         _bus: Kafka event bus for subscriptions.
         _unsubscribe: Callback to unsubscribe from topic.
 
     Example:
-        >>> from omnibase_core.container import ModelONEXContainer
-        >>> container = ModelONEXContainer()
-        >>> # Ensure services are registered in container first
-        >>> sync = ServiceMCPToolSync(container)
+        >>> from omnibase_infra.services.mcp.service_mcp_tool_registry import (
+        ...     ServiceMCPToolRegistry,
+        ... )
+        >>> registry = ServiceMCPToolRegistry()
+        >>> sync = ServiceMCPToolSync(registry=registry, bus=bus)
         >>> await sync.start()
         >>> # ... process events ...
         >>> await sync.stop()
@@ -97,28 +94,23 @@ class ServiceMCPToolSync:
         container: ModelONEXContainer | None = None,
         *,
         registry: ServiceMCPToolRegistry | None = None,
-        discovery: ServiceMCPToolDiscovery | None = None,
         bus: EventBusKafka | None = None,
     ) -> None:
         """Initialize the sync service.
 
         Supports two initialization patterns:
         1. Container-based DI: Pass a ModelONEXContainer to resolve dependencies
-        2. Direct injection: Pass registry, discovery, and bus directly
+        2. Direct injection: Pass registry and bus directly
 
         Args:
             container: Optional ONEX container for dependency injection.
             registry: Tool registry (used if container not provided)
-            discovery: Discovery service for Consul fallback (used if container not provided)
             bus: Kafka event bus (used if container not provided)
 
         Raises:
-            ValueError: If neither container nor all direct dependencies are provided.
+            ValueError: If neither container nor (registry and bus) are provided.
         """
         from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
-        from omnibase_infra.services.mcp.service_mcp_tool_discovery import (
-            ServiceMCPToolDiscovery,
-        )
         from omnibase_infra.services.mcp.service_mcp_tool_registry import (
             ServiceMCPToolRegistry,
         )
@@ -130,19 +122,13 @@ class ServiceMCPToolSync:
             self._registry: ServiceMCPToolRegistry = container.get_service(
                 ServiceMCPToolRegistry
             )
-            self._discovery: ServiceMCPToolDiscovery = container.get_service(
-                ServiceMCPToolDiscovery
-            )
             self._bus: EventBusKafka = container.get_service(EventBusKafka)
-        elif registry is not None and discovery is not None and bus is not None:
+        elif registry is not None and bus is not None:
             # Use directly provided dependencies
             self._registry = registry
-            self._discovery = discovery
             self._bus = bus
         else:
-            raise ValueError(
-                "Must provide either container or all of: registry, discovery, bus"
-            )
+            raise ValueError("Must provide either container or all of: registry, bus")
 
         self._unsubscribe: Callable[[], Awaitable[None]] | None = None
         self._started = False
@@ -412,25 +398,14 @@ class ServiceMCPToolSync:
             )
             return
 
-        # Try to build tool from event data
+        # Build tool from event data.
+        # Events must carry full MCP metadata; there is no Consul fallback (OMN-2700).
         tool = self._build_tool_from_event(event, tool_name)
-
-        # Fallback: if event lacks full info, re-fetch from Consul
-        if tool is None:
-            service_id = event.get("service_id")
-            if service_id and isinstance(service_id, str):
-                logger.debug(
-                    "Event lacks full info, falling back to Consul",
-                    extra={
-                        "service_id": service_id,
-                        "correlation_id": str(correlation_id),
-                    },
-                )
-                tool = await self._discovery.discover_by_service_id(service_id)
 
         if tool is None:
             logger.warning(
-                "Could not build tool definition from event or Consul",
+                "Could not build tool definition from event payload; "
+                "event is missing required MCP metadata fields",
                 extra={
                     "tool_name": tool_name,
                     "correlation_id": str(correlation_id),

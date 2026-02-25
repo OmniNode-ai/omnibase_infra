@@ -4,7 +4,7 @@
 
 This module provides the MCPServerLifecycle class that manages the complete
 lifecycle of the MCP server, including:
-- Cold start: Discover tools from Consul and populate registry
+- Cold start: Discover tools from the event bus registry and populate registry
 - Hot reload: Start Kafka subscription for real-time updates
 - Handler initialization: Set up HandlerMCP with registry and executor
 - Graceful shutdown: Clean up all resources
@@ -33,9 +33,6 @@ from omnibase_infra.adapters.adapter_onex_tool_execution import (
     AdapterONEXToolExecution,
 )
 from omnibase_infra.models.mcp.model_mcp_server_config import ModelMCPServerConfig
-from omnibase_infra.services.mcp.service_mcp_tool_discovery import (
-    ServiceMCPToolDiscovery,
-)
 from omnibase_infra.services.mcp.service_mcp_tool_registry import (
     ServiceMCPToolRegistry,
 )
@@ -47,6 +44,10 @@ if TYPE_CHECKING:
     from omnibase_infra.models.mcp.model_mcp_tool_definition import (
         ModelMCPToolDefinition,
     )
+    from omnibase_infra.projectors import ProjectionReaderRegistration
+    from omnibase_infra.services.mcp.service_mcp_tool_discovery import (
+        ServiceMCPToolDiscovery,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -56,14 +57,14 @@ class MCPServerLifecycle:
 
     This class manages the lifecycle of all MCP-related services:
     - ServiceMCPToolRegistry: In-memory cache of tool definitions
-    - ServiceMCPToolDiscovery: Consul scanner for MCP-enabled orchestrators
+    - ServiceMCPToolDiscovery: Event bus registry scanner for MCP-enabled orchestrators
     - ServiceMCPToolSync: Kafka listener for hot reload
     - AdapterONEXToolExecution: Dispatcher bridge for tool execution
 
     Lifecycle Phases:
         1. start(): Initialize services and populate registry
            - Create registry, discovery, executor
-           - Cold start: scan Consul for MCP-enabled orchestrators
+           - Cold start: query event bus registry for MCP-enabled orchestrators
            - Start Kafka subscription (if enabled)
         2. get_handler(): Create configured HandlerMCP
         3. shutdown(): Clean up all resources
@@ -71,15 +72,16 @@ class MCPServerLifecycle:
     Attributes:
         _container: ONEX container for dependency injection.
         _config: Server configuration.
+        _reader: Optional projection reader for event bus registry queries.
         _registry: Tool registry instance.
-        _discovery: Consul discovery service.
+        _discovery: Event bus registry discovery service.
         _sync: Kafka sync service (if enabled).
         _executor: Tool execution adapter.
         _started: Whether the lifecycle has been started.
 
     Example:
         >>> config = ModelMCPServerConfig(
-        ...     consul_host="consul.local",
+        ...     registry_query_limit=100,
         ...     http_port=8090,
         ... )
         >>> lifecycle = MCPServerLifecycle(container=container, config=config)
@@ -94,6 +96,7 @@ class MCPServerLifecycle:
         container: ModelONEXContainer,
         config: ModelMCPServerConfig,
         bus: EventBusKafka | None = None,
+        reader: ProjectionReaderRegistration | None = None,
     ) -> None:
         """Initialize the lifecycle manager.
 
@@ -102,10 +105,14 @@ class MCPServerLifecycle:
             config: Server configuration.
             bus: Optional Kafka event bus for hot reload. If not provided,
                 Kafka subscription is skipped even if kafka_enabled=True.
+            reader: Optional projection reader for event bus registry queries.
+                If not provided, cold-start discovery is skipped (only dev mode
+                or Kafka-sourced tools will appear in the registry).
         """
         self._container = container
         self._config = config
         self._bus = bus
+        self._reader = reader
 
         # Services (initialized during start())
         self._registry: ServiceMCPToolRegistry | None = None
@@ -119,10 +126,10 @@ class MCPServerLifecycle:
         logger.debug(
             "MCPServerLifecycle initialized",
             extra={
-                "consul_host": config.consul_host,
-                "consul_port": config.consul_port,
+                "registry_query_limit": config.registry_query_limit,
                 "kafka_enabled": config.kafka_enabled,
                 "http_port": config.http_port,
+                "reader_available": reader is not None,
             },
         )
 
@@ -146,7 +153,7 @@ class MCPServerLifecycle:
 
         This method performs the following steps:
         1. Create registry, discovery, and executor instances
-        2. Cold start: discover all MCP-enabled tools from Consul
+        2. Cold start: discover all MCP-enabled tools from the event bus registry
         3. Populate the registry with discovered tools
         4. Start Kafka subscription for hot reload (if enabled)
 
@@ -171,7 +178,7 @@ class MCPServerLifecycle:
             default_timeout=self._config.default_timeout,
         )
 
-        # Dev mode: scan local contracts instead of Consul
+        # Dev mode: scan local contracts instead of event bus registry
         if self._config.dev_mode:
             logger.info(
                 "Dev mode: discovering tools from local contracts",
@@ -190,17 +197,19 @@ class MCPServerLifecycle:
                     "correlation_id": str(correlation_id),
                 },
             )
-        else:
-            # Production mode: discover from Consul
+        elif self._reader is not None:
+            # Production mode: discover from event bus registry
+            from omnibase_infra.services.mcp.service_mcp_tool_discovery import (
+                ServiceMCPToolDiscovery,
+            )
+
             self._discovery = ServiceMCPToolDiscovery(
-                consul_host=self._config.consul_host,
-                consul_port=self._config.consul_port,
-                consul_scheme=self._config.consul_scheme,
-                consul_token=self._config.consul_token,
+                reader=self._reader,
+                query_limit=self._config.registry_query_limit,
             )
 
             logger.info(
-                "Cold start: discovering tools from Consul",
+                "Cold start: discovering tools from event bus registry",
                 extra={"correlation_id": str(correlation_id)},
             )
 
@@ -229,13 +238,20 @@ class MCPServerLifecycle:
                         "correlation_id": str(correlation_id),
                     },
                 )
+        else:
+            logger.info(
+                "No projection reader provided - skipping cold start discovery; "
+                "registry will be populated via Kafka hot-reload only",
+                extra={"correlation_id": str(correlation_id)},
+            )
 
         # Start Kafka sync (if enabled, bus provided, and not in dev mode)
-        # Dev mode doesn't use Consul discovery, so Kafka sync is not applicable
+        # Dev mode doesn't use registry discovery, so Kafka sync is not applicable
         if (
             self._config.kafka_enabled
             and self._bus is not None
-            and self._discovery is not None
+            and self._registry is not None
+            and not self._config.dev_mode
         ):
             logger.info(
                 "Starting Kafka subscription for hot reload",
@@ -244,17 +260,17 @@ class MCPServerLifecycle:
 
             self._sync = ServiceMCPToolSync(
                 registry=self._registry,
-                discovery=self._discovery,
                 bus=self._bus,
             )
             await self._sync.start()
 
         self._started = True
 
+        registry_count = self._registry.tool_count if self._registry else 0
         logger.info(
             "MCP server lifecycle started",
             extra={
-                "tool_count": self._registry.tool_count,
+                "tool_count": registry_count,
                 "kafka_enabled": self._config.kafka_enabled and self._bus is not None,
                 "correlation_id": str(correlation_id),
             },
@@ -436,8 +452,7 @@ class MCPServerLifecycle:
             "service_name": "MCPServerLifecycle",
             "started": self._started,
             "config": {
-                "consul_host": self._config.consul_host,
-                "consul_port": self._config.consul_port,
+                "registry_query_limit": self._config.registry_query_limit,
                 "kafka_enabled": self._config.kafka_enabled,
                 "http_port": self._config.http_port,
             },

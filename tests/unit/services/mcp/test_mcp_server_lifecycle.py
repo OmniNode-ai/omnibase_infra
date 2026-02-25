@@ -169,8 +169,6 @@ def production_config() -> ModelMCPServerConfig:
     """
     return ModelMCPServerConfig(
         dev_mode=False,
-        consul_host="localhost",
-        consul_port=8500,
         kafka_enabled=False,
     )
 
@@ -954,7 +952,7 @@ class TestMCPServerLifecycleDescribe:
 
         Given: A lifecycle that hasn't been started
         When: describe() is called
-        Then: Returns metadata with started=False and 0 tools
+        Then: Returns metadata with started=False and 0 tools, no Consul fields
         """
         lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
@@ -965,6 +963,12 @@ class TestMCPServerLifecycleDescribe:
         assert metadata["registry_tool_count"] == 0
         assert metadata["sync_running"] is False
         assert "config" in metadata
+        # Consul fields must not appear
+        config_meta = metadata["config"]
+        assert isinstance(config_meta, dict)
+        assert "consul_host" not in config_meta
+        assert "consul_port" not in config_meta
+        assert "registry_query_limit" in config_meta
 
     @pytest.mark.asyncio
     async def test_describe_after_start(
@@ -1024,24 +1028,26 @@ class TestModelMCPServerConfig:
     """Tests for ModelMCPServerConfig defaults."""
 
     def test_default_values(self) -> None:
-        """Should have sensible default values.
+        """Should have sensible default values with no Consul fields.
 
         Given: No constructor arguments
         When: ModelMCPServerConfig is created
-        Then: Default values are set correctly
+        Then: Default values are set correctly (no consul_host/port/scheme/token)
         """
         config = ModelMCPServerConfig()
 
-        assert config.consul_host == "localhost"
-        assert config.consul_port == 8500
-        assert config.consul_scheme == "http"
-        assert config.consul_token is None
+        assert config.registry_query_limit == 100
         assert config.kafka_enabled is True
         assert config.http_host == "0.0.0.0"  # noqa: S104
         assert config.http_port == 8090
         assert config.default_timeout == 30.0
         assert config.dev_mode is False
         assert config.contracts_dir is None
+        # Verify Consul fields are gone
+        assert not hasattr(config, "consul_host")
+        assert not hasattr(config, "consul_port")
+        assert not hasattr(config, "consul_scheme")
+        assert not hasattr(config, "consul_token")
 
     def test_dev_mode_config(self) -> None:
         """Should accept dev_mode and contracts_dir.
@@ -1057,3 +1063,14 @@ class TestModelMCPServerConfig:
 
         assert config.dev_mode is True
         assert config.contracts_dir == "/path/to/contracts"
+
+    def test_registry_query_limit_config(self) -> None:
+        """Should accept registry_query_limit.
+
+        Given: registry_query_limit=200
+        When: ModelMCPServerConfig is created
+        Then: Value is set correctly
+        """
+        config = ModelMCPServerConfig(registry_query_limit=200)
+
+        assert config.registry_query_limit == 200

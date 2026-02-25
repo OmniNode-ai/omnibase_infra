@@ -138,26 +138,6 @@ class MockMCPToolRegistry:
         return self._tools.get(tool_name)
 
 
-@dataclass
-class MockMCPToolDiscovery:
-    """Mock ServiceMCPToolDiscovery for Consul fallback testing.
-
-    This mock can be configured to return specific tools for service IDs.
-    """
-
-    discover_by_service_id_calls: list[str] = field(default_factory=list)
-    tools_by_service_id: dict[str, ModelMCPToolDefinition | None] = field(
-        default_factory=dict
-    )
-
-    async def discover_by_service_id(
-        self, service_id: str
-    ) -> ModelMCPToolDefinition | None:
-        """Mock Consul lookup that returns pre-configured tools."""
-        self.discover_by_service_id_calls.append(service_id)
-        return self.tools_by_service_id.get(service_id)
-
-
 # =============================================================================
 # Helper Functions
 # =============================================================================
@@ -362,28 +342,20 @@ def mock_registry() -> MockMCPToolRegistry:
 
 
 @pytest.fixture
-def mock_discovery() -> MockMCPToolDiscovery:
-    """Create a mock MCP tool discovery service."""
-    return MockMCPToolDiscovery()
-
-
-@pytest.fixture
 async def mcp_tool_sync(
     kafka_event_bus: EventBusKafka,
     mock_registry: MockMCPToolRegistry,
-    mock_discovery: MockMCPToolDiscovery,
     registration_topic: str,
 ) -> AsyncGenerator:
     """Create ServiceMCPToolSync with mocked dependencies.
 
-    Yields the sync service with pre-created topic, registry, and discovery mocks.
+    Yields the sync service with pre-created topic and registry mock.
     """
     from omnibase_infra.services.mcp.service_mcp_tool_sync import ServiceMCPToolSync
 
-    # Create sync service with mocked dependencies
+    # Create sync service without Consul discovery (OMN-2700)
     sync = ServiceMCPToolSync(
         registry=mock_registry,  # type: ignore[arg-type]
-        discovery=mock_discovery,  # type: ignore[arg-type]
         bus=kafka_event_bus,
     )
 
@@ -784,49 +756,41 @@ class TestServiceMCPToolSyncErrorHandling:
 
 
 # =============================================================================
-# Consul Fallback Tests
+# Incomplete Event Tests (OMN-2700: No Consul Fallback)
 # =============================================================================
 
 
-class TestServiceMCPToolSyncConsulFallback:
-    """Tests for ServiceMCPToolSync Consul discovery fallback."""
+class TestServiceMCPToolSyncIncompleteEvent:
+    """Tests for ServiceMCPToolSync handling of incomplete event payloads.
+
+    OMN-2700: Consul fallback is removed. Events missing required MCP metadata
+    are now skipped with a WARNING log rather than falling back to Consul.
+    """
 
     @pytest.mark.asyncio
-    async def test_fallback_to_consul_when_event_lacks_full_info(
+    async def test_skips_event_lacking_service_name(
         self,
         mcp_tool_sync,
         kafka_event_bus: EventBusKafka,
         mock_registry: MockMCPToolRegistry,
-        mock_discovery: MockMCPToolDiscovery,
     ) -> None:
-        """Verify service falls back to Consul when event lacks full info.
+        """Verify incomplete events are skipped, not forwarded to Consul.
 
-        When a registration event doesn't contain enough information to build
-        the tool definition, the service should call discover_by_service_id.
+        When a registration event doesn't contain service_name (minimum required
+        field for building a tool definition), the event is skipped with a warning.
+        No Consul call is made.
         """
-        from omnibase_infra.models.mcp.model_mcp_tool_definition import (
-            ModelMCPToolDefinition,
-        )
-
         await mcp_tool_sync.start()
 
-        # Configure mock discovery to return a tool
-        tool_name = f"consul_tool_{uuid.uuid4().hex[:8]}"
+        tool_name = f"incomplete_tool_{uuid.uuid4().hex[:8]}"
         service_id = f"service-{uuid.uuid4().hex[:8]}"
-        mock_tool = ModelMCPToolDefinition(
-            name=tool_name,
-            description="Tool from Consul fallback",
-            version="1.0.0",
-            parameters=[],
-        )
-        mock_discovery.tools_by_service_id[service_id] = mock_tool
 
         # Event without full service info (missing service_name)
         event = create_registration_event(
             event_type="registered",
             tool_name=tool_name,
             service_id=service_id,
-            service_name=None,  # Missing - triggers fallback
+            service_name=None,  # Missing - used to trigger Consul fallback
             include_full_info=False,
         )
 
@@ -836,16 +800,11 @@ class TestServiceMCPToolSyncConsulFallback:
             json.dumps(event).encode("utf-8"),
         )
 
-        # Wait for discovery and registry update
-        await wait_for_registry_update(mock_registry, expected_upsert_count=1)
+        # Brief wait - nothing should be upserted
+        await asyncio.sleep(EVENT_PROCESSING_WAIT_SECONDS)
 
-        # Verify Consul was called
-        assert service_id in mock_discovery.discover_by_service_id_calls
-
-        # Verify tool was upserted
-        assert len(mock_registry.upsert_calls) >= 1
-        upserted_tool, _ = mock_registry.upsert_calls[0]
-        assert upserted_tool.name == tool_name
+        # No tools should have been upserted (event was skipped)
+        assert len(mock_registry.upsert_calls) == 0
 
 
 # =============================================================================
