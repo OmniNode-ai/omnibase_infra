@@ -2977,3 +2977,88 @@ class TestKafkaEventBusProducerRecreation:
             assert producer_create_count == 2
 
             await bus.close()
+
+
+# ---------------------------------------------------------------------------
+# SASL/SSL Authentication Tests (OMN-2793)
+# ---------------------------------------------------------------------------
+
+
+class TestKafkaAuthConfig:
+    """Tests for SASL/SSL auth configuration in ModelKafkaEventBusConfig."""
+
+    @pytest.mark.unit
+    def test_kafka_config_sasl_oauthbearer_validation_missing_fields(self) -> None:
+        """Validator rejects OAUTHBEARER when token endpoint fields are absent."""
+        with pytest.raises(Exception) as exc_info:
+            ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                environment=TEST_ENVIRONMENT,
+                security_protocol="SASL_SSL",
+                sasl_mechanism="OAUTHBEARER",
+                # Missing sasl_oauthbearer_token_endpoint_url, client_id, client_secret
+            )
+        error_msg = str(exc_info.value)
+        assert "OAUTHBEARER" in error_msg
+
+    @pytest.mark.unit
+    def test_kafka_config_sasl_requires_sasl_protocol(self) -> None:
+        """Validator rejects sasl_mechanism=PLAIN when security_protocol=PLAINTEXT."""
+        with pytest.raises(Exception) as exc_info:
+            ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                environment=TEST_ENVIRONMENT,
+                security_protocol="PLAINTEXT",
+                sasl_mechanism="PLAIN",
+            )
+        error_msg = str(exc_info.value)
+        assert "SASL_PLAINTEXT" in error_msg or "SASL_SSL" in error_msg
+
+    @pytest.mark.unit
+    async def test_event_bus_kafka_passes_sasl_kwargs(self) -> None:
+        """Verify auth kwargs are forwarded to AIOKafkaProducer when SASL is configured."""
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+            environment=TEST_ENVIRONMENT,
+            security_protocol="SASL_SSL",
+            sasl_mechanism="OAUTHBEARER",
+            sasl_oauthbearer_token_endpoint_url="https://auth.example.com/token",
+            sasl_oauthbearer_client_id="my-client-id",
+            sasl_oauthbearer_client_secret="my-client-secret",
+        )
+
+        captured_kwargs: dict[str, object] = {}
+
+        mock_producer = AsyncMock()
+        mock_producer.start = AsyncMock()
+        mock_producer.stop = AsyncMock()
+        mock_producer.send = AsyncMock()
+        mock_producer._closed = False
+
+        def capture_producer(**kwargs: object) -> AsyncMock:
+            captured_kwargs.update(kwargs)
+            return mock_producer
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            side_effect=capture_producer,
+        ):
+            bus = EventBusKafka(config=config)
+            await bus.start()
+
+        assert captured_kwargs.get("security_protocol") == "SASL_SSL"
+        assert captured_kwargs.get("sasl_mechanism") == "OAUTHBEARER"
+        # aiokafka only accepts sasl_oauth_token_provider; the individual credential
+        # fields must NOT be passed as kwargs (they are unsupported by aiokafka)
+        assert "sasl_oauthbearer_token_endpoint_url" not in captured_kwargs
+        assert "sasl_oauthbearer_client_id" not in captured_kwargs
+        assert "sasl_oauthbearer_client_secret" not in captured_kwargs
+        from omnibase_infra.event_bus.event_bus_kafka import OAuthBearerTokenProvider
+
+        token_provider = captured_kwargs.get("sasl_oauth_token_provider")
+        assert isinstance(token_provider, OAuthBearerTokenProvider)
+        assert token_provider._token_endpoint_url == "https://auth.example.com/token"
+        assert token_provider._client_id == "my-client-id"
+        assert token_provider._client_secret == "my-client-secret"
+
+        await bus.close()
