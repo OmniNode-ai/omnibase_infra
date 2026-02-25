@@ -1,0 +1,144 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract — Contract Resolver Bridge Effect Node
+# Ticket: OMN-2756
+#
+# Transitional HTTP bridge exposing NodeContractResolveCompute (OMN-2754) via
+# synchronous FastAPI routes so the dashboard can call contract.resolve without
+# a Kafka round-trip. Implemented as a proper ONEX EFFECT node — same contracts,
+# same events, same registry entry as the production node. When the real ONEX
+# node runner supports HTTP invocation, only the execution path changes; the
+# registry entry and dashboard proxy code remain identical.
+#
+name: "node_contract_resolver_bridge"
+contract_name: "node_contract_resolver_bridge"
+node_name: "node_contract_resolver_bridge"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  Transitional HTTP bridge that exposes the contract.resolve compute node (NodeContractResolveCompute) as a synchronous FastAPI service. Allows the dashboard (Node.js/Express) to resolve overlaid contracts via POST /api/nodes/contract.resolve without a Kafka round-trip. Emits onex.contract.resolve.completed to Kafka fire-and-forget for observability. Identical contract, events, and registry entry to the production node — only the execution path (HTTP vs. Kafka) changes in the transition.
+
+# ---------------------------------------------------------------------------
+# Strongly typed I/O models (from OMN-2754 / omnibase_core)
+# ---------------------------------------------------------------------------
+input_model:
+  name: "ModelContractResolveInput"
+  module: "omnibase_core.models.nodes.contract_resolve.model_contract_resolve_input"
+  description: "Input envelope for contract resolution — base profile ref + ordered patches + options."
+output_model:
+  name: "ModelContractResolveOutput"
+  module: "omnibase_core.models.nodes.contract_resolve.model_contract_resolve_output"
+  description: "Output envelope — resolved contract, canonical hash, overlay refs, optional diff."
+# ---------------------------------------------------------------------------
+# Service configuration
+# ---------------------------------------------------------------------------
+config:
+  # Port the FastAPI bridge listens on
+  port: 8091
+  # Host binding
+  host: "0.0.0.0"
+  # Maximum request timeout (seconds)
+  request_timeout_seconds: 30
+  # Whether to emit Kafka events (fire-and-forget observability)
+  emit_kafka_events: true
+  # CORS — defaults for local development; override via CORS_ORIGINS env var
+  cors_allow_credentials: true
+  cors_allow_methods:
+    - "GET"
+    - "POST"
+    - "OPTIONS"
+  cors_allow_headers:
+    - "*"
+# ---------------------------------------------------------------------------
+# IO operations
+# ---------------------------------------------------------------------------
+io_operations:
+  - operation: "contract_resolve"
+    description: "Resolve a contract by applying ordered patches onto a base profile."
+    input_fields:
+      - base_profile_ref
+      - patches
+      - options
+      - correlation_id
+    output_fields:
+      - resolved_contract
+      - resolved_hash
+      - patch_hashes
+      - overlay_refs
+      - diff
+      - resolver_build
+  - operation: "health_check"
+    description: "Liveness check — always returns 200 when service is running."
+    input_fields: []
+    output_fields:
+      - status
+      - service
+      - version
+# ---------------------------------------------------------------------------
+# Events (same as production contract.resolve node — OMN-2754)
+# ---------------------------------------------------------------------------
+produced_events:
+  - name: "onex.contract.resolve.completed"
+    description: "Emitted fire-and-forget after each successful resolution. Carries resolved_hash and overlay_refs."
+    model:
+      name: "ModelContractResolveCompletedEvent"
+      module: "omnibase_core.models.events.contract_resolve.model_contract_resolve_completed_event"
+consumed_events:
+  - name: "onex.contract.resolve.requested"
+    description: "Lifecycle event emitted by NodeContractResolveCompute before processing."
+    model:
+      name: "ModelContractResolveRequestedEvent"
+      module: "omnibase_core.models.events.contract_resolve.model_contract_resolve_requested_event"
+# ---------------------------------------------------------------------------
+# Capabilities
+# ---------------------------------------------------------------------------
+capabilities:
+  - name: "contract.resolve"
+    description: "Synchronous HTTP endpoint for overlay resolution via NodeContractResolveCompute."
+  - name: "contract.health"
+    description: "Liveness health check for the contract resolver bridge."
+# ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
+dependencies:
+  - name: "protocol_event_bus"
+    type: "protocol"
+    class_name: "ProtocolEventBus"
+    module: "omnibase_spi.protocols"
+    description: "Event bus for fire-and-forget Kafka emission of onex.contract.resolve.completed."
+    optional: true
+# ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+# ---------------------------------------------------------------------------
+# Metadata
+# ---------------------------------------------------------------------------
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  ticket: "OMN-2756"
+  depends_on_ticket: "OMN-2754"
+  created: "2026-02-25"
+  updated: "2026-02-25"
+  transitional: true
+  replacement_path: "ONEX node runner HTTP invocation (post OMN-2358)"
+  tags:
+    - effect
+    - http
+    - bridge
+    - contract-resolve
+    - dashboard
+    - fastapi
+    - transitional

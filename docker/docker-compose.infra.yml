@@ -68,6 +68,7 @@
 #     - runtime-effects: 8086 [runtime profile]
 #     - agent-actions-consumer: 8087 [runtime profile]
 #     - intelligence-api: 8053 [runtime profile]
+#     - contract-resolver: 8091 [runtime profile] (OMN-2756 transitional bridge)
 name: omnibase-infra
 # ==========================================================================
 # IMPORTANT: Requires Docker Compose v2.20.0 or later (nested variable expansion).
@@ -563,6 +564,62 @@ services:
       - "com.omninode.service=intelligence-api"
       - "com.omninode.layer=runtime"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+  # ==========================================================================
+  # Contract Resolver Bridge - Synchronous HTTP for Dashboard (Runtime Profile)
+  # ==========================================================================
+  # Transitional HTTP bridge (OMN-2756) that exposes NodeContractResolveCompute
+  # via POST /api/nodes/contract.resolve so the dashboard can resolve contracts
+  # without a Kafka round-trip. Node-shaped: same contract, same events, same
+  # registry entry as the production node. Only the execution path changes when
+  # the real ONEX node runner supports HTTP invocation.
+  omninode-contract-resolver:
+    !!merge <<: *runtime-base
+    container_name: omninode-contract-resolver
+    profiles: ["runtime", "full"]
+    depends_on:
+      omninode-runtime:
+        condition: service_healthy
+    command:
+      - uvicorn
+      - omnibase_infra.services.contract_resolver.launcher:app
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8091"
+      - --workers
+      - "1"
+    environment:
+      !!merge <<: *runtime-env
+      OTEL_SERVICE_NAME: omninode-contract-resolver
+      CORS_ORIGINS: ${CONTRACT_RESOLVER_CORS_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:8085}
+      CONTRACT_RESOLVER_PORT: "8091"
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+    ports:
+      - "${CONTRACT_RESOLVER_PORT:-8091}:8091"
+    stop_grace_period: 30s
+    volumes:
+      - contract_resolver_logs:/app/logs
+      - ../contracts:/app/contracts:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8091/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    labels:
+      - "com.omninode.service=contract-resolver"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+      - "com.omninode.ticket=OMN-2756"
+      - "com.omninode.transitional=true"
 # ==========================================================================
 # Network Configuration
 # ==========================================================================
@@ -596,3 +653,5 @@ volumes:
     name: omninode-worker-logs
   agent_actions_logs:
     name: omninode-agent-actions-logs
+  contract_resolver_logs:
+    name: omninode-contract-resolver-logs
