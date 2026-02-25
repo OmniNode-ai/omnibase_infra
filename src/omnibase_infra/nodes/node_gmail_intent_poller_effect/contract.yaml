@@ -1,0 +1,219 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeGmailIntentPollerEffect
+#
+# Polls configured Gmail source labels, extracts URLs, emits one
+# gmail-intent-received intent event per email, and archives processed
+# messages. On-demand trigger (no input_subscriptions).
+#
+# Related Tickets:
+#   - OMN-2730: feat(omnibase_infra): add node_gmail_intent_poller_effect
+#   - OMN-2728: Gmail Integration epic (omnibase_infra)
+name: "node_gmail_intent_poller_effect"
+contract_name: "node_gmail_intent_poller_effect"
+node_name: "node_gmail_intent_poller_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  Effect node that drains configured Gmail source labels on demand. For each message it applies an idempotency marker label, fetches the full message, extracts URLs, appends a gmail-intent-received event payload to pending_events, then archives the message. A recovery pass runs first to handle crashed mid-run states. Emits to onex.evt.omnibase_infra.gmail-intent-received.v1 with partition key = message_id.
+
+# No input_subscriptions — on-demand trigger only
+input_model:
+  name: "ModelGmailIntentPollerConfig"
+  module: "omnibase_infra.nodes.node_gmail_intent_poller_effect.models.model_gmail_intent_poller_config"
+  description: "Configuration for Gmail intent poller: source labels, archive label, processed label, max per label."
+output_model:
+  name: "ModelGmailIntentPollerResult"
+  module: "omnibase_infra.nodes.node_gmail_intent_poller_effect.models.model_gmail_intent_poller_result"
+  description: "Result model containing pending events, counts, hard_failed flag, and errors."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "gmail.poll_inbox"
+      handler:
+        name: "HandlerGmailIntentPoll"
+        module: "omnibase_infra.nodes.node_gmail_intent_poller_effect.handlers.handler_gmail_intent_poll"
+      description: "Drain Gmail source labels, extract URLs, emit intent events, archive processed messages"
+      output_fields:
+        - messages_processed
+        - messages_archived
+        - hard_failed
+        - events_published
+        - errors
+        - pending_events
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - name: "GMAIL_AUTH_ERROR"
+      description: "Gmail OAuth2 credentials not configured or token refresh failed"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "GMAIL_LABEL_UNRESOLVED"
+      description: "One or more configured label names could not be resolved"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "GMAIL_MESSAGE_FETCH_ERROR"
+      description: "Failed to fetch a specific message (per-message, skip-and-continue)"
+      recoverable: true
+      retry_strategy: "none"
+    - name: "GMAIL_MODIFY_LABELS_ERROR"
+      description: "Failed to modify labels on a message (per-message, skip-and-continue)"
+      recoverable: true
+      retry_strategy: "none"
+io_operations:
+  - operation: "gmail.poll_inbox"
+    description: "Drain Gmail source labels and emit gmail-intent-received events"
+    input_fields:
+      - source_labels
+      - archive_label
+      - processed_label
+      - max_per_label
+    output_fields:
+      - messages_processed
+      - messages_archived
+      - hard_failed
+      - events_published
+      - errors
+      - pending_events
+config:
+  max_per_label: 50
+dependencies:
+  - name: "httpx"
+    type: "library"
+    library: "httpx"
+    description: "Async HTTP client used by HandlerGmailApi"
+  - name: "gmail_client_id"
+    type: "environment"
+    env_var: "GMAIL_CLIENT_ID"
+    description: "Gmail OAuth2 client ID"
+    required: true
+  - name: "gmail_client_secret"
+    type: "environment"
+    env_var: "GMAIL_CLIENT_SECRET"
+    description: "Gmail OAuth2 client secret"
+    required: true
+  - name: "gmail_refresh_token"
+    type: "environment"
+    env_var: "GMAIL_REFRESH_TOKEN"
+    description: "Gmail OAuth2 refresh token (long-lived)"
+    required: true
+  - name: "event_publisher"
+    type: "protocol"
+    protocol: "ProtocolEventPublisher"
+    description: "Event publisher for onex.evt.omnibase_infra.gmail-intent-received.v1"
+capabilities:
+  - name: "gmail_label_draining"
+    description: "Drain configured Gmail source labels and archive processed messages"
+  - name: "url_extraction"
+    description: "Extract and deduplicate URLs from email subject and body"
+  - name: "idempotency_marker"
+    description: "Apply processed_label before fetching to prevent double-emit on crash"
+  - name: "crash_recovery"
+    description: "Recover from crashed mid-run by re-archiving partially processed messages"
+  - name: "kafka_event_production"
+    description: "Emit gmail-intent-received events to onex.evt.omnibase_infra.gmail-intent-received.v1"
+definitions:
+  ModelGmailIntentPollerConfig:
+    type: object
+    description: "Configuration input for the Gmail intent poller"
+    frozen: true
+    extra: "forbid"
+    properties:
+      source_labels:
+        type: array
+        item_type: string
+        description: "Label names to drain (e.g. ['to-read'])"
+      archive_label:
+        type: string
+        description: "Label name to apply after processing (archiving)"
+      processed_label:
+        type: string
+        description: "Idempotency marker label applied BEFORE emitting events"
+      max_per_label:
+        type: integer
+        description: "Maximum messages to process per label per run"
+        default: 50
+        ge: 1
+        le: 500
+    required:
+      - source_labels
+      - archive_label
+      - processed_label
+  ModelGmailIntentPollerResult:
+    type: object
+    description: "Result from one Gmail intent poller run"
+    frozen: true
+    extra: "forbid"
+    properties:
+      messages_processed:
+        type: integer
+        description: "Total messages processed across all source labels"
+        default: 0
+        ge: 0
+      messages_archived:
+        type: integer
+        description: "Total messages archived"
+        default: 0
+        ge: 0
+      hard_failed:
+        type: boolean
+        description: "True if any label-level list_messages call failed"
+        default: false
+      events_published:
+        type: integer
+        description: "Set by runtime after publishing pending_events"
+        default: 0
+        ge: 0
+      errors:
+        type: array
+        item_type: string
+        description: "Per-message error strings from skip-and-continue failures"
+        default_factory: "list"
+      pending_events:
+        type: array
+        item_type: object
+        description: "Event payloads for the runtime to publish"
+        default_factory: "list"
+    required: []
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 300
+  checks:
+    - name: "gmail_client_id_configured"
+      check_type: "environment"
+      env_var: "GMAIL_CLIENT_ID"
+      description: "Verify GMAIL_CLIENT_ID is set"
+    - name: "gmail_client_secret_configured"
+      check_type: "environment"
+      env_var: "GMAIL_CLIENT_SECRET"
+      description: "Verify GMAIL_CLIENT_SECRET is set"
+    - name: "gmail_refresh_token_configured"
+      check_type: "environment"
+      env_var: "GMAIL_REFRESH_TOKEN"
+      description: "Verify GMAIL_REFRESH_TOKEN is set"
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-24"
+  updated: "2026-02-24"
+  tags:
+    - effect
+    - gmail
+    - intent-poller
+    - kafka-producer
+    - url-extraction
