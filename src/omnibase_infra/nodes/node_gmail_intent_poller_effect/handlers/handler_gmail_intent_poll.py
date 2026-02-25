@@ -45,6 +45,7 @@ import re
 from typing import cast
 
 from omnibase_core.types import JsonType
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.handlers.handler_gmail_api import HandlerGmailApi
 from omnibase_infra.handlers.models.model_gmail_message import ModelGmailMessage
 from omnibase_infra.nodes.node_gmail_intent_poller_effect.models.model_gmail_intent_poller_config import (
@@ -109,6 +110,16 @@ class HandlerGmailIntentPoll:
         gmail: Injected HandlerGmailApi transport layer instance.
             Required — no default construction to enforce DI.
     """
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Return the architectural role: NODE_HANDLER (bound to poller effect node)."""
+        return EnumHandlerType.NODE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification: EFFECT (Gmail API I/O)."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def __init__(self, gmail: HandlerGmailApi) -> None:
         """Initialize handler with injected Gmail transport.

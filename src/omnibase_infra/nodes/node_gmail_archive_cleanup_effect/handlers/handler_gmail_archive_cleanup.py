@@ -51,6 +51,7 @@ from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from omnibase_core.types import JsonType
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.handlers.handler_gmail_api import HandlerGmailApi
 from omnibase_infra.nodes.node_gmail_archive_cleanup_effect.models.model_gmail_cleanup_config import (
     ModelGmailCleanupConfig,
@@ -93,6 +94,16 @@ class HandlerGmailArchiveCleanup:
             REST transport layer. If not provided, a new instance is created
             using environment variable credentials.
     """
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Return the architectural role: NODE_HANDLER (bound to cleanup effect node)."""
+        return EnumHandlerType.NODE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification: EFFECT (Gmail API I/O)."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def __init__(
         self,

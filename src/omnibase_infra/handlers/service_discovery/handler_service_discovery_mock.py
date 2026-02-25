@@ -18,6 +18,7 @@ import time
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+from omnibase_infra.enums import EnumHandlerTypeCategory
 from omnibase_infra.handlers.service_discovery.models import (
     ModelDiscoveryResult,
     ModelHandlerRegistrationResult,
@@ -69,6 +70,11 @@ class HandlerServiceDiscoveryMock:
             "mock" identifier string.
         """
         return "mock"
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification: EFFECT (in-memory storage I/O)."""
+        return EnumHandlerTypeCategory.EFFECT
 
     async def register_service(
         self,
