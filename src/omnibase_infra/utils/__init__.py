@@ -15,6 +15,7 @@ This package provides common utilities used across the infrastructure:
     - util_pydantic_validators: Shared Pydantic field validator utilities
     - util_retry_optimistic: Optimistic locking retry helper with exponential backoff
     - util_semver: Semantic versioning validation utilities
+    - util_topic_validation: Kafka topic name validation (non-empty, max 255 chars, valid chars)
 """
 
 from omnibase_infra.utils.correlation import (
@@ -87,6 +88,7 @@ from omnibase_infra.utils.util_semver import (
     validate_semver,
     validate_version_lenient,
 )
+from omnibase_infra.utils.util_topic_validation import validate_topic_name
 
 __all__: list[str] = [
     "CorrelationContext",
@@ -129,6 +131,7 @@ __all__: list[str] = [
     "validate_timezone_aware_datetime",
     "validate_timezone_aware_datetime_optional",
     "validate_timezone_aware_with_context",
+    "validate_topic_name",
     "validate_version_lenient",
     "warn_if_naive_datetime",
     "write_atomic_bytes",
