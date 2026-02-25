@@ -33,7 +33,7 @@ def adapter_config() -> ModelInfisicalAdapterConfig:
         client_secret=SecretStr("test-client-secret"),
         project_id=UUID("00000000-0000-0000-0000-000000000123"),
         environment_slug="dev",
-        secret_path="/",  # noqa: S106
+        secret_path="/",
     )
 
 
@@ -89,7 +89,7 @@ class TestAdapterInfisicalInitialization:
             )
             mock_sdk_client.auth.universal_auth.login.assert_called_once_with(
                 client_id="test-client-id",
-                client_secret="test-client-secret",  # noqa: S106
+                client_secret="test-client-secret",
             )
         finally:
             if original is not None:
@@ -171,15 +171,15 @@ class TestAdapterInfisicalGetSecret:
             "API_KEY",
             project_id="proj-456",
             environment_slug="prod",
-            secret_path="/api",  # noqa: S106
+            secret_path="/api",
         )
 
         assert result.value.get_secret_value() == "prod-value"
         mock_client.secrets.get_secret_by_name.assert_called_once_with(
-            secret_name="API_KEY",  # noqa: S106
+            secret_name="API_KEY",
             project_id="proj-456",
             environment_slug="prod",
-            secret_path="/api",  # noqa: S106
+            secret_path="/api",
             expand_secret_references=True,
             view_secret_value=True,
             include_imports=True,
@@ -423,11 +423,11 @@ class TestAdapterInfisicalCreateSecret:
         adapter.create_secret("MY_KEY", "my-value")
 
         mock_client.secrets.create_secret_by_name.assert_called_once_with(
-            secret_name="MY_KEY",  # noqa: S106
+            secret_name="MY_KEY",
             project_id=str(adapter_config.project_id),
             environment_slug=adapter_config.environment_slug,
             secret_path=adapter_config.secret_path,
-            secret_value="my-value",  # noqa: S106
+            secret_value="my-value",
         )
 
     def test_create_secret_with_overrides(
@@ -444,15 +444,15 @@ class TestAdapterInfisicalCreateSecret:
             "value",
             project_id="override-proj",
             environment_slug="prod",
-            secret_path="/prod/secrets/",  # noqa: S106
+            secret_path="/prod/secrets/",
         )
 
         mock_client.secrets.create_secret_by_name.assert_called_once_with(
-            secret_name="KEY",  # noqa: S106
+            secret_name="KEY",
             project_id="override-proj",
             environment_slug="prod",
-            secret_path="/prod/secrets/",  # noqa: S106
-            secret_value="value",  # noqa: S106
+            secret_path="/prod/secrets/",
+            secret_value="value",
         )
 
     def test_create_secret_sdk_failure_wraps_to_infra_connection_error(
@@ -484,7 +484,7 @@ class TestAdapterInfisicalCreateSecret:
         adapter.create_secret("EMPTY_KEY", "")
 
         mock_client.secrets.create_secret_by_name.assert_called_once_with(
-            secret_name="EMPTY_KEY",  # noqa: S106
+            secret_name="EMPTY_KEY",
             project_id=str(adapter_config.project_id),
             environment_slug=adapter_config.environment_slug,
             secret_path=adapter_config.secret_path,
@@ -515,11 +515,11 @@ class TestAdapterInfisicalUpdateSecret:
         adapter.update_secret("MY_KEY", "updated-value")
 
         mock_client.secrets.update_secret_by_name.assert_called_once_with(
-            current_secret_name="MY_KEY",  # noqa: S106
+            current_secret_name="MY_KEY",
             project_id=str(adapter_config.project_id),
             environment_slug=adapter_config.environment_slug,
             secret_path=adapter_config.secret_path,
-            secret_value="updated-value",  # noqa: S106
+            secret_value="updated-value",
         )
 
     def test_update_secret_with_overrides(
@@ -536,15 +536,15 @@ class TestAdapterInfisicalUpdateSecret:
             "value",
             project_id="override-proj",
             environment_slug="staging",
-            secret_path="/staging/secrets/",  # noqa: S106
+            secret_path="/staging/secrets/",
         )
 
         mock_client.secrets.update_secret_by_name.assert_called_once_with(
-            current_secret_name="KEY",  # noqa: S106
+            current_secret_name="KEY",
             project_id="override-proj",
             environment_slug="staging",
-            secret_path="/staging/secrets/",  # noqa: S106
-            secret_value="value",  # noqa: S106
+            secret_path="/staging/secrets/",
+            secret_value="value",
         )
 
     def test_update_secret_sdk_failure_wraps_to_infra_connection_error(
@@ -576,7 +576,7 @@ class TestAdapterInfisicalUpdateSecret:
         adapter.update_secret("KEY", "")
 
         mock_client.secrets.update_secret_by_name.assert_called_once_with(
-            current_secret_name="KEY",  # noqa: S106
+            current_secret_name="KEY",
             project_id=str(adapter_config.project_id),
             environment_slug=adapter_config.environment_slug,
             secret_path=adapter_config.secret_path,

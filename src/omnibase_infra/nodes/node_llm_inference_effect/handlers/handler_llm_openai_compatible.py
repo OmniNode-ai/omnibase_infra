@@ -286,6 +286,7 @@ class HandlerLlmOpenaiCompatible:
             url=url,
             payload=payload,
             api_key=request.api_key,
+            extra_headers=request.extra_headers,
             correlation_id=correlation_id,
             timeout_seconds=request.timeout_seconds,
         )
@@ -530,23 +531,30 @@ class HandlerLlmOpenaiCompatible:
         payload: dict[str, JsonType],
         api_key: str | None,
         correlation_id: UUID,
+        extra_headers: dict[str, str] | None = None,
         timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
     ) -> dict[str, JsonType]:
-        """Execute HTTP call via transport, injecting auth if needed.
+        """Execute HTTP call via transport, injecting auth and extra headers if needed.
 
         When ``api_key`` is provided, creates a temporary httpx client with
         the Authorization header and injects it into the transport for the
         duration of the call. The transport's original client reference is
         restored afterward.
 
-        When ``api_key`` is None, delegates directly to the transport's
-        ``_execute_llm_http_call``.
+        When ``extra_headers`` is provided (and non-empty), those headers are
+        merged into the auth client's headers (or a standalone client is created
+        if ``api_key`` is None).
+
+        When both ``api_key`` and ``extra_headers`` are None/empty, delegates
+        directly to the transport's ``_execute_llm_http_call``.
 
         Args:
             url: Full URL for the request.
             payload: JSON payload.
             api_key: Optional Bearer token. None means no auth.
             correlation_id: Correlation ID for tracing.
+            extra_headers: Additional HTTP headers to inject (e.g. X-ONEX-Signature).
+                None or empty dict means no additional headers.
             timeout_seconds: HTTP request timeout in seconds for the
                 auth-injected client. Sourced from the request model so
                 callers can override the default (30.0) per-request.
@@ -562,20 +570,25 @@ class HandlerLlmOpenaiCompatible:
             InfraTimeoutError: On timeout after retries.
             InfraUnavailableError: On 5xx or circuit breaker open.
         """
-        if api_key is None:
+        merged_headers: dict[str, str] = {}
+        if extra_headers:
+            merged_headers.update(extra_headers)
+        if api_key is not None:
+            if not api_key:
+                msg = (
+                    "api_key is an empty string, which indicates misconfiguration. "
+                    "Provide a valid API key or omit api_key (set to None) to skip "
+                    "authentication."
+                )
+                raise ValueError(msg)
+            merged_headers["Authorization"] = f"Bearer {api_key}"
+
+        if not merged_headers:
             return await self._transport._execute_llm_http_call(
                 url=url,
                 payload=payload,
                 correlation_id=correlation_id,
             )
-
-        if not api_key:
-            msg = (
-                "api_key is an empty string, which indicates misconfiguration. "
-                "Provide a valid API key or omit api_key (set to None) to skip "
-                "authentication."
-            )
-            raise ValueError(msg)
 
         # Lock lives on the transport so that ALL handler instances sharing
         # the same transport serialize their client-swap sections against each
@@ -589,7 +602,7 @@ class HandlerLlmOpenaiCompatible:
 
         async with auth_lock:
             auth_client = httpx.AsyncClient(
-                headers={"Authorization": f"Bearer {api_key}"},
+                headers=merged_headers,
                 timeout=httpx.Timeout(timeout_seconds),
                 limits=_AUTH_CLIENT_LIMITS,
             )

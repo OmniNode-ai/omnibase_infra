@@ -77,7 +77,7 @@ class TestTypesModuleExports:
             hostname="localhost",
             port=5432,
             username="user",
-            password="pass",  # noqa: S106 - test fixture
+            password="pass",
             database="testdb",
         )
         assert dsn.scheme == "postgresql"

@@ -56,7 +56,7 @@ def config() -> ModelMaterializerConfig:
             host="localhost",
             port=5432,
             user="test",
-            password="test",  # noqa: S106
+            password="test",
             database="testdb",
         ),
         kafka=ModelKafkaProducerConfig(
@@ -210,7 +210,7 @@ class TestModelPostgresPoolConfig:
                 port=5432,
                 database="test",
                 user="user",
-                password="pass",  # noqa: S106
+                password="pass",
                 min_size=20,
                 max_size=5,
             )
@@ -922,7 +922,7 @@ class TestRuntimeHostProcessMaterializerIntegration:
                     host="localhost",
                     port=5432,
                     user="test",
-                    password="test",  # noqa: S106
+                    password="test",
                     database="testdb",
                 ),
                 kafka=ModelKafkaProducerConfig(bootstrap_servers="localhost:9092"),

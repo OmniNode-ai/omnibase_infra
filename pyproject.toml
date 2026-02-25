@@ -274,6 +274,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Integration tests with controlled table names - S608 false positives
 "tests/integration/runtime/db/test_postgres_repository_runtime_integration.py" = ["S608"]
+# S106: Hardcoded password in function arg - test fixtures only
+# Production secrets managed via Infisical/Vault (OMN-2287, OMN-2736)
+"tests/**/*.py" = ["S106"]
 
 [tool.ruff.lint.isort]
 # Ensure consistent import sorting between local and CI
