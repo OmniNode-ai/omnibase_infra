@@ -114,33 +114,42 @@ class TestTopicModelMapping:
     """Test topic to model and writer method mappings."""
 
     def test_all_topics_have_models(self) -> None:
-        """All configured topics should have corresponding models."""
+        """All configured topics should have corresponding models.
+
+        OMN-2621: 5 legacy bare topic names replaced with ONEX canonical names.
+        """
         expected_topics = {
-            "agent-actions",
-            "agent-routing-decisions",
-            "agent-transformation-events",
-            "router-performance-metrics",
-            "agent-detection-failures",
+            "onex.evt.omniclaude.agent-actions.v1",
+            "onex.evt.omniclaude.routing-decision.v1",
+            "onex.evt.omniclaude.agent-transformation.v1",
+            "onex.evt.omniclaude.performance-metrics.v1",
+            "onex.evt.omniclaude.detection-failure.v1",
             "agent-execution-logs",
             "onex.evt.agent.status.v1",
         }
         assert set(TOPIC_TO_MODEL.keys()) == expected_topics
 
     def test_all_topics_have_writer_methods(self) -> None:
-        """All configured topics should have corresponding writer methods."""
+        """All configured topics should have corresponding writer methods.
+
+        OMN-2621: 5 legacy bare topic names replaced with ONEX canonical names.
+        """
         expected_topics = {
-            "agent-actions",
-            "agent-routing-decisions",
-            "agent-transformation-events",
-            "router-performance-metrics",
-            "agent-detection-failures",
+            "onex.evt.omniclaude.agent-actions.v1",
+            "onex.evt.omniclaude.routing-decision.v1",
+            "onex.evt.omniclaude.agent-transformation.v1",
+            "onex.evt.omniclaude.performance-metrics.v1",
+            "onex.evt.omniclaude.detection-failure.v1",
             "agent-execution-logs",
             "onex.evt.agent.status.v1",
         }
         assert set(TOPIC_TO_WRITER_METHOD.keys()) == expected_topics
 
     def test_topic_to_model_mapping_correct(self) -> None:
-        """Topic to model mapping should be correct."""
+        """Topic to model mapping should be correct.
+
+        OMN-2621: Asserts ONEX canonical topic names, not legacy bare names.
+        """
         from omnibase_infra.services.observability.agent_actions.models import (
             ModelAgentAction,
             ModelAgentStatusEvent,
@@ -151,13 +160,48 @@ class TestTopicModelMapping:
             ModelTransformationEvent,
         )
 
-        assert TOPIC_TO_MODEL["agent-actions"] is ModelAgentAction
-        assert TOPIC_TO_MODEL["agent-routing-decisions"] is ModelRoutingDecision
-        assert TOPIC_TO_MODEL["agent-transformation-events"] is ModelTransformationEvent
-        assert TOPIC_TO_MODEL["router-performance-metrics"] is ModelPerformanceMetric
-        assert TOPIC_TO_MODEL["agent-detection-failures"] is ModelDetectionFailure
+        assert (
+            TOPIC_TO_MODEL["onex.evt.omniclaude.agent-actions.v1"] is ModelAgentAction
+        )
+        assert (
+            TOPIC_TO_MODEL["onex.evt.omniclaude.routing-decision.v1"]
+            is ModelRoutingDecision
+        )
+        assert (
+            TOPIC_TO_MODEL["onex.evt.omniclaude.agent-transformation.v1"]
+            is ModelTransformationEvent
+        )
+        assert (
+            TOPIC_TO_MODEL["onex.evt.omniclaude.performance-metrics.v1"]
+            is ModelPerformanceMetric
+        )
+        assert (
+            TOPIC_TO_MODEL["onex.evt.omniclaude.detection-failure.v1"]
+            is ModelDetectionFailure
+        )
         assert TOPIC_TO_MODEL["agent-execution-logs"] is ModelExecutionLog
         assert TOPIC_TO_MODEL["onex.evt.agent.status.v1"] is ModelAgentStatusEvent
+
+    def test_all_subscribed_topics_have_model_and_writer_mapping(self) -> None:
+        """Every topic in config default list must appear in both dispatch dicts.
+
+        Regression test for OMN-2621 (CONTRACT_DRIFT: orphaned subscriptions).
+        Prevents topic name mismatch from returning silently — if a topic is
+        subscribed but has no model/writer mapping, events are silently dropped.
+        """
+        config = ConfigAgentActionsConsumer(
+            kafka_bootstrap_servers="localhost:9092",
+            postgres_dsn="postgresql://test:test@localhost:5432/test",
+        )
+        for topic in config.topics:
+            assert topic in TOPIC_TO_MODEL, (
+                f"Topic '{topic}' is subscribed but has no model mapping. "
+                "Either add it to TOPIC_TO_MODEL or remove it from config."
+            )
+            assert topic in TOPIC_TO_WRITER_METHOD, (
+                f"Topic '{topic}' is subscribed but has no writer mapping. "
+                "Either add it to TOPIC_TO_WRITER_METHOD or remove it from config."
+            )
 
 
 # =============================================================================
@@ -405,7 +449,7 @@ class TestBatchProcessing:
 
         # Create mock message
         message = make_mock_consumer_record(
-            topic="agent-actions",
+            topic="onex.evt.omniclaude.agent-actions.v1",
             partition=0,
             offset=100,
             value=sample_agent_action_payload,
@@ -420,7 +464,7 @@ class TestBatchProcessing:
         # Verify offset tracking
         from aiokafka import TopicPartition
 
-        tp = TopicPartition("agent-actions", 0)
+        tp = TopicPartition("onex.evt.omniclaude.agent-actions.v1", 0)
         assert tp in result
         assert result[tp] == 100
 
@@ -437,7 +481,7 @@ class TestBatchProcessing:
         consumer._running = True
 
         message = make_mock_consumer_record(
-            topic="agent-routing-decisions",
+            topic="onex.evt.omniclaude.routing-decision.v1",
             partition=0,
             offset=50,
             value=sample_routing_decision_payload,
@@ -460,7 +504,7 @@ class TestBatchProcessing:
 
         # Create message with invalid JSON
         message = MagicMock()
-        message.topic = "agent-actions"
+        message.topic = "onex.evt.omniclaude.agent-actions.v1"
         message.partition = 0
         message.offset = 100
         message.value = b"not valid json"
@@ -470,7 +514,7 @@ class TestBatchProcessing:
         # Should still track offset (skip and continue)
         from aiokafka import TopicPartition
 
-        tp = TopicPartition("agent-actions", 0)
+        tp = TopicPartition("onex.evt.omniclaude.agent-actions.v1", 0)
         assert tp in result
         assert result[tp] == 100
 
@@ -486,7 +530,7 @@ class TestBatchProcessing:
 
         # Create message with valid JSON but invalid model (missing required fields)
         message = make_mock_consumer_record(
-            topic="agent-actions",
+            topic="onex.evt.omniclaude.agent-actions.v1",
             partition=0,
             offset=100,
             value={"invalid": "payload"},  # Missing required fields
@@ -497,7 +541,7 @@ class TestBatchProcessing:
         # Should track offset for skipped message
         from aiokafka import TopicPartition
 
-        tp = TopicPartition("agent-actions", 0)
+        tp = TopicPartition("onex.evt.omniclaude.agent-actions.v1", 0)
         assert tp in result
         assert result[tp] == 100
 
@@ -539,7 +583,7 @@ class TestBatchProcessing:
 
         # Create tombstone message (value is None)
         message = MagicMock()
-        message.topic = "agent-actions"
+        message.topic = "onex.evt.omniclaude.agent-actions.v1"
         message.partition = 0
         message.offset = 100
         message.value = None  # Tombstone
@@ -548,7 +592,7 @@ class TestBatchProcessing:
 
         from aiokafka import TopicPartition
 
-        tp = TopicPartition("agent-actions", 0)
+        tp = TopicPartition("onex.evt.omniclaude.agent-actions.v1", 0)
         assert tp in result
         assert result[tp] == 100
 
@@ -564,7 +608,7 @@ class TestBatchProcessing:
 
         # Create message with invalid UTF-8 bytes
         message = MagicMock()
-        message.topic = "agent-actions"
+        message.topic = "onex.evt.omniclaude.agent-actions.v1"
         message.partition = 0
         message.offset = 100
         message.value = b"\xff\xfe invalid utf-8"  # Invalid UTF-8 sequence
@@ -573,7 +617,7 @@ class TestBatchProcessing:
 
         from aiokafka import TopicPartition
 
-        tp = TopicPartition("agent-actions", 0)
+        tp = TopicPartition("onex.evt.omniclaude.agent-actions.v1", 0)
         assert tp in result
         assert result[tp] == 100
 
@@ -599,14 +643,14 @@ class TestBatchProcessing:
 
         # Skipped message (invalid JSON) at offset 100
         skipped_message = MagicMock()
-        skipped_message.topic = "agent-actions"
+        skipped_message.topic = "onex.evt.omniclaude.agent-actions.v1"
         skipped_message.partition = 0
         skipped_message.offset = 100
         skipped_message.value = b"not valid json"
 
         # Valid message at offset 101 (will fail write)
         valid_message = make_mock_consumer_record(
-            topic="agent-actions",
+            topic="onex.evt.omniclaude.agent-actions.v1",
             partition=0,
             offset=101,
             value=sample_agent_action_payload,
@@ -618,7 +662,7 @@ class TestBatchProcessing:
 
         from aiokafka import TopicPartition
 
-        tp = TopicPartition("agent-actions", 0)
+        tp = TopicPartition("onex.evt.omniclaude.agent-actions.v1", 0)
         # Skipped offset should be preserved even though write failed
         assert tp in result
         # The highest skipped offset (100) should be there, not 101 (which failed)
@@ -646,7 +690,7 @@ class TestOffsetTracking:
         consumer._running = True
 
         message = make_mock_consumer_record(
-            topic="agent-actions",
+            topic="onex.evt.omniclaude.agent-actions.v1",
             partition=2,
             offset=500,
             value=sample_agent_action_payload,
@@ -656,7 +700,7 @@ class TestOffsetTracking:
 
         from aiokafka import TopicPartition
 
-        tp = TopicPartition("agent-actions", 2)
+        tp = TopicPartition("onex.evt.omniclaude.agent-actions.v1", 2)
         assert tp in result
         assert result[tp] == 500
 
@@ -675,7 +719,7 @@ class TestOffsetTracking:
         consumer._running = True
 
         message = make_mock_consumer_record(
-            topic="agent-actions",
+            topic="onex.evt.omniclaude.agent-actions.v1",
             partition=0,
             offset=100,
             value=sample_agent_action_payload,
@@ -685,7 +729,7 @@ class TestOffsetTracking:
 
         from aiokafka import TopicPartition
 
-        tp = TopicPartition("agent-actions", 0)
+        tp = TopicPartition("onex.evt.omniclaude.agent-actions.v1", 0)
         # Failed partition should NOT be in result
         assert tp not in result
 
@@ -709,13 +753,13 @@ class TestOffsetTracking:
 
         messages = [
             make_mock_consumer_record(
-                topic="agent-actions",
+                topic="onex.evt.omniclaude.agent-actions.v1",
                 partition=0,
                 offset=100,
                 value=payload1,
             ),
             make_mock_consumer_record(
-                topic="agent-actions",
+                topic="onex.evt.omniclaude.agent-actions.v1",
                 partition=1,
                 offset=200,
                 value=payload2,
@@ -726,8 +770,8 @@ class TestOffsetTracking:
 
         from aiokafka import TopicPartition
 
-        tp0 = TopicPartition("agent-actions", 0)
-        tp1 = TopicPartition("agent-actions", 1)
+        tp0 = TopicPartition("onex.evt.omniclaude.agent-actions.v1", 0)
+        tp1 = TopicPartition("onex.evt.omniclaude.agent-actions.v1", 1)
 
         assert tp0 in result
         assert tp1 in result
@@ -753,7 +797,7 @@ class TestOffsetTracking:
             payload["id"] = str(uuid4())
             messages.append(
                 make_mock_consumer_record(
-                    topic="agent-actions",
+                    topic="onex.evt.omniclaude.agent-actions.v1",
                     partition=0,
                     offset=offset,
                     value=payload,
@@ -764,7 +808,7 @@ class TestOffsetTracking:
 
         from aiokafka import TopicPartition
 
-        tp = TopicPartition("agent-actions", 0)
+        tp = TopicPartition("onex.evt.omniclaude.agent-actions.v1", 0)
         # Should track highest offset (150)
         assert result[tp] == 150
 
@@ -1079,8 +1123,8 @@ class TestCommitOffsets:
         from aiokafka import TopicPartition
 
         offsets = {
-            TopicPartition("agent-actions", 0): 100,
-            TopicPartition("agent-actions", 1): 200,
+            TopicPartition("onex.evt.omniclaude.agent-actions.v1", 0): 100,
+            TopicPartition("onex.evt.omniclaude.agent-actions.v1", 1): 200,
         }
 
         await consumer._commit_offsets(offsets, uuid4())
@@ -1089,8 +1133,12 @@ class TestCommitOffsets:
         call_args = mock_kafka.commit.call_args[0][0]
 
         # Should commit offset + 1
-        assert call_args[TopicPartition("agent-actions", 0)] == 101
-        assert call_args[TopicPartition("agent-actions", 1)] == 201
+        assert (
+            call_args[TopicPartition("onex.evt.omniclaude.agent-actions.v1", 0)] == 101
+        )
+        assert (
+            call_args[TopicPartition("onex.evt.omniclaude.agent-actions.v1", 1)] == 201
+        )
 
     @pytest.mark.asyncio
     async def test_commit_offsets_empty_dict_skips_commit(
@@ -1119,7 +1167,7 @@ class TestCommitOffsets:
 
         from aiokafka import TopicPartition
 
-        offsets = {TopicPartition("agent-actions", 0): 100}
+        offsets = {TopicPartition("onex.evt.omniclaude.agent-actions.v1", 0): 100}
 
         # Should not raise
         await consumer._commit_offsets(offsets, uuid4())
