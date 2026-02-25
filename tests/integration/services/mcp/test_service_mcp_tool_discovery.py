@@ -1,841 +1,376 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Integration tests for ServiceMCPToolDiscovery against real Consul infrastructure.
+"""Integration tests for ServiceMCPToolDiscovery via event bus registry.
 
-These tests validate ServiceMCPToolDiscovery behavior against actual Consul
-infrastructure running on the remote infrastructure server. They require Consul
-to be available and will be skipped gracefully if Consul is not reachable.
+These tests validate ServiceMCPToolDiscovery behavior against the ONEX
+registration projection (PostgreSQL-backed).  They exercise the live
+database if it is available, and skip gracefully in CI/CD environments
+where the database is not reachable.
 
 CI/CD Graceful Skip Behavior
-============================
-
-These tests skip gracefully in CI/CD environments without Consul access:
+=============================
 
 Skip Conditions:
-    - Skips if CONSUL_HOST not set
-    - Skips if TCP connection to CONSUL_HOST:CONSUL_PORT fails
-    - Reachability check performed at module import time with 5-second timeout
-
-Example CI/CD Output::
-
-    $ pytest tests/integration/services/mcp/test_service_mcp_tool_discovery.py -v
-    test_discover_all_with_mcp_service SKIPPED (Consul not available)
-    test_discover_by_service_id SKIPPED (Consul not available)
+    - Skips if DATABASE_URL (or OMNIBASE_INFRA_DB_URL) is not set
+    - Skips if TCP connection to the database host fails
 
 Test Categories
 ===============
 
-- Discovery Tests: Validate discover_all() and discover_by_service_id()
-- Tag Filtering Tests: Validate _is_mcp_orchestrator() behavior
-- Tool Name Extraction Tests: Validate _extract_tool_name() behavior
-- Error Handling Tests: Validate error scenarios
+- Unit-style tests using mock ProjectionReaderRegistration (no infra)
+- Integration tests using the real projection reader (infra required)
 
-Environment Variables
-=====================
-
-    CONSUL_HOST: Consul server hostname (required - skip if not set)
-        Example: localhost or 192.168.86.200
-    CONSUL_PORT: Consul server port (default: 8500 or 28500 for remote)
-    CONSUL_SCHEME: HTTP scheme (default: http)
-    CONSUL_TOKEN: Optional ACL token for authentication
-
-Related Ticket: OMN-1281
+Related Ticket: OMN-2700
 """
 
 from __future__ import annotations
 
 import logging
-import os
-import uuid
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
-import consul
 import pytest
 
-from tests.integration.handlers.conftest import (
-    CONSUL_AVAILABLE,
-    CONSUL_HOST,
-    CONSUL_PORT,
-    CONSUL_SCHEME,
-    CONSUL_TOKEN,
+from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.models.mcp.model_mcp_contract_config import ModelMCPContractConfig
+from omnibase_infra.models.registration.model_node_capabilities import (
+    ModelNodeCapabilities,
+)
+from omnibase_infra.services.mcp.service_mcp_tool_discovery import (
+    ServiceMCPToolDiscovery,
 )
 
 if TYPE_CHECKING:
-    from omnibase_infra.services.mcp.service_mcp_tool_discovery import (
-        ServiceMCPToolDiscovery,
-    )
+    from omnibase_infra.projectors import ProjectionReaderRegistration
 
-# Module-level logger for test diagnostics
 logger = logging.getLogger(__name__)
 
-# =============================================================================
-# Test Configuration and Skip Conditions
-# =============================================================================
-
-# Module-level markers - skip all tests if Consul is not available
-pytestmark = [
-    pytest.mark.skipif(
-        not CONSUL_AVAILABLE,
-        reason="Consul not available (cannot connect to remote infrastructure)",
-    ),
-]
-
 
 # =============================================================================
-# Fixtures
+# Helpers
 # =============================================================================
 
 
-@pytest.fixture
-def mcp_discovery_service() -> ServiceMCPToolDiscovery:
-    """Create ServiceMCPToolDiscovery instance configured for test infrastructure.
+def _make_projection(
+    node_type: str = "orchestrator_generic",
+    mcp_expose: bool = True,
+    tool_name: str | None = "test_tool",
+    description: str | None = "Test tool description",
+    timeout: int = 30,
+    state: EnumRegistrationState = EnumRegistrationState.ACTIVE,
+) -> MagicMock:
+    """Build a mock ModelRegistrationProjection with MCP metadata."""
+    from omnibase_core.enums import EnumNodeKind
 
-    Returns:
-        Configured ServiceMCPToolDiscovery instance.
-    """
-    from omnibase_infra.services.mcp.service_mcp_tool_discovery import (
-        ServiceMCPToolDiscovery,
-    )
-
-    return ServiceMCPToolDiscovery(
-        consul_host=CONSUL_HOST or "localhost",
-        consul_port=CONSUL_PORT,
-        consul_scheme=CONSUL_SCHEME,
-        consul_token=CONSUL_TOKEN,
-    )
-
-
-@pytest.fixture
-def consul_client() -> consul.Consul:
-    """Create a Consul client for test service registration.
-
-    Returns:
-        Consul client instance.
-    """
-    return consul.Consul(
-        host=CONSUL_HOST or "localhost",
-        port=CONSUL_PORT,
-        scheme=CONSUL_SCHEME,
-        token=CONSUL_TOKEN,
-    )
-
-
-@pytest.fixture
-def unique_service_id() -> str:
-    """Generate unique service ID for test isolation.
-
-    Returns:
-        Unique service ID prefixed with test namespace.
-    """
-    return f"test-mcp-svc-{uuid.uuid4().hex[:12]}"
-
-
-@pytest.fixture
-def unique_service_name() -> str:
-    """Generate unique service name for test isolation.
-
-    Returns:
-        Unique service name prefixed with test namespace.
-    """
-    return f"test-mcp-orchestrator-{uuid.uuid4().hex[:8]}"
-
-
-@pytest.fixture
-def unique_tool_name() -> str:
-    """Generate unique tool name for test isolation.
-
-    Returns:
-        Unique tool name.
-    """
-    return f"test_tool_{uuid.uuid4().hex[:8]}"
-
-
-@pytest.fixture
-async def registered_mcp_service(
-    consul_client: consul.Consul,
-    unique_service_id: str,
-    unique_service_name: str,
-    unique_tool_name: str,
-) -> AsyncGenerator[dict[str, str], None]:
-    """Register a test MCP-enabled orchestrator service in Consul.
-
-    Registers the service, yields service details, then cleans up.
-
-    Cleanup Behavior:
-        - Deregisters the service after test completion
-        - Ignores cleanup errors to prevent test pollution
-
-    Yields:
-        Dict with service_id, service_name, and tool_name keys.
-    """
-    # Register test service with MCP tags
-    consul_client.agent.service.register(
-        name=unique_service_name,
-        service_id=unique_service_id,
-        address="127.0.0.1",
-        port=8080,
-        tags=[
-            "mcp-enabled",
-            "node-type:orchestrator",
-            f"mcp-tool:{unique_tool_name}",
-            "integration-test",
-        ],
-    )
-
-    logger.info(
-        "Registered test MCP service: %s (id: %s, tool: %s)",
-        unique_service_name,
-        unique_service_id,
-        unique_tool_name,
-    )
-
-    yield {
-        "service_id": unique_service_id,
-        "service_name": unique_service_name,
-        "tool_name": unique_tool_name,
-    }
-
-    # Cleanup: deregister test service
-    try:
-        consul_client.agent.service.deregister(unique_service_id)
-        logger.info("Deregistered test MCP service: %s", unique_service_id)
-    except Exception as e:
-        logger.warning(
-            "Cleanup failed for test service %s: %s",
-            unique_service_id,
-            e,
+    mcp_config = (
+        ModelMCPContractConfig(
+            expose=mcp_expose,
+            tool_name=tool_name,
+            description=description,
+            timeout_seconds=timeout,
         )
-
-
-@pytest.fixture
-async def registered_non_mcp_service(
-    consul_client: consul.Consul,
-    unique_service_id: str,
-) -> AsyncGenerator[str, None]:
-    """Register a test service without MCP tags.
-
-    This service should be ignored by discovery.
-
-    Yields:
-        Service ID.
-    """
-    service_name = f"test-non-mcp-svc-{uuid.uuid4().hex[:8]}"
-
-    # Register service WITHOUT mcp-enabled tag
-    consul_client.agent.service.register(
-        name=service_name,
-        service_id=unique_service_id,
-        address="127.0.0.1",
-        port=9090,
-        tags=[
-            "node-type:orchestrator",
-            "some-other-tag",
-            "integration-test",
-        ],
+        if mcp_expose
+        else None
     )
+    capabilities = ModelNodeCapabilities(mcp=mcp_config)
 
-    logger.info("Registered non-MCP service: %s", unique_service_id)
+    node_type_enum = MagicMock()
+    node_type_enum.value = node_type
 
-    yield unique_service_id
+    proj = MagicMock()
+    proj.entity_id = uuid4()
+    proj.node_type = node_type_enum
+    proj.node_version = MagicMock()
+    proj.node_version.__str__ = lambda self: "1.0.0"
+    proj.capabilities = capabilities
+    proj.current_state = state
 
-    # Cleanup
-    try:
-        consul_client.agent.service.deregister(unique_service_id)
-        logger.info("Deregistered non-MCP service: %s", unique_service_id)
-    except Exception as e:
-        logger.warning("Cleanup failed for service %s: %s", unique_service_id, e)
+    # Make isinstance(proj, ModelRegistrationProjection) pass
+    from omnibase_infra.models.projection import ModelRegistrationProjection
 
-
-@pytest.fixture
-async def registered_non_orchestrator_service(
-    consul_client: consul.Consul,
-) -> AsyncGenerator[str, None]:
-    """Register a test service that is MCP-enabled but not an orchestrator.
-
-    This service should be ignored by discovery because it lacks
-    node-type:orchestrator tag.
-
-    Yields:
-        Service ID.
-    """
-    service_id = f"test-non-orch-svc-{uuid.uuid4().hex[:12]}"
-    service_name = f"test-non-orch-{uuid.uuid4().hex[:8]}"
-
-    # Register service WITH mcp-enabled but WITHOUT node-type:orchestrator
-    consul_client.agent.service.register(
-        name=service_name,
-        service_id=service_id,
-        address="127.0.0.1",
-        port=7070,
-        tags=[
-            "mcp-enabled",
-            "node-type:effect",  # Not an orchestrator
-            "mcp-tool:should_be_ignored",
-            "integration-test",
-        ],
-    )
-
-    logger.info("Registered non-orchestrator service: %s", service_id)
-
-    yield service_id
-
-    # Cleanup
-    try:
-        consul_client.agent.service.deregister(service_id)
-        logger.info("Deregistered non-orchestrator service: %s", service_id)
-    except Exception as e:
-        logger.warning("Cleanup failed for service %s: %s", service_id, e)
-
-
-@pytest.fixture
-async def registered_mcp_service_without_tool_tag(
-    consul_client: consul.Consul,
-) -> AsyncGenerator[str, None]:
-    """Register a test MCP-enabled orchestrator WITHOUT mcp-tool tag.
-
-    This service should be skipped by discovery because it lacks
-    the mcp-tool:{name} tag.
-
-    Yields:
-        Service ID.
-    """
-    service_id = f"test-no-tool-svc-{uuid.uuid4().hex[:12]}"
-    service_name = f"test-no-tool-{uuid.uuid4().hex[:8]}"
-
-    # Register service WITH mcp-enabled and node-type:orchestrator
-    # but WITHOUT mcp-tool:{name} tag
-    consul_client.agent.service.register(
-        name=service_name,
-        service_id=service_id,
-        address="127.0.0.1",
-        port=6060,
-        tags=[
-            "mcp-enabled",
-            "node-type:orchestrator",
-            # Missing: mcp-tool:{name}
-            "integration-test",
-        ],
-    )
-
-    logger.info("Registered MCP service without tool tag: %s", service_id)
-
-    yield service_id
-
-    # Cleanup
-    try:
-        consul_client.agent.service.deregister(service_id)
-        logger.info("Deregistered service without tool tag: %s", service_id)
-    except Exception as e:
-        logger.warning("Cleanup failed for service %s: %s", service_id, e)
+    proj.__class__ = ModelRegistrationProjection
+    return proj
 
 
 # =============================================================================
-# Discovery Tests - discover_all()
+# Mock-based tests (no infrastructure required)
 # =============================================================================
 
 
+@pytest.mark.unit
+class TestServiceMCPToolDiscoveryInit:
+    """Tests for ServiceMCPToolDiscovery initialization."""
+
+    def test_init_sets_defaults(self) -> None:
+        """Should accept a ProjectionReaderRegistration and use default limit."""
+        reader = MagicMock()
+        svc = ServiceMCPToolDiscovery(reader)
+
+        assert svc._reader is reader
+        assert svc._query_limit == 100
+
+    def test_init_accepts_custom_limit(self) -> None:
+        """Should accept a custom query_limit."""
+        reader = MagicMock()
+        svc = ServiceMCPToolDiscovery(reader, query_limit=50)
+
+        assert svc._query_limit == 50
+
+    def test_describe_returns_metadata(self) -> None:
+        """describe() should return service metadata without Consul fields."""
+        reader = MagicMock()
+        svc = ServiceMCPToolDiscovery(reader)
+
+        meta = svc.describe()
+
+        assert meta["service_name"] == "ServiceMCPToolDiscovery"
+        assert meta["source"] == "event_bus_registry"
+        assert meta["capability_tag"] == "mcp-enabled"
+        # Must not contain consul-related keys
+        assert "consul_host" not in meta
+        assert "consul_port" not in meta
+        assert "consul_scheme" not in meta
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 class TestDiscoverAll:
-    """Tests for ServiceMCPToolDiscovery.discover_all() method."""
+    """Tests for ServiceMCPToolDiscovery.discover_all() using mock reader."""
 
-    @pytest.mark.asyncio
-    async def test_discover_all_finds_mcp_service(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-        registered_mcp_service: dict[str, str],
-    ) -> None:
-        """Test discover_all() finds service with correct MCP tags.
-
-        Verifies that:
-        - MCP-enabled orchestrator services are discovered
-        - Tool name is correctly extracted from tags
-        - Service metadata is populated
-        """
-        tools = await mcp_discovery_service.discover_all()
-
-        # Find our test tool
-        test_tool = next(
-            (t for t in tools if t.name == registered_mcp_service["tool_name"]),
-            None,
+    async def test_discover_all_returns_mcp_orchestrator(self) -> None:
+        """Should return a tool definition for an ACTIVE MCP orchestrator."""
+        proj = _make_projection(
+            node_type="orchestrator_generic",
+            mcp_expose=True,
+            tool_name="my_tool",
+            description="My tool description",
         )
+        reader = MagicMock()
+        reader.get_by_capability_tag = AsyncMock(return_value=[proj])
 
-        assert test_tool is not None, (
-            f"Expected to find tool '{registered_mcp_service['tool_name']}' "
-            f"in discovered tools: {[t.name for t in tools]}"
+        svc = ServiceMCPToolDiscovery(reader)
+        tools = await svc.discover_all()
+
+        assert len(tools) == 1
+        assert tools[0].name == "my_tool"
+        assert tools[0].description == "My tool description"
+        assert tools[0].metadata["source"] == "event_bus_registry"
+
+    async def test_discover_all_skips_non_orchestrator(self) -> None:
+        """Should skip nodes that are not orchestrators."""
+        proj = _make_projection(node_type="effect_generic", mcp_expose=True)
+        reader = MagicMock()
+        reader.get_by_capability_tag = AsyncMock(return_value=[proj])
+
+        svc = ServiceMCPToolDiscovery(reader)
+        tools = await svc.discover_all()
+
+        assert tools == []
+
+    async def test_discover_all_skips_mcp_expose_false(self) -> None:
+        """Should skip nodes where mcp.expose=False."""
+        proj = _make_projection(node_type="orchestrator_generic", mcp_expose=False)
+        proj.capabilities = ModelNodeCapabilities(
+            mcp=ModelMCPContractConfig(expose=False)
         )
+        reader = MagicMock()
+        reader.get_by_capability_tag = AsyncMock(return_value=[proj])
 
-        # Verify tool properties
-        assert test_tool.name == registered_mcp_service["tool_name"]
-        assert registered_mcp_service["service_name"] in test_tool.description
-        assert test_tool.orchestrator_service_id == registered_mcp_service["service_id"]
-        assert test_tool.metadata.get("source") == "consul_discovery"
-        assert "mcp-enabled" in test_tool.metadata.get("tags", [])
+        svc = ServiceMCPToolDiscovery(reader)
+        tools = await svc.discover_all()
 
-    @pytest.mark.asyncio
-    async def test_discover_all_ignores_non_mcp_service(
+        assert tools == []
+
+    async def test_discover_all_skips_no_mcp_config(self) -> None:
+        """Should skip nodes without mcp config in capabilities."""
+        proj = _make_projection(node_type="orchestrator_generic")
+        proj.capabilities = ModelNodeCapabilities(mcp=None)
+        reader = MagicMock()
+        reader.get_by_capability_tag = AsyncMock(return_value=[proj])
+
+        svc = ServiceMCPToolDiscovery(reader)
+        tools = await svc.discover_all()
+
+        assert tools == []
+
+    async def test_discover_all_falls_back_tool_name_to_entity_id(self) -> None:
+        """Should fall back to str(entity_id) when mcp.tool_name is None."""
+        proj = _make_projection(
+            node_type="orchestrator_generic",
+            mcp_expose=True,
+            tool_name=None,
+        )
+        reader = MagicMock()
+        reader.get_by_capability_tag = AsyncMock(return_value=[proj])
+
+        svc = ServiceMCPToolDiscovery(reader)
+        tools = await svc.discover_all()
+
+        assert len(tools) == 1
+        assert tools[0].name == str(proj.entity_id)
+
+    async def test_discover_all_warns_on_empty_registry(
         self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-        registered_non_mcp_service: str,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Test discover_all() ignores services without mcp-enabled tag.
+        """Should log WARNING when registry returns 0 eligible nodes."""
+        reader = MagicMock()
+        reader.get_by_capability_tag = AsyncMock(return_value=[])
 
-        Verifies that:
-        - Services without mcp-enabled tag are not discovered
-        - Only MCP-enabled orchestrators appear in results
-        """
-        tools = await mcp_discovery_service.discover_all()
+        svc = ServiceMCPToolDiscovery(reader)
 
-        # Verify the non-MCP service is not included
-        non_mcp_tools = [
-            t for t in tools if t.orchestrator_service_id == registered_non_mcp_service
+        with caplog.at_level(logging.WARNING):
+            tools = await svc.discover_all()
+
+        assert tools == []
+        assert any("0 eligible nodes" in r.message for r in caplog.records)
+
+    async def test_discover_all_passes_state_filter(self) -> None:
+        """Should filter by ACTIVE state when querying the reader."""
+        reader = MagicMock()
+        reader.get_by_capability_tag = AsyncMock(return_value=[])
+
+        svc = ServiceMCPToolDiscovery(reader)
+        await svc.discover_all()
+
+        reader.get_by_capability_tag.assert_awaited_once()
+        call_kwargs = reader.get_by_capability_tag.call_args.kwargs
+        assert call_kwargs.get("state") == EnumRegistrationState.ACTIVE
+        assert call_kwargs.get("tag") == "mcp-enabled"
+
+    async def test_discover_all_passes_query_limit(self) -> None:
+        """Should pass configured query_limit to the reader."""
+        reader = MagicMock()
+        reader.get_by_capability_tag = AsyncMock(return_value=[])
+
+        svc = ServiceMCPToolDiscovery(reader, query_limit=42)
+        await svc.discover_all()
+
+        call_kwargs = reader.get_by_capability_tag.call_args.kwargs
+        assert call_kwargs.get("limit") == 42
+
+    async def test_discover_all_multiple_tools(self) -> None:
+        """Should return multiple tools when multiple eligible nodes exist."""
+        projs = [
+            _make_projection(
+                node_type="orchestrator_generic",
+                tool_name=f"tool_{i}",
+                mcp_expose=True,
+            )
+            for i in range(3)
         ]
+        reader = MagicMock()
+        reader.get_by_capability_tag = AsyncMock(return_value=projs)
 
-        assert len(non_mcp_tools) == 0, (
-            f"Non-MCP service should not be discovered: {registered_non_mcp_service}"
+        svc = ServiceMCPToolDiscovery(reader)
+        tools = await svc.discover_all()
+
+        assert len(tools) == 3
+        tool_names = {t.name for t in tools}
+        assert tool_names == {"tool_0", "tool_1", "tool_2"}
+
+    async def test_discover_all_uses_timeout_from_mcp_config(self) -> None:
+        """Should use mcp.timeout_seconds from contract config."""
+        proj = _make_projection(
+            node_type="orchestrator_generic",
+            mcp_expose=True,
+            tool_name="timed_tool",
+            timeout=120,
+        )
+        reader = MagicMock()
+        reader.get_by_capability_tag = AsyncMock(return_value=[proj])
+
+        svc = ServiceMCPToolDiscovery(reader)
+        tools = await svc.discover_all()
+
+        assert len(tools) == 1
+        assert tools[0].timeout_seconds == 120
+
+    async def test_discover_all_metadata_includes_entity_id(self) -> None:
+        """Tool metadata should include entity_id for traceability."""
+        proj = _make_projection(
+            node_type="orchestrator_generic",
+            mcp_expose=True,
+            tool_name="traced_tool",
+        )
+        reader = MagicMock()
+        reader.get_by_capability_tag = AsyncMock(return_value=[proj])
+
+        svc = ServiceMCPToolDiscovery(reader)
+        tools = await svc.discover_all()
+
+        assert len(tools) == 1
+        assert tools[0].metadata["entity_id"] == str(proj.entity_id)
+
+    async def test_discover_all_no_consul_fields_in_metadata(self) -> None:
+        """Tool metadata must not contain consul_host/port/scheme fields."""
+        proj = _make_projection(
+            node_type="orchestrator_generic",
+            mcp_expose=True,
+            tool_name="clean_tool",
+        )
+        reader = MagicMock()
+        reader.get_by_capability_tag = AsyncMock(return_value=[proj])
+
+        svc = ServiceMCPToolDiscovery(reader)
+        tools = await svc.discover_all()
+
+        assert len(tools) == 1
+        meta = tools[0].metadata
+        assert "consul_host" not in meta
+        assert "consul_port" not in meta
+        assert "service_name" not in meta or meta.get("source") != "consul_discovery"
+        assert meta["source"] == "event_bus_registry"
+
+    async def test_discover_all_propagates_registry_error(self) -> None:
+        """Should propagate InfraConnectionError from the reader."""
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
+
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="get_by_capability_tag",
+            target_name="test",
+            correlation_id=uuid4(),
+        )
+        reader = MagicMock()
+        reader.get_by_capability_tag = AsyncMock(
+            side_effect=InfraConnectionError("DB down", context=ctx)
         )
 
-    @pytest.mark.asyncio
-    async def test_discover_all_ignores_non_orchestrator_service(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-        registered_non_orchestrator_service: str,
-    ) -> None:
-        """Test discover_all() ignores services without node-type:orchestrator tag.
+        svc = ServiceMCPToolDiscovery(reader)
 
-        Verifies that:
-        - MCP-enabled services without orchestrator tag are not discovered
-        - Only orchestrator nodes can be exposed as MCP tools
-        """
-        tools = await mcp_discovery_service.discover_all()
+        with pytest.raises(InfraConnectionError):
+            await svc.discover_all()
 
-        # Verify the non-orchestrator service is not included
-        non_orch_tools = [
-            t
-            for t in tools
-            if t.orchestrator_service_id == registered_non_orchestrator_service
-        ]
 
-        assert len(non_orch_tools) == 0, (
-            "Non-orchestrator service should not be discovered: "
-            f"{registered_non_orchestrator_service}"
+@pytest.mark.unit
+class TestProjectionToTool:
+    """Tests for ServiceMCPToolDiscovery._projection_to_tool() edge cases."""
+
+    def test_returns_none_for_non_projection_object(self) -> None:
+        """Should return None for non-ModelRegistrationProjection objects."""
+        reader = MagicMock()
+        svc = ServiceMCPToolDiscovery(reader)
+
+        result = svc._projection_to_tool("not a projection", uuid4())
+
+        assert result is None
+
+    def test_description_falls_back_to_generated(self) -> None:
+        """Should generate description when mcp.description is None."""
+        proj = _make_projection(
+            node_type="orchestrator_generic",
+            mcp_expose=True,
+            tool_name="my_tool",
+            description=None,
         )
+        reader = MagicMock()
+        svc = ServiceMCPToolDiscovery(reader)
 
-    @pytest.mark.asyncio
-    async def test_discover_all_skips_service_without_tool_tag(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-        registered_mcp_service_without_tool_tag: str,
-    ) -> None:
-        """Test discover_all() skips services missing mcp-tool tag.
-
-        Verifies that:
-        - MCP-enabled orchestrators without mcp-tool tag are skipped
-        - A warning is logged (not tested here, but documented)
-        """
-        tools = await mcp_discovery_service.discover_all()
-
-        # Verify the service without tool tag is not included
-        no_tool_services = [
-            t
-            for t in tools
-            if t.orchestrator_service_id == registered_mcp_service_without_tool_tag
-        ]
-
-        assert len(no_tool_services) == 0, (
-            "Service without mcp-tool tag should not be discovered: "
-            f"{registered_mcp_service_without_tool_tag}"
-        )
-
-    @pytest.mark.asyncio
-    async def test_discover_all_returns_empty_list_when_no_mcp_services(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-    ) -> None:
-        """Test discover_all() returns empty list when no MCP services registered.
-
-        Verifies that:
-        - Empty list is returned (not None, not error)
-        - No exception is raised
-        """
-        # Note: There may be pre-existing services in Consul, so we just verify
-        # the return type is a list (not None or exception)
-        tools = await mcp_discovery_service.discover_all()
-
-        assert isinstance(tools, list), f"Expected list, got {type(tools)}"
-
-    @pytest.mark.asyncio
-    async def test_discover_all_populates_endpoint(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-        registered_mcp_service: dict[str, str],
-    ) -> None:
-        """Test discover_all() populates endpoint from service instance.
-
-        Verifies that:
-        - Endpoint is populated from healthy service instances
-        - Endpoint format is http://{address}:{port}
-        """
-        tools = await mcp_discovery_service.discover_all()
-
-        test_tool = next(
-            (t for t in tools if t.name == registered_mcp_service["tool_name"]),
-            None,
-        )
-
-        assert test_tool is not None
-        # Our test service was registered at 127.0.0.1:8080
-        assert test_tool.endpoint is not None
-        assert "127.0.0.1" in test_tool.endpoint
-        assert "8080" in test_tool.endpoint
-
-
-# =============================================================================
-# Discovery Tests - discover_by_service_id()
-# =============================================================================
-
-
-class TestDiscoverByServiceId:
-    """Tests for ServiceMCPToolDiscovery.discover_by_service_id() method."""
-
-    @pytest.mark.asyncio
-    async def test_discover_by_service_id_finds_service(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-        registered_mcp_service: dict[str, str],
-    ) -> None:
-        """Test discover_by_service_id() finds service by ID.
-
-        Verifies that:
-        - Service can be looked up by ID
-        - Correct tool definition is returned
-        """
-        tool = await mcp_discovery_service.discover_by_service_id(
-            registered_mcp_service["service_id"]
-        )
+        tool = svc._projection_to_tool(proj, uuid4())
 
         assert tool is not None
-        assert tool.name == registered_mcp_service["tool_name"]
-        assert tool.orchestrator_service_id == registered_mcp_service["service_id"]
-
-    @pytest.mark.asyncio
-    async def test_discover_by_service_id_returns_none_for_unknown_id(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-    ) -> None:
-        """Test discover_by_service_id() returns None for unknown ID.
-
-        Verifies that:
-        - None is returned for non-existent service ID
-        - No exception is raised
-        """
-        tool = await mcp_discovery_service.discover_by_service_id(
-            "nonexistent-service-id-12345"
-        )
-
-        assert tool is None
-
-    @pytest.mark.asyncio
-    async def test_discover_by_service_id_returns_none_for_non_mcp_service(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-        registered_non_mcp_service: str,
-    ) -> None:
-        """Test discover_by_service_id() returns None for non-MCP service.
-
-        Verifies that:
-        - Services without MCP tags are not returned
-        - None is returned instead of error
-        """
-        tool = await mcp_discovery_service.discover_by_service_id(
-            registered_non_mcp_service
-        )
-
-        assert tool is None
-
-    @pytest.mark.asyncio
-    async def test_discover_by_service_id_returns_none_for_non_orchestrator(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-        registered_non_orchestrator_service: str,
-    ) -> None:
-        """Test discover_by_service_id() returns None for non-orchestrator.
-
-        Verifies that:
-        - MCP-enabled non-orchestrators are not returned
-        """
-        tool = await mcp_discovery_service.discover_by_service_id(
-            registered_non_orchestrator_service
-        )
-
-        assert tool is None
-
-    @pytest.mark.asyncio
-    async def test_discover_by_service_id_returns_none_without_tool_tag(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-        registered_mcp_service_without_tool_tag: str,
-    ) -> None:
-        """Test discover_by_service_id() returns None when mcp-tool tag missing.
-
-        Verifies that:
-        - Services without mcp-tool:{name} tag return None
-        """
-        tool = await mcp_discovery_service.discover_by_service_id(
-            registered_mcp_service_without_tool_tag
-        )
-
-        assert tool is None
-
-
-# =============================================================================
-# Tag Filtering Tests - _is_mcp_orchestrator()
-# =============================================================================
-
-
-class TestIsMCPOrchestrator:
-    """Tests for ServiceMCPToolDiscovery._is_mcp_orchestrator() method."""
-
-    def test_is_mcp_orchestrator_with_both_tags(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-    ) -> None:
-        """Test _is_mcp_orchestrator() returns True with both required tags.
-
-        Verifies that:
-        - Both mcp-enabled and node-type:orchestrator tags are required
-        """
-        tags = ["mcp-enabled", "node-type:orchestrator", "other-tag"]
-
-        result = mcp_discovery_service._is_mcp_orchestrator(tags)
-
-        assert result is True
-
-    def test_is_mcp_orchestrator_missing_mcp_enabled(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-    ) -> None:
-        """Test _is_mcp_orchestrator() returns False without mcp-enabled tag.
-
-        Verifies that:
-        - Returns False when mcp-enabled tag is missing
-        """
-        tags = ["node-type:orchestrator", "other-tag"]
-
-        result = mcp_discovery_service._is_mcp_orchestrator(tags)
-
-        assert result is False
-
-    def test_is_mcp_orchestrator_missing_orchestrator_type(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-    ) -> None:
-        """Test _is_mcp_orchestrator() returns False without orchestrator tag.
-
-        Verifies that:
-        - Returns False when node-type:orchestrator tag is missing
-        """
-        tags = ["mcp-enabled", "node-type:effect", "other-tag"]
-
-        result = mcp_discovery_service._is_mcp_orchestrator(tags)
-
-        assert result is False
-
-    def test_is_mcp_orchestrator_empty_tags(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-    ) -> None:
-        """Test _is_mcp_orchestrator() returns False for empty tags.
-
-        Verifies that:
-        - Returns False for empty tag list
-        """
-        tags: list[str] = []
-
-        result = mcp_discovery_service._is_mcp_orchestrator(tags)
-
-        assert result is False
-
-
-# =============================================================================
-# Tool Name Extraction Tests - _extract_tool_name()
-# =============================================================================
-
-
-class TestExtractToolName:
-    """Tests for ServiceMCPToolDiscovery._extract_tool_name() method."""
-
-    def test_extract_tool_name_success(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-    ) -> None:
-        """Test _extract_tool_name() extracts name from mcp-tool tag.
-
-        Verifies that:
-        - Tool name is correctly extracted from mcp-tool:{name} tag
-        """
-        tags = ["mcp-enabled", "mcp-tool:my_test_tool", "other-tag"]
-
-        result = mcp_discovery_service._extract_tool_name(tags)
-
-        assert result == "my_test_tool"
-
-    def test_extract_tool_name_with_underscores(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-    ) -> None:
-        """Test _extract_tool_name() handles tool names with underscores.
-
-        Verifies that:
-        - Tool names with underscores are preserved
-        """
-        tags = ["mcp-tool:my_complex_tool_name"]
-
-        result = mcp_discovery_service._extract_tool_name(tags)
-
-        assert result == "my_complex_tool_name"
-
-    def test_extract_tool_name_with_dashes(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-    ) -> None:
-        """Test _extract_tool_name() handles tool names with dashes.
-
-        Verifies that:
-        - Tool names with dashes are preserved
-        """
-        tags = ["mcp-tool:my-tool-with-dashes"]
-
-        result = mcp_discovery_service._extract_tool_name(tags)
-
-        assert result == "my-tool-with-dashes"
-
-    def test_extract_tool_name_missing_tag(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-    ) -> None:
-        """Test _extract_tool_name() returns None when tag is missing.
-
-        Verifies that:
-        - Returns None when no mcp-tool tag exists
-        """
-        tags = ["mcp-enabled", "node-type:orchestrator", "other-tag"]
-
-        result = mcp_discovery_service._extract_tool_name(tags)
-
-        assert result is None
-
-    def test_extract_tool_name_empty_tags(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-    ) -> None:
-        """Test _extract_tool_name() returns None for empty tags.
-
-        Verifies that:
-        - Returns None for empty tag list
-        """
-        tags: list[str] = []
-
-        result = mcp_discovery_service._extract_tool_name(tags)
-
-        assert result is None
-
-    def test_extract_tool_name_first_match(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-    ) -> None:
-        """Test _extract_tool_name() returns first mcp-tool tag value.
-
-        Verifies that:
-        - First matching mcp-tool tag is used if multiple exist
-        """
-        tags = ["mcp-tool:first_tool", "mcp-tool:second_tool"]
-
-        result = mcp_discovery_service._extract_tool_name(tags)
-
-        assert result == "first_tool"
-
-
-# =============================================================================
-# Error Handling Tests
-# =============================================================================
-
-
-class TestErrorHandling:
-    """Tests for ServiceMCPToolDiscovery error handling."""
-
-    @pytest.mark.asyncio
-    async def test_discover_all_connection_error(self) -> None:
-        """Test discover_all() raises InfraConnectionError on Consul failure.
-
-        Verifies that:
-        - InfraConnectionError is raised when Consul is unreachable
-        - Error context includes transport type and operation
-        """
-        from omnibase_infra.errors import InfraConnectionError
-        from omnibase_infra.services.mcp.service_mcp_tool_discovery import (
-            ServiceMCPToolDiscovery,
-        )
-
-        # Create service pointing to invalid Consul address
-        bad_service = ServiceMCPToolDiscovery(
-            consul_host="invalid-host-that-does-not-exist.local",
-            consul_port=9999,
-        )
-
-        with pytest.raises(InfraConnectionError) as exc_info:
-            await bad_service.discover_all()
-
-        # Verify error context
-        assert exc_info.value.model.context is not None
-        assert exc_info.value.model.context.get("operation") == "discover_all"
-
-    @pytest.mark.asyncio
-    async def test_discover_by_service_id_connection_error(self) -> None:
-        """Test discover_by_service_id() raises InfraConnectionError.
-
-        Verifies that:
-        - InfraConnectionError is raised when Consul is unreachable
-        """
-        from omnibase_infra.errors import InfraConnectionError
-        from omnibase_infra.services.mcp.service_mcp_tool_discovery import (
-            ServiceMCPToolDiscovery,
-        )
-
-        # Create service pointing to invalid Consul address
-        bad_service = ServiceMCPToolDiscovery(
-            consul_host="invalid-host-that-does-not-exist.local",
-            consul_port=9999,
-        )
-
-        with pytest.raises(InfraConnectionError) as exc_info:
-            await bad_service.discover_by_service_id("any-service-id")
-
-        # Verify error context
-        assert exc_info.value.model.context is not None
-        assert exc_info.value.model.context.get("operation") == "discover_by_service_id"
-
-
-# =============================================================================
-# Service Metadata Tests
-# =============================================================================
-
-
-class TestServiceMetadata:
-    """Tests for ServiceMCPToolDiscovery.describe() method."""
-
-    def test_describe_returns_service_metadata(
-        self,
-        mcp_discovery_service: ServiceMCPToolDiscovery,
-    ) -> None:
-        """Test describe() returns correct service metadata.
-
-        Verifies that:
-        - Service name is returned
-        - Consul connection details are included
-        """
-        metadata = mcp_discovery_service.describe()
-
-        assert metadata["service_name"] == "ServiceMCPToolDiscovery"
-        assert metadata["consul_host"] == (CONSUL_HOST or "localhost")
-        assert metadata["consul_port"] == CONSUL_PORT
-        assert metadata["consul_scheme"] == CONSUL_SCHEME
+        assert "ONEX orchestrator" in tool.description
