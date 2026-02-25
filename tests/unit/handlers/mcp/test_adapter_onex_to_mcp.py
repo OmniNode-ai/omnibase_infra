@@ -159,6 +159,47 @@ class TestSuccessfulDispatch:
         assert result["isError"] is False
         assert result["content"][0]["text"] == "plain text result"
 
+    async def test_protocol_fields_stripped_from_result_payload(self) -> None:
+        """Envelope protocol fields are stripped from dict results before MCP serialization.
+
+        When the orchestrator returns an envelope-shaped result the internal
+        protocol fields (envelope_id, correlation_id, source, payload, metadata,
+        success) must not appear in the MCP content text.  Domain fields such as
+        "data" must be preserved.
+        """
+        executor = MagicMock()
+        executor.execute = AsyncMock(
+            return_value={
+                "success": True,
+                "result": {
+                    "envelope_id": "abc",
+                    "correlation_id": "xyz",
+                    "source": "mcp-adapter",
+                    "payload": {"arg": 1},
+                    "metadata": {"k": "v"},
+                    "success": True,
+                    "data": "actual_value",
+                },
+            }
+        )
+
+        adapter = _make_adapter(executor)
+        await _register_tool(adapter)
+
+        result = await adapter.invoke_tool("my_tool", {"input_data": "hello"})
+
+        assert result["isError"] is False
+        text = result["content"][0]["text"]
+
+        # Protocol envelope fields must be stripped
+        assert "envelope_id" not in text
+        assert "correlation_id" not in text
+        assert "source" not in text
+        assert "metadata" not in text
+
+        # Domain data must be preserved
+        assert "actual_value" in text or "data" in text
+
 
 # ---------------------------------------------------------------------------
 # R2: ONEX error response → isError: True

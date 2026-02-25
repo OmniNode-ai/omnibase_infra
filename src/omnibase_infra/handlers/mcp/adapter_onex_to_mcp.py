@@ -53,6 +53,12 @@ logger = logging.getLogger(__name__)
 # Internal ONEX envelope/protocol fields that must never be forwarded to MCP
 # clients.  These appear on the top-level dict when the orchestrator returns
 # an envelope-shaped result instead of a bare domain value.
+#
+# SHALLOW STRIPPING ONLY: only top-level keys are removed.  Nested dicts
+# inside "payload" or "metadata" are passed through untouched.  This is
+# intentional — orchestrator results are expected to be flat domain values;
+# if envelope fields appear at a deeper nesting level that signals a protocol
+# violation that should be fixed at the source, not silently scrubbed here.
 _PROTOCOL_FIELDS: frozenset[str] = frozenset(
     {
         "envelope_id",
