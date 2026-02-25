@@ -58,3 +58,15 @@ excluded_checks:
   - name: "Nightly Summary"
     workflow: nightly-tests.yml
     reason: "Nightly schedule only -- never runs on PRs"
+  - name: "Trigger Runtime Image Rebuild"
+    workflow: release.yml
+    reason: "Post-release only -- triggers omninode_infra rebuild (OMN-2751)"
+  - name: "Dependency Cascade"
+    workflow: release.yml
+    reason: "Post-release only -- opens bump PRs in downstream repos (OMN-2751)"
+  - name: "Compute Downstream Matrix"
+    workflow: dependency-cascade.yml
+    reason: "Post-release only -- part of dependency cascade (OMN-2751)"
+  - name: "Bump *"
+    workflow: dependency-cascade.yml
+    reason: "Post-release only -- matrix legs for downstream bump PRs (OMN-2751)"

@@ -21,6 +21,8 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -99,3 +101,43 @@ jobs:
             dist/SHA256SUMS.txt
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, 'rc') }}
+
+  # ---------------------------------------------------------------------------
+  # Post-release: trigger runtime Docker image rebuild (OMN-2751)
+  # ---------------------------------------------------------------------------
+  # When omnibase_infra is released, the runtime image in omninode_infra must be
+  # rebuilt to pick up the new version. This uses repository_dispatch to trigger
+  # the build-and-push workflow in the omninode_infra repo.
+  trigger-runtime-rebuild:
+    name: Trigger Runtime Image Rebuild
+    needs: release
+    if: ${{ !contains(needs.release.outputs.version, 'rc') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch runtime rebuild to omninode_infra
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.CROSS_REPO_PAT }}
+          repository: OmniNode-ai/omninode_infra
+          event-type: foundation-release
+          client-payload: >-
+            {
+              "package": "omnibase_infra",
+              "version": "${{ needs.release.outputs.version }}",
+              "source_repo": "${{ github.repository }}",
+              "source_sha": "${{ github.sha }}"
+            }
+
+  # ---------------------------------------------------------------------------
+  # Post-release: open dependency bump PRs in downstream repos (OMN-2751)
+  # ---------------------------------------------------------------------------
+  dependency-cascade:
+    name: Dependency Cascade
+    needs: release
+    if: ${{ !contains(needs.release.outputs.version, 'rc') }}
+    uses: ./.github/workflows/dependency-cascade.yml
+    with:
+      package: omnibase_infra
+      version: ${{ needs.release.outputs.version }}
+    secrets:
+      cross-repo-pat: ${{ secrets.CROSS_REPO_PAT }}
