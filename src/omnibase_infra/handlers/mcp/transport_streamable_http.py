@@ -9,32 +9,43 @@ The transport uses the official MCP Python SDK's streamable HTTP implementation,
 configured for stateless operation and JSON responses for scalability.
 
 Security:
-    Authentication is handled at the handler level (HandlerMCP), not at the
-    transport level. The transport exposes the raw HTTP endpoint without any
-    authentication middleware.
+    Authentication is enforced via MCPAuthMiddleware, an ASGI middleware that
+    validates bearer token / API key on every request to the MCP endpoint.
 
-    For production deployments before HandlerMCP authentication is implemented:
-    - Deploy behind an API gateway with authentication (recommended)
-    - Use network-level access controls (VPC, firewall rules)
-    - Restrict access to trusted clients only
+    The ``/health`` endpoint is explicitly exempted from authentication so that
+    infrastructure health checks can reach it without credentials.
 
-    The transport layer is intentionally kept simple to allow flexibility in
-    authentication strategies (API gateway, service mesh, direct auth).
+    Configure via ModelMcpHandlerConfig:
+    - ``auth_enabled=True`` (default): auth middleware is active
+    - ``auth_enabled=False``: middleware is bypassed; WARNING logged at startup
+    - ``api_key``: the secret token value (from Infisical/env)
 
-    See: HandlerMCP class docstring for authentication implementation status
-    See: TODO(OMN-1288) for authentication implementation tracking
+    Supported auth schemes (either accepted):
+    - ``Authorization: Bearer <token>``
+    - ``X-API-Key: <token>``
+
+    Unauthenticated requests receive HTTP 401 with a JSON error body.
+    Auth failures are logged with: timestamp, remote IP, rejection reason.
+    Successful tool invocations are logged with: timestamp, masked token
+    (last 4 chars), tool name (path), correlation ID.
 
 Usage:
     from omnibase_infra.handlers.models.mcp import ModelMcpHandlerConfig
 
-    config = ModelMcpHandlerConfig(host="0.0.0.0", port=8090, path="/mcp")
+    config = ModelMcpHandlerConfig(
+        host="0.0.0.0", port=8090, path="/mcp",
+        auth_enabled=True, api_key="secret-token",
+    )
     transport = TransportMCPStreamableHttp(config)
     await transport.start(tool_registry)
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import time
+import uuid
 from typing import TYPE_CHECKING
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -46,6 +57,7 @@ if TYPE_CHECKING:
 
     import uvicorn
     from starlette.applications import Starlette
+    from starlette.types import ASGIApp, Receive, Scope, Send
 
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
     from omnibase_spi.protocols.types.protocol_mcp_tool_types import (
@@ -53,6 +65,129 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+# Endpoints explicitly exempted from auth (case-insensitive prefix match)
+_AUTH_EXEMPT_PATHS: frozenset[str] = frozenset({"/health"})
+
+
+class MCPAuthMiddleware:
+    """ASGI middleware that enforces bearer token / API-key authentication.
+
+    Exempts ``/health`` (and any path in ``_AUTH_EXEMPT_PATHS``) from auth.
+    All other paths require a valid ``Authorization: Bearer <token>`` or
+    ``X-API-Key: <token>`` header.
+
+    Audit logging:
+        - Auth failures: WARNING with timestamp, remote IP, rejection reason.
+        - Successful authenticated requests: INFO with timestamp, masked token
+          (last 4 chars), path, and correlation ID from ``X-Correlation-ID``.
+
+    Args:
+        app: The inner ASGI application to wrap.
+        api_key: The expected token value. If empty or None, every request is
+            rejected with 401 (misconfiguration guard).
+    """
+
+    def __init__(self, app: ASGIApp, api_key: str) -> None:
+        self._app = app
+        self._api_key = api_key
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        # Only enforce auth on HTTP requests; forward all other scope types
+        # (lifespan, websocket, etc.) to the inner app without auth checks.
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+
+        path: str = scope.get("path", "")
+
+        # Exempt health and other explicitly excluded paths
+        if path in _AUTH_EXEMPT_PATHS:
+            await self._app(scope, receive, send)
+            return
+
+        # Extract remote IP for audit logging
+        client = scope.get("client")
+        remote_ip: str = client[0] if client else "unknown"
+
+        # Extract headers (ASGI headers are list of (name_bytes, value_bytes))
+        headers: dict[str, str] = {
+            k.decode("latin-1").lower(): v.decode("latin-1")
+            for k, v in scope.get("headers", [])
+        }
+
+        # Generate or propagate a correlation ID for audit trail traceability.
+        # If the client supplies X-Correlation-ID, use it; otherwise create one.
+        correlation_id: str = headers.get("x-correlation-id") or str(uuid.uuid4())
+
+        token: str | None = None
+
+        # Accept Authorization: Bearer <token>
+        auth_header = headers.get("authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header[len("bearer ") :]
+
+        # Accept X-API-Key: <token>
+        if token is None:
+            token = headers.get("x-api-key")
+
+        timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+        if not token or not self._api_key or token != self._api_key:
+            reason = (
+                "missing token"
+                if not token
+                else (
+                    "server misconfiguration" if not self._api_key else "invalid token"
+                )
+            )
+            logger.warning(
+                "MCP auth rejected",
+                extra={
+                    "timestamp": timestamp,
+                    "remote_ip": remote_ip,
+                    "path": path,
+                    "reason": reason,
+                    "correlation_id": correlation_id,
+                },
+            )
+            await self._send_401(send)
+            return
+
+        # Auth passed — log masked token (last 4 chars) for audit trail
+        masked = f"****{token[-4:]}" if len(token) >= 4 else "****"
+        logger.info(
+            "MCP auth accepted",
+            extra={
+                "timestamp": timestamp,
+                "masked_token": masked,
+                "path": path,
+                "correlation_id": correlation_id,
+            },
+        )
+
+        await self._app(scope, receive, send)
+
+    @staticmethod
+    async def _send_401(send: Send) -> None:
+        """Send an HTTP 401 response with a JSON error body."""
+        body = json.dumps(
+            {
+                "error": "Unauthorized",
+                "detail": "Valid bearer token or X-API-Key required",
+            }
+        ).encode()
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 401,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
 
 
 class TransportMCPStreamableHttp:
@@ -64,6 +199,14 @@ class TransportMCPStreamableHttp:
     The transport creates an ASGI application that can be:
     1. Run standalone via uvicorn
     2. Mounted into an existing FastAPI/Starlette application
+
+    Authentication:
+        When ``config.auth_enabled`` is True (default), every request to the
+        MCP endpoint is validated by ``MCPAuthMiddleware`` before reaching the
+        inner application. The ``/health`` endpoint is exempt.
+
+        When ``config.auth_enabled`` is False, a startup WARNING is logged and
+        no auth is enforced — intended for local development only.
 
     Attributes:
         config: MCP handler configuration containing host, port, path, etc.
@@ -108,7 +251,8 @@ class TransportMCPStreamableHttp:
         """Create the ASGI application for the MCP server.
 
         This method creates a Starlette application with the MCP server
-        mounted at the configured path.
+        mounted at the configured path, wrapped by ``MCPAuthMiddleware``
+        when ``config.auth_enabled`` is True.
 
         Args:
             tools: Sequence of tool definitions to expose.
@@ -116,11 +260,14 @@ class TransportMCPStreamableHttp:
                           Signature: (tool_name, arguments) -> result
 
         Returns:
-            Starlette ASGI application.
+            Starlette ASGI application (may be wrapped in auth middleware).
 
         Note:
             The MCP SDK is imported lazily to allow the module to be
             imported even if the MCP SDK is not installed.
+
+            When ``auth_enabled=False``, a WARNING is logged at startup
+            and no authentication is enforced. Do not use in production.
         """
         try:
             from mcp.server.fastmcp import FastMCP
@@ -148,6 +295,16 @@ class TransportMCPStreamableHttp:
             ],
         )
 
+        # Apply authentication middleware (R1, R3 — OMN-2701)
+        if self._config.auth_enabled:
+            api_key = self._config.api_key or ""
+            self._app = MCPAuthMiddleware(self._app, api_key=api_key)  # type: ignore[assignment]
+        else:
+            logger.warning(
+                "MCP auth disabled — do not use in production",
+                extra={"path": self._config.path},
+            )
+
         logger.info(
             "MCP streamable HTTP transport app created",
             extra={
@@ -155,10 +312,11 @@ class TransportMCPStreamableHttp:
                 "tool_count": len(tools),
                 "stateless": self._config.stateless,
                 "json_response": self._config.json_response,
+                "auth_enabled": self._config.auth_enabled,
             },
         )
 
-        return self._app
+        return self._app  # type: ignore[return-value]
 
     def _register_tool(
         self,
@@ -347,4 +505,4 @@ class TransportMCPStreamableHttp:
         logger.info("MCP streamable HTTP transport stopped")
 
 
-__all__ = ["TransportMCPStreamableHttp"]
+__all__ = ["MCPAuthMiddleware", "TransportMCPStreamableHttp"]

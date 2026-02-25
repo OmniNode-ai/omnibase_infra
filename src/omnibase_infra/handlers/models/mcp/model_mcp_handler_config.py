@@ -18,6 +18,10 @@ class ModelMcpHandlerConfig(BaseModel):
         json_response: Return JSON responses instead of SSE streaming.
         timeout_seconds: Default timeout for tool execution.
         max_tools: Maximum number of tools to expose.
+        auth_enabled: Whether bearer token / API-key auth middleware is active.
+            When False, a WARNING is logged at startup. Default True.
+        api_key: Bearer token / API key value required for authenticated requests.
+            Loaded from Infisical or env. Required when auth_enabled=True.
     """
 
     host: str = Field(default="0.0.0.0", description="Host to bind MCP server to")
@@ -33,6 +37,20 @@ class ModelMcpHandlerConfig(BaseModel):
         default=30.0, description="Default timeout for tool execution"
     )
     max_tools: int = Field(default=100, description="Maximum number of tools to expose")
+    auth_enabled: bool = Field(
+        default=True,
+        description=(
+            "Whether bearer token / API-key auth middleware is active. "
+            "When False, a WARNING is logged at startup."
+        ),
+    )
+    api_key: str | None = Field(
+        default=None,
+        description=(
+            "Bearer token / API key required for authenticated requests. "
+            "Loaded from Infisical or env. Required when auth_enabled=True."
+        ),
+    )
 
     model_config = {"frozen": True}
 

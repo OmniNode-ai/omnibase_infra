@@ -19,6 +19,7 @@ class ModelMCPServerConfig(BaseModel):
     - Kafka settings for hot reload
     - HTTP server binding
     - Execution defaults
+    - Authentication settings (OMN-2701)
 
     Attributes:
         consul_host: Consul server hostname for service discovery.
@@ -31,6 +32,8 @@ class ModelMCPServerConfig(BaseModel):
         default_timeout: Default execution timeout for tools.
         dev_mode: Whether to run in development mode (local contracts).
         contracts_dir: Directory for contract scanning in dev mode.
+        auth_enabled: Whether bearer token / API-key auth middleware is active.
+        api_key: API key / bearer token value for authenticated requests.
     """
 
     consul_host: str = Field(default="localhost", description="Consul server hostname")
@@ -61,6 +64,20 @@ class ModelMCPServerConfig(BaseModel):
     )
     contracts_dir: str | None = Field(
         default=None, description="Directory for contract scanning in dev mode"
+    )
+    auth_enabled: bool = Field(
+        default=True,
+        description=(
+            "Whether bearer token / API-key auth middleware is active. "
+            "When False, a WARNING is logged at startup. Default True."
+        ),
+    )
+    api_key: str | None = Field(
+        default=None,
+        description=(
+            "Bearer token / API key required for authenticated MCP requests. "
+            "Loaded from Infisical or env. Required when auth_enabled=True."
+        ),
     )
 
 
