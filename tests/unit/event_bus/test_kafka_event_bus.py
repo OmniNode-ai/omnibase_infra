@@ -3022,9 +3022,9 @@ class TestKafkaAuthConfig:
             environment=TEST_ENVIRONMENT,
             security_protocol="SASL_SSL",
             sasl_mechanism="OAUTHBEARER",
-            sasl_oauthbearer_token_endpoint_url="https://auth.example.com/token",  # noqa: S106
+            sasl_oauthbearer_token_endpoint_url="https://auth.example.com/token",
             sasl_oauthbearer_client_id="my-client-id",
-            sasl_oauthbearer_client_secret="my-client-secret",  # noqa: S106
+            sasl_oauthbearer_client_secret="my-client-secret",
         )
 
         captured_kwargs: dict[str, object] = {}

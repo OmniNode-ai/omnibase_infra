@@ -274,6 +274,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Integration tests with controlled table names - S608 false positives
 "tests/integration/runtime/db/test_postgres_repository_runtime_integration.py" = ["S608"]
+# Unit tests use hardcoded test credentials - S106 false positives
+"tests/unit/event_bus/test_kafka_event_bus.py" = ["S106"]
 
 [tool.ruff.lint.isort]
 # Ensure consistent import sorting between local and CI
