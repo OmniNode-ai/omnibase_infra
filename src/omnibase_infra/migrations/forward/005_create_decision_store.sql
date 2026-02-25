@@ -48,10 +48,17 @@ CREATE TABLE IF NOT EXISTS decision_store (
         CHECK (source IN ('planning', 'interview', 'pr_review', 'manual')),
     epic_id         TEXT,
     supersedes      JSONB NOT NULL DEFAULT '[]',
-    superseded_by   UUID,
+    superseded_by   UUID REFERENCES decision_store (decision_id),
     created_at      TIMESTAMPTZ NOT NULL,
     db_written_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by      TEXT NOT NULL
+    created_by      TEXT NOT NULL,
+    -- Array-shape guards: reject non-array JSON values.
+    CONSTRAINT chk_scope_services_is_array CHECK (jsonb_typeof(scope_services) = 'array'),
+    CONSTRAINT chk_alternatives_is_array CHECK (jsonb_typeof(alternatives) = 'array'),
+    CONSTRAINT chk_tags_is_array CHECK (jsonb_typeof(tags) = 'array'),
+    CONSTRAINT chk_supersedes_is_array CHECK (jsonb_typeof(supersedes) = 'array'),
+    -- Prevent a decision from superseding itself.
+    CONSTRAINT chk_not_self_superseded CHECK (superseded_by IS NULL OR superseded_by <> decision_id)
 );
 
 -- =============================================================================
@@ -124,7 +131,8 @@ CREATE TABLE IF NOT EXISTS decision_conflicts (
     -- Normalise pair order to prevent (A,B) and (B,A) duplicates.
     CONSTRAINT chk_conflict_pair_order CHECK (decision_min_id < decision_max_id),
     CONSTRAINT uk_conflict_pair UNIQUE (decision_min_id, decision_max_id),
-    structural_confidence DECIMAL(4,3) NOT NULL,
+    structural_confidence DECIMAL(4,3) NOT NULL
+        CHECK (structural_confidence >= 0.000 AND structural_confidence <= 1.000),
     semantic_verdict      BOOLEAN,
     semantic_explanation  TEXT,
     final_severity        TEXT NOT NULL
@@ -134,7 +142,13 @@ CREATE TABLE IF NOT EXISTS decision_conflicts (
     detected_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     resolved_at           TIMESTAMPTZ,
     resolved_by           TEXT,
-    resolution_note       TEXT
+    resolution_note       TEXT,
+    -- Resolved conflicts must have resolver metadata.
+    CONSTRAINT chk_resolved_requires_metadata
+        CHECK (
+            status <> 'RESOLVED'
+            OR (resolved_at IS NOT NULL AND resolved_by IS NOT NULL)
+        )
 );
 
 -- =============================================================================
