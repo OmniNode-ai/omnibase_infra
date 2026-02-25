@@ -1,0 +1,109 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeDecisionStoreQueryCompute
+#
+# Cursor-paginated decision store query compute node.
+# Queries decisions with flexible scope filtering and stable cursor pagination.
+#
+# Related Tickets:
+#   - OMN-2767: NodeDecisionStoreQueryCompute implementation
+#   - OMN-2765: NodeDecisionStoreEffect (write path)
+#   - OMN-2764: DB migrations (decision_store table + indexes)
+#   - OMN-2763: omnibase_core decision store models
+#
+# Contract identifiers
+name: "node_decision_store_query_compute"
+contract_name: "node_decision_store_query_compute"
+node_name: "node_decision_store_query_compute"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+# Node type
+node_type: "COMPUTE_GENERIC"
+# Description
+description: >
+  Compute node for cursor-paginated decision store queries. Supports filtering by domain, layer, decision_type, tags, epic_id, status, and scope_services (ANY/ALL/EXACT modes). Returns a paginated result with opaque cursor for stable page traversal under concurrent writes.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelPayloadQueryDecisions"
+  module: "omnibase_infra.nodes.node_decision_store_query_compute.models.model_payload_query_decisions"
+  description: "Query filter parameters with cursor and limit."
+output_model:
+  name: "ModelResultDecisionList"
+  module: "omnibase_infra.nodes.node_decision_store_query_compute.models.model_result_decision_list"
+  description: "Paginated decision list with next_cursor and total_active count."
+# Capability declaration
+capabilities:
+  - name: "decision_store.query_decisions"
+    description: >
+      Query decisions from the decision_store table with cursor-based pagination and flexible scope filtering (ANY/ALL/EXACT modes).
+
+# Handler routing
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "decision_store.query_decisions"
+      handler_class: "HandlerQueryDecisions"
+      handler_module: "omnibase_infra.nodes.node_decision_store_query_compute.handlers.handler_query_decisions"
+      description: >
+        Cursor-paginated SELECT from decision_store with dynamic WHERE clause, scope_services filter (ANY/ALL/EXACT), and COUNT(*) for total_active.
+
+      input_model:
+        name: "ModelPayloadQueryDecisions"
+        module: "omnibase_infra.nodes.node_decision_store_query_compute.models.model_payload_query_decisions"
+        description: "Query filter parameters."
+# Error handling
+error_handling:
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+      - "InfraUnavailableError"
+  error_types:
+    - name: "DecisionQueryError"
+      description: "Failed to execute decision store query"
+      recoverable: true
+    - name: "InvalidCursorError"
+      description: "Cursor is malformed or cannot be decoded"
+      recoverable: false
+# Health check
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  checks:
+    - name: "query_handler_loaded"
+      type: "handler"
+      critical: true
+    - name: "db_pool_available"
+      type: "dependency"
+      critical: true
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-25"
+  tags:
+    - compute
+    - decision-store
+    - query
+    - pagination
+    - cursor
+    - scope-filter
+  related_tickets:
+    - "OMN-2767"
+    - "OMN-2765"
+    - "OMN-2764"
+    - "OMN-2763"
