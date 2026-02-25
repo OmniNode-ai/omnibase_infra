@@ -29,7 +29,7 @@ import json
 import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -143,22 +143,23 @@ def _row_to_entry(row: Mapping[str, object]) -> ModelDecisionStoreEntry:
         ModelDecisionStoreEntry,
     )
 
-    # JSONB columns come back as strings from asyncpg; parse them.
-    scope_services_raw = row["scope_services"]
-    if isinstance(scope_services_raw, str):
-        scope_services_raw = json.loads(scope_services_raw)
-
-    tags_raw = row["tags"]
-    if isinstance(tags_raw, str):
-        tags_raw = json.loads(tags_raw)
-
-    alternatives_raw = row["alternatives"]
-    if isinstance(alternatives_raw, str):
-        alternatives_raw = json.loads(alternatives_raw)
-
-    supersedes_raw = row["supersedes"]
-    if isinstance(supersedes_raw, str):
-        supersedes_raw = json.loads(supersedes_raw)
+    # JSONB columns come back as strings from asyncpg; parse and cast to list[object].
+    _ss = row["scope_services"]
+    scope_services_list = cast(
+        "list[object]", json.loads(_ss) if isinstance(_ss, str) else _ss
+    )
+    _tags = row["tags"]
+    tags_list = cast(
+        "list[object]", json.loads(_tags) if isinstance(_tags, str) else _tags
+    )
+    _alts = row["alternatives"]
+    alternatives_list = cast(
+        "list[object]", json.loads(_alts) if isinstance(_alts, str) else _alts
+    )
+    _sup = row["supersedes"]
+    supersedes_list = cast(
+        "list[object]", json.loads(_sup) if isinstance(_sup, str) else _sup
+    )
 
     return ModelDecisionStoreEntry.model_validate(
         {
@@ -168,13 +169,13 @@ def _row_to_entry(row: Mapping[str, object]) -> ModelDecisionStoreEntry:
             "decision_type": row["decision_type"],
             "status": row["status"],
             "scope_domain": row["scope_domain"],
-            "scope_services": tuple(scope_services_raw),
+            "scope_services": tuple(scope_services_list),
             "scope_layer": row["scope_layer"],
             "rationale": row["rationale"],
-            "alternatives": alternatives_raw,
-            "tags": tuple(tags_raw),
+            "alternatives": alternatives_list,
+            "tags": tuple(tags_list),
             "epic_id": row["epic_id"],
-            "supersedes": tuple(UUID(s) for s in supersedes_raw),
+            "supersedes": tuple(UUID(str(s)) for s in supersedes_list),
             "superseded_by": row["superseded_by"],
             "source": row["source"],
             "created_at": row["created_at"],
