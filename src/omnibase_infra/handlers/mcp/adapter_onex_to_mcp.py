@@ -16,22 +16,31 @@ Example:
     tools = await adapter.discover_tools()
     result = await adapter.invoke_tool("node_name", {"param": "value"})
 
-Note:
-    This adapter is designed for future integration with the ONEX node registry.
-    Currently, tool discovery is manual via `register_node_as_tool()`. Once the
-    ONEX registry is fully implemented (OMN-1288), this adapter will automatically
-    scan the registry for nodes that expose MCP capabilities through their
-    contract.yaml `mcp_enabled: true` flag, enabling zero-configuration tool
-    discovery for AI agents.
+Contract-driven discovery:
+    Contracts with ``mcp.expose: true`` are automatically discovered when
+    ``contracts_root`` is provided to ``discover_tools()``. The tool name,
+    description, input schema, and endpoint are all derived from the contract.
+
+    Example contract.yaml fragment::
+
+        mcp:
+          expose: true
+          tool_name: "register_node"
+          description: "Register a new ONEX node with the cluster."
+          timeout_seconds: 30
 """
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
+
+import yaml
 
 from omnibase_infra.adapters.adapter_onex_tool_execution import AdapterONEXToolExecution
 from omnibase_infra.enums import EnumInfraTransportType
@@ -169,20 +178,48 @@ class ONEXToMCPAdapter:
     async def discover_tools(
         self,
         tags: list[str] | None = None,
+        contracts_root: Path | None = None,
     ) -> Sequence[MCPToolDefinition]:
         """Discover MCP-enabled ONEX nodes.
 
-        Scans the node registry for nodes that expose MCP tool capabilities
-        and converts their contracts to MCP tool definitions.
+        When ``contracts_root`` is provided, scans all ``contract.yaml`` files
+        under that directory tree.  Contracts that contain an ``mcp.expose: true``
+        stanza are converted to :class:`MCPToolDefinition` instances and merged
+        into the in-memory cache (existing manual registrations are preserved and
+        take precedence when tool names collide).
+
+        When ``contracts_root`` is ``None``, only the existing in-memory cache is
+        returned (legacy behaviour — no file I/O).
+
+        The discovery pipeline for each qualifying contract:
+
+        1. Load contract YAML; skip unparseable files with a warning.
+        2. Skip contracts where ``mcp.expose`` is absent or falsy.
+        3. Resolve ``tool_name`` → ``mcp.tool_name`` or ``name`` or file stem.
+        4. Resolve ``description`` → ``mcp.description`` or top-level
+           ``description``.
+        5. Load the Pydantic input model declared in ``input_model.name`` +
+           ``input_model.module``; derive JSON schema via
+           :meth:`pydantic_to_json_schema`.  Falls back to
+           ``{"type": "object"}`` on import errors.
+        6. Derive ``endpoint`` from Consul registration metadata when available;
+           otherwise leave as an empty string.
+        7. Build :class:`MCPToolDefinition`; write into ``_tool_cache`` only if
+           the name is **not already present** (manual registrations win).
 
         Args:
-            tags: Optional list of tags to filter by.
+            tags: Optional list of tags to filter results.  Filtering is applied
+                *after* the cache has been populated from contracts.
+            contracts_root: Root directory to search for ``contract.yaml`` files.
+                Pass ``None`` to skip filesystem scanning.
 
         Returns:
-            Sequence of discovered tool definitions.
+            Sequence of discovered tool definitions matching the optional tag
+            filter.
         """
-        # TODO(OMN-1288): Implement actual registry scanning
-        # For now, return cached tools
+        if contracts_root is not None:
+            self._scan_contracts(contracts_root)
+
         tools = list(self._tool_cache.values())
 
         if tags:
@@ -193,10 +230,164 @@ class ONEXToMCPAdapter:
             extra={
                 "tool_count": len(tools),
                 "filter_tags": tags,
+                "contracts_root": str(contracts_root) if contracts_root else None,
             },
         )
 
         return tools
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _scan_contracts(self, contracts_root: Path) -> None:
+        """Scan *contracts_root* for ``contract.yaml`` files and populate cache.
+
+        Contracts where ``mcp.expose`` is ``true`` are converted to
+        :class:`MCPToolDefinition` and merged into ``_tool_cache``.  Existing
+        cache entries are not overwritten (manual registrations take precedence).
+
+        Args:
+            contracts_root: Root directory to search recursively.
+        """
+        for contract_path in contracts_root.rglob("contract.yaml"):
+            self._load_contract(contract_path)
+
+    def _load_contract(self, contract_path: Path) -> None:
+        """Parse one contract YAML and register tool if MCP-enabled.
+
+        Invalid / unparseable contracts are logged and skipped (non-fatal).
+        Contracts without ``mcp.expose: true`` are silently ignored.
+
+        Args:
+            contract_path: Absolute path to the ``contract.yaml`` file.
+        """
+        try:
+            raw: object = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError, ValueError) as exc:
+            logger.warning(
+                "Skipping contract: failed to parse YAML",
+                extra={
+                    "contract_path": str(contract_path),
+                    "error": str(exc),
+                },
+            )
+            return
+
+        if not isinstance(raw, dict):
+            logger.warning(
+                "Skipping contract: unexpected top-level type",
+                extra={
+                    "contract_path": str(contract_path),
+                    "actual_type": type(raw).__name__,
+                },
+            )
+            return
+
+        mcp_section = raw.get("mcp")
+        if not isinstance(mcp_section, dict):
+            # No mcp section — silently ignore
+            return
+        if not mcp_section.get("expose", False):
+            # mcp.expose absent or False — silently ignore
+            return
+
+        # --- Derive tool name ---
+        tool_name: str = (
+            str(mcp_section["tool_name"])
+            if mcp_section.get("tool_name")
+            else str(raw.get("name", contract_path.parent.name))
+        )
+
+        # --- Skip if already in cache (manual registration wins) ---
+        if tool_name in self._tool_cache:
+            logger.debug(
+                "Contract-discovered tool already registered; skipping",
+                extra={
+                    "tool_name": tool_name,
+                    "contract_path": str(contract_path),
+                },
+            )
+            return
+
+        # --- Derive description ---
+        description: str = str(
+            mcp_section.get("description") or raw.get("description", "")
+        ).strip()
+
+        # --- Derive timeout ---
+        timeout_raw = mcp_section.get("timeout_seconds", 30)
+        timeout_seconds: int = int(timeout_raw) if isinstance(timeout_raw, int) else 30
+
+        # --- Derive input schema from Pydantic model ---
+        input_schema: dict[str, object] = {"type": "object"}
+        input_model_section = raw.get("input_model")
+        if isinstance(input_model_section, dict):
+            model_name = input_model_section.get("name")
+            model_module = input_model_section.get("module")
+            if model_name and model_module:
+                input_schema = self._resolve_input_schema(
+                    str(model_name), str(model_module)
+                )
+
+        # --- Extract parameters from schema ---
+        parameters = self.extract_parameters_from_schema(input_schema)
+
+        tool = MCPToolDefinition(
+            name=tool_name,
+            tool_type="function",
+            description=description,
+            version=str(raw.get("node_version", "1.0.0")),
+            parameters=parameters,
+            execution_endpoint="",  # Consul endpoint resolved at invocation time
+            timeout_seconds=timeout_seconds,
+            metadata={
+                "contract_path": str(contract_path),
+                "node_name": str(raw.get("name", "")),
+                "node_type": str(raw.get("node_type", "")),
+                "source": "contract_discovery",
+            },
+        )
+        self._tool_cache[tool_name] = tool
+
+        logger.info(
+            "Registered MCP tool from contract",
+            extra={
+                "tool_name": tool_name,
+                "contract_path": str(contract_path),
+                "parameter_count": len(parameters),
+            },
+        )
+
+    def _resolve_input_schema(
+        self, model_name: str, model_module: str
+    ) -> dict[str, object]:
+        """Import *model_module* and generate JSON Schema for *model_name*.
+
+        Falls back to ``{"type": "object"}`` when the module cannot be
+        imported or the class is not a Pydantic model.
+
+        Args:
+            model_name: Class name within the module.
+            model_module: Dotted module path.
+
+        Returns:
+            JSON Schema dict.
+        """
+        try:
+            module = importlib.import_module(model_module)
+            model_class = getattr(module, model_name)
+            return self.pydantic_to_json_schema(model_class)
+        except (ImportError, AttributeError, TypeError, ValueError) as exc:
+            logger.warning(
+                "Cannot resolve input schema for contract tool; using fallback",
+                extra={
+                    "model_name": model_name,
+                    "model_module": model_module,
+                    "error": str(exc),
+                },
+            )
+            return {"type": "object"}
 
     async def register_node_as_tool(
         self,
