@@ -113,7 +113,11 @@ from uuid import uuid4
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
-from omnibase_infra.enums import EnumInfraTransportType, EnumKafkaAcks
+from omnibase_infra.enums import (
+    EnumInfraTransportType,
+    EnumKafkaAcks,
+    EnumKafkaEnvironment,
+)
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
 logger = logging.getLogger(__name__)
@@ -128,7 +132,7 @@ class ModelKafkaEventBusConfig(BaseModel):
 
     Attributes:
         bootstrap_servers: Kafka bootstrap servers (host:port format)
-        environment: Environment identifier for message routing
+        environment: Environment identifier for message routing (EnumKafkaEnvironment)
         timeout_seconds: Timeout for Kafka operations in seconds
         max_retry_attempts: Maximum retry attempts for publish operations
         retry_backoff_base: Base delay in seconds for exponential backoff
@@ -166,10 +170,13 @@ class ModelKafkaEventBusConfig(BaseModel):
         description="Kafka bootstrap servers (host:port format, comma-separated for multiple)",
         min_length=1,
     )
-    environment: str = Field(
-        default="local",
-        description="Environment identifier for message routing (e.g., 'local', 'dev', 'prod')",
-        min_length=1,
+    environment: EnumKafkaEnvironment = Field(
+        default=EnumKafkaEnvironment.LOCAL,
+        description=(
+            "Environment identifier for message routing. "
+            "Valid values: 'local', 'dev', 'staging', 'prod'. "
+            "Accepts EnumKafkaEnvironment members or coercible string values."
+        ),
     )
     timeout_seconds: int = Field(
         default=30,
@@ -412,17 +419,22 @@ class ModelKafkaEventBusConfig(BaseModel):
 
     @field_validator("environment", mode="before")
     @classmethod
-    def validate_environment(cls, v: object) -> str:
-        """Validate environment identifier.
+    def validate_environment(cls, v: object) -> EnumKafkaEnvironment:
+        """Validate environment identifier and coerce to EnumKafkaEnvironment.
+
+        Accepts EnumKafkaEnvironment members directly or string values that
+        correspond to valid enum values ('local', 'dev', 'staging', 'prod').
+        Invalid values raise ProtocolConfigurationError with context.
 
         Args:
             v: Environment value (any type before Pydantic conversion)
 
         Returns:
-            Validated environment string
+            EnumKafkaEnvironment member
 
         Raises:
-            ProtocolConfigurationError: If environment is empty or invalid type
+            ProtocolConfigurationError: If environment is None, not a string,
+                empty, or not a valid EnumKafkaEnvironment value
         """
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.KAFKA,
@@ -438,6 +450,9 @@ class ModelKafkaEventBusConfig(BaseModel):
                 parameter="environment",
                 value=None,
             )
+        # Allow EnumKafkaEnvironment instances to pass through
+        if isinstance(v, EnumKafkaEnvironment):
+            return v
         if not isinstance(v, str):
             raise ProtocolConfigurationError(
                 f"environment must be a string, got {type(v).__name__}",
@@ -445,14 +460,24 @@ class ModelKafkaEventBusConfig(BaseModel):
                 parameter="environment",
                 value=type(v).__name__,
             )
-        if not v.strip():
+        v = v.strip()
+        if not v:
             raise ProtocolConfigurationError(
                 "environment cannot be empty",
                 context=context,
                 parameter="environment",
                 value=v,
             )
-        return v.strip()
+        valid_values = {e.value: e for e in EnumKafkaEnvironment}
+        if v not in valid_values:
+            raise ProtocolConfigurationError(
+                f"environment '{v}' is not a valid Kafka environment. "
+                f"Valid values: {sorted(valid_values.keys())}",
+                context=context,
+                parameter="environment",
+                value=v,
+            )
+        return valid_values[v]
 
     def apply_environment_overrides(self) -> ModelKafkaEventBusConfig:
         """Apply environment variable overrides to configuration.
@@ -602,7 +627,7 @@ class ModelKafkaEventBusConfig(BaseModel):
         """
         base_config = cls(
             bootstrap_servers="localhost:9092",
-            environment="local",
+            environment=EnumKafkaEnvironment.LOCAL,
             timeout_seconds=30,
             max_retry_attempts=3,
             retry_backoff_base=1.0,

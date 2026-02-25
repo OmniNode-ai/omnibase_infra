@@ -444,7 +444,7 @@ class TestMixinMethodFunctionality:
         ):
             config = ModelKafkaEventBusConfig(
                 bootstrap_servers="localhost:9092",
-                environment="test",
+                environment="dev",
             )
             bus = EventBusKafka(config=config)
             yield bus
