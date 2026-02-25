@@ -1,0 +1,266 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeDecisionStoreEffect
+#
+# Implements the two-stage write handler for the ONEX decision management system.
+# Stage 1 commits independently; Stage 2 (conflict detection) failure never
+# rolls back Stage 1.
+#
+# Related Tickets:
+#   - OMN-2765: NodeDecisionStoreEffect implementation
+#   - OMN-2764: DB migrations (decision_store, decision_conflicts tables)
+#   - OMN-2763: omnibase_core store models
+#
+# Contract identifiers
+name: "node_decision_store_effect"
+contract_name: "node_decision_store_effect"
+node_name: "node_decision_store_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+# Node type
+node_type: "EFFECT_GENERIC"
+# Description
+description: >
+  Two-stage effect node for decision store persistence. Stage 1 normalises and upserts the decision record into decision_store, committing independently of Stage 2. Stage 2 runs structural conflict detection against ACTIVE decisions in the same scope_domain + scope_layer, writing pairs >= 0.3 confidence to decision_conflicts and enforcing the ACTIVE invariant for pairs >= 0.9. Stage 2 failure never rolls back Stage 1. Supports two intent types: write_decision (two-stage) and write_conflict (idempotent pair insert).
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelIntent"
+  module: "omnibase_core.models.reducer.model_intent"
+  description: "Intent model with write_decision or write_conflict typed payload."
+output_model:
+  name: "ModelBackendResult"
+  module: "omnibase_infra.models.model_backend_result"
+  description: "Output model containing PostgreSQL operation result."
+# =============================================================================
+# HANDLER ROUTING (Declarative Handler Dispatch)
+# =============================================================================
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    # Write Decision — two-stage: upsert (Stage 1, committed) + conflict detection (Stage 2)
+    # Triggered by decision capture intents from planning / interview / pr_review workflows.
+    # Stage 1: normalize, validate, upsert into decision_store ON CONFLICT DO UPDATE.
+    # Stage 2: structural conflict detection, writes to decision_conflicts.
+    - payload_type: "decision_store.write_decision"
+      handler:
+        name: "HandlerWriteDecision"
+        module: "omnibase_infra.nodes.node_decision_store_effect.handlers.handler_write_decision"
+      backend: "postgres"
+      description: "Two-stage upsert into decision_store with structural conflict detection."
+      input_model:
+        name: "ModelPayloadWriteDecision"
+        module: "omnibase_infra.nodes.node_decision_store_effect.models.model_payload_write_decision"
+      output_fields:
+        - success
+        - error
+        - error_code
+        - duration_ms
+        - correlation_id
+    # Write Conflict — idempotent INSERT ON CONFLICT DO NOTHING into decision_conflicts.
+    # Used for direct conflict injection, tooling, and testing.
+    - payload_type: "decision_store.write_conflict"
+      handler:
+        name: "HandlerWriteConflict"
+        module: "omnibase_infra.nodes.node_decision_store_effect.handlers.handler_write_conflict"
+      backend: "postgres"
+      description: "Idempotent conflict-pair insert into decision_conflicts."
+      input_model:
+        name: "ModelPayloadWriteConflict"
+        module: "omnibase_infra.nodes.node_decision_store_effect.models.model_payload_write_conflict"
+      output_fields:
+        - success
+        - error
+        - error_code
+        - duration_ms
+        - correlation_id
+  # Execution configuration
+  execution_mode: "sequential"
+  partial_failure_handling: false
+  aggregation_strategy: "first_match"
+# =============================================================================
+# ERROR HANDLING (Circuit Breaker + Retry + Sanitization)
+# =============================================================================
+error_handling:
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+    half_open_max_requests: 3
+    per_backend: false
+    backends:
+      - name: "postgres"
+        failure_threshold: 5
+        reset_timeout_ms: 60000
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+      - "InfraUnavailableError"
+      - "RepositoryExecutionError"
+  error_sanitization:
+    enabled: true
+    utility: "omnibase_infra.utils.util_error_sanitization"
+    sanitize_patterns:
+      - "password"
+      - "secret"
+      - "token"
+      - "api_key"
+      - "connection_string"
+  error_types:
+    - name: "InfraConnectionError"
+      description: "Failed to connect to PostgreSQL"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "InfraTimeoutError"
+      description: "PostgreSQL operation timed out"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "InfraAuthenticationError"
+      description: "Authentication failed with PostgreSQL"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "InfraUnavailableError"
+      description: "PostgreSQL is unavailable (circuit open)"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "RepositoryExecutionError"
+      description: "PostgreSQL query execution failed"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "ValidationError"
+      description: "Payload validation failed (scope_domain, created_at, etc.)"
+      recoverable: false
+      retry_strategy: "none"
+  error_codes:
+    - code: "POSTGRES_CONNECTION_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "Connection to PostgreSQL server failed"
+      retriable: true
+    - code: "POSTGRES_TIMEOUT_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "PostgreSQL operation exceeded timeout"
+      retriable: true
+    - code: "POSTGRES_AUTH_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "Authentication with PostgreSQL server failed"
+      retriable: false
+    - code: "POSTGRES_UPSERT_ERROR"
+      backend: "postgres"
+      operation: "write_decision"
+      description: "PostgreSQL decision upsert failed"
+      retriable: false
+    - code: "POSTGRES_UNKNOWN_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "Unknown error during PostgreSQL operation"
+      retriable: false
+# IO operations (EFFECT node specific)
+io_operations:
+  - operation: "write_decision"
+    description: "Two-stage: upsert decision_store + detect conflicts in decision_conflicts"
+    input_fields:
+      - decision_id
+      - correlation_id
+      - title
+      - decision_type
+      - status
+      - scope_domain
+      - scope_services
+      - scope_layer
+      - rationale
+      - alternatives
+      - tags
+      - source
+      - epic_id
+      - supersedes
+      - superseded_by
+      - created_at
+      - created_by
+    output_fields:
+      - success
+      - error
+      - error_code
+      - duration_ms
+      - correlation_id
+  - operation: "write_conflict"
+    description: "Idempotent insert of a conflict pair into decision_conflicts"
+    input_fields:
+      - decision_min_id
+      - decision_max_id
+      - structural_confidence
+      - final_severity
+      - correlation_id
+    output_fields:
+      - success
+      - error
+      - error_code
+      - duration_ms
+      - correlation_id
+# Dependencies (protocols this node requires)
+dependencies:
+  - name: "protocol_postgres_adapter"
+    type: "protocol"
+    class_name: "ProtocolPostgresAdapter"
+    module: "omnibase_infra.adapters.protocol_postgres_adapter"
+    description: "PostgreSQL database operations"
+  - name: "protocol_circuit_breaker_aware"
+    type: "protocol"
+    class_name: "ProtocolCircuitBreakerAware"
+    module: "omnibase_infra.mixins.protocol_circuit_breaker_aware"
+    description: "Circuit breaker awareness for backend protection"
+# Capabilities provided by this node
+capabilities:
+  - name: "decision_persistence"
+    description: "Persist architectural decisions to PostgreSQL decision_store table"
+  - name: "structural_conflict_detection"
+    description: "Detect structural conflicts between ACTIVE decisions in the same scope"
+  - name: "two_stage_write"
+    description: "Stage 1 commits independently; Stage 2 failure never rolls back Stage 1"
+  - name: "idempotent_conflict_insert"
+    description: "INSERT ON CONFLICT DO NOTHING for conflict pairs"
+  - name: "active_invariant_enforcement"
+    description: "Demote new decision to PROPOSED when structural_confidence >= 0.9 without dismissal"
+  - name: "circuit_breaker_protection"
+    description: "Protect PostgreSQL with circuit breaker pattern"
+# Health check configuration
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  backends:
+    - name: "postgres"
+      check_type: "connection"
+      timeout_ms: 5000
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-25"
+  updated: "2026-02-25"
+  tags:
+    - effect
+    - decision-store
+    - postgresql
+    - persistence
+    - conflict-detection
+    - circuit-breaker
+  related_tickets:
+    - "OMN-2765"
+    - "OMN-2764"
+    - "OMN-2763"
