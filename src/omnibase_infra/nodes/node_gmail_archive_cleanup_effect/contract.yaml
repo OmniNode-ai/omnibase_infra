@@ -1,0 +1,193 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeGmailArchiveCleanupEffect
+#
+# Scheduled archive cleanup node — permanently deletes emails from archive
+# labels older than retention_days. Triggered by the runtime tick event.
+#
+# Related Tickets:
+#   - OMN-2731: Add node_gmail_archive_cleanup_effect
+#   - OMN-2728: Gmail Integration epic (omnibase_infra)
+name: "node_gmail_archive_cleanup_effect"
+contract_name: "node_gmail_archive_cleanup_effect"
+node_name: "node_gmail_archive_cleanup_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  Effect node that permanently deletes archived Gmail messages older than retention_days from each configured archive label. Triggered by onex.int.platform.runtime-tick.v1. Emits a single summary event to onex.evt.omnibase_infra.gmail-archive-purged.v1 per run when any messages were deleted or errors occurred.
+
+# Input subscriptions: scheduling trigger
+input_subscriptions:
+  - topic: "onex.int.platform.runtime-tick.v1"
+    operation: "gmail.purge_archive"
+input_model:
+  name: "ModelGmailCleanupConfig"
+  module: "omnibase_infra.nodes.node_gmail_archive_cleanup_effect.models.model_gmail_cleanup_config"
+  description: "Configuration model for the Gmail archive cleanup (labels, retention_days)."
+output_model:
+  name: "ModelGmailCleanupResult"
+  module: "omnibase_infra.nodes.node_gmail_archive_cleanup_effect.models.model_gmail_cleanup_result"
+  description: "Result model containing purge counts, per-label breakdown, and errors."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "gmail.purge_archive"
+      handler:
+        name: "HandlerGmailArchiveCleanup"
+        module: "omnibase_infra.nodes.node_gmail_archive_cleanup_effect.handlers.handler_gmail_archive_cleanup"
+      description: "Search and delete aged archive messages across configured labels"
+      output_fields:
+        - purged_count
+        - label_counts
+        - hard_failed
+        - errors
+        - events_published
+        - pending_events
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 2
+    retry_on: []
+  error_types:
+    - name: "GMAIL_SEARCH_FAILED"
+      description: "search_messages raised an exception for a label"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "GMAIL_DELETE_FAILED"
+      description: "delete_message returned False for a message (soft failure)"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "GMAIL_AUTH_ERROR"
+      description: "Gmail OAuth2 token refresh failed"
+      recoverable: false
+      retry_strategy: "none"
+io_operations:
+  - operation: "gmail.purge_archive"
+    description: "Search each archive label for messages older than retention_days and delete them"
+    input_fields:
+      - archive_labels
+      - retention_days
+    output_fields:
+      - purged_count
+      - label_counts
+      - hard_failed
+      - errors
+      - events_published
+      - pending_events
+# Node configuration with defaults
+config:
+  retention_days: 60
+  archive_labels: []
+dependencies:
+  - name: "gmail_client_id"
+    type: "environment"
+    env_var: "GMAIL_CLIENT_ID"
+    description: "Gmail OAuth2 client ID"
+    required: true
+  - name: "gmail_client_secret"
+    type: "environment"
+    env_var: "GMAIL_CLIENT_SECRET"
+    description: "Gmail OAuth2 client secret"
+    required: true
+  - name: "gmail_refresh_token"
+    type: "environment"
+    env_var: "GMAIL_REFRESH_TOKEN"
+    description: "Gmail OAuth2 refresh token (long-lived)"
+    required: true
+  - name: "event_publisher"
+    type: "protocol"
+    protocol: "ProtocolEventPublisher"
+    description: "Event publisher for onex.evt.omnibase_infra.gmail-archive-purged.v1"
+capabilities:
+  - name: "gmail_archive_cleanup"
+    description: "Permanently delete archived Gmail messages older than retention_days"
+  - name: "gmail_label_search"
+    description: "Search Gmail by label name and date cutoff"
+  - name: "kafka_event_production"
+    description: "Publish summary event to onex.evt.omnibase_infra.gmail-archive-purged.v1"
+definitions:
+  ModelGmailCleanupConfig:
+    type: object
+    description: "Configuration input for the Gmail archive cleanup"
+    frozen: true
+    extra: "forbid"
+    properties:
+      archive_labels:
+        type: array
+        item_type: string
+        description: "Label names to purge from"
+        default_factory: "list"
+      retention_days:
+        type: integer
+        description: "Age threshold in days; messages older than this are deleted"
+        default: 60
+        ge: 1
+        le: 365
+    required: []
+  ModelGmailCleanupResult:
+    type: object
+    description: "Result from one archive cleanup run"
+    frozen: true
+    extra: "forbid"
+    properties:
+      purged_count:
+        type: integer
+        description: "Total messages permanently deleted across all archive labels"
+        default: 0
+      label_counts:
+        type: object
+        description: "Per-label count of messages deleted (label name to count)"
+        default_factory: "dict"
+      hard_failed:
+        type: boolean
+        description: "True if any label's search_messages call raised an exception"
+        default: false
+      errors:
+        type: array
+        item_type: string
+        description: "Error messages for individual delete failures and skipped labels"
+        default_factory: "list"
+      events_published:
+        type: integer
+        description: "Number of summary events published by the runtime"
+        default: 0
+      pending_events:
+        type: array
+        description: "Event payloads pending publication by the runtime/node shell"
+        default_factory: "list"
+    required: []
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 60
+  checks:
+    - name: "gmail_credentials_configured"
+      check_type: "environment"
+      env_var: "GMAIL_CLIENT_ID"
+      description: "Verify GMAIL_CLIENT_ID is set"
+    - name: "gmail_refresh_token_configured"
+      check_type: "environment"
+      env_var: "GMAIL_REFRESH_TOKEN"
+      description: "Verify GMAIL_REFRESH_TOKEN is set"
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-25"
+  updated: "2026-02-25"
+  tags:
+    - effect
+    - gmail
+    - archive-cleanup
+    - kafka-producer
+    - scheduled
