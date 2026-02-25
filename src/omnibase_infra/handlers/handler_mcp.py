@@ -47,6 +47,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.handlers.mcp.transport_streamable_http import MCPAuthMiddleware
 from omnibase_infra.handlers.models.mcp import (
     EnumMcpOperationType,
     ModelMcpHandlerConfig,
@@ -160,26 +161,25 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         - Correlation ID propagation for tracing
         - Circuit breaker protection against cascading failures
 
-    Authentication:
-        Authentication is NOT yet implemented in this MVP version. The MCP
-        endpoint is currently open/unauthenticated. Authentication will be
-        added in a future release via:
-        - Bearer token validation in the transport layer
-        - Integration with ONEX identity service for token verification
-        - Optional API key support for service-to-service communication
-        See: TODO(OMN-1288) for authentication implementation tracking
+    Authentication (OMN-2701):
+        Bearer token / API-key authentication is enforced via ``MCPAuthMiddleware``
+        on all MCP endpoints. The ``/health`` endpoint is explicitly exempted.
 
-        For production deployments before authentication is implemented,
-        deploy behind an API gateway with authentication or restrict
-        network access to trusted clients.
+        Configure via ModelMcpHandlerConfig:
+        - ``auth_enabled=True`` (default): auth is active
+        - ``auth_enabled=False``: auth is bypassed; WARNING logged at startup
+        - ``api_key``: token value loaded from Infisical/env
+
+        Accepted header schemes (either is valid):
+        - ``Authorization: Bearer <token>``
+        - ``X-API-Key: <token>``
+
+        Unauthenticated requests receive HTTP 401 with JSON error body.
+        Auth failures and successes are audit-logged (see MCPAuthMiddleware).
 
     Dispatcher Integration:
-        This MVP version uses placeholder tool execution. Full ONEX dispatcher
-        integration is planned to enable:
-        - Routing tool calls to the appropriate ONEX node
-        - Timeout enforcement via asyncio.wait_for()
-        - Full observability through the ONEX runtime
-        See: TODO(OMN-1288) for dispatcher integration tracking
+        Tool execution routes through AdapterONEXToolExecution when an
+        executor is provided at construction time (OMN-2697).
 
     Class Attributes:
         shutdown_timeout: Timeout for graceful server shutdown (default: 5.0s).
@@ -560,7 +560,21 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                     default_timeout=self._config.timeout_seconds,
                     dev_mode=dev_mode,
                     contracts_dir=contracts_dir,
+                    auth_enabled=self._config.auth_enabled,
+                    api_key=self._config.api_key,
                 )
+
+                # R3: Log startup warning when auth is disabled (OMN-2701)
+                if not self._config.auth_enabled:
+                    logger.warning(
+                        "MCP auth disabled — do not use in production",
+                        extra={
+                            "handler": self.__class__.__name__,
+                            "host": self._config.host,
+                            "port": self._config.port,
+                            "correlation_id": str(init_correlation_id),
+                        },
+                    )
 
                 # Wrap entire server startup in try/except to ensure cleanup
                 # if ANY step fails after lifecycle starts. This prevents:
@@ -592,12 +606,22 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                     health_endpoint = self._create_health_endpoint()
                     tools_list_endpoint = self._create_tools_list_endpoint()
 
-                    app = Starlette(
+                    base_app: Starlette = Starlette(
                         routes=[
                             Route("/health", health_endpoint, methods=["GET"]),
                             Route("/mcp/tools", tools_list_endpoint, methods=["GET"]),
                         ],
                     )
+
+                    # Apply auth middleware (R1, R3 — OMN-2701).
+                    # /health is exempted by MCPAuthMiddleware._AUTH_EXEMPT_PATHS.
+                    if self._config.auth_enabled:
+                        app: Starlette = MCPAuthMiddleware(  # type: ignore[assignment]
+                            base_app,
+                            api_key=self._config.api_key or "",
+                        )
+                    else:
+                        app = base_app
 
                     # Create uvicorn server config and server
                     uvicorn_config = uvicorn.Config(
