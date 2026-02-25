@@ -1159,23 +1159,29 @@ class TestConsumerLifecycle:
             with patch(
                 "omnibase_infra.services.observability.agent_actions.consumer.AIOKafkaConsumer"
             ) as mock_kafka:
-                mock_pool.return_value = AsyncMock()
-                mock_pool.return_value.close = AsyncMock()
+                with patch(
+                    "omnibase_infra.services.observability.agent_actions.consumer.AIOKafkaProducer"
+                ) as mock_producer:
+                    mock_pool.return_value = AsyncMock()
+                    mock_pool.return_value.close = AsyncMock()
 
-                mock_kafka_instance = AsyncMock()
-                mock_kafka.return_value = mock_kafka_instance
+                    mock_kafka_instance = AsyncMock()
+                    mock_kafka.return_value = mock_kafka_instance
 
-                consumer = AgentActionsConsumer(mock_config)
+                    mock_producer_instance = AsyncMock()
+                    mock_producer.return_value = mock_producer_instance
 
-                # Patch health server to avoid binding
-                object.__setattr__(consumer, "_start_health_server", AsyncMock())
+                    consumer = AgentActionsConsumer(mock_config)
 
-                async with consumer as ctx:
-                    assert ctx is consumer
-                    assert ctx.is_running is True
+                    # Patch health server to avoid binding
+                    object.__setattr__(consumer, "_start_health_server", AsyncMock())
 
-                # After exit, should be stopped
-                assert consumer.is_running is False
+                    async with consumer as ctx:
+                        assert ctx is consumer
+                        assert ctx.is_running is True
+
+                    # After exit, should be stopped
+                    assert consumer.is_running is False
 
     @pytest.mark.asyncio
     async def test_stop_when_not_running_is_safe(
