@@ -5,6 +5,38 @@ All notable changes to the ONEX Infrastructure (omnibase_infra) will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-02-25
+
+### Added
+
+#### Event Bus Registry (OMN-2700, MCP-04)
+
+- **Replace Consul discovery with event bus registry queries**: `HandlerMcpRegistryEffect` now queries the event bus registry instead of Consul for service discovery, removing Consul as a hard dependency for MCP-04 discovery flows (#421)
+
+#### Topic Catalog PostgreSQL Backend (OMN-2746)
+
+- **Replace `ServiceTopicCatalog` Consul KV backend with PostgreSQL**: Topic catalog persistence migrated from Consul KV to PostgreSQL, eliminating Consul as a runtime dependency for topic catalog operations (#422)
+
+#### Runtime Observability (OMN-2292)
+
+- **Runtime source-hash and compose-project startup banner**: Services now log a structured startup banner including source hash, compose project name, and environment at boot time for improved traceability (#412)
+
+#### Deployment Safety (OMN-2296)
+
+- **Detect compose project name collisions in `deploy-runtime.sh`**: The deploy script now detects and rejects duplicate compose project names before starting services, preventing silent container conflicts (#413)
+
+### Changed
+
+- Bumped version to 0.11.0
+
+### Tests
+
+- **Adversarial fingerprint CI twins** (OMN-2293): Tests that prove fingerprint CI twins catch drift between runtime and test environments (#414)
+
+### Documentation
+
+- **ADR: two-handler-system architecture** (OMN-1973): Decision record documenting the dual-handler pattern for protocol binding separation (#411)
+
 ## [0.10.0] - 2026-02-23
 
 ### Added
