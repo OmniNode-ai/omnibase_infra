@@ -94,6 +94,32 @@ Environment Variables:
             so each container gets unique consumer group membership and
             proper Kafka partition assignment in multi-container dev environments.
 
+    Authentication and TLS Settings (OMN-2793):
+        KAFKA_SECURITY_PROTOCOL: Security protocol for Kafka connections
+            Default: "PLAINTEXT"
+            Options: "PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL"
+
+        KAFKA_SASL_MECHANISM: SASL authentication mechanism (optional)
+            Default: None (no SASL)
+            Options: "PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512", "OAUTHBEARER"
+            Requires: security_protocol must be SASL_PLAINTEXT or SASL_SSL
+
+        KAFKA_SASL_OAUTHBEARER_TOKEN_ENDPOINT_URL: Token endpoint for OAUTHBEARER (optional)
+            Default: None
+            Required when: KAFKA_SASL_MECHANISM=OAUTHBEARER
+
+        KAFKA_SASL_OAUTHBEARER_CLIENT_ID: OAuth client ID (optional)
+            Default: None
+            Required when: KAFKA_SASL_MECHANISM=OAUTHBEARER
+
+        KAFKA_SASL_OAUTHBEARER_CLIENT_SECRET: OAuth client secret (optional)
+            Default: None
+            Required when: KAFKA_SASL_MECHANISM=OAUTHBEARER
+
+        KAFKA_SSL_CA_FILE: Path to CA certificate file for TLS verification (optional)
+            Default: None
+            Used when: security_protocol is SSL or SASL_SSL
+
 Parsing Behavior:
     - Integer/Float fields: Logs warning and uses default if parsing fails
     - Boolean fields: Logs warning if value not in expected set, treats as False
@@ -111,7 +137,14 @@ from pathlib import Path
 from uuid import uuid4
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from omnibase_infra.enums import EnumInfraTransportType, EnumKafkaAcks
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
@@ -245,6 +278,96 @@ class ModelKafkaEventBusConfig(BaseModel):
             "(e.g., 'dev.dlq.intents.v1', 'prod.dlq.events.v1')"
         ),
     )
+
+    # Authentication and TLS configuration (OMN-2793)
+    security_protocol: str = Field(
+        default="PLAINTEXT",
+        description=(
+            "Security protocol for Kafka connections. "
+            "Valid values: PLAINTEXT, SSL, SASL_PLAINTEXT, SASL_SSL"
+        ),
+        pattern=r"^(PLAINTEXT|SSL|SASL_PLAINTEXT|SASL_SSL)$",
+    )
+    sasl_mechanism: str | None = Field(
+        default=None,
+        description=(
+            "SASL mechanism for authentication. "
+            "Valid values: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512, OAUTHBEARER. "
+            "Requires security_protocol to be SASL_PLAINTEXT or SASL_SSL."
+        ),
+        pattern=r"^(PLAIN|SCRAM-SHA-256|SCRAM-SHA-512|OAUTHBEARER)$",
+    )
+    sasl_oauthbearer_token_endpoint_url: str | None = Field(
+        default=None,
+        description=(
+            "Token endpoint URL for OAUTHBEARER SASL mechanism. "
+            "Required when sasl_mechanism is OAUTHBEARER."
+        ),
+    )
+    sasl_oauthbearer_client_id: str | None = Field(
+        default=None,
+        description=(
+            "Client ID for OAUTHBEARER token requests. "
+            "Required when sasl_mechanism is OAUTHBEARER."
+        ),
+    )
+    sasl_oauthbearer_client_secret: str | None = Field(
+        default=None,
+        description=(
+            "Client secret for OAUTHBEARER token requests. "
+            "Required when sasl_mechanism is OAUTHBEARER."
+        ),
+    )
+    ssl_ca_file: str | None = Field(
+        default=None,
+        description=(
+            "Path to CA certificate file for SSL/TLS verification. "
+            "Used when security_protocol is SSL or SASL_SSL."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_auth_config(self) -> ModelKafkaEventBusConfig:
+        """Validate authentication configuration consistency.
+
+        Enforces:
+        - If sasl_mechanism is set, security_protocol must be SASL_PLAINTEXT or SASL_SSL
+        - If sasl_mechanism is OAUTHBEARER, all three oauth fields must be present
+
+        Returns:
+            Self after validation
+
+        Raises:
+            ValueError: If auth configuration is inconsistent
+        """
+        if self.sasl_mechanism is not None:
+            if self.security_protocol not in ("SASL_PLAINTEXT", "SASL_SSL"):
+                raise ValueError(
+                    f"sasl_mechanism={self.sasl_mechanism!r} requires security_protocol "
+                    f"to be 'SASL_PLAINTEXT' or 'SASL_SSL', got {self.security_protocol!r}"
+                )
+            if self.sasl_mechanism == "OAUTHBEARER":
+                missing = [
+                    field
+                    for field, val in (
+                        (
+                            "sasl_oauthbearer_token_endpoint_url",
+                            self.sasl_oauthbearer_token_endpoint_url,
+                        ),
+                        ("sasl_oauthbearer_client_id", self.sasl_oauthbearer_client_id),
+                        (
+                            "sasl_oauthbearer_client_secret",
+                            self.sasl_oauthbearer_client_secret,
+                        ),
+                    )
+                    if val is None
+                ]
+                if missing:
+                    raise ValueError(
+                        f"sasl_mechanism='OAUTHBEARER' requires all three OAuth fields: "
+                        f"{', '.join(missing)}"
+                    )
+        return self
 
     # Instance discriminator for multi-container dev environments (OMN-2251)
     instance_id: str | None = Field(
@@ -463,6 +586,12 @@ class ModelKafkaEventBusConfig(BaseModel):
             - KAFKA_ENVIRONMENT -> environment
             - KAFKA_MAX_RETRY_ATTEMPTS -> max_retry_attempts
             - KAFKA_CIRCUIT_BREAKER_THRESHOLD -> circuit_breaker_threshold
+            - KAFKA_SECURITY_PROTOCOL -> security_protocol
+            - KAFKA_SASL_MECHANISM -> sasl_mechanism
+            - KAFKA_SASL_OAUTHBEARER_TOKEN_ENDPOINT_URL -> sasl_oauthbearer_token_endpoint_url
+            - KAFKA_SASL_OAUTHBEARER_CLIENT_ID -> sasl_oauthbearer_client_id
+            - KAFKA_SASL_OAUTHBEARER_CLIENT_SECRET -> sasl_oauthbearer_client_secret
+            - KAFKA_SSL_CA_FILE -> ssl_ca_file
 
         Returns:
             New configuration instance with environment overrides applied
@@ -484,6 +613,12 @@ class ModelKafkaEventBusConfig(BaseModel):
             "KAFKA_ENABLE_AUTO_COMMIT": "enable_auto_commit",
             "KAFKA_DEAD_LETTER_TOPIC": "dead_letter_topic",
             "KAFKA_INSTANCE_ID": "instance_id",
+            "KAFKA_SECURITY_PROTOCOL": "security_protocol",
+            "KAFKA_SASL_MECHANISM": "sasl_mechanism",
+            "KAFKA_SASL_OAUTHBEARER_TOKEN_ENDPOINT_URL": "sasl_oauthbearer_token_endpoint_url",
+            "KAFKA_SASL_OAUTHBEARER_CLIENT_ID": "sasl_oauthbearer_client_id",
+            "KAFKA_SASL_OAUTHBEARER_CLIENT_SECRET": "sasl_oauthbearer_client_secret",
+            "KAFKA_SSL_CA_FILE": "ssl_ca_file",
         }
 
         # Integer fields for type conversion

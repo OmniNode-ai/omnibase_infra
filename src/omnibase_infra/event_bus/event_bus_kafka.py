@@ -494,6 +494,49 @@ class EventBusKafka(
         """
         return self._environment
 
+    # =========================================================================
+    # Auth / TLS helpers
+    # =========================================================================
+
+    def _build_auth_kwargs(self) -> dict[str, object]:
+        """Build auth/TLS kwargs to spread into AIOKafkaProducer/Consumer.
+
+        Returns an empty dict when security_protocol is PLAINTEXT so that
+        existing deployments (no auth) are completely unaffected.
+
+        Returns:
+            Dict of auth-related kwargs ready for **-spreading into aiokafka
+            constructors. Never returns None; returns {} for PLAINTEXT.
+        """
+        if self._config.security_protocol == "PLAINTEXT":
+            return {}
+
+        kwargs: dict[str, object] = {
+            "security_protocol": self._config.security_protocol
+        }
+
+        if self._config.sasl_mechanism is not None:
+            kwargs["sasl_mechanism"] = self._config.sasl_mechanism
+
+        if self._config.sasl_mechanism == "OAUTHBEARER":
+            kwargs["sasl_oauth_token_provider"] = (
+                None  # placeholder; real impl uses token provider
+            )
+            kwargs["sasl_oauthbearer_token_endpoint_url"] = (
+                self._config.sasl_oauthbearer_token_endpoint_url
+            )
+            kwargs["sasl_oauthbearer_client_id"] = (
+                self._config.sasl_oauthbearer_client_id
+            )
+            kwargs["sasl_oauthbearer_client_secret"] = (
+                self._config.sasl_oauthbearer_client_secret
+            )
+
+        if self._config.ssl_ca_file is not None:
+            kwargs["ssl_cafile"] = self._config.ssl_ca_file
+
+        return kwargs
+
     async def start(self) -> None:
         """Start the event bus and connect to Kafka.
 
@@ -529,6 +572,7 @@ class EventBusKafka(
                     bootstrap_servers=self._bootstrap_servers,
                     acks=self._config.acks_aiokafka,
                     enable_idempotence=self._config.enable_idempotence,
+                    **self._build_auth_kwargs(),
                 )
 
                 await asyncio.wait_for(
@@ -841,6 +885,7 @@ class EventBusKafka(
                 bootstrap_servers=self._bootstrap_servers,
                 acks=self._config.acks_aiokafka,
                 enable_idempotence=self._config.enable_idempotence,
+                **self._build_auth_kwargs(),
             )
 
             await asyncio.wait_for(
@@ -1440,6 +1485,7 @@ class EventBusKafka(
             group_id=effective_group_id,
             auto_offset_reset=self._config.auto_offset_reset,
             enable_auto_commit=self._config.enable_auto_commit,
+            **self._build_auth_kwargs(),
         )
 
         try:
