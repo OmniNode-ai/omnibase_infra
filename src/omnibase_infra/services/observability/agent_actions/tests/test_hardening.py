@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -25,6 +24,7 @@ from omnibase_infra.services.observability.agent_actions.config import (
     ConfigAgentActionsConsumer,
 )
 from omnibase_infra.services.observability.agent_actions.consumer import (
+    AgentActionsConsumer,
     ConsumerMetrics,
     EnumHealthStatus,
 )
@@ -156,12 +156,12 @@ class TestPayloadSizeLimits:
 # =============================================================================
 
 
-def _make_health_consumer() -> MagicMock:
-    """Create a mock consumer with _determine_health_status accessible."""
-    from omnibase_infra.services.observability.agent_actions.consumer import (
-        AgentActionsConsumer,
-    )
+def _make_health_consumer() -> AgentActionsConsumer:
+    """Create a partially-initialized consumer for health status testing.
 
+    Uses ``__new__`` to bypass ``__init__`` (avoids Kafka/DB connections)
+    and sets only the attributes needed by ``_determine_health_status``.
+    """
     config = ConfigAgentActionsConsumer(
         kafka_bootstrap_servers="localhost:9092",
         postgres_dsn="postgresql://test:test@localhost:5432/test",
@@ -179,11 +179,11 @@ class TestHealthStatusStartupGrace:
     """Test startup grace period edge cases in _determine_health_status."""
 
     @pytest.fixture
-    def mock_consumer(self) -> MagicMock:
+    def mock_consumer(self) -> AgentActionsConsumer:
         return _make_health_consumer()
 
     def test_within_startup_grace_period_is_healthy(
-        self, mock_consumer: MagicMock
+        self, mock_consumer: AgentActionsConsumer
     ) -> None:
         """Consumer well within 60s grace period with messages but no writes should be HEALTHY."""
         now = datetime.now(UTC)
@@ -199,7 +199,7 @@ class TestHealthStatusStartupGrace:
         assert status == EnumHealthStatus.HEALTHY
 
     def test_past_startup_grace_period_is_degraded(
-        self, mock_consumer: MagicMock
+        self, mock_consumer: AgentActionsConsumer
     ) -> None:
         """Consumer past 60s grace with messages but no writes should be DEGRADED."""
         now = datetime.now(UTC)
@@ -214,7 +214,9 @@ class TestHealthStatusStartupGrace:
         status = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.DEGRADED
 
-    def test_idle_consumer_always_healthy(self, mock_consumer: MagicMock) -> None:
+    def test_idle_consumer_always_healthy(
+        self, mock_consumer: AgentActionsConsumer
+    ) -> None:
         """Idle consumer (zero messages) should always be HEALTHY regardless of uptime."""
         now = datetime.now(UTC)
         metrics = {
@@ -232,11 +234,11 @@ class TestHealthStatusStaleness:
     """Test poll and write staleness thresholds in _determine_health_status."""
 
     @pytest.fixture
-    def mock_consumer(self) -> MagicMock:
+    def mock_consumer(self) -> AgentActionsConsumer:
         return _make_health_consumer()
 
     def test_poll_within_staleness_threshold_is_healthy(
-        self, mock_consumer: MagicMock
+        self, mock_consumer: AgentActionsConsumer
     ) -> None:
         """Poll age within threshold should be HEALTHY."""
         now = datetime.now(UTC)
@@ -252,7 +254,7 @@ class TestHealthStatusStaleness:
         assert status == EnumHealthStatus.HEALTHY
 
     def test_poll_exceeding_staleness_threshold_is_degraded(
-        self, mock_consumer: MagicMock
+        self, mock_consumer: AgentActionsConsumer
     ) -> None:
         """Poll age clearly exceeding threshold should be DEGRADED."""
         now = datetime.now(UTC)
@@ -268,7 +270,7 @@ class TestHealthStatusStaleness:
         assert status == EnumHealthStatus.DEGRADED
 
     def test_write_staleness_within_threshold_is_healthy(
-        self, mock_consumer: MagicMock
+        self, mock_consumer: AgentActionsConsumer
     ) -> None:
         """Write age within threshold (200s < 300s) should be HEALTHY."""
         now = datetime.now(UTC)
@@ -284,7 +286,7 @@ class TestHealthStatusStaleness:
         assert status == EnumHealthStatus.HEALTHY
 
     def test_write_staleness_exceeding_threshold_is_degraded(
-        self, mock_consumer: MagicMock
+        self, mock_consumer: AgentActionsConsumer
     ) -> None:
         """Write age clearly exceeding threshold (600s > 300s) should be DEGRADED."""
         now = datetime.now(UTC)
@@ -304,10 +306,12 @@ class TestHealthStatusCircuitBreaker:
     """Test circuit breaker state effects on _determine_health_status."""
 
     @pytest.fixture
-    def mock_consumer(self) -> MagicMock:
+    def mock_consumer(self) -> AgentActionsConsumer:
         return _make_health_consumer()
 
-    def test_not_running_is_unhealthy(self, mock_consumer: MagicMock) -> None:
+    def test_not_running_is_unhealthy(
+        self, mock_consumer: AgentActionsConsumer
+    ) -> None:
         """Consumer not running should always be UNHEALTHY."""
         mock_consumer._running = False
         metrics = {
@@ -320,7 +324,9 @@ class TestHealthStatusCircuitBreaker:
         status = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.UNHEALTHY
 
-    def test_circuit_open_is_degraded(self, mock_consumer: MagicMock) -> None:
+    def test_circuit_open_is_degraded(
+        self, mock_consumer: AgentActionsConsumer
+    ) -> None:
         """Open circuit breaker should be DEGRADED."""
         metrics = {
             "messages_received": 10,
@@ -332,7 +338,9 @@ class TestHealthStatusCircuitBreaker:
         status = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.DEGRADED
 
-    def test_circuit_half_open_is_degraded(self, mock_consumer: MagicMock) -> None:
+    def test_circuit_half_open_is_degraded(
+        self, mock_consumer: AgentActionsConsumer
+    ) -> None:
         """Half-open circuit breaker should be DEGRADED."""
         metrics = {
             "messages_received": 10,
