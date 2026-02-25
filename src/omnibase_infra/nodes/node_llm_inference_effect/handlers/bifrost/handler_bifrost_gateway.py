@@ -313,13 +313,15 @@ class HandlerBifrostGateway:
             backend IDs tuple is empty only if no rule matched AND
             ``default_backends`` is also empty.
         """
-        sorted_rules = sorted(
+        indexed_rules = sorted(
             enumerate(self._config.routing_rules),
             key=lambda pair: (pair[1].priority, pair[0]),
         )
-        sorted_rules = [rule for _, rule in sorted_rules]
+        ordered_rules: list[ModelBifrostRoutingRule] = [
+            rule for _, rule in indexed_rules
+        ]
 
-        for rule in sorted_rules:
+        for rule in ordered_rules:
             if self._rule_matches(rule, request):
                 return rule.backend_ids, rule
 
