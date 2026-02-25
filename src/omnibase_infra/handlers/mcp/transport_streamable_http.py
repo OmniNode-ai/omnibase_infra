@@ -45,6 +45,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import uuid
 from typing import TYPE_CHECKING
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -92,7 +93,9 @@ class MCPAuthMiddleware:
         self._api_key = api_key
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] not in ("http", "websocket"):
+        # Only enforce auth on HTTP requests; forward all other scope types
+        # (lifespan, websocket, etc.) to the inner app without auth checks.
+        if scope["type"] != "http":
             await self._app(scope, receive, send)
             return
 
@@ -112,6 +115,10 @@ class MCPAuthMiddleware:
             k.decode("latin-1").lower(): v.decode("latin-1")
             for k, v in scope.get("headers", [])
         }
+
+        # Generate or propagate a correlation ID for audit trail traceability.
+        # If the client supplies X-Correlation-ID, use it; otherwise create one.
+        correlation_id: str = headers.get("x-correlation-id") or str(uuid.uuid4())
 
         token: str | None = None
 
@@ -141,6 +148,7 @@ class MCPAuthMiddleware:
                     "remote_ip": remote_ip,
                     "path": path,
                     "reason": reason,
+                    "correlation_id": correlation_id,
                 },
             )
             await self._send_401(send)
@@ -148,7 +156,6 @@ class MCPAuthMiddleware:
 
         # Auth passed — log masked token (last 4 chars) for audit trail
         masked = f"****{token[-4:]}" if len(token) >= 4 else "****"
-        correlation_id = headers.get("x-correlation-id", "")
         logger.info(
             "MCP auth accepted",
             extra={

@@ -616,9 +616,24 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                     # Apply auth middleware (R1, R3 — OMN-2701).
                     # /health is exempted by MCPAuthMiddleware._AUTH_EXEMPT_PATHS.
                     if self._config.auth_enabled:
+                        # Validate api_key is non-empty before constructing the
+                        # middleware; fail fast rather than silently coercing to ""
+                        # (which would reject every request with "server misconfiguration").
+                        if not self._config.api_key:
+                            raise ProtocolConfigurationError(
+                                "auth_enabled=True but api_key is not set. "
+                                "Set MCPServerConfig.api_key (loaded from Infisical/env) "
+                                "or disable auth with auth_enabled=False for local dev.",
+                                context=ModelInfraErrorContext.with_correlation(
+                                    correlation_id=init_correlation_id,
+                                    transport_type=EnumInfraTransportType.MCP,
+                                    operation="initialize",
+                                    target_name="mcp_handler",
+                                ),
+                            )
                         app: Starlette = MCPAuthMiddleware(  # type: ignore[assignment]
                             base_app,
-                            api_key=self._config.api_key or "",
+                            api_key=self._config.api_key,
                         )
                     else:
                         app = base_app
