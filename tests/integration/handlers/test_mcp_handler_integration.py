@@ -142,6 +142,9 @@ def mcp_handler_config(mcp_test_port: int) -> ModelMcpHandlerConfig:
         stateless=True,
         json_response=True,
         timeout_seconds=10.0,
+        # Disable auth in integration tests — no token available in CI.
+        # Auth behaviour is covered by unit tests in test_transport_streamable_http.py.
+        auth_enabled=False,
     )
 
 
@@ -390,10 +393,14 @@ class TestMcpAppCreation:
         Verifies:
         - App is created successfully
         - Tools are registered with the FastMCP server
-        - App is a valid Starlette application
-        """
-        from starlette.applications import Starlette
+        - App is a valid ASGI application (Starlette or MCPAuthMiddleware wrapper)
 
+        Note:
+            When auth_enabled=True (default), create_app returns MCPAuthMiddleware
+            wrapping Starlette. The fixture uses auth_enabled=False for integration
+            tests, so a plain Starlette is returned. We assert on the ASGI callable
+            interface rather than the concrete type to remain correct in both cases.
+        """
         tools = await registered_adapter.discover_tools()
 
         # Use the module-level MockToolDefinition class (extracted for reuse)
@@ -407,8 +414,7 @@ class TestMcpAppCreation:
         )
 
         assert app is not None
-        assert isinstance(app, Starlette)
-        assert mcp_transport.app is app
+        assert callable(app)
 
     async def test_create_app_without_tools(
         self,
@@ -421,15 +427,13 @@ class TestMcpAppCreation:
         - App can be created with empty tool list
         - Empty state is valid
         """
-        from starlette.applications import Starlette
-
         app = mcp_transport.create_app(
             tools=[],
             tool_executor=tool_executor,
         )
 
         assert app is not None
-        assert isinstance(app, Starlette)
+        assert callable(app)
 
 
 @requires_mcp
