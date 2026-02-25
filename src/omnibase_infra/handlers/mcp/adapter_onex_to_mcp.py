@@ -50,6 +50,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Internal ONEX envelope/protocol fields that must never be forwarded to MCP
+# clients.  These appear on the top-level dict when the orchestrator returns
+# an envelope-shaped result instead of a bare domain value.
+_PROTOCOL_FIELDS: frozenset[str] = frozenset(
+    {
+        "envelope_id",
+        "correlation_id",
+        "source",
+        "payload",
+        "metadata",
+        "success",
+    }
+)
+
 
 @dataclass
 class MCPToolParameter:
@@ -324,7 +338,14 @@ class ONEXToMCPAdapter:
         # leaking internal protocol fields into MCP content.
         success: bool = bool(raw.get("success", False))
         if success:
-            result_payload = raw.get("result", "")
+            result_payload: object = raw.get("result", "")
+            # Strip internal protocol fields so envelope-shaped orchestrator
+            # responses do not leak envelope_id, correlation_id, source,
+            # payload, metadata, or success into MCP content.
+            if isinstance(result_payload, dict):
+                result_payload = {
+                    k: v for k, v in result_payload.items() if k not in _PROTOCOL_FIELDS
+                }
             content_text = (
                 result_payload
                 if isinstance(result_payload, str)

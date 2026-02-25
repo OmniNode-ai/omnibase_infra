@@ -258,7 +258,7 @@ class TestONEXErrorMapping:
 
     async def test_infra_unavailable_exception_maps_to_mcp_error(self) -> None:
         """InfraUnavailableError raised by execute() is caught and returned as MCP error."""
-        ctx = ModelInfraErrorContext(
+        ctx = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.HTTP,
             operation="execute_tool",
         )
