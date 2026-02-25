@@ -222,6 +222,16 @@ repos:
         types: [markdown]
         pass_filenames: true
         stages: [pre-commit]
+      # DB quality gate - forbid domain-specific DB adapters (OMN-1785)
+      # Detects forbidden patterns: adapter classes, direct SQL, direct connections
+      # outside of omnibase_infra and tests. Escape hatches: # db-adapter-ok, # sql-ok
+      - id: onex-validate-db-quality-gate
+        name: ONEX DB Quality Gate
+        entry: uv run python scripts/validate.py db_quality_gate
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-commit]
 # Configuration
 default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit]
