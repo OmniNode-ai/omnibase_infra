@@ -250,21 +250,21 @@ class ONEXToMCPAdapter:
         correlation_id = correlation_id or uuid4()
 
         if tool_name not in self._tool_cache:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.MCP,
                 operation="invoke_tool",
                 target_name=tool_name,
-                correlation_id=correlation_id,
             )
             raise InfraUnavailableError(
                 f"Tool '{tool_name}' not found in registry", context=ctx
             )
 
         if self._node_executor is None:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.MCP,
                 operation="invoke_tool",
-                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 "Node executor not configured. Cannot invoke tools without executor.",
