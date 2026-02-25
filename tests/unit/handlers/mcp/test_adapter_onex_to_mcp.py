@@ -1,0 +1,294 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""Unit tests for ONEXToMCPAdapter.invoke_tool() real dispatch path (OMN-2697).
+
+Covers:
+- Successful dispatch → correct CallToolResult shape
+- ONEX error response → isError: True result
+- Timeout → MCP error content
+- Circuit-open → MCP error content
+- Tool not found → InfraUnavailableError
+- No executor configured → ProtocolConfigurationError
+
+All tests use mocked AdapterONEXToolExecution (no real network).
+"""
+
+from __future__ import annotations
+
+import json
+from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID, uuid4
+
+import pytest
+
+from omnibase_infra.errors import InfraUnavailableError, ProtocolConfigurationError
+from omnibase_infra.handlers.mcp.adapter_onex_to_mcp import (
+    MCPToolParameter,
+    ONEXToMCPAdapter,
+)
+
+pytestmark = [pytest.mark.unit]
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_adapter(
+    executor: object | None = None,
+) -> ONEXToMCPAdapter:
+    return ONEXToMCPAdapter(node_executor=executor)  # type: ignore[arg-type]
+
+
+async def _register_tool(
+    adapter: ONEXToMCPAdapter,
+    name: str = "my_tool",
+    endpoint: str = "http://localhost:8085/execute",
+    timeout_seconds: int = 10,
+) -> None:
+    await adapter.register_node_as_tool(
+        node_name=name,
+        description="A test tool",
+        parameters=[
+            MCPToolParameter(
+                name="input_data",
+                parameter_type="string",
+                description="Input payload",
+                required=True,
+            )
+        ],
+        version="1.0.0",
+        timeout_seconds=timeout_seconds,
+    )
+    # Patch execution_endpoint into the cached tool definition
+    tool = adapter._tool_cache[name]
+    object.__setattr__(tool, "execution_endpoint", endpoint) if hasattr(
+        tool, "__dataclass_fields__"
+    ) else setattr(tool, "execution_endpoint", endpoint)
+
+
+# ---------------------------------------------------------------------------
+# R1 / R2: Successful dispatch
+# ---------------------------------------------------------------------------
+
+
+class TestSuccessfulDispatch:
+    """Successful ONEX response maps to CallToolResult with isError: False."""
+
+    async def test_invoke_tool_returns_content_list_on_success(self) -> None:
+        """invoke_tool() returns MCP CallToolResult with content list."""
+        executor = MagicMock()
+        executor.execute = AsyncMock(
+            return_value={"success": True, "result": {"output": "done"}}
+        )
+
+        adapter = _make_adapter(executor)
+        await _register_tool(adapter)
+
+        result = await adapter.invoke_tool("my_tool", {"input_data": "hello"})
+
+        assert result["isError"] is False
+        content = result["content"]
+        assert isinstance(content, list)
+        assert len(content) == 1
+        assert content[0]["type"] == "text"
+        # Result should be JSON-encoded payload
+        text = content[0]["text"]
+        assert isinstance(text, str)
+        parsed = json.loads(text)
+        assert parsed["output"] == "done"
+
+    async def test_invoke_tool_threads_correlation_id_to_executor(self) -> None:
+        """Correlation ID supplied by caller is forwarded to executor.execute()."""
+        executor = MagicMock()
+        executor.execute = AsyncMock(return_value={"success": True, "result": "ok"})
+
+        adapter = _make_adapter(executor)
+        await _register_tool(adapter)
+
+        cid = uuid4()
+        await adapter.invoke_tool("my_tool", {}, correlation_id=cid)
+
+        call_kwargs = executor.execute.call_args[1]
+        assert call_kwargs["correlation_id"] == cid
+
+    async def test_invoke_tool_uses_tool_timeout_seconds(self) -> None:
+        """Per-tool timeout_seconds is passed to ModelMCPToolDefinition."""
+        executor = MagicMock()
+        executor.execute = AsyncMock(return_value={"success": True, "result": "ok"})
+
+        adapter = _make_adapter(executor)
+        await _register_tool(adapter, timeout_seconds=42)
+
+        await adapter.invoke_tool("my_tool", {})
+
+        tool_arg = executor.execute.call_args[1]["tool"]
+        assert tool_arg.timeout_seconds == 42
+
+    async def test_invoke_tool_generates_correlation_id_when_absent(self) -> None:
+        """A fresh UUID is generated when no correlation_id is supplied."""
+        executor = MagicMock()
+        executor.execute = AsyncMock(return_value={"success": True, "result": "ok"})
+
+        adapter = _make_adapter(executor)
+        await _register_tool(adapter)
+
+        await adapter.invoke_tool("my_tool", {})
+
+        call_kwargs = executor.execute.call_args[1]
+        cid = call_kwargs["correlation_id"]
+        assert isinstance(cid, UUID)
+
+    async def test_invoke_tool_with_string_result(self) -> None:
+        """Plain string result from executor is placed directly in content text."""
+        executor = MagicMock()
+        executor.execute = AsyncMock(
+            return_value={"success": True, "result": "plain text result"}
+        )
+
+        adapter = _make_adapter(executor)
+        await _register_tool(adapter)
+
+        result = await adapter.invoke_tool("my_tool", {})
+
+        assert result["isError"] is False
+        assert result["content"][0]["text"] == "plain text result"
+
+
+# ---------------------------------------------------------------------------
+# R2: ONEX error response → isError: True
+# ---------------------------------------------------------------------------
+
+
+class TestONEXErrorMapping:
+    """ONEX error responses map to CallToolResult with isError: True."""
+
+    async def test_onex_error_response_sets_is_error_true(self) -> None:
+        """When executor returns success=False, isError is True."""
+        executor = MagicMock()
+        executor.execute = AsyncMock(
+            return_value={"success": False, "error": "node execution failed"}
+        )
+
+        adapter = _make_adapter(executor)
+        await _register_tool(adapter)
+
+        result = await adapter.invoke_tool("my_tool", {})
+
+        assert result["isError"] is True
+        content = result["content"]
+        assert isinstance(content, list)
+        assert len(content) == 1
+        assert content[0]["type"] == "text"
+        assert "node execution failed" in content[0]["text"]
+
+    async def test_onex_error_response_without_error_field_uses_fallback(
+        self,
+    ) -> None:
+        """When error key is absent, a generic message appears in content."""
+        executor = MagicMock()
+        executor.execute = AsyncMock(return_value={"success": False})
+
+        adapter = _make_adapter(executor)
+        await _register_tool(adapter)
+
+        result = await adapter.invoke_tool("my_tool", {})
+
+        assert result["isError"] is True
+        assert result["content"][0]["text"] == "Tool execution failed"
+
+    async def test_timeout_maps_to_mcp_error_content(self) -> None:
+        """Timeout error message from executor appears as MCP error content."""
+        timeout_message = "Tool execution timed out after 10 seconds"
+        executor = MagicMock()
+        executor.execute = AsyncMock(
+            return_value={"success": False, "error": timeout_message}
+        )
+
+        adapter = _make_adapter(executor)
+        await _register_tool(adapter)
+
+        result = await adapter.invoke_tool("my_tool", {})
+
+        assert result["isError"] is True
+        assert timeout_message in result["content"][0]["text"]
+
+    async def test_circuit_open_maps_to_mcp_error_content(self) -> None:
+        """Circuit-open message from executor appears as MCP error content."""
+        circuit_message = "Service temporarily unavailable - circuit breaker open"
+        executor = MagicMock()
+        executor.execute = AsyncMock(
+            return_value={"success": False, "error": circuit_message}
+        )
+
+        adapter = _make_adapter(executor)
+        await _register_tool(adapter)
+
+        result = await adapter.invoke_tool("my_tool", {})
+
+        assert result["isError"] is True
+        assert circuit_message in result["content"][0]["text"]
+
+
+# ---------------------------------------------------------------------------
+# R3: Guard conditions
+# ---------------------------------------------------------------------------
+
+
+class TestGuardConditions:
+    """Pre-condition checks before executor dispatch."""
+
+    async def test_invoke_tool_raises_when_tool_not_found(self) -> None:
+        """InfraUnavailableError raised when tool is not in registry."""
+        adapter = _make_adapter()
+
+        with pytest.raises(InfraUnavailableError, match="not found"):
+            await adapter.invoke_tool("nonexistent_tool", {})
+
+    async def test_invoke_tool_raises_when_no_executor_configured(self) -> None:
+        """ProtocolConfigurationError raised when executor is not set."""
+        adapter = _make_adapter(executor=None)
+        await _register_tool(adapter)
+
+        with pytest.raises(ProtocolConfigurationError, match="executor not configured"):
+            await adapter.invoke_tool("my_tool", {})
+
+    async def test_no_mock_responses_in_invoke_tool(self) -> None:
+        """Verify invoke_tool dispatches to executor, not a hardcoded stub.
+
+        After a successful call the result must not contain the old mock fields
+        ('message', 'arguments') from the pre-OMN-2697 implementation.
+        """
+        executor = MagicMock()
+        executor.execute = AsyncMock(
+            return_value={"success": True, "result": {"computed": True}}
+        )
+
+        adapter = _make_adapter(executor)
+        await _register_tool(adapter)
+
+        result = await adapter.invoke_tool("my_tool", {"k": "v"})
+
+        # MCP shape must be present
+        assert "content" in result
+        assert "isError" in result
+        # Old mock stub fields must be absent
+        assert "message" not in result
+        assert "arguments" not in result
+        # Executor was actually called
+        executor.execute.assert_awaited_once()
+
+    async def test_invoke_tool_passes_arguments_to_executor(self) -> None:
+        """Arguments dict is forwarded verbatim to executor.execute()."""
+        executor = MagicMock()
+        executor.execute = AsyncMock(return_value={"success": True, "result": "ok"})
+
+        adapter = _make_adapter(executor)
+        await _register_tool(adapter)
+
+        args = {"input_data": "test_payload", "flag": True}
+        await adapter.invoke_tool("my_tool", args)
+
+        call_kwargs = executor.execute.call_args[1]
+        assert call_kwargs["arguments"] == args

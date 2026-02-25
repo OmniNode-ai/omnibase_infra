@@ -27,17 +27,20 @@ Note:
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from omnibase_infra.adapters.adapter_onex_tool_execution import AdapterONEXToolExecution
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraUnavailableError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
 )
+from omnibase_infra.models.mcp.model_mcp_tool_definition import ModelMCPToolDefinition
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -120,13 +123,13 @@ class ONEXToMCPAdapter:
 
     def __init__(
         self,
-        node_executor: object | None = None,
+        node_executor: AdapterONEXToolExecution | None = None,
         container: ModelONEXContainer | None = None,
     ) -> None:
         """Initialize the adapter.
 
         Args:
-            node_executor: Optional callback for node execution.
+            node_executor: Optional AdapterONEXToolExecution for real dispatch.
                           If not provided, tools will be discovered but
                           not executable.
             container: Optional ONEX container for dependency injection.
@@ -224,18 +227,23 @@ class ONEXToMCPAdapter:
         arguments: dict[str, object],
         correlation_id: UUID | None = None,
     ) -> dict[str, object]:
-        """Invoke an MCP tool by routing to the corresponding ONEX node.
+        """Invoke an MCP tool by routing to the ONEX orchestrator via AdapterONEXToolExecution.
+
+        Dispatches the tool call through the full ONEX execution pipeline:
+        envelope building, correlation ID threading, per-tool timeout enforcement,
+        and circuit breaker protection. The raw response is mapped to the MCP
+        CallToolResult format: ``{"content": [...], "isError": bool}``.
 
         Args:
             tool_name: Name of the tool to invoke.
             arguments: Tool arguments.
-            correlation_id: Optional correlation ID for tracing.
+            correlation_id: Optional correlation ID for tracing; generated if absent.
 
         Returns:
-            Tool execution result.
+            MCP CallToolResult dict with ``content`` list and ``isError`` flag.
 
         Raises:
-            InfraUnavailableError: If tool not found.
+            InfraUnavailableError: If tool not found in registry.
             ProtocolConfigurationError: If node executor not configured.
         """
         correlation_id = correlation_id or uuid4()
@@ -271,18 +279,47 @@ class ONEXToMCPAdapter:
             },
         )
 
-        # TODO(OMN-1288): Implement actual node invocation
-        # This will:
-        # 1. Build an envelope for the ONEX node
-        # 2. Dispatch via the ONEX runtime
-        # 3. Transform the response to MCP format
+        tool_def = self._tool_cache[tool_name]
 
-        return {
-            "success": True,
-            "message": f"Tool '{tool_name}' invoked successfully",
-            "arguments": arguments,
-            "correlation_id": str(correlation_id),
-        }
+        # Bridge MCPToolDefinition (dataclass) → ModelMCPToolDefinition (Pydantic)
+        # for AdapterONEXToolExecution.execute().
+        mcp_tool = ModelMCPToolDefinition(
+            name=tool_def.name,
+            description=tool_def.description,
+            version=tool_def.version,
+            endpoint=tool_def.execution_endpoint or None,
+            timeout_seconds=tool_def.timeout_seconds,
+            metadata=dict(tool_def.metadata),
+        )
+
+        # Dispatch via AdapterONEXToolExecution: envelope build, timeout,
+        # circuit breaker, and HTTP dispatch are all handled there.
+        raw = await self._node_executor.execute(
+            tool=mcp_tool,
+            arguments=arguments,
+            correlation_id=correlation_id,
+        )
+
+        # Map AdapterONEXToolExecution result → CallToolResult dict.
+        # MCP spec: {"content": [{"type": "text", "text": ...}], "isError": bool}
+        success: bool = bool(raw.get("success", False))
+        if success:
+            result_payload = raw.get("result", raw)
+            content_text = (
+                result_payload
+                if isinstance(result_payload, str)
+                else json.dumps(result_payload)
+            )
+            return {
+                "content": [{"type": "text", "text": content_text}],
+                "isError": False,
+            }
+        else:
+            error_text = str(raw.get("error", "Tool execution failed"))
+            return {
+                "content": [{"type": "text", "text": error_text}],
+                "isError": True,
+            }
 
     def get_tool(self, tool_name: str) -> MCPToolDefinition | None:
         """Get a tool definition by name.
