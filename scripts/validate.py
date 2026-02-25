@@ -22,6 +22,7 @@ Usage:
     python scripts/validate.py imports
     python scripts/validate.py markdown_links
     python scripts/validate.py markdown_links file1.md file2.md  # validate specific files
+    python scripts/validate.py db_quality_gate
     python scripts/validate.py all
 """
 
@@ -884,6 +885,56 @@ def run_markdown_links(verbose: bool = False, files: list[str] | None = None) ->
         return False
 
 
+def run_db_quality_gate(verbose: bool = False) -> bool:
+    """Run DB quality gate validation (OMN-1785).
+
+    Forbids domain-specific DB adapter classes, direct SQL, and direct DB
+    connection calls outside of omnibase_infra and tests.
+
+    Uses escape hatches ``# db-adapter-ok`` and ``# sql-ok`` for intentional
+    exemptions.
+    """
+    import importlib.util
+
+    try:
+        validator_path = (
+            Path(__file__).parent / "validation" / "validate_db_quality_gate.py"
+        )
+
+        if not validator_path.exists():
+            print(f"DB Quality Gate: SKIP (validator not found: {validator_path})")
+            return True
+
+        spec = importlib.util.spec_from_file_location(
+            "validate_db_quality_gate", validator_path
+        )
+        if spec is None or spec.loader is None:
+            print("DB Quality Gate: SKIP (could not load validator module)")
+            return True
+
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["validate_db_quality_gate"] = module
+        spec.loader.exec_module(module)
+
+        result = module.validate_db_quality_gate(verbose=verbose)
+        report = module.generate_report(result)
+
+        if verbose or not result.is_valid:
+            print(report)
+        else:
+            print(f"DB Quality Gate: PASS ({result.files_checked} files checked)")
+
+        return result.is_valid
+
+    except Exception as e:
+        print(f"DB Quality Gate: ERROR ({type(e).__name__}: {e})")
+        if verbose:
+            import traceback
+
+            traceback.print_exc()
+        return False
+
+
 def run_all(verbose: bool = False, quick: bool = False) -> bool:
     """Run all validations.
 
@@ -919,6 +970,7 @@ def run_all(verbose: bool = False, quick: bool = False) -> bool:
                 ("I/O Audit", run_io_audit),
                 ("Imports", run_imports),
                 ("Markdown Links", run_markdown_links),
+                ("DB Quality Gate", run_db_quality_gate),
             ]
         )
 
@@ -964,6 +1016,7 @@ def main() -> int:
             "io_audit",
             "imports",
             "markdown_links",
+            "db_quality_gate",
         ],
         help="Which validator to run (default: all)",
     )
@@ -993,6 +1046,7 @@ def main() -> int:
         "io_audit": run_io_audit,
         "imports": run_imports,
         "markdown_links": run_markdown_links,
+        "db_quality_gate": run_db_quality_gate,
     }
 
     if args.validator == "all":

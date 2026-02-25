@@ -128,6 +128,13 @@ jobs:
           echo "================================================================"
           uv run python scripts/validate.py markdown_links --verbose
 
+      - name: Run DB quality gate
+        run: |
+          echo "================================================================"
+          echo "DB Quality Gate - Forbid Domain-Specific Adapters (OMN-1785)"
+          echo "================================================================"
+          uv run python scripts/validate.py db_quality_gate --verbose
+
   # Fingerprint drift detection -- CI twins for runtime assertions B2 and B3
   # Prevents stale fingerprint artifacts from being merged (OMN-2149)
   fingerprint-check:
