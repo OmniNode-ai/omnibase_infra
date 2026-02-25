@@ -21,7 +21,13 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from omnibase_infra.errors import InfraUnavailableError, ProtocolConfigurationError
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import (
+    InfraTimeoutError,
+    InfraUnavailableError,
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+)
 from omnibase_infra.handlers.mcp.adapter_onex_to_mcp import (
     MCPToolParameter,
     ONEXToMCPAdapter,
@@ -61,11 +67,9 @@ async def _register_tool(
         version="1.0.0",
         timeout_seconds=timeout_seconds,
     )
-    # Patch execution_endpoint into the cached tool definition
-    tool = adapter._tool_cache[name]
-    object.__setattr__(tool, "execution_endpoint", endpoint) if hasattr(
-        tool, "__dataclass_fields__"
-    ) else setattr(tool, "execution_endpoint", endpoint)
+    # Patch execution_endpoint into the cached tool definition.
+    # MCPToolDefinition is a non-frozen dataclass, so direct assignment works.
+    adapter._tool_cache[name].execution_endpoint = endpoint
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +233,50 @@ class TestONEXErrorMapping:
 
         assert result["isError"] is True
         assert circuit_message in result["content"][0]["text"]
+
+    async def test_infra_timeout_exception_maps_to_mcp_error(self) -> None:
+        """InfraTimeoutError raised by execute() is caught and returned as MCP error."""
+        from omnibase_infra.errors import ModelTimeoutErrorContext
+
+        timeout_ctx = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="execute_tool",
+        )
+        exc = InfraTimeoutError("timed out calling orchestrator", context=timeout_ctx)
+
+        executor = MagicMock()
+        executor.execute = AsyncMock(side_effect=exc)
+
+        adapter = _make_adapter(executor)
+        await _register_tool(adapter)
+
+        result = await adapter.invoke_tool("my_tool", {})
+
+        assert result["isError"] is True
+        text = result["content"][0]["text"]
+        assert "timed out" in text.lower() or "timeout" in text.lower()
+
+    async def test_infra_unavailable_exception_maps_to_mcp_error(self) -> None:
+        """InfraUnavailableError raised by execute() is caught and returned as MCP error."""
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="execute_tool",
+        )
+        exc = InfraUnavailableError("circuit breaker open", context=ctx)
+
+        executor = MagicMock()
+        executor.execute = AsyncMock(side_effect=exc)
+
+        adapter = _make_adapter(executor)
+        await _register_tool(adapter)
+
+        result = await adapter.invoke_tool("my_tool", {})
+
+        assert result["isError"] is True
+        assert (
+            "unavailable" in result["content"][0]["text"].lower()
+            or "circuit" in result["content"][0]["text"].lower()
+        )
 
 
 # ---------------------------------------------------------------------------

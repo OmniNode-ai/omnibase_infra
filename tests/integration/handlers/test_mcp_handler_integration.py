@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import socket
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -152,12 +152,11 @@ def onex_adapter() -> ONEXToMCPAdapter:
     Returns:
         Configured adapter with sample tools registered.
     """
-    from unittest.mock import AsyncMock, MagicMock
-
     from omnibase_infra.handlers.mcp import ONEXToMCPAdapter as Adapter
 
     # Create mock AdapterONEXToolExecution for tool invocation.
     # node_executor must have an async .execute() method (per OMN-2697).
+    # AsyncMock and MagicMock are imported at module level.
     mock_executor = MagicMock()
     mock_executor.execute = AsyncMock(
         side_effect=lambda tool, arguments, correlation_id: {
@@ -629,6 +628,8 @@ class TestOnexAdapterToolInvocation:
         assert isinstance(result["content"], list)
         assert len(result["content"]) == 1
         assert result["content"][0]["type"] == "text"
+        # The mock returns {"tool_name": "test_echo", ...} which gets JSON-serialized
+        assert "test_echo" in result["content"][0]["text"]
 
     async def test_invoke_nonexistent_tool(
         self, registered_adapter: ONEXToMCPAdapter

@@ -36,6 +36,7 @@ from uuid import UUID, uuid4
 from omnibase_infra.adapters.adapter_onex_tool_execution import AdapterONEXToolExecution
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
+    InfraTimeoutError,
     InfraUnavailableError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
@@ -294,17 +295,36 @@ class ONEXToMCPAdapter:
 
         # Dispatch via AdapterONEXToolExecution: envelope build, timeout,
         # circuit breaker, and HTTP dispatch are all handled there.
-        raw = await self._node_executor.execute(
-            tool=mcp_tool,
-            arguments=arguments,
-            correlation_id=correlation_id,
-        )
+        # AdapterONEXToolExecution.execute() normally catches its own errors and
+        # returns {"success": False, "error": ...} dicts, but we also guard
+        # against any exceptions that escape (e.g. InfraTimeoutError raised
+        # before the circuit breaker catches it).
+        try:
+            raw = await self._node_executor.execute(
+                tool=mcp_tool,
+                arguments=arguments,
+                correlation_id=correlation_id,
+            )
+        except InfraTimeoutError as exc:
+            return {
+                "content": [
+                    {"type": "text", "text": f"Tool execution timed out: {exc}"}
+                ],
+                "isError": True,
+            }
+        except InfraUnavailableError as exc:
+            return {
+                "content": [{"type": "text", "text": f"Service unavailable: {exc}"}],
+                "isError": True,
+            }
 
         # Map AdapterONEXToolExecution result → CallToolResult dict.
         # MCP spec: {"content": [{"type": "text", "text": ...}], "isError": bool}
+        # Use raw.get("result", "") as fallback (not raw itself) to avoid
+        # leaking internal protocol fields into MCP content.
         success: bool = bool(raw.get("success", False))
         if success:
-            result_payload = raw.get("result", raw)
+            result_payload = raw.get("result", "")
             content_text = (
                 result_payload
                 if isinstance(result_payload, str)
