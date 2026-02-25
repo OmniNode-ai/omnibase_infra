@@ -128,6 +128,14 @@ class ModelRegistrationRecord(BaseModel):
         default=None,
         description="Correlation ID for distributed tracing (auto-generated if not provided)",
     )
+    subscribe_topics: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description="Topic suffixes this node subscribes to (written to PostgreSQL for ServiceTopicCatalogPostgres).",
+    )
+    publish_topics: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description="Topic suffixes this node publishes to (written to PostgreSQL for ServiceTopicCatalogPostgres).",
+    )
 
     @field_validator("capabilities", mode="before")
     @classmethod

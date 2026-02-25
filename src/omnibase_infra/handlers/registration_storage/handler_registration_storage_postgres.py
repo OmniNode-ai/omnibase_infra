@@ -100,20 +100,24 @@ CREATE TABLE IF NOT EXISTS node_registrations (
     endpoints JSONB NOT NULL DEFAULT '{}',
     metadata JSONB NOT NULL DEFAULT '{}',
     registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    subscribe_topics JSONB NOT NULL DEFAULT '[]',
+    publish_topics JSONB NOT NULL DEFAULT '[]'
 );
 """
 
 SQL_UPSERT = """
-INSERT INTO node_registrations (node_id, node_type, node_version, capabilities, endpoints, metadata, registered_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO node_registrations (node_id, node_type, node_version, capabilities, endpoints, metadata, registered_at, updated_at, subscribe_topics, publish_topics)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (node_id) DO UPDATE SET
     node_type = EXCLUDED.node_type,
     node_version = EXCLUDED.node_version,
     capabilities = EXCLUDED.capabilities,
     endpoints = EXCLUDED.endpoints,
     metadata = EXCLUDED.metadata,
-    updated_at = EXCLUDED.updated_at
+    updated_at = EXCLUDED.updated_at,
+    subscribe_topics = EXCLUDED.subscribe_topics,
+    publish_topics = EXCLUDED.publish_topics
 RETURNING (xmax = 0) AS was_insert;
 """
 
@@ -383,6 +387,8 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
             capabilities_json = json.dumps(record.capabilities)
             endpoints_json = json.dumps(record.endpoints)
             metadata_json = json.dumps(record.metadata)
+            subscribe_topics_json = json.dumps(list(record.subscribe_topics))
+            publish_topics_json = json.dumps(list(record.publish_topics))
 
             async with pool.acquire() as conn:
                 result = await asyncio.wait_for(
@@ -396,6 +402,8 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
                         metadata_json,
                         record.created_at or now,
                         now,
+                        subscribe_topics_json,
+                        publish_topics_json,
                     ),
                     timeout=self._timeout_seconds,
                 )

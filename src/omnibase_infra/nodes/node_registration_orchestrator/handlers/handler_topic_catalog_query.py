@@ -43,7 +43,6 @@ from __future__ import annotations
 import logging
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
@@ -63,9 +62,9 @@ from omnibase_infra.models.catalog.model_topic_catalog_query import (
 from omnibase_infra.models.catalog.model_topic_catalog_response import (
     ModelTopicCatalogResponse,
 )
-
-if TYPE_CHECKING:
-    from omnibase_infra.services.service_topic_catalog import ServiceTopicCatalog
+from omnibase_infra.services.protocol_topic_catalog_service import (
+    ProtocolTopicCatalogService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +95,7 @@ class HandlerTopicCatalogQuery:
         _catalog_service: ServiceTopicCatalog for building catalog snapshots.
 
     Example:
-        >>> service = ServiceTopicCatalog(container=container, consul_handler=h)
+        >>> service = ServiceTopicCatalogPostgres(container=container, pool=pool)
         >>> handler = HandlerTopicCatalogQuery(catalog_service=service)
         >>> output = await handler.handle(envelope)
         >>> assert len(output.events) == 1
@@ -105,12 +104,17 @@ class HandlerTopicCatalogQuery:
         True
     """
 
-    def __init__(self, catalog_service: ServiceTopicCatalog) -> None:
+    def __init__(
+        self,
+        catalog_service: ProtocolTopicCatalogService,
+    ) -> None:
         """Initialize the handler with a topic catalog service.
 
         Args:
-            catalog_service: ``ServiceTopicCatalog`` instance for querying
-                topic metadata. Wired via registry ``handler_dependencies``.
+            catalog_service: Any implementation of ``ProtocolTopicCatalogService``:
+                either ``ServiceTopicCatalog`` (Consul-backed, legacy) or
+                ``ServiceTopicCatalogPostgres`` (PostgreSQL-backed, OMN-2746).
+                Wired via registry ``handler_dependencies``.
         """
         self._catalog_service = catalog_service
 
@@ -147,8 +151,9 @@ class HandlerTopicCatalogQuery:
     def handler_category(self) -> EnumHandlerTypeCategory:
         """Behavioral classification for this handler.
 
-        Returns EFFECT because this handler performs I/O via
-        ``ServiceTopicCatalog`` which reads from Consul KV.
+        Returns EFFECT because this handler performs I/O via the catalog
+        service (reads from PostgreSQL or Consul KV depending on the
+        injected implementation).
         """
         return EnumHandlerTypeCategory.EFFECT
 
