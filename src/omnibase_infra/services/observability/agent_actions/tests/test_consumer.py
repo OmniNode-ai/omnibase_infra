@@ -994,6 +994,108 @@ class TestHealthCheck:
         # Should be HEALTHY because no traffic means stale write is expected
         assert health["status"] == EnumHealthStatus.HEALTHY.value
 
+    @pytest.mark.asyncio
+    async def test_health_check_healthy_when_no_writes_and_no_messages_beyond_grace(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Health check should return HEALTHY when no writes and no messages, even past grace period.
+
+        This is the core bug fix (OMN-2781): an idle consumer on an empty topic must
+        not be treated as DEGRADED simply because it has been running for more than
+        60 seconds without writing.  Zero messages received means the topic is empty —
+        that is a normal operating state, not a failure.
+        """
+        from datetime import timedelta
+
+        consumer._running = True
+
+        # Mock writer with closed circuit
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "closed", "failure_count": 0}
+        )
+        consumer._writer = mock_writer
+
+        # Simulate consumer started well beyond the 60-second grace period
+        consumer.metrics.started_at = datetime.now(UTC) - timedelta(seconds=300)
+
+        # No messages received, no writes
+        consumer.metrics.messages_received = 0
+        consumer.metrics.last_successful_write_at = None
+
+        health = await consumer.health_check()
+
+        # Must be HEALTHY — an idle consumer is not degraded
+        assert health["status"] == EnumHealthStatus.HEALTHY.value
+
+    @pytest.mark.asyncio
+    async def test_health_check_degraded_when_messages_received_but_no_writes_beyond_grace(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Health check returns DEGRADED when messages received but nothing written past grace period.
+
+        If the consumer has consumed messages (messages_received > 0) but
+        last_successful_write_at is still None after the 60-second grace period,
+        the write pipeline is failing and DEGRADED is the correct status.
+        """
+        from datetime import timedelta
+
+        consumer._running = True
+
+        # Mock writer with closed circuit (circuit itself is fine)
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "closed", "failure_count": 0}
+        )
+        consumer._writer = mock_writer
+
+        # Consumer started well beyond the 60-second grace period
+        consumer.metrics.started_at = datetime.now(UTC) - timedelta(seconds=300)
+
+        # Messages were received but nothing written
+        consumer.metrics.messages_received = 50
+        consumer.metrics.last_successful_write_at = None
+
+        # Ensure poll is recent so poll-staleness check does not fire first
+        consumer.metrics.last_poll_at = datetime.now(UTC) - timedelta(seconds=1)
+
+        health = await consumer.health_check()
+
+        # Write pipeline is failing — DEGRADED is correct
+        assert health["status"] == EnumHealthStatus.DEGRADED.value
+
+    @pytest.mark.asyncio
+    async def test_health_check_healthy_when_messages_received_but_no_writes_within_grace(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Health check returns HEALTHY when messages received but still within grace period."""
+        from datetime import timedelta
+
+        consumer._running = True
+
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "closed", "failure_count": 0}
+        )
+        consumer._writer = mock_writer
+
+        # Consumer started only 10 seconds ago — within 60-second grace period
+        consumer.metrics.started_at = datetime.now(UTC) - timedelta(seconds=10)
+
+        # Messages were received but nothing written yet (normal during startup)
+        consumer.metrics.messages_received = 5
+        consumer.metrics.last_successful_write_at = None
+
+        consumer.metrics.last_poll_at = datetime.now(UTC) - timedelta(seconds=1)
+
+        health = await consumer.health_check()
+
+        # Within grace period — HEALTHY
+        assert health["status"] == EnumHealthStatus.HEALTHY.value
+
 
 # =============================================================================
 # Consumer Lifecycle Tests

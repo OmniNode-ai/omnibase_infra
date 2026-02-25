@@ -1096,12 +1096,14 @@ class AgentActionsConsumer:
         1. UNHEALTHY: Consumer is not running (stopped or crashed)
         2. DEGRADED: Circuit breaker is open or half-open (database issues, retrying)
         3. DEGRADED: Last poll exceeds poll staleness threshold (consumer not polling)
-        4. DEGRADED: No writes yet AND consumer running > 60s (startup grace period exceeded)
+        4. DEGRADED: Messages received but no writes AND consumer running > 60s
+           (startup grace period exceeded with unwritten messages — write pipeline failing)
         5. DEGRADED: Last successful write exceeds staleness threshold (with messages received)
-        6. HEALTHY: All other cases (running, circuit closed, recent activity or in grace period)
+        6. HEALTHY: All other cases (running, circuit closed, recent activity, idle, or in grace period)
 
-        The 60-second startup grace period allows the consumer to be considered
-        healthy immediately after starting, before any messages have been consumed.
+        An idle consumer (zero messages received) is always HEALTHY regardless of uptime.
+        The 60-second startup grace period covers the case where messages arrive before
+        the first write completes.
 
         Args:
             metrics_snapshot: Snapshot of current consumer metrics including
@@ -1142,7 +1144,14 @@ class AgentActionsConsumer:
         messages_received = metrics_snapshot.get("messages_received", 0)
 
         if last_write is None:
-            # No writes yet - check startup grace period (60 seconds)
+            # No writes yet - only DEGRADED if messages were received but not written
+            # (i.e., messages came in but the write pipeline is failing).
+            # An idle consumer on an empty topic has no messages received, so it is
+            # healthy regardless of uptime.
+            if not isinstance(messages_received, int) or messages_received == 0:
+                # Rule 4 (revised): No messages received at all -> idle consumer, HEALTHY
+                return EnumHealthStatus.HEALTHY
+            # Messages have been received but none written - check startup grace period
             started_at_str = metrics_snapshot.get("started_at")
             if started_at_str is not None:
                 try:
@@ -1152,7 +1161,7 @@ class AgentActionsConsumer:
                         # Rule 6: Consumer just started, healthy even without writes
                         return EnumHealthStatus.HEALTHY
                     else:
-                        # Rule 4: Consumer running > 60s with no writes -> DEGRADED
+                        # Rule 4: Consumer running > 60s, messages received but no writes -> DEGRADED
                         return EnumHealthStatus.DEGRADED
                 except (ValueError, TypeError):
                     # Parse error - fallback to healthy
