@@ -14,9 +14,8 @@ Ticket: OMN-2552
 
 from __future__ import annotations
 
-import json
 import os
-from collections.abc import AsyncGenerator
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -28,15 +27,23 @@ from omnibase_infra.nodes.node_reward_binder_effect.handlers.handler_reward_bind
     HandlerRewardBinder,
     _compute_objective_fingerprint,
 )
+from omnibase_infra.nodes.node_reward_binder_effect.models.model_evaluation_result import (
+    ModelEvaluationResult,
+)
+from omnibase_infra.nodes.node_reward_binder_effect.models.model_evidence_bundle import (
+    ModelEvidenceBundle,
+)
+from omnibase_infra.nodes.node_reward_binder_effect.models.model_evidence_item import (
+    ModelEvidenceItem,
+)
+from omnibase_infra.nodes.node_reward_binder_effect.models.model_objective_spec import (
+    ModelObjectiveSpec,
+)
 from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_binder_output import (
     ModelRewardBinderOutput,
 )
-from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_domain import (
-    EvaluationResult,
-    EvidenceBundle,
-    EvidenceItem,
-    ObjectiveSpec,
-    ScoreVector,
+from omnibase_infra.nodes.node_reward_binder_effect.models.model_score_vector import (
+    ModelScoreVector,
 )
 
 # ==============================================================================
@@ -54,32 +61,33 @@ pytestmark = [
     ),
 ]
 
+
 # ==============================================================================
 # Helpers
 # ==============================================================================
 
 
-def _make_evaluation_result() -> EvaluationResult:
-    """Build a test EvaluationResult with two score vectors."""
+def _make_evaluation_result() -> ModelEvaluationResult:
+    """Build a test ModelEvaluationResult with two score vectors."""
     run_id = uuid4()
-    evidence = EvidenceBundle(
+    evidence = ModelEvidenceBundle(
         run_id=run_id,
         items=(
-            EvidenceItem(source="integration_test", content="evidence_a"),
-            EvidenceItem(source="integration_test", content="evidence_b"),
+            ModelEvidenceItem(source="integration_test", content="evidence_a"),
+            ModelEvidenceItem(source="integration_test", content="evidence_b"),
         ),
     )
-    return EvaluationResult(
+    return ModelEvaluationResult(
         run_id=run_id,
         objective_id=uuid4(),
         score_vectors=(
-            ScoreVector(
+            ModelScoreVector(
                 target_id=uuid4(),
                 target_type="tool",
                 dimensions={"accuracy": 0.9},
                 composite_score=0.85,
             ),
-            ScoreVector(
+            ModelScoreVector(
                 target_id=uuid4(),
                 target_type="model",
                 dimensions={"accuracy": 0.8},
@@ -92,9 +100,9 @@ def _make_evaluation_result() -> EvaluationResult:
     )
 
 
-def _make_objective_spec() -> ObjectiveSpec:
-    """Build a test ObjectiveSpec."""
-    return ObjectiveSpec(
+def _make_objective_spec() -> ModelObjectiveSpec:
+    """Build a test ModelObjectiveSpec."""
+    return ModelObjectiveSpec(
         objective_id=uuid4(),
         name="integration-test-objective",
         target_types=("tool", "model"),
@@ -117,34 +125,16 @@ class TestRewardBinderKafkaIntegration:
     async def test_events_published_to_correct_topics(self) -> None:
         """All three event types reach correct Kafka topics in correct order.
 
-        Uses EventBusKafka to publish and a consumer group to verify receipt.
+        Uses EventBusKafka to publish and verifies output model is correct.
         """
         from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
         from omnibase_infra.runtime.publisher_topic_scoped import PublisherTopicScoped
 
         bootstrap = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
-        run_id_str = uuid4().hex[:8]
-
-        # Unique consumer group to avoid offset conflicts
-        consumer_group = f"test-reward-binder-{run_id_str}"
 
         result = _make_evaluation_result()
         spec = _make_objective_spec()
         corr_id = uuid4()
-
-        received: list[dict[str, object]] = []
-
-        async def _subscribe_topic(bus: EventBusKafka, topic: str) -> None:
-            """Subscribe to topic and collect one message."""
-            collected: list[bytes] = []
-
-            async def _handler(message: object) -> None:
-                from omnibase_infra.event_bus.models import ModelEventMessage
-
-                if isinstance(message, ModelEventMessage):
-                    collected.append(message.value)
-
-            await bus.subscribe(topic=topic, group_id=consumer_group, callback=_handler)
 
         bus = EventBusKafka(
             bootstrap_servers=bootstrap,
@@ -198,9 +188,7 @@ class TestRewardBinderKafkaIntegration:
 
     @pytest.mark.asyncio
     async def test_publish_failure_propagates(self) -> None:
-        """Kafka publish failure propagates — not swallowed silently."""
-        from unittest.mock import AsyncMock
-
+        """Kafka publish failure propagates -- not swallowed silently."""
         broken_publisher = AsyncMock(
             side_effect=ConnectionError("Kafka unavailable for test")
         )

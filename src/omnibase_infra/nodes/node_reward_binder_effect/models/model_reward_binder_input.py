@@ -11,17 +11,19 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_domain import (
-    EvaluationResult,
-    ObjectiveSpec,
+from omnibase_infra.nodes.node_reward_binder_effect.models.model_evaluation_result import (
+    ModelEvaluationResult,
+)
+from omnibase_infra.nodes.node_reward_binder_effect.models.model_objective_spec import (
+    ModelObjectiveSpec,
 )
 
 
 class ModelRewardBinderInput(BaseModel):
     """Input envelope for RewardBinderEffect operations.
 
-    Carries the ``EvaluationResult`` produced by ``ScoringReducer`` together
-    with the ``ObjectiveSpec`` used for the run (required for
+    Carries the ``ModelEvaluationResult`` produced by ``ScoringReducer`` together
+    with the ``ModelObjectiveSpec`` used for the run (required for
     ``objective_fingerprint`` computation).
     """
 
@@ -31,11 +33,11 @@ class ModelRewardBinderInput(BaseModel):
         ...,
         description="Correlation ID for distributed tracing.",
     )
-    evaluation_result: EvaluationResult = Field(
+    evaluation_result: ModelEvaluationResult = Field(
         ...,
         description="Evaluation result produced by ScoringReducer.",
     )
-    objective_spec: ObjectiveSpec = Field(
+    objective_spec: ModelObjectiveSpec = Field(
         ...,
         description="ObjectiveSpec used for this evaluation run (for fingerprint computation).",
     )

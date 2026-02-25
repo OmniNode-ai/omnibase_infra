@@ -2,22 +2,22 @@
 # Copyright (c) 2026 OmniNode Team
 """Handler that emits structured reward events to Kafka.
 
-Emits three event types in strict order after ScoringReducer produces an
-EvaluationResult:
+Emits three event types in strict order after ScoringReducer produces a
+ModelEvaluationResult:
 
-  1. ``RunEvaluatedEvent``       → ``{env}.onex.evt.omnimemory.run-evaluated.v1``
-  2. ``RewardAssignedEvent``     → ``{env}.onex.evt.omnimemory.reward-assigned.v1``
-     (one event per ``target_type`` present in the evaluation result)
-  3. ``PolicyStateUpdatedEvent`` → ``{env}.onex.evt.omnimemory.policy-state-updated.v1``
+  1. ``ModelRunEvaluatedEvent``       -> ``onex.evt.omnimemory.run-evaluated.v1``
+  2. ``ModelRewardAssignedEvent``     -> ``onex.evt.omnimemory.reward-assigned.v1``
+     (one event per target present in the evaluation result)
+  3. ``ModelPolicyStateUpdatedEvent`` -> ``onex.evt.omnimemory.policy-state-updated.v1``
 
 Design constraints:
-  - No scoring logic — only emits what ScoringReducer produced.
+  - No scoring logic -- only emits what ScoringReducer produced.
   - Kafka publish failures are never swallowed silently; they propagate to the caller.
   - Events are emitted in the order listed above.
-  - ``objective_fingerprint`` is SHA-256 of ``ObjectiveSpec.model_dump_json()``
+  - ``objective_fingerprint`` is SHA-256 of ``ModelObjectiveSpec.model_dump_json()``
     (deterministic serialisation).
-  - ``evidence_refs`` in ``RewardAssignedEvent`` trace back to specific
-    ``EvidenceItem.item_id`` values from the input ``EvidenceBundle``.
+  - ``evidence_refs`` in ``ModelRewardAssignedEvent`` trace back to specific
+    ``ModelEvidenceItem.item_id`` values from the input ``ModelEvidenceBundle``.
 
 Ticket: OMN-2552
 """
@@ -37,16 +37,22 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
+from omnibase_infra.nodes.node_reward_binder_effect.models.model_evaluation_result import (
+    ModelEvaluationResult,
+)
+from omnibase_infra.nodes.node_reward_binder_effect.models.model_objective_spec import (
+    ModelObjectiveSpec,
+)
+from omnibase_infra.nodes.node_reward_binder_effect.models.model_policy_state_updated_event import (
+    ModelPolicyStateUpdatedEvent,
+)
+from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_assigned_event import (
+    ModelRewardAssignedEvent,
+)
 from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_binder_output import (
     ModelRewardBinderOutput,
 )
-from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_domain import (
-    EvaluationResult,
-    ObjectiveSpec,
-)
-from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_events import (
-    ModelPolicyStateUpdatedEvent,
-    ModelRewardAssignedEvent,
+from omnibase_infra.nodes.node_reward_binder_effect.models.model_run_evaluated_event import (
     ModelRunEvaluatedEvent,
 )
 
@@ -57,21 +63,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Topic name templates (env-prefixed per contract)
-# ──────────────────────────────────────────────────────────────────────────────
+# ==============================================================================
+# Topic name constants
+# ==============================================================================
 _TOPIC_RUN_EVALUATED = "onex.evt.omnimemory.run-evaluated.v1"
 _TOPIC_REWARD_ASSIGNED = "onex.evt.omnimemory.reward-assigned.v1"
 _TOPIC_POLICY_STATE_UPDATED = "onex.evt.omnimemory.policy-state-updated.v1"
 
 
-def _compute_objective_fingerprint(spec: ObjectiveSpec) -> str:
-    """Compute a tamper-evident SHA-256 fingerprint of the ObjectiveSpec.
+def _compute_objective_fingerprint(spec: ModelObjectiveSpec) -> str:
+    """Compute a tamper-evident SHA-256 fingerprint of the ModelObjectiveSpec.
 
-    Uses ``ObjectiveSpec.model_dump_json()`` for deterministic serialisation.
+    Uses ``ModelObjectiveSpec.model_dump_json()`` for deterministic serialisation.
 
     Args:
-        spec: The ObjectiveSpec to fingerprint.
+        spec: The ModelObjectiveSpec to fingerprint.
 
     Returns:
         64-character lowercase hex digest.
@@ -80,14 +86,14 @@ def _compute_objective_fingerprint(spec: ObjectiveSpec) -> str:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def _build_evidence_refs(result: EvaluationResult) -> tuple[UUID, ...]:
-    """Extract all EvidenceItem IDs from the EvidenceBundle.
+def _build_evidence_refs(result: ModelEvaluationResult) -> tuple[UUID, ...]:
+    """Extract all ModelEvidenceItem IDs from the ModelEvidenceBundle.
 
     Args:
-        result: The EvaluationResult containing the evidence bundle.
+        result: The ModelEvaluationResult containing the evidence bundle.
 
     Returns:
-        Tuple of EvidenceItem.item_id values.
+        Tuple of ModelEvidenceItem.item_id values.
     """
     return tuple(item.item_id for item in result.evidence_bundle.items)
 
@@ -145,14 +151,14 @@ class HandlerRewardBinder:
         """Emit reward events to Kafka.
 
         Envelope keys:
-            evaluation_result (EvaluationResult): Result from ScoringReducer.
-            objective_spec (ObjectiveSpec): Spec used for this run.
+            evaluation_result (ModelEvaluationResult): Result from ScoringReducer.
+            objective_spec (ModelObjectiveSpec): Spec used for this run.
             correlation_id (UUID): Tracing correlation ID.
 
         Events are emitted in order:
-          1. RunEvaluatedEvent
-          2. RewardAssignedEvent x len(score_vectors)
-          3. PolicyStateUpdatedEvent
+          1. ModelRunEvaluatedEvent
+          2. ModelRewardAssignedEvent x len(score_vectors)
+          3. ModelPolicyStateUpdatedEvent
 
         Raises:
             RuntimeHostError: If the publisher is not configured or required
@@ -182,23 +188,23 @@ class HandlerRewardBinder:
         if self._publisher is None:
             raise RuntimeHostError(
                 "HandlerRewardBinder requires a publisher to be configured. "
-                "Use RegistryInfraRewardBinderEffect.register_with_publisher().",
+                "Use RegistryInfraRewardBinderEffect.create_with_publisher().",
                 context=context,
             )
 
-        # ── Extract and validate inputs ────────────────────────────────────
+        # Extract and validate inputs
         raw_result = envelope.get("evaluation_result")
         if raw_result is None:
             raise RuntimeHostError(
                 "emit_reward_events requires 'evaluation_result' in the envelope",
                 context=context,
             )
-        if not isinstance(raw_result, EvaluationResult):
+        if not isinstance(raw_result, ModelEvaluationResult):
             raise RuntimeHostError(
-                f"Expected EvaluationResult, got {type(raw_result).__name__}",
+                f"Expected ModelEvaluationResult, got {type(raw_result).__name__}",
                 context=context,
             )
-        result: EvaluationResult = raw_result
+        result: ModelEvaluationResult = raw_result
 
         raw_spec = envelope.get("objective_spec")
         if raw_spec is None:
@@ -206,18 +212,18 @@ class HandlerRewardBinder:
                 "emit_reward_events requires 'objective_spec' in the envelope",
                 context=context,
             )
-        if not isinstance(raw_spec, ObjectiveSpec):
+        if not isinstance(raw_spec, ModelObjectiveSpec):
             raise RuntimeHostError(
-                f"Expected ObjectiveSpec, got {type(raw_spec).__name__}",
+                f"Expected ModelObjectiveSpec, got {type(raw_spec).__name__}",
                 context=context,
             )
-        spec: ObjectiveSpec = raw_spec
+        spec: ModelObjectiveSpec = raw_spec
 
-        # ── Compute fingerprint ────────────────────────────────────────────
+        # Compute fingerprint
         fingerprint = _compute_objective_fingerprint(spec)
         evidence_refs = _build_evidence_refs(result)
 
-        # ── Event 1: RunEvaluatedEvent ─────────────────────────────────────
+        # Event 1: ModelRunEvaluatedEvent
         run_evaluated = ModelRunEvaluatedEvent(
             run_id=result.run_id,
             objective_id=result.objective_id,
@@ -233,12 +239,12 @@ class HandlerRewardBinder:
             correlation_id=corr_id,
         )
         logger.info(
-            "Emitted RunEvaluatedEvent run_id=%s fingerprint=%s",
+            "Emitted ModelRunEvaluatedEvent run_id=%s fingerprint=%s",
             result.run_id,
             fingerprint,
         )
 
-        # ── Event 2: RewardAssignedEvent (one per ScoreVector) ─────────────
+        # Event 2: ModelRewardAssignedEvent (one per ModelScoreVector)
         reward_event_ids: list[UUID] = []
         for sv in result.score_vectors:
             reward_event = ModelRewardAssignedEvent(
@@ -257,13 +263,13 @@ class HandlerRewardBinder:
                 correlation_id=corr_id,
             )
             logger.info(
-                "Emitted RewardAssignedEvent target_id=%s target_type=%s score=%s",
+                "Emitted ModelRewardAssignedEvent target_id=%s target_type=%s score=%s",
                 sv.target_id,
                 sv.target_type,
                 sv.composite_score,
             )
 
-        # ── Event 3: PolicyStateUpdatedEvent ──────────────────────────────
+        # Event 3: ModelPolicyStateUpdatedEvent
         policy_event = ModelPolicyStateUpdatedEvent(
             run_id=result.run_id,
             old_state=result.policy_state_before,
@@ -276,11 +282,11 @@ class HandlerRewardBinder:
             correlation_id=corr_id,
         )
         logger.info(
-            "Emitted PolicyStateUpdatedEvent run_id=%s",
+            "Emitted ModelPolicyStateUpdatedEvent run_id=%s",
             result.run_id,
         )
 
-        # ── Build output ───────────────────────────────────────────────────
+        # Build output
         topics: tuple[str, ...] = (
             _TOPIC_RUN_EVALUATED,
             _TOPIC_REWARD_ASSIGNED,
@@ -313,7 +319,7 @@ class HandlerRewardBinder:
     ) -> None:
         """Publish to Kafka via the injected publisher.
 
-        Errors are never swallowed — any exception from the publisher
+        Errors are never swallowed -- any exception from the publisher
         propagates to the caller per contract constraint.
 
         Args:

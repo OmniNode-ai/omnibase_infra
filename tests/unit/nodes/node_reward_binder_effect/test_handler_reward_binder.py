@@ -3,9 +3,9 @@
 """Unit tests for HandlerRewardBinder.
 
 Tests:
-- objective_fingerprint is deterministic SHA-256 of ObjectiveSpec.model_dump_json()
-- evidence_refs trace back to EvidenceItem.item_id values in EvidenceBundle
-- Three events emitted in correct order: RunEvaluated → RewardAssigned → PolicyStateUpdated
+- objective_fingerprint is deterministic SHA-256 of ModelObjectiveSpec.model_dump_json()
+- evidence_refs trace back to ModelEvidenceItem.item_id values in ModelEvidenceBundle
+- Three events emitted in correct order: RunEvaluated -> RewardAssigned -> PolicyStateUpdated
 - Event structure correct (topic names, field values)
 - Kafka publish failure propagates (never swallowed silently)
 - Missing inputs raise RuntimeHostError
@@ -17,10 +17,7 @@ Ticket: OMN-2552
 from __future__ import annotations
 
 import hashlib
-import json
-from collections.abc import AsyncGenerator
-from typing import Any
-from unittest.mock import AsyncMock, call
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -32,15 +29,23 @@ from omnibase_infra.nodes.node_reward_binder_effect.handlers.handler_reward_bind
     HandlerRewardBinder,
     _compute_objective_fingerprint,
 )
+from omnibase_infra.nodes.node_reward_binder_effect.models.model_evaluation_result import (
+    ModelEvaluationResult,
+)
+from omnibase_infra.nodes.node_reward_binder_effect.models.model_evidence_bundle import (
+    ModelEvidenceBundle,
+)
+from omnibase_infra.nodes.node_reward_binder_effect.models.model_evidence_item import (
+    ModelEvidenceItem,
+)
+from omnibase_infra.nodes.node_reward_binder_effect.models.model_objective_spec import (
+    ModelObjectiveSpec,
+)
 from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_binder_output import (
     ModelRewardBinderOutput,
 )
-from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_domain import (
-    EvaluationResult,
-    EvidenceBundle,
-    EvidenceItem,
-    ObjectiveSpec,
-    ScoreVector,
+from omnibase_infra.nodes.node_reward_binder_effect.models.model_score_vector import (
+    ModelScoreVector,
 )
 
 pytestmark = pytest.mark.unit
@@ -51,22 +56,22 @@ pytestmark = pytest.mark.unit
 # ==============================================================================
 
 
-def _make_objective_spec(name: str = "test-objective") -> ObjectiveSpec:
-    """Build a minimal ObjectiveSpec for testing."""
-    return ObjectiveSpec(
+def _make_objective_spec(name: str = "test-objective") -> ModelObjectiveSpec:
+    """Build a minimal ModelObjectiveSpec for testing."""
+    return ModelObjectiveSpec(
         objective_id=uuid4(),
         name=name,
         target_types=("tool", "model"),
     )
 
 
-def _make_evidence_bundle(run_id: UUID) -> EvidenceBundle:
-    """Build an EvidenceBundle with two items."""
-    return EvidenceBundle(
+def _make_evidence_bundle(run_id: UUID) -> ModelEvidenceBundle:
+    """Build a ModelEvidenceBundle with two items."""
+    return ModelEvidenceBundle(
         run_id=run_id,
         items=(
-            EvidenceItem(source="session_log", content="evidence A"),
-            EvidenceItem(source="session_log", content="evidence B"),
+            ModelEvidenceItem(source="session_log", content="evidence A"),
+            ModelEvidenceItem(source="session_log", content="evidence B"),
         ),
     )
 
@@ -76,12 +81,12 @@ def _make_evaluation_result(
     policy_before: dict[str, object] | None = None,
     policy_after: dict[str, object] | None = None,
     num_targets: int = 2,
-) -> EvaluationResult:
-    """Build a minimal EvaluationResult with N score vectors."""
+) -> ModelEvaluationResult:
+    """Build a minimal ModelEvaluationResult with N score vectors."""
     run_id = uuid4()
     evidence = _make_evidence_bundle(run_id)
     score_vectors = tuple(
-        ScoreVector(
+        ModelScoreVector(
             target_id=uuid4(),
             target_type="tool" if i % 2 == 0 else "model",
             dimensions={"accuracy": 0.8 + i * 0.05},
@@ -89,7 +94,7 @@ def _make_evaluation_result(
         )
         for i in range(num_targets)
     )
-    return EvaluationResult(
+    return ModelEvaluationResult(
         run_id=run_id,
         objective_id=objective_id or uuid4(),
         score_vectors=score_vectors,
@@ -101,7 +106,6 @@ def _make_evaluation_result(
 
 class _FakeContainer:
     """Minimal container stub."""
-
 
 
 # ==============================================================================
@@ -121,7 +125,7 @@ class TestComputeObjectiveFingerprint:
 
     def test_deterministic_for_same_spec(self) -> None:
         """Same spec always produces the same fingerprint."""
-        spec = ObjectiveSpec(
+        spec = ModelObjectiveSpec(
             objective_id=UUID("12345678-1234-5678-1234-567812345678"),
             name="deterministic",
             target_types=("tool",),
@@ -132,7 +136,7 @@ class TestComputeObjectiveFingerprint:
 
     def test_matches_manual_sha256(self) -> None:
         """Fingerprint matches manual SHA-256 of model_dump_json()."""
-        spec = ObjectiveSpec(
+        spec = ModelObjectiveSpec(
             objective_id=UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
             name="manual-check",
             target_types=("agent",),
@@ -150,7 +154,7 @@ class TestComputeObjectiveFingerprint:
 
 
 # ==============================================================================
-# HandlerRewardBinder — execute()
+# HandlerRewardBinder -- execute()
 # ==============================================================================
 
 
@@ -172,21 +176,21 @@ class TestHandlerRewardBinderExecute:
         )
 
     @pytest.fixture
-    def result(self) -> EvaluationResult:
-        """Default EvaluationResult with 2 score vectors."""
+    def result(self) -> ModelEvaluationResult:
+        """Default ModelEvaluationResult with 2 score vectors."""
         return _make_evaluation_result(num_targets=2)
 
     @pytest.fixture
-    def spec(self) -> ObjectiveSpec:
-        """Default ObjectiveSpec."""
+    def spec(self) -> ModelObjectiveSpec:
+        """Default ModelObjectiveSpec."""
         return _make_objective_spec()
 
     @pytest.mark.asyncio
     async def test_returns_success_output(
         self,
         handler: HandlerRewardBinder,
-        result: EvaluationResult,
-        spec: ObjectiveSpec,
+        result: ModelEvaluationResult,
+        spec: ModelObjectiveSpec,
     ) -> None:
         """execute() returns ModelHandlerOutput with success=True."""
         corr_id = uuid4()
@@ -208,8 +212,8 @@ class TestHandlerRewardBinderExecute:
     async def test_objective_fingerprint_in_output(
         self,
         handler: HandlerRewardBinder,
-        result: EvaluationResult,
-        spec: ObjectiveSpec,
+        result: ModelEvaluationResult,
+        spec: ModelObjectiveSpec,
     ) -> None:
         """Output objective_fingerprint matches SHA-256 of spec."""
         expected = _compute_objective_fingerprint(spec)
@@ -231,8 +235,8 @@ class TestHandlerRewardBinderExecute:
         self,
         publisher: AsyncMock,
         handler: HandlerRewardBinder,
-        result: EvaluationResult,
-        spec: ObjectiveSpec,
+        result: ModelEvaluationResult,
+        spec: ModelObjectiveSpec,
     ) -> None:
         """Publisher called in order: RunEvaluated -> RewardAssigned x N -> PolicyStateUpdated."""
         num_targets = len(result.score_vectors)
@@ -264,10 +268,10 @@ class TestHandlerRewardBinderExecute:
         self,
         publisher: AsyncMock,
         handler: HandlerRewardBinder,
-        result: EvaluationResult,
-        spec: ObjectiveSpec,
+        result: ModelEvaluationResult,
+        spec: ModelObjectiveSpec,
     ) -> None:
-        """RunEvaluatedEvent payload contains correct objective_fingerprint."""
+        """ModelRunEvaluatedEvent payload contains correct objective_fingerprint."""
         expected_fp = _compute_objective_fingerprint(spec)
         envelope: dict[str, object] = {
             "correlation_id": uuid4(),
@@ -287,10 +291,10 @@ class TestHandlerRewardBinderExecute:
         self,
         publisher: AsyncMock,
         handler: HandlerRewardBinder,
-        result: EvaluationResult,
-        spec: ObjectiveSpec,
+        result: ModelEvaluationResult,
+        spec: ModelObjectiveSpec,
     ) -> None:
-        """RewardAssignedEvent evidence_refs trace to EvidenceItem.item_id values."""
+        """ModelRewardAssignedEvent evidence_refs trace to ModelEvidenceItem.item_id values."""
         expected_item_ids = {str(item.item_id) for item in result.evidence_bundle.items}
         envelope: dict[str, object] = {
             "correlation_id": uuid4(),
@@ -315,10 +319,10 @@ class TestHandlerRewardBinderExecute:
         self,
         publisher: AsyncMock,
         handler: HandlerRewardBinder,
-        result: EvaluationResult,
-        spec: ObjectiveSpec,
+        result: ModelEvaluationResult,
+        spec: ModelObjectiveSpec,
     ) -> None:
-        """PolicyStateUpdatedEvent payload includes both old_state and new_state."""
+        """ModelPolicyStateUpdatedEvent payload includes both old_state and new_state."""
         envelope: dict[str, object] = {
             "correlation_id": uuid4(),
             "evaluation_result": result,
@@ -337,8 +341,8 @@ class TestHandlerRewardBinderExecute:
     async def test_output_reward_event_ids_match_count(
         self,
         handler: HandlerRewardBinder,
-        result: EvaluationResult,
-        spec: ObjectiveSpec,
+        result: ModelEvaluationResult,
+        spec: ModelObjectiveSpec,
     ) -> None:
         """Output reward_assigned_event_ids count equals number of score vectors."""
         envelope: dict[str, object] = {
@@ -357,8 +361,8 @@ class TestHandlerRewardBinderExecute:
     async def test_output_topics_published(
         self,
         handler: HandlerRewardBinder,
-        result: EvaluationResult,
-        spec: ObjectiveSpec,
+        result: ModelEvaluationResult,
+        spec: ModelObjectiveSpec,
     ) -> None:
         """Output topics_published contains all three topic names."""
         envelope: dict[str, object] = {
@@ -379,11 +383,10 @@ class TestHandlerRewardBinderExecute:
     async def test_kafka_failure_propagates(
         self,
         handler: HandlerRewardBinder,
-        result: EvaluationResult,
-        spec: ObjectiveSpec,
+        result: ModelEvaluationResult,
+        spec: ModelObjectiveSpec,
     ) -> None:
-        """Kafka publish failure is never swallowed — it propagates to the caller."""
-        # Replace publisher with one that raises
+        """Kafka publish failure is never swallowed -- it propagates to the caller."""
         handler._publisher = AsyncMock(side_effect=ConnectionError("Kafka down"))
 
         envelope: dict[str, object] = {
@@ -399,7 +402,7 @@ class TestHandlerRewardBinderExecute:
     async def test_missing_evaluation_result_raises(
         self,
         handler: HandlerRewardBinder,
-        spec: ObjectiveSpec,
+        spec: ModelObjectiveSpec,
     ) -> None:
         """Missing evaluation_result raises RuntimeHostError."""
         from omnibase_infra.errors import RuntimeHostError
@@ -416,7 +419,7 @@ class TestHandlerRewardBinderExecute:
     async def test_missing_objective_spec_raises(
         self,
         handler: HandlerRewardBinder,
-        result: EvaluationResult,
+        result: ModelEvaluationResult,
     ) -> None:
         """Missing objective_spec raises RuntimeHostError."""
         from omnibase_infra.errors import RuntimeHostError
@@ -432,8 +435,8 @@ class TestHandlerRewardBinderExecute:
     @pytest.mark.asyncio
     async def test_no_publisher_raises(
         self,
-        result: EvaluationResult,
-        spec: ObjectiveSpec,
+        result: ModelEvaluationResult,
+        spec: ModelObjectiveSpec,
     ) -> None:
         """Handler without publisher raises RuntimeHostError on execute()."""
         from omnibase_infra.errors import RuntimeHostError
@@ -452,9 +455,9 @@ class TestHandlerRewardBinderExecute:
     async def test_single_target_produces_one_reward_event(
         self,
         publisher: AsyncMock,
-        spec: ObjectiveSpec,
+        spec: ModelObjectiveSpec,
     ) -> None:
-        """Single-target result produces exactly one RewardAssignedEvent."""
+        """Single-target result produces exactly one ModelRewardAssignedEvent."""
         result = _make_evaluation_result(num_targets=1)
         handler = HandlerRewardBinder(
             container=_FakeContainer(),  # type: ignore[arg-type]
