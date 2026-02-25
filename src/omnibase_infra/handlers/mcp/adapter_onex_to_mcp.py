@@ -59,6 +59,10 @@ logger = logging.getLogger(__name__)
 # intentional — orchestrator results are expected to be flat domain values;
 # if envelope fields appear at a deeper nesting level that signals a protocol
 # violation that should be fixed at the source, not silently scrubbed here.
+# Note: "payload" is intentionally in this set even though it is a common
+# English word.  Tools that return a top-level "payload" key as domain data
+# (rather than as an ONEX envelope wrapper) will have it stripped.  Tools
+# with this naming pattern should be updated to use a more specific key.
 _PROTOCOL_FIELDS: frozenset[str] = frozenset(
     {
         "envelope_id",
@@ -355,7 +359,7 @@ class ONEXToMCPAdapter:
             content_text = (
                 result_payload
                 if isinstance(result_payload, str)
-                else json.dumps(result_payload)
+                else json.dumps(result_payload, default=str)
             )
             return {
                 "content": [{"type": "text", "text": content_text}],

@@ -114,7 +114,7 @@ class TestSuccessfulDispatch:
         cid = uuid4()
         await adapter.invoke_tool("my_tool", {}, correlation_id=cid)
 
-        call_kwargs = executor.execute.call_args[1]
+        call_kwargs = executor.execute.call_args.kwargs
         assert call_kwargs["correlation_id"] == cid
 
     async def test_invoke_tool_uses_tool_timeout_seconds(self) -> None:
@@ -196,6 +196,7 @@ class TestSuccessfulDispatch:
         assert "correlation_id" not in text
         assert "source" not in text
         assert "metadata" not in text
+        assert '"payload"' not in text
 
         # Domain data must be preserved
         assert "actual_value" in text or "data" in text
@@ -381,3 +382,39 @@ class TestGuardConditions:
 
         call_kwargs = executor.execute.call_args[1]
         assert call_kwargs["arguments"] == args
+
+    async def test_tool_with_no_endpoint_returns_error(self) -> None:
+        """When a tool has no execution_endpoint set, invoke_tool returns isError: True.
+
+        Exercises the code path where execution_endpoint is "" (default), which
+        becomes endpoint=None in ModelMCPToolDefinition. The executor raises
+        InfraUnavailableError, which the adapter catches and maps to an MCP
+        error result rather than propagating the exception.
+        """
+        ctx = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="execute_tool",
+        )
+        exc = InfraUnavailableError("no endpoint configured for tool", context=ctx)
+
+        executor = MagicMock()
+        executor.execute = AsyncMock(side_effect=exc)
+
+        adapter = _make_adapter(executor)
+        # Register the tool WITHOUT patching execution_endpoint — it stays as "".
+        await adapter.register_node_as_tool(
+            node_name="no_endpoint_tool",
+            description="A tool with no endpoint",
+            parameters=[],
+            version="1.0.0",
+        )
+
+        result = await adapter.invoke_tool("no_endpoint_tool", {})
+
+        assert result["isError"] is True
+        text = result["content"][0]["text"]
+        assert (
+            "unavailable" in text.lower()
+            or "endpoint" in text.lower()
+            or "no endpoint" in text.lower()
+        )
