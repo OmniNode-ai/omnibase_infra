@@ -20,6 +20,7 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_core.types import JsonType
 from omnibase_infra.services.observability.agent_actions.config import (
     ConfigAgentActionsConsumer,
 )
@@ -188,13 +189,13 @@ class TestHealthStatusStartupGrace:
         """Consumer well within 60s grace period with messages but no writes should be HEALTHY."""
         now = datetime.now(UTC)
         started = (now - timedelta(seconds=30)).isoformat()
-        metrics = {
+        metrics: dict[str, object] = {
             "messages_received": 5,
             "last_poll_at": now.isoformat(),
             "last_successful_write_at": None,
             "started_at": started,
         }
-        circuit = {"state": "closed"}
+        circuit: dict[str, JsonType] = {"state": "closed"}
         status = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.HEALTHY
 
@@ -204,13 +205,13 @@ class TestHealthStatusStartupGrace:
         """Consumer past 60s grace with messages but no writes should be DEGRADED."""
         now = datetime.now(UTC)
         started = (now - timedelta(seconds=90)).isoformat()
-        metrics = {
+        metrics: dict[str, object] = {
             "messages_received": 5,
             "last_poll_at": now.isoformat(),
             "last_successful_write_at": None,
             "started_at": started,
         }
-        circuit = {"state": "closed"}
+        circuit: dict[str, JsonType] = {"state": "closed"}
         status = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.DEGRADED
 
@@ -219,13 +220,13 @@ class TestHealthStatusStartupGrace:
     ) -> None:
         """Idle consumer (zero messages) should always be HEALTHY regardless of uptime."""
         now = datetime.now(UTC)
-        metrics = {
+        metrics: dict[str, object] = {
             "messages_received": 0,
             "last_poll_at": now.isoformat(),
             "last_successful_write_at": None,
             "started_at": (now - timedelta(hours=24)).isoformat(),
         }
-        circuit = {"state": "closed"}
+        circuit: dict[str, JsonType] = {"state": "closed"}
         status = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.HEALTHY
 
@@ -243,13 +244,13 @@ class TestHealthStatusStaleness:
         """Poll age within threshold should be HEALTHY."""
         now = datetime.now(UTC)
         last_poll = (now - timedelta(seconds=30)).isoformat()
-        metrics = {
+        metrics: dict[str, object] = {
             "messages_received": 10,
             "last_poll_at": last_poll,
             "last_successful_write_at": now.isoformat(),
             "started_at": (now - timedelta(hours=1)).isoformat(),
         }
-        circuit = {"state": "closed"}
+        circuit: dict[str, JsonType] = {"state": "closed"}
         status = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.HEALTHY
 
@@ -259,13 +260,13 @@ class TestHealthStatusStaleness:
         """Poll age clearly exceeding threshold should be DEGRADED."""
         now = datetime.now(UTC)
         last_poll = (now - timedelta(seconds=120)).isoformat()
-        metrics = {
+        metrics: dict[str, object] = {
             "messages_received": 10,
             "last_poll_at": last_poll,
             "last_successful_write_at": now.isoformat(),
             "started_at": (now - timedelta(hours=1)).isoformat(),
         }
-        circuit = {"state": "closed"}
+        circuit: dict[str, JsonType] = {"state": "closed"}
         status = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.DEGRADED
 
@@ -275,13 +276,13 @@ class TestHealthStatusStaleness:
         """Write age within threshold (200s < 300s) should be HEALTHY."""
         now = datetime.now(UTC)
         last_write = (now - timedelta(seconds=200)).isoformat()
-        metrics = {
+        metrics: dict[str, object] = {
             "messages_received": 100,
             "last_poll_at": now.isoformat(),
             "last_successful_write_at": last_write,
             "started_at": (now - timedelta(hours=1)).isoformat(),
         }
-        circuit = {"state": "closed"}
+        circuit: dict[str, JsonType] = {"state": "closed"}
         status = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.HEALTHY
 
@@ -291,13 +292,13 @@ class TestHealthStatusStaleness:
         """Write age clearly exceeding threshold (600s > 300s) should be DEGRADED."""
         now = datetime.now(UTC)
         last_write = (now - timedelta(seconds=600)).isoformat()
-        metrics = {
+        metrics: dict[str, object] = {
             "messages_received": 100,
             "last_poll_at": now.isoformat(),
             "last_successful_write_at": last_write,
             "started_at": (now - timedelta(hours=1)).isoformat(),
         }
-        circuit = {"state": "closed"}
+        circuit: dict[str, JsonType] = {"state": "closed"}
         status = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.DEGRADED
 
@@ -314,13 +315,13 @@ class TestHealthStatusCircuitBreaker:
     ) -> None:
         """Consumer not running should always be UNHEALTHY."""
         mock_consumer._running = False
-        metrics = {
+        metrics: dict[str, object] = {
             "messages_received": 0,
             "last_poll_at": None,
             "last_successful_write_at": None,
             "started_at": datetime.now(UTC).isoformat(),
         }
-        circuit = {"state": "closed"}
+        circuit: dict[str, JsonType] = {"state": "closed"}
         status = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.UNHEALTHY
 
@@ -328,13 +329,13 @@ class TestHealthStatusCircuitBreaker:
         self, mock_consumer: AgentActionsConsumer
     ) -> None:
         """Open circuit breaker should be DEGRADED."""
-        metrics = {
+        metrics: dict[str, object] = {
             "messages_received": 10,
             "last_poll_at": datetime.now(UTC).isoformat(),
             "last_successful_write_at": datetime.now(UTC).isoformat(),
             "started_at": datetime.now(UTC).isoformat(),
         }
-        circuit = {"state": "open"}
+        circuit: dict[str, JsonType] = {"state": "open"}
         status = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.DEGRADED
 
@@ -342,13 +343,13 @@ class TestHealthStatusCircuitBreaker:
         self, mock_consumer: AgentActionsConsumer
     ) -> None:
         """Half-open circuit breaker should be DEGRADED."""
-        metrics = {
+        metrics: dict[str, object] = {
             "messages_received": 10,
             "last_poll_at": datetime.now(UTC).isoformat(),
             "last_successful_write_at": datetime.now(UTC).isoformat(),
             "started_at": datetime.now(UTC).isoformat(),
         }
-        circuit = {"state": "half_open"}
+        circuit: dict[str, JsonType] = {"state": "half_open"}
         status = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.DEGRADED
 
