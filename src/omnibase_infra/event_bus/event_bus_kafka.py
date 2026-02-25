@@ -190,7 +190,6 @@ import asyncio
 import hashlib
 import logging
 import random
-import re
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -223,6 +222,7 @@ from omnibase_infra.observability.wiring_health import MixinEmissionCounter
 from omnibase_infra.utils import apply_instance_discriminator, compute_consumer_group_id
 from omnibase_infra.utils.util_consumer_group import KAFKA_CONSUMER_GROUP_MAX_LENGTH
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+from omnibase_infra.utils.util_topic_validation import validate_topic_name
 
 logger = logging.getLogger(__name__)
 
@@ -1931,63 +1931,23 @@ class EventBusKafka(
     def _validate_topic_name(self, topic: str, correlation_id: UUID) -> None:
         """Validate Kafka topic name according to Kafka naming rules.
 
-        Kafka topic names must:
-        - Not be empty
-        - Be 255 characters or less
-        - Contain only: a-z, A-Z, 0-9, period (.), underscore (_), hyphen (-)
-        - Not be "." or ".." (reserved)
+        Delegates to ``validate_topic_name()`` in
+        ``omnibase_infra.utils.util_topic_validation``. Kept as a private
+        method on ``KafkaEventBus`` for backward compatibility with existing
+        call sites inside this class.
 
         Args:
-            topic: Topic name to validate
-            correlation_id: Correlation ID for error context
+            topic: Topic name to validate.
+            correlation_id: Correlation ID for error context.
 
         Raises:
-            ProtocolConfigurationError: If topic name is invalid
+            ProtocolConfigurationError: If topic name is invalid.
 
-        Reference:
-            https://kafka.apache.org/documentation/#topicconfigs
+        See Also:
+            omnibase_infra.utils.util_topic_validation.validate_topic_name:
+                The standalone utility usable outside ``KafkaEventBus``.
         """
-        context = ModelInfraErrorContext.with_correlation(
-            correlation_id=correlation_id,
-            transport_type=EnumInfraTransportType.KAFKA,
-            operation="validate_topic",
-            target_name=f"kafka.{self._environment}",
-        )
-
-        if not topic:
-            raise ProtocolConfigurationError(
-                "Topic name cannot be empty",
-                context=context,
-                parameter="topic",
-                value=topic,
-            )
-
-        if len(topic) > 255:
-            raise ProtocolConfigurationError(
-                f"Topic name '{topic}' exceeds maximum length of 255 characters",
-                context=context,
-                parameter="topic",
-                value=topic,
-            )
-
-        if topic in (".", ".."):
-            raise ProtocolConfigurationError(
-                f"Topic name '{topic}' is reserved and cannot be used",
-                context=context,
-                parameter="topic",
-                value=topic,
-            )
-
-        # Validate characters (a-z, A-Z, 0-9, '.', '_', '-')
-        if not re.match(r"^[a-zA-Z0-9._-]+$", topic):
-            raise ProtocolConfigurationError(
-                f"Topic name '{topic}' contains invalid characters. "
-                "Only alphanumeric characters, periods (.), underscores (_), "
-                "and hyphens (-) are allowed",
-                context=context,
-                parameter="topic",
-                value=topic,
-            )
+        validate_topic_name(topic, correlation_id=correlation_id)
 
     def _model_headers_to_kafka(
         self, headers: ModelEventHeaders
