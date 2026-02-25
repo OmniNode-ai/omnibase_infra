@@ -84,6 +84,9 @@ Slack Models:
     EnumAlertSeverity: Alert severity levels (critical, error, warning, info)
     ModelSlackAlert: Input payload for Slack alert operations
     ModelSlackAlertResult: Response from Slack webhook operations
+
+Gmail Models:
+    ModelGmailMessage: Immutable representation of a Gmail message with decoded body
 """
 
 from omnibase_infra.handlers.models.consul import (
@@ -151,6 +154,7 @@ from omnibase_infra.handlers.models.model_filesystem_write_payload import (
 from omnibase_infra.handlers.models.model_filesystem_write_result import (
     ModelWriteFileResult,
 )
+from omnibase_infra.handlers.models.model_gmail_message import ModelGmailMessage
 from omnibase_infra.handlers.models.model_graph_handler_response import (
     ModelGraphHandlerResponse,
 )
@@ -261,4 +265,6 @@ __all__: list[str] = [
     "EnumAlertSeverity",
     "ModelSlackAlert",
     "ModelSlackAlertResult",
+    # Gmail models
+    "ModelGmailMessage",
 ]

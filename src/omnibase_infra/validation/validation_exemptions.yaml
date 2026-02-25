@@ -2568,6 +2568,28 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Pydantic Model Standards)
     ticket: OMN-2239
+  # ==========================================================================
+  # Gmail Message ID Exemptions (OMN-2729)
+  # ==========================================================================
+  # Gmail message IDs and thread IDs are opaque string identifiers assigned
+  # by the Gmail API (e.g., "18a0b2c3d4e5f6g7"). They are NOT UUIDs and
+  # cannot be represented as uuid.UUID. Using str is correct for these fields.
+  - file_pattern: 'model_gmail_message\.py'
+    violation_pattern: "Field 'message_id' should use UUID"
+    reason: >
+      Gmail message IDs are opaque string identifiers assigned by the Gmail API (e.g., "18a0b2c3d4e5f6g7"). They are NOT UUIDs. Using str is the correct type annotation for external API identifiers that follow provider-specific formats.
+
+    documentation:
+      - Gmail API Reference: https://developers.google.com/gmail/api/reference/rest/v1/users.messages
+    ticket: OMN-2729
+  - file_pattern: 'model_gmail_message\.py'
+    violation_pattern: "Field 'thread_id' should use UUID"
+    reason: >
+      Gmail thread IDs are opaque string identifiers assigned by the Gmail API. They are NOT UUIDs. Using str is the correct type annotation for external API identifiers that follow provider-specific formats.
+
+    documentation:
+      - Gmail API Reference: https://developers.google.com/gmail/api/reference/rest/v1/users.threads
+    ticket: OMN-2729
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
