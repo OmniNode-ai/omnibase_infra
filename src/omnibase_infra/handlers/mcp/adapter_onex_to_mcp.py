@@ -33,6 +33,7 @@ Contract-driven discovery:
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,12 +42,15 @@ from uuid import UUID, uuid4
 
 import yaml
 
+from omnibase_infra.adapters.adapter_onex_tool_execution import AdapterONEXToolExecution
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
+    InfraTimeoutError,
     InfraUnavailableError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
 )
+from omnibase_infra.models.mcp.model_mcp_tool_definition import ModelMCPToolDefinition
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -54,6 +58,31 @@ if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
 logger = logging.getLogger(__name__)
+
+# Internal ONEX envelope/protocol fields that must never be forwarded to MCP
+# clients.  These appear on the top-level dict when the orchestrator returns
+# an envelope-shaped result instead of a bare domain value.
+#
+# SHALLOW STRIPPING ONLY: only top-level keys are removed.  Nested dicts
+# inside "payload" or "metadata" are passed through untouched.  This is
+# intentional — orchestrator results are expected to be flat domain values;
+# if envelope fields appear at a deeper nesting level that signals a protocol
+# violation that should be fixed at the source, not silently scrubbed here.
+# Note: "payload" and "success" are intentionally in this set even though
+# they are common English words.  Tools that use either as top-level domain
+# keys (e.g. {"success": True, "record_count": 5} or {"payload": "data"})
+# will have those keys silently stripped.  Tools with these naming patterns
+# should be updated to use more specific domain key names.
+_PROTOCOL_FIELDS: frozenset[str] = frozenset(
+    {
+        "envelope_id",
+        "correlation_id",
+        "source",
+        "payload",
+        "metadata",
+        "success",
+    }
+)
 
 
 @dataclass
@@ -129,13 +158,13 @@ class ONEXToMCPAdapter:
 
     def __init__(
         self,
-        node_executor: object | None = None,
+        node_executor: AdapterONEXToolExecution | None = None,
         container: ModelONEXContainer | None = None,
     ) -> None:
         """Initialize the adapter.
 
         Args:
-            node_executor: Optional callback for node execution.
+            node_executor: Optional AdapterONEXToolExecution for real dispatch.
                           If not provided, tools will be discovered but
                           not executable.
             container: Optional ONEX container for dependency injection.
@@ -415,38 +444,43 @@ class ONEXToMCPAdapter:
         arguments: dict[str, object],
         correlation_id: UUID | None = None,
     ) -> dict[str, object]:
-        """Invoke an MCP tool by routing to the corresponding ONEX node.
+        """Invoke an MCP tool by routing to the ONEX orchestrator via AdapterONEXToolExecution.
+
+        Dispatches the tool call through the full ONEX execution pipeline:
+        envelope building, correlation ID threading, per-tool timeout enforcement,
+        and circuit breaker protection. The raw response is mapped to the MCP
+        CallToolResult format: ``{"content": [...], "isError": bool}``.
 
         Args:
             tool_name: Name of the tool to invoke.
             arguments: Tool arguments.
-            correlation_id: Optional correlation ID for tracing.
+            correlation_id: Optional correlation ID for tracing; generated if absent.
 
         Returns:
-            Tool execution result.
+            MCP CallToolResult dict with ``content`` list and ``isError`` flag.
 
         Raises:
-            InfraUnavailableError: If tool not found.
+            InfraUnavailableError: If tool not found in registry.
             ProtocolConfigurationError: If node executor not configured.
         """
         correlation_id = correlation_id or uuid4()
 
         if tool_name not in self._tool_cache:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.MCP,
                 operation="invoke_tool",
                 target_name=tool_name,
-                correlation_id=correlation_id,
             )
             raise InfraUnavailableError(
                 f"Tool '{tool_name}' not found in registry", context=ctx
             )
 
         if self._node_executor is None:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.MCP,
                 operation="invoke_tool",
-                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 "Node executor not configured. Cannot invoke tools without executor.",
@@ -462,19 +496,77 @@ class ONEXToMCPAdapter:
             },
         )
 
-        # Node invocation stub — full ONEX runtime dispatch is implemented
-        # separately once the runtime dispatch layer is complete.
-        # This will:
-        # 1. Build an envelope for the ONEX node
-        # 2. Dispatch via the ONEX runtime
-        # 3. Transform the response to MCP format
+        tool_def = self._tool_cache[tool_name]
 
-        return {
-            "success": True,
-            "message": f"Tool '{tool_name}' invoked successfully",
-            "arguments": arguments,
-            "correlation_id": str(correlation_id),
-        }
+        # Bridge MCPToolDefinition (dataclass) → ModelMCPToolDefinition (Pydantic)
+        # for AdapterONEXToolExecution.execute().
+        mcp_tool = ModelMCPToolDefinition(
+            name=tool_def.name,
+            description=tool_def.description,
+            version=tool_def.version,
+            endpoint=tool_def.execution_endpoint or None,
+            timeout_seconds=tool_def.timeout_seconds,
+            metadata=dict(tool_def.metadata),
+        )
+
+        # Dispatch via AdapterONEXToolExecution: envelope build, timeout,
+        # circuit breaker, and HTTP dispatch are all handled there.
+        # AdapterONEXToolExecution.execute() normally catches its own errors and
+        # returns {"success": False, "error": ...} dicts, but we also guard
+        # against any exceptions that escape (e.g. InfraTimeoutError raised
+        # before the circuit breaker catches it).
+        try:
+            raw = await self._node_executor.execute(
+                tool=mcp_tool,
+                arguments=arguments,
+                correlation_id=correlation_id,
+            )
+        except InfraTimeoutError as exc:
+            return {
+                "content": [
+                    {"type": "text", "text": f"Tool execution timed out: {exc}"}
+                ],
+                "isError": True,
+            }
+        except InfraUnavailableError as exc:
+            return {
+                "content": [{"type": "text", "text": f"Service unavailable: {exc}"}],
+                "isError": True,
+            }
+        # InfraConnectionError is intentionally absent here: AdapterONEXToolExecution.execute()
+        # converts InfraConnectionError to a {success: False, error: ...} dict internally before
+        # returning, so it never propagates to invoke_tool. If execute() is refactored to let
+        # InfraConnectionError propagate, add it here.
+
+        # Map AdapterONEXToolExecution result → CallToolResult dict.
+        # MCP spec: {"content": [{"type": "text", "text": ...}], "isError": bool}
+        # Use raw.get("result", "") as fallback (not raw itself) to avoid
+        # leaking internal protocol fields into MCP content.
+        success: bool = bool(raw.get("success", False))
+        if success:
+            result_payload: object = raw.get("result", "")
+            # Strip internal protocol fields so envelope-shaped orchestrator
+            # responses do not leak envelope_id, correlation_id, source,
+            # payload, metadata, or success into MCP content.
+            if isinstance(result_payload, dict):
+                result_payload = {
+                    k: v for k, v in result_payload.items() if k not in _PROTOCOL_FIELDS
+                }
+            content_text = (
+                result_payload
+                if isinstance(result_payload, str)
+                else json.dumps(result_payload, default=str)
+            )
+            return {
+                "content": [{"type": "text", "text": content_text}],
+                "isError": False,
+            }
+        else:
+            error_text = str(raw.get("error", "Tool execution failed"))
+            return {
+                "content": [{"type": "text", "text": error_text}],
+                "isError": True,
+            }
 
     def get_tool(self, tool_name: str) -> MCPToolDefinition | None:
         """Get a tool definition by name.

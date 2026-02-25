@@ -366,6 +366,10 @@ class AdapterONEXToolExecution(MixinAsyncCircuitBreaker):
             InfraConnectionError: If connection fails.
         """
         try:
+            # Belt-and-suspenders two-layer timeout:
+            #   inner httpx timeout= — transport-level guard (connection + read);
+            #   outer asyncio.wait_for timeout= — coroutine-level guard in case
+            #   httpx itself stalls and never raises (e.g. during response streaming).
             response = await asyncio.wait_for(
                 client.post(
                     endpoint,
