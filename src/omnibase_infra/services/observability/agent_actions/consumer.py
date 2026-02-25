@@ -451,7 +451,11 @@ class AgentActionsConsumer:
 
         correlation_id = uuid4()
 
-        unmapped_topics = [t for t in self._config.topics if t not in TOPIC_TO_MODEL]
+        unmapped_topics = [
+            t
+            for t in self._config.topics
+            if t not in TOPIC_TO_MODEL or t not in TOPIC_TO_WRITER_METHOD
+        ]
         logger.info(
             "AgentActionsConsumer starting",
             extra={
