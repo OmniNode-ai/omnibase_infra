@@ -11,10 +11,13 @@ Design Principles:
     - Async-first: All methods are async for non-blocking I/O
     - Correlation IDs: Full traceability across all operations
     - Container DI: Accepts ModelONEXContainer for dependency injection
+    - Contract-driven: All operational limits sourced from NodeRegistryApiEffect
+      contract.yaml, not hardcoded constants (OMN-1441).
 
 Related Tickets:
     - OMN-1278: Contract-Driven Dashboard - Registry Discovery
     - OMN-1282: MCP Handler Contract-Driven Config
+    - OMN-1441: Refactor Registry API as Contract-Driven ONEX Node
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ import yaml
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.nodes.node_registry_api_effect import load_registry_api_config
 from omnibase_infra.nodes.node_service_discovery_effect.models.enum_health_status import (
     EnumHealthStatus,
 )
@@ -60,14 +64,29 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Maximum records to fetch when node_type filtering requires in-memory pagination.
-# The projection reader API doesn't support node_type filtering, so we fetch all
-# records matching the state filter and apply node_type filter in-memory.
-MAX_NODE_TYPE_FILTER_FETCH = 10000
+# ---------------------------------------------------------------------------
+# Contract-driven configuration (OMN-1441)
+# All operational limits are now sourced from NodeRegistryApiEffect/contract.yaml
+# rather than being hardcoded here.  The constants below preserve backward-
+# compatibility for any callers that import them directly from this module.
+# ---------------------------------------------------------------------------
+_NODE_CFG = load_registry_api_config()
 
-# Default config path relative to this module
-DEFAULT_WIDGET_MAPPING_PATH = (
-    Path(__file__).parent.parent.parent / "configs" / "widget_mapping.yaml"
+# Maximum records to fetch when node_type filtering requires in-memory pagination.
+# Sourced from: node_registry_api_effect/contract.yaml → config.max_node_type_filter_fetch
+MAX_NODE_TYPE_FILTER_FETCH: int = int(
+    _NODE_CFG.get("max_node_type_filter_fetch", 10000)
+)
+
+# Default config path for widget mapping YAML.
+# Sourced from: node_registry_api_effect/contract.yaml → config.default_widget_mapping_path
+_default_widget_mapping_rel: str = str(
+    _NODE_CFG.get("default_widget_mapping_path", "configs/widget_mapping.yaml")
+)
+# Resolve relative to the omnibase_infra package root (three levels up from this file:
+# services/registry_api/service.py → services/registry_api → services → omnibase_infra)
+DEFAULT_WIDGET_MAPPING_PATH: Path = (
+    Path(__file__).parent.parent.parent / _default_widget_mapping_rel
 )
 
 
