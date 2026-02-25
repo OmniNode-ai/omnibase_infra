@@ -341,7 +341,9 @@ class TestGuardConditions:
         adapter = _make_adapter(executor=None)
         await _register_tool(adapter)
 
-        with pytest.raises(ProtocolConfigurationError, match="executor not configured"):
+        with pytest.raises(
+            ProtocolConfigurationError, match="Node executor not configured"
+        ):
             await adapter.invoke_tool("my_tool", {})
 
     async def test_no_mock_responses_in_invoke_tool(self) -> None:

@@ -341,6 +341,10 @@ class ONEXToMCPAdapter:
                 "content": [{"type": "text", "text": f"Service unavailable: {exc}"}],
                 "isError": True,
             }
+        # InfraConnectionError is intentionally absent here: AdapterONEXToolExecution.execute()
+        # converts InfraConnectionError to a {success: False, error: ...} dict internally before
+        # returning, so it never propagates to invoke_tool. If execute() is refactored to let
+        # InfraConnectionError propagate, add it here.
 
         # Map AdapterONEXToolExecution result → CallToolResult dict.
         # MCP spec: {"content": [{"type": "text", "text": ...}], "isError": bool}
