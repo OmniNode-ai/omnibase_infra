@@ -7,7 +7,7 @@ as MCP tools for AI agent integration.
 
 Services:
     ServiceMCPToolRegistry: Event-loop safe in-memory cache of tool definitions
-    ServiceMCPToolDiscovery: Consul scanner for MCP-enabled orchestrators
+    ServiceMCPToolDiscovery: Event bus registry scanner for MCP-enabled orchestrators
     ServiceMCPToolSync: Kafka listener for hot reload with idempotency
     MCPServerLifecycle: Server lifecycle management
 """

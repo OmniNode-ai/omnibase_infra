@@ -51,7 +51,7 @@ import asyncpg
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumHandlerTypeCategory, EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -277,6 +277,11 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
             "postgresql" identifier string.
         """
         return "postgresql"
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification: EFFECT (PostgreSQL I/O)."""
+        return EnumHandlerTypeCategory.EFFECT
 
     async def _ensure_pool(
         self,

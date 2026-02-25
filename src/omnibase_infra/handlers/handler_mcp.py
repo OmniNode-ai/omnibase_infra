@@ -28,6 +28,7 @@ import time
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+import jsonschema
 import uvicorn
 from pydantic import ValidationError
 from starlette.applications import Starlette
@@ -223,7 +224,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         MCP Integration (OMN-1281):
             When registry and executor are provided, the handler operates in
             "integrated mode" with full MCP tool discovery and execution:
-            - Tools are discovered from Consul via ServiceMCPToolDiscovery
+            - Tools are discovered from the event bus registry via ServiceMCPToolDiscovery
             - Tool list is cached in ServiceMCPToolRegistry
             - Tool execution routes through AdapterONEXToolExecution
             - Hot reload updates are received via ServiceMCPToolSync
@@ -476,18 +477,17 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 - json_response: Return JSON responses (default: True)
                 - timeout_seconds: Tool execution timeout (default: 30.0)
                 - max_tools: Maximum tools to expose (default: 100)
-                - consul_host: Consul server hostname (REQUIRED - no default)
-                - consul_port: Consul server port (REQUIRED - no default)
                 - kafka_enabled: Whether to enable Kafka hot reload (REQUIRED - no default)
                 - dev_mode: Whether to run in development mode (REQUIRED - no default)
                 - contracts_dir: Directory for contract scanning in dev mode (optional)
+                - registry_query_limit: Max nodes to fetch during cold-start discovery (optional)
                 - skip_server: Skip starting uvicorn server (default: False).
                     Use for unit testing to avoid port binding.
 
         Raises:
             ProtocolConfigurationError: If configuration is invalid or required
-                config values (consul_host, consul_port, kafka_enabled, dev_mode)
-                are missing. Per CLAUDE.md, .env is the single source of truth -
+                config values (kafka_enabled, dev_mode) are missing.
+                Per CLAUDE.md, .env is the single source of truth -
                 no hardcoded fallbacks are used.
         """
         init_correlation_id = uuid4()
@@ -533,12 +533,6 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 # Per CLAUDE.md: .env is the SINGLE SOURCE OF TRUTH.
                 # No hardcoded fallbacks - all required config must be explicit.
                 # The _require_config_value helper validates type, cast() is for mypy.
-                consul_host = _require_config_value(
-                    config, "consul_host", str, init_correlation_id
-                )
-                consul_port = _require_config_value(
-                    config, "consul_port", int, init_correlation_id
-                )
                 kafka_enabled = _require_config_value(
                     config, "kafka_enabled", bool, init_correlation_id
                 )
@@ -550,19 +544,28 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 contracts_dir: str | None = (
                     contracts_dir_val if isinstance(contracts_dir_val, str) else None
                 )
-
-                server_config = ModelMCPServerConfig(
-                    consul_host=consul_host,
-                    consul_port=consul_port,
-                    kafka_enabled=kafka_enabled,
-                    http_host=self._config.host,
-                    http_port=self._config.port,
-                    default_timeout=self._config.timeout_seconds,
-                    dev_mode=dev_mode,
-                    contracts_dir=contracts_dir,
-                    auth_enabled=self._config.auth_enabled,
-                    api_key=self._config.api_key,
+                # registry_query_limit is optional; defaults handled by ModelMCPServerConfig
+                registry_query_limit_val = config.get("registry_query_limit")
+                registry_query_limit: int | None = (
+                    int(registry_query_limit_val)
+                    if isinstance(registry_query_limit_val, (int, str))
+                    else None
                 )
+
+                server_config_kwargs: dict[str, object] = {
+                    "kafka_enabled": kafka_enabled,
+                    "http_host": self._config.host,
+                    "http_port": self._config.port,
+                    "default_timeout": self._config.timeout_seconds,
+                    "dev_mode": dev_mode,
+                    "contracts_dir": contracts_dir,
+                    "auth_enabled": self._config.auth_enabled,
+                    "api_key": self._config.api_key,
+                }
+                if registry_query_limit is not None:
+                    server_config_kwargs["registry_query_limit"] = registry_query_limit
+
+                server_config = ModelMCPServerConfig(**server_config_kwargs)
 
                 # R3: Log startup warning when auth is disabled (OMN-2701)
                 if not self._config.auth_enabled:
@@ -661,7 +664,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 except Exception as startup_error:
                     # Any failure during server startup - clean up all resources
                     # This handles failures in:
-                    # - lifecycle.start() (Consul/contract discovery)
+                    # - lifecycle.start() (event-bus registry / contract discovery)
                     # - Starlette app creation
                     # - uvicorn config/server creation
                     # - server task creation
@@ -998,6 +1001,54 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 f"Tool '{tool_name}' not found in registry", context=ctx
             )
 
+        # --- Input schema validation (OMN-2699) ---
+        # Validate arguments before dispatch so malformed inputs are rejected
+        # at the MCP boundary with a clean error rather than producing confusing
+        # downstream errors inside ONEX orchestrators.
+        tool_def = self._tool_registry[tool_name]
+        # MCPToolDefinition stores input_schema; ProtocolMCPToolDefinition does
+        # not declare it, so we access it via getattr for forward-compatibility.
+        tool_input_schema: dict[str, object] | None = getattr(
+            tool_def, "input_schema", None
+        )
+        if tool_input_schema is not None:
+            validation_error = self._validate_arguments_against_schema(
+                tool_name=tool_name,
+                arguments=arguments,
+                input_schema=tool_input_schema,
+                correlation_id=correlation_id,
+            )
+            if validation_error is not None:
+                logger.warning(
+                    "MCP tool call rejected: input schema validation failed",
+                    extra={
+                        "tool_name": tool_name,
+                        "validation_error": validation_error,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                # Return an MCP error result immediately — no ONEX dispatch.
+                tool_result = ModelMcpToolResult(
+                    success=False,
+                    content=f"Input validation failed: {validation_error}",
+                    is_error=True,
+                    error_message=f"Input validation failed: {validation_error}",
+                    correlation_id=correlation_id,
+                    execution_time_ms=0.0,
+                )
+                return ModelHandlerOutput.for_compute(
+                    input_envelope_id=input_envelope_id,
+                    correlation_id=correlation_id,
+                    handler_id=HANDLER_ID_MCP,
+                    result={
+                        "status": "error",
+                        # Use mode='json' so UUID values are serialised to str
+                        # (required by ModelHandlerOutput JSON-ledger-safe constraint).
+                        "payload": tool_result.model_dump(mode="json"),
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
         # Execute tool (placeholder - actual execution delegates to ONEX node)
         start_time = time.perf_counter()
 
@@ -1107,7 +1158,9 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             handler_id=HANDLER_ID_MCP,
             result={
                 "status": "success" if tool_result.success else "error",
-                "payload": tool_result.model_dump(),
+                # Use mode='json' so UUID values are serialised to str
+                # (required by ModelHandlerOutput JSON-ledger-safe constraint).
+                "payload": tool_result.model_dump(mode="json"),
                 "correlation_id": str(correlation_id),
             },
         )
@@ -1156,6 +1209,73 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             "properties": properties,
             "required": required,
         }
+
+    def _validate_arguments_against_schema(
+        self,
+        tool_name: str,
+        arguments: dict[str, object],
+        input_schema: dict[str, object],
+        correlation_id: UUID,
+    ) -> str | None:
+        """Validate *arguments* against the tool's *input_schema*.
+
+        Performs JSON Schema validation using ``jsonschema.validate()``.
+        Returns a human-readable error string when validation fails, or
+        ``None`` when the arguments are valid.
+
+        Validation is intentionally strict: required fields, types, and
+        enum values are all enforced as specified in the JSON Schema.
+
+        Args:
+            tool_name: Name of the tool (for log context only).
+            arguments: Arguments dict as received from the MCP caller.
+            input_schema: Full JSON Schema dict for the tool's input.
+            correlation_id: Correlation ID for tracing.
+
+        Returns:
+            ``None`` when arguments are valid.
+            A descriptive error string (field name + reason) when invalid.
+        """
+        try:
+            jsonschema.validate(instance=arguments, schema=input_schema)
+            return None
+        except jsonschema.ValidationError as exc:
+            # Build a clean, field-specific message — no raw tracebacks.
+            # ``exc.path`` is a deque of JSON path elements; join them for the
+            # field name.  If empty the error is at the top level (e.g. a
+            # missing required property reported via the "required" keyword).
+            if exc.path:
+                field = ".".join(str(p) for p in exc.path)
+                msg = f"field '{field}': {exc.message}"
+            elif exc.validator == "required":
+                # exc.message already says "… is a required property"
+                msg = exc.message
+            else:
+                msg = exc.message
+
+            logger.debug(
+                "Input schema validation failed",
+                extra={
+                    "tool_name": tool_name,
+                    "validator": exc.validator,
+                    "field_path": list(exc.path),
+                    "error": msg,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return msg
+        except jsonschema.SchemaError as exc:
+            # The schema itself is malformed — log and skip validation rather
+            # than blocking a call due to a bad schema.
+            logger.warning(
+                "Tool input_schema is invalid — skipping validation",
+                extra={
+                    "tool_name": tool_name,
+                    "schema_error": str(exc.message),
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return None
 
     async def _execute_tool(
         self,

@@ -3,7 +3,7 @@
 """MCP server configuration model.
 
 This model defines the configuration for the MCP server lifecycle,
-including Consul discovery, Kafka hot reload, and HTTP server settings.
+including event bus registry discovery, Kafka hot reload, and HTTP server settings.
 """
 
 from __future__ import annotations
@@ -15,17 +15,14 @@ class ModelMCPServerConfig(BaseModel):
     """Configuration for the MCP server lifecycle.
 
     This model captures all configuration needed for the MCP server:
-    - Consul connection settings for service discovery
+    - Event bus registry settings for cold-start service discovery
     - Kafka settings for hot reload
     - HTTP server binding
     - Execution defaults
     - Authentication settings (OMN-2701)
 
     Attributes:
-        consul_host: Consul server hostname for service discovery.
-        consul_port: Consul server port.
-        consul_scheme: HTTP scheme for Consul (http/https).
-        consul_token: Optional ACL token for Consul authentication.
+        registry_query_limit: Maximum nodes fetched per cold-start discovery query.
         kafka_enabled: Whether to enable Kafka for hot reload.
         http_host: Host to bind the MCP HTTP server.
         http_port: Port for the MCP HTTP server.
@@ -36,15 +33,11 @@ class ModelMCPServerConfig(BaseModel):
         api_key: API key / bearer token value for authenticated requests.
     """
 
-    consul_host: str = Field(default="localhost", description="Consul server hostname")
-    consul_port: int = Field(
-        default=8500, ge=1, le=65535, description="Consul server port"
-    )
-    consul_scheme: str = Field(
-        default="http", pattern="^https?$", description="HTTP scheme for Consul"
-    )
-    consul_token: str | None = Field(
-        default=None, description="Optional ACL token for Consul authentication"
+    registry_query_limit: int = Field(
+        default=100,
+        ge=1,
+        le=10000,
+        description="Maximum nodes to fetch per cold-start discovery query from the registry",
     )
     kafka_enabled: bool = Field(
         default=True, description="Whether to enable Kafka for hot reload"

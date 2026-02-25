@@ -37,6 +37,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.handlers.handler_mcp import HandlerMCP
+from omnibase_infra.handlers.mcp.adapter_onex_to_mcp import MCPToolDefinition
 from omnibase_infra.handlers.models.mcp import (
     EnumMcpOperationType,
     ModelMcpHandlerConfig,
@@ -63,8 +64,6 @@ def mcp_test_config() -> dict[str, object]:
     """
     return {
         "skip_server": True,
-        "consul_host": "localhost",
-        "consul_port": 8500,
         "kafka_enabled": False,
         "dev_mode": True,
     }
@@ -87,8 +86,6 @@ def mcp_custom_config() -> dict[str, object]:
         "timeout_seconds": 60.0,
         "max_tools": 50,
         "skip_server": True,
-        "consul_host": "localhost",
-        "consul_port": 8500,
         "kafka_enabled": False,
         "dev_mode": True,
     }
@@ -635,13 +632,13 @@ class TestHandlerMCPConfigValidation:
         """Test that skip_server=True allows initialization without full config.
 
         When skip_server=True, the handler skips MCPServerLifecycle initialization
-        which requires consul_host, consul_port, etc. Only the Pydantic model
+        which requires kafka_enabled, dev_mode, etc. Only the Pydantic model
         config validation runs, which has its own defaults for server-specific
         fields (host, port, path, etc.).
 
         This test verifies the skip_server path works correctly for unit tests.
         """
-        # skip_server=True bypasses the code path that needs consul_host etc.
+        # skip_server=True bypasses the code path that needs kafka_enabled etc.
         await handler.initialize({"skip_server": True})
 
         assert handler._initialized is True
@@ -683,3 +680,282 @@ class TestHandlerMCPConfigValidation:
         assert handler._config is not None
 
         await handler.shutdown()
+
+
+# =============================================================================
+# Input Schema Validation Tests (OMN-2699)
+# =============================================================================
+
+# JSON Schema used across the validation test suite.
+_SCHEMA_WITH_REQUIRED_STRING = {
+    "type": "object",
+    "properties": {
+        "model_name": {"type": "string", "description": "Name of the model"},
+        "temperature": {"type": "number", "description": "Sampling temperature"},
+        "mode": {
+            "type": "string",
+            "enum": ["fast", "precise", "balanced"],
+            "description": "Inference mode",
+        },
+    },
+    "required": ["model_name"],
+}
+
+
+def _make_tool_with_schema(
+    name: str = "test_tool",
+    input_schema: dict[str, object] | None = None,
+) -> MCPToolDefinition:
+    """Return a minimal MCPToolDefinition with an optional input_schema."""
+    return MCPToolDefinition(
+        name=name,
+        tool_type="function",
+        description="A test tool for validation tests.",
+        version="1.0.0",
+        input_schema=input_schema,
+    )
+
+
+class TestHandlerMCPInputSchemaValidation:
+    """Tests for R1/R2: input schema validation before ONEX dispatch (OMN-2699).
+
+    These tests cover:
+    - Missing required field is rejected with isError=True (no dispatch)
+    - Wrong type for a field is rejected with isError=True
+    - Enum value violation is rejected with isError=True
+    - Valid arguments pass validation and reach dispatch
+    - Tool without input_schema passes through unchanged (backwards-compatible)
+    - Error messages identify the failing field (no raw tracebacks)
+    """
+
+    @pytest.fixture
+    async def handler(
+        self, mock_container: MagicMock, mcp_test_config: dict[str, object]
+    ) -> HandlerMCP:
+        """Initialized HandlerMCP with skip_server=True."""
+        h = HandlerMCP(container=mock_container)
+        await h.initialize(mcp_test_config)
+        yield h
+        await h.shutdown()
+
+    # ------------------------------------------------------------------
+    # R1: Validation rejects bad inputs
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_missing_required_field_returns_error(
+        self, handler: HandlerMCP
+    ) -> None:
+        """Missing required field should return isError=True, no dispatch."""
+        tool = _make_tool_with_schema(
+            name="needs_model_name",
+            input_schema=_SCHEMA_WITH_REQUIRED_STRING,
+        )
+        handler._tool_registry["needs_model_name"] = tool  # type: ignore[assignment]
+
+        envelope = {
+            "operation": EnumMcpOperationType.CALL_TOOL.value,
+            "payload": {
+                "tool_name": "needs_model_name",
+                "arguments": {},  # model_name is required but absent
+            },
+            "correlation_id": str(uuid4()),
+        }
+
+        result = await handler.execute(envelope)
+
+        assert result.result["status"] == "error"
+        payload = result.result["payload"]
+        assert payload["is_error"] is True
+        assert payload["success"] is False
+        # Error message must mention the field
+        assert "model_name" in payload["error_message"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_wrong_type_returns_error(self, handler: HandlerMCP) -> None:
+        """Wrong type for a field (int instead of string) should return isError=True."""
+        tool = _make_tool_with_schema(
+            name="type_check_tool",
+            input_schema=_SCHEMA_WITH_REQUIRED_STRING,
+        )
+        handler._tool_registry["type_check_tool"] = tool  # type: ignore[assignment]
+
+        envelope = {
+            "operation": EnumMcpOperationType.CALL_TOOL.value,
+            "payload": {
+                "tool_name": "type_check_tool",
+                "arguments": {"model_name": 42},  # must be string
+            },
+            "correlation_id": str(uuid4()),
+        }
+
+        result = await handler.execute(envelope)
+
+        assert result.result["status"] == "error"
+        payload = result.result["payload"]
+        assert payload["is_error"] is True
+        # Error message must name the failing field
+        assert "model_name" in payload["error_message"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_enum_violation_returns_error(self, handler: HandlerMCP) -> None:
+        """Enum value not in allowed set should return isError=True."""
+        tool = _make_tool_with_schema(
+            name="enum_tool",
+            input_schema=_SCHEMA_WITH_REQUIRED_STRING,
+        )
+        handler._tool_registry["enum_tool"] = tool  # type: ignore[assignment]
+
+        envelope = {
+            "operation": EnumMcpOperationType.CALL_TOOL.value,
+            "payload": {
+                "tool_name": "enum_tool",
+                "arguments": {
+                    "model_name": "gpt-4",
+                    "mode": "turbo",  # not in ["fast", "precise", "balanced"]
+                },
+            },
+            "correlation_id": str(uuid4()),
+        }
+
+        result = await handler.execute(envelope)
+
+        assert result.result["status"] == "error"
+        payload = result.result["payload"]
+        assert payload["is_error"] is True
+        # Should mention the mode field
+        assert "mode" in payload["error_message"]
+
+    # ------------------------------------------------------------------
+    # R1: Valid inputs dispatch successfully
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_valid_input_dispatches_successfully(
+        self, handler: HandlerMCP
+    ) -> None:
+        """Valid arguments must pass validation and reach dispatch (not short-circuit)."""
+        tool = _make_tool_with_schema(
+            name="valid_tool",
+            input_schema=_SCHEMA_WITH_REQUIRED_STRING,
+        )
+        handler._tool_registry["valid_tool"] = tool  # type: ignore[assignment]
+
+        envelope = {
+            "operation": EnumMcpOperationType.CALL_TOOL.value,
+            "payload": {
+                "tool_name": "valid_tool",
+                "arguments": {
+                    "model_name": "gpt-4",
+                    "temperature": 0.7,
+                    "mode": "fast",
+                },
+            },
+            "correlation_id": str(uuid4()),
+        }
+
+        result = await handler.execute(envelope)
+
+        # Should reach dispatch (placeholder) and return success
+        assert result.result["status"] == "success"
+        payload = result.result["payload"]
+        assert payload["is_error"] is False
+
+    # ------------------------------------------------------------------
+    # R1: Backwards-compatible pass-through when no schema
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_tool_without_schema_passes_through(
+        self, handler: HandlerMCP
+    ) -> None:
+        """Tool with input_schema=None must not validate (pass-through)."""
+        tool = _make_tool_with_schema(
+            name="no_schema_tool",
+            input_schema=None,  # explicitly no schema
+        )
+        handler._tool_registry["no_schema_tool"] = tool  # type: ignore[assignment]
+
+        envelope = {
+            "operation": EnumMcpOperationType.CALL_TOOL.value,
+            "payload": {
+                "tool_name": "no_schema_tool",
+                "arguments": {"garbage": True},  # would fail if validated
+            },
+            "correlation_id": str(uuid4()),
+        }
+
+        result = await handler.execute(envelope)
+
+        # Must succeed (no validation gate applied)
+        assert result.result["status"] == "success"
+
+    # ------------------------------------------------------------------
+    # R2: Error message quality — no raw Python tracebacks
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_validation_error_message_has_no_traceback(
+        self, handler: HandlerMCP
+    ) -> None:
+        """Validation error messages must not contain raw Python tracebacks."""
+        tool = _make_tool_with_schema(
+            name="traceback_check_tool",
+            input_schema=_SCHEMA_WITH_REQUIRED_STRING,
+        )
+        handler._tool_registry["traceback_check_tool"] = tool  # type: ignore[assignment]
+
+        envelope = {
+            "operation": EnumMcpOperationType.CALL_TOOL.value,
+            "payload": {
+                "tool_name": "traceback_check_tool",
+                "arguments": {},  # missing required field
+            },
+            "correlation_id": str(uuid4()),
+        }
+
+        result = await handler.execute(envelope)
+
+        error_message: str = result.result["payload"]["error_message"]
+        # Must NOT contain any Python traceback markers
+        assert "Traceback" not in error_message
+        assert "File " not in error_message
+        assert "jsonschema" not in error_message.lower()
+        # Must be a clean user-facing message
+        assert len(error_message) < 300  # bounded length
+
+    # ------------------------------------------------------------------
+    # R2: Error message names the failing field
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_validation_error_message_names_field(
+        self, handler: HandlerMCP
+    ) -> None:
+        """Validation error message must name the field that failed validation."""
+        tool = _make_tool_with_schema(
+            name="field_naming_tool",
+            input_schema=_SCHEMA_WITH_REQUIRED_STRING,
+        )
+        handler._tool_registry["field_naming_tool"] = tool  # type: ignore[assignment]
+
+        envelope = {
+            "operation": EnumMcpOperationType.CALL_TOOL.value,
+            "payload": {
+                "tool_name": "field_naming_tool",
+                "arguments": {"model_name": 99},  # wrong type
+            },
+            "correlation_id": str(uuid4()),
+        }
+
+        result = await handler.execute(envelope)
+
+        error_message: str = result.result["payload"]["error_message"]
+        assert "model_name" in error_message

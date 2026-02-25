@@ -202,7 +202,7 @@ class TestHandlerSlackWebhook:
     def test_handler_initialization_with_bot_token(self) -> None:
         """Test handler initializes with bot token for Web API mode."""
         handler = HandlerSlackWebhook(
-            bot_token="xoxb-test-token",  # noqa: S106
+            bot_token="xoxb-test-token",
             default_channel="C01234567",
         )
         assert handler._bot_token == "xoxb-test-token"
@@ -392,7 +392,7 @@ class TestHandlerWebApiMode:
     def handler(self) -> HandlerSlackWebhook:
         """Create handler in Web API mode."""
         return HandlerSlackWebhook(
-            bot_token="xoxb-test-token",  # noqa: S106
+            bot_token="xoxb-test-token",
             default_channel="C01234567",
             max_retries=2,
             retry_backoff=(0.01, 0.02),
@@ -536,7 +536,7 @@ class TestHandlerWebApiMode:
     async def test_web_api_channel_from_alert(self) -> None:
         """Test that channel from alert overrides default."""
         handler = HandlerSlackWebhook(
-            bot_token="xoxb-test",  # noqa: S106
+            bot_token="xoxb-test",
             default_channel="C_DEFAULT",
             max_retries=0,
             timeout=1.0,
@@ -568,7 +568,7 @@ class TestHandlerWebApiMode:
     async def test_web_api_no_channel_configured(self) -> None:
         """Test Web API mode fails when no channel is configured."""
         handler = HandlerSlackWebhook(
-            bot_token="xoxb-test",  # noqa: S106
+            bot_token="xoxb-test",
             default_channel="",
             max_retries=0,
             timeout=1.0,
@@ -861,7 +861,7 @@ class TestModeResolution:
         """When bot_token is set, Web API is used even if webhook_url is also set."""
         handler = HandlerSlackWebhook(
             webhook_url="https://hooks.slack.com/test",
-            bot_token="xoxb-test",  # noqa: S106
+            bot_token="xoxb-test",
             default_channel="C01234567",
             max_retries=0,
             timeout=1.0,

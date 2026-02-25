@@ -118,11 +118,14 @@ class TestInfraValidatorConstants:
           - ServiceArtifactStore.write_artifact(): content: str | bytes parameter
         - 127 (2026-02-17): OMN-2239 pricing table manifest loading (+1 union)
           - ModelPricingTable.from_yaml(): path: Path | str | None parameter
+        - 129 (2026-02-25): OMN-2736 bifrost gateway field_validator coercions (+2 unions)
+          - ModelBifrostRequest._coerce_capabilities(): list[str] | tuple[str, ...]
+          - ModelBifrostRequest._coerce_messages(): list[JsonDict] | tuple[JsonDict, ...]
 
-        Current: 127 (as of OMN-2239). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
+        Current: 129 (as of OMN-2736). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 127, (
-            "INFRA_MAX_UNIONS should be 127 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 129, (
+            "INFRA_MAX_UNIONS should be 129 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

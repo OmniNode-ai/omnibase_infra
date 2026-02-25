@@ -18,14 +18,14 @@ Critical Invariant:
     that has been successfully persisted for that partition.
     Never commit offsets for partitions that had write failures in the batch.
 
-Topics consumed:
-    - agent-actions
-    - agent-routing-decisions
-    - agent-transformation-events
-    - router-performance-metrics
-    - agent-detection-failures
-    - agent-execution-logs
-    - onex.evt.agent.status.v1
+Topics consumed (OMN-2621: migrated 5 legacy bare names to ONEX canonical):
+    - onex.evt.omniclaude.agent-actions.v1         (was: agent-actions)
+    - onex.evt.omniclaude.routing-decision.v1      (was: agent-routing-decisions)
+    - onex.evt.omniclaude.agent-transformation.v1  (was: agent-transformation-events)
+    - onex.evt.omniclaude.performance-metrics.v1   (was: router-performance-metrics)
+    - onex.evt.omniclaude.detection-failure.v1     (was: agent-detection-failures)
+    - agent-execution-logs                         (unchanged — producer unconfirmed)
+    - onex.evt.agent.status.v1                     (unchanged — not omniclaude-produced)
 
 Related Tickets:
     - OMN-1743: Migrate agent_actions_consumer to omnibase_infra (current)
@@ -161,24 +161,27 @@ def mask_dsn_password(dsn: str) -> str:
 # Type Aliases and Constants
 # =============================================================================
 
-# Map topics to their Pydantic model class
+# Map topics to their Pydantic model class.
+# OMN-2621: 5 legacy bare topic names replaced with ONEX canonical names.
+# "agent-execution-logs" and "onex.evt.agent.status.v1" are unchanged.
 TOPIC_TO_MODEL: dict[str, type[BaseModel]] = {
-    "agent-actions": ModelAgentAction,
-    "agent-routing-decisions": ModelRoutingDecision,
-    "agent-transformation-events": ModelTransformationEvent,
-    "router-performance-metrics": ModelPerformanceMetric,
-    "agent-detection-failures": ModelDetectionFailure,
+    "onex.evt.omniclaude.agent-actions.v1": ModelAgentAction,
+    "onex.evt.omniclaude.routing-decision.v1": ModelRoutingDecision,
+    "onex.evt.omniclaude.agent-transformation.v1": ModelTransformationEvent,
+    "onex.evt.omniclaude.performance-metrics.v1": ModelPerformanceMetric,
+    "onex.evt.omniclaude.detection-failure.v1": ModelDetectionFailure,
     "agent-execution-logs": ModelExecutionLog,
     "onex.evt.agent.status.v1": ModelAgentStatusEvent,
 }
 
-# Map topics to writer method names
+# Map topics to writer method names.
+# OMN-2621: Keys updated to match ONEX canonical topic names.
 TOPIC_TO_WRITER_METHOD: dict[str, str] = {
-    "agent-actions": "write_agent_actions",
-    "agent-routing-decisions": "write_routing_decisions",
-    "agent-transformation-events": "write_transformation_events",
-    "router-performance-metrics": "write_performance_metrics",
-    "agent-detection-failures": "write_detection_failures",
+    "onex.evt.omniclaude.agent-actions.v1": "write_agent_actions",
+    "onex.evt.omniclaude.routing-decision.v1": "write_routing_decisions",
+    "onex.evt.omniclaude.agent-transformation.v1": "write_transformation_events",
+    "onex.evt.omniclaude.performance-metrics.v1": "write_performance_metrics",
+    "onex.evt.omniclaude.detection-failure.v1": "write_detection_failures",
     "agent-execution-logs": "write_execution_logs",
     "onex.evt.agent.status.v1": "write_agent_status_events",
 }
@@ -448,14 +451,31 @@ class AgentActionsConsumer:
 
         correlation_id = uuid4()
 
+        unmapped_topics = [
+            t
+            for t in self._config.topics
+            if t not in TOPIC_TO_MODEL or t not in TOPIC_TO_WRITER_METHOD
+        ]
         logger.info(
-            "Starting AgentActionsConsumer",
+            "AgentActionsConsumer starting",
             extra={
                 "consumer_id": self._consumer_id,
                 "correlation_id": str(correlation_id),
-                "topics": self._config.topics,
+                "subscribed_topics": self._config.topics,
+                "mapped_topics": list(TOPIC_TO_MODEL.keys()),
+                "unmapped_subscribed": unmapped_topics,
             },
         )
+        if unmapped_topics:
+            logger.warning(
+                "Subscribed topics with no model/writer mapping — messages will be skipped: %s",
+                unmapped_topics,
+                extra={
+                    "consumer_id": self._consumer_id,
+                    "correlation_id": str(correlation_id),
+                    "unmapped_topics": unmapped_topics,
+                },
+            )
 
         try:
             # Create PostgreSQL pool
@@ -1096,12 +1116,14 @@ class AgentActionsConsumer:
         1. UNHEALTHY: Consumer is not running (stopped or crashed)
         2. DEGRADED: Circuit breaker is open or half-open (database issues, retrying)
         3. DEGRADED: Last poll exceeds poll staleness threshold (consumer not polling)
-        4. DEGRADED: No writes yet AND consumer running > 60s (startup grace period exceeded)
+        4. DEGRADED: Messages received but no writes AND consumer running > 60s
+           (startup grace period exceeded with unwritten messages — write pipeline failing)
         5. DEGRADED: Last successful write exceeds staleness threshold (with messages received)
-        6. HEALTHY: All other cases (running, circuit closed, recent activity or in grace period)
+        6. HEALTHY: All other cases (running, circuit closed, recent activity, idle, or in grace period)
 
-        The 60-second startup grace period allows the consumer to be considered
-        healthy immediately after starting, before any messages have been consumed.
+        An idle consumer (zero messages received) is always HEALTHY regardless of uptime.
+        The 60-second startup grace period covers the case where messages arrive before
+        the first write completes.
 
         Args:
             metrics_snapshot: Snapshot of current consumer metrics including
@@ -1142,7 +1164,14 @@ class AgentActionsConsumer:
         messages_received = metrics_snapshot.get("messages_received", 0)
 
         if last_write is None:
-            # No writes yet - check startup grace period (60 seconds)
+            # No writes yet - only DEGRADED if messages were received but not written
+            # (i.e., messages came in but the write pipeline is failing).
+            # An idle consumer on an empty topic has no messages received, so it is
+            # healthy regardless of uptime.
+            if not isinstance(messages_received, int) or messages_received == 0:
+                # Rule 4 (revised): No messages received at all -> idle consumer, HEALTHY
+                return EnumHealthStatus.HEALTHY
+            # Messages have been received but none written - check startup grace period
             started_at_str = metrics_snapshot.get("started_at")
             if started_at_str is not None:
                 try:
@@ -1152,7 +1181,7 @@ class AgentActionsConsumer:
                         # Rule 6: Consumer just started, healthy even without writes
                         return EnumHealthStatus.HEALTHY
                     else:
-                        # Rule 4: Consumer running > 60s with no writes -> DEGRADED
+                        # Rule 4: Consumer running > 60s, messages received but no writes -> DEGRADED
                         return EnumHealthStatus.DEGRADED
                 except (ValueError, TypeError):
                     # Parse error - fallback to healthy

@@ -48,7 +48,11 @@ from datetime import UTC, datetime, timedelta
 import httpx
 
 from omnibase_core.types import JsonType
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
@@ -192,6 +196,16 @@ class HandlerGitHubApiPoll:
             Override in tests.
         http_timeout: HTTP client timeout in seconds (default: 15).
     """
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Return the architectural role: NODE_HANDLER (bound to PR poller effect node)."""
+        return EnumHandlerType.NODE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification: EFFECT (GitHub REST API I/O)."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def __init__(
         self,

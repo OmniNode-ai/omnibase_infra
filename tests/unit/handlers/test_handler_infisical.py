@@ -130,7 +130,7 @@ class TestHandlerInfisicalGetSecret:
                 key="DB_PASS",
                 value=SecretStr("secret123"),
                 version=1,
-                secret_path="/",  # noqa: S106
+                secret_path="/",
                 environment="test",
             )
 
