@@ -194,7 +194,7 @@ class TestSuccessfulDispatch:
         # Protocol envelope fields must be stripped
         assert "envelope_id" not in text
         assert "correlation_id" not in text
-        assert "source" not in text
+        assert '"source"' not in text
         assert "metadata" not in text
         assert '"payload"' not in text
 

@@ -59,10 +59,11 @@ logger = logging.getLogger(__name__)
 # intentional — orchestrator results are expected to be flat domain values;
 # if envelope fields appear at a deeper nesting level that signals a protocol
 # violation that should be fixed at the source, not silently scrubbed here.
-# Note: "payload" is intentionally in this set even though it is a common
-# English word.  Tools that return a top-level "payload" key as domain data
-# (rather than as an ONEX envelope wrapper) will have it stripped.  Tools
-# with this naming pattern should be updated to use a more specific key.
+# Note: "payload" and "success" are intentionally in this set even though
+# they are common English words.  Tools that use either as top-level domain
+# keys (e.g. {"success": True, "record_count": 5} or {"payload": "data"})
+# will have those keys silently stripped.  Tools with these naming patterns
+# should be updated to use more specific domain key names.
 _PROTOCOL_FIELDS: frozenset[str] = frozenset(
     {
         "envelope_id",
