@@ -465,7 +465,10 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #                     ServiceArtifactStore.write_artifact(): content: str | bytes parameter
 # - 127 (2026-02-17): OMN-2239 pricing table manifest loading
 #                     ModelPricingTable.from_yaml(): path: Path | str | None parameter
-INFRA_MAX_UNIONS = 127
+# - 129 (2026-02-25): OMN-2736 bifrost gateway field_validator coercions
+#                     ModelBifrostRequest._coerce_capabilities(): list[str] | tuple[str, ...]
+#                     ModelBifrostRequest._coerce_messages(): list[JsonDict] | tuple[JsonDict, ...]
+INFRA_MAX_UNIONS = 129
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

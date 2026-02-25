@@ -1,4 +1,3 @@
-# ruff: noqa: S106
 # S106 disabled: Hardcoded passwords are intentional test fixtures for security sanitization testing
 """
 Comprehensive tests for infrastructure error classes.

@@ -61,7 +61,7 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.effects.models.model_llm_inference_response import (
@@ -89,16 +89,12 @@ from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_r
 
 logger = logging.getLogger(__name__)
 
-# Sentinel values for rule_id when no rule matched or all backends failed.
-_RULE_ID_DEFAULT = "default"
-_RULE_ID_NONE = "none"
-
 # HMAC header name for outbound request authentication.
 _HMAC_HEADER_NAME = "X-ONEX-Signature"
 
 
 @dataclass
-class _CircuitBreakerState:
+class CircuitBreakerState:
     """Per-backend circuit breaker state.
 
     Tracks consecutive failure count and circuit-open timestamp.
@@ -181,8 +177,8 @@ class HandlerBifrostGateway:
         self._config = config
         self._inference_handler = inference_handler
         # Per-backend circuit breaker state — lazily created on first access.
-        self._circuit_states: dict[str, _CircuitBreakerState] = defaultdict(
-            _CircuitBreakerState
+        self._circuit_states: dict[str, CircuitBreakerState] = defaultdict(
+            CircuitBreakerState
         )
         # Per-backend lock guard for lazy circuit state creation.
         self._state_init_lock: asyncio.Lock = asyncio.Lock()
@@ -221,21 +217,18 @@ class HandlerBifrostGateway:
             ModelBifrostResponse with backend_selected, rule_id,
             latency_ms, retry_count, and the inference result.
         """
-        correlation_id = request.correlation_id or str(uuid4())
+        correlation_id: UUID = request.correlation_id or uuid4()
         start_time = time.perf_counter()
 
         # Evaluate routing rules → candidate backend IDs + matched rule
         candidate_backend_ids, matched_rule = self._evaluate_rules(request)
-
-        rule_id = matched_rule.rule_id if matched_rule else _RULE_ID_DEFAULT
-        if not candidate_backend_ids:
-            rule_id = _RULE_ID_NONE
+        matched_rule_id: UUID | None = matched_rule.rule_id if matched_rule else None
 
         logger.debug(
             "Bifrost routing decision: tenant=%s operation=%s rule=%s candidates=%s corr=%s",
             request.tenant_id,
             request.operation_type,
-            rule_id,
+            matched_rule_id,
             candidate_backend_ids,
             correlation_id,
         )
@@ -256,13 +249,13 @@ class HandlerBifrostGateway:
                 "attempts=%d corr=%s",
                 request.tenant_id,
                 request.operation_type,
-                rule_id,
+                matched_rule_id,
                 retry_count,
                 correlation_id,
             )
             return ModelBifrostResponse(
-                backend_selected="",
-                rule_id=rule_id,
+                backend_selected="",  # empty — no backend served on total failure
+                matched_rule_id=matched_rule_id,
                 latency_ms=latency_ms,
                 retry_count=retry_count,
                 tenant_id=request.tenant_id,
@@ -271,7 +264,7 @@ class HandlerBifrostGateway:
                 success=False,
                 error_message=(
                     f"All backends failed after {retry_count} attempt(s). "
-                    f"tenant_id={request.tenant_id} operation_type={request.operation_type}"
+                    f"operation_type={request.operation_type.value}"
                 ),
             )
 
@@ -281,7 +274,7 @@ class HandlerBifrostGateway:
             request.tenant_id,
             request.operation_type,
             backend_selected,
-            rule_id,
+            matched_rule_id,
             latency_ms,
             retry_count,
             correlation_id,
@@ -289,7 +282,7 @@ class HandlerBifrostGateway:
 
         return ModelBifrostResponse(
             backend_selected=backend_selected,
-            rule_id=rule_id,
+            matched_rule_id=matched_rule_id,
             latency_ms=latency_ms,
             retry_count=retry_count,
             tenant_id=request.tenant_id,
@@ -321,8 +314,10 @@ class HandlerBifrostGateway:
             ``default_backends`` is also empty.
         """
         sorted_rules = sorted(
-            self._config.routing_rules, key=lambda r: (r.priority, r.rule_id)
+            enumerate(self._config.routing_rules),
+            key=lambda pair: (pair[1].priority, pair[0]),
         )
+        sorted_rules = [rule for _, rule in sorted_rules]
 
         for rule in sorted_rules:
             if self._rule_matches(rule, request):
@@ -348,7 +343,10 @@ class HandlerBifrostGateway:
             True if all match predicates are satisfied, False otherwise.
         """
         # operation_type match
-        if rule.match_operation_types and request.operation_type not in rule.match_operation_types:
+        if (
+            rule.match_operation_types
+            and request.operation_type not in rule.match_operation_types
+        ):
             return False
 
         # capabilities match — ALL declared capabilities must appear in request
@@ -358,7 +356,10 @@ class HandlerBifrostGateway:
                 return False
 
         # cost_tier match
-        if rule.match_cost_tiers and request.cost_tier.value not in rule.match_cost_tiers:
+        if (
+            rule.match_cost_tiers
+            and request.cost_tier.value not in rule.match_cost_tiers
+        ):
             return False
 
         # max_latency_ms constraint
@@ -376,7 +377,7 @@ class HandlerBifrostGateway:
         self,
         request: ModelBifrostRequest,
         candidate_backend_ids: list[str],
-        correlation_id: str,
+        correlation_id: UUID,
     ) -> tuple[ModelLlmInferenceResponse | None, str, int]:
         """Try candidate backends in order with failover and circuit breaking.
 
@@ -422,7 +423,9 @@ class HandlerBifrostGateway:
 
             # Apply backoff before non-first attempts
             if attempted > 0:
-                delay_ms = self._config.failover_backoff_base_ms * (2 ** (attempted - 1))
+                delay_ms = self._config.failover_backoff_base_ms * (
+                    2 ** (attempted - 1)
+                )
                 delay_s = delay_ms / 1000.0
                 logger.debug(
                     "Bifrost: backoff %.0f ms before attempt %d on backend '%s'. corr=%s",
@@ -468,7 +471,7 @@ class HandlerBifrostGateway:
         self,
         request: ModelBifrostRequest,
         backend_cfg: ModelBifrostBackendConfig,
-        correlation_id: str,
+        correlation_id: UUID,
     ) -> ModelLlmInferenceRequest:
         """Build a ``ModelLlmInferenceRequest`` for a specific backend.
 
@@ -488,27 +491,22 @@ class HandlerBifrostGateway:
 
         # Resolve model name: request override → backend config → fallback
         model_name = (
-            request.model
-            or backend_cfg.model_name
-            or request.operation_type
+            request.model or backend_cfg.model_name or request.operation_type.value
         )
 
         # Resolve timeout: backend override → global config
         timeout_ms = backend_cfg.timeout_ms or self._config.request_timeout_ms
         timeout_seconds = timeout_ms / 1000.0
 
-        # Map operation_type string to enum (default to CHAT_COMPLETION)
-        try:
-            operation_type = EnumLlmOperationType(request.operation_type)
-        except ValueError:
-            operation_type = EnumLlmOperationType.CHAT_COMPLETION
+        # operation_type is already an EnumLlmOperationType
+        operation_type = request.operation_type
 
-        # Build HMAC API key if secret is configured
-        api_key: str | None = None
+        # Build HMAC signature as X-ONEX-Signature header if secret is configured
+        extra_headers: dict[str, str] = {}
         if backend_cfg.hmac_secret:
-            api_key = self._compute_hmac_signature(
+            extra_headers[_HMAC_HEADER_NAME] = self._compute_hmac_signature(
                 secret=backend_cfg.hmac_secret,
-                correlation_id=correlation_id,
+                correlation_id=str(correlation_id),
             )
 
         return ModelLlmInferenceRequest(
@@ -520,7 +518,7 @@ class HandlerBifrostGateway:
             system_prompt=request.system_prompt,
             max_tokens=request.max_tokens,
             temperature=request.temperature,
-            api_key=api_key,
+            extra_headers=extra_headers,
             timeout_seconds=timeout_seconds,
         )
 
@@ -530,7 +528,7 @@ class HandlerBifrostGateway:
 
         The signature covers the correlation ID and UTC timestamp to
         provide replay protection. The result is formatted as a hex
-        digest suitable for an ``Authorization: Bearer`` or custom header.
+        digest suitable for the ``X-ONEX-Signature`` header.
 
         Args:
             secret: The HMAC-SHA256 secret key.
@@ -550,18 +548,18 @@ class HandlerBifrostGateway:
 
     # ── Circuit breaker ───────────────────────────────────────────────────
 
-    async def _get_circuit_state(self, backend_id: str) -> _CircuitBreakerState:
+    async def _get_circuit_state(self, backend_id: str) -> CircuitBreakerState:
         """Get or lazily create the circuit breaker state for a backend.
 
         Args:
             backend_id: The backend identifier.
 
         Returns:
-            The ``_CircuitBreakerState`` for this backend.
+            The ``CircuitBreakerState`` for this backend.
         """
         async with self._state_init_lock:
             if backend_id not in self._circuit_states:
-                self._circuit_states[backend_id] = _CircuitBreakerState()
+                self._circuit_states[backend_id] = CircuitBreakerState()
         return self._circuit_states[backend_id]
 
     async def _is_circuit_open(self, backend_id: str) -> bool:
@@ -569,10 +567,19 @@ class HandlerBifrostGateway:
 
         The circuit is open if:
         - ``failure_count`` >= ``circuit_breaker_failure_threshold``, AND
-        - The circuit opened less than ``circuit_breaker_window_seconds`` ago.
+        - The circuit has been open for less than
+          ``circuit_breaker_reset_timeout_seconds`` (i.e. the reset window
+          has not yet elapsed).
 
-        If the window has elapsed, the circuit transitions to half-open
-        (``opened_at`` is reset to None) to allow a probe attempt.
+        Once ``circuit_breaker_reset_timeout_seconds`` elapses the circuit
+        transitions to half-open (``opened_at`` reset to None) to allow one
+        probe attempt. On probe success ``_record_success`` closes the circuit;
+        on probe failure ``_record_failure`` reopens it.
+
+        Note on ``circuit_breaker_window_seconds``: this config field
+        represents the reset/cooldown timeout — how long to keep the circuit
+        open before allowing a probe. Failure counting is cumulative (not
+        windowed); callers reset it explicitly via ``_record_success``.
 
         Args:
             backend_id: The backend to check.
@@ -595,11 +602,11 @@ class HandlerBifrostGateway:
                 )
                 return True
 
-            # Check if cooldown window has elapsed (half-open probe)
+            # Check if reset timeout has elapsed (half-open probe)
             elapsed = time.monotonic() - state.opened_at
             if elapsed >= self._config.circuit_breaker_window_seconds:
                 logger.info(
-                    "Bifrost: circuit half-open for backend '%s' after %.0fs cooldown.",
+                    "Bifrost: circuit half-open for backend '%s' after %.0fs reset timeout.",
                     backend_id,
                     elapsed,
                 )

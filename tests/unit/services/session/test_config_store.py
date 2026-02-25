@@ -138,7 +138,7 @@ class TestConfigSessionStorageAliasChoices:
         config = ConfigSessionStorage(
             pool_min_size=5,
             pool_max_size=15,
-            postgres_password="testpass",  # type: ignore[arg-type]  # noqa: S106
+            postgres_password="testpass",  # type: ignore[arg-type]
         )
 
         assert config.pool_min_size == 5

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -44,6 +44,10 @@ from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost.model_bifro
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,
 )
+
+# Stable test UUIDs for routing rule IDs
+_RULE_DEFAULT = UUID("6776fcc4-a151-54e0-b512-673105387e81")
+_RULE_UNKNOWN = UUID("35964217-6223-5a2c-bd5f-fa655286345a")
 
 pytestmark = pytest.mark.unit
 
@@ -92,7 +96,7 @@ def _make_two_backend_config(
         },
         routing_rules=(
             ModelBifrostRoutingRule(
-                rule_id="default-rule",
+                rule_id=_RULE_DEFAULT,
                 priority=10,
                 backend_ids=rule_backend_ids,
             ),
@@ -105,11 +109,14 @@ def _make_two_backend_config(
     )
 
 
+_TEST_TENANT_ID = UUID("00000000-0000-0000-0000-000000000001")
+
+
 def _make_request() -> ModelBifrostRequest:
     """Build a minimal valid ModelBifrostRequest for failover tests."""
     return ModelBifrostRequest(
-        operation_type="chat_completion",
-        tenant_id="test-tenant",
+        operation_type=EnumLlmOperationType.CHAT_COMPLETION,
+        tenant_id=_TEST_TENANT_ID,
         messages=[{"role": "user", "content": "Hello"}],
     )
 
@@ -164,10 +171,12 @@ class TestBifrostFailoverBackendADown:
 
         # First call (backend-a) raises, second call (backend-b) succeeds
         success_response = _make_inference_response()
-        handler = _make_handler_with_sequence([
-            InfraUnavailableError("backend-a is down", context=None),
-            success_response,
-        ])
+        handler = _make_handler_with_sequence(
+            [
+                InfraUnavailableError("backend-a is down", context=None),
+                success_response,
+            ]
+        )
         gateway = HandlerBifrostGateway(config=config, inference_handler=handler)
 
         request = _make_request()
@@ -176,7 +185,7 @@ class TestBifrostFailoverBackendADown:
         # backend-b served the request
         assert result.success is True
         assert result.backend_selected == "backend-b"
-        assert result.rule_id == "default-rule"
+        assert result.matched_rule_id == _RULE_DEFAULT
         # One retry (backend-a failed, backend-b succeeded)
         assert result.retry_count == 1
         assert result.inference_response is not None
@@ -189,10 +198,12 @@ class TestBifrostFailoverBackendADown:
             failover_attempts=3,
         )
         success_response = _make_inference_response()
-        handler = _make_handler_with_sequence([
-            InfraUnavailableError("backend-a down", context=None),
-            success_response,
-        ])
+        handler = _make_handler_with_sequence(
+            [
+                InfraUnavailableError("backend-a down", context=None),
+                success_response,
+            ]
+        )
         gateway = HandlerBifrostGateway(config=config, inference_handler=handler)
 
         result = await gateway.handle(_make_request())
@@ -201,15 +212,15 @@ class TestBifrostFailoverBackendADown:
         assert result.retry_count == 1  # 1 failed before success
 
     @pytest.mark.asyncio
-    async def test_bifrost_failover_all_backends_down_returns_structured_error(self) -> None:
+    async def test_bifrost_failover_all_backends_down_returns_structured_error(
+        self,
+    ) -> None:
         """R3: All backends down → return structured error, not timeout hang."""
         config = _make_two_backend_config(
             rule_backend_ids=("backend-a", "backend-b"),
             failover_attempts=2,
         )
-        handler = _make_failing_handler(
-            InfraUnavailableError("All down", context=None)
-        )
+        handler = _make_failing_handler(InfraUnavailableError("All down", context=None))
         gateway = HandlerBifrostGateway(config=config, inference_handler=handler)
 
         request = _make_request()
@@ -222,21 +233,23 @@ class TestBifrostFailoverBackendADown:
         assert "tenant_id" in result.error_message or "attempt" in result.error_message
 
     @pytest.mark.asyncio
-    async def test_bifrost_failover_structured_error_includes_tenant_and_operation(self) -> None:
-        """Structured error message includes tenant_id and operation_type for queryability."""
+    async def test_bifrost_failover_structured_error_includes_operation(self) -> None:
+        """Structured error message includes operation_type (tenant_id omitted for PII safety)."""
         config = _make_two_backend_config(failover_attempts=1)
         handler = _make_failing_handler()
         gateway = HandlerBifrostGateway(config=config, inference_handler=handler)
 
+        _specific_tenant_id = UUID("00000000-0000-0000-0000-000000000042")
         request = ModelBifrostRequest(
-            operation_type="chat_completion",
-            tenant_id="specific-tenant",
+            operation_type=EnumLlmOperationType.CHAT_COMPLETION,
+            tenant_id=_specific_tenant_id,
             messages=[{"role": "user", "content": "Hello"}],
         )
         result = await gateway.handle(request)
 
         assert result.success is False
-        assert "specific-tenant" in result.error_message
+        # tenant_id is NOT in error_message (PII — kept in structured log only)
+        assert str(_specific_tenant_id) not in result.error_message
         assert "chat_completion" in result.error_message
 
     @pytest.mark.asyncio
@@ -249,7 +262,7 @@ class TestBifrostFailoverBackendADown:
         result = await gateway.handle(_make_request())
 
         assert result.success is False
-        assert result.rule_id == "default-rule"
+        assert result.matched_rule_id == _RULE_DEFAULT
 
     @pytest.mark.asyncio
     async def test_bifrost_failover_first_backend_success_zero_retries(self) -> None:
@@ -268,7 +281,9 @@ class TestBifrostFailoverBackendADown:
         assert result.retry_count == 0
 
     @pytest.mark.asyncio
-    async def test_bifrost_failover_failover_attempts_limits_tried_backends(self) -> None:
+    async def test_bifrost_failover_failover_attempts_limits_tried_backends(
+        self,
+    ) -> None:
         """failover_attempts=1 limits to only 1 backend tried even if more available."""
         config = _make_two_backend_config(
             rule_backend_ids=("backend-a", "backend-b"),
@@ -297,7 +312,7 @@ class TestBifrostFailoverBackendADown:
             },
             routing_rules=(
                 ModelBifrostRoutingRule(
-                    rule_id="rule-unknown",
+                    rule_id=_RULE_UNKNOWN,
                     priority=10,
                     # backend-missing not in config.backends
                     backend_ids=("backend-missing", "backend-b"),
@@ -329,7 +344,9 @@ class TestBifrostFailoverCircuitBreaker:
     """Tests for circuit breaker open/close behavior."""
 
     @pytest.mark.asyncio
-    async def test_bifrost_failover_circuit_opens_after_threshold_failures(self) -> None:
+    async def test_bifrost_failover_circuit_opens_after_threshold_failures(
+        self,
+    ) -> None:
         """Circuit opens after circuit_breaker_failure_threshold consecutive failures."""
         config = _make_two_backend_config(
             circuit_breaker_failure_threshold=3,
@@ -465,11 +482,13 @@ class TestBifrostFailoverHmacAuth:
         )
         assert sig.startswith("hmac-sha256-")
         # Hex portion should be 64 chars (SHA-256 hex)
-        hex_part = sig[len("hmac-sha256-"):]
+        hex_part = sig[len("hmac-sha256-") :]
         assert len(hex_part) == 64
         assert all(c in "0123456789abcdef" for c in hex_part)
 
-    def test_bifrost_failover_hmac_different_secrets_produce_different_sigs(self) -> None:
+    def test_bifrost_failover_hmac_different_secrets_produce_different_sigs(
+        self,
+    ) -> None:
         """Different HMAC secrets produce different signatures."""
         sig_a = HandlerBifrostGateway._compute_hmac_signature(
             secret="secret-a",
@@ -481,7 +500,9 @@ class TestBifrostFailoverHmacAuth:
         )
         assert sig_a != sig_b
 
-    def test_bifrost_failover_hmac_different_correlation_ids_produce_different_sigs(self) -> None:
+    def test_bifrost_failover_hmac_different_correlation_ids_produce_different_sigs(
+        self,
+    ) -> None:
         """Different correlation IDs produce different signatures (replay protection)."""
         sig_1 = HandlerBifrostGateway._compute_hmac_signature(
             secret="same-secret",
@@ -494,8 +515,10 @@ class TestBifrostFailoverHmacAuth:
         assert sig_1 != sig_2
 
     @pytest.mark.asyncio
-    async def test_bifrost_failover_backend_without_hmac_secret_no_api_key(self) -> None:
-        """Backend without hmac_secret does not inject an api_key into inference request."""
+    async def test_bifrost_failover_backend_without_hmac_secret_no_signature_header(
+        self,
+    ) -> None:
+        """Backend without hmac_secret does not inject X-ONEX-Signature into inference request."""
         config = ModelBifrostConfig(
             backends={
                 "backend-a": ModelBifrostBackendConfig(
@@ -521,18 +544,24 @@ class TestBifrostFailoverHmacAuth:
             return success_response
 
         inference_handler.handle = AsyncMock(side_effect=_capture)
-        gateway = HandlerBifrostGateway(config=config, inference_handler=inference_handler)
+        gateway = HandlerBifrostGateway(
+            config=config, inference_handler=inference_handler
+        )
 
         await gateway.handle(_make_request())
 
         assert len(captured_requests) == 1
         captured_req = captured_requests[0]
         assert captured_req is not None
+        # No HMAC secret → X-ONEX-Signature absent from extra_headers
+        assert "X-ONEX-Signature" not in captured_req.extra_headers
         assert captured_req.api_key is None
 
     @pytest.mark.asyncio
-    async def test_bifrost_failover_backend_with_hmac_secret_injects_api_key(self) -> None:
-        """Backend with hmac_secret injects a non-None api_key into inference request."""
+    async def test_bifrost_failover_backend_with_hmac_secret_injects_signature_header(
+        self,
+    ) -> None:
+        """Backend with hmac_secret injects X-ONEX-Signature header (not api_key) into inference request."""
         config = ModelBifrostConfig(
             backends={
                 "backend-a": ModelBifrostBackendConfig(
@@ -558,12 +587,18 @@ class TestBifrostFailoverHmacAuth:
             return success_response
 
         inference_handler.handle = AsyncMock(side_effect=_capture)
-        gateway = HandlerBifrostGateway(config=config, inference_handler=inference_handler)
+        gateway = HandlerBifrostGateway(
+            config=config, inference_handler=inference_handler
+        )
 
         await gateway.handle(_make_request())
 
         assert len(captured_requests) == 1
         captured_req = captured_requests[0]
         assert captured_req is not None
-        assert captured_req.api_key is not None
-        assert captured_req.api_key.startswith("hmac-sha256-")
+        # HMAC secret → X-ONEX-Signature present in extra_headers (not api_key/Authorization)
+        assert "X-ONEX-Signature" in captured_req.extra_headers
+        sig = captured_req.extra_headers["X-ONEX-Signature"]
+        assert sig.startswith("hmac-sha256-")
+        # api_key must be None (HMAC not sent as Authorization: Bearer)
+        assert captured_req.api_key is None

@@ -53,11 +53,13 @@ class ModelBifrostBackendConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
+    # ONEX_EXCLUDE: pattern_validator - backend_id is a human-readable slug
+    # (e.g. "qwen-14b"), not a UUID entity reference. Config usability trumps UUID convention.
     backend_id: str = Field(
         ...,
         min_length=1,
         max_length=128,
-        description="Stable unique identifier for audit logging and routing.",
+        description="Stable unique slug identifier for audit logging and routing.",
     )
     base_url: str = Field(
         ...,
@@ -110,8 +112,10 @@ class ModelBifrostConfig(BaseModel):
             Delay for attempt N = ``backoff_base_ms * 2^(N-1)``.
         circuit_breaker_failure_threshold: Number of consecutive
             failures that open the circuit for a backend.
-        circuit_breaker_window_seconds: Rolling time window (seconds)
-            in which failures are counted for circuit breaker.
+        circuit_breaker_window_seconds: Reset/cooldown timeout (seconds)
+            after the circuit opens before a half-open probe is allowed.
+            Failures are counted cumulatively, not within a rolling window;
+            this field controls how long the circuit stays open.
         request_timeout_ms: Default per-request HTTP timeout in
             milliseconds. Per-backend ``timeout_ms`` overrides this.
         health_check_interval_seconds: How often the gateway probes
@@ -177,7 +181,11 @@ class ModelBifrostConfig(BaseModel):
         default=30,
         ge=1,
         le=3600,
-        description="Rolling time window for counting circuit breaker failures.",
+        description=(
+            "Reset/cooldown timeout in seconds after the circuit opens. "
+            "The circuit stays open for this duration before allowing a "
+            "half-open probe attempt."
+        ),
     )
     request_timeout_ms: int = Field(
         default=10_000,

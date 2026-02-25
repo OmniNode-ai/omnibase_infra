@@ -72,7 +72,7 @@ class TestInfisicalHandlerLifecycle:
                 key="API_KEY",
                 value=SecretStr("sk-test-123"),
                 version=5,
-                secret_path="/app",  # noqa: S106
+                secret_path="/app",
                 environment="staging",
             )
 

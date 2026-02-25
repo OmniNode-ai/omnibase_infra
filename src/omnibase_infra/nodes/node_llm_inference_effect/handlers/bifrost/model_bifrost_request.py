@@ -13,11 +13,13 @@ Related:
 
 from __future__ import annotations
 
-from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums.enum_cost_tier import EnumCostTier
+from omnibase_infra.enums.enum_llm_operation_type import EnumLlmOperationType
+from omnibase_infra.models.types import JsonDict
 
 
 class ModelBifrostRequest(BaseModel):
@@ -30,7 +32,7 @@ class ModelBifrostRequest(BaseModel):
 
     Attributes:
         operation_type: LLM operation to perform (e.g.
-            ``"chat_completion"``, ``"completion"``, ``"embedding"``).
+            ``EnumLlmOperationType.CHAT_COMPLETION``).
             Used for routing rule matching.
         capabilities: Set of capabilities the selected backend must
             support (e.g. ``["tool_calling", "json_mode"]``). All
@@ -41,7 +43,7 @@ class ModelBifrostRequest(BaseModel):
             rule selection (``match_max_latency_ms_lte``).
         cost_tier: Cost tier preference. The gateway routes to the
             cheapest tier that satisfies the request.
-        tenant_id: Caller identity for audit logging and per-tenant
+        tenant_id: Caller identity UUID for audit logging and per-tenant
             routing policy (future). Recorded in every audit log entry.
         model: Optional model identifier override. When set, the gateway
             passes this to the backend; otherwise the backend's configured
@@ -55,21 +57,22 @@ class ModelBifrostRequest(BaseModel):
             Auto-generated if not provided.
 
     Example:
+        >>> from uuid import UUID
+        >>> from omnibase_infra.enums.enum_llm_operation_type import EnumLlmOperationType
         >>> req = ModelBifrostRequest(
-        ...     operation_type="chat_completion",
+        ...     operation_type=EnumLlmOperationType.CHAT_COMPLETION,
         ...     capabilities=["tool_calling"],
         ...     max_latency_ms=5000,
         ...     cost_tier=EnumCostTier.LOW,
-        ...     tenant_id="omniintelligence",
+        ...     tenant_id=UUID("12345678-1234-5678-1234-567812345678"),
         ...     messages=[{"role": "user", "content": "Hello"}],
         ... )
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    operation_type: str = Field(
+    operation_type: EnumLlmOperationType = Field(
         ...,
-        min_length=1,
         description="LLM operation type for routing rule matching.",
     )
     capabilities: tuple[str, ...] = Field(
@@ -86,20 +89,15 @@ class ModelBifrostRequest(BaseModel):
         default=EnumCostTier.MID,
         description="Cost tier preference for backend selection.",
     )
-    tenant_id: str = Field(
+    tenant_id: UUID = Field(
         ...,
-        min_length=1,
-        max_length=256,
-        description="Caller identity for audit logging.",
+        description="Caller identity (UUID) for audit logging.",
     )
     model: str | None = Field(
         default=None,
         description="Optional model identifier override for the backend request.",
     )
-    # ONEX_EXCLUDE: any_type — chat messages follow the OpenAI wire format with
-    # heterogeneous content. Strict typing would require mirroring the full
-    # OpenAI message spec.
-    messages: tuple[dict[str, Any], ...] = Field(
+    messages: tuple[JsonDict, ...] = Field(
         default_factory=tuple,
         description="Chat messages for chat_completion operations.",
     )
@@ -122,7 +120,7 @@ class ModelBifrostRequest(BaseModel):
         le=2.0,
         description="Sampling temperature.",
     )
-    correlation_id: str | None = Field(
+    correlation_id: UUID | None = Field(
         default=None,
         description="Correlation ID for distributed tracing (auto-generated if None).",
     )
@@ -145,8 +143,8 @@ class ModelBifrostRequest(BaseModel):
     @field_validator("messages", mode="before")
     @classmethod
     def _coerce_messages(
-        cls, v: list[dict[str, Any]] | tuple[dict[str, Any], ...]
-    ) -> tuple[dict[str, Any], ...]:
+        cls, v: list[JsonDict] | tuple[JsonDict, ...]
+    ) -> tuple[JsonDict, ...]:
         """Coerce list inputs to tuple for strict=True compatibility.
 
         Args:

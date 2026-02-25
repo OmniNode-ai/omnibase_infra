@@ -13,6 +13,7 @@ from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost.handler_bif
     HandlerBifrostGateway,
 )
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost.model_bifrost_config import (
+    ModelBifrostBackendConfig,
     ModelBifrostConfig,
 )
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost.model_bifrost_request import (
@@ -27,6 +28,7 @@ from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost.model_bifro
 
 __all__: list[str] = [
     "HandlerBifrostGateway",
+    "ModelBifrostBackendConfig",
     "ModelBifrostConfig",
     "ModelBifrostRequest",
     "ModelBifrostResponse",

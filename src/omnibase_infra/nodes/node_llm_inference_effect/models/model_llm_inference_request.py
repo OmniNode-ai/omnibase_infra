@@ -52,6 +52,8 @@ class ModelLlmInferenceRequest(BaseModel):
         tools: Tool definitions to make available to the model.
         tool_choice: Constraint on how the model should use tools.
         api_key: Optional API key for Bearer auth. If None, no auth header is sent.
+        extra_headers: Additional HTTP headers injected into the outbound request.
+            Used for custom authentication schemes (e.g. HMAC ``X-ONEX-Signature``).
         timeout_seconds: HTTP request timeout in seconds (default 30.0). Applied
             to both authenticated and unauthenticated calls. Must be between 1.0
             and 600.0 inclusive.
@@ -131,6 +133,15 @@ class ModelLlmInferenceRequest(BaseModel):
         default=None,
         repr=False,
         description="Optional API key for Bearer auth.",
+    )
+    extra_headers: dict[str, str] = Field(
+        default_factory=dict,
+        repr=False,
+        description=(
+            "Additional HTTP headers injected into the outbound request. "
+            "Used for custom authentication schemes such as HMAC signatures "
+            "(e.g. ``X-ONEX-Signature``). Keys and values must be ASCII strings."
+        ),
     )
     timeout_seconds: float = Field(
         default=30.0,

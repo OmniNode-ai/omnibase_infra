@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -40,6 +40,29 @@ from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_
 )
 
 pytestmark = pytest.mark.unit
+
+# Stable test UUIDs for routing rule IDs
+_RULE_CHAT_ONLY = UUID("e9768a9e-1d87-5e8b-bd52-df64e3a1696a")
+_RULE_EMBEDDING_ONLY = UUID("3a8cac71-534c-559a-9112-7653badecad8")
+_RULE_LOW_COST = UUID("cc777383-da26-5528-9e91-6372239ab5f4")
+_RULE_HIGH_COST = UUID("e2ff7898-b68b-5feb-a4d5-407500ae20b6")
+_RULE_TOOL_JSON = UUID("d91e087b-8ea9-5f89-b272-68dee5075f67")
+_RULE_FAST = UUID("2807a315-5a3a-5568-a632-27ecb7e15b44")
+_RULE_HIGH_PRIORITY = UUID("a751a784-aac8-55a1-8ac5-cb87fffa8591")
+_RULE_LOW_PRIORITY = UUID("ae1ad2fc-ef0f-5e83-91d0-db7dafb0b739")
+_RULE_CATCH_ALL = UUID("420f1565-313e-5fa9-b128-fb6414837c7c")
+_RULE_CHAT_LOW = UUID("1a64acc1-7d94-5b74-9b56-98c959cdc494")
+_RULE_RULE_CHAT = UUID("3cda38ef-f8f7-5e0c-acf1-ee1da4426262")
+_RULE_RULE_EMBED = UUID("3471fed8-51bf-5ebf-9f2a-ffbd036213ef")
+_RULE_COMBINED = UUID("7ccc24a0-8c5d-5841-942e-85868e1afb9a")
+_RULE_CAP_MATCH = UUID("c5467def-9d89-59c2-ac00-c4e1c67f2a83")
+_RULE_LATENCY_1000 = UUID("12102e49-4a09-5c79-99e0-26ab779d0b62")
+_RULE_CHAT_OR_COMPLETE = UUID("f8aff824-7b8e-5321-9af3-1f28709eae34")
+_RULE_LOW_ONLY = UUID("daab60d7-ef92-5813-8e25-7ecd0f051de3")
+_RULE_WILDCARD = UUID("692797c9-0f81-5016-8733-ce30c1b6a36f")
+_RULE_LOW_COST_5B = UUID("81ac0d1b-d645-5087-bef7-fcf20f2a9497")
+_RULE_MID_COST_14B = UUID("66f96b84-68ac-5183-a3bd-092004e0fa76")
+_RULE_HIGH_COST_70B = UUID("f061f4c1-fbad-54e7-8a6a-03aae3375a9c")
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -70,7 +93,9 @@ def _make_transport() -> MagicMock:
     return MagicMock(spec=MixinLlmHttpTransport)
 
 
-def _make_handler(inference_response: ModelLlmInferenceResponse | None = None) -> HandlerLlmOpenaiCompatible:
+def _make_handler(
+    inference_response: ModelLlmInferenceResponse | None = None,
+) -> HandlerLlmOpenaiCompatible:
     """Create a HandlerLlmOpenaiCompatible with mocked handle()."""
     transport = _make_transport()
     handler = HandlerLlmOpenaiCompatible(transport=transport)
@@ -113,11 +138,11 @@ def _make_two_backend_config(
 
 def _make_chat_request(
     *,
-    operation_type: str = "chat_completion",
+    operation_type: EnumLlmOperationType = EnumLlmOperationType.CHAT_COMPLETION,
     cost_tier: EnumCostTier = EnumCostTier.MID,
     capabilities: tuple[str, ...] = (),
     max_latency_ms: int = 10_000,
-    tenant_id: str = "test-tenant",
+    tenant_id: UUID | None = None,
 ) -> ModelBifrostRequest:
     """Build a minimal valid ModelBifrostRequest."""
     return ModelBifrostRequest(
@@ -125,7 +150,7 @@ def _make_chat_request(
         cost_tier=cost_tier,
         capabilities=capabilities,
         max_latency_ms=max_latency_ms,
-        tenant_id=tenant_id,
+        tenant_id=tenant_id or UUID("00000000-0000-0000-0000-000000000001"),
         messages=[{"role": "user", "content": "Hello"}],
     )
 
@@ -154,11 +179,11 @@ class TestBifrostRoutingRuleEvaluation:
         assert matched_rule is None
 
     def test_bifrost_routing_single_rule_matches_by_operation_type(self) -> None:
-        """Rule with match_operation_types='chat_completion' matches correctly."""
+        """Rule with match_operation_types=CHAT_COMPLETION matches correctly."""
         rule = ModelBifrostRoutingRule(
-            rule_id="chat-only",
+            rule_id=_RULE_CHAT_ONLY,
             priority=10,
-            match_operation_types=("chat_completion",),
+            match_operation_types=(EnumLlmOperationType.CHAT_COMPLETION.value,),
             backend_ids=("backend-a",),
         )
         config = _make_two_backend_config(
@@ -168,19 +193,21 @@ class TestBifrostRoutingRuleEvaluation:
         handler = _make_handler()
         gateway = HandlerBifrostGateway(config=config, inference_handler=handler)
 
-        request = _make_chat_request(operation_type="chat_completion")
+        request = _make_chat_request(
+            operation_type=EnumLlmOperationType.CHAT_COMPLETION
+        )
         candidate_ids, matched_rule = gateway._evaluate_rules(request)
 
         assert candidate_ids == ("backend-a",)
         assert matched_rule is not None
-        assert matched_rule.rule_id == "chat-only"
+        assert matched_rule.rule_id == _RULE_CHAT_ONLY
 
     def test_bifrost_routing_operation_type_mismatch_falls_through(self) -> None:
-        """Rule for 'embedding' does not match a 'chat_completion' request."""
+        """Rule for EMBEDDING does not match a CHAT_COMPLETION request."""
         rule = ModelBifrostRoutingRule(
-            rule_id="embedding-only",
+            rule_id=_RULE_EMBEDDING_ONLY,
             priority=10,
-            match_operation_types=("embedding",),
+            match_operation_types=(EnumLlmOperationType.EMBEDDING.value,),
             backend_ids=("backend-a",),
         )
         config = _make_two_backend_config(
@@ -190,7 +217,9 @@ class TestBifrostRoutingRuleEvaluation:
         handler = _make_handler()
         gateway = HandlerBifrostGateway(config=config, inference_handler=handler)
 
-        request = _make_chat_request(operation_type="chat_completion")
+        request = _make_chat_request(
+            operation_type=EnumLlmOperationType.CHAT_COMPLETION
+        )
         candidate_ids, matched_rule = gateway._evaluate_rules(request)
 
         assert candidate_ids == ("backend-b",)  # default
@@ -199,13 +228,13 @@ class TestBifrostRoutingRuleEvaluation:
     def test_bifrost_routing_cost_tier_low_selects_low_cost_backend(self) -> None:
         """Rule matching cost_tier='low' selects the cheap backend."""
         rule_low = ModelBifrostRoutingRule(
-            rule_id="low-cost",
+            rule_id=_RULE_LOW_COST,
             priority=10,
             match_cost_tiers=("low",),
             backend_ids=("backend-a",),  # cheap backend
         )
         rule_high = ModelBifrostRoutingRule(
-            rule_id="high-cost",
+            rule_id=_RULE_HIGH_COST,
             priority=20,
             match_cost_tiers=("high",),
             backend_ids=("backend-b",),  # expensive backend
@@ -222,18 +251,18 @@ class TestBifrostRoutingRuleEvaluation:
 
         assert candidate_ids == ("backend-a",)
         assert matched_rule is not None
-        assert matched_rule.rule_id == "low-cost"
+        assert matched_rule.rule_id == _RULE_LOW_COST
 
     def test_bifrost_routing_cost_tier_high_selects_high_cost_backend(self) -> None:
         """Rule matching cost_tier='high' selects the premium backend."""
         rule_low = ModelBifrostRoutingRule(
-            rule_id="low-cost",
+            rule_id=_RULE_LOW_COST,
             priority=10,
             match_cost_tiers=("low",),
             backend_ids=("backend-a",),
         )
         rule_high = ModelBifrostRoutingRule(
-            rule_id="high-cost",
+            rule_id=_RULE_HIGH_COST,
             priority=20,
             match_cost_tiers=("high",),
             backend_ids=("backend-b",),
@@ -250,12 +279,12 @@ class TestBifrostRoutingRuleEvaluation:
 
         assert candidate_ids == ("backend-b",)
         assert matched_rule is not None
-        assert matched_rule.rule_id == "high-cost"
+        assert matched_rule.rule_id == _RULE_HIGH_COST
 
     def test_bifrost_routing_capability_match_all_required(self) -> None:
         """Rule requiring ['tool_calling', 'json_mode'] only matches if BOTH present."""
         rule = ModelBifrostRoutingRule(
-            rule_id="tool-json-backend",
+            rule_id=_RULE_TOOL_JSON,
             priority=10,
             match_capabilities=("tool_calling", "json_mode"),
             backend_ids=("backend-a",),
@@ -278,12 +307,12 @@ class TestBifrostRoutingRuleEvaluation:
         candidate_ids, matched_rule = gateway._evaluate_rules(request_full)
         assert candidate_ids == ("backend-a",)
         assert matched_rule is not None
-        assert matched_rule.rule_id == "tool-json-backend"
+        assert matched_rule.rule_id == _RULE_TOOL_JSON
 
     def test_bifrost_routing_latency_constraint_filters_rules(self) -> None:
         """Rule with match_max_latency_ms_lte=1000 does not match request with 5000ms budget."""
         rule_fast = ModelBifrostRoutingRule(
-            rule_id="fast-backend",
+            rule_id=_RULE_FAST,
             priority=10,
             match_max_latency_ms_lte=1000,
             backend_ids=("backend-a",),
@@ -306,17 +335,17 @@ class TestBifrostRoutingRuleEvaluation:
         candidate_ids, matched_rule = gateway._evaluate_rules(request_fast)
         assert candidate_ids == ("backend-a",)
         assert matched_rule is not None
-        assert matched_rule.rule_id == "fast-backend"
+        assert matched_rule.rule_id == _RULE_FAST
 
     def test_bifrost_routing_priority_order_first_match_wins(self) -> None:
         """Lower priority value wins when multiple rules could match."""
         rule_high_priority = ModelBifrostRoutingRule(
-            rule_id="high-priority",
+            rule_id=_RULE_HIGH_PRIORITY,
             priority=5,  # Lower number = higher priority
             backend_ids=("backend-a",),
         )
         rule_low_priority = ModelBifrostRoutingRule(
-            rule_id="low-priority",
+            rule_id=_RULE_LOW_PRIORITY,
             priority=50,
             backend_ids=("backend-b",),
         )
@@ -333,12 +362,12 @@ class TestBifrostRoutingRuleEvaluation:
 
         assert candidate_ids == ("backend-a",)
         assert matched_rule is not None
-        assert matched_rule.rule_id == "high-priority"
+        assert matched_rule.rule_id == _RULE_HIGH_PRIORITY
 
     def test_bifrost_routing_wildcard_rule_matches_any_request(self) -> None:
         """Rule with no match predicates matches every request."""
         rule = ModelBifrostRoutingRule(
-            rule_id="catch-all",
+            rule_id=_RULE_CATCH_ALL,
             priority=100,
             # No match predicates = wildcard
             backend_ids=("backend-a", "backend-b"),
@@ -350,15 +379,21 @@ class TestBifrostRoutingRuleEvaluation:
         handler = _make_handler()
         gateway = HandlerBifrostGateway(config=config, inference_handler=handler)
 
-        for op_type in ["chat_completion", "completion", "embedding"]:
+        for op_type in [
+            EnumLlmOperationType.CHAT_COMPLETION,
+            EnumLlmOperationType.COMPLETION,
+            EnumLlmOperationType.EMBEDDING,
+        ]:
             for cost_tier in [EnumCostTier.LOW, EnumCostTier.MID, EnumCostTier.HIGH]:
-                request = _make_chat_request(operation_type=op_type, cost_tier=cost_tier)
+                request = _make_chat_request(
+                    operation_type=op_type, cost_tier=cost_tier
+                )
                 candidate_ids, matched_rule = gateway._evaluate_rules(request)
                 assert candidate_ids == ("backend-a", "backend-b"), (
                     f"Expected catch-all match for op={op_type} tier={cost_tier}"
                 )
                 assert matched_rule is not None
-                assert matched_rule.rule_id == "catch-all"
+                assert matched_rule.rule_id == _RULE_CATCH_ALL
 
     def test_bifrost_routing_five_backends_per_ticket_contract(self) -> None:
         """Verify routing works across 5 backends as specified in OMN-2736."""
@@ -373,19 +408,19 @@ class TestBifrostRoutingRuleEvaluation:
         # Tiered routing rules
         rules = (
             ModelBifrostRoutingRule(
-                rule_id="low-cost-5b",
+                rule_id=_RULE_LOW_COST_5B,
                 priority=10,
                 match_cost_tiers=("low",),
                 backend_ids=("backend-1", "backend-2"),
             ),
             ModelBifrostRoutingRule(
-                rule_id="mid-cost-14b",
+                rule_id=_RULE_MID_COST_14B,
                 priority=20,
                 match_cost_tiers=("mid",),
                 backend_ids=("backend-3", "backend-4"),
             ),
             ModelBifrostRoutingRule(
-                rule_id="high-cost-70b",
+                rule_id=_RULE_HIGH_COST_70B,
                 priority=30,
                 match_cost_tiers=("high",),
                 backend_ids=("backend-5",),
@@ -405,19 +440,19 @@ class TestBifrostRoutingRuleEvaluation:
         req_low = _make_chat_request(cost_tier=EnumCostTier.LOW)
         ids, rule = gateway._evaluate_rules(req_low)
         assert "backend-1" in ids
-        assert rule is not None and rule.rule_id == "low-cost-5b"
+        assert rule is not None and rule.rule_id == _RULE_LOW_COST_5B
 
         # Mid cost → backends 3,4
         req_mid = _make_chat_request(cost_tier=EnumCostTier.MID)
         ids, rule = gateway._evaluate_rules(req_mid)
         assert "backend-3" in ids
-        assert rule is not None and rule.rule_id == "mid-cost-14b"
+        assert rule is not None and rule.rule_id == _RULE_MID_COST_14B
 
         # High cost → backend 5
         req_high = _make_chat_request(cost_tier=EnumCostTier.HIGH)
         ids, rule = gateway._evaluate_rules(req_high)
         assert "backend-5" in ids
-        assert rule is not None and rule.rule_id == "high-cost-70b"
+        assert rule is not None and rule.rule_id == _RULE_HIGH_COST_70B
 
 
 # ---------------------------------------------------------------------------
@@ -429,10 +464,12 @@ class TestBifrostRoutingHandleEndToEnd:
     """Tests that handle() returns correct audit fields for routing decisions."""
 
     @pytest.mark.asyncio
-    async def test_bifrost_routing_handle_returns_correct_backend_and_rule(self) -> None:
+    async def test_bifrost_routing_handle_returns_correct_backend_and_rule(
+        self,
+    ) -> None:
         """handle() returns backend_selected matching the matched rule's first backend."""
         rule = ModelBifrostRoutingRule(
-            rule_id="chat-low",
+            rule_id=_RULE_CHAT_LOW,
             priority=10,
             match_cost_tiers=("low",),
             backend_ids=("backend-a",),
@@ -450,12 +487,14 @@ class TestBifrostRoutingHandleEndToEnd:
 
         assert result.success is True
         assert result.backend_selected == "backend-a"
-        assert result.rule_id == "chat-low"
+        assert result.matched_rule_id == _RULE_CHAT_LOW
         assert result.retry_count == 0
         assert result.tenant_id == request.tenant_id
 
     @pytest.mark.asyncio
-    async def test_bifrost_routing_handle_uses_default_when_no_rule_matches(self) -> None:
+    async def test_bifrost_routing_handle_uses_default_when_no_rule_matches(
+        self,
+    ) -> None:
         """handle() uses default_backends when no rule matches, rule_id='default'."""
         config = _make_two_backend_config(
             routing_rules=(),
@@ -470,7 +509,7 @@ class TestBifrostRoutingHandleEndToEnd:
 
         assert result.success is True
         assert result.backend_selected == "backend-b"
-        assert result.rule_id == "default"
+        assert result.matched_rule_id is None  # No rule matched — default backend used
         assert result.retry_count == 0
 
     @pytest.mark.asyncio
@@ -498,10 +537,10 @@ class TestBifrostRoutingHandleEndToEnd:
         handler = _make_handler()
         gateway = HandlerBifrostGateway(config=config, inference_handler=handler)
 
-        my_corr_id = "test-corr-123"
+        my_corr_id = UUID("00000000-0000-0000-0000-000000000099")
         request = ModelBifrostRequest(
-            operation_type="chat_completion",
-            tenant_id="test-tenant",
+            operation_type=EnumLlmOperationType.CHAT_COMPLETION,
+            tenant_id=UUID("00000000-0000-0000-0000-000000000001"),
             messages=[{"role": "user", "content": "Hello"}],
             correlation_id=my_corr_id,
         )
@@ -526,23 +565,25 @@ class TestBifrostRoutingHandleEndToEnd:
         assert result.correlation_id is not None
 
     @pytest.mark.asyncio
-    async def test_bifrost_routing_n_synthetic_requests_select_expected_backends(self) -> None:
+    async def test_bifrost_routing_n_synthetic_requests_select_expected_backends(
+        self,
+    ) -> None:
         """Deterministic routing test: N synthetic requests select expected backends.
 
         DoD requirement: "Deterministic routing config test — N synthetic requests
         select expected backends: uv run pytest tests/unit/ -k bifrost_routing"
         """
         rule_chat = ModelBifrostRoutingRule(
-            rule_id="rule-chat",
+            rule_id=_RULE_RULE_CHAT,
             priority=10,
-            match_operation_types=("chat_completion",),
+            match_operation_types=(EnumLlmOperationType.CHAT_COMPLETION.value,),
             match_cost_tiers=("low", "mid"),
             backend_ids=("backend-a",),
         )
         rule_embed = ModelBifrostRoutingRule(
-            rule_id="rule-embed",
+            rule_id=_RULE_RULE_EMBED,
             priority=20,
-            match_operation_types=("embedding",),
+            match_operation_types=(EnumLlmOperationType.EMBEDDING.value,),
             backend_ids=("backend-b",),
         )
         config = _make_two_backend_config(
@@ -552,28 +593,37 @@ class TestBifrostRoutingHandleEndToEnd:
         handler = _make_handler()
         gateway = HandlerBifrostGateway(config=config, inference_handler=handler)
 
-        test_cases: list[tuple[ModelBifrostRequest, str, str]] = [
-            # (request, expected_backend, expected_rule_id)
+        test_cases: list[tuple[ModelBifrostRequest, str, UUID | None]] = [
+            # (request, expected_backend, expected_matched_rule_id)
             (
-                _make_chat_request(operation_type="chat_completion", cost_tier=EnumCostTier.LOW),
+                _make_chat_request(
+                    operation_type=EnumLlmOperationType.CHAT_COMPLETION,
+                    cost_tier=EnumCostTier.LOW,
+                ),
                 "backend-a",
-                "rule-chat",
+                _RULE_RULE_CHAT,
             ),
             (
-                _make_chat_request(operation_type="chat_completion", cost_tier=EnumCostTier.MID),
+                _make_chat_request(
+                    operation_type=EnumLlmOperationType.CHAT_COMPLETION,
+                    cost_tier=EnumCostTier.MID,
+                ),
                 "backend-a",
-                "rule-chat",
+                _RULE_RULE_CHAT,
             ),
             (
-                _make_chat_request(operation_type="embedding"),
+                _make_chat_request(operation_type=EnumLlmOperationType.EMBEDDING),
                 "backend-b",
-                "rule-embed",
+                _RULE_RULE_EMBED,
             ),
             (
                 # HIGH cost chat — no rule matches (rule-chat only matches low/mid)
-                _make_chat_request(operation_type="chat_completion", cost_tier=EnumCostTier.HIGH),
+                _make_chat_request(
+                    operation_type=EnumLlmOperationType.CHAT_COMPLETION,
+                    cost_tier=EnumCostTier.HIGH,
+                ),
                 "backend-b",
-                "default",
+                None,  # No rule matched — default backend used
             ),
         ]
 
@@ -586,9 +636,9 @@ class TestBifrostRoutingHandleEndToEnd:
                 f"op={req.operation_type} tier={req.cost_tier}: "
                 f"expected backend={expected_backend}, got={result.backend_selected}"
             )
-            assert result.rule_id == expected_rule, (
+            assert result.matched_rule_id == expected_rule, (
                 f"op={req.operation_type} tier={req.cost_tier}: "
-                f"expected rule={expected_rule}, got={result.rule_id}"
+                f"expected rule={expected_rule}, got={result.matched_rule_id}"
             )
 
 
@@ -608,13 +658,17 @@ class TestBifrostRoutingRuleMatchPredicates:
     def test_bifrost_routing_empty_rule_matches_everything(self) -> None:
         """Rule with no predicates matches any request (wildcard)."""
         rule = ModelBifrostRoutingRule(
-            rule_id="wildcard",
+            rule_id=_RULE_WILDCARD,
             priority=0,
             backend_ids=("backend-a",),
         )
         gateway = self._gateway()
 
-        for op in ["chat_completion", "embedding", "completion"]:
+        for op in [
+            EnumLlmOperationType.CHAT_COMPLETION,
+            EnumLlmOperationType.EMBEDDING,
+            EnumLlmOperationType.COMPLETION,
+        ]:
             for tier in [EnumCostTier.LOW, EnumCostTier.MID, EnumCostTier.HIGH]:
                 request = _make_chat_request(operation_type=op, cost_tier=tier)
                 assert gateway._rule_matches(rule, request) is True
@@ -622,81 +676,151 @@ class TestBifrostRoutingRuleMatchPredicates:
     def test_bifrost_routing_operation_type_match(self) -> None:
         """match_operation_types filters by exact operation type."""
         rule = ModelBifrostRoutingRule(
-            rule_id="chat-only",
+            rule_id=_RULE_CHAT_ONLY,
             priority=0,
-            match_operation_types=("chat_completion",),
+            match_operation_types=(EnumLlmOperationType.CHAT_COMPLETION.value,),
             backend_ids=("backend-a",),
         )
         gateway = self._gateway()
 
-        assert gateway._rule_matches(rule, _make_chat_request(operation_type="chat_completion")) is True
-        assert gateway._rule_matches(rule, _make_chat_request(operation_type="embedding")) is False
-        assert gateway._rule_matches(rule, _make_chat_request(operation_type="completion")) is False
+        assert (
+            gateway._rule_matches(
+                rule,
+                _make_chat_request(operation_type=EnumLlmOperationType.CHAT_COMPLETION),
+            )
+            is True
+        )
+        assert (
+            gateway._rule_matches(
+                rule, _make_chat_request(operation_type=EnumLlmOperationType.EMBEDDING)
+            )
+            is False
+        )
+        assert (
+            gateway._rule_matches(
+                rule, _make_chat_request(operation_type=EnumLlmOperationType.COMPLETION)
+            )
+            is False
+        )
 
     def test_bifrost_routing_multi_operation_type_match(self) -> None:
         """match_operation_types with multiple values accepts any listed type."""
         rule = ModelBifrostRoutingRule(
-            rule_id="chat-or-complete",
+            rule_id=_RULE_CHAT_OR_COMPLETE,
             priority=0,
-            match_operation_types=("chat_completion", "completion"),
+            match_operation_types=(
+                EnumLlmOperationType.CHAT_COMPLETION.value,
+                EnumLlmOperationType.COMPLETION.value,
+            ),
             backend_ids=("backend-a",),
         )
         gateway = self._gateway()
 
-        assert gateway._rule_matches(rule, _make_chat_request(operation_type="chat_completion")) is True
-        assert gateway._rule_matches(rule, _make_chat_request(operation_type="completion")) is True
-        assert gateway._rule_matches(rule, _make_chat_request(operation_type="embedding")) is False
+        assert (
+            gateway._rule_matches(
+                rule,
+                _make_chat_request(operation_type=EnumLlmOperationType.CHAT_COMPLETION),
+            )
+            is True
+        )
+        assert (
+            gateway._rule_matches(
+                rule, _make_chat_request(operation_type=EnumLlmOperationType.COMPLETION)
+            )
+            is True
+        )
+        assert (
+            gateway._rule_matches(
+                rule, _make_chat_request(operation_type=EnumLlmOperationType.EMBEDDING)
+            )
+            is False
+        )
 
     def test_bifrost_routing_cost_tier_match(self) -> None:
         """match_cost_tiers filters by EnumCostTier value."""
         rule_low = ModelBifrostRoutingRule(
-            rule_id="low-only",
+            rule_id=_RULE_LOW_ONLY,
             priority=0,
             match_cost_tiers=("low",),
             backend_ids=("backend-a",),
         )
         gateway = self._gateway()
 
-        assert gateway._rule_matches(rule_low, _make_chat_request(cost_tier=EnumCostTier.LOW)) is True
-        assert gateway._rule_matches(rule_low, _make_chat_request(cost_tier=EnumCostTier.MID)) is False
-        assert gateway._rule_matches(rule_low, _make_chat_request(cost_tier=EnumCostTier.HIGH)) is False
+        assert (
+            gateway._rule_matches(
+                rule_low, _make_chat_request(cost_tier=EnumCostTier.LOW)
+            )
+            is True
+        )
+        assert (
+            gateway._rule_matches(
+                rule_low, _make_chat_request(cost_tier=EnumCostTier.MID)
+            )
+            is False
+        )
+        assert (
+            gateway._rule_matches(
+                rule_low, _make_chat_request(cost_tier=EnumCostTier.HIGH)
+            )
+            is False
+        )
 
     def test_bifrost_routing_capability_subset_match(self) -> None:
         """match_capabilities requires all listed capabilities to be present."""
         rule = ModelBifrostRoutingRule(
-            rule_id="cap-match",
+            rule_id=_RULE_CAP_MATCH,
             priority=0,
             match_capabilities=("tool_calling",),
             backend_ids=("backend-a",),
         )
         gateway = self._gateway()
 
-        assert gateway._rule_matches(rule, _make_chat_request(capabilities=("tool_calling",))) is True
+        assert (
+            gateway._rule_matches(
+                rule, _make_chat_request(capabilities=("tool_calling",))
+            )
+            is True
+        )
         # Extra capabilities are fine
-        assert gateway._rule_matches(rule, _make_chat_request(capabilities=("tool_calling", "json_mode"))) is True
-        assert gateway._rule_matches(rule, _make_chat_request(capabilities=("json_mode",))) is False
+        assert (
+            gateway._rule_matches(
+                rule, _make_chat_request(capabilities=("tool_calling", "json_mode"))
+            )
+            is True
+        )
+        assert (
+            gateway._rule_matches(rule, _make_chat_request(capabilities=("json_mode",)))
+            is False
+        )
         assert gateway._rule_matches(rule, _make_chat_request(capabilities=())) is False
 
     def test_bifrost_routing_latency_constraint_boundary(self) -> None:
         """match_max_latency_ms_lte boundary condition: <= passes, > fails."""
         rule = ModelBifrostRoutingRule(
-            rule_id="latency-1000",
+            rule_id=_RULE_LATENCY_1000,
             priority=0,
             match_max_latency_ms_lte=1000,
             backend_ids=("backend-a",),
         )
         gateway = self._gateway()
 
-        assert gateway._rule_matches(rule, _make_chat_request(max_latency_ms=999)) is True
-        assert gateway._rule_matches(rule, _make_chat_request(max_latency_ms=1000)) is True  # boundary
-        assert gateway._rule_matches(rule, _make_chat_request(max_latency_ms=1001)) is False
+        assert (
+            gateway._rule_matches(rule, _make_chat_request(max_latency_ms=999)) is True
+        )
+        assert (
+            gateway._rule_matches(rule, _make_chat_request(max_latency_ms=1000)) is True
+        )  # boundary
+        assert (
+            gateway._rule_matches(rule, _make_chat_request(max_latency_ms=1001))
+            is False
+        )
 
     def test_bifrost_routing_combined_predicates_all_must_match(self) -> None:
         """Rule with multiple predicates requires ALL to match."""
         rule = ModelBifrostRoutingRule(
-            rule_id="combined",
+            rule_id=_RULE_COMBINED,
             priority=0,
-            match_operation_types=("chat_completion",),
+            match_operation_types=(EnumLlmOperationType.CHAT_COMPLETION.value,),
             match_cost_tiers=("low",),
             match_capabilities=("tool_calling",),
             match_max_latency_ms_lte=2000,
@@ -706,7 +830,7 @@ class TestBifrostRoutingRuleMatchPredicates:
 
         # All match
         full_match = _make_chat_request(
-            operation_type="chat_completion",
+            operation_type=EnumLlmOperationType.CHAT_COMPLETION,
             cost_tier=EnumCostTier.LOW,
             capabilities=("tool_calling",),
             max_latency_ms=1500,
@@ -715,7 +839,7 @@ class TestBifrostRoutingRuleMatchPredicates:
 
         # Wrong cost tier
         wrong_tier = _make_chat_request(
-            operation_type="chat_completion",
+            operation_type=EnumLlmOperationType.CHAT_COMPLETION,
             cost_tier=EnumCostTier.HIGH,  # wrong
             capabilities=("tool_calling",),
             max_latency_ms=1500,
@@ -724,7 +848,7 @@ class TestBifrostRoutingRuleMatchPredicates:
 
         # Latency too high
         too_slow = _make_chat_request(
-            operation_type="chat_completion",
+            operation_type=EnumLlmOperationType.CHAT_COMPLETION,
             cost_tier=EnumCostTier.LOW,
             capabilities=("tool_calling",),
             max_latency_ms=9999,  # exceeds 2000ms limit

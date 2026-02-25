@@ -13,6 +13,8 @@ Related:
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -25,8 +27,8 @@ class ModelBifrostRoutingRule(BaseModel):
     falls through to the ``default_backends`` in ``ModelBifrostConfig``.
 
     Attributes:
-        rule_id: Stable identifier for this rule, recorded in every
-            audit log entry. Must be unique within a config.
+        rule_id: Stable UUID identifier for this rule, recorded in
+            every audit log entry. Must be unique within a config.
         priority: Rule evaluation order. Lower values are evaluated first.
             Ties are broken by list insertion order.
         match_operation_types: If non-empty, the request's
@@ -44,8 +46,9 @@ class ModelBifrostRoutingRule(BaseModel):
             one receives the request.
 
     Example:
+        >>> from uuid import UUID
         >>> rule = ModelBifrostRoutingRule(
-        ...     rule_id="low-cost-chat",
+        ...     rule_id=UUID("12345678-1234-5678-1234-567812345678"),
         ...     priority=10,
         ...     match_cost_tiers=["low"],
         ...     backend_ids=["qwen-7b", "codestral-7b"],
@@ -54,10 +57,8 @@ class ModelBifrostRoutingRule(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    rule_id: str = Field(
+    rule_id: UUID = Field(
         ...,
-        min_length=1,
-        max_length=128,
         description="Stable unique identifier for audit logging.",
     )
     priority: int = Field(
