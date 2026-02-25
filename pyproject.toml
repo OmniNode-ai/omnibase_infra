@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.10.0"
+version = "0.11.0"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{name = "OmniNode Team", email = "team@omninode.ai"}]
 license = {text = "MIT"}
@@ -29,10 +29,10 @@ dependencies = [
     #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
     # Remember to switch back to PyPI versions before merging to main.
     #
-    # omnibase-core v0.19.0: DecisionRecord, NodeReducer projection effect, version bump for omnibase_infra 0.10.0
-    "omnibase-core>=0.19.0,<0.20.0",
-    # omnibase-spi v0.12.0: ProtocolEffect, ProtocolNodeProjectionEffect, ContractProjectionResult (OMN-2508)
-    "omnibase-spi>=0.12.0,<0.13.0",
+    # omnibase-core v0.20.0: release chain bump for omnibase_infra 0.11.0
+    "omnibase-core>=0.20.0,<0.21.0",
+    # omnibase-spi v0.13.0: release chain bump for omnibase_infra 0.11.0
+    "omnibase-spi>=0.13.0,<0.14.0",
 
     # ============================================================================
     # External Dependency Security Guidance
