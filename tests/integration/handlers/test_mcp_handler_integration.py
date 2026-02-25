@@ -152,16 +152,23 @@ def onex_adapter() -> ONEXToMCPAdapter:
     Returns:
         Configured adapter with sample tools registered.
     """
+    from unittest.mock import AsyncMock, MagicMock
+
     from omnibase_infra.handlers.mcp import ONEXToMCPAdapter as Adapter
 
-    # Create mock executor for tool invocation
-    def mock_executor(tool_name: str, arguments: dict[str, object]) -> object:
-        """Mock executor that returns tool call metadata."""
-        return {
-            "tool_name": tool_name,
-            "arguments": arguments,
-            "status": "success",
+    # Create mock AdapterONEXToolExecution for tool invocation.
+    # node_executor must have an async .execute() method (per OMN-2697).
+    mock_executor = MagicMock()
+    mock_executor.execute = AsyncMock(
+        side_effect=lambda tool, arguments, correlation_id: {
+            "success": True,
+            "result": {
+                "tool_name": tool.name,
+                "arguments": arguments,
+                "status": "success",
+            },
         }
+    )
 
     adapter = Adapter(node_executor=mock_executor)
     return adapter
@@ -608,9 +615,9 @@ class TestOnexAdapterToolInvocation:
         """Test invoking a registered tool.
 
         Verifies:
-        - Tool can be invoked successfully
-        - Arguments are passed correctly
-        - Result is returned
+        - Tool can be invoked successfully (CallToolResult shape)
+        - Result contains MCP content list
+        - isError is False on success
         """
         result = await registered_adapter.invoke_tool(
             tool_name="test_echo",
@@ -618,8 +625,10 @@ class TestOnexAdapterToolInvocation:
         )
 
         assert result is not None
-        assert result["success"] is True
-        assert "test_echo" in result["message"]
+        assert result["isError"] is False
+        assert isinstance(result["content"], list)
+        assert len(result["content"]) == 1
+        assert result["content"][0]["type"] == "text"
 
     async def test_invoke_nonexistent_tool(
         self, registered_adapter: ONEXToMCPAdapter
@@ -833,23 +842,26 @@ class TestMcpMultipleToolCalls:
         - Each invocation returns correct result
         - No state leakage between calls
         """
-        # Invoke echo tool
+        # Invoke echo tool — verify MCP CallToolResult shape
         result1 = await registered_adapter.invoke_tool(
             tool_name="test_echo",
             arguments={"message": "First message"},
         )
-        assert result1["success"] is True
+        assert result1["isError"] is False
+        assert isinstance(result1["content"], list)
 
         # Invoke calculate tool
         result2 = await registered_adapter.invoke_tool(
             tool_name="test_calculate",
             arguments={"a": 10, "b": 5, "operation": "add"},
         )
-        assert result2["success"] is True
+        assert result2["isError"] is False
+        assert isinstance(result2["content"], list)
 
         # Invoke optional params tool
         result3 = await registered_adapter.invoke_tool(
             tool_name="test_optional_params",
             arguments={"required_param": "value"},
         )
-        assert result3["success"] is True
+        assert result3["isError"] is False
+        assert isinstance(result3["content"], list)
