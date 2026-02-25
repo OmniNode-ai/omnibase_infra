@@ -45,6 +45,28 @@ export DOCKER_BUILDKIT=1
 
 ## Quick Start
 
+> **WARNING: Do not run `docker compose up` directly from this directory.**
+>
+> Multiple repo copies (omnibase_infra, omnibase_infra2, etc.) share the same
+> Docker Compose project name (`omnibase-infra-runtime`) when invoked from their
+> own `docker/` directories. Running `docker compose up` from the wrong copy
+> causes "invisible deployments" — your code changes have no effect because
+> containers continue to run from a different copy. This is the Feb 15 (OMN-2233)
+> class of incident.
+>
+> **Always use `deploy-runtime.sh` as the deployment entry point:**
+>
+> ```bash
+> # From the repository root:
+> ./scripts/deploy-runtime.sh --execute
+> ./scripts/deploy-runtime.sh --execute --restart
+> ```
+>
+> `deploy-runtime.sh` deploys from a versioned stable directory under
+> `~/.omnibase/infra/deployed/` with a fixed compose project name, eliminating
+> directory-derived collisions. It also detects active collisions before
+> proceeding and exits with a clear error message.
+
 ```bash
 # 1. Copy and configure environment
 cp .env.example .env
@@ -55,16 +77,13 @@ cp .env.example .env
 #    - INFISICAL_ENCRYPTION_KEY (secrets profile): openssl rand -hex 32
 #    - INFISICAL_AUTH_SECRET (secrets profile): openssl rand -hex 32
 
-# 3. Start core infrastructure (default profile)
-docker compose -f docker-compose.infra.yml up -d
+# 3. Deploy via the canonical script (DO NOT use docker compose up directly)
+cd .. && ./scripts/deploy-runtime.sh --execute --restart
 
-# 4. Or start with full runtime services
-docker compose -f docker-compose.infra.yml --profile runtime up -d --build
+# 4. View logs (use the project name from deploy-runtime.sh output)
+docker compose -p omnibase-infra-runtime logs -f
 
-# 5. View logs
-docker compose -f docker-compose.infra.yml logs -f
-
-# 6. Verify health (runtime profile only)
+# 5. Verify health (runtime profile only)
 curl http://localhost:8085/health
 ```
 

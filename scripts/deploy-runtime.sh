@@ -874,6 +874,105 @@ setup_env() {
 }
 
 # =============================================================================
+# Compose Project Collision Detection
+# =============================================================================
+#
+# Detects whether the target compose project name is currently owned by a
+# DIFFERENT deployment directory. This guards against the Feb 15 (OMN-2233)
+# class of incident where multiple repo copies share the same compose project
+# name, causing containers from the wrong copy to silently continue running.
+#
+# How it works:
+#   Docker labels every container with the working directory of the compose
+#   invocation via com.docker.compose.project.working_dir. We compare that
+#   label against the resolved deploy target to detect cross-copy ownership.
+#
+# Scenarios:
+#   - No running containers for the project  → no collision, safe to proceed
+#   - Running containers from THIS deploy dir → already deployed, safe to proceed
+#   - Running containers from a DIFFERENT dir → COLLISION, exit 1
+#
+# The check runs in BOTH dry-run and execute modes so operators see the
+# warning even during a preview.
+
+check_compose_project_collision() {
+    local compose_project="$1"
+    local deploy_target="$2"
+
+    log_step "Compose Project Collision Check"
+
+    # Query running containers for this compose project name.
+    # Use --all (not just running) to catch stopped-but-not-removed containers
+    # that still hold the project label, which would cause collisions on `up`.
+    local running_dirs
+    running_dirs="$(
+        docker ps --all \
+            --filter "label=com.docker.compose.project=${compose_project}" \
+            --format '{{index .Labels "com.docker.compose.project.working_dir"}}' \
+            2>/dev/null \
+        | sort -u \
+        | grep -v '^$' \
+        || true
+    )"
+
+    if [[ -z "${running_dirs}" ]]; then
+        log_info "No running containers for project '${compose_project}'. No collision."
+        return 0
+    fi
+
+    log_info "Found containers for project '${compose_project}' from: ${running_dirs}"
+
+    # Normalize paths: resolve symlinks so that ~/.omnibase and /home/... compare equal.
+    local resolved_deploy_target
+    resolved_deploy_target="$(cd "${deploy_target}" 2>/dev/null && pwd -P || echo "${deploy_target}")"
+
+    local collision_detected=false
+    local colliding_dirs=()
+
+    while IFS= read -r running_dir; do
+        [[ -z "${running_dir}" ]] && continue
+
+        local resolved_running_dir
+        resolved_running_dir="$(cd "${running_dir}" 2>/dev/null && pwd -P || echo "${running_dir}")"
+
+        if [[ "${resolved_running_dir}" != "${resolved_deploy_target}" ]]; then
+            collision_detected=true
+            colliding_dirs+=("${running_dir}")
+        fi
+    done <<< "${running_dirs}"
+
+    if [[ "${collision_detected}" == true ]]; then
+        log_error "============================================================"
+        log_error "COMPOSE PROJECT COLLISION DETECTED"
+        log_error "============================================================"
+        log_error ""
+        log_error "Compose project '${compose_project}' is already running"
+        log_error "from a DIFFERENT directory:"
+        for dir in "${colliding_dirs[@]}"; do
+            log_error "  Running from: ${dir}"
+        done
+        log_error "  You are in:   ${deploy_target}"
+        log_error ""
+        log_error "Proceeding would deploy from this copy while the other copy's"
+        log_error "containers continue to own the compose project. This causes"
+        log_error "silent failures where code changes have no effect."
+        log_error ""
+        log_error "To resolve:"
+        log_error "  1. Stop containers from the other copy first:"
+        log_error "     docker compose -p ${compose_project} down"
+        log_error "  2. Then re-run this script."
+        log_error ""
+        log_error "Or, if you are certain this is the correct copy:"
+        log_error "  Manually stop all containers for project '${compose_project}'"
+        log_error "  and remove the stale deployment from: ${colliding_dirs[0]}"
+        log_error "============================================================"
+        exit 1
+    fi
+
+    log_info "Collision check passed: containers are from the expected deployment directory."
+}
+
+# =============================================================================
 # Sanity Check -- validate compose can resolve all paths
 # =============================================================================
 
@@ -975,7 +1074,10 @@ write_registry() {
 # =============================================================================
 
 build_images() {
-    # Build Docker images with VCS_REF and BUILD_DATE labels.
+    # Build Docker images with VCS_REF, BUILD_DATE, and deployment identity args.
+    # RUNTIME_SOURCE_HASH and COMPOSE_PROJECT are stamped into the image so the
+    # startup banner in entrypoint-runtime.sh can display them on container start.
+    # This makes deployment drift visible in logs without git forensics.
     local deploy_target="$1"
     local compose_project="$2"
     local git_sha="$3"
@@ -1000,9 +1102,11 @@ build_images() {
         build
         --build-arg "VCS_REF=${git_sha}"
         --build-arg "BUILD_DATE=${build_date}"
+        --build-arg "RUNTIME_SOURCE_HASH=${git_sha}"
+        --build-arg "COMPOSE_PROJECT=${compose_project}"
     )
 
-    log_info "Building images with VCS_REF=${git_sha}..."
+    log_info "Building images with VCS_REF=${git_sha} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
     log_cmd "${cmd[*]}"
 
     "${cmd[@]}"
@@ -1155,7 +1259,9 @@ print_compose_commands() {
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    build \\"
     log_info "    --build-arg VCS_REF=${git_sha} \\"
-    log_info "    --build-arg BUILD_DATE=\$(date -u +\"%Y-%m-%dT%H:%M:%SZ\")"
+    log_info "    --build-arg BUILD_DATE=\$(date -u +\"%Y-%m-%dT%H:%M:%SZ\") \\"
+    log_info "    --build-arg RUNTIME_SOURCE_HASH=${git_sha} \\"
+    log_info "    --build-arg COMPOSE_PROJECT=${compose_project}"
     log_info ""
     log_info "Restart runtime services:"
     log_info "  docker compose \\"
@@ -1313,6 +1419,15 @@ main() {
     if [[ "${PRINT_COMPOSE_CMD}" == true ]]; then
         print_compose_commands "${deploy_target}" "${compose_project}" "${git_sha}"
         exit 0
+    fi
+
+    # Phase 2.5: Compose project collision check
+    # Runs in both dry-run and execute modes so operators see collisions during
+    # preview. Skipped only when Docker is unavailable (non-fatal in that case).
+    if command -v docker &>/dev/null; then
+        check_compose_project_collision "${compose_project}" "${deploy_target}"
+    else
+        log_warn "Docker not available -- skipping compose project collision check."
     fi
 
     # Phase 3: Preview

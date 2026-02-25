@@ -169,11 +169,19 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ============================================================================
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
-# Build-time arguments for OCI version labels
-# These can be passed at build time for better image tracing
+# Build-time arguments for OCI version labels and deployment identity
+# These can be passed at build time for better image tracing and operator visibility.
+# RUNTIME_SOURCE_HASH and COMPOSE_PROJECT are stamped as env vars so operators can
+# verify which code is running via `docker logs <container>` without git forensics.
 ARG RUNTIME_VERSION=0.1.0
 ARG BUILD_DATE
 ARG VCS_REF
+# Source hash from the repo being deployed (short git SHA from the build context).
+# Default "unknown" ensures manual `docker compose up` without the arg still works.
+ARG RUNTIME_SOURCE_HASH=unknown
+# Docker Compose project name used for this deployment.
+# Lets operators confirm the container belongs to the expected compose stack.
+ARG COMPOSE_PROJECT=unknown
 
 # OCI Image Labels (https://github.com/opencontainers/image-spec/blob/main/annotations.md)
 LABEL org.opencontainers.image.title="OmniBase Infra Runtime" \
@@ -204,6 +212,12 @@ ENV PYTHONUNBUFFERED=1 \
     ONEX_INPUT_TOPIC=requests \
     ONEX_OUTPUT_TOPIC=responses \
     ONEX_GROUP_ID=onex-runtime
+
+# Deployment identity env vars (stamped at build time from ARGs above).
+# Read by entrypoint-runtime.sh to emit the startup banner.
+# Operators can verify which code is running via: docker logs <container> | head -10
+ENV RUNTIME_SOURCE_HASH=${RUNTIME_SOURCE_HASH} \
+    COMPOSE_PROJECT=${COMPOSE_PROJECT}
 
 # Install minimal runtime dependencies only
 # No build tools needed - all Python packages are pre-compiled in builder stage
