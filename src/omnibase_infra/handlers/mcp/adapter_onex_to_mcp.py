@@ -131,6 +131,11 @@ class MCPToolDefinition:
     requires_auth: bool = False
     tags: list[str] = field(default_factory=list)
     metadata: dict[str, object] = field(default_factory=dict)
+    # Full JSON Schema for input validation (OMN-2699).
+    # When set, HandlerMCP._handle_call_tool() validates arguments against this
+    # schema using jsonschema before dispatching to ONEX.  None means pass-through
+    # (backwards-compatible behaviour for tools registered without a schema).
+    input_schema: dict[str, object] | None = None
 
     def validate_tool_definition(self) -> bool:
         """Validate the tool definition."""
@@ -347,6 +352,9 @@ class ONEXToMCPAdapter:
                 "node_type": str(raw.get("node_type", "")),
                 "source": "contract_discovery",
             },
+            # Store the resolved JSON Schema so HandlerMCP can validate inputs
+            # before dispatching to ONEX (OMN-2699).
+            input_schema=input_schema if input_schema != {"type": "object"} else None,
         )
         self._tool_cache[tool_name] = tool
 
@@ -398,6 +406,7 @@ class ONEXToMCPAdapter:
         version: str = "1.0.0",
         tags: list[str] | None = None,
         timeout_seconds: int = 30,
+        input_schema: dict[str, object] | None = None,
     ) -> MCPToolDefinition:
         """Register an ONEX node as an MCP tool.
 
@@ -411,6 +420,9 @@ class ONEXToMCPAdapter:
             version: Tool version (default: "1.0.0").
             tags: Optional categorization tags.
             timeout_seconds: Execution timeout.
+            input_schema: Optional JSON Schema dict for input validation.
+                When provided, HandlerMCP validates arguments against this
+                schema before dispatching to ONEX (OMN-2699).
 
         Returns:
             The created tool definition.
@@ -423,6 +435,7 @@ class ONEXToMCPAdapter:
             parameters=parameters,
             timeout_seconds=timeout_seconds,
             tags=tags or [],
+            input_schema=input_schema,
         )
 
         self._tool_cache[node_name] = tool

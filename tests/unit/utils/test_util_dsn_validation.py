@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-# ruff: noqa: S106
 # S106 disabled: Test password fixtures are intentional for DSN validation testing
 """Tests for PostgreSQL DSN validation utility.
 

@@ -671,8 +671,10 @@ class TestBootstrap:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that bootstrap creates EventBusKafka when KAFKA_BOOTSTRAP_SERVERS is set."""
-        monkeypatch.setenv("ONEX_ENVIRONMENT", "test-env")
+        monkeypatch.setenv("KAFKA_ENVIRONMENT", "dev")
         monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+        # Clear ONEX_ENVIRONMENT to avoid interference
+        monkeypatch.delenv("ONEX_ENVIRONMENT", raising=False)
         # Clear any CI override that forces inmemory event bus
         monkeypatch.delenv("ONEX_EVENT_BUS_TYPE", raising=False)
 
@@ -702,7 +704,7 @@ class TestBootstrap:
         call_kwargs = mock_kafka_bus.call_args[1]
         config = call_kwargs["config"]
         assert config.bootstrap_servers == "kafka:9092"
-        assert config.environment == "test-env"
+        assert config.environment == "dev"
 
     async def test_bootstrap_fails_when_kafka_configured_without_bootstrap_servers(
         self,

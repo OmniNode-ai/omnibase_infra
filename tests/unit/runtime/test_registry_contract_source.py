@@ -623,7 +623,7 @@ class TestRegistryContractSourceConfiguration:
             source = RegistryContractSource(
                 host="explicit.example.com",
                 port=8500,
-                token="explicit-token",  # noqa: S106  # Test value, not a real token
+                token="explicit-token",  # Test value, not a real token
                 scheme="http",
             )
 

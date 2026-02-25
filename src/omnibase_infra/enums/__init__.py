@@ -23,6 +23,7 @@ Exports:
     EnumConsumerGroupPurpose: Consumer group purpose (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL)
     EnumContextSectionCategory: Semantic categories for static context sections (CONFIG, RULES, TOPOLOGY, etc.)
     EnumContractType: Contract types for ONEX nodes (effect, compute, reducer, orchestrator)
+    EnumCostTier: Cost tier for LLM backend routing (LOW, MID, HIGH)
     EnumDispatchStatus: Dispatch operation status enumeration
     EnumEnvironment: Deployment environment classification (DEVELOPMENT, STAGING, PRODUCTION, CI)
     EnumExecutionShapeViolation: Specific execution shape violation types
@@ -36,6 +37,7 @@ Exports:
     EnumInfraTransportType: Infrastructure transport type enumeration
     EnumIntrospectionReason: Introspection event reasons (STARTUP, SHUTDOWN, etc.)
     EnumKafkaAcks: Kafka producer acknowledgment policy (ALL, NONE, LEADER, ALL_REPLICAS)
+    EnumKafkaEnvironment: Kafka environment identifiers for topic prefixes (DEV, STAGING, PROD, LOCAL)
     EnumLlmFinishReason: LLM finish reasons (STOP, LENGTH, ERROR, CONTENT_FILTER, TOOL_CALLS, UNKNOWN)
     EnumLlmOperationType: LLM operation types (CHAT_COMPLETION, COMPLETION, EMBEDDING)
     EnumMessageCategory: Message categories (EVENT, COMMAND, INTENT)
@@ -76,6 +78,7 @@ from omnibase_infra.enums.enum_context_section_category import (
     EnumContextSectionCategory,
 )
 from omnibase_infra.enums.enum_contract_type import EnumContractType
+from omnibase_infra.enums.enum_cost_tier import EnumCostTier
 from omnibase_infra.enums.enum_declarative_node_violation import (
     EnumDeclarativeNodeViolation,
 )
@@ -95,6 +98,7 @@ from omnibase_infra.enums.enum_infra_resource_type import EnumInfraResourceType
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.enums.enum_introspection_reason import EnumIntrospectionReason
 from omnibase_infra.enums.enum_kafka_acks import EnumKafkaAcks
+from omnibase_infra.enums.enum_kafka_environment import EnumKafkaEnvironment
 from omnibase_infra.enums.enum_ledger_sink_drop_policy import EnumLedgerSinkDropPolicy
 from omnibase_infra.enums.enum_lifecycle_tier import EnumLifecycleTier
 from omnibase_infra.enums.enum_llm_finish_reason import EnumLlmFinishReason
@@ -130,6 +134,7 @@ __all__: list[str] = [
     "EnumAuthDecision",
     "EnumAuthSource",
     "EnumBackendType",
+    "EnumCostTier",
     "EnumCaptureOutcome",
     "EnumCaptureState",
     "EnumChainViolationType",
@@ -155,6 +160,7 @@ __all__: list[str] = [
     "EnumInfraTransportType",
     "EnumIntrospectionReason",
     "EnumKafkaAcks",
+    "EnumKafkaEnvironment",
     "EnumLedgerSinkDropPolicy",
     "EnumLifecycleTier",
     "EnumLlmFinishReason",

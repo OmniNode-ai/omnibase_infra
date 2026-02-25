@@ -147,7 +147,7 @@ class TestKafkaReadinessTracking:
 
         config = ModelKafkaEventBusConfig(
             bootstrap_servers="localhost:9092",
-            environment="test",
+            environment="dev",
         )
         bus = EventBusKafka(config=config)
 
@@ -191,7 +191,7 @@ class TestKafkaReadinessTracking:
 
         config = ModelKafkaEventBusConfig(
             bootstrap_servers="localhost:9092",
-            environment="test",
+            environment="dev",
         )
         bus = EventBusKafka(config=config)
         readiness = await bus.get_readiness_status()
@@ -206,7 +206,7 @@ class TestKafkaReadinessTracking:
 
         config = ModelKafkaEventBusConfig(
             bootstrap_servers="localhost:9092",
-            environment="test",
+            environment="dev",
         )
         bus = EventBusKafka(config=config)
         bus._started = True
@@ -222,7 +222,7 @@ class TestKafkaReadinessTracking:
 
         config = ModelKafkaEventBusConfig(
             bootstrap_servers="localhost:9092",
-            environment="test",
+            environment="dev",
         )
         bus = EventBusKafka(config=config)
         bus._started = True
@@ -242,7 +242,7 @@ class TestKafkaReadinessTracking:
 
         config = ModelKafkaEventBusConfig(
             bootstrap_servers="localhost:9092",
-            environment="test",
+            environment="dev",
         )
         bus = EventBusKafka(config=config)
         bus._started = True
@@ -277,7 +277,7 @@ class TestKafkaReadinessTracking:
 
         config = ModelKafkaEventBusConfig(
             bootstrap_servers="localhost:9092",
-            environment="test",
+            environment="dev",
         )
         bus = EventBusKafka(config=config)
         bus._started = True
@@ -306,7 +306,7 @@ class TestKafkaReadinessTracking:
 
         config = ModelKafkaEventBusConfig(
             bootstrap_servers="localhost:9092",
-            environment="test",
+            environment="dev",
         )
         bus = EventBusKafka(config=config)
         bus._started = True

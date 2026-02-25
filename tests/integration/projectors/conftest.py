@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-# ruff: noqa: S106
 # S106 disabled: Test password fixtures are intentional for integration testing
 """Pytest fixtures for projector integration tests.
 

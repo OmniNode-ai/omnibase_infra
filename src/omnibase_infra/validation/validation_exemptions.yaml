@@ -2590,6 +2590,19 @@ pattern_exemptions:
     documentation:
       - Gmail API Reference: https://developers.google.com/gmail/api/reference/rest/v1/users.threads
     ticket: OMN-2729
+  # Bifrost Backend Config Exemption (OMN-2736)
+  # ==========================================================================
+  # backend_id is a human-readable slug (e.g., "qwen-14b", "codestral"), not a
+  # UUID entity reference. Config usability requires stable, readable identifiers
+  # that appear in routing rules, audit logs, and operator configuration files.
+  - file_pattern: 'model_bifrost_config\.py'
+    violation_pattern: "Field 'backend_id' should use UUID"
+    reason: >
+      backend_id is a human-readable slug identifier (e.g., 'qwen-14b', 'codestral'), not a UUID. Routing rules, audit logs, and operator config files reference backends by readable name. UUID identifiers would degrade config usability without providing entity-reference benefits. Consistent with dispatcher_id, route_id, and policy_id patterns throughout the codebase.
+
+    documentation:
+      - CLAUDE.md (Pydantic Model Standards)
+    ticket: OMN-2736
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
@@ -2656,6 +2669,23 @@ architecture_exemptions:
       - CLAUDE.md (Protocol File Naming - domain-grouping convention)
       - docs/patterns/timeout_scanner_emitter.md
     ticket: OMN-932
+  # ==========================================================================
+  # Bifrost Config Models Exemption (OMN-2736)
+  # ==========================================================================
+  # model_bifrost_config.py contains two tightly coupled Pydantic models:
+  # - ModelBifrostBackendConfig: Per-backend endpoint configuration
+  # - ModelBifrostConfig: Complete gateway configuration referencing backends
+  # These are always used together; ModelBifrostConfig cannot be instantiated
+  # without ModelBifrostBackendConfig, and splitting them creates a circular
+  # import (config imports routing_rule, backend_config would need to import config).
+  - file_pattern: 'model_bifrost_config\.py'
+    violation_pattern: '\d+ models in one file'
+    reason: >
+      ModelBifrostBackendConfig and ModelBifrostConfig are tightly coupled gateway configuration models — ModelBifrostConfig contains a dict[str, ModelBifrostBackendConfig] field, making them inseparable. Splitting would require a circular import chain since routing_rule is already imported by config. Per CLAUDE.md domain-grouping convention for cohesive models always used together.
+
+    documentation:
+      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
+    ticket: OMN-2736
 # These handle complex union type violations
 union_exemptions:
   # ==========================================================================
