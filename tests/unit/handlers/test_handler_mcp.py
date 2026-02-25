@@ -64,8 +64,6 @@ def mcp_test_config() -> dict[str, object]:
     """
     return {
         "skip_server": True,
-        "consul_host": "localhost",
-        "consul_port": 8500,
         "kafka_enabled": False,
         "dev_mode": True,
     }
@@ -88,8 +86,6 @@ def mcp_custom_config() -> dict[str, object]:
         "timeout_seconds": 60.0,
         "max_tools": 50,
         "skip_server": True,
-        "consul_host": "localhost",
-        "consul_port": 8500,
         "kafka_enabled": False,
         "dev_mode": True,
     }
@@ -636,13 +632,13 @@ class TestHandlerMCPConfigValidation:
         """Test that skip_server=True allows initialization without full config.
 
         When skip_server=True, the handler skips MCPServerLifecycle initialization
-        which requires consul_host, consul_port, etc. Only the Pydantic model
+        which requires kafka_enabled, dev_mode, etc. Only the Pydantic model
         config validation runs, which has its own defaults for server-specific
         fields (host, port, path, etc.).
 
         This test verifies the skip_server path works correctly for unit tests.
         """
-        # skip_server=True bypasses the code path that needs consul_host etc.
+        # skip_server=True bypasses the code path that needs kafka_enabled etc.
         await handler.initialize({"skip_server": True})
 
         assert handler._initialized is True
