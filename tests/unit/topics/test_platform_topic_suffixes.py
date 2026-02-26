@@ -1,10 +1,11 @@
-"""Tests for platform and intelligence topic suffix constants."""
+"""Tests for platform, intelligence, omnimemory, and omniclaude topic suffix constants."""
 
 import pytest
 
 from omnibase_core.validation import validate_topic_suffix
 from omnibase_infra.topics import (
     ALL_INTELLIGENCE_TOPIC_SPECS,
+    ALL_OMNICLAUDE_TOPIC_SPECS,
     ALL_OMNIMEMORY_TOPIC_SPECS,
     ALL_PLATFORM_SUFFIXES,
     ALL_PROVISIONED_SUFFIXES,
@@ -340,13 +341,14 @@ class TestProvisionedTopicSpecs:
             )
 
     def test_provisioned_count(self) -> None:
-        """Combined provisioned specs should equal platform + intelligence + omnimemory."""
+        """Combined provisioned specs should equal platform + intelligence + omnimemory + omniclaude."""
         from omnibase_infra.topics import ALL_PLATFORM_TOPIC_SPECS
 
         expected = (
             len(ALL_PLATFORM_TOPIC_SPECS)
             + len(ALL_INTELLIGENCE_TOPIC_SPECS)
             + len(ALL_OMNIMEMORY_TOPIC_SPECS)
+            + len(ALL_OMNICLAUDE_TOPIC_SPECS)
         )
         assert len(ALL_PROVISIONED_TOPIC_SPECS) == expected
 
@@ -360,7 +362,101 @@ class TestProvisionedTopicSpecs:
             result = validate_topic_suffix(suffix)
             assert result.is_valid, f"Invalid suffix: {suffix} - {result.error}"
 
+    def test_provisioned_contains_all_omniclaude(self) -> None:
+        """ALL_PROVISIONED_SUFFIXES must include all OmniClaude skill suffixes."""
+        omniclaude_suffixes = {spec.suffix for spec in ALL_OMNICLAUDE_TOPIC_SPECS}
+        for suffix in omniclaude_suffixes:
+            assert suffix in ALL_PROVISIONED_SUFFIXES, (
+                f"OmniClaude suffix missing from provisioned: {suffix}"
+            )
+
     def test_provisioned_is_tuple(self) -> None:
         """ALL_PROVISIONED_TOPIC_SPECS and ALL_PROVISIONED_SUFFIXES should be tuples."""
         assert isinstance(ALL_PROVISIONED_TOPIC_SPECS, tuple)
         assert isinstance(ALL_PROVISIONED_SUFFIXES, tuple)
+
+
+class TestOmniClaudeTopicSuffixes:
+    """Tests for OmniClaude skill topic suffix constants."""
+
+    def test_all_omniclaude_suffixes_are_valid(self) -> None:
+        """Every OmniClaude suffix must pass ONEX topic validation."""
+        for spec in ALL_OMNICLAUDE_TOPIC_SPECS:
+            result = validate_topic_suffix(spec.suffix)
+            assert result.is_valid, (
+                f"Invalid OmniClaude suffix: {spec.suffix} - {result.error}"
+            )
+
+    def test_omniclaude_suffixes_use_correct_producer(self) -> None:
+        """OmniClaude suffixes should use 'omniclaude' as producer."""
+        for spec in ALL_OMNICLAUDE_TOPIC_SPECS:
+            parts = spec.suffix.split(".")
+            producer = parts[2]
+            assert producer == "omniclaude", (
+                f"Expected 'omniclaude' producer in: {spec.suffix}"
+            )
+
+    def test_omniclaude_topic_count(self) -> None:
+        """OmniClaude spec registry should have 204 topics (68 skills x 3 each)."""
+        assert len(ALL_OMNICLAUDE_TOPIC_SPECS) == 204
+
+    def test_omniclaude_topics_use_1_partition(self) -> None:
+        """All OmniClaude topics should use 1 partition (low-throughput skill dispatch)."""
+        for spec in ALL_OMNICLAUDE_TOPIC_SPECS:
+            assert spec.partitions == 1, (
+                f"Expected 1 partition for {spec.suffix}, got {spec.partitions}"
+            )
+
+    def test_no_duplicate_omniclaude_suffixes(self) -> None:
+        """OmniClaude topic specs should not contain duplicates."""
+        suffixes = [spec.suffix for spec in ALL_OMNICLAUDE_TOPIC_SPECS]
+        assert len(suffixes) == len(set(suffixes))
+
+    def test_omniclaude_has_cmd_and_evt_topics(self) -> None:
+        """OmniClaude topics should include both cmd and evt kinds."""
+        cmd_topics = [s for s in ALL_OMNICLAUDE_TOPIC_SPECS if ".cmd." in s.suffix]
+        evt_topics = [s for s in ALL_OMNICLAUDE_TOPIC_SPECS if ".evt." in s.suffix]
+        assert len(cmd_topics) > 0, "Expected cmd topics in OmniClaude registry"
+        assert len(evt_topics) > 0, "Expected evt topics in OmniClaude registry"
+        # 68 cmd topics + 136 evt topics (68 completed + 68 failed) = 204
+        assert len(cmd_topics) == 68
+        assert len(evt_topics) == 136
+
+    def test_epic_team_topic_in_registry(self) -> None:
+        """Spot check: epic-team skill topics should be in the registry."""
+        suffixes = {spec.suffix for spec in ALL_OMNICLAUDE_TOPIC_SPECS}
+        assert "onex.cmd.omniclaude.epic-team.v1" in suffixes
+        assert "onex.evt.omniclaude.epic-team-completed.v1" in suffixes
+        assert "onex.evt.omniclaude.epic-team-failed.v1" in suffixes
+
+    def test_ticket_work_topic_in_registry(self) -> None:
+        """Spot check: ticket-work skill topics should be in the registry."""
+        suffixes = {spec.suffix for spec in ALL_OMNICLAUDE_TOPIC_SPECS}
+        assert "onex.cmd.omniclaude.ticket-work.v1" in suffixes
+        assert "onex.evt.omniclaude.ticket-work-completed.v1" in suffixes
+        assert "onex.evt.omniclaude.ticket-work-failed.v1" in suffixes
+
+    def test_create_ticket_topic_in_registry(self) -> None:
+        """Spot check: create-ticket skill topics should be in the registry."""
+        suffixes = {spec.suffix for spec in ALL_OMNICLAUDE_TOPIC_SPECS}
+        assert "onex.cmd.omniclaude.create-ticket.v1" in suffixes
+        assert "onex.evt.omniclaude.create-ticket-completed.v1" in suffixes
+        assert "onex.evt.omniclaude.create-ticket-failed.v1" in suffixes
+
+    def test_ticket_pipeline_topic_in_registry(self) -> None:
+        """Spot check: ticket-pipeline skill topics should be in the registry."""
+        suffixes = {spec.suffix for spec in ALL_OMNICLAUDE_TOPIC_SPECS}
+        assert "onex.cmd.omniclaude.ticket-pipeline.v1" in suffixes
+        assert "onex.evt.omniclaude.ticket-pipeline-completed.v1" in suffixes
+        assert "onex.evt.omniclaude.ticket-pipeline-failed.v1" in suffixes
+
+    def test_local_review_topic_in_registry(self) -> None:
+        """Spot check: local-review skill topics should be in the registry."""
+        suffixes = {spec.suffix for spec in ALL_OMNICLAUDE_TOPIC_SPECS}
+        assert "onex.cmd.omniclaude.local-review.v1" in suffixes
+        assert "onex.evt.omniclaude.local-review-completed.v1" in suffixes
+        assert "onex.evt.omniclaude.local-review-failed.v1" in suffixes
+
+    def test_omniclaude_is_tuple(self) -> None:
+        """ALL_OMNICLAUDE_TOPIC_SPECS should be an immutable tuple."""
+        assert isinstance(ALL_OMNICLAUDE_TOPIC_SPECS, tuple)
