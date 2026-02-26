@@ -143,7 +143,7 @@ class TestDemoTopicPrefixes:
             "onex.evt.omniintelligence.session-outcome.v1",
             "onex.cmd.omniintelligence.pattern-lifecycle.v1",
             "onex.evt.omniclaude.phase-metrics.v1",
-            "onex.evt.agent.status.v1",
+            "onex.evt.omniclaude.agent-status.v1",
         ],
     )
     def test_demo_topics_match_prefixes(self, topic: str) -> None:

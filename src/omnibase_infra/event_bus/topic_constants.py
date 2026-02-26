@@ -484,19 +484,22 @@ def derive_dlq_topic_for_event_type(
 # ==============================================================================
 # Topics monitored for emission/consumption health checks.
 #
-# NOTE: session-outcome currently uses 'cmd' prefix but should semantically be 'evt'
-# (it's a fact/outcome, not a command requesting action). A migration ticket should
-# be created to fix this in omniclaude and omniintelligence.
+# NOTE: session-outcome uses dual-publish by design:
+#   - cmd topic: consumed by omniintelligence for pattern feedback (triggers processing)
+#   - evt topic: consumed by observability/dashboards (informational fact)
+# The 'cmd' prefix is intentional because the intelligence consumer treats the
+# message as a command to evaluate patterns, not merely an observable event.
 #
 # See: OMN-1895 - Wiring health monitor implementation
 
 TOPIC_SESSION_OUTCOME_CURRENT: Final[str] = (
     "onex.cmd.omniintelligence.session-outcome.v1"
 )
-"""Current session-outcome topic (pre-migration).
+"""Session-outcome command topic for intelligence processing.
 
-WARNING: Uses 'cmd' prefix but should be 'evt' - session outcomes are facts,
-not commands. Kept for compatibility until migration completes.
+Uses 'cmd' prefix intentionally: omniintelligence treats session outcomes as
+commands triggering pattern feedback evaluation. This is the dual-publish
+design -- cmd for intelligence, evt for observability.
 
 Producer: omniclaude (SessionEnd hook)
 Consumer: omniintelligence/node_pattern_feedback_effect
@@ -505,10 +508,10 @@ Consumer: omniintelligence/node_pattern_feedback_effect
 TOPIC_SESSION_OUTCOME_CANONICAL: Final[str] = (
     "onex.evt.omniintelligence.session-outcome.v1"
 )
-"""Canonical session-outcome topic (post-migration).
+"""Session-outcome event topic for observability.
 
-This is the correct semantic name. Use TOPIC_SESSION_OUTCOME_CURRENT until
-migration ticket completes the rename in omniclaude and omniintelligence.
+The evt counterpart of the dual-publish pair. Observability consumers
+(dashboards, metrics) subscribe to this topic for session outcome facts.
 """
 
 # Injection effectiveness topics (already correctly named with 'evt')
@@ -545,12 +548,13 @@ Consumer: Dashboard WebSocket servers, API caches
 Payload: ModelEffectivenessInvalidationEvent (tables_affected, rows_written, source)
 """
 
-# Agent status events
-TOPIC_AGENT_STATUS: Final[str] = "onex.evt.agent.status.v1"
+# Agent status events (OMN-2846: aligned with omniclaude producer)
+TOPIC_AGENT_STATUS: Final[str] = "onex.evt.omniclaude.agent-status.v1"
 """Agent status events for real-time agent visibility.
 
-Producer: Agent status reporters (claude hooks, runtime)
+Producer: omniclaude (agent status hooks)
 Consumer: agent_actions consumer for persistence
+Renamed: onex.evt.agent.status.v1 -> onex.evt.omniclaude.agent-status.v1 (OMN-2846)
 """
 
 # Reward architecture topics (OMN-2552)

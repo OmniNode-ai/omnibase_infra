@@ -407,7 +407,7 @@ class TestDeriveDlqTopicForEventType:
 
         result = derive_dlq_topic_for_event_type(
             "agent.status-changed.v1",
-            "onex.evt.agent.status.v1",
+            "onex.evt.omniclaude.agent-status.v1",
         )
         assert result == "onex.dlq.agent.v1"
 
