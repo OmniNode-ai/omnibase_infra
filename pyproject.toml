@@ -32,7 +32,7 @@ dependencies = [
     # omnibase-core: requires OMN-2754 (contract.resolve compute node) which
     # landed on main after v0.20.0.  Using git source override until v0.21.0 is
     # published; revert [tool.uv.sources] and pin >=0.21.0,<0.22.0 after release.
-    "omnibase-core>=0.20.0",
+    "omnibase-core>=0.20.0,<0.21.0",
     # omnibase-spi v0.13.0: release chain bump for omnibase_infra 0.11.0
     "omnibase-spi>=0.13.0,<0.14.0",
 
