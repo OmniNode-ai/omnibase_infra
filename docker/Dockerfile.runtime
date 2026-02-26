@@ -163,7 +163,7 @@ RUN uv pip freeze | grep -v '^\(-e\|@\)' > /tmp/constraints.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --constraint /tmp/constraints.txt \
     omniintelligence==0.5.0 \
-    omnimemory==0.4.0
+    "omnimemory @ git+https://github.com/OmniNode-ai/omnimemory@v0.4.0"
 
 # ============================================================================
 # Runtime Stage - Minimal production image
