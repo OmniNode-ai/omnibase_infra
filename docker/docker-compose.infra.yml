@@ -149,6 +149,8 @@ x-runtime-env: &runtime-env
   # See top-of-file note re: nested variable expansion.
   # RECOMMENDED: Set OMNIINTELLIGENCE_DB_URL explicitly in .env instead.
   OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for intelligence DB URL fallback}@postgres:5432/omniintelligence}
+  # OmniMemory domain plugin
+  OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-}
 # ==========================================================================
 # Services
 # ==========================================================================
