@@ -9,36 +9,28 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 description: >
-  EFFECT node that emits structured reward events to Kafka after ScoringReducer produces
-  an EvaluationResult. Publishes three event types in order: RunEvaluatedEvent,
-  RewardAssignedEvent (one per affected target_type), and PolicyStateUpdatedEvent.
-  This is the only node in the objective pipeline that performs I/O.
-  No scoring logic — only emits what ScoringReducer produced.
+  EFFECT node that emits structured reward events to Kafka after ScoringReducer produces an EvaluationResult. Publishes three event types in order: RunEvaluatedEvent, RewardAssignedEvent (one per affected target_type), and PolicyStateUpdatedEvent. This is the only node in the objective pipeline that performs I/O. No scoring logic — only emits what ScoringReducer produced.
 
 input_model:
   name: "ModelRewardBinderInput"
   module: "omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_binder_input"
   description: "Input envelope carrying EvaluationResult and ObjectiveSpec."
-
 output_model:
   name: "ModelRewardBinderOutput"
   module: "omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_binder_output"
   description: "Result reporting emitted event IDs and objective fingerprint."
-
 io_operations:
   - name: "emit_reward_events"
     description: >
-      Emit RunEvaluatedEvent, RewardAssignedEvent (per target), and
-      PolicyStateUpdatedEvent to their respective Kafka topics in order.
+      Emit RunEvaluatedEvent, RewardAssignedEvent (per target), and PolicyStateUpdatedEvent to their respective Kafka topics in order.
+
     input_fields: ["evaluation_result", "objective_spec", "correlation_id"]
     output_fields: ["success", "run_id", "objective_fingerprint", "topics_published"]
-
 event_bus:
   publish_topics:
     - "onex.evt.omnimemory.run-evaluated.v1"
     - "onex.evt.omnimemory.reward-assigned.v1"
     - "onex.evt.omnimemory.policy-state-updated.v1"
-
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
@@ -46,12 +38,10 @@ handler_routing:
       handler:
         name: "HandlerRewardBinder"
         module: "omnibase_infra.nodes.node_reward_binder_effect.handlers.handler_reward_binder"
-
 capabilities:
   - "reward.emit.run_evaluated"
   - "reward.emit.reward_assigned"
   - "reward.emit.policy_state_updated"
-
 metadata:
   author: "OmniNode Team"
   license: "MIT"
