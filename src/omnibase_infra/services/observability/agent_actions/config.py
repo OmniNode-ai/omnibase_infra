@@ -48,8 +48,7 @@ class ConfigAgentActionsConsumer(BaseSettings):
     )
 
     # Topics to subscribe (7 observability topics)
-    # NOTE: 5 topics migrated to ONEX canonical names (OMN-2621, CONTRACT_DRIFT fix).
-    # "agent-execution-logs" stays unchanged (producer name unconfirmed — monitor via counter).
+    # NOTE: All omniclaude-produced topics use canonical ONEX names (OMN-2621, OMN-2902, OMN-2903).
     # "onex.evt.omniclaude.agent-status.v1" renamed from "onex.evt.agent.status.v1" (OMN-2846).
     topics: list[str] = Field(
         default_factory=lambda: [
@@ -58,8 +57,8 @@ class ConfigAgentActionsConsumer(BaseSettings):
             "onex.evt.omniclaude.agent-transformation.v1",
             "onex.evt.omniclaude.performance-metrics.v1",
             "onex.evt.omniclaude.detection-failure.v1",
-            "agent-execution-logs",  # producer name unconfirmed — monitor via per-topic counter
-            "onex.evt.omniclaude.agent-status.v1",  # renamed from onex.evt.agent.status.v1 (OMN-2846)
+            "onex.evt.omniclaude.agent-execution-logs.v1",  # omniclaude TopicBase.EXECUTION_LOGS (OMN-2902)
+            "onex.evt.omniclaude.agent-status.v1",  # renamed from onex.evt.agent.status.v1 (OMN-2846, OMN-2903)
         ],
         description="Kafka topics to consume for agent observability",
     )
