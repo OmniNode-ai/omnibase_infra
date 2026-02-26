@@ -11,14 +11,18 @@ Formal Invariant:
     pass-through logic in individual components is prohibited.
 
 Current Behavior:
-    Pass-through. Topic suffixes are returned unchanged because ONEX topics are
-    realm-agnostic. The environment/realm is enforced via envelope identity and
-    consumer group naming, NOT via topic name prefixing.
+    Pass-through by default. Topic suffixes are returned unchanged because ONEX
+    topics are realm-agnostic. The environment/realm is enforced via envelope
+    identity and consumer group naming, NOT via topic name prefixing.
 
-Future Phases:
-    This class is the single extension point for realm-based routing, topic
-    aliasing, or tenant-scoped topic mapping. When those features are needed,
-    they are added HERE and all callers automatically benefit.
+Multi-Bus Resolution (Phase 5 - OMN-2894):
+    When constructed with ``bus_descriptors`` and called with a ``trust_domain``
+    parameter, the resolver finds the matching bus descriptor and prepends its
+    ``namespace_prefix`` to the validated topic suffix. This enables
+    trust-domain-scoped topic routing across multiple message buses.
+
+    Without these optional parameters, behavior is identical to the original
+    pass-through implementation (full backward compatibility).
 
 Topic Suffix Format:
     onex.<kind>.<producer>.<event-name>.v<version>
@@ -30,6 +34,7 @@ Topic Suffix Format:
 See Also:
     omnibase_core.validation.validate_topic_suffix - Suffix format validation
     omnibase_infra.topics.platform_topic_suffixes - Platform-reserved suffixes
+    omnibase_infra.topics.model_bus_descriptor - Bus descriptor model
 """
 
 from __future__ import annotations
@@ -42,6 +47,7 @@ from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
+from omnibase_infra.topics.model_bus_descriptor import ModelBusDescriptor
 
 
 class TopicResolutionError(ProtocolConfigurationError):
@@ -98,6 +104,35 @@ class TopicResolutionError(ProtocolConfigurationError):
         super().__init__(message, context=infra_context)
 
 
+class BusDescriptorNotFoundError(TopicResolutionError):
+    """Raised when no bus descriptor matches the requested trust domain.
+
+    This error indicates that the ``TopicResolver`` was asked to resolve a
+    topic for a specific trust domain, but no ``ModelBusDescriptor`` in the
+    configured set matches that domain.
+
+    Attributes:
+        trust_domain: The trust domain that was requested but not found.
+    """
+
+    def __init__(
+        self,
+        trust_domain: str,
+        *,
+        correlation_id: UUID | None = None,
+        infra_context: ModelInfraErrorContext | None = None,
+    ) -> None:
+        self.trust_domain = trust_domain
+        message = f"No bus descriptor found for trust domain '{trust_domain}'"
+        if correlation_id is not None:
+            message += f" (correlation_id={correlation_id})"
+        super().__init__(
+            message,
+            correlation_id=correlation_id,
+            infra_context=infra_context,
+        )
+
+
 class TopicResolver:
     """Canonical resolver that maps ONEX topic suffixes to concrete Kafka topics.
 
@@ -109,32 +144,81 @@ class TopicResolver:
     naming convention before returning it. Invalid suffixes are rejected with
     a ``TopicResolutionError``.
 
-    Current behavior is pass-through (realm-agnostic topics, no environment
-    prefix). The environment is enforced via consumer group naming, not topic
-    names.
+    **Default behavior** (no ``bus_descriptors``): pass-through. The validated
+    suffix is returned unchanged. The environment is enforced via consumer
+    group naming, not topic names.
+
+    **Multi-bus behavior** (with ``bus_descriptors`` and ``trust_domain`` on
+    ``resolve()``): the resolver looks up the bus descriptor for the given
+    trust domain and prepends its ``namespace_prefix`` to the validated suffix.
+
+    Args:
+        bus_descriptors: Optional sequence of bus descriptors for multi-bus
+            routing. When ``None`` (the default), the resolver operates in
+            pass-through mode regardless of the ``trust_domain`` argument
+            to ``resolve()``.
 
     Example:
+        >>> # Pass-through (backward compatible)
         >>> resolver = TopicResolver()
         >>> resolver.resolve("onex.evt.platform.node-registration.v1")
         'onex.evt.platform.node-registration.v1'
 
-        >>> resolver.resolve("bad-topic")
-        Traceback (most recent call last):
-            ...
-        TopicResolutionError: Invalid topic suffix 'bad-topic': ...
+        >>> # Multi-bus with namespace prefix
+        >>> from omnibase_infra.topics.model_bus_descriptor import ModelBusDescriptor
+        >>> from omnibase_infra.enums import EnumInfraTransportType
+        >>> desc = ModelBusDescriptor(
+        ...     bus_id="bus.org",
+        ...     trust_domain="org.omninode",
+        ...     transport_type=EnumInfraTransportType.KAFKA,
+        ...     namespace_prefix="org.omninode.",
+        ...     bootstrap_servers=("kafka.org:9092",),
+        ... )
+        >>> resolver = TopicResolver(bus_descriptors=[desc])
+        >>> resolver.resolve(
+        ...     "onex.evt.platform.node-registration.v1",
+        ...     trust_domain="org.omninode",
+        ... )
+        'org.omninode.onex.evt.platform.node-registration.v1'
+
+    .. versionchanged:: 0.10.0
+        Added optional ``bus_descriptors`` constructor parameter and
+        ``trust_domain`` parameter on ``resolve()`` for Phase 5 multi-bus
+        topic resolution (OMN-2894).
     """
+
+    def __init__(
+        self,
+        bus_descriptors: list[ModelBusDescriptor] | None = None,
+    ) -> None:
+        # Index descriptors by trust_domain for O(1) lookup.
+        self._descriptors_by_domain: dict[str, ModelBusDescriptor] = {}
+        if bus_descriptors is not None:
+            for desc in bus_descriptors:
+                self._descriptors_by_domain[desc.trust_domain] = desc
+
+    @property
+    def bus_descriptors(self) -> list[ModelBusDescriptor]:
+        """Return a list of all configured bus descriptors.
+
+        Returns an empty list when no descriptors are configured (pass-through
+        mode).
+        """
+        return list(self._descriptors_by_domain.values())
 
     def resolve(
         self,
         topic_suffix: str,
         *,
         correlation_id: UUID | None = None,
+        trust_domain: str | None = None,
     ) -> str:
         """Resolve a topic suffix to a concrete Kafka topic name.
 
         Validates the suffix against the ONEX topic naming convention and
-        returns the resolved topic name. Currently this is a pass-through
-        (the suffix IS the topic name) because ONEX topics are realm-agnostic.
+        returns the resolved topic name. When ``trust_domain`` is provided
+        and bus descriptors are configured, the matching descriptor's
+        ``namespace_prefix`` is prepended to the suffix.
 
         Args:
             topic_suffix: ONEX format topic suffix
@@ -142,13 +226,23 @@ class TopicResolver:
             correlation_id: Optional correlation ID for error traceability.
                 When provided, included in the ``TopicResolutionError`` message
                 so callers can correlate failures to specific request flows.
+            trust_domain: Optional trust domain for multi-bus routing. When
+                provided with configured bus descriptors, the matching
+                descriptor's namespace prefix is prepended to the topic.
+                When ``None`` or when no bus descriptors are configured,
+                behavior is identical to pass-through.
 
         Returns:
-            Concrete Kafka topic name. Currently identical to the input suffix.
+            Concrete Kafka topic name. Identical to the input suffix in
+            pass-through mode, or prefixed with the bus namespace when
+            trust-domain routing is active.
 
         Raises:
             TopicResolutionError: If the suffix does not match the required
                 ONEX topic format ``onex.<kind>.<producer>.<event-name>.v<n>``.
+            BusDescriptorNotFoundError: If ``trust_domain`` is provided and
+                bus descriptors are configured, but no descriptor matches the
+                requested trust domain.
         """
         result = validate_topic_suffix(topic_suffix)
         if not result.is_valid:
@@ -175,4 +269,23 @@ class TopicResolver:
                 f"Invalid topic suffix '{topic_suffix}': {result.error}",
                 infra_context=infra_context,
             )
+
+        # Multi-bus resolution: if trust_domain is provided and descriptors
+        # are configured, look up the matching bus and prepend its prefix.
+        if trust_domain is not None and self._descriptors_by_domain:
+            descriptor = self._descriptors_by_domain.get(trust_domain)
+            if descriptor is None:
+                infra_context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="resolve_topic",
+                )
+                raise BusDescriptorNotFoundError(
+                    trust_domain,
+                    correlation_id=correlation_id,
+                    infra_context=infra_context,
+                )
+            if descriptor.namespace_prefix:
+                return f"{descriptor.namespace_prefix}{topic_suffix}"
+
         return topic_suffix

@@ -16,6 +16,7 @@ Exports:
     TopicResolutionError: Error raised when topic resolution fails
 """
 
+from omnibase_infra.topics.model_bus_descriptor import ModelBusDescriptor
 from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
 from omnibase_infra.topics.platform_topic_suffixes import (
     ALL_INTELLIGENCE_TOPIC_SPECS,
@@ -56,7 +57,11 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_TOPIC_CATALOG_QUERY,
     SUFFIX_TOPIC_CATALOG_RESPONSE,
 )
-from omnibase_infra.topics.topic_resolver import TopicResolutionError, TopicResolver
+from omnibase_infra.topics.topic_resolver import (
+    BusDescriptorNotFoundError,
+    TopicResolutionError,
+    TopicResolver,
+)
 
 __all__: list[str] = [
     # Platform suffix constants
@@ -103,7 +108,10 @@ __all__: list[str] = [
     "ALL_PROVISIONED_TOPIC_SPECS",
     # Topic spec model
     "ModelTopicSpec",
+    # Bus descriptor model (Phase 5 - OMN-2894)
+    "ModelBusDescriptor",
     # Topic resolution
     "TopicResolver",
     "TopicResolutionError",
+    "BusDescriptorNotFoundError",
 ]
