@@ -1183,6 +1183,14 @@ class RuntimeHostProcess:
             },
         )
 
+        # Step 0: Verify dependency version compatibility (OMN-758)
+        # Logs resolved versions and fails fast if incompatible packages detected
+        from omnibase_infra.runtime.version_compatibility import (
+            log_and_verify_versions,
+        )
+
+        log_and_verify_versions()
+
         # Step 1: Validate architecture compliance FIRST (OMN-1138)
         # This runs before event bus starts or handlers are wired to ensure
         # clean failure without partial state if validation fails
