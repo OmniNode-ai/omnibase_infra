@@ -117,8 +117,8 @@ def _parse_cidr_allowlist() -> tuple[IPv4Network, ...]:
     Returns:
         Tuple of parsed ``IPv4Network`` objects, never empty.
     """
-    raw = os.environ.get("LLM_ENDPOINT_CIDR_ALLOWLIST", "")
-    if not raw:
+    raw = os.environ.get("LLM_ENDPOINT_CIDR_ALLOWLIST")
+    if raw is None:
         logger.warning(
             "LLM_ENDPOINT_CIDR_ALLOWLIST not set — using default %s",
             _DEFAULT_CIDR,

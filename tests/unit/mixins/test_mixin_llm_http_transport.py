@@ -1639,6 +1639,18 @@ class TestParseCidrAllowlist:
             for record in caplog.records
         )
 
+    def test_parse_cidr_empty_string_no_not_set_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Empty string is 'explicitly set' — no 'not set' warning [OMN-2811]."""
+        with patch.dict(os.environ, {"LLM_ENDPOINT_CIDR_ALLOWLIST": ""}):
+            with caplog.at_level("WARNING"):
+                _parse_cidr_allowlist()
+        assert not any(
+            "LLM_ENDPOINT_CIDR_ALLOWLIST not set" in record.message
+            for record in caplog.records
+        )
+
 
 # ── HMAC Signing (OMN-2250) ───────────────────────────────────────────
 
