@@ -58,7 +58,7 @@ class ConfigAgentActionsConsumer(BaseSettings):
             "onex.evt.omniclaude.performance-metrics.v1",
             "onex.evt.omniclaude.detection-failure.v1",
             "onex.evt.omniclaude.agent-execution-logs.v1",  # omniclaude TopicBase.EXECUTION_LOGS (OMN-2902)
-            "onex.evt.omniclaude.agent-status.v1",  # renamed from onex.evt.agent.status.v1 (OMN-2846, OMN-2903)
+            "onex.evt.omniclaude.agent-status.v1",  # omniclaude TopicBase.AGENT_STATUS (OMN-2846, OMN-2903)
         ],
         description="Kafka topics to consume for agent observability",
     )
