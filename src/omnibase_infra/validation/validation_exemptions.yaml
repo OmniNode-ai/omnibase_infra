@@ -2414,6 +2414,20 @@ pattern_exemptions:
       - CLAUDE.md (Phase 5 - Multi-Bus Topic Resolution)
     ticket: OMN-2894
   # ==========================================================================
+  # ModelTrustDomainConfigLocal domain_id Exemption (OMN-2896)
+  # ==========================================================================
+  # domain_id is a human-readable trust domain identifier (e.g., "local.default",
+  # "org.omninode"), not a UUID. It follows the trust-domain naming convention
+  # from the Authenticated Dependency Resolution epic.
+  - file_pattern: 'model_trust_domain_config_local\.py'
+    violation_pattern: "Field 'domain_id' should use UUID type instead of str"
+    reason: >
+      domain_id is a human-readable trust domain identifier (e.g., "local.default", "org.omninode") used in contract YAML trust_domains sections. It follows the hierarchical naming convention from the epic plan, not a UUID-based system identifier.
+
+    documentation:
+      - CLAUDE.md (Phase 7 - Contract YAML Integration)
+    ticket: OMN-2896
+  # ==========================================================================
   # ServiceArtifactStore Method Count Exemption (OMN-2151)
   # ==========================================================================
   # ServiceArtifactStore manages on-disk validation artifacts with cohesive file I/O
