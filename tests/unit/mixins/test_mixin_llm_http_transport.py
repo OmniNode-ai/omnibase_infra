@@ -1613,6 +1613,32 @@ class TestParseCidrAllowlist:
             result = _parse_cidr_allowlist()
         assert result == (IPv4Network("192.168.86.0/24"),)
 
+    def test_parse_cidr_default_logs_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When env var is unset, a warning is logged about the default [OMN-2811]."""
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("LLM_ENDPOINT_CIDR_ALLOWLIST", None)
+            with caplog.at_level("WARNING"):
+                result = _parse_cidr_allowlist()
+        assert result == (IPv4Network("192.168.86.0/24"),)
+        assert any(
+            "LLM_ENDPOINT_CIDR_ALLOWLIST not set" in record.message
+            for record in caplog.records
+        )
+
+    def test_parse_cidr_explicit_value_no_default_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When env var is explicitly set, no 'not set' warning is logged [OMN-2811]."""
+        with patch.dict(os.environ, {"LLM_ENDPOINT_CIDR_ALLOWLIST": "10.0.0.0/8"}):
+            with caplog.at_level("WARNING"):
+                _parse_cidr_allowlist()
+        assert not any(
+            "LLM_ENDPOINT_CIDR_ALLOWLIST not set" in record.message
+            for record in caplog.records
+        )
+
 
 # ── HMAC Signing (OMN-2250) ───────────────────────────────────────────
 
