@@ -180,7 +180,10 @@ class TestTopicModelMapping:
             is ModelDetectionFailure
         )
         assert TOPIC_TO_MODEL["agent-execution-logs"] is ModelExecutionLog
-        assert TOPIC_TO_MODEL["onex.evt.omniclaude.agent-status.v1"] is ModelAgentStatusEvent
+        assert (
+            TOPIC_TO_MODEL["onex.evt.omniclaude.agent-status.v1"]
+            is ModelAgentStatusEvent
+        )
 
     def test_all_subscribed_topics_have_model_and_writer_mapping(self) -> None:
         """Every topic in config default list must appear in both dispatch dicts.
