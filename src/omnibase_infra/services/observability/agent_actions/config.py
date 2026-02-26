@@ -127,6 +127,34 @@ class ConfigAgentActionsConsumer(BaseSettings):
         description="Successful requests required to close circuit from half-open state",
     )
 
+    # Dead Letter Queue (Phase 2 hardening - OMN-1768)
+    dlq_topic: str = Field(
+        default="onex.evt.omniclaude.agent-actions-dlq.v1",
+        description=(
+            "Dead letter topic for permanently failed messages. Messages that "
+            "fail validation or exceed max retry count are forwarded here. "
+            "Configure via OMNIBASE_INFRA_AGENT_ACTIONS_DLQ_TOPIC env var."
+        ),
+    )
+    dlq_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable dead letter queue for permanently failed messages. "
+            "When disabled, permanently failed messages are logged and skipped. "
+            "Configure via OMNIBASE_INFRA_AGENT_ACTIONS_DLQ_ENABLED env var."
+        ),
+    )
+    max_retry_count: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description=(
+            "Maximum number of retries before sending a message to the DLQ. "
+            "Set to 0 to send to DLQ on first failure. "
+            "Configure via OMNIBASE_INFRA_AGENT_ACTIONS_MAX_RETRY_COUNT env var."
+        ),
+    )
+
     # Health check
     health_check_port: int = Field(
         default=8087,
@@ -135,12 +163,12 @@ class ConfigAgentActionsConsumer(BaseSettings):
         description="Port for HTTP health check endpoint",
     )
     health_check_host: str = Field(
-        default="0.0.0.0",  # noqa: S104 - Configurable, see security note below
+        default="127.0.0.1",
         description=(
-            "Host/IP for health check server binding. Default '0.0.0.0' binds to all "
-            "interfaces for container/Kubernetes probe access. For security-sensitive "
-            "deployments, set to '127.0.0.1' to restrict to localhost-only access. "
-            "Configure via OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_HOST env var."
+            "Host/IP for health check server binding. Default '127.0.0.1' restricts "
+            "to localhost-only access for security. For container/Kubernetes deployments, "
+            "override to '0.0.0.0' via OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_HOST "
+            "env var to allow external probe access."
         ),
     )
     health_check_staleness_seconds: int = Field(

@@ -57,6 +57,7 @@ import asyncio
 import json
 import logging
 import signal
+import time
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -66,7 +67,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 from aiohttp import web
-from aiokafka import AIOKafkaConsumer, TopicPartition
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.errors import KafkaError
 from pydantic import BaseModel, ValidationError
 
@@ -217,18 +218,32 @@ class ConsumerMetrics:
     """Metrics tracking for the agent actions consumer.
 
     Tracks processing statistics for observability and monitoring.
-    Thread-safe via asyncio lock protection.
+    Thread-safe via asyncio lock protection. Supports optional external
+    metrics export via hook callbacks for Prometheus/OpenTelemetry integration.
 
     Attributes:
         messages_received: Total messages received from Kafka.
         messages_processed: Successfully processed messages.
         messages_failed: Messages that failed processing.
         messages_skipped: Messages skipped (invalid, duplicate, etc.).
+        messages_sent_to_dlq: Messages forwarded to dead letter queue.
         batches_processed: Number of batches successfully processed.
         last_poll_at: Timestamp of last Kafka poll.
         last_successful_write_at: Timestamp of last successful database write.
         started_at: Timestamp when metrics were initialized (consumer start time).
+        per_topic_received: Per-topic message received counts.
+        per_topic_processed: Per-topic message processed counts.
+        per_topic_failed: Per-topic message failure counts.
+        batch_latency_ms: List of recent batch latency samples (ring buffer, max 100).
+
+    Phase 2 Additions (OMN-1768):
+        - Per-topic counters for received/processed/failed
+        - Batch latency tracking (ring buffer of recent samples)
+        - DLQ message counter
+        - Optional metrics export hooks for external systems
     """
+
+    MAX_LATENCY_SAMPLES: int = 100
 
     def __init__(self) -> None:
         """Initialize metrics with zero values."""
@@ -236,38 +251,149 @@ class ConsumerMetrics:
         self.messages_processed: int = 0
         self.messages_failed: int = 0
         self.messages_skipped: int = 0
+        self.messages_sent_to_dlq: int = 0
         self.batches_processed: int = 0
         self.last_poll_at: datetime | None = None
         self.last_successful_write_at: datetime | None = None
         self.started_at: datetime = datetime.now(UTC)
         self._lock = asyncio.Lock()
 
-    async def record_received(self, count: int = 1) -> None:
-        """Record messages received."""
+        # Per-topic counters (Phase 2 - OMN-1768)
+        self.per_topic_received: dict[str, int] = {}
+        self.per_topic_processed: dict[str, int] = {}
+        self.per_topic_failed: dict[str, int] = {}
+
+        # Batch latency ring buffer (Phase 2 - OMN-1768)
+        self.batch_latency_ms: list[float] = []
+
+        # External metrics export hooks (Phase 2 - OMN-1768)
+        # Callables invoked on each metric update for Prometheus/OTEL integration.
+        # Each hook receives (metric_name: str, value: float, labels: dict[str, str]).
+        self._export_hooks: list[Callable[[str, float, dict[str, str]], None]] = []
+
+    def register_export_hook(
+        self,
+        hook: Callable[[str, float, dict[str, str]], None],
+    ) -> None:
+        """Register an external metrics export hook.
+
+        Hooks are called synchronously on each metric update. Keep hooks
+        lightweight to avoid blocking the consumer loop.
+
+        Args:
+            hook: Callable receiving (metric_name, value, labels).
+
+        Example:
+            >>> def prometheus_hook(name: str, value: float, labels: dict) -> None:
+            ...     prometheus_counter.labels(**labels).inc(value)
+            >>> metrics.register_export_hook(prometheus_hook)
+        """
+        self._export_hooks.append(hook)
+
+    def _export(
+        self, name: str, value: float, labels: dict[str, str] | None = None
+    ) -> None:
+        """Export a metric to all registered hooks.
+
+        Args:
+            name: Metric name.
+            value: Metric value.
+            labels: Optional label dict.
+        """
+        resolved_labels = labels or {}
+        for hook in self._export_hooks:
+            try:
+                hook(name, value, resolved_labels)
+            except Exception:
+                # Never let a failing hook crash the consumer
+                logger.debug("Metrics export hook failed", exc_info=True)
+
+    async def record_received(self, count: int = 1, topic: str | None = None) -> None:
+        """Record messages received.
+
+        Args:
+            count: Number of messages received.
+            topic: Optional topic name for per-topic tracking.
+        """
         async with self._lock:
             self.messages_received += count
             self.last_poll_at = datetime.now(UTC)
+            if topic is not None:
+                self.per_topic_received[topic] = (
+                    self.per_topic_received.get(topic, 0) + count
+                )
+        self._export(
+            "consumer_messages_received_total", float(count), {"topic": topic or ""}
+        )
 
-    async def record_processed(self, count: int = 1) -> None:
-        """Record successfully processed messages."""
+    async def record_processed(self, count: int = 1, topic: str | None = None) -> None:
+        """Record successfully processed messages.
+
+        Args:
+            count: Number of messages processed.
+            topic: Optional topic name for per-topic tracking.
+        """
         async with self._lock:
             self.messages_processed += count
             self.last_successful_write_at = datetime.now(UTC)
+            if topic is not None:
+                self.per_topic_processed[topic] = (
+                    self.per_topic_processed.get(topic, 0) + count
+                )
+        self._export(
+            "consumer_messages_processed_total", float(count), {"topic": topic or ""}
+        )
 
-    async def record_failed(self, count: int = 1) -> None:
-        """Record failed messages."""
+    async def record_failed(self, count: int = 1, topic: str | None = None) -> None:
+        """Record failed messages.
+
+        Args:
+            count: Number of messages that failed.
+            topic: Optional topic name for per-topic tracking.
+        """
         async with self._lock:
             self.messages_failed += count
+            if topic is not None:
+                self.per_topic_failed[topic] = (
+                    self.per_topic_failed.get(topic, 0) + count
+                )
+        self._export(
+            "consumer_messages_failed_total", float(count), {"topic": topic or ""}
+        )
 
     async def record_skipped(self, count: int = 1) -> None:
         """Record skipped messages."""
         async with self._lock:
             self.messages_skipped += count
+        self._export("consumer_messages_skipped_total", float(count))
 
-    async def record_batch_processed(self) -> None:
-        """Record a successfully processed batch."""
+    async def record_sent_to_dlq(self, count: int = 1) -> None:
+        """Record messages sent to the dead letter queue.
+
+        Args:
+            count: Number of messages sent to DLQ.
+        """
+        async with self._lock:
+            self.messages_sent_to_dlq += count
+        self._export("consumer_messages_dlq_total", float(count))
+
+    async def record_batch_processed(self, latency_ms: float | None = None) -> None:
+        """Record a successfully processed batch.
+
+        Args:
+            latency_ms: Optional batch processing latency in milliseconds.
+        """
         async with self._lock:
             self.batches_processed += 1
+            if latency_ms is not None:
+                self.batch_latency_ms.append(latency_ms)
+                # Ring buffer: keep only last MAX_LATENCY_SAMPLES
+                if len(self.batch_latency_ms) > self.MAX_LATENCY_SAMPLES:
+                    self.batch_latency_ms = self.batch_latency_ms[
+                        -self.MAX_LATENCY_SAMPLES :
+                    ]
+        if latency_ms is not None:
+            self._export("consumer_batch_latency_ms", latency_ms)
 
     async def record_polled(self) -> None:
         """Record a poll attempt (updates last_poll_at regardless of message count).
@@ -286,14 +412,34 @@ class ConsumerMetrics:
         """Get a snapshot of current metrics.
 
         Returns:
-            Dictionary with all metric values.
+            Dictionary with all metric values including per-topic breakdowns
+            and batch latency statistics.
         """
         async with self._lock:
+            # Compute batch latency stats
+            latency_stats: dict[str, object] = {}
+            if self.batch_latency_ms:
+                sorted_latencies = sorted(self.batch_latency_ms)
+                latency_stats = {
+                    "count": len(sorted_latencies),
+                    "min_ms": sorted_latencies[0],
+                    "max_ms": sorted_latencies[-1],
+                    "avg_ms": sum(sorted_latencies) / len(sorted_latencies),
+                    "p50_ms": sorted_latencies[len(sorted_latencies) // 2],
+                    "p99_ms": sorted_latencies[
+                        min(
+                            int(len(sorted_latencies) * 0.99),
+                            len(sorted_latencies) - 1,
+                        )
+                    ],
+                }
+
             return {
                 "messages_received": self.messages_received,
                 "messages_processed": self.messages_processed,
                 "messages_failed": self.messages_failed,
                 "messages_skipped": self.messages_skipped,
+                "messages_sent_to_dlq": self.messages_sent_to_dlq,
                 "batches_processed": self.batches_processed,
                 "last_poll_at": (
                     self.last_poll_at.isoformat() if self.last_poll_at else None
@@ -304,6 +450,10 @@ class ConsumerMetrics:
                     else None
                 ),
                 "started_at": self.started_at.isoformat(),
+                "per_topic_received": dict(self.per_topic_received),
+                "per_topic_processed": dict(self.per_topic_processed),
+                "per_topic_failed": dict(self.per_topic_failed),
+                "batch_latency": latency_stats if latency_stats else None,
             }
 
 
@@ -376,6 +526,9 @@ class AgentActionsConsumer:
         self._writer: WriterAgentActionsPostgres | None = None
         self._running = False
         self._shutdown_event = asyncio.Event()
+
+        # Dead Letter Queue producer (Phase 2 - OMN-1768)
+        self._dlq_producer: AIOKafkaProducer | None = None
 
         # Health check server
         self._health_app: web.Application | None = None
@@ -522,6 +675,21 @@ class AgentActionsConsumer:
                 },
             )
 
+            # Start DLQ producer if enabled (Phase 2 - OMN-1768)
+            if self._config.dlq_enabled:
+                self._dlq_producer = AIOKafkaProducer(
+                    bootstrap_servers=self._config.kafka_bootstrap_servers,
+                )
+                await self._dlq_producer.start()
+                logger.info(
+                    "DLQ producer started",
+                    extra={
+                        "consumer_id": self._consumer_id,
+                        "correlation_id": str(correlation_id),
+                        "dlq_topic": self._config.dlq_topic,
+                    },
+                )
+
             # Start health check server
             await self._start_health_server()
 
@@ -611,6 +779,22 @@ class AgentActionsConsumer:
             self._health_runner = None
 
         self._health_app = None
+
+        # Stop DLQ producer (Phase 2 - OMN-1768)
+        if self._dlq_producer is not None:
+            try:
+                await self._dlq_producer.stop()
+            except Exception as e:
+                logger.warning(
+                    "Error stopping DLQ producer",
+                    extra={
+                        "consumer_id": self._consumer_id,
+                        "correlation_id": str(correlation_id),
+                        "error": str(e),
+                    },
+                )
+            finally:
+                self._dlq_producer = None
 
         # Stop Kafka consumer
         if self._consumer is not None:
@@ -767,14 +951,18 @@ class AgentActionsConsumer:
 
                 # Process batch and get successful offsets per partition
                 batch_correlation_id = uuid4()
+                batch_start = time.monotonic()
                 successful_offsets = await self._process_batch(
                     messages, batch_correlation_id
                 )
+                batch_latency_ms = (time.monotonic() - batch_start) * 1000
 
                 # Commit only successful offsets
                 if successful_offsets:
                     await self._commit_offsets(successful_offsets, batch_correlation_id)
-                    await self.metrics.record_batch_processed()
+                    await self.metrics.record_batch_processed(
+                        latency_ms=batch_latency_ms
+                    )
 
         except asyncio.CancelledError:
             logger.info(
@@ -937,6 +1125,20 @@ class AgentActionsConsumer:
                     },
                 )
                 parsed_skipped += 1
+                # Permanent failure: send to DLQ (Phase 2 - OMN-1768)
+                raw_bytes = (
+                    msg.value
+                    if isinstance(msg.value, bytes)
+                    else str(msg.value).encode("utf-8")
+                )
+                await self._send_to_dlq(
+                    message_value=raw_bytes,
+                    source_topic=msg.topic,
+                    partition=msg.partition,
+                    offset=msg.offset,
+                    error_reason=f"JSONDecodeError: {e}",
+                    correlation_id=correlation_id,
+                )
                 # Skip malformed messages but track offset separately to preserve on write failures
                 tp = TopicPartition(msg.topic, msg.partition)
                 current = skipped_offsets.get(tp, -1)
@@ -955,6 +1157,20 @@ class AgentActionsConsumer:
                     },
                 )
                 parsed_skipped += 1
+                # Permanent failure: send to DLQ (Phase 2 - OMN-1768)
+                raw_bytes = (
+                    msg.value
+                    if isinstance(msg.value, bytes)
+                    else str(msg.value).encode("utf-8")
+                )
+                await self._send_to_dlq(
+                    message_value=raw_bytes,
+                    source_topic=msg.topic,
+                    partition=msg.partition,
+                    offset=msg.offset,
+                    error_reason=f"ValidationError: {e}",
+                    correlation_id=correlation_id,
+                )
                 # Skip invalid messages but track offset separately to preserve on write failures
                 tp = TopicPartition(msg.topic, msg.partition)
                 current = skipped_offsets.get(tp, -1)
@@ -991,7 +1207,7 @@ class AgentActionsConsumer:
                     current = successful_offsets.get(tp, -1)
                     successful_offsets[tp] = max(current, msg.offset)
 
-                await self.metrics.record_processed(written_count)
+                await self.metrics.record_processed(written_count, topic=topic)
 
                 logger.debug(
                     "Wrote batch for topic",
@@ -1014,7 +1230,7 @@ class AgentActionsConsumer:
                         "count": len(models),
                     },
                 )
-                await self.metrics.record_failed(len(models))
+                await self.metrics.record_failed(len(models), topic=topic)
                 # Remove any offsets we may have tracked for failed partitions
                 for msg, _ in items:
                     tp = TopicPartition(msg.topic, msg.partition)
@@ -1073,6 +1289,78 @@ class AgentActionsConsumer:
                 },
             )
             # Don't re-raise - messages will be reprocessed on restart
+
+    # =========================================================================
+    # Dead Letter Queue (Phase 2 - OMN-1768)
+    # =========================================================================
+
+    async def _send_to_dlq(
+        self,
+        message_value: bytes,
+        source_topic: str,
+        partition: int,
+        offset: int,
+        error_reason: str,
+        correlation_id: UUID,
+    ) -> None:
+        """Send a permanently failed message to the dead letter queue topic.
+
+        Wraps the original message with failure metadata for later analysis.
+        Failures in DLQ publishing are logged but do not propagate -- the
+        consumer must never crash due to DLQ issues.
+
+        Args:
+            message_value: Original raw message bytes.
+            source_topic: Topic the message was consumed from.
+            partition: Partition the message was consumed from.
+            offset: Offset of the original message.
+            error_reason: Human-readable failure reason.
+            correlation_id: Correlation ID for tracing.
+        """
+        if self._dlq_producer is None or not self._config.dlq_enabled:
+            return
+
+        dlq_envelope = {
+            "source_topic": source_topic,
+            "source_partition": partition,
+            "source_offset": offset,
+            "error_reason": error_reason,
+            "correlation_id": str(correlation_id),
+            "timestamp": datetime.now(UTC).isoformat(),
+            "consumer_id": self._consumer_id,
+            "original_value": message_value.decode("utf-8", errors="replace"),
+        }
+
+        try:
+            await self._dlq_producer.send_and_wait(
+                self._config.dlq_topic,
+                value=json.dumps(dlq_envelope).encode("utf-8"),
+            )
+            await self.metrics.record_sent_to_dlq()
+
+            logger.info(
+                "Message sent to DLQ",
+                extra={
+                    "consumer_id": self._consumer_id,
+                    "correlation_id": str(correlation_id),
+                    "source_topic": source_topic,
+                    "source_partition": partition,
+                    "source_offset": offset,
+                    "error_reason": error_reason,
+                    "dlq_topic": self._config.dlq_topic,
+                },
+            )
+        except Exception:
+            # DLQ failures must never crash the consumer
+            logger.exception(
+                "Failed to send message to DLQ",
+                extra={
+                    "consumer_id": self._consumer_id,
+                    "correlation_id": str(correlation_id),
+                    "source_topic": source_topic,
+                    "dlq_topic": self._config.dlq_topic,
+                },
+            )
 
     # =========================================================================
     # Health Check Server

@@ -31,12 +31,20 @@ Example:
     ... )
 """
 
+import json
+import logging
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_core.types import JsonType
+
+logger = logging.getLogger(__name__)
+
+# Payload size limits (Phase 2 hardening - OMN-1768)
+MAX_METADATA_SIZE_BYTES: int = 65_536  # 64 KB
+MAX_RAW_PAYLOAD_SIZE_BYTES: int = 1_048_576  # 1 MB
 
 
 class ModelAgentAction(BaseModel):
@@ -129,6 +137,72 @@ class ModelAgentAction(BaseModel):
         description="Complete raw payload for Phase 2 schema tightening.",
     )
 
+    # ---- Payload Size Validators (Phase 2 hardening - OMN-1768) ----
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def validate_metadata_size(
+        cls, v: dict[str, JsonType] | None
+    ) -> dict[str, JsonType] | None:
+        """Validate metadata does not exceed size limit.
+
+        Truncates oversized metadata to prevent unbounded storage growth.
+        Logs a warning when truncation occurs.
+
+        Args:
+            v: Metadata dictionary or None.
+
+        Returns:
+            Original metadata if within limits, truncated version if oversized.
+        """
+        if v is None:
+            return v
+        serialized = json.dumps(v)
+        if len(serialized.encode("utf-8")) > MAX_METADATA_SIZE_BYTES:
+            logger.warning(
+                "Metadata exceeds size limit (%d bytes > %d), truncating",
+                len(serialized.encode("utf-8")),
+                MAX_METADATA_SIZE_BYTES,
+                extra={"size_bytes": len(serialized.encode("utf-8"))},
+            )
+            return {
+                "_truncated": True,
+                "_original_size_bytes": len(serialized.encode("utf-8")),
+            }
+        return v
+
+    @field_validator("raw_payload", mode="before")
+    @classmethod
+    def validate_raw_payload_size(
+        cls, v: dict[str, JsonType] | None
+    ) -> dict[str, JsonType] | None:
+        """Validate raw_payload does not exceed size limit.
+
+        Truncates oversized raw payloads to prevent unbounded storage growth.
+        Logs a warning when truncation occurs.
+
+        Args:
+            v: Raw payload dictionary or None.
+
+        Returns:
+            Original payload if within limits, truncated version if oversized.
+        """
+        if v is None:
+            return v
+        serialized = json.dumps(v)
+        if len(serialized.encode("utf-8")) > MAX_RAW_PAYLOAD_SIZE_BYTES:
+            logger.warning(
+                "Raw payload exceeds size limit (%d bytes > %d), truncating",
+                len(serialized.encode("utf-8")),
+                MAX_RAW_PAYLOAD_SIZE_BYTES,
+                extra={"size_bytes": len(serialized.encode("utf-8"))},
+            )
+            return {
+                "_truncated": True,
+                "_original_size_bytes": len(serialized.encode("utf-8")),
+            }
+        return v
+
     # ---- Project Context (absorbed from omniclaude - OMN-2057) ----
     project_path: str | None = Field(
         default=None,
@@ -156,4 +230,8 @@ class ModelAgentAction(BaseModel):
         )
 
 
-__all__ = ["ModelAgentAction"]
+__all__ = [
+    "MAX_METADATA_SIZE_BYTES",
+    "MAX_RAW_PAYLOAD_SIZE_BYTES",
+    "ModelAgentAction",
+]
