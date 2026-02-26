@@ -19,6 +19,7 @@ Exports:
 from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
 from omnibase_infra.topics.platform_topic_suffixes import (
     ALL_INTELLIGENCE_TOPIC_SPECS,
+    ALL_OMNICLAUDE_TOPIC_SPECS,
     ALL_OMNIMEMORY_TOPIC_SPECS,
     ALL_PLATFORM_SUFFIXES,
     ALL_PLATFORM_TOPIC_SPECS,
@@ -96,6 +97,7 @@ __all__: list[str] = [
     "ALL_PLATFORM_SUFFIXES",
     "ALL_PLATFORM_TOPIC_SPECS",
     "ALL_INTELLIGENCE_TOPIC_SPECS",
+    "ALL_OMNICLAUDE_TOPIC_SPECS",
     "ALL_OMNIMEMORY_TOPIC_SPECS",
     "ALL_PROVISIONED_SUFFIXES",
     "ALL_PROVISIONED_TOPIC_SPECS",
