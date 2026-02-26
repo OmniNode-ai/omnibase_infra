@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.11.0"
+version = "0.11.1"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{name = "OmniNode Team", email = "team@omninode.ai"}]
 license = {text = "MIT"}
