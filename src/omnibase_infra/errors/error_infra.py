@@ -307,6 +307,7 @@ class InfraConnectionError(RuntimeHostError):
         EnumInfraTransportType.QDRANT: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.GRAPH: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.LLM: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
+        EnumInfraTransportType.BRIDGE: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         None: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
     }
 

@@ -20,6 +20,7 @@ Supported transport types:
     - QDRANT: Qdrant vector database operations
     - GRAPH: Graph database (Memgraph/Neo4j) operations
     - LLM: LLM service endpoints (vLLM, embedding servers, etc.)
+    - BRIDGE: Cross-domain bridge transport for multi-bus topic routing
 
 Each transport type has a corresponding handler implementation:
     - HandlerConsul: Service registration, health checks, KV store operations
@@ -55,6 +56,7 @@ class EnumInfraTransportType(str, Enum):
         QDRANT: Qdrant vector database transport
         GRAPH: Graph database (Memgraph/Neo4j) transport
         LLM: LLM service endpoint transport (vLLM, embedding servers, etc.)
+        BRIDGE: Cross-domain bridge transport for multi-bus topic routing
     """
 
     HTTP = "http"
@@ -71,6 +73,7 @@ class EnumInfraTransportType(str, Enum):
     QDRANT = "qdrant"
     GRAPH = "graph"
     LLM = "llm"
+    BRIDGE = "bridge"
 
 
 __all__ = ["EnumInfraTransportType"]

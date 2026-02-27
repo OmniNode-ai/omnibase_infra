@@ -2400,6 +2400,20 @@ pattern_exemptions:
       - CLAUDE.md (Node Architecture - EFFECT nodes)
     ticket: OMN-2143
   # ==========================================================================
+  # ModelBusDescriptor bus_id Exemption (OMN-2894)
+  # ==========================================================================
+  # bus_id is a human-readable bus instance identifier (e.g., "bus.local",
+  # "bus.org.omninode"), not a UUID. It follows the trust-domain naming
+  # convention from the Authenticated Dependency Resolution epic.
+  - file_pattern: 'model_bus_descriptor\.py'
+    violation_pattern: "Field 'bus_id' should use UUID type instead of str"
+    reason: >
+      bus_id is a human-readable bus instance identifier (e.g., "bus.local", "bus.org.omninode") used for trust-domain-scoped topic routing. It follows the hierarchical naming convention from the epic plan, not a UUID-based system identifier.
+
+    documentation:
+      - CLAUDE.md (Phase 5 - Multi-Bus Topic Resolution)
+    ticket: OMN-2894
+  # ==========================================================================
   # ServiceArtifactStore Method Count Exemption (OMN-2151)
   # ==========================================================================
   # ServiceArtifactStore manages on-disk validation artifacts with cohesive file I/O
