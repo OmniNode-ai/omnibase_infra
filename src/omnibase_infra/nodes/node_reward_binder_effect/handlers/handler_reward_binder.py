@@ -2,12 +2,16 @@
 # Copyright (c) 2026 OmniNode Team
 """Handler that emits structured reward events to Kafka.
 
-Emits three event types in strict order after ScoringReducer produces a
+Emits two event types in strict order after ScoringReducer produces a
 ModelEvaluationResult:
 
-  1. ``ModelRunEvaluatedEvent``       -> ``onex.evt.omnimemory.run-evaluated.v1``
-  2. ``ModelRewardAssignedEvent``     -> ``onex.evt.omnimemory.reward-assigned.v1``
-  3. ``ModelPolicyStateUpdatedEvent`` -> ``onex.evt.omnimemory.policy-state-updated.v1``
+  1. ``ModelRewardAssignedEvent``     -> ``onex.evt.omnimemory.reward-assigned.v1``
+  2. ``ModelPolicyStateUpdatedEvent`` -> ``onex.evt.omnimemory.policy-state-updated.v1``
+
+Note: ``ModelRunEvaluatedEvent`` (``onex.evt.omnimemory.run-evaluated.v1``) was removed
+in OMN-2929. The canonical run-evaluated event is produced by omniintelligence
+``node_evidence_collection_effect`` to ``onex.evt.omniintelligence.run-evaluated.v1``.
+The orphan ``onex.evt.omnimemory.run-evaluated.v1`` topic had zero consumers.
 
 Design constraints:
   - No scoring logic -- only emits what ScoringReducer produced.
@@ -20,7 +24,7 @@ Design constraints:
   - Emits canonical omnibase_core.ModelScoreVector fields (correctness, safety,
     cost, latency, maintainability, human_time) rather than stub field shapes.
 
-Ticket: OMN-2927
+Ticket: OMN-2929
 """
 
 from __future__ import annotations
@@ -53,9 +57,6 @@ from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_assigned
 from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_binder_output import (
     ModelRewardBinderOutput,
 )
-from omnibase_infra.nodes.node_reward_binder_effect.models.model_run_evaluated_event import (
-    ModelRunEvaluatedEvent,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -67,7 +68,6 @@ logger = logging.getLogger(__name__)
 # ==============================================================================
 # Topic name constants
 # ==============================================================================
-_TOPIC_RUN_EVALUATED = "onex.evt.omnimemory.run-evaluated.v1"
 _TOPIC_REWARD_ASSIGNED = "onex.evt.omnimemory.reward-assigned.v1"
 _TOPIC_POLICY_STATE_UPDATED = "onex.evt.omnimemory.policy-state-updated.v1"
 
@@ -157,9 +157,8 @@ class HandlerRewardBinder:
             correlation_id (UUID): Tracing correlation ID.
 
         Events are emitted in order:
-          1. ModelRunEvaluatedEvent (canonical score vector fields inline)
-          2. ModelRewardAssignedEvent (canonical score vector fields inline)
-          3. ModelPolicyStateUpdatedEvent
+          1. ModelRewardAssignedEvent (canonical score vector fields inline)
+          2. ModelPolicyStateUpdatedEvent
 
         Raises:
             RuntimeHostError: If the publisher is not configured or required
@@ -225,31 +224,7 @@ class HandlerRewardBinder:
         evidence_refs = _build_evidence_refs(result)
         sv = result.score_vector
 
-        # Event 1: ModelRunEvaluatedEvent (canonical score vector fields inline)
-        run_evaluated = ModelRunEvaluatedEvent(
-            run_id=result.run_id,
-            objective_id=result.objective_id,
-            objective_fingerprint=fingerprint,
-            correctness=sv.correctness,
-            safety=sv.safety,
-            cost=sv.cost,
-            latency=sv.latency,
-            maintainability=sv.maintainability,
-            human_time=sv.human_time,
-        )
-        await self._publish(
-            event_type="run.evaluated",
-            topic=_TOPIC_RUN_EVALUATED,
-            payload=json.loads(run_evaluated.model_dump_json()),
-            correlation_id=corr_id,
-        )
-        logger.info(
-            "Emitted ModelRunEvaluatedEvent run_id=%s fingerprint=%s",
-            result.run_id,
-            fingerprint,
-        )
-
-        # Event 2: ModelRewardAssignedEvent (canonical score vector fields inline)
+        # Event 1: ModelRewardAssignedEvent (canonical score vector fields inline)
         reward_event = ModelRewardAssignedEvent(
             run_id=result.run_id,
             correctness=sv.correctness,
@@ -273,7 +248,7 @@ class HandlerRewardBinder:
             sv.safety,
         )
 
-        # Event 3: ModelPolicyStateUpdatedEvent
+        # Event 2: ModelPolicyStateUpdatedEvent
         policy_event = ModelPolicyStateUpdatedEvent(
             run_id=result.run_id,
             old_state=result.policy_state_before,
@@ -292,7 +267,6 @@ class HandlerRewardBinder:
 
         # Build output
         topics: tuple[str, ...] = (
-            _TOPIC_RUN_EVALUATED,
             _TOPIC_REWARD_ASSIGNED,
             _TOPIC_POLICY_STATE_UPDATED,
         )
@@ -301,7 +275,6 @@ class HandlerRewardBinder:
             correlation_id=corr_id,
             run_id=result.run_id,
             objective_fingerprint=fingerprint,
-            run_evaluated_event_id=run_evaluated.event_id,
             reward_assigned_event_ids=(reward_event.event_id,),
             policy_state_updated_event_id=policy_event.event_id,
             topics_published=topics,

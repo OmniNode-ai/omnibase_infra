@@ -36,10 +36,6 @@ class ModelRewardBinderOutput(BaseModel):
         ...,
         description="SHA-256 hex digest of the ObjectiveSpec (64 hex chars).",
     )
-    run_evaluated_event_id: UUID | None = Field(
-        default=None,
-        description="Event ID of the emitted RunEvaluatedEvent.",
-    )
     reward_assigned_event_ids: tuple[UUID, ...] = Field(
         default_factory=tuple,
         description="Event IDs of all RewardAssignedEvents emitted (one per target).",

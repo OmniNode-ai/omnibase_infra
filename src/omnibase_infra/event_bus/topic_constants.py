@@ -558,13 +558,10 @@ Renamed: onex.evt.agent.status.v1 -> onex.evt.omniclaude.agent-status.v1 (OMN-28
 """
 
 # Reward architecture topics (OMN-2552)
-TOPIC_RUN_EVALUATED: Final[str] = "onex.evt.omnimemory.run-evaluated.v1"
-"""Reward run evaluation summary with objective fingerprint.
-
-Producer: NodeRewardBinderEffect
-Consumer: Policy update consumers, analytics
-Ticket: OMN-2552
-"""
+# Note: TOPIC_RUN_EVALUATED ("onex.evt.omnimemory.run-evaluated.v1") was removed in
+# OMN-2929. The canonical run-evaluated event is produced by omniintelligence
+# node_evidence_collection_effect to "onex.evt.omniintelligence.run-evaluated.v1".
+# The omnibase_infra orphan topic had zero consumers and has been retired.
 
 TOPIC_REWARD_ASSIGNED: Final[str] = "onex.evt.omnimemory.reward-assigned.v1"
 """Per-target reward assignment with traceable evidence refs.
@@ -624,7 +621,6 @@ __all__ = [
     "TOPIC_REWARD_ASSIGNED",
     # Resolution Event Ledger (OMN-2895)
     "TOPIC_RESOLUTION_DECIDED",
-    "TOPIC_RUN_EVALUATED",
     # LLM Call Metrics Topics
     "TOPIC_LLM_CALL_COMPLETED",
     # Wiring Health Topics
