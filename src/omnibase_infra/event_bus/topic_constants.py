@@ -582,6 +582,19 @@ Consumer: Policy state consumers, audit log
 Ticket: OMN-2552
 """
 
+# Resolution event ledger (OMN-2895 / Phase 6)
+TOPIC_RESOLUTION_DECIDED: Final[str] = "onex.evt.platform.resolution-decided.v1"
+"""Resolution decision audit events.
+
+Published after every tiered dependency resolution decision. Records the
+full tier progression, proofs attempted, and final outcome for audit,
+replay, and intelligence.
+
+Producer: ServiceResolutionEventPublisher
+Consumer: Audit log, intelligence pipeline, replay infrastructure
+Ticket: OMN-2895 (Phase 6 of OMN-2897 epic)
+"""
+
 # Grouped constants for wiring health monitoring
 WIRING_HEALTH_MONITORED_TOPICS: Final[tuple[str, ...]] = (
     TOPIC_SESSION_OUTCOME_CURRENT,
@@ -609,6 +622,8 @@ __all__ = [
     # Reward Architecture Topics (OMN-2552)
     "TOPIC_POLICY_STATE_UPDATED",
     "TOPIC_REWARD_ASSIGNED",
+    # Resolution Event Ledger (OMN-2895)
+    "TOPIC_RESOLUTION_DECIDED",
     "TOPIC_RUN_EVALUATED",
     # LLM Call Metrics Topics
     "TOPIC_LLM_CALL_COMPLETED",

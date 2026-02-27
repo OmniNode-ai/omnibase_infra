@@ -141,6 +141,18 @@ Published by a node after it receives a registration-accepted event,
 confirming that the node acknowledges successful registration.
 """
 
+# Resolution event ledger (OMN-2895 / Phase 6 of OMN-2897)
+SUFFIX_RESOLUTION_DECIDED: str = "onex.evt.platform.resolution-decided.v1"
+"""Topic suffix for resolution decision audit events.
+
+Published after every tiered dependency resolution decision. Records the
+full tier progression, proofs attempted, and final outcome for audit,
+replay, and intelligence.
+
+Producer: ServiceResolutionEventPublisher
+Consumer: Audit log, intelligence pipeline, replay infrastructure
+"""
+
 # =============================================================================
 # INTELLIGENCE DOMAIN TOPIC SUFFIXES (omniintelligence plugin)
 # =============================================================================
@@ -518,6 +530,8 @@ ALL_PLATFORM_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_CONTRACT_REGISTERED, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_CONTRACT_DEREGISTERED, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION_ACKED, partitions=6),
+    # Resolution event ledger (OMN-2895)
+    ModelTopicSpec(suffix=SUFFIX_RESOLUTION_DECIDED, partitions=3),
     # Topic catalog topics (low-throughput coordination, 1 partition each)
     ModelTopicSpec(
         suffix=SUFFIX_TOPIC_CATALOG_QUERY,
