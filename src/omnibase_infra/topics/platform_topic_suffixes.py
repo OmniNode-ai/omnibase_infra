@@ -253,6 +253,12 @@ SUFFIX_OMNIMEMORY_CRAWL_REQUESTED: str = "onex.cmd.omnimemory.crawl-requested.v1
 # in the ALL_OMNICLAUDE_TOPIC_SPECS tuple below.
 
 _OMNICLAUDE_SKILL_TOPIC_SUFFIXES: tuple[str, ...] = (
+    # ----- Skill lifecycle observability topics (OMN-2934) -----
+    # Emitted by handle_skill_requested() in omniclaude on every skill invocation.
+    # run_id is the join key: started and completed for the same invocation
+    # share the same run_id and land on the same Kafka partition.
+    "onex.evt.omniclaude.skill-started.v1",
+    "onex.evt.omniclaude.skill-completed.v1",
     # ----- Command topics (skill invocation requests) -----
     "onex.cmd.omniclaude.action-logging.v1",
     "onex.cmd.omniclaude.agent-observability.v1",
@@ -462,7 +468,11 @@ _OMNICLAUDE_SKILL_TOPIC_SUFFIXES: tuple[str, ...] = (
 )
 """All OmniClaude skill topic suffixes extracted from contract.yaml files.
 
-Each skill node defines 3 topics:
+Includes skill lifecycle observability topics (OMN-2934):
+  - ``onex.evt.omniclaude.skill-started.v1``   (emitted before dispatch)
+  - ``onex.evt.omniclaude.skill-completed.v1`` (emitted after dispatch)
+
+Each skill node also defines 3 topics:
   - Command: ``onex.cmd.omniclaude.<skill-name>.v1`` (subscribe)
   - Success: ``onex.evt.omniclaude.<skill-name>-completed.v1`` (publish)
   - Failure: ``onex.evt.omniclaude.<skill-name>-failed.v1`` (publish)
@@ -607,7 +617,7 @@ ALL_OMNICLAUDE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = tuple(
 """OmniClaude skill topic specs provisioned for skill orchestrator nodes.
 
 Each skill topic gets 1 partition (low-throughput skill dispatch -- each skill
-invocation is a single message). 204 topics total (68 skills x 3 topics each).
+invocation is a single message). 206 topics total (68 skills x 3 topics each + 2 lifecycle topics [OMN-2934]).
 
 Source: ``omniclaude/src/omniclaude/nodes/node_skill_*/contract.yaml``
 """
