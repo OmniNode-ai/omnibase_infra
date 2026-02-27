@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.11.1"
+version = "0.12.0"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{name = "OmniNode Team", email = "team@omninode.ai"}]
 license = {text = "MIT"}
@@ -32,9 +32,9 @@ dependencies = [
     # omnibase-core: requires OMN-2754 (contract.resolve compute node) which
     # landed on main after v0.20.0.  Using git source override until v0.21.0 is
     # published; revert [tool.uv.sources] and pin >=0.21.0,<0.22.0 after release.
-    "omnibase-core>=0.20.0,<0.21.0",
+    "omnibase-core>=0.21.0,<0.22.0",
     # omnibase-spi v0.13.0: release chain bump for omnibase_infra 0.11.0
-    "omnibase-spi>=0.13.0,<0.14.0",
+    "omnibase-spi>=0.14.0,<0.15.0",
 
     # ============================================================================
     # External Dependency Security Guidance
@@ -358,9 +358,7 @@ warn_required_dynamic_aliases = true
 warn_untyped_fields = true
 
 [tool.uv.sources]
-# OMN-2756: pin to omnibase_core main (post-v0.20.0) which contains OMN-2754
-# (models/nodes/contract_resolve).  Revert to PyPI pin once v0.21.0 is released.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "64d6af140e8a2804368f247e229cb51965f6ef97" }
+# omnibase-core v0.21.0 is now published to PyPI; git source override removed.
 
 [tool.coverage.run]
 source = ["src/omnibase_infra"]
