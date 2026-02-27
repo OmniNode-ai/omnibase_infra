@@ -152,7 +152,7 @@ class TestCanonicalPipelineExclusivity:
         )
 
         legacy_topic = "onex.cmd.omniintelligence.session-outcome.v1"
-        canonical_topic = "onex.evt.omniintelligence.session-outcome.v1"
+        canonical_topic = "onex.evt.omniclaude.session-outcome.v1"
 
         fake_registrations = (
             ModelEventRegistration(
@@ -496,7 +496,7 @@ class TestNoDuplicateEvents:
         )
 
         legacy_topic = "onex.cmd.omniintelligence.session-outcome.v1"
-        canonical_topic = "onex.evt.omniintelligence.session-outcome.v1"
+        canonical_topic = "onex.evt.omniclaude.session-outcome.v1"
 
         fake_registrations = (
             ModelEventRegistration(
