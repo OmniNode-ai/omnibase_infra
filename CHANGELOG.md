@@ -5,6 +5,15 @@ All notable changes to the ONEX Infrastructure (omnibase_infra) will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-02-27
+
+### Changed
+- Version bump as part of coordinated OmniNode platform release run release-20260227-eceed7
+
+### Dependencies
+- omnibase-core bumped to >=0.21.0,<0.22.0 (was >=0.20.0,<0.21.0); git source override removed
+- omnibase-spi bumped to >=0.14.0,<0.15.0 (was >=0.13.0,<0.14.0)
+
 ## [0.11.0] - 2026-02-25
 
 ### Added
