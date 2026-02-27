@@ -21,10 +21,13 @@ Design constraints:
     (deterministic serialisation).
   - ``evidence_refs`` in ``ModelRewardAssignedEvent`` trace back to specific
     ``ModelEvidenceItem.item_id`` values from the input ``ModelEvidenceBundle``.
-  - Emits canonical omnibase_core.ModelScoreVector fields (correctness, safety,
-    cost, latency, maintainability, human_time) rather than stub field shapes.
+  - Emits canonical omnibase_core.ModelRewardAssignedEvent (OMN-2928):
+    bridges run-level score vector fields with consumer's policy signal fields.
+  - ``reward_delta`` is computed as mean(score_vector) * 2 - 1, normalised to [-1, +1].
+  - ``idempotency_key`` is SHA-256 of (event_id.hex, policy_id.hex, run_id.hex).
+  - Envelope must include ``policy_id`` (UUID) and ``policy_type`` (EnumPolicyType).
 
-Ticket: OMN-2929
+Ticket: OMN-2927, OMN-2928
 """
 
 from __future__ import annotations
@@ -32,10 +35,16 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from omnibase_core.enums.enum_policy_type import EnumPolicyType
 from omnibase_core.models.dispatch import ModelHandlerOutput
+from omnibase_core.models.objective.model_reward_assigned_event import (
+    ModelRewardAssignedEvent,
+)
+from omnibase_core.models.objective.model_score_vector import ModelScoreVector
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
@@ -50,9 +59,6 @@ from omnibase_infra.nodes.node_reward_binder_effect.models.model_objective_spec 
 )
 from omnibase_infra.nodes.node_reward_binder_effect.models.model_policy_state_updated_event import (
     ModelPolicyStateUpdatedEvent,
-)
-from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_assigned_event import (
-    ModelRewardAssignedEvent,
 )
 from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_binder_output import (
     ModelRewardBinderOutput,
@@ -97,6 +103,53 @@ def _build_evidence_refs(result: ModelEvaluationResult) -> tuple[UUID, ...]:
         Tuple of ModelEvidenceItem.item_id values.
     """
     return tuple(item.item_id for item in result.evidence_bundle.items)
+
+
+def _compute_reward_delta(sv: ModelScoreVector) -> float:
+    """Derive a signed reward delta [-1.0, +1.0] from a canonical score vector.
+
+    Formula: mean(all 6 score fields) * 2 - 1
+    This maps [0.0, 1.0] score range to [-1.0, +1.0] reward delta range:
+      - 1.0 mean score -> +1.0 delta (maximum improvement)
+      - 0.5 mean score ->  0.0 delta (neutral)
+      - 0.0 mean score -> -1.0 delta (maximum degradation)
+
+    Result is clamped to [-1.0, +1.0] to guard against floating-point drift.
+
+    Args:
+        sv: Canonical score vector from ScoringReducer.
+
+    Returns:
+        Signed reward delta in [-1.0, +1.0].
+    """
+    mean_score = (
+        sv.correctness
+        + sv.safety
+        + sv.cost
+        + sv.latency
+        + sv.maintainability
+        + sv.human_time
+    ) / 6.0
+    delta = mean_score * 2.0 - 1.0
+    return max(-1.0, min(1.0, delta))
+
+
+def _compute_idempotency_key(event_id: UUID, policy_id: UUID, run_id: UUID) -> str:
+    """Compute deterministic idempotency key from (event_id, policy_id, run_id).
+
+    Uses SHA-256 of the concatenated UUID hex values (no hyphens).
+    Consumers use this to detect and discard duplicate reward events.
+
+    Args:
+        event_id: Unique event identifier.
+        policy_id: Policy entity receiving the reward.
+        run_id: Evaluation run ID.
+
+    Returns:
+        64-character lowercase hex digest.
+    """
+    combined = f"{event_id.hex}{policy_id.hex}{run_id.hex}"
+    return hashlib.sha256(combined.encode("utf-8")).hexdigest()
 
 
 class HandlerRewardBinder:
@@ -155,6 +208,8 @@ class HandlerRewardBinder:
             evaluation_result (ModelEvaluationResult): Result from ScoringReducer.
             objective_spec (ModelObjectiveSpec): Spec used for this run.
             correlation_id (UUID): Tracing correlation ID.
+            policy_id (UUID): Policy entity receiving the reward.
+            policy_type (EnumPolicyType): Policy type for the entity.
 
         Events are emitted in order:
           1. ModelRewardAssignedEvent (canonical score vector fields inline)
@@ -219,13 +274,43 @@ class HandlerRewardBinder:
             )
         spec: ModelObjectiveSpec = raw_spec
 
-        # Compute fingerprint and evidence refs
+        raw_policy_id = envelope.get("policy_id")
+        if raw_policy_id is None:
+            raise RuntimeHostError(
+                "emit_reward_events requires 'policy_id' in the envelope",
+                context=context,
+            )
+        if not isinstance(raw_policy_id, UUID):
+            raise RuntimeHostError(
+                f"Expected policy_id as UUID, got {type(raw_policy_id).__name__}",
+                context=context,
+            )
+        policy_id: UUID = raw_policy_id
+
+        raw_policy_type = envelope.get("policy_type")
+        if raw_policy_type is None:
+            raise RuntimeHostError(
+                "emit_reward_events requires 'policy_type' in the envelope",
+                context=context,
+            )
+        if not isinstance(raw_policy_type, EnumPolicyType):
+            raise RuntimeHostError(
+                f"Expected policy_type as EnumPolicyType, got {type(raw_policy_type).__name__}",
+                context=context,
+            )
+        policy_type: EnumPolicyType = raw_policy_type
+
+        # Compute fingerprint, evidence refs, and canonical reward delta
         fingerprint = _compute_objective_fingerprint(spec)
         evidence_refs = _build_evidence_refs(result)
         sv = result.score_vector
+        reward_delta = _compute_reward_delta(sv)
+        occurred_at_utc = datetime.now(UTC).isoformat()
 
         # Event 1: ModelRewardAssignedEvent (canonical score vector fields inline)
+        reward_event_id = uuid4()
         reward_event = ModelRewardAssignedEvent(
+            event_id=reward_event_id,
             run_id=result.run_id,
             correctness=sv.correctness,
             safety=sv.safety,
@@ -234,6 +319,16 @@ class HandlerRewardBinder:
             maintainability=sv.maintainability,
             human_time=sv.human_time,
             evidence_refs=evidence_refs,
+            policy_id=policy_id,
+            policy_type=policy_type,
+            reward_delta=reward_delta,
+            objective_id=result.objective_id,
+            idempotency_key=_compute_idempotency_key(
+                event_id=reward_event_id,
+                policy_id=policy_id,
+                run_id=result.run_id,
+            ),
+            occurred_at_utc=occurred_at_utc,
         )
         await self._publish(
             event_type="reward.assigned",
@@ -242,10 +337,12 @@ class HandlerRewardBinder:
             correlation_id=corr_id,
         )
         logger.info(
-            "Emitted ModelRewardAssignedEvent run_id=%s correctness=%s safety=%s",
+            "Emitted canonical ModelRewardAssignedEvent run_id=%s "
+            "policy_id=%s policy_type=%s reward_delta=%.4f",
             result.run_id,
-            sv.correctness,
-            sv.safety,
+            policy_id,
+            policy_type.value,
+            reward_delta,
         )
 
         # Event 2: ModelPolicyStateUpdatedEvent
@@ -314,4 +411,9 @@ class HandlerRewardBinder:
         )
 
 
-__all__: list[str] = ["HandlerRewardBinder"]
+__all__: list[str] = [
+    "HandlerRewardBinder",
+    "_compute_idempotency_key",
+    "_compute_objective_fingerprint",
+    "_compute_reward_delta",
+]
