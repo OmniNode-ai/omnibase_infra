@@ -1,0 +1,1266 @@
+{
+  "schema_version": "1.0.0",
+  "package_version": "0.11.0",
+  "protocol_count": 19,
+  "protocols": {
+    "ProtocolCapabilityProjection": {
+      "runtime_checkable": true,
+      "method_count": 6,
+      "methods": {
+        "get_by_capability_tag": {
+          "parameters": [
+            {
+              "name": "tag",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "state",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "EnumRegistrationState | None",
+              "default": "None"
+            },
+            {
+              "name": "correlation_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "list[ModelRegistrationProjection]"
+        },
+        "get_by_capability_tags_all": {
+          "parameters": [
+            {
+              "name": "tags",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "list[str]",
+              "default": null
+            },
+            {
+              "name": "state",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "EnumRegistrationState | None",
+              "default": "None"
+            },
+            {
+              "name": "correlation_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "list[ModelRegistrationProjection]"
+        },
+        "get_by_capability_tags_any": {
+          "parameters": [
+            {
+              "name": "tags",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "list[str]",
+              "default": null
+            },
+            {
+              "name": "state",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "EnumRegistrationState | None",
+              "default": "None"
+            },
+            {
+              "name": "correlation_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "list[ModelRegistrationProjection]"
+        },
+        "get_by_contract_type": {
+          "parameters": [
+            {
+              "name": "contract_type",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ContractType",
+              "default": null
+            },
+            {
+              "name": "state",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "EnumRegistrationState | None",
+              "default": "None"
+            },
+            {
+              "name": "correlation_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "list[ModelRegistrationProjection]"
+        },
+        "get_by_intent_type": {
+          "parameters": [
+            {
+              "name": "intent_type",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "state",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "EnumRegistrationState | None",
+              "default": "None"
+            },
+            {
+              "name": "correlation_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "list[ModelRegistrationProjection]"
+        },
+        "get_by_protocol": {
+          "parameters": [
+            {
+              "name": "protocol_name",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "state",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "EnumRegistrationState | None",
+              "default": "None"
+            },
+            {
+              "name": "correlation_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "list[ModelRegistrationProjection]"
+        }
+      }
+    },
+    "ProtocolCapabilityQuery": {
+      "runtime_checkable": true,
+      "method_count": 4,
+      "methods": {
+        "find_nodes_by_capability": {
+          "parameters": [
+            {
+              "name": "capability",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "contract_type",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str | None",
+              "default": "None"
+            },
+            {
+              "name": "state",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "EnumRegistrationState | None",
+              "default": "None"
+            },
+            {
+              "name": "correlation_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "list[ModelRegistrationProjection]"
+        },
+        "find_nodes_by_intent_type": {
+          "parameters": [
+            {
+              "name": "intent_type",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "contract_type",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": "'effect'"
+            },
+            {
+              "name": "state",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "EnumRegistrationState | None",
+              "default": "None"
+            },
+            {
+              "name": "correlation_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "list[ModelRegistrationProjection]"
+        },
+        "find_nodes_by_protocol": {
+          "parameters": [
+            {
+              "name": "protocol",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "contract_type",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str | None",
+              "default": "None"
+            },
+            {
+              "name": "state",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "EnumRegistrationState | None",
+              "default": "None"
+            },
+            {
+              "name": "correlation_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "list[ModelRegistrationProjection]"
+        },
+        "resolve_dependency": {
+          "parameters": [
+            {
+              "name": "dependency_spec",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelDependencySpec",
+              "default": null
+            },
+            {
+              "name": "correlation_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "ModelRegistrationProjection | None"
+        }
+      }
+    },
+    "ProtocolContainerAware": {
+      "runtime_checkable": true,
+      "method_count": 5,
+      "methods": {
+        "describe": {
+          "parameters": [],
+          "return_annotation": "ModelHandlerDescriptor"
+        },
+        "execute": {
+          "parameters": [
+            {
+              "name": "request",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelProtocolRequest",
+              "default": null
+            },
+            {
+              "name": "operation_config",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelOperationConfig",
+              "default": null
+            }
+          ],
+          "return_annotation": "ModelProtocolResponse"
+        },
+        "health_check": {
+          "parameters": [],
+          "return_annotation": "JsonType"
+        },
+        "initialize": {
+          "parameters": [
+            {
+              "name": "config",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelConnectionConfig",
+              "default": null
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "shutdown": {
+          "parameters": [
+            {
+              "name": "timeout_seconds",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "float",
+              "default": "30.0"
+            }
+          ],
+          "return_annotation": "None"
+        }
+      }
+    },
+    "ProtocolDispatchEngine": {
+      "runtime_checkable": true,
+      "method_count": 2,
+      "methods": {
+        "dispatch": {
+          "parameters": [
+            {
+              "name": "topic",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "envelope",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelEventEnvelope[object]",
+              "default": null
+            }
+          ],
+          "return_annotation": "ModelDispatchResult | None"
+        },
+        "dispatch_with_transaction": {
+          "parameters": [
+            {
+              "name": "topic",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "envelope",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "ModelEventEnvelope[object]",
+              "default": null
+            },
+            {
+              "name": "tx",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "object",
+              "default": null
+            }
+          ],
+          "return_annotation": "ModelDispatchResult | None"
+        }
+      }
+    },
+    "ProtocolEventBusLike": {
+      "runtime_checkable": true,
+      "method_count": 2,
+      "methods": {
+        "publish": {
+          "parameters": [
+            {
+              "name": "topic",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "key",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "bytes | None",
+              "default": null
+            },
+            {
+              "name": "value",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "bytes",
+              "default": null
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "publish_envelope": {
+          "parameters": [
+            {
+              "name": "envelope",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "object",
+              "default": null
+            },
+            {
+              "name": "topic",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "key",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "bytes | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "None"
+        }
+      }
+    },
+    "ProtocolEventProjector": {
+      "runtime_checkable": true,
+      "method_count": 2,
+      "methods": {
+        "get_state": {
+          "parameters": [
+            {
+              "name": "aggregate_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID",
+              "default": null
+            },
+            {
+              "name": "correlation_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID",
+              "default": null
+            }
+          ],
+          "return_annotation": "object | None"
+        },
+        "project": {
+          "parameters": [
+            {
+              "name": "event",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelEventEnvelope",
+              "default": null
+            },
+            {
+              "name": "correlation_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID",
+              "default": null
+            }
+          ],
+          "return_annotation": "ModelProjectionResult"
+        }
+      }
+    },
+    "ProtocolIdempotencyStore": {
+      "runtime_checkable": true,
+      "method_count": 4,
+      "methods": {
+        "check_and_record": {
+          "parameters": [
+            {
+              "name": "message_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID",
+              "default": null
+            },
+            {
+              "name": "domain",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str | None",
+              "default": "None"
+            },
+            {
+              "name": "correlation_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "bool"
+        },
+        "cleanup_expired": {
+          "parameters": [
+            {
+              "name": "ttl_seconds",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "int",
+              "default": null
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "is_processed": {
+          "parameters": [
+            {
+              "name": "message_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID",
+              "default": null
+            },
+            {
+              "name": "domain",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "bool"
+        },
+        "mark_processed": {
+          "parameters": [
+            {
+              "name": "message_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID",
+              "default": null
+            },
+            {
+              "name": "domain",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str | None",
+              "default": "None"
+            },
+            {
+              "name": "correlation_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID | None",
+              "default": "None"
+            },
+            {
+              "name": "processed_at",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "datetime | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "None"
+        }
+      }
+    },
+    "ProtocolLedgerSink": {
+      "runtime_checkable": true,
+      "method_count": 3,
+      "methods": {
+        "close": {
+          "parameters": [],
+          "return_annotation": "None"
+        },
+        "emit": {
+          "parameters": [
+            {
+              "name": "event",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelLedgerEventBase",
+              "default": null
+            }
+          ],
+          "return_annotation": "bool"
+        },
+        "flush": {
+          "parameters": [],
+          "return_annotation": "int"
+        }
+      }
+    },
+    "ProtocolMessageDispatcher": {
+      "runtime_checkable": true,
+      "method_count": 1,
+      "methods": {
+        "handle": {
+          "parameters": [
+            {
+              "name": "envelope",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelEventEnvelope[object]",
+              "default": null
+            }
+          ],
+          "return_annotation": "ModelDispatchResult"
+        }
+      }
+    },
+    "ProtocolMessageTypeRegistry": {
+      "runtime_checkable": true,
+      "method_count": 8,
+      "methods": {
+        "freeze": {
+          "parameters": [],
+          "return_annotation": "None"
+        },
+        "get_entry": {
+          "parameters": [
+            {
+              "name": "message_type",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>",
+              "default": null
+            }
+          ],
+          "return_annotation": "omnibase_infra.models.registry.model_message_type_entry.ModelMessageTypeEntry | None"
+        },
+        "get_handlers": {
+          "parameters": [
+            {
+              "name": "message_type",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>",
+              "default": null
+            },
+            {
+              "name": "topic_category",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<enum 'EnumMessageCategory'>",
+              "default": null
+            },
+            {
+              "name": "topic_domain",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>",
+              "default": null
+            }
+          ],
+          "return_annotation": "list[str]"
+        },
+        "has_message_type": {
+          "parameters": [
+            {
+              "name": "message_type",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>",
+              "default": null
+            }
+          ],
+          "return_annotation": "<class 'bool'>"
+        },
+        "list_domains": {
+          "parameters": [],
+          "return_annotation": "list[str]"
+        },
+        "list_message_types": {
+          "parameters": [
+            {
+              "name": "category",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "omnibase_infra.enums.enum_message_category.EnumMessageCategory | None",
+              "default": "None"
+            },
+            {
+              "name": "domain",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "list[str]"
+        },
+        "register_message_type": {
+          "parameters": [
+            {
+              "name": "entry",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'omnibase_infra.models.registry.model_message_type_entry.ModelMessageTypeEntry'>",
+              "default": null
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "validate_startup": {
+          "parameters": [],
+          "return_annotation": "list[str]"
+        }
+      }
+    },
+    "ProtocolNodeHeartbeat": {
+      "runtime_checkable": true,
+      "method_count": 1,
+      "methods": {
+        "handle": {
+          "parameters": [
+            {
+              "name": "envelope",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelEventEnvelope[ModelNodeHeartbeatEvent]",
+              "default": null
+            }
+          ],
+          "return_annotation": "ModelHandlerOutput[object]"
+        }
+      }
+    },
+    "ProtocolNodeIntrospection": {
+      "runtime_checkable": true,
+      "method_count": 3,
+      "methods": {
+        "publish_introspection": {
+          "parameters": [
+            {
+              "name": "reason",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "EnumIntrospectionReason",
+              "default": null
+            },
+            {
+              "name": "correlation_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "start_heartbeat_task": {
+          "parameters": [],
+          "return_annotation": "None"
+        },
+        "stop_heartbeat_task": {
+          "parameters": [],
+          "return_annotation": "None"
+        }
+      }
+    },
+    "ProtocolPayloadRegistry": {
+      "runtime_checkable": true,
+      "method_count": 5,
+      "methods": {
+        "freeze": {
+          "parameters": [],
+          "return_annotation": "None"
+        },
+        "has": {
+          "parameters": [
+            {
+              "name": "payload_type",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "version",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            }
+          ],
+          "return_annotation": "bool"
+        },
+        "list_types": {
+          "parameters": [],
+          "return_annotation": "list[tuple[str, str]]"
+        },
+        "register": {
+          "parameters": [
+            {
+              "name": "payload_type",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "version",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "model_class",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "type[BaseModel]",
+              "default": null
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "resolve": {
+          "parameters": [
+            {
+              "name": "payload_type",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "version",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            }
+          ],
+          "return_annotation": "type[BaseModel]"
+        }
+      }
+    },
+    "ProtocolPluginCompute": {
+      "runtime_checkable": true,
+      "method_count": 1,
+      "methods": {
+        "execute": {
+          "parameters": [
+            {
+              "name": "input_data",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelPluginInputData",
+              "default": null
+            },
+            {
+              "name": "context",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelPluginContext",
+              "default": null
+            }
+          ],
+          "return_annotation": "ModelPluginOutputData"
+        }
+      }
+    },
+    "ProtocolProjectorSchemaValidator": {
+      "runtime_checkable": true,
+      "method_count": 2,
+      "methods": {
+        "ensure_schema_exists": {
+          "parameters": [
+            {
+              "name": "schema",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelProjectorSchema",
+              "default": null
+            },
+            {
+              "name": "correlation_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID",
+              "default": null
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "table_exists": {
+          "parameters": [
+            {
+              "name": "table_name",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "correlation_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID",
+              "default": null
+            },
+            {
+              "name": "schema_name",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "bool"
+        }
+      }
+    },
+    "ProtocolRegistryMetrics": {
+      "runtime_checkable": true,
+      "method_count": 5,
+      "methods": {
+        "record_cache_hit": {
+          "parameters": [],
+          "return_annotation": "None"
+        },
+        "record_cache_miss": {
+          "parameters": [],
+          "return_annotation": "None"
+        },
+        "record_error": {
+          "parameters": [
+            {
+              "name": "error_type",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "plugin_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "record_get_latency": {
+          "parameters": [
+            {
+              "name": "plugin_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "version",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str | None",
+              "default": null
+            },
+            {
+              "name": "latency_ms",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "float",
+              "default": null
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "record_registry_size": {
+          "parameters": [
+            {
+              "name": "size",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "int",
+              "default": null
+            }
+          ],
+          "return_annotation": "None"
+        }
+      }
+    },
+    "ProtocolSnapshotPublisher": {
+      "runtime_checkable": true,
+      "method_count": 5,
+      "methods": {
+        "delete_snapshot": {
+          "parameters": [
+            {
+              "name": "entity_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "domain",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            }
+          ],
+          "return_annotation": "bool"
+        },
+        "get_latest_snapshot": {
+          "parameters": [
+            {
+              "name": "entity_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "domain",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            }
+          ],
+          "return_annotation": "ModelRegistrationSnapshot | None"
+        },
+        "publish_batch": {
+          "parameters": [
+            {
+              "name": "snapshots",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "list[ModelRegistrationProjection]",
+              "default": null
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "publish_from_projection": {
+          "parameters": [
+            {
+              "name": "projection",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelRegistrationProjection",
+              "default": null
+            },
+            {
+              "name": "node_name",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "str | None",
+              "default": "None"
+            },
+            {
+              "name": "correlation_id",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "UUID | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "ModelRegistrationSnapshot"
+        },
+        "publish_snapshot": {
+          "parameters": [
+            {
+              "name": "snapshot",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelRegistrationProjection",
+              "default": null
+            }
+          ],
+          "return_annotation": "None"
+        }
+      }
+    },
+    "ProtocolSnapshotStore": {
+      "runtime_checkable": true,
+      "method_count": 9,
+      "methods": {
+        "cleanup_expired": {
+          "parameters": [
+            {
+              "name": "max_age_seconds",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "int | None",
+              "default": "None"
+            },
+            {
+              "name": "keep_latest_n",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "int | None",
+              "default": "None"
+            },
+            {
+              "name": "subject",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "ModelSubjectRef | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "delete": {
+          "parameters": [
+            {
+              "name": "snapshot_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID",
+              "default": null
+            }
+          ],
+          "return_annotation": "bool"
+        },
+        "get_next_sequence_number": {
+          "parameters": [
+            {
+              "name": "subject",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelSubjectRef",
+              "default": null
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "load": {
+          "parameters": [
+            {
+              "name": "snapshot_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID",
+              "default": null
+            }
+          ],
+          "return_annotation": "ModelSnapshot | None"
+        },
+        "load_latest": {
+          "parameters": [
+            {
+              "name": "subject",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelSubjectRef | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "ModelSnapshot | None"
+        },
+        "load_latest_many": {
+          "parameters": [
+            {
+              "name": "subjects",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "list[ModelSubjectRef]",
+              "default": null
+            }
+          ],
+          "return_annotation": "dict[tuple[str, UUID], ModelSnapshot]"
+        },
+        "load_many": {
+          "parameters": [
+            {
+              "name": "snapshot_ids",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "list[UUID]",
+              "default": null
+            }
+          ],
+          "return_annotation": "dict[UUID, ModelSnapshot]"
+        },
+        "query": {
+          "parameters": [
+            {
+              "name": "subject",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelSubjectRef | None",
+              "default": "None"
+            },
+            {
+              "name": "limit",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "int",
+              "default": "50"
+            },
+            {
+              "name": "after",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "datetime | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "list[ModelSnapshot]"
+        },
+        "save": {
+          "parameters": [
+            {
+              "name": "snapshot",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelSnapshot",
+              "default": null
+            }
+          ],
+          "return_annotation": "UUID"
+        }
+      }
+    },
+    "ProtocolValidationLedgerRepository": {
+      "runtime_checkable": true,
+      "method_count": 4,
+      "methods": {
+        "append": {
+          "parameters": [
+            {
+              "name": "run_id",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "UUID",
+              "default": null
+            },
+            {
+              "name": "repo_id",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "event_type",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "event_version",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "occurred_at",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "datetime",
+              "default": null
+            },
+            {
+              "name": "kafka_topic",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "kafka_partition",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "int",
+              "default": null
+            },
+            {
+              "name": "kafka_offset",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "int",
+              "default": null
+            },
+            {
+              "name": "envelope_bytes",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "bytes",
+              "default": null
+            },
+            {
+              "name": "envelope_hash",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "str",
+              "default": null
+            }
+          ],
+          "return_annotation": "ModelValidationLedgerAppendResult"
+        },
+        "cleanup_expired": {
+          "parameters": [
+            {
+              "name": "retention_days",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "int",
+              "default": "30"
+            },
+            {
+              "name": "min_runs_per_repo",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "int",
+              "default": "25"
+            },
+            {
+              "name": "batch_size",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "int",
+              "default": "1000"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "query": {
+          "parameters": [
+            {
+              "name": "query",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "ModelValidationLedgerQuery",
+              "default": null
+            }
+          ],
+          "return_annotation": "ModelValidationLedgerReplayBatch"
+        },
+        "query_by_run_id": {
+          "parameters": [
+            {
+              "name": "run_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "UUID",
+              "default": null
+            },
+            {
+              "name": "limit",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "int",
+              "default": "100"
+            },
+            {
+              "name": "offset",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "int",
+              "default": "0"
+            }
+          ],
+          "return_annotation": "list[ModelValidationLedgerEntry]"
+        }
+      }
+    }
+  }
+}
