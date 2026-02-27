@@ -240,6 +240,43 @@ SUFFIX_OMNIMEMORY_CRAWL_REQUESTED: str = "onex.cmd.omnimemory.crawl-requested.v1
 """Topic for crawl requested commands (explicit crawl request for a document source)."""
 
 # =============================================================================
+# OMNIBASE_INFRA DOMAIN TOPIC SUFFIXES (omnibase-infra gmail nodes)
+# =============================================================================
+# These topics are produced by omnibase_infra gmail effect nodes. They are
+# provisioned alongside platform topics so consumers find them ready at startup.
+
+SUFFIX_GMAIL_ARCHIVE_PURGED: str = "onex.evt.omnibase-infra.gmail-archive-purged.v1"
+"""Topic suffix for Gmail archive purge summary events.
+
+Published by NodeGmailArchiveCleanupEffect after each cleanup run when any
+messages were deleted or errors occurred. This is a fire-and-forget summary
+event — there are no downstream consumers in the current implementation.
+
+No consumer rationale: Gmail archive cleanup events are audit-trail events
+only. Downstream systems (dashboards, alerting) may subscribe in the future,
+but no service currently depends on this event for correctness. The topic is
+provisioned to ensure the correct name exists on the broker and to prevent
+consumer misconfiguration if a subscriber is added later.
+
+Producer: NodeGmailArchiveCleanupEffect / HandlerGmailArchiveCleanup
+Consumer: None (intentionally fire-and-forget; see OMN-2937)
+"""
+
+# =============================================================================
+# OMNIBASE_INFRA DOMAIN TOPIC SPEC REGISTRY
+# =============================================================================
+
+ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
+    # Gmail cleanup events (3 partitions — low-throughput, one event per run)
+    ModelTopicSpec(suffix=SUFFIX_GMAIL_ARCHIVE_PURGED, partitions=3),
+)
+"""Omnibase_infra domain topic specs for internal effect nodes.
+
+Currently covers gmail cleanup events. Topics are provisioned so the correct
+broker topic name exists even if no consumer is registered yet.
+"""
+
+# =============================================================================
 # OMNICLAUDE SKILL TOPIC SUFFIXES (omniclaude plugin)
 # =============================================================================
 # These topics are consumed/produced by OmniClaude skill orchestrator nodes.
@@ -620,6 +657,7 @@ ALL_PROVISIONED_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ALL_PLATFORM_TOPIC_SPECS
     + ALL_INTELLIGENCE_TOPIC_SPECS
     + ALL_OMNIMEMORY_TOPIC_SPECS
+    + ALL_OMNIBASE_INFRA_TOPIC_SPECS
     + ALL_OMNICLAUDE_TOPIC_SPECS
 )
 """All topic specs to be provisioned by TopicProvisioner at startup.

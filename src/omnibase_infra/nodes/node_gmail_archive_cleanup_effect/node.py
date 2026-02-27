@@ -7,7 +7,7 @@ This node follows the ONEX declarative pattern:
     - Triggered by onex.int.platform.runtime-tick.v1 (input_subscriptions)
     - Permanently deletes archived emails older than retention_days
     - Publishes a single summary event to
-      onex.evt.omnibase_infra.gmail-archive-purged.v1
+      onex.evt.omnibase-infra.gmail-archive-purged.v1
     - Lightweight shell — all logic in HandlerGmailArchiveCleanup
 
 Design:
@@ -34,7 +34,7 @@ class NodeGmailArchiveCleanupEffect(NodeEffect):
     contract.yaml ``input_subscriptions``). Permanently deletes messages
     from each configured archive label whose age exceeds ``retention_days``.
     Publishes one summary event to
-    ``onex.evt.omnibase_infra.gmail-archive-purged.v1`` per run when any
+    ``onex.evt.omnibase-infra.gmail-archive-purged.v1`` per run when any
     messages were deleted or errors occurred.
 
     All routing and execution logic is driven by contract.yaml.

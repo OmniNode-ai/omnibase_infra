@@ -32,7 +32,7 @@ A single summary event is appended to ``pending_events`` when
 ``purged_count > 0`` OR any errors exist:
 
     {
-        "event_type": "onex.evt.omnibase_infra.gmail-archive-purged.v1",
+        "event_type": "onex.evt.omnibase-infra.gmail-archive-purged.v1",
         "purged_count": <int>,
         "label_counts": {<label_name>: <count>, ...},
         "error_count": <int>,
@@ -65,7 +65,7 @@ logger = logging.getLogger(__name__)
 __all__ = ["HandlerGmailArchiveCleanup"]
 
 # Event type emitted per cleanup run
-_PURGED_EVENT_TYPE = "onex.evt.omnibase_infra.gmail-archive-purged.v1"
+_PURGED_EVENT_TYPE = "onex.evt.omnibase-infra.gmail-archive-purged.v1"
 
 # Partition key: all cleanup events share a single partition
 _PARTITION_KEY = "gmail-archive-cleanup"
