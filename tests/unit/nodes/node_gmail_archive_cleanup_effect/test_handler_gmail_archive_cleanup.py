@@ -122,7 +122,7 @@ class TestHandlerGmailArchiveCleanup:
         assert len(result.pending_events) == 1
         event = result.pending_events[0]
         assert isinstance(event, dict)
-        assert event["event_type"] == "onex.evt.omnibase_infra.gmail-archive-purged.v1"
+        assert event["event_type"] == "onex.evt.omnibase-infra.gmail-archive-purged.v1"
         assert event["purged_count"] == 5
         assert event["partition_key"] == "gmail-archive-cleanup"
 

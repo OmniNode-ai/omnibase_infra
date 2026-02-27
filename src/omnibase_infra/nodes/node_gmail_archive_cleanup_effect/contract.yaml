@@ -23,7 +23,7 @@ node_version:
   patch: 0
 node_type: "EFFECT_GENERIC"
 description: >
-  Effect node that permanently deletes archived Gmail messages older than retention_days from each configured archive label. Triggered by onex.int.platform.runtime-tick.v1. Emits a single summary event to onex.evt.omnibase_infra.gmail-archive-purged.v1 per run when any messages were deleted or errors occurred.
+  Effect node that permanently deletes archived Gmail messages older than retention_days from each configured archive label. Triggered by onex.int.platform.runtime-tick.v1. Emits a single summary event to onex.evt.omnibase-infra.gmail-archive-purged.v1 per run when any messages were deleted or errors occurred.
 
 # Input subscriptions: scheduling trigger
 input_subscriptions:
@@ -108,14 +108,14 @@ dependencies:
   - name: "event_publisher"
     type: "protocol"
     protocol: "ProtocolEventPublisher"
-    description: "Event publisher for onex.evt.omnibase_infra.gmail-archive-purged.v1"
+    description: "Event publisher for onex.evt.omnibase-infra.gmail-archive-purged.v1"
 capabilities:
   - name: "gmail_archive_cleanup"
     description: "Permanently delete archived Gmail messages older than retention_days"
   - name: "gmail_label_search"
     description: "Search Gmail by label name and date cutoff"
   - name: "kafka_event_production"
-    description: "Publish summary event to onex.evt.omnibase_infra.gmail-archive-purged.v1"
+    description: "Publish summary event to onex.evt.omnibase-infra.gmail-archive-purged.v1"
 definitions:
   ModelGmailCleanupConfig:
     type: object
