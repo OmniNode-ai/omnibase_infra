@@ -149,6 +149,8 @@ x-runtime-env: &runtime-env
   # See top-of-file note re: nested variable expansion.
   # RECOMMENDED: Set OMNIINTELLIGENCE_DB_URL explicitly in .env instead.
   OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for intelligence DB URL fallback}@postgres:5432/omniintelligence}
+  # OmniMemory domain plugin
+  OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-}
 # ==========================================================================
 # Services
 # ==========================================================================
@@ -488,6 +490,7 @@ services:
       OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_PORT: "8087"
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
       ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-development}
+      OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-false}
     ports:
       - "${AGENT_ACTIONS_CONSUMER_PORT:-8087}:8087"
     stop_grace_period: 60s
