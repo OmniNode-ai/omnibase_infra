@@ -571,14 +571,6 @@ Consumer: Tool/model/pattern/agent reward consumers
 Ticket: OMN-2552
 """
 
-TOPIC_POLICY_STATE_UPDATED: Final[str] = "onex.evt.omnimemory.policy-state-updated.v1"
-"""Policy state transition with old/new snapshots.
-
-Producer: NodeRewardBinderEffect
-Consumer: Policy state consumers, audit log
-Ticket: OMN-2552
-"""
-
 # Resolution event ledger (OMN-2895 / Phase 6)
 TOPIC_RESOLUTION_DECIDED: Final[str] = "onex.evt.platform.resolution-decided.v1"
 """Resolution decision audit events.
@@ -617,7 +609,6 @@ __all__ = [
     # Effectiveness Invalidation Topics
     "TOPIC_EFFECTIVENESS_INVALIDATION",
     # Reward Architecture Topics (OMN-2552)
-    "TOPIC_POLICY_STATE_UPDATED",
     "TOPIC_REWARD_ASSIGNED",
     # Resolution Event Ledger (OMN-2895)
     "TOPIC_RESOLUTION_DECIDED",
