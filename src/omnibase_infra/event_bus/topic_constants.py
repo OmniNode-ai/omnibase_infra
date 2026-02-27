@@ -505,13 +505,14 @@ Producer: omniclaude (SessionEnd hook)
 Consumer: omniintelligence/node_pattern_feedback_effect
 """
 
-TOPIC_SESSION_OUTCOME_CANONICAL: Final[str] = (
-    "onex.evt.omniintelligence.session-outcome.v1"
-)
+TOPIC_SESSION_OUTCOME_CANONICAL: Final[str] = "onex.evt.omniclaude.session-outcome.v1"
 """Session-outcome event topic for observability.
 
 The evt counterpart of the dual-publish pair. Observability consumers
 (dashboards, metrics) subscribe to this topic for session outcome facts.
+
+Producer: omniclaude (SessionEnd hook)
+See: OMN-2946 - Corrected producer segment from omniintelligence to omniclaude.
 """
 
 # Injection effectiveness topics (already correctly named with 'evt')
