@@ -54,7 +54,6 @@ class RegistryInfraRewardBinderEffect:
             "module": "omnibase_infra.nodes.node_reward_binder_effect.handlers.handler_reward_binder",
             "description": "Handler for reward event emission to Kafka",
             "capabilities": [
-                "reward.emit.run_evaluated",
                 "reward.emit.reward_assigned",
                 "reward.emit.policy_state_updated",
             ],
