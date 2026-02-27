@@ -31,6 +31,9 @@ Related Tickets:
     - OMN-1102: Refactor to pure declarative with standard handler signatures
 """
 
+from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_catalog_request import (
+    HandlerCatalogRequest,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_heartbeat import (
     HandlerNodeHeartbeat,
 )
@@ -53,6 +56,7 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_topic_
 __all__: list[str] = [
     "DEFAULT_LIVENESS_INTERVAL_SECONDS",
     "ENV_LIVENESS_INTERVAL_SECONDS",
+    "HandlerCatalogRequest",
     "HandlerNodeHeartbeat",
     "HandlerNodeIntrospected",
     "HandlerNodeRegistrationAcked",

@@ -50,6 +50,7 @@ from omnibase_infra.models.registration.model_node_introspection_event import (
 )
 from omnibase_infra.nodes.node_registration_orchestrator.services import (
     RegistrationReducerService,
+    ServiceIntrospectionTopicStore,
 )
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
@@ -123,6 +124,7 @@ class HandlerNodeIntrospected:
         self,
         projection_reader: ProjectionReaderRegistration,
         reducer: RegistrationReducerService,
+        topic_store: ServiceIntrospectionTopicStore | None = None,
     ) -> None:
         """Initialize the handler with a projection reader and reducer service.
 
@@ -139,9 +141,15 @@ class HandlerNodeIntrospected:
                 registration decision logic (state checks, event creation,
                 intent construction). Configuration such as ack_timeout_seconds
                 and consul_enabled lives on the reducer, not on this handler.
+            topic_store: Optional shared in-memory store for accumulating
+                event_bus publish topics from introspection events. When provided,
+                this handler populates the store on every introspection event so
+                that HandlerCatalogRequest can assemble catalog responses.
+                When None, topic accumulation is skipped (backward compatible).
         """
         self._projection_reader = projection_reader
         self._reducer = reducer
+        self._topic_store = topic_store
 
     @property
     def handler_id(self) -> str:
@@ -222,6 +230,17 @@ class HandlerNodeIntrospected:
         validate_timezone_aware_with_context(now, ctx)
 
         node_id = event.node_id
+
+        # Populate introspection topic store for catalog responder (OMN-2923)
+        # Done unconditionally (before decision) so the catalog always reflects
+        # the latest known event_bus config regardless of registration state.
+        if self._topic_store is not None and event.event_bus is not None:
+            publish_topics = event.event_bus.publish_topic_strings
+            await self._topic_store.update_node(str(node_id), publish_topics)
+        elif self._topic_store is not None:
+            # Node sent introspection without event_bus config; record empty set
+            # so count_nodes_missing_event_bus() works correctly.
+            await self._topic_store.update_node(str(node_id), [])
 
         # Query current projection state
         projection = await self._projection_reader.get_entity_state(
