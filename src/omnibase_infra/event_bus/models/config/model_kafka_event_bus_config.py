@@ -12,6 +12,7 @@ Features:
     - YAML configuration file loading
     - Sensible defaults for production resilience patterns
     - Circuit breaker and retry configuration
+    - Reconnect backoff configuration to prevent thundering-herd storms
     - Warning logs for invalid environment variable values
 
 Environment Variables:
@@ -93,6 +94,19 @@ Environment Variables:
             When set, appended as '.__i.{instance_id}' to consumer group IDs
             so each container gets unique consumer group membership and
             proper Kafka partition assignment in multi-container dev environments.
+
+    Reconnect Backoff Settings (OMN-2916):
+        KAFKA_RECONNECT_BACKOFF_MS: Initial reconnect backoff in milliseconds (integer, >= 0)
+            Default: 2000
+            Example: "1000"
+            Warning: Logs warning if not a valid integer, uses default
+            Used to prevent thundering-herd reconnection storms after broker restarts.
+
+        KAFKA_RECONNECT_BACKOFF_MAX_MS: Maximum reconnect backoff in milliseconds (integer, >= 0)
+            Default: 30000
+            Example: "60000"
+            Warning: Logs warning if not a valid integer, uses default
+            Must be >= reconnect_backoff_ms. Caps the exponential backoff growth.
 
     Authentication and TLS Settings (OMN-2793):
         KAFKA_SECURITY_PROTOCOL: Security protocol for Kafka connections
@@ -177,6 +191,8 @@ class ModelKafkaEventBusConfig(BaseModel):
         auto_offset_reset: Consumer offset reset policy ("earliest", "latest")
         enable_auto_commit: Enable auto-commit for consumer offsets
         dead_letter_topic: Dead letter queue topic for failed messages (optional)
+        reconnect_backoff_ms: Initial reconnect backoff in milliseconds (OMN-2916)
+        reconnect_backoff_max_ms: Maximum reconnect backoff in milliseconds (OMN-2916)
 
     Example:
         ```python
@@ -332,6 +348,51 @@ class ModelKafkaEventBusConfig(BaseModel):
             "Used when security_protocol is SSL or SASL_SSL."
         ),
     )
+
+    # Reconnect backoff configuration (OMN-2916)
+    reconnect_backoff_ms: int = Field(
+        default=2000,
+        description=(
+            "Initial reconnect backoff in milliseconds. Used by aiokafka to space out "
+            "reconnection attempts after a broker disconnect, preventing thundering-herd "
+            "storms after broker restarts. Override via KAFKA_RECONNECT_BACKOFF_MS."
+        ),
+        ge=0,
+    )
+    reconnect_backoff_max_ms: int = Field(
+        default=30000,
+        description=(
+            "Maximum reconnect backoff in milliseconds. Caps the exponential growth of "
+            "reconnect delays. Must be >= reconnect_backoff_ms. "
+            "Override via KAFKA_RECONNECT_BACKOFF_MAX_MS."
+        ),
+        ge=0,
+    )
+
+    @model_validator(mode="after")
+    def validate_reconnect_backoff(self) -> ModelKafkaEventBusConfig:
+        """Validate that reconnect_backoff_max_ms >= reconnect_backoff_ms.
+
+        Returns:
+            Self after validation
+
+        Raises:
+            ProtocolConfigurationError: If max backoff is less than base backoff
+        """
+        if self.reconnect_backoff_max_ms < self.reconnect_backoff_ms:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="validate_reconnect_backoff",
+                target_name="kafka_config",
+            )
+            raise ProtocolConfigurationError(
+                f"reconnect_backoff_max_ms ({self.reconnect_backoff_max_ms}) must be "
+                f">= reconnect_backoff_ms ({self.reconnect_backoff_ms})",
+                context=context,
+                parameter="reconnect_backoff_max_ms",
+                value=self.reconnect_backoff_max_ms,
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_auth_config(self) -> ModelKafkaEventBusConfig:
@@ -641,6 +702,8 @@ class ModelKafkaEventBusConfig(BaseModel):
             - KAFKA_SASL_OAUTHBEARER_CLIENT_ID -> sasl_oauthbearer_client_id
             - KAFKA_SASL_OAUTHBEARER_CLIENT_SECRET -> sasl_oauthbearer_client_secret
             - KAFKA_SSL_CA_FILE -> ssl_ca_file
+            - KAFKA_RECONNECT_BACKOFF_MS -> reconnect_backoff_ms
+            - KAFKA_RECONNECT_BACKOFF_MAX_MS -> reconnect_backoff_max_ms
 
         Returns:
             New configuration instance with environment overrides applied
@@ -668,6 +731,8 @@ class ModelKafkaEventBusConfig(BaseModel):
             "KAFKA_SASL_OAUTHBEARER_CLIENT_ID": "sasl_oauthbearer_client_id",
             "KAFKA_SASL_OAUTHBEARER_CLIENT_SECRET": "sasl_oauthbearer_client_secret",
             "KAFKA_SSL_CA_FILE": "ssl_ca_file",
+            "KAFKA_RECONNECT_BACKOFF_MS": "reconnect_backoff_ms",
+            "KAFKA_RECONNECT_BACKOFF_MAX_MS": "reconnect_backoff_max_ms",
         }
 
         # Integer fields for type conversion
@@ -675,6 +740,8 @@ class ModelKafkaEventBusConfig(BaseModel):
             "timeout_seconds",
             "max_retry_attempts",
             "circuit_breaker_threshold",
+            "reconnect_backoff_ms",
+            "reconnect_backoff_max_ms",
         }
 
         # Float fields for type conversion
@@ -799,6 +866,8 @@ class ModelKafkaEventBusConfig(BaseModel):
             enable_auto_commit=True,
             dead_letter_topic=None,
             instance_id=None,
+            reconnect_backoff_ms=2000,
+            reconnect_backoff_max_ms=30000,
         )
         return base_config.apply_environment_overrides()
 
