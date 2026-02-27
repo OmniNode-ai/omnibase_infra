@@ -24,7 +24,6 @@ from omnibase_core.models.objective.model_score_vector import ModelScoreVector
 from omnibase_infra.nodes.node_reward_binder_effect.handlers.handler_reward_binder import (
     _TOPIC_POLICY_STATE_UPDATED,
     _TOPIC_REWARD_ASSIGNED,
-    _TOPIC_RUN_EVALUATED,
     HandlerRewardBinder,
     _compute_objective_fingerprint,
 )
@@ -138,7 +137,6 @@ class TestRewardBinderKafkaIntegration:
             publisher = PublisherTopicScoped(
                 event_bus=bus,
                 allowed_topics={
-                    _TOPIC_RUN_EVALUATED,
                     _TOPIC_REWARD_ASSIGNED,
                     _TOPIC_POLICY_STATE_UPDATED,
                 },
@@ -167,12 +165,11 @@ class TestRewardBinderKafkaIntegration:
             assert output.objective_fingerprint == expected_fp
 
             # Verify event counts (one reward event per run)
-            assert output.run_evaluated_event_id is not None
+            # run_evaluated_event_id removed in OMN-2929 (orphan topic retired)
             assert len(output.reward_assigned_event_ids) == 1
             assert output.policy_state_updated_event_id is not None
 
-            # Verify all three topics published
-            assert _TOPIC_RUN_EVALUATED in output.topics_published
+            # Verify two topics published (run-evaluated topic retired in OMN-2929)
             assert _TOPIC_REWARD_ASSIGNED in output.topics_published
             assert _TOPIC_POLICY_STATE_UPDATED in output.topics_published
         finally:

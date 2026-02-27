@@ -26,7 +26,6 @@ from omnibase_core.models.objective.model_score_vector import ModelScoreVector
 from omnibase_infra.nodes.node_reward_binder_effect.handlers.handler_reward_binder import (
     _TOPIC_POLICY_STATE_UPDATED,
     _TOPIC_REWARD_ASSIGNED,
-    _TOPIC_RUN_EVALUATED,
     HandlerRewardBinder,
     _compute_objective_fingerprint,
 )
@@ -245,7 +244,10 @@ class TestHandlerRewardBinderExecute:
         result: ModelEvaluationResult,
         spec: ModelObjectiveSpec,
     ) -> None:
-        """Publisher called in order: RunEvaluated -> RewardAssigned -> PolicyStateUpdated."""
+        """Publisher called in order: RewardAssigned -> PolicyStateUpdated.
+
+        ModelRunEvaluatedEvent removed in OMN-2929 (orphan topic, zero consumers).
+        """
         envelope: dict[str, object] = {
             "correlation_id": uuid4(),
             "evaluation_result": result,
@@ -254,27 +256,28 @@ class TestHandlerRewardBinderExecute:
         await handler.initialize({})
         await handler.execute(envelope)
 
-        # Total calls: 1 RunEvaluated + 1 RewardAssigned + 1 PolicyStateUpdated
-        assert publisher.call_count == 3
+        # Total calls: 1 RewardAssigned + 1 PolicyStateUpdated
+        assert publisher.call_count == 2
 
         calls = publisher.call_args_list
-        assert calls[0].kwargs["topic"] == _TOPIC_RUN_EVALUATED
-        assert calls[0].kwargs["event_type"] == "run.evaluated"
-        assert calls[1].kwargs["topic"] == _TOPIC_REWARD_ASSIGNED
-        assert calls[1].kwargs["event_type"] == "reward.assigned"
-        assert calls[2].kwargs["topic"] == _TOPIC_POLICY_STATE_UPDATED
-        assert calls[2].kwargs["event_type"] == "policy.state.updated"
+        assert calls[0].kwargs["topic"] == _TOPIC_REWARD_ASSIGNED
+        assert calls[0].kwargs["event_type"] == "reward.assigned"
+        assert calls[1].kwargs["topic"] == _TOPIC_POLICY_STATE_UPDATED
+        assert calls[1].kwargs["event_type"] == "policy.state.updated"
 
     @pytest.mark.asyncio
-    async def test_run_evaluated_contains_fingerprint_and_canonical_fields(
+    async def test_reward_assigned_first_call_canonical_fields(
         self,
         publisher: AsyncMock,
         handler: HandlerRewardBinder,
         result: ModelEvaluationResult,
         spec: ModelObjectiveSpec,
     ) -> None:
-        """ModelRunEvaluatedEvent payload has fingerprint and canonical score fields."""
-        expected_fp = _compute_objective_fingerprint(spec)
+        """First publisher call is RewardAssigned with canonical score fields.
+
+        ModelRunEvaluatedEvent removed in OMN-2929 (orphan topic, zero consumers).
+        Canonical run-evaluated is produced by omniintelligence node_evidence_collection_effect.
+        """
         envelope: dict[str, object] = {
             "correlation_id": uuid4(),
             "evaluation_result": result,
@@ -283,20 +286,19 @@ class TestHandlerRewardBinderExecute:
         await handler.initialize({})
         await handler.execute(envelope)
 
-        run_eval_payload = publisher.call_args_list[0].kwargs["payload"]
-        assert run_eval_payload["objective_fingerprint"] == expected_fp
-        assert run_eval_payload["run_id"] == str(result.run_id)
-        # Canonical score vector fields present
+        # Call index 0 is now RewardAssigned (RunEvaluated removed)
+        reward_payload = publisher.call_args_list[0].kwargs["payload"]
+        assert publisher.call_args_list[0].kwargs["topic"] == _TOPIC_REWARD_ASSIGNED
         sv = result.score_vector
-        assert run_eval_payload["correctness"] == sv.correctness
-        assert run_eval_payload["safety"] == sv.safety
-        assert run_eval_payload["cost"] == sv.cost
-        assert run_eval_payload["latency"] == sv.latency
-        assert run_eval_payload["maintainability"] == sv.maintainability
-        assert run_eval_payload["human_time"] == sv.human_time
+        assert reward_payload["correctness"] == sv.correctness
+        assert reward_payload["safety"] == sv.safety
+        assert reward_payload["cost"] == sv.cost
+        assert reward_payload["latency"] == sv.latency
+        assert reward_payload["maintainability"] == sv.maintainability
+        assert reward_payload["human_time"] == sv.human_time
         # Stub fields absent
-        assert "composite_scores" not in run_eval_payload
-        assert "target_id" not in run_eval_payload
+        assert "composite_scores" not in reward_payload
+        assert "target_id" not in reward_payload
 
     @pytest.mark.asyncio
     async def test_reward_assigned_canonical_fields_and_evidence_refs(
@@ -316,8 +318,8 @@ class TestHandlerRewardBinderExecute:
         await handler.initialize({})
         await handler.execute(envelope)
 
-        # Call index 1 is RewardAssigned
-        reward_payload = publisher.call_args_list[1].kwargs["payload"]
+        # Call index 0 is RewardAssigned (RunEvaluated removed in OMN-2929)
+        reward_payload = publisher.call_args_list[0].kwargs["payload"]
         # Canonical score vector fields present
         sv = result.score_vector
         assert reward_payload["correctness"] == sv.correctness
@@ -397,9 +399,9 @@ class TestHandlerRewardBinderExecute:
 
         output = handler_output.result
         assert isinstance(output, ModelRewardBinderOutput)
-        assert _TOPIC_RUN_EVALUATED in output.topics_published
         assert _TOPIC_REWARD_ASSIGNED in output.topics_published
         assert _TOPIC_POLICY_STATE_UPDATED in output.topics_published
+        # TOPIC_RUN_EVALUATED removed in OMN-2929 (orphan topic, zero consumers)
 
     @pytest.mark.asyncio
     async def test_kafka_failure_propagates(

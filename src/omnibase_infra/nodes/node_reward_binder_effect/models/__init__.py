@@ -30,9 +30,6 @@ from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_binder_i
 from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_binder_output import (
     ModelRewardBinderOutput,
 )
-from omnibase_infra.nodes.node_reward_binder_effect.models.model_run_evaluated_event import (
-    ModelRunEvaluatedEvent,
-)
 
 __all__: list[str] = [
     "ModelEvaluationResult",
@@ -43,6 +40,5 @@ __all__: list[str] = [
     "ModelRewardAssignedEvent",
     "ModelRewardBinderInput",
     "ModelRewardBinderOutput",
-    "ModelRunEvaluatedEvent",
     "ModelScoreVector",
 ]
