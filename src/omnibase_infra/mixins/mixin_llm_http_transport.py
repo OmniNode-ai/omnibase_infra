@@ -108,15 +108,22 @@ _DEFAULT_CIDR = "192.168.86.0/24"
 def _parse_cidr_allowlist() -> tuple[IPv4Network, ...]:
     """Parse CIDR allowlist from the ``LLM_ENDPOINT_CIDR_ALLOWLIST`` env var.
 
-    Parses each comma-separated value as an ``IPv4Network``. Malformed
-    entries are logged at WARNING level and skipped. If **all** entries
-    are malformed (or the env var is empty after parsing), falls back to
-    the default ``192.168.86.0/24`` and logs a warning.
+    When the env var is not set, logs a WARNING and falls back to the
+    default ``192.168.86.0/24``.  Parses each comma-separated value as
+    an ``IPv4Network``. Malformed entries are logged at WARNING level and
+    skipped. If **all** entries are malformed (or the env var is empty
+    after parsing), falls back to the default and logs a warning.
 
     Returns:
         Tuple of parsed ``IPv4Network`` objects, never empty.
     """
-    raw = os.environ.get("LLM_ENDPOINT_CIDR_ALLOWLIST", _DEFAULT_CIDR)
+    raw = os.environ.get("LLM_ENDPOINT_CIDR_ALLOWLIST")
+    if raw is None:
+        logger.warning(
+            "LLM_ENDPOINT_CIDR_ALLOWLIST not set — using default %s",
+            _DEFAULT_CIDR,
+        )
+        raw = _DEFAULT_CIDR
     parsed: list[IPv4Network] = []
     for entry in raw.split(","):
         cidr = entry.strip()
