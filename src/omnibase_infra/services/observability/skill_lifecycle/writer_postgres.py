@@ -37,6 +37,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
+from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
@@ -355,7 +356,7 @@ class WriterSkillLifecyclePostgres(MixinAsyncCircuitBreaker):
                 context=context,
             ) from e
 
-    def get_circuit_breaker_state(self) -> dict[str, object]:
+    def get_circuit_breaker_state(self) -> dict[str, JsonType]:
         """Return current circuit breaker state for health checks.
 
         Returns:
