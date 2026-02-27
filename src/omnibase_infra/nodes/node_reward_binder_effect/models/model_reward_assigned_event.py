@@ -1,25 +1,27 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""RewardAssignedEvent emitted for each target that received a reward.
+"""RewardAssignedEvent emitted after an evaluation run.
 
 Published to: ``onex.evt.omnimemory.reward-assigned.v1``
 
-Ticket: OMN-2552
+Ticket: OMN-2927
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelRewardAssignedEvent(BaseModel):
-    """Event emitted for each target_type that received a reward.
+    """Event emitted after an evaluation run with canonical score vector fields.
 
     Published to: ``onex.evt.omnimemory.reward-assigned.v1``
+
+    Uses canonical omnibase_core.ModelScoreVector field shapes
+    (correctness, safety, cost, latency, maintainability, human_time).
 
     ``evidence_refs`` must be traceable back to specific ``ModelEvidenceItem.item_id``
     values from the input ``ModelEvidenceBundle``.
@@ -35,23 +37,41 @@ class ModelRewardAssignedEvent(BaseModel):
         ...,
         description="Evaluation run ID.",
     )
-    target_id: UUID = Field(
+    correctness: float = Field(
         ...,
-        description="ID of the target receiving this reward.",
-    )
-    target_type: Literal["tool", "model", "pattern", "agent"] = Field(
-        ...,
-        description="Category of the reward target.",
-    )
-    composite_score: float = Field(
-        ...,
-        ge=-1.0,
+        ge=0.0,
         le=1.0,
-        description="Composite scalar reward in [-1, 1].",
+        description="Gate-derived correctness: 1.0 if all gates pass, 0.0 if any fail.",
     )
-    dimensions: dict[str, float] = Field(
-        default_factory=dict,
-        description="Named dimension scores from ModelScoreVector.",
+    safety: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Security, PII, and blacklist gate composite score.",
+    )
+    cost: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Inverted cost score: lower cost = higher score.",
+    )
+    latency: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Inverted latency score: lower latency = higher score.",
+    )
+    maintainability: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Cyclomatic complexity delta and test coverage composite score.",
+    )
+    human_time: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Inverted human intervention score: fewer retries/reviews = higher score.",
     )
     evidence_refs: tuple[UUID, ...] = Field(
         default_factory=tuple,

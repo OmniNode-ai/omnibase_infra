@@ -2,9 +2,10 @@
 # Copyright (c) 2026 OmniNode Team
 """Models for the reward binder effect node.
 
-Ticket: OMN-2552
+Ticket: OMN-2927
 """
 
+from omnibase_core.models.objective.model_score_vector import ModelScoreVector
 from omnibase_infra.nodes.node_reward_binder_effect.models.model_evaluation_result import (
     ModelEvaluationResult,
 )
@@ -31,9 +32,6 @@ from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_binder_o
 )
 from omnibase_infra.nodes.node_reward_binder_effect.models.model_run_evaluated_event import (
     ModelRunEvaluatedEvent,
-)
-from omnibase_infra.nodes.node_reward_binder_effect.models.model_score_vector import (
-    ModelScoreVector,
 )
 
 __all__: list[str] = [

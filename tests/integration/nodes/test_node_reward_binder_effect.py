@@ -9,7 +9,7 @@ They require:
 
 Tests are skipped gracefully if Kafka is not available.
 
-Ticket: OMN-2552
+Ticket: OMN-2927
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_core.models.objective.model_score_vector import ModelScoreVector
 from omnibase_infra.nodes.node_reward_binder_effect.handlers.handler_reward_binder import (
     _TOPIC_POLICY_STATE_UPDATED,
     _TOPIC_REWARD_ASSIGNED,
@@ -41,9 +42,6 @@ from omnibase_infra.nodes.node_reward_binder_effect.models.model_objective_spec 
 )
 from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_binder_output import (
     ModelRewardBinderOutput,
-)
-from omnibase_infra.nodes.node_reward_binder_effect.models.model_score_vector import (
-    ModelScoreVector,
 )
 
 # ==============================================================================
@@ -68,7 +66,7 @@ pytestmark = [
 
 
 def _make_evaluation_result() -> ModelEvaluationResult:
-    """Build a test ModelEvaluationResult with two score vectors."""
+    """Build a test ModelEvaluationResult with canonical score vector."""
     run_id = uuid4()
     evidence = ModelEvidenceBundle(
         run_id=run_id,
@@ -80,19 +78,13 @@ def _make_evaluation_result() -> ModelEvaluationResult:
     return ModelEvaluationResult(
         run_id=run_id,
         objective_id=uuid4(),
-        score_vectors=(
-            ModelScoreVector(
-                target_id=uuid4(),
-                target_type="tool",
-                dimensions={"accuracy": 0.9},
-                composite_score=0.85,
-            ),
-            ModelScoreVector(
-                target_id=uuid4(),
-                target_type="model",
-                dimensions={"accuracy": 0.8},
-                composite_score=0.75,
-            ),
+        score_vector=ModelScoreVector(
+            correctness=0.9,
+            safety=0.85,
+            cost=0.8,
+            latency=0.75,
+            maintainability=0.7,
+            human_time=0.95,
         ),
         evidence_bundle=evidence,
         policy_state_before={"policy_version": 1},
@@ -174,9 +166,9 @@ class TestRewardBinderKafkaIntegration:
             expected_fp = _compute_objective_fingerprint(spec)
             assert output.objective_fingerprint == expected_fp
 
-            # Verify event counts
+            # Verify event counts (one reward event per run)
             assert output.run_evaluated_event_id is not None
-            assert len(output.reward_assigned_event_ids) == len(result.score_vectors)
+            assert len(output.reward_assigned_event_ids) == 1
             assert output.policy_state_updated_event_id is not None
 
             # Verify all three topics published

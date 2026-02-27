@@ -7,7 +7,6 @@ ModelEvaluationResult:
 
   1. ``ModelRunEvaluatedEvent``       -> ``onex.evt.omnimemory.run-evaluated.v1``
   2. ``ModelRewardAssignedEvent``     -> ``onex.evt.omnimemory.reward-assigned.v1``
-     (one event per target present in the evaluation result)
   3. ``ModelPolicyStateUpdatedEvent`` -> ``onex.evt.omnimemory.policy-state-updated.v1``
 
 Design constraints:
@@ -18,8 +17,10 @@ Design constraints:
     (deterministic serialisation).
   - ``evidence_refs`` in ``ModelRewardAssignedEvent`` trace back to specific
     ``ModelEvidenceItem.item_id`` values from the input ``ModelEvidenceBundle``.
+  - Emits canonical omnibase_core.ModelScoreVector fields (correctness, safety,
+    cost, latency, maintainability, human_time) rather than stub field shapes.
 
-Ticket: OMN-2552
+Ticket: OMN-2927
 """
 
 from __future__ import annotations
@@ -156,8 +157,8 @@ class HandlerRewardBinder:
             correlation_id (UUID): Tracing correlation ID.
 
         Events are emitted in order:
-          1. ModelRunEvaluatedEvent
-          2. ModelRewardAssignedEvent x len(score_vectors)
+          1. ModelRunEvaluatedEvent (canonical score vector fields inline)
+          2. ModelRewardAssignedEvent (canonical score vector fields inline)
           3. ModelPolicyStateUpdatedEvent
 
         Raises:
@@ -219,18 +220,22 @@ class HandlerRewardBinder:
             )
         spec: ModelObjectiveSpec = raw_spec
 
-        # Compute fingerprint
+        # Compute fingerprint and evidence refs
         fingerprint = _compute_objective_fingerprint(spec)
         evidence_refs = _build_evidence_refs(result)
+        sv = result.score_vector
 
-        # Event 1: ModelRunEvaluatedEvent
+        # Event 1: ModelRunEvaluatedEvent (canonical score vector fields inline)
         run_evaluated = ModelRunEvaluatedEvent(
             run_id=result.run_id,
             objective_id=result.objective_id,
             objective_fingerprint=fingerprint,
-            composite_scores={
-                str(sv.target_id): sv.composite_score for sv in result.score_vectors
-            },
+            correctness=sv.correctness,
+            safety=sv.safety,
+            cost=sv.cost,
+            latency=sv.latency,
+            maintainability=sv.maintainability,
+            human_time=sv.human_time,
         )
         await self._publish(
             event_type="run.evaluated",
@@ -244,30 +249,29 @@ class HandlerRewardBinder:
             fingerprint,
         )
 
-        # Event 2: ModelRewardAssignedEvent (one per ModelScoreVector)
-        reward_event_ids: list[UUID] = []
-        for sv in result.score_vectors:
-            reward_event = ModelRewardAssignedEvent(
-                run_id=result.run_id,
-                target_id=sv.target_id,
-                target_type=sv.target_type,
-                composite_score=sv.composite_score,
-                dimensions=sv.dimensions,
-                evidence_refs=evidence_refs,
-            )
-            reward_event_ids.append(reward_event.event_id)
-            await self._publish(
-                event_type="reward.assigned",
-                topic=_TOPIC_REWARD_ASSIGNED,
-                payload=json.loads(reward_event.model_dump_json()),
-                correlation_id=corr_id,
-            )
-            logger.info(
-                "Emitted ModelRewardAssignedEvent target_id=%s target_type=%s score=%s",
-                sv.target_id,
-                sv.target_type,
-                sv.composite_score,
-            )
+        # Event 2: ModelRewardAssignedEvent (canonical score vector fields inline)
+        reward_event = ModelRewardAssignedEvent(
+            run_id=result.run_id,
+            correctness=sv.correctness,
+            safety=sv.safety,
+            cost=sv.cost,
+            latency=sv.latency,
+            maintainability=sv.maintainability,
+            human_time=sv.human_time,
+            evidence_refs=evidence_refs,
+        )
+        await self._publish(
+            event_type="reward.assigned",
+            topic=_TOPIC_REWARD_ASSIGNED,
+            payload=json.loads(reward_event.model_dump_json()),
+            correlation_id=corr_id,
+        )
+        logger.info(
+            "Emitted ModelRewardAssignedEvent run_id=%s correctness=%s safety=%s",
+            result.run_id,
+            sv.correctness,
+            sv.safety,
+        )
 
         # Event 3: ModelPolicyStateUpdatedEvent
         policy_event = ModelPolicyStateUpdatedEvent(
@@ -298,7 +302,7 @@ class HandlerRewardBinder:
             run_id=result.run_id,
             objective_fingerprint=fingerprint,
             run_evaluated_event_id=run_evaluated.event_id,
-            reward_assigned_event_ids=tuple(reward_event_ids),
+            reward_assigned_event_ids=(reward_event.event_id,),
             policy_state_updated_event_id=policy_event.event_id,
             topics_published=topics,
         )
