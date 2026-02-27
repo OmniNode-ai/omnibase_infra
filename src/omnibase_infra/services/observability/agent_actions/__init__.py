@@ -21,7 +21,7 @@ Topics consumed:
     - router-performance-metrics
     - agent-detection-failures
     - agent-execution-logs
-    - onex.evt.agent.status.v1
+    - onex.evt.omniclaude.agent-status.v1
 
 Example:
     >>> from omnibase_infra.services.observability.agent_actions import (

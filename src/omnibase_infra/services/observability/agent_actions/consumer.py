@@ -25,7 +25,7 @@ Topics consumed (OMN-2621: migrated 5 legacy bare names to ONEX canonical):
     - onex.evt.omniclaude.performance-metrics.v1   (was: router-performance-metrics)
     - onex.evt.omniclaude.detection-failure.v1     (was: agent-detection-failures)
     - agent-execution-logs                         (unchanged — producer unconfirmed)
-    - onex.evt.agent.status.v1                     (unchanged — not omniclaude-produced)
+    - onex.evt.omniclaude.agent-status.v1           (was: onex.evt.agent.status.v1, OMN-2846)
 
 Related Tickets:
     - OMN-1743: Migrate agent_actions_consumer to omnibase_infra (current)
@@ -164,7 +164,8 @@ def mask_dsn_password(dsn: str) -> str:
 
 # Map topics to their Pydantic model class.
 # OMN-2621: 5 legacy bare topic names replaced with ONEX canonical names.
-# "agent-execution-logs" and "onex.evt.agent.status.v1" are unchanged.
+# "agent-execution-logs" is unchanged (producer unconfirmed).
+# "onex.evt.omniclaude.agent-status.v1" renamed from "onex.evt.agent.status.v1" (OMN-2846).
 TOPIC_TO_MODEL: dict[str, type[BaseModel]] = {
     "onex.evt.omniclaude.agent-actions.v1": ModelAgentAction,
     "onex.evt.omniclaude.routing-decision.v1": ModelRoutingDecision,
@@ -172,7 +173,7 @@ TOPIC_TO_MODEL: dict[str, type[BaseModel]] = {
     "onex.evt.omniclaude.performance-metrics.v1": ModelPerformanceMetric,
     "onex.evt.omniclaude.detection-failure.v1": ModelDetectionFailure,
     "agent-execution-logs": ModelExecutionLog,
-    "onex.evt.agent.status.v1": ModelAgentStatusEvent,
+    "onex.evt.omniclaude.agent-status.v1": ModelAgentStatusEvent,
 }
 
 # Map topics to writer method names.
@@ -184,7 +185,7 @@ TOPIC_TO_WRITER_METHOD: dict[str, str] = {
     "onex.evt.omniclaude.performance-metrics.v1": "write_performance_metrics",
     "onex.evt.omniclaude.detection-failure.v1": "write_detection_failures",
     "agent-execution-logs": "write_execution_logs",
-    "onex.evt.agent.status.v1": "write_agent_status_events",
+    "onex.evt.omniclaude.agent-status.v1": "write_agent_status_events",
 }
 
 

@@ -86,7 +86,8 @@ DEMO_TOPIC_PREFIXES: Final[tuple[str, ...]] = (
     "onex.evt.omniintelligence.",
     "onex.cmd.omniintelligence.",
     "onex.evt.omniclaude.",
-    "onex.evt.agent.",
+    # "onex.evt.agent." removed: agent-status topic renamed to onex.evt.omniclaude.agent-status.v1
+    # which is already covered by the "onex.evt.omniclaude." prefix (OMN-2846).
 )
 
 # Resources that are NEVER touched, listed for the summary report.
