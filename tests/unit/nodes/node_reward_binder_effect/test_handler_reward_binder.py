@@ -6,12 +6,12 @@ Tests:
 - objective_fingerprint is deterministic SHA-256 of ModelObjectiveSpec.model_dump_json()
 - evidence_refs trace back to ModelEvidenceItem.item_id values in ModelEvidenceBundle
 - Three events emitted in correct order: RunEvaluated -> RewardAssigned -> PolicyStateUpdated
-- Event structure correct (topic names, field values)
+- Event structure uses canonical score vector fields (not stub fields)
 - Kafka publish failure propagates (never swallowed silently)
 - Missing inputs raise RuntimeHostError
 - No publisher configured raises RuntimeHostError
 
-Ticket: OMN-2552
+Ticket: OMN-2927
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_core.models.objective.model_score_vector import ModelScoreVector
 from omnibase_infra.nodes.node_reward_binder_effect.handlers.handler_reward_binder import (
     _TOPIC_POLICY_STATE_UPDATED,
     _TOPIC_REWARD_ASSIGNED,
@@ -44,9 +45,6 @@ from omnibase_infra.nodes.node_reward_binder_effect.models.model_objective_spec 
 from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_binder_output import (
     ModelRewardBinderOutput,
 )
-from omnibase_infra.nodes.node_reward_binder_effect.models.model_score_vector import (
-    ModelScoreVector,
-)
 
 pytestmark = pytest.mark.unit
 
@@ -54,6 +52,25 @@ pytestmark = pytest.mark.unit
 # ==============================================================================
 # Helpers / Fixtures
 # ==============================================================================
+
+
+def _make_score_vector(
+    correctness: float = 0.9,
+    safety: float = 0.8,
+    cost: float = 0.7,
+    latency: float = 0.85,
+    maintainability: float = 0.75,
+    human_time: float = 0.95,
+) -> ModelScoreVector:
+    """Build a canonical ModelScoreVector for testing."""
+    return ModelScoreVector(
+        correctness=correctness,
+        safety=safety,
+        cost=cost,
+        latency=latency,
+        maintainability=maintainability,
+        human_time=human_time,
+    )
 
 
 def _make_objective_spec(name: str = "test-objective") -> ModelObjectiveSpec:
@@ -80,24 +97,14 @@ def _make_evaluation_result(
     objective_id: UUID | None = None,
     policy_before: dict[str, object] | None = None,
     policy_after: dict[str, object] | None = None,
-    num_targets: int = 2,
 ) -> ModelEvaluationResult:
-    """Build a minimal ModelEvaluationResult with N score vectors."""
+    """Build a minimal ModelEvaluationResult with a canonical score vector."""
     run_id = uuid4()
     evidence = _make_evidence_bundle(run_id)
-    score_vectors = tuple(
-        ModelScoreVector(
-            target_id=uuid4(),
-            target_type="tool" if i % 2 == 0 else "model",
-            dimensions={"accuracy": 0.8 + i * 0.05},
-            composite_score=0.75 + i * 0.05,
-        )
-        for i in range(num_targets)
-    )
     return ModelEvaluationResult(
         run_id=run_id,
         objective_id=objective_id or uuid4(),
-        score_vectors=score_vectors,
+        score_vector=_make_score_vector(),
         evidence_bundle=evidence,
         policy_state_before=policy_before or {"version": 1},
         policy_state_after=policy_after or {"version": 2},
@@ -177,8 +184,8 @@ class TestHandlerRewardBinderExecute:
 
     @pytest.fixture
     def result(self) -> ModelEvaluationResult:
-        """Default ModelEvaluationResult with 2 score vectors."""
-        return _make_evaluation_result(num_targets=2)
+        """Default ModelEvaluationResult with canonical score vector."""
+        return _make_evaluation_result()
 
     @pytest.fixture
     def spec(self) -> ModelObjectiveSpec:
@@ -238,8 +245,7 @@ class TestHandlerRewardBinderExecute:
         result: ModelEvaluationResult,
         spec: ModelObjectiveSpec,
     ) -> None:
-        """Publisher called in order: RunEvaluated -> RewardAssigned x N -> PolicyStateUpdated."""
-        num_targets = len(result.score_vectors)
+        """Publisher called in order: RunEvaluated -> RewardAssigned -> PolicyStateUpdated."""
         envelope: dict[str, object] = {
             "correlation_id": uuid4(),
             "evaluation_result": result,
@@ -248,30 +254,26 @@ class TestHandlerRewardBinderExecute:
         await handler.initialize({})
         await handler.execute(envelope)
 
-        # Total calls: 1 RunEvaluated + N RewardAssigned + 1 PolicyStateUpdated
-        assert publisher.call_count == 1 + num_targets + 1
+        # Total calls: 1 RunEvaluated + 1 RewardAssigned + 1 PolicyStateUpdated
+        assert publisher.call_count == 3
 
         calls = publisher.call_args_list
-        # First call: RunEvaluated
         assert calls[0].kwargs["topic"] == _TOPIC_RUN_EVALUATED
         assert calls[0].kwargs["event_type"] == "run.evaluated"
-        # Middle calls: RewardAssigned
-        for i in range(1, num_targets + 1):
-            assert calls[i].kwargs["topic"] == _TOPIC_REWARD_ASSIGNED
-            assert calls[i].kwargs["event_type"] == "reward.assigned"
-        # Last call: PolicyStateUpdated
-        assert calls[-1].kwargs["topic"] == _TOPIC_POLICY_STATE_UPDATED
-        assert calls[-1].kwargs["event_type"] == "policy.state.updated"
+        assert calls[1].kwargs["topic"] == _TOPIC_REWARD_ASSIGNED
+        assert calls[1].kwargs["event_type"] == "reward.assigned"
+        assert calls[2].kwargs["topic"] == _TOPIC_POLICY_STATE_UPDATED
+        assert calls[2].kwargs["event_type"] == "policy.state.updated"
 
     @pytest.mark.asyncio
-    async def test_run_evaluated_contains_fingerprint(
+    async def test_run_evaluated_contains_fingerprint_and_canonical_fields(
         self,
         publisher: AsyncMock,
         handler: HandlerRewardBinder,
         result: ModelEvaluationResult,
         spec: ModelObjectiveSpec,
     ) -> None:
-        """ModelRunEvaluatedEvent payload contains correct objective_fingerprint."""
+        """ModelRunEvaluatedEvent payload has fingerprint and canonical score fields."""
         expected_fp = _compute_objective_fingerprint(spec)
         envelope: dict[str, object] = {
             "correlation_id": uuid4(),
@@ -281,20 +283,30 @@ class TestHandlerRewardBinderExecute:
         await handler.initialize({})
         await handler.execute(envelope)
 
-        # First publisher call is RunEvaluated
         run_eval_payload = publisher.call_args_list[0].kwargs["payload"]
         assert run_eval_payload["objective_fingerprint"] == expected_fp
         assert run_eval_payload["run_id"] == str(result.run_id)
+        # Canonical score vector fields present
+        sv = result.score_vector
+        assert run_eval_payload["correctness"] == sv.correctness
+        assert run_eval_payload["safety"] == sv.safety
+        assert run_eval_payload["cost"] == sv.cost
+        assert run_eval_payload["latency"] == sv.latency
+        assert run_eval_payload["maintainability"] == sv.maintainability
+        assert run_eval_payload["human_time"] == sv.human_time
+        # Stub fields absent
+        assert "composite_scores" not in run_eval_payload
+        assert "target_id" not in run_eval_payload
 
     @pytest.mark.asyncio
-    async def test_reward_assigned_evidence_refs_traceable(
+    async def test_reward_assigned_canonical_fields_and_evidence_refs(
         self,
         publisher: AsyncMock,
         handler: HandlerRewardBinder,
         result: ModelEvaluationResult,
         spec: ModelObjectiveSpec,
     ) -> None:
-        """ModelRewardAssignedEvent evidence_refs trace to ModelEvidenceItem.item_id values."""
+        """ModelRewardAssignedEvent has canonical fields and traceable evidence refs."""
         expected_item_ids = {str(item.item_id) for item in result.evidence_bundle.items}
         envelope: dict[str, object] = {
             "correlation_id": uuid4(),
@@ -304,15 +316,25 @@ class TestHandlerRewardBinderExecute:
         await handler.initialize({})
         await handler.execute(envelope)
 
-        num_targets = len(result.score_vectors)
-        # Calls 1..N are RewardAssigned
-        for i in range(1, num_targets + 1):
-            payload = publisher.call_args_list[i].kwargs["payload"]
-            refs_in_payload = set(payload["evidence_refs"])
-            # All refs must be valid item IDs
-            assert refs_in_payload.issubset(expected_item_ids)
-            # There must be at least one ref
-            assert len(refs_in_payload) > 0
+        # Call index 1 is RewardAssigned
+        reward_payload = publisher.call_args_list[1].kwargs["payload"]
+        # Canonical score vector fields present
+        sv = result.score_vector
+        assert reward_payload["correctness"] == sv.correctness
+        assert reward_payload["safety"] == sv.safety
+        assert reward_payload["cost"] == sv.cost
+        assert reward_payload["latency"] == sv.latency
+        assert reward_payload["maintainability"] == sv.maintainability
+        assert reward_payload["human_time"] == sv.human_time
+        # Stub fields absent
+        assert "composite_score" not in reward_payload
+        assert "dimensions" not in reward_payload
+        assert "target_id" not in reward_payload
+        assert "target_type" not in reward_payload
+        # Evidence refs traceable
+        refs_in_payload = set(reward_payload["evidence_refs"])
+        assert refs_in_payload.issubset(expected_item_ids)
+        assert len(refs_in_payload) > 0
 
     @pytest.mark.asyncio
     async def test_policy_state_updated_includes_snapshots(
@@ -338,13 +360,13 @@ class TestHandlerRewardBinderExecute:
         assert policy_payload["new_state"] == result.policy_state_after
 
     @pytest.mark.asyncio
-    async def test_output_reward_event_ids_match_count(
+    async def test_output_reward_event_ids_count(
         self,
         handler: HandlerRewardBinder,
         result: ModelEvaluationResult,
         spec: ModelObjectiveSpec,
     ) -> None:
-        """Output reward_assigned_event_ids count equals number of score vectors."""
+        """Output reward_assigned_event_ids contains exactly one event ID per run."""
         envelope: dict[str, object] = {
             "correlation_id": uuid4(),
             "evaluation_result": result,
@@ -355,7 +377,7 @@ class TestHandlerRewardBinderExecute:
 
         output = handler_output.result
         assert isinstance(output, ModelRewardBinderOutput)
-        assert len(output.reward_assigned_event_ids) == len(result.score_vectors)
+        assert len(output.reward_assigned_event_ids) == 1
 
     @pytest.mark.asyncio
     async def test_output_topics_published(
@@ -450,30 +472,6 @@ class TestHandlerRewardBinderExecute:
         await handler.initialize({})
         with pytest.raises(RuntimeHostError, match="publisher"):
             await handler.execute(envelope)
-
-    @pytest.mark.asyncio
-    async def test_single_target_produces_one_reward_event(
-        self,
-        publisher: AsyncMock,
-        spec: ModelObjectiveSpec,
-    ) -> None:
-        """Single-target result produces exactly one ModelRewardAssignedEvent."""
-        result = _make_evaluation_result(num_targets=1)
-        handler = HandlerRewardBinder(
-            container=_FakeContainer(),  # type: ignore[arg-type]
-            publisher=publisher,
-        )
-        envelope: dict[str, object] = {
-            "correlation_id": uuid4(),
-            "evaluation_result": result,
-            "objective_spec": spec,
-        }
-        await handler.initialize({})
-        await handler.execute(envelope)
-
-        # 1 RunEvaluated + 1 RewardAssigned + 1 PolicyStateUpdated = 3 calls
-        assert publisher.call_count == 3
-        assert publisher.call_args_list[1].kwargs["topic"] == _TOPIC_REWARD_ASSIGNED
 
     @pytest.mark.asyncio
     async def test_handler_properties(
