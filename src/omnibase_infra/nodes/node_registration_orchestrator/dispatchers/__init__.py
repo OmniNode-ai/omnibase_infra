@@ -38,6 +38,9 @@ Related:
     - OMN-1990: Heartbeat Dispatcher Wiring
 """
 
+from omnibase_infra.nodes.node_registration_orchestrator.dispatchers.dispatcher_catalog_request import (
+    DispatcherCatalogRequest,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.dispatchers.dispatcher_node_heartbeat import (
     DispatcherNodeHeartbeat,
 )
@@ -55,6 +58,7 @@ from omnibase_infra.nodes.node_registration_orchestrator.dispatchers.dispatcher_
 )
 
 __all__: list[str] = [
+    "DispatcherCatalogRequest",
     "DispatcherNodeHeartbeat",
     "DispatcherNodeIntrospected",
     "DispatcherNodeRegistrationAcked",

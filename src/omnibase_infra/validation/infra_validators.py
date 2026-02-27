@@ -468,7 +468,9 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 129 (2026-02-25): OMN-2736 bifrost gateway field_validator coercions
 #                     ModelBifrostRequest._coerce_capabilities(): list[str] | tuple[str, ...]
 #                     ModelBifrostRequest._coerce_messages(): list[JsonDict] | tuple[JsonDict, ...]
-INFRA_MAX_UNIONS = 129
+# - 130 (2026-02-27): OMN-2923 catalog responder dispatcher
+#                     DispatcherCatalogRequest.handle(): ModelEventEnvelope[object] | dict[str, object]
+INFRA_MAX_UNIONS = 130
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

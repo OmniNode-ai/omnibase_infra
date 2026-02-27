@@ -417,11 +417,21 @@ class RegistryInfraNodeRegistrationOrchestrator:
         #   Missing entries cause ProtocolConfigurationError at startup (fail-fast).
         #
         # See module docstring "Handler Dependency Map - Design Trade-off" for details.
+        # Create the shared introspection topic store (OMN-2923).
+        # Always created here so HandlerNodeIntrospected and HandlerCatalogRequest
+        # share the same instance without requiring it as a constructor parameter.
+        from omnibase_infra.nodes.node_registration_orchestrator.services import (
+            ServiceIntrospectionTopicStore,
+        )
+
+        _topic_store = ServiceIntrospectionTopicStore()
+
         # =====================================================================
         handler_dependencies: dict[str, dict[str, object]] = {
             "HandlerNodeIntrospected": {
                 "projection_reader": projection_reader,
                 "reducer": reducer,
+                "topic_store": _topic_store,
             },
             "HandlerRuntimeTick": {
                 "projection_reader": projection_reader,
@@ -443,6 +453,9 @@ class RegistryInfraNodeRegistrationOrchestrator:
             # error rather than a clear "catalog_service not provided" message.
             "HandlerTopicCatalogQuery": {
                 "catalog_service": catalog_service,
+            },
+            "HandlerCatalogRequest": {
+                "topic_store": _topic_store,
             },
         }
 

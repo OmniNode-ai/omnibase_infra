@@ -66,6 +66,7 @@ event_bus:
     - "onex.cmd.platform.node-registration-acked.v1"
     - "onex.evt.platform.node-heartbeat.v1"
     - "onex.cmd.platform.topic-catalog-query.v1"
+    - "onex.cmd.platform.request-introspection.v1"
   publish_topics:
     - "onex.evt.platform.node-registration-result.v1"
     - "onex.evt.platform.node-registration-initiated.v1"
@@ -298,6 +299,15 @@ consumed_events:
     message_category: "COMMAND"
     description: "Request for a topic catalog snapshot from dashboard or other consumers"
     direct_handler: true
+  # OMN-2923: Introspection-based catalog responder
+  # Clients publish a request on request-introspection; runtime responds with
+  # onex.evt.* topics from accumulated node introspection state.
+  # HandlerCatalogRequest processes these requests via ServiceIntrospectionTopicStore.
+  - topic: "onex.cmd.platform.request-introspection.v1"
+    event_type: "TopicCatalogRequest"
+    message_category: "COMMAND"
+    description: "Request for onex.evt.* topics from accumulated node introspection state"
+    direct_handler: true
 # Handler Routing Configuration
 # ==============================
 # Declarative mapping of consumed events to handler implementations.
@@ -423,6 +433,20 @@ handler_routing:
         - "ModelTopicCatalogResponse"
       direct_handler: true
       description: "Returns topic catalog snapshot in response to a catalog query"
+    # ModelTopicCatalogRequest -> HandlerCatalogRequest (OMN-2923)
+    # Introspection-based catalog responder - returns onex.evt.* topics from
+    # accumulated node introspection state via ServiceIntrospectionTopicStore.
+    - event_model:
+        name: "ModelTopicCatalogRequest"
+        module: "omnibase_infra.models.registration.model_topic_catalog_request"
+      handler:
+        name: "HandlerCatalogRequest"
+        module: "omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_catalog_request"
+      message_category: "COMMAND"
+      output_events:
+        - "ModelTopicCatalogResponse"
+      direct_handler: true
+      description: "Returns onex.evt.* topics from accumulated node introspection state"
   # Handler initialization configuration
   # All handlers share the same projection reader dependency
   handler_dependencies:

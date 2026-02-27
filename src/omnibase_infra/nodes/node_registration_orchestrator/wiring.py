@@ -134,6 +134,14 @@ Message type: ModelTopicCatalogQuery
 Category: COMMAND
 """
 
+ROUTE_ID_CATALOG_REQUEST = "route.registration.catalog-request"
+"""Route ID for introspection-based catalog request commands (OMN-2923).
+
+Topic pattern: *.cmd.*.request-introspection.*
+Message type: ModelTopicCatalogRequest
+Category: COMMAND
+"""
+
 
 def _validate_service_registry(
     container: ModelONEXContainer,
@@ -255,6 +263,7 @@ async def wire_registration_dispatchers(
     from omnibase_infra.enums import EnumMessageCategory
     from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_infra.nodes.node_registration_orchestrator.dispatchers import (
+        DispatcherCatalogRequest,
         DispatcherNodeHeartbeat,
         DispatcherNodeIntrospected,
         DispatcherNodeRegistrationAcked,
@@ -262,6 +271,7 @@ async def wire_registration_dispatchers(
         DispatcherTopicCatalogQuery,
     )
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerCatalogRequest,
         HandlerNodeIntrospected,
         HandlerNodeRegistrationAcked,
         HandlerRuntimeTick,
@@ -320,6 +330,22 @@ async def wire_registration_dispatchers(
             logger.info(
                 "HandlerTopicCatalogQuery not registered (catalog_service may be unavailable), "
                 "topic-catalog-query dispatcher will not be wired",
+                extra={
+                    "error": sanitize_error_message(e),
+                    "error_type": type(e).__name__,
+                },
+            )
+
+        # 1f. Resolve catalog request handler (OMN-2923)
+        handler_catalog_request: HandlerCatalogRequest | None = None
+        try:
+            handler_catalog_request = await container.service_registry.resolve_service(
+                HandlerCatalogRequest
+            )
+        except Exception as e:
+            logger.info(
+                "HandlerCatalogRequest not registered, "
+                "catalog-request dispatcher will not be wired",
                 extra={
                     "error": sanitize_error_message(e),
                     "error_type": type(e).__name__,
@@ -450,6 +476,30 @@ async def wire_registration_dispatchers(
             )
             engine.register_route(route_topic_catalog_query)
             routes_registered.append(route_topic_catalog_query.route_id)
+
+        # 3f/4f. Register DispatcherCatalogRequest (OMN-2923)
+        if handler_catalog_request is not None:
+            dispatcher_catalog_request = DispatcherCatalogRequest(
+                handler_catalog_request
+            )
+
+            engine.register_dispatcher(
+                dispatcher_id=dispatcher_catalog_request.dispatcher_id,
+                dispatcher=dispatcher_catalog_request.handle,
+                category=dispatcher_catalog_request.category,
+                message_types=dispatcher_catalog_request.message_types,
+            )
+            dispatchers_registered.append(dispatcher_catalog_request.dispatcher_id)
+
+            route_catalog_request = ModelDispatchRoute(
+                route_id=ROUTE_ID_CATALOG_REQUEST,
+                topic_pattern="*.cmd.*.request-introspection.*",
+                message_category=EnumMessageCategory.COMMAND,
+                dispatcher_id=dispatcher_catalog_request.dispatcher_id,
+                message_type="platform.request-introspection",
+            )
+            engine.register_route(route_catalog_request)
+            routes_registered.append(route_catalog_request.route_id)
 
         logger.info(
             "Registration dispatchers wired successfully",
@@ -610,9 +660,19 @@ async def wire_registration_handlers(
         services_registered.append("RegistrationReducerService")
         logger.debug("Registered RegistrationReducerService in container")
 
+        # Create shared topic store for HandlerNodeIntrospected and HandlerCatalogRequest.
+        # This must be created before HandlerNodeIntrospected so both handlers share
+        # the same instance (HandlerNodeIntrospected populates it; HandlerCatalogRequest reads it).
+        from omnibase_infra.nodes.node_registration_orchestrator.services import (
+            ServiceIntrospectionTopicStore,
+        )
+
+        topic_store = ServiceIntrospectionTopicStore()
+
         handler_introspected = HandlerNodeIntrospected(
             projection_reader,
             reducer=reducer,
+            topic_store=topic_store,
         )
         await container.service_registry.register_instance(
             interface=HandlerNodeIntrospected,
@@ -733,6 +793,49 @@ async def wire_registration_handlers(
             )
             services_registered.append("HandlerTopicCatalogQuery")
             logger.debug("Registered HandlerTopicCatalogQuery in container")
+
+        # Register HandlerCatalogRequest (OMN-2923) with shared topic store.
+        # Always registered (no optional dependency check) — the topic store
+        # is a simple in-memory object that requires no external services.
+        from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+            HandlerCatalogRequest,
+        )
+        from omnibase_infra.nodes.node_registration_orchestrator.services import (
+            ServiceIntrospectionTopicStore,
+        )
+
+        topic_store = ServiceIntrospectionTopicStore()
+
+        # Update HandlerNodeIntrospected to use the shared topic store.
+        # Re-create with topic_store so introspection events populate the store.
+        handler_introspected_with_store = HandlerNodeIntrospected(
+            projection_reader,
+            reducer=reducer,
+            topic_store=topic_store,
+        )
+        # Re-register to replace the earlier instance
+        await container.service_registry.register_instance(
+            interface=HandlerNodeIntrospected,
+            instance=handler_introspected_with_store,
+            scope=EnumInjectionScope.GLOBAL,
+            metadata={
+                "description": "Handler for NodeIntrospectionEvent (with topic store)",
+                "version": str(semver_default),
+            },
+        )
+
+        handler_catalog_request = HandlerCatalogRequest(topic_store=topic_store)
+        await container.service_registry.register_instance(
+            interface=HandlerCatalogRequest,
+            instance=handler_catalog_request,
+            scope=EnumInjectionScope.GLOBAL,
+            metadata={
+                "description": "Handler for ModelTopicCatalogRequest (OMN-2923)",
+                "version": str(semver_default),
+            },
+        )
+        services_registered.append("HandlerCatalogRequest")
+        logger.debug("Registered HandlerCatalogRequest in container")
 
     except AttributeError as e:
         error_str = str(e)
