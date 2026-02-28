@@ -1,9 +1,8 @@
 # Docker Build and Test Workflow for ONEX Infrastructure
 # Dedicated workflow for Docker builds and integration tests
 #
-# This workflow runs Docker-specific tests separately from the main test suite,
-# following the pattern from omninode_bridge to ensure proper Docker/BuildKit
-# setup and avoid pytest-xdist worker crashes.
+# This workflow runs Docker-specific tests separately from the main test suite
+# to ensure proper Docker/BuildKit setup and avoid pytest-xdist worker crashes.
 
 name: Docker Build
 

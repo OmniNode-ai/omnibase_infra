@@ -744,8 +744,8 @@ class TestModelSchemaManifest:
             OMNIBASE_INFRA_SCHEMA_MANIFEST.owner_service = "hacked"  # type: ignore[misc]
 
     def test_canonical_manifest_has_19_tables(self) -> None:
-        """Canonical manifest declares 19 tables."""
-        assert len(OMNIBASE_INFRA_SCHEMA_MANIFEST.tables) == 19
+        """Canonical manifest declares 20 tables (19 original + topics added in OMN-2923)."""
+        assert len(OMNIBASE_INFRA_SCHEMA_MANIFEST.tables) == 20
 
     def test_canonical_manifest_tables_are_sorted(self) -> None:
         """Tables in canonical manifest are alphabetically sorted."""
