@@ -411,8 +411,22 @@ Producer: agent-actions consumer (ServiceAgentActionsConsumer)
 Consumer: observability alerting, incident recovery tooling
 """
 
+SUFFIX_OMNICLAUDE_AGENT_OBSERVABILITY_DLQ: str = (
+    "onex.evt.omniclaude.agent-observability-dlq.v1"
+)
+"""Dead letter queue topic for the legacy agent-observability consumer.
+
+Messages that fail deserialization or exceed max retry count in
+the legacy ``consumers/agent_actions_consumer.py`` are forwarded to this topic.
+Matches ``TopicBase.AGENT_OBSERVABILITY_DLQ`` in omniclaude (OMN-2959).
+
+Producer: legacy agent-observability consumer (consumers/agent_actions_consumer.py)
+Consumer: observability alerting, incident recovery tooling
+"""
+
 _OMNICLAUDE_OBSERVABILITY_DLQ_TOPIC_SUFFIXES: tuple[str, ...] = (
     SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
+    SUFFIX_OMNICLAUDE_AGENT_OBSERVABILITY_DLQ,
 )
 """DLQ topic suffixes for OmniClaude observability consumers.
 
@@ -844,6 +858,10 @@ ALL_OMNICLAUDE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
 
 Skill topics: 1 partition each (low-throughput skill dispatch -- each skill
 invocation is a single message). 207 topics total (68 skills x 3 topics each + 2 lifecycle topics [OMN-2934] + 1 DLQ topic [OMN-2945]).
+
+Observability DLQ topics: 3 partitions each (matches agent-actions consumer
+throughput). Provisioned to guarantee broker topic existence when auto-creation
+is disabled (OMN-2945).
 
 Observability DLQ topics: 3 partitions each (matches agent-actions consumer
 throughput). Provisioned to guarantee broker topic existence when auto-creation

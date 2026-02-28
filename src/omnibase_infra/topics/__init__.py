@@ -1,8 +1,8 @@
 """ONEX Infrastructure Topic Constants.
 
-This module provides platform-reserved topic suffix constants for ONEX infrastructure
-components. Domain services should NOT import from this module - domain topics should
-be defined in domain contracts.
+Platform-reserved topic suffix constants for ONEX infrastructure components. Domain
+services should NOT import from this module - domain topics should be defined in
+domain contracts.
 
 IMPORTANT: ONEX topics are realm-agnostic. Environment prefixes (dev., prod., etc.)
 must NOT appear on the wire. Environment isolation is enforced via envelope identity
@@ -48,6 +48,7 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_NODE_REGISTRATION,
     SUFFIX_NODE_REGISTRATION_ACKED,
     SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
+    SUFFIX_OMNICLAUDE_AGENT_OBSERVABILITY_DLQ,
     SUFFIX_OMNIMEMORY_ARCHIVE_MEMORY,
     SUFFIX_OMNIMEMORY_CRAWL_REQUESTED,
     SUFFIX_OMNIMEMORY_CRAWL_TICK,
@@ -155,6 +156,7 @@ __all__: list[str] = [
     "SUFFIX_OMNIMEMORY_RESTORE_MEMORY",
     # OmniClaude observability DLQ suffix constants (OMN-2945)
     "SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ",
+    "SUFFIX_OMNICLAUDE_AGENT_OBSERVABILITY_DLQ",
     # Aggregate collections
     "ALL_PLATFORM_SUFFIXES",
     "ALL_PLATFORM_TOPIC_SPECS",
