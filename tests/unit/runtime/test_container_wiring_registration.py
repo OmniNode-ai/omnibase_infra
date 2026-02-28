@@ -43,7 +43,8 @@ class TestWireRegistrationHandlers:
         assert "HandlerNodeIntrospected" in summary["services"]
         assert "HandlerRuntimeTick" in summary["services"]
         assert "HandlerNodeRegistrationAcked" in summary["services"]
-        assert len(summary["services"]) == 5
+        assert "HandlerCatalogRequest" in summary["services"]
+        assert len(summary["services"]) == 6
 
     @pytest.mark.asyncio
     async def test_registers_instances_with_correct_interfaces(self) -> None:
