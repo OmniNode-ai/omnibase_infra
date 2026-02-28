@@ -211,6 +211,30 @@ token counts, cost, and latency for the cost aggregation pipeline.
 SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED: str = "onex.evt.pattern.discovered.v1"
 """Topic for generic pattern discovery events."""
 
+SUFFIX_INTELLIGENCE_DECISION_RECORDED_EVT: str = (
+    "onex.evt.omniintelligence.decision-recorded.v1"
+)
+"""Topic for decision recorded events (outbound from intelligence pipeline).
+
+Published by omniintelligence decision_emitter on every model routing decision.
+Records the final routing decision for audit, replay, and downstream consumers.
+
+Producer: omniintelligence decision_emitter
+Consumer: Audit log, intelligence pipeline, omnidash routing analytics
+"""
+
+SUFFIX_INTELLIGENCE_DECISION_RECORDED_CMD: str = (
+    "onex.cmd.omniintelligence.decision-recorded.v1"
+)
+"""Topic for decision recorded commands (coordination channel).
+
+Published by omniintelligence decision_emitter alongside the evt topic on every
+model routing decision. Used for downstream command acknowledgement and replay.
+
+Producer: omniintelligence decision_emitter
+Consumer: Intelligence coordination, replay infrastructure
+"""
+
 # =============================================================================
 # OMNIMEMORY DOMAIN TOPIC SUFFIXES (omnimemory plugin)
 # =============================================================================
@@ -624,6 +648,9 @@ ALL_INTELLIGENCE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ),
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED, partitions=3),
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_LLM_CALL_COMPLETED, partitions=3),
+    # Decision recording topics (OMN-2943 — previously unprovisioned gap)
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_DECISION_RECORDED_EVT, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_DECISION_RECORDED_CMD, partitions=3),
 )
 """Intelligence domain topic specs provisioned for PluginIntelligence."""
 

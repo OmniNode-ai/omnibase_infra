@@ -195,8 +195,8 @@ class TestIntelligenceTopicSuffixes:
             )
 
     def test_intelligence_topic_count(self) -> None:
-        """Intelligence spec registry should have 10 topics."""
-        assert len(ALL_INTELLIGENCE_TOPIC_SPECS) == 10
+        """Intelligence spec registry should have 12 topics (10 original + 2 decision-recorded added in OMN-2943)."""
+        assert len(ALL_INTELLIGENCE_TOPIC_SPECS) == 12
 
     def test_intelligence_command_topics(self) -> None:
         """Intelligence command topics should be defined."""
@@ -343,13 +343,17 @@ class TestProvisionedTopicSpecs:
             )
 
     def test_provisioned_count(self) -> None:
-        """Combined provisioned specs should equal platform + intelligence + omnimemory + omniclaude."""
-        from omnibase_infra.topics import ALL_PLATFORM_TOPIC_SPECS
+        """Combined provisioned specs should equal platform + intelligence + omnimemory + omniclaude + omnibase_infra."""
+        from omnibase_infra.topics import (
+            ALL_OMNIBASE_INFRA_TOPIC_SPECS,
+            ALL_PLATFORM_TOPIC_SPECS,
+        )
 
         expected = (
             len(ALL_PLATFORM_TOPIC_SPECS)
             + len(ALL_INTELLIGENCE_TOPIC_SPECS)
             + len(ALL_OMNIMEMORY_TOPIC_SPECS)
+            + len(ALL_OMNIBASE_INFRA_TOPIC_SPECS)
             + len(ALL_OMNICLAUDE_TOPIC_SPECS)
         )
         assert len(ALL_PROVISIONED_TOPIC_SPECS) == expected
