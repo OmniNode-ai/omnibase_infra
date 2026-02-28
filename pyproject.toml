@@ -358,7 +358,10 @@ warn_required_dynamic_aliases = true
 warn_untyped_fields = true
 
 [tool.uv.sources]
-# omnibase-core v0.21.0 is now published to PyPI; git source override removed.
+# omnibase-core: ModelRewardAssignedEvent merged in PR #579 after v0.21.0 was published.
+# Using git source override until a patch release (v0.21.1+) includes SHA 85f79e09.
+# Revert to PyPI pin once omnibase-core>=0.21.1 is published.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "85f79e091f30fc76f163eb06c89dd56e1299d778" }
 
 [tool.coverage.run]
 source = ["src/omnibase_infra"]
