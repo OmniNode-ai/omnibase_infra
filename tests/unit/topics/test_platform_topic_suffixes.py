@@ -343,7 +343,7 @@ class TestProvisionedTopicSpecs:
             )
 
     def test_provisioned_count(self) -> None:
-        """Combined provisioned specs should equal platform + intelligence + omnimemory + omniclaude + omnibase_infra."""
+        """Combined provisioned specs should equal platform + intelligence + omnimemory + omnibase_infra + omniclaude."""
         from omnibase_infra.topics import (
             ALL_OMNIBASE_INFRA_TOPIC_SPECS,
             ALL_PLATFORM_TOPIC_SPECS,
