@@ -515,6 +515,10 @@ class TestOmnimemoryEnabledGating:
         """
         import sys
 
+        # Declare before try so finally can always reference them safely.
+        mod_name = "omnibase_infra.topics.platform_topic_suffixes"
+        parent_name = "omnibase_infra.topics"
+
         # Manipulate env before reload
         old_env = os.environ.copy()
         try:
@@ -526,8 +530,6 @@ class TestOmnimemoryEnabledGating:
 
             # Force reimport of the module (and its parent package) so
             # _omnimemory_enabled() re-evaluates with the new env.
-            mod_name = "omnibase_infra.topics.platform_topic_suffixes"
-            parent_name = "omnibase_infra.topics"
             if mod_name in sys.modules:
                 del sys.modules[mod_name]
             if parent_name in sys.modules:
