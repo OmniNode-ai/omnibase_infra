@@ -273,8 +273,8 @@ class TestOmniMemoryTopicSuffixes:
             )
 
     def test_omnimemory_topic_count(self) -> None:
-        """OmniMemory spec registry should have 6 topics."""
-        assert len(ALL_OMNIMEMORY_TOPIC_SPECS) == 6
+        """OmniMemory spec registry should have 27 topics (OMN-2941)."""
+        assert len(ALL_OMNIMEMORY_TOPIC_SPECS) == 27
 
     def test_omnimemory_event_topics(self) -> None:
         """OmniMemory event topics should be defined with correct suffixes."""
@@ -355,6 +355,7 @@ class TestProvisionedTopicSpecs:
             + len(ALL_OMNIMEMORY_TOPIC_SPECS)
             + len(ALL_OMNIBASE_INFRA_TOPIC_SPECS)
             + len(ALL_OMNICLAUDE_TOPIC_SPECS)
+            + len(ALL_OMNIBASE_INFRA_TOPIC_SPECS)
         )
         assert len(ALL_PROVISIONED_TOPIC_SPECS) == expected
 
@@ -403,8 +404,8 @@ class TestOmniClaudeTopicSuffixes:
             )
 
     def test_omniclaude_topic_count(self) -> None:
-        """OmniClaude spec registry should have 204 topics (68 skills x 3 each)."""
-        assert len(ALL_OMNICLAUDE_TOPIC_SPECS) == 204
+        """OmniClaude spec registry should have 206 topics (68 skills x 3 each + 2 lifecycle topics from OMN-2934)."""
+        assert len(ALL_OMNICLAUDE_TOPIC_SPECS) == 206
 
     def test_omniclaude_topics_use_1_partition(self) -> None:
         """All OmniClaude topics should use 1 partition (low-throughput skill dispatch)."""
@@ -424,9 +425,9 @@ class TestOmniClaudeTopicSuffixes:
         evt_topics = [s for s in ALL_OMNICLAUDE_TOPIC_SPECS if ".evt." in s.suffix]
         assert len(cmd_topics) > 0, "Expected cmd topics in OmniClaude registry"
         assert len(evt_topics) > 0, "Expected evt topics in OmniClaude registry"
-        # 68 cmd topics + 136 evt topics (68 completed + 68 failed) = 204
+        # 68 cmd topics + 138 evt topics (68 completed + 68 failed + 2 lifecycle [OMN-2934]) = 206
         assert len(cmd_topics) == 68
-        assert len(evt_topics) == 136
+        assert len(evt_topics) == 138
 
     def test_epic_team_topic_in_registry(self) -> None:
         """Spot check: epic-team skill topics should be in the registry."""
