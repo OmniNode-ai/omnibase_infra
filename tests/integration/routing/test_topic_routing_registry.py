@@ -57,13 +57,15 @@ class MockConsulKV:
     """In-memory mock of Consul KV store for testing.
 
     This mock provides a simple dict-based KV store that mimics the
-    Consul python-consul client's KV interface.
+    Consul python-consul client's KV interface, including CAS semantics
+    (check-and-set via the ``cas`` keyword on ``put``).
     """
 
     def __init__(self) -> None:
         """Initialize empty KV store."""
-        self._store: dict[str, str] = {}
-        self._index = 0
+        # Maps key -> (value_string, modify_index)
+        self._store: dict[str, tuple[str, int]] = {}
+        self._global_index = 0
 
     def get(
         self, key: str, recurse: bool = False
@@ -75,32 +77,45 @@ class MockConsulKV:
             recurse: Whether to recurse (ignored in mock).
 
         Returns:
-            Tuple of (index, data dict or None if not found).
+            Tuple of (global_index, data dict or None if not found).
         """
         if key not in self._store:
-            return self._index, None
+            return self._global_index, None
 
-        value = self._store[key]
-        return self._index, {
+        value, modify_index = self._store[key]
+        return self._global_index, {
             "Key": key,
             "Value": value.encode("utf-8"),
             "Flags": 0,
-            "CreateIndex": self._index,
-            "ModifyIndex": self._index,
+            "CreateIndex": modify_index,
+            "ModifyIndex": modify_index,
         }
 
-    def put(self, key: str, value: str) -> bool:
-        """Put value to KV store.
+    def put(
+        self,
+        key: str,
+        value: str,
+        flags: int | None = None,
+        cas: int | None = None,
+    ) -> bool:
+        """Put value to KV store with optional CAS check.
 
         Args:
             key: KV key path.
             value: Value to store.
+            flags: Optional flags (ignored in mock).
+            cas: If provided, the write succeeds only if the key's current
+                ModifyIndex matches this value (0 means create-only — succeeds
+                only when the key does not yet exist).
 
         Returns:
-            True on success.
+            True on success, False if CAS check fails.
         """
-        self._store[key] = value
-        self._index += 1
+        current_index = self._store[key][1] if key in self._store else 0
+        if cas is not None and cas != current_index:
+            return False
+        self._global_index += 1
+        self._store[key] = (value, self._global_index)
         return True
 
     def delete(self, key: str) -> bool:
@@ -114,7 +129,7 @@ class MockConsulKV:
         """
         if key in self._store:
             del self._store[key]
-        self._index += 1
+        self._global_index += 1
         return True
 
 

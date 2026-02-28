@@ -27,6 +27,7 @@ Operations:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Callable
@@ -345,7 +346,13 @@ class MixinConsulTopicIndex:
         Computes the delta between previously registered topics and new topics,
         then adds/removes the node_id from the appropriate topic subscriber lists.
 
-        This method is idempotent - calling it multiple times with the same
+        Each per-topic subscriber-list update uses Consul CAS semantics
+        (``kv_get_with_modify_index`` + ``kv_put_raw_with_cas``) to eliminate
+        the read-modify-write race introduced in OMN-2345.  If a concurrent
+        writer wins the CAS slot, the update retries up to
+        ``_CAS_MAX_RETRIES`` times with exponential back-off before raising.
+
+        This method is idempotent — calling it multiple times with the same
         parameters produces the same result.
 
         Args:
@@ -358,26 +365,9 @@ class MixinConsulTopicIndex:
             strings. Both sets are empty when there is no change.
 
         Raises:
-            InfraConsulError: If Consul client not initialized or operation fails.
-
-        Note:
-            This operation is NOT atomic. In high-concurrency scenarios with multiple
-            nodes updating the same topic's subscriber list simultaneously, race
-            conditions may occur. For MVP, this is an accepted limitation.
-
-            The non-atomic read-modify-write also affects delta correctness: the
-            (topics_added, topics_removed) tuple returned by this method is derived
-            from a snapshot of the previous state that may already be stale by the
-            time the write completes.  With OMN-2314, this delta is the direct input
-            to ``ModelTopicCatalogChanged`` events emitted downstream, so concurrent
-            registrations can produce incorrect or duplicate catalog change
-            notifications — not just inconsistent subscriber lists.
-
-            For production with high concurrency, consider:
-            - Using Consul transactions (txn endpoint) for atomic read-modify-write
-            - Implementing optimistic locking with Consul's ModifyIndex
+            InfraConsulError: If Consul client not initialized, operation fails,
+                or CAS retries are exhausted.
         """
-        # NOTE: Non-atomic read-modify-write. See docstring for concurrency notes.
         logger.debug(
             "Updating topic index for node %s",
             node_id,
@@ -438,16 +428,128 @@ class MixinConsulTopicIndex:
 
         return frozenset(topics_to_add), frozenset(topics_to_remove)
 
+    # Maximum number of CAS retries for subscriber-list updates.
+    # Set conservatively high: under asyncio concurrency, up to N-1 retries
+    # may be needed where N is the number of concurrent writers.  10 covers
+    # typical bulk provisioning bursts without unbounded retry loops.
+    _CAS_MAX_RETRIES: int = 10
+    # Base back-off delay (seconds) between CAS retries; doubles on each attempt.
+    _CAS_BACKOFF_BASE: float = 0.05
+
+    async def _cas_update_subscriber_set(
+        self,
+        key: str,
+        node_id: str,
+        add: bool,
+        correlation_id: UUID,
+    ) -> None:
+        """Atomically add or remove *node_id* from the JSON subscriber set at *key*.
+
+        Uses Consul check-and-set (CAS) semantics: read the current value with
+        its ModifyIndex, compute the new set, then write back with
+        ``cas=ModifyIndex``.  If the write is rejected because another writer
+        modified the key concurrently, retry the entire read-compute-write loop
+        up to ``_CAS_MAX_RETRIES`` times with exponential back-off.
+
+        Args:
+            key: Consul KV key for the subscriber list (already validated).
+            node_id: The node identifier to add or remove.
+            add: True to add *node_id*, False to remove it.
+            correlation_id: Correlation ID for tracing.
+
+        Raises:
+            InfraConsulError: If Consul client not initialized, the stored value
+                is not valid JSON, or all CAS retries are exhausted.
+        """
+        for attempt in range(self._CAS_MAX_RETRIES):
+            existing_value, modify_index = await self.kv_get_with_modify_index(
+                key, correlation_id
+            )
+
+            try:
+                if existing_value:
+                    parsed = json.loads(existing_value)
+                    if not isinstance(parsed, list) or not all(
+                        isinstance(elem, str) for elem in parsed
+                    ):
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.CONSUL,
+                            operation="consul.kv_get_with_modify_index",
+                            target_name="consul_handler",
+                        )
+                        raise InfraConsulError(
+                            "Malformed Consul topic subscriber list: expected list[str]",
+                            context=context,
+                            consul_key=key,
+                        )
+                    subscribers: set[str] = set(parsed)
+                else:
+                    subscribers = set()
+            except (json.JSONDecodeError, TypeError) as exc:
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="consul.kv_get_with_modify_index",
+                    target_name="consul_handler",
+                )
+                raise InfraConsulError(
+                    "Invalid JSON in Consul topic subscriber list",
+                    context=context,
+                    consul_key=key,
+                ) from exc
+
+            if add:
+                subscribers.add(node_id)
+            else:
+                subscribers.discard(node_id)
+
+            success = await self.kv_put_raw_with_cas(
+                key, json.dumps(sorted(subscribers)), modify_index, correlation_id
+            )
+            if success:
+                return
+
+            # CAS conflict — another writer modified the key.  Back off and retry.
+            backoff = self._CAS_BACKOFF_BASE * (2**attempt)
+            logger.debug(
+                "CAS conflict on %s (attempt %d/%d); retrying in %.3fs",
+                key,
+                attempt + 1,
+                self._CAS_MAX_RETRIES,
+                backoff,
+                extra={"correlation_id": str(correlation_id)},
+            )
+            await asyncio.sleep(backoff)
+
+        # All retries exhausted.
+        context = ModelInfraErrorContext.with_correlation(
+            correlation_id=correlation_id,
+            transport_type=EnumInfraTransportType.CONSUL,
+            operation="consul.kv_put_raw_with_cas",
+            target_name="consul_handler",
+        )
+        raise InfraConsulError(
+            f"CAS write to '{key}' failed after {self._CAS_MAX_RETRIES} retries — "
+            "too much write contention on topic subscriber index",
+            context=context,
+            consul_key=key,
+        )
+
     async def _add_subscriber_to_topic(
         self,
         topic: str,
         node_id: str,
         correlation_id: UUID,
     ) -> None:
-        """Add node_id to topic's subscriber list (idempotent).
+        """Add node_id to topic's subscriber list (idempotent, CAS-atomic).
 
         If the node_id is already in the list, this is a no-op.
         The subscriber list is stored as a sorted JSON array.
+
+        Uses Consul CAS semantics to eliminate the non-atomic read-modify-write
+        race fixed in OMN-2345.  Up to ``_CAS_MAX_RETRIES`` retries are
+        attempted with exponential back-off on CAS conflict.
 
         Args:
             topic: The topic string.
@@ -455,35 +557,17 @@ class MixinConsulTopicIndex:
             correlation_id: Correlation ID for tracing.
 
         Raises:
-            InfraConsulError: If Consul client not initialized or operation fails.
+            InfraConsulError: If Consul client not initialized, operation fails,
+                or CAS retries are exhausted.
             ProtocolConfigurationError: If topic contains invalid characters.
-
-        Note:
-            Non-atomic read-modify-write. See _update_topic_index docstring for
-            concurrency notes. Accepted MVP limitation.
         """
         # Validate topic format before KV path interpolation to prevent path traversal
         self._validate_topic_format(topic, correlation_id)
 
-        # NOTE: Non-atomic read-modify-write. See _update_topic_index for details.
         key = f"onex/topics/{topic}/subscribers"
-        existing = await self.kv_get_raw(key, correlation_id)
-        try:
-            subscribers = set(json.loads(existing) if existing else [])
-        except (json.JSONDecodeError, TypeError) as e:
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="consul.kv_get_raw",
-                target_name="consul_handler",
-            )
-            raise InfraConsulError(
-                "Invalid JSON in Consul topic subscriber list",
-                context=context,
-                consul_key=key,
-            ) from e
-        subscribers.add(node_id)
-        await self._kv_put_raw(key, json.dumps(sorted(subscribers)), correlation_id)
+        await self._cas_update_subscriber_set(
+            key, node_id, add=True, correlation_id=correlation_id
+        )
 
         logger.debug(
             "Added node %s to topic %s subscribers",
@@ -502,10 +586,14 @@ class MixinConsulTopicIndex:
         node_id: str,
         correlation_id: UUID,
     ) -> None:
-        """Remove node_id from topic's subscriber list.
+        """Remove node_id from topic's subscriber list (CAS-atomic).
 
         If the node_id is not in the list, this is a no-op.
         The subscriber list is stored as a sorted JSON array.
+
+        Uses Consul CAS semantics to eliminate the non-atomic read-modify-write
+        race fixed in OMN-2345.  Up to ``_CAS_MAX_RETRIES`` retries are
+        attempted with exponential back-off on CAS conflict.
 
         Args:
             topic: The topic string.
@@ -513,47 +601,28 @@ class MixinConsulTopicIndex:
             correlation_id: Correlation ID for tracing.
 
         Raises:
-            InfraConsulError: If Consul client not initialized or operation fails.
+            InfraConsulError: If Consul client not initialized, operation fails,
+                or CAS retries are exhausted.
             ProtocolConfigurationError: If topic contains invalid characters.
-
-        Note:
-            Non-atomic read-modify-write. See _update_topic_index docstring for
-            concurrency notes. Accepted MVP limitation.
         """
         # Validate topic format before KV path interpolation to prevent path traversal
         self._validate_topic_format(topic, correlation_id)
 
-        # NOTE: Non-atomic read-modify-write. See _update_topic_index for details.
         key = f"onex/topics/{topic}/subscribers"
-        existing = await self.kv_get_raw(key, correlation_id)
-        if existing:
-            try:
-                subscribers = set(json.loads(existing))
-            except (json.JSONDecodeError, TypeError) as e:
-                context = ModelInfraErrorContext.with_correlation(
-                    correlation_id=correlation_id,
-                    transport_type=EnumInfraTransportType.CONSUL,
-                    operation="consul.kv_get_raw",
-                    target_name="consul_handler",
-                )
-                raise InfraConsulError(
-                    "Invalid JSON in Consul topic subscriber list",
-                    context=context,
-                    consul_key=key,
-                ) from e
-            subscribers.discard(node_id)
-            await self._kv_put_raw(key, json.dumps(sorted(subscribers)), correlation_id)
+        await self._cas_update_subscriber_set(
+            key, node_id, add=False, correlation_id=correlation_id
+        )
 
-            logger.debug(
-                "Removed node %s from topic %s subscribers",
-                node_id,
-                topic,
-                extra={
-                    "correlation_id": str(correlation_id),
-                    "node_id": node_id,
-                    "topic": topic,
-                },
-            )
+        logger.debug(
+            "Removed node %s from topic %s subscribers",
+            node_id,
+            topic,
+            extra={
+                "correlation_id": str(correlation_id),
+                "node_id": node_id,
+                "topic": topic,
+            },
+        )
 
     async def _get_topic_subscribers(
         self,

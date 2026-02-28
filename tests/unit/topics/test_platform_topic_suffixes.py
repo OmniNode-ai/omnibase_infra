@@ -432,10 +432,10 @@ class TestOmniClaudeTopicSuffixes:
         evt_topics = [s for s in ALL_OMNICLAUDE_TOPIC_SPECS if ".evt." in s.suffix]
         assert len(cmd_topics) > 0, "Expected cmd topics in OmniClaude registry"
         assert len(evt_topics) > 0, "Expected evt topics in OmniClaude registry"
-        # 68 cmd topics + 138 evt topics (68 completed + 68 failed + 2 lifecycle [OMN-2934])
-        # + 1 evt DLQ topic (agent-actions-dlq [OMN-2945]) = 207 total
+        # 68 cmd topics + 139 evt topics:
+        #   68 completed + 68 failed (skill) + 2 lifecycle [OMN-2934] + 1 DLQ [OMN-2945] = 207
         assert len(cmd_topics) == 68
-        assert len(evt_topics) == 139  # 138 skill/lifecycle + 1 DLQ (OMN-2945)
+        assert len(evt_topics) == 139
 
     def test_epic_team_topic_in_registry(self) -> None:
         """Spot check: epic-team skill topics should be in the registry."""
