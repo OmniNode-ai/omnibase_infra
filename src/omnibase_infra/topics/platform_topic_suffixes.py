@@ -277,6 +277,37 @@ broker topic name exists even if no consumer is registered yet.
 """
 
 # =============================================================================
+# OMNICLAUDE OBSERVABILITY DLQ TOPIC SUFFIXES
+# =============================================================================
+# Dead letter queue topics for OmniClaude observability consumers. These are
+# NOT skill topics -- they are infrastructure-level DLQ destinations for
+# messages that permanently fail processing in the agent-actions consumer.
+#
+# Provisioned here so broker auto-creation is guaranteed at startup. Without
+# provisioning, DLQ writes fail when broker auto-creation is disabled (OMN-2945).
+
+SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ: str = "onex.evt.omniclaude.agent-actions-dlq.v1"
+"""Dead letter queue topic for the agent-actions observability consumer.
+
+Messages that fail validation or exceed max retry count in
+ConfigAgentActionsConsumer are forwarded to this topic. Matches the
+hardcoded default in
+``omnibase_infra.services.observability.agent_actions.config.ConfigAgentActionsConsumer.dlq_topic``.
+
+Producer: agent-actions consumer (ServiceAgentActionsConsumer)
+Consumer: observability alerting, incident recovery tooling
+"""
+
+_OMNICLAUDE_OBSERVABILITY_DLQ_TOPIC_SUFFIXES: tuple[str, ...] = (
+    SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
+)
+"""DLQ topic suffixes for OmniClaude observability consumers.
+
+These topics are provisioned separately from skill topics to make the
+DLQ contract explicit and auditable via the provisioning registry.
+"""
+
+# =============================================================================
 # OMNICLAUDE SKILL TOPIC SUFFIXES (omniclaude plugin)
 # =============================================================================
 # These topics are consumed/produced by OmniClaude skill orchestrator nodes.
@@ -637,14 +668,26 @@ ALL_OMNIMEMORY_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
 # OMNICLAUDE SKILL TOPIC SPEC REGISTRY
 # =============================================================================
 
-ALL_OMNICLAUDE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = tuple(
-    ModelTopicSpec(suffix=suffix, partitions=1)
-    for suffix in _OMNICLAUDE_SKILL_TOPIC_SUFFIXES
+ALL_OMNICLAUDE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
+    # Skill orchestrator topics (1 partition -- low-throughput skill dispatch)
+    *tuple(
+        ModelTopicSpec(suffix=suffix, partitions=1)
+        for suffix in _OMNICLAUDE_SKILL_TOPIC_SUFFIXES
+    ),
+    # Observability DLQ topics (3 partitions -- matches agent-actions consumer throughput)
+    *tuple(
+        ModelTopicSpec(suffix=suffix, partitions=3)
+        for suffix in _OMNICLAUDE_OBSERVABILITY_DLQ_TOPIC_SUFFIXES
+    ),
 )
-"""OmniClaude skill topic specs provisioned for skill orchestrator nodes.
+"""OmniClaude topic specs provisioned for skill orchestrator nodes and observability.
 
-Each skill topic gets 1 partition (low-throughput skill dispatch -- each skill
+Skill topics: 1 partition each (low-throughput skill dispatch -- each skill
 invocation is a single message). 204 topics total (68 skills x 3 topics each).
+
+Observability DLQ topics: 3 partitions each (matches agent-actions consumer
+throughput). Provisioned to guarantee broker topic existence when auto-creation
+is disabled (OMN-2945).
 
 Source: ``omniclaude/src/omniclaude/nodes/node_skill_*/contract.yaml``
 """

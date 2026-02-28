@@ -20,6 +20,7 @@ from omnibase_infra.topics.model_bus_descriptor import ModelBusDescriptor
 from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
 from omnibase_infra.topics.platform_topic_suffixes import (
     ALL_INTELLIGENCE_TOPIC_SPECS,
+    ALL_OMNIBASE_INFRA_TOPIC_SPECS,
     ALL_OMNICLAUDE_TOPIC_SPECS,
     ALL_OMNIMEMORY_TOPIC_SPECS,
     ALL_PLATFORM_SUFFIXES,
@@ -29,6 +30,7 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_CONTRACT_DEREGISTERED,
     SUFFIX_CONTRACT_REGISTERED,
     SUFFIX_FSM_STATE_TRANSITIONS,
+    SUFFIX_GMAIL_ARCHIVE_PURGED,
     SUFFIX_INTELLIGENCE_CLAUDE_HOOK_EVENT,
     SUFFIX_INTELLIGENCE_INTENT_CLASSIFIED,
     SUFFIX_INTELLIGENCE_LLM_CALL_COMPLETED,
@@ -43,6 +45,7 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_NODE_INTROSPECTION,
     SUFFIX_NODE_REGISTRATION,
     SUFFIX_NODE_REGISTRATION_ACKED,
+    SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
     SUFFIX_OMNIMEMORY_CRAWL_REQUESTED,
     SUFFIX_OMNIMEMORY_CRAWL_TICK,
     SUFFIX_OMNIMEMORY_DOCUMENT_CHANGED,
@@ -101,12 +104,17 @@ __all__: list[str] = [
     "SUFFIX_OMNIMEMORY_DOCUMENT_INDEXED",
     "SUFFIX_OMNIMEMORY_CRAWL_TICK",
     "SUFFIX_OMNIMEMORY_CRAWL_REQUESTED",
+    # Omnibase_infra domain suffix constants
+    "SUFFIX_GMAIL_ARCHIVE_PURGED",
+    # OmniClaude observability DLQ suffix constants (OMN-2945)
+    "SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ",
     # Aggregate collections
     "ALL_PLATFORM_SUFFIXES",
     "ALL_PLATFORM_TOPIC_SPECS",
     "ALL_INTELLIGENCE_TOPIC_SPECS",
     "ALL_OMNICLAUDE_TOPIC_SPECS",
     "ALL_OMNIMEMORY_TOPIC_SPECS",
+    "ALL_OMNIBASE_INFRA_TOPIC_SPECS",
     "ALL_PROVISIONED_SUFFIXES",
     "ALL_PROVISIONED_TOPIC_SPECS",
     # Topic spec model
