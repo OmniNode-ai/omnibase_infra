@@ -163,6 +163,7 @@ RUN uv pip freeze | grep -v '^\(-e\|@\)' > /tmp/constraints.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --constraint /tmp/constraints.txt \
     omniintelligence==0.6.0 \
+    omninode-claude==0.3.0 \
     omninode-memory==0.6.0
 
 # ============================================================================

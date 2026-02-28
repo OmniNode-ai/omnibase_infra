@@ -152,6 +152,8 @@ x-runtime-env: &runtime-env
   OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for intelligence DB URL fallback}@postgres:5432/omniintelligence}
   # OmniMemory domain plugin
   OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-}
+  # OmniClaude domain plugin (OMN-3182): required by PluginClaude.wire_dispatchers()
+  OMNICLAUDE_CONTRACTS_ROOT: ${OMNICLAUDE_CONTRACTS_ROOT:-}
 # ==========================================================================
 # Services
 # ==========================================================================
