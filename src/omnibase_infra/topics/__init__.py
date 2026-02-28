@@ -1,8 +1,8 @@
 """ONEX Infrastructure Topic Constants.
 
-This module provides platform-reserved topic suffix constants for ONEX infrastructure
-components. Domain services should NOT import from this module - domain topics should
-be defined in domain contracts.
+Platform-reserved topic suffix constants for ONEX infrastructure components. Domain
+services should NOT import from this module - domain topics should be defined in
+domain contracts.
 
 IMPORTANT: ONEX topics are realm-agnostic. Environment prefixes (dev., prod., etc.)
 must NOT appear on the wire. Environment isolation is enforced via envelope identity
