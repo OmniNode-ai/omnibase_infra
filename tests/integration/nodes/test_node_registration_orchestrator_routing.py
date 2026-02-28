@@ -150,8 +150,8 @@ class TestHandlerRoutingContract:
         handler_routing = contract_data.get("handler_routing", {})
         handlers = handler_routing.get("handlers", [])
 
-        assert len(handlers) == 5, (
-            f"Expected exactly 5 handler entries, found {len(handlers)}. "
+        assert len(handlers) == 6, (
+            f"Expected exactly 6 handler entries, found {len(handlers)}. "
             f"Events: {[h.get('event_model', {}).get('name', 'unknown') for h in handlers]}"
         )
 
@@ -166,6 +166,7 @@ class TestHandlerRoutingContract:
             "ModelNodeRegistrationAcked",
             "ModelNodeHeartbeatEvent",
             "ModelTopicCatalogQuery",  # OMN-2313
+            "ModelTopicCatalogRequest",  # OMN-2923
         }
 
         actual_event_models = {
@@ -191,6 +192,7 @@ class TestHandlerRoutingContract:
             "HandlerNodeRegistrationAcked",
             "HandlerNodeHeartbeat",
             "HandlerTopicCatalogQuery",  # OMN-2313
+            "HandlerCatalogRequest",  # OMN-2923
         }
 
         actual_handlers = {
@@ -712,6 +714,7 @@ class TestHandlerRoutingInitialization:
             "ModelNodeRegistrationAcked": "handler-node-registration-acked",
             "ModelNodeHeartbeatEvent": "handler-node-heartbeat",
             "ModelTopicCatalogQuery": "handler-topic-catalog-query",  # OMN-2313
+            "ModelTopicCatalogRequest": "handler-catalog-request",  # OMN-2923
         }
 
         actual_mappings = {
@@ -845,6 +848,7 @@ class TestRouteToHandlers:
             "ModelNodeRegistrationAcked",
             "ModelNodeHeartbeatEvent",
             "ModelTopicCatalogQuery",  # OMN-2313
+            "ModelTopicCatalogRequest",  # OMN-2923
         }
 
         actual_keys = {entry.routing_key for entry in subcontract.handlers}
@@ -1004,6 +1008,7 @@ class TestHandlerRoutingContractCodeConsistency:
             "handler-node-registration-acked",
             "handler-node-heartbeat",
             "handler-topic-catalog-query",  # OMN-2313
+            "handler-catalog-request",  # OMN-2923
         }
 
         assert handler_keys == expected_handler_ids, (

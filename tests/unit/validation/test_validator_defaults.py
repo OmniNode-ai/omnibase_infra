@@ -121,11 +121,12 @@ class TestInfraValidatorConstants:
         - 129 (2026-02-25): OMN-2736 bifrost gateway field_validator coercions (+2 unions)
           - ModelBifrostRequest._coerce_capabilities(): list[str] | tuple[str, ...]
           - ModelBifrostRequest._coerce_messages(): list[JsonDict] | tuple[JsonDict, ...]
+        - 130 (2026-02-28): PR #469 HandlerCatalogRequest for ModelTopicCatalogRequest (+1 union)
 
-        Current: 129 (as of OMN-2736). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
+        Current: 130 (as of PR #469). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 129, (
-            "INFRA_MAX_UNIONS should be 129 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 130, (
+            "INFRA_MAX_UNIONS should be 130 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
