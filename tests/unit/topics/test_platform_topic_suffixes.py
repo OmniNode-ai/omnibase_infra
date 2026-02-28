@@ -12,6 +12,7 @@ from omnibase_infra.topics import (
     ALL_OMNICLAUDE_TOPIC_SPECS,
     ALL_OMNIMEMORY_TOPIC_SPECS,
     ALL_PLATFORM_SUFFIXES,
+    ALL_PLATFORM_TOPIC_SPECS,
     ALL_PROVISIONED_SUFFIXES,
     ALL_PROVISIONED_TOPIC_SPECS,
     SUFFIX_CONTRACT_DEREGISTERED,
@@ -360,10 +361,6 @@ class TestProvisionedTopicSpecs:
 
     def test_provisioned_count(self) -> None:
         """Combined provisioned specs count reflects whether OMNIMEMORY_ENABLED is set."""
-        from omnibase_infra.topics import (
-            ALL_PLATFORM_TOPIC_SPECS,
-        )
-
         enabled = os.environ.get("OMNIMEMORY_ENABLED", "").strip().lower() in {
             "1",
             "true",
