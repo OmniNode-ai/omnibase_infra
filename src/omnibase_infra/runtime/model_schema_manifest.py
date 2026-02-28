@@ -53,6 +53,7 @@ OMNIBASE_INFRA_SCHEMA_MANIFEST = ModelSchemaManifest(
         "latency_breakdowns",
         "llm_call_metrics",
         "llm_cost_aggregates",
+        "manifest_injection_lifecycle",
         "pattern_hit_rates",
         "registration_projections",
         "router_performance_metrics",

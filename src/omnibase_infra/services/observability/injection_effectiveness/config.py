@@ -32,6 +32,7 @@ Validation:
 Related Tickets:
     - OMN-1890: Store injection metrics with corrected schema
     - OMN-1889: Emit injection metrics from omniclaude hooks (producer)
+    - OMN-2942: Add consumer for manifest injection lifecycle events (OMN-1888 audit trail)
 
 Example:
     >>> from omnibase_infra.services.observability.injection_effectiveness.config import (
@@ -97,12 +98,17 @@ class ConfigInjectionEffectivenessConsumer(BaseSettings):
         description="Consumer group ID for offset tracking",
     )
 
-    # Topics to subscribe (3 injection effectiveness topics from OMN-1889)
+    # Topics to subscribe (3 injection effectiveness topics from OMN-1889 +
+    # 3 manifest injection lifecycle topics from OMN-2942 for OMN-1888 audit trail)
     topics: list[str] = Field(
         default_factory=lambda: [
             "onex.evt.omniclaude.context-utilization.v1",
             "onex.evt.omniclaude.agent-match.v1",
             "onex.evt.omniclaude.latency-breakdown.v1",
+            # Manifest injection lifecycle topics (OMN-1888 / OMN-2942)
+            "onex.evt.omniclaude.manifest-injection-started.v1",
+            "onex.evt.omniclaude.manifest-injected.v1",
+            "onex.evt.omniclaude.manifest-injection-failed.v1",
         ],
         description="Kafka topics to consume for injection effectiveness",
     )

@@ -55,6 +55,9 @@ from omnibase_infra.services.observability.injection_effectiveness.models.model_
 from omnibase_infra.services.observability.injection_effectiveness.models.model_latency_breakdown import (
     ModelLatencyBreakdownEvent,
 )
+from omnibase_infra.services.observability.injection_effectiveness.models.model_manifest_injection_lifecycle import (
+    ModelManifestInjectionLifecycleEvent,
+)
 from omnibase_infra.utils.util_db_error_context import db_operation_error_context
 from omnibase_infra.utils.util_db_transaction import set_statement_timeout
 
@@ -578,6 +581,100 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 },
             )
             return len(events)
+
+    async def write_manifest_injection_lifecycle(
+        self,
+        events: list[ModelManifestInjectionLifecycleEvent],
+        correlation_id: UUID,
+    ) -> int:
+        """Write batch of manifest injection lifecycle events to PostgreSQL.
+
+        Inserts records into ``manifest_injection_lifecycle`` with
+        ``ON CONFLICT DO NOTHING`` idempotency (one row per session + event_type).
+
+        This closes the OMN-1888 audit trail gap: manifest injection lifecycle
+        events are now stored for end-to-end effectiveness attribution.
+
+        Args:
+            events: List of manifest injection lifecycle events to write.
+                Each event carries an ``event_type`` discriminator:
+                ``manifest_injection_started``, ``manifest_injected``, or
+                ``manifest_injection_failed``.
+            correlation_id: Correlation ID for tracing (for circuit breaker context).
+
+        Returns:
+            Count of events in the batch (idempotent — skips duplicates).
+
+        Raises:
+            InfraConnectionError: If database connection fails.
+            InfraTimeoutError: If operation times out.
+            InfraUnavailableError: If circuit breaker is open.
+        """
+        if not events:
+            return 0
+
+        # Check circuit breaker before entering error context
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker(
+                operation="write_manifest_injection_lifecycle",
+                correlation_id=correlation_id,
+            )
+
+        sql = """
+            INSERT INTO manifest_injection_lifecycle (
+                event_type, entity_id, session_id, correlation_id, causation_id,
+                emitted_at, agent_label, agent_domain,
+                injection_success, injection_duration_ms,
+                routing_source, agent_version, yaml_path,
+                error_message, error_type,
+                created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
+            ON CONFLICT (session_id, event_type) DO NOTHING
+        """
+
+        async with db_operation_error_context(
+            operation="write_manifest_injection_lifecycle",
+            correlation_id=correlation_id,
+        ):
+            async with self._pool.acquire() as conn:
+                await set_statement_timeout(conn, self._query_timeout)
+                await conn.executemany(
+                    sql,
+                    [
+                        (
+                            e.event_type,
+                            e.entity_id,
+                            e.session_id,
+                            e.correlation_id,
+                            e.causation_id,
+                            e.emitted_at,
+                            e.agent_label,
+                            e.agent_domain,
+                            e.injection_success,
+                            e.injection_duration_ms,
+                            e.routing_source,
+                            e.agent_version,
+                            e.yaml_path,
+                            e.error_message,
+                            e.error_type,
+                        )
+                        for e in events
+                    ],
+                )
+
+        # Record success - reset circuit breaker after successful write
+        async with self._circuit_breaker_lock:
+            await self._reset_circuit_breaker()
+
+        logger.debug(
+            "Wrote manifest injection lifecycle batch",
+            extra={
+                "count": len(events),
+                "correlation_id": str(correlation_id),
+            },
+        )
+        return len(events)
 
     def get_circuit_breaker_state(self) -> dict[str, JsonType]:
         """Return current circuit breaker state for health checks.
