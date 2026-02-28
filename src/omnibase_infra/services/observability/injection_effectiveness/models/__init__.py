@@ -10,6 +10,7 @@ Event Types:
     - ModelContextUtilizationEvent: Context utilization detection results
     - ModelAgentMatchEvent: Agent routing accuracy metrics
     - ModelLatencyBreakdownEvent: Per-prompt latency breakdowns
+    - ModelManifestInjectionLifecycleEvent: Manifest injection lifecycle audit trail (OMN-2942)
 
 Query Models (OMN-2078):
     - ModelInjectionEffectivenessRow: Single row from injection_effectiveness table
@@ -46,6 +47,9 @@ from omnibase_infra.services.observability.injection_effectiveness.models.model_
 from omnibase_infra.services.observability.injection_effectiveness.models.model_latency_breakdown_row import (
     ModelLatencyBreakdownRow,
 )
+from omnibase_infra.services.observability.injection_effectiveness.models.model_manifest_injection_lifecycle import (
+    ModelManifestInjectionLifecycleEvent,
+)
 from omnibase_infra.services.observability.injection_effectiveness.models.model_pattern_hit_rate_row import (
     ModelPatternHitRateRow,
 )
@@ -63,6 +67,7 @@ __all__ = [
     "ModelInjectionEffectivenessRow",
     "ModelLatencyBreakdownEvent",
     "ModelLatencyBreakdownRow",
+    "ModelManifestInjectionLifecycleEvent",
     "ModelPatternHitRateRow",
     "ModelPatternUtilization",
 ]
