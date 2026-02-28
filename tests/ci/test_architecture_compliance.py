@@ -954,6 +954,7 @@ class TestArchitectureCompliance:
             f"{self.CORE_PACKAGE} package path does not exist: {package_path}"
         )
 
+    @pytest.mark.slow
     @pytest.mark.serial
     @pytest.mark.timeout(300)
     @pytest.mark.xdist_group(name="serial")
@@ -979,13 +980,15 @@ class TestArchitectureCompliance:
         memory pressure from multiple workers running similar scans concurrently.
 
         Markers:
+        - slow: Excluded from the default parallel CI split (takes ~14 min in CI);
+          run explicitly with -m slow or in the nightly suite
         - serial: Documents this test should run serially
         - timeout(300): 5-minute timeout as the scan takes ~3 minutes locally
         - xdist_group("serial"): Forces pytest-xdist to run this test in
           isolation, not in parallel with other tests
 
         Local runtime: ~3 minutes
-        CI runtime: May vary based on worker resources
+        CI runtime: ~14 minutes (excluded from parallel splits via @pytest.mark.slow)
         """
         forbidden_patterns = [
             "kafka",

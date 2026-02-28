@@ -211,13 +211,37 @@ token counts, cost, and latency for the cost aggregation pipeline.
 SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED: str = "onex.evt.pattern.discovered.v1"
 """Topic for generic pattern discovery events."""
 
+SUFFIX_INTELLIGENCE_DECISION_RECORDED_EVT: str = (
+    "onex.evt.omniintelligence.decision-recorded.v1"
+)
+"""Topic for decision recorded events (outbound from intelligence pipeline).
+
+Published by omniintelligence decision_emitter on every model routing decision.
+Records the final routing decision for audit, replay, and downstream consumers.
+
+Producer: omniintelligence decision_emitter
+Consumer: Audit log, intelligence pipeline, omnidash routing analytics
+"""
+
+SUFFIX_INTELLIGENCE_DECISION_RECORDED_CMD: str = (
+    "onex.cmd.omniintelligence.decision-recorded.v1"
+)
+"""Topic for decision recorded commands (coordination channel).
+
+Published by omniintelligence decision_emitter alongside the evt topic on every
+model routing decision. Used for downstream command acknowledgement and replay.
+
+Producer: omniintelligence decision_emitter
+Consumer: Intelligence coordination, replay infrastructure
+"""
+
 # =============================================================================
 # OMNIMEMORY DOMAIN TOPIC SUFFIXES (omnimemory plugin)
 # =============================================================================
 # These topics are consumed/produced by PluginOmnimemory. They are provisioned
 # alongside platform topics so the plugin finds them ready at startup.
 
-# Event topics (outbound from omnimemory pipeline)
+# Document crawl event topics (outbound from omnimemory crawl pipeline)
 SUFFIX_OMNIMEMORY_DOCUMENT_DISCOVERED: str = (
     "onex.evt.omnimemory.document-discovered.v1"
 )
@@ -232,12 +256,99 @@ SUFFIX_OMNIMEMORY_DOCUMENT_REMOVED: str = "onex.evt.omnimemory.document-removed.
 SUFFIX_OMNIMEMORY_DOCUMENT_INDEXED: str = "onex.evt.omnimemory.document-indexed.v1"
 """Topic for document indexed events (document successfully indexed into vector store)."""
 
-# Command topics (inbound to omnimemory pipeline)
+SUFFIX_OMNIMEMORY_DOCUMENT_PARSE_FAILED: str = (
+    "onex.evt.omnimemory.document-parse-failed.v1"
+)
+"""Topic for document parse failure events (document could not be parsed during indexing)."""
+
+# Crawl command topics (inbound to omnimemory crawl pipeline)
 SUFFIX_OMNIMEMORY_CRAWL_TICK: str = "onex.cmd.omnimemory.crawl-tick.v1"
 """Topic for crawl tick commands (periodic scheduler trigger for crawl cycle)."""
 
 SUFFIX_OMNIMEMORY_CRAWL_REQUESTED: str = "onex.cmd.omnimemory.crawl-requested.v1"
-"""Topic for crawl requested commands (explicit crawl request for a document source)."""
+"""Topic for crawl requested commands (explicit crawl request for a document source).
+
+Note: No subscriber is currently declared in any omnimemory contract.yaml. The topic is
+provisioned to ensure the correct broker topic exists if a subscriber is added in the
+future. See OMN-2941.
+"""
+
+SUFFIX_OMNIMEMORY_RUNTIME_TICK: str = "onex.cmd.omnimemory.runtime-tick.v1"
+"""Topic for runtime tick commands (internal periodic tick for omnimemory orchestrator)."""
+
+# Intent pipeline topics
+SUFFIX_OMNIMEMORY_INTENT_STORED: str = "onex.evt.omnimemory.intent-stored.v1"
+"""Topic for intent stored events (intent classification successfully persisted)."""
+
+SUFFIX_OMNIMEMORY_INTENT_STORE_FAILED: str = (
+    "onex.evt.omnimemory.intent-store-failed.v1"
+)
+"""Topic for intent store failed events (intent classification persistence failure)."""
+
+SUFFIX_OMNIMEMORY_INTENT_QUERY_REQUESTED: str = (
+    "onex.cmd.omnimemory.intent-query-requested.v1"
+)
+"""Topic for intent query request commands (request to query stored intents)."""
+
+SUFFIX_OMNIMEMORY_INTENT_QUERY_RESPONSE: str = (
+    "onex.evt.omnimemory.intent-query-response.v1"
+)
+"""Topic for intent query response events (query results for stored intents)."""
+
+# Memory lifecycle event topics (outbound from memory lifecycle pipeline)
+SUFFIX_OMNIMEMORY_MEMORY_STORED: str = "onex.evt.omnimemory.memory-stored.v1"
+"""Topic for memory stored events (memory entry successfully persisted)."""
+
+SUFFIX_OMNIMEMORY_MEMORY_RETRIEVED: str = "onex.evt.omnimemory.memory-retrieved.v1"
+"""Topic for memory retrieved events (memory entry successfully fetched)."""
+
+SUFFIX_OMNIMEMORY_MEMORY_UPDATED: str = "onex.evt.omnimemory.memory-updated.v1"
+"""Topic for memory updated events (memory entry content or metadata changed)."""
+
+SUFFIX_OMNIMEMORY_MEMORY_DELETED: str = "onex.evt.omnimemory.memory-deleted.v1"
+"""Topic for memory deleted events (memory entry permanently removed)."""
+
+SUFFIX_OMNIMEMORY_MEMORY_ACCESSED: str = "onex.evt.omnimemory.memory-accessed.v1"
+"""Topic for memory accessed events (memory entry read access recorded)."""
+
+SUFFIX_OMNIMEMORY_MEMORY_EXPIRED: str = "onex.evt.omnimemory.memory-expired.v1"
+"""Topic for memory expired events (memory entry TTL elapsed and marked expired)."""
+
+SUFFIX_OMNIMEMORY_MEMORY_ARCHIVED: str = "onex.evt.omnimemory.memory-archived.v1"
+"""Topic for memory archived events (memory entry moved to long-term archive)."""
+
+SUFFIX_OMNIMEMORY_MEMORY_ARCHIVE_INITIATED: str = (
+    "onex.evt.omnimemory.memory-archive-initiated.v1"
+)
+"""Topic for memory archive initiated events (archive workflow started for a memory entry)."""
+
+SUFFIX_OMNIMEMORY_MEMORY_RESTORED: str = "onex.evt.omnimemory.memory-restored.v1"
+"""Topic for memory restored events (archived memory entry restored to active state)."""
+
+SUFFIX_OMNIMEMORY_LIFECYCLE_TRANSITION_FAILED: str = (
+    "onex.evt.omnimemory.lifecycle-transition-failed.v1"
+)
+"""Topic for lifecycle transition failure events (FSM transition could not be completed)."""
+
+# Memory lifecycle command topics (inbound to memory lifecycle pipeline)
+SUFFIX_OMNIMEMORY_MEMORY_RETRIEVAL_REQUESTED: str = (
+    "onex.cmd.omnimemory.memory-retrieval-requested.v1"
+)
+"""Topic for memory retrieval request commands (request to retrieve a memory entry)."""
+
+SUFFIX_OMNIMEMORY_MEMORY_RETRIEVAL_RESPONSE: str = (
+    "onex.evt.omnimemory.memory-retrieval-response.v1"
+)
+"""Topic for memory retrieval response events (retrieval results for a memory query)."""
+
+SUFFIX_OMNIMEMORY_EXPIRE_MEMORY: str = "onex.cmd.omnimemory.expire-memory.v1"
+"""Topic for expire memory commands (command to expire a memory entry by ID)."""
+
+SUFFIX_OMNIMEMORY_ARCHIVE_MEMORY: str = "onex.cmd.omnimemory.archive-memory.v1"
+"""Topic for archive memory commands (command to archive a memory entry by ID)."""
+
+SUFFIX_OMNIMEMORY_RESTORE_MEMORY: str = "onex.cmd.omnimemory.restore-memory.v1"
+"""Topic for restore memory commands (command to restore an archived memory entry)."""
 
 # =============================================================================
 # OMNIBASE_INFRA DOMAIN TOPIC SUFFIXES (omnibase-infra gmail nodes)
@@ -321,6 +432,12 @@ DLQ contract explicit and auditable via the provisioning registry.
 # in the ALL_OMNICLAUDE_TOPIC_SPECS tuple below.
 
 _OMNICLAUDE_SKILL_TOPIC_SUFFIXES: tuple[str, ...] = (
+    # ----- Skill lifecycle observability topics (OMN-2934) -----
+    # Emitted by handle_skill_requested() in omniclaude on every skill invocation.
+    # run_id is the join key: started and completed for the same invocation
+    # share the same run_id and land on the same Kafka partition.
+    "onex.evt.omniclaude.skill-started.v1",
+    "onex.evt.omniclaude.skill-completed.v1",
     # ----- Command topics (skill invocation requests) -----
     "onex.cmd.omniclaude.action-logging.v1",
     "onex.cmd.omniclaude.agent-observability.v1",
@@ -530,7 +647,11 @@ _OMNICLAUDE_SKILL_TOPIC_SUFFIXES: tuple[str, ...] = (
 )
 """All OmniClaude skill topic suffixes extracted from contract.yaml files.
 
-Each skill node defines 3 topics:
+Includes skill lifecycle observability topics (OMN-2934):
+  - ``onex.evt.omniclaude.skill-started.v1``   (emitted before dispatch)
+  - ``onex.evt.omniclaude.skill-completed.v1`` (emitted after dispatch)
+
+Each skill node also defines 3 topics:
   - Command: ``onex.cmd.omniclaude.<skill-name>.v1`` (subscribe)
   - Success: ``onex.evt.omniclaude.<skill-name>-completed.v1`` (publish)
   - Failure: ``onex.evt.omniclaude.<skill-name>-failed.v1`` (publish)
@@ -645,6 +766,9 @@ ALL_INTELLIGENCE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ),
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED, partitions=3),
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_LLM_CALL_COMPLETED, partitions=3),
+    # Decision recording topics (OMN-2943 — previously unprovisioned gap)
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_DECISION_RECORDED_EVT, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_DECISION_RECORDED_CMD, partitions=3),
 )
 """Intelligence domain topic specs provisioned for PluginIntelligence."""
 
@@ -653,16 +777,50 @@ ALL_INTELLIGENCE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
 # =============================================================================
 
 ALL_OMNIMEMORY_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
-    # Event topics (3 partitions each)
+    # --- Document crawl event topics ---
     ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_DOCUMENT_DISCOVERED, partitions=3),
     ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_DOCUMENT_CHANGED, partitions=3),
     ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_DOCUMENT_REMOVED, partitions=3),
     ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_DOCUMENT_INDEXED, partitions=3),
-    # Command topics (3 partitions each)
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_DOCUMENT_PARSE_FAILED, partitions=3),
+    # --- Crawl command topics ---
     ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_CRAWL_TICK, partitions=3),
     ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_CRAWL_REQUESTED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_RUNTIME_TICK, partitions=3),
+    # --- Intent pipeline topics ---
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_INTENT_STORED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_INTENT_STORE_FAILED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_INTENT_QUERY_REQUESTED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_INTENT_QUERY_RESPONSE, partitions=3),
+    # --- Memory lifecycle event topics ---
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_MEMORY_STORED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_MEMORY_RETRIEVED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_MEMORY_UPDATED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_MEMORY_DELETED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_MEMORY_ACCESSED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_MEMORY_EXPIRED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_MEMORY_ARCHIVED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_MEMORY_ARCHIVE_INITIATED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_MEMORY_RESTORED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_LIFECYCLE_TRANSITION_FAILED, partitions=3),
+    # --- Memory lifecycle command topics ---
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_MEMORY_RETRIEVAL_REQUESTED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_MEMORY_RETRIEVAL_RESPONSE, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_EXPIRE_MEMORY, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_ARCHIVE_MEMORY, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_RESTORE_MEMORY, partitions=3),
 )
-"""Omnimemory domain topic specs provisioned for PluginOmnimemory."""
+"""Omnimemory domain topic specs provisioned for PluginOmnimemory.
+
+Covers all topics declared in omnimemory contract.yaml files (OMN-2941):
+  - Document crawl pipeline: discovered, changed, removed, indexed, parse-failed
+  - Crawl commands: crawl-tick, crawl-requested (no current subscriber), runtime-tick
+  - Intent pipeline: stored, store-failed, query-requested, query-response
+  - Memory lifecycle events: stored, retrieved, updated, deleted, accessed, expired,
+    archived, archive-initiated, restored, lifecycle-transition-failed
+  - Memory lifecycle commands: retrieval-requested, retrieval-response, expire,
+    archive, restore
+"""
 
 # =============================================================================
 # OMNICLAUDE SKILL TOPIC SPEC REGISTRY
@@ -682,8 +840,8 @@ ALL_OMNICLAUDE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
 )
 """OmniClaude topic specs provisioned for skill orchestrator nodes and observability.
 
-Skill topics: 1 partition each (low-throughput skill dispatch -- each skill
-invocation is a single message). 204 topics total (68 skills x 3 topics each).
+Each skill topic gets 1 partition (low-throughput skill dispatch -- each skill
+invocation is a single message). 207 topics total (68 skills x 3 topics each + 2 lifecycle topics [OMN-2934] + 1 DLQ [OMN-2945]).
 
 Observability DLQ topics: 3 partitions each (matches agent-actions consumer
 throughput). Provisioned to guarantee broker topic existence when auto-creation

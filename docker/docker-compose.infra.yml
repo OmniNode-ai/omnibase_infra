@@ -69,6 +69,7 @@
 #     - agent-actions-consumer: 8087 [runtime profile]
 #     - intelligence-api: 8053 [runtime profile]
 #     - contract-resolver: 8091 [runtime profile] (OMN-2756 transitional bridge)
+#     - skill-lifecycle-consumer: 8092 [runtime profile] (OMN-2934)
 name: omnibase-infra
 # ==========================================================================
 # IMPORTANT: Requires Docker Compose v2.20.0 or later (nested variable expansion).
@@ -212,7 +213,8 @@ services:
       - --advertise-rpc-addr redpanda:33145
       - --mode dev-container
       - --smp 1
-      - --memory 1G
+      - --memory ${REDPANDA_MEMORY:-8G}
+      - --kafka-connections-max ${REDPANDA_KAFKA_CONNECTIONS_MAX:-10000}
       - --default-log-level=warn
     ports:
       - "${REDPANDA_EXTERNAL_PORT:-29092}:19092"
@@ -512,6 +514,51 @@ services:
           memory: 64M
     labels:
       - "com.omninode.service=agent-actions-consumer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+  # ==========================================================================
+  # Skill Lifecycle Consumer - Observability (Runtime Profile) [OMN-2934]
+  # ==========================================================================
+  # Consumes skill-started and skill-completed events from Kafka and persists
+  # them to the skill_executions PostgreSQL table for omnidash monitoring.
+  skill-lifecycle-consumer:
+    !!merge <<: *runtime-base
+    container_name: omninode-skill-lifecycle-consumer
+    profiles: ["runtime", "full"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    command: ["python", "-m", "omnibase_infra.services.observability.skill_lifecycle.consumer"]
+    environment:
+      OMNIBASE_INFRA_SKILL_LIFECYCLE_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
+      OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN: ${OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for skill-lifecycle DSN}@postgres:5432/omnibase_infra}
+      OMNIBASE_INFRA_SKILL_LIFECYCLE_BATCH_SIZE: ${SKILL_LIFECYCLE_BATCH_SIZE:-100}
+      OMNIBASE_INFRA_SKILL_LIFECYCLE_BATCH_TIMEOUT_MS: ${SKILL_LIFECYCLE_BATCH_TIMEOUT_MS:-1000}
+      OMNIBASE_INFRA_SKILL_LIFECYCLE_HEALTH_CHECK_PORT: "8092"
+      OMNIBASE_INFRA_SKILL_LIFECYCLE_HEALTH_CHECK_HOST: "0.0.0.0"
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-development}
+    ports:
+      - "${SKILL_LIFECYCLE_CONSUMER_PORT:-8092}:8092"
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8092/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
+    labels:
+      - "com.omninode.service=skill-lifecycle-consumer"
       - "com.omninode.layer=runtime"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
   # ==========================================================================

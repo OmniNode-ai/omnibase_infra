@@ -140,7 +140,7 @@ class TestDemoTopicPrefixes:
         [
             "onex.evt.platform.node-registration.v1",
             "onex.cmd.platform.node-introspection.v1",
-            "onex.evt.omniintelligence.session-outcome.v1",
+            "onex.evt.omniclaude.session-outcome.v1",
             "onex.cmd.omniintelligence.pattern-lifecycle.v1",
             "onex.evt.omniclaude.phase-metrics.v1",
             "onex.evt.omniclaude.agent-status.v1",

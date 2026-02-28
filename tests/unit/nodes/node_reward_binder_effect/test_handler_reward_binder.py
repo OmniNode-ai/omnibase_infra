@@ -6,12 +6,13 @@ Tests:
 - objective_fingerprint is deterministic SHA-256 of ModelObjectiveSpec.model_dump_json()
 - evidence_refs trace back to ModelEvidenceItem.item_id values in ModelEvidenceBundle
 - Three events emitted in correct order: RunEvaluated -> RewardAssigned -> PolicyStateUpdated
-- Event structure uses canonical score vector fields (not stub fields)
+- Event structure uses canonical ModelRewardAssignedEvent shape (OMN-2928):
+  score vector fields + policy signal fields (policy_id, policy_type, reward_delta, etc.)
 - Kafka publish failure propagates (never swallowed silently)
 - Missing inputs raise RuntimeHostError
 - No publisher configured raises RuntimeHostError
 
-Ticket: OMN-2927
+Ticket: OMN-2927, OMN-2928
 """
 
 from __future__ import annotations
@@ -22,12 +23,15 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_core.enums.enum_policy_type import EnumPolicyType
 from omnibase_core.models.objective.model_score_vector import ModelScoreVector
 from omnibase_infra.nodes.node_reward_binder_effect.handlers.handler_reward_binder import (
     _TOPIC_POLICY_STATE_UPDATED,
     _TOPIC_REWARD_ASSIGNED,
     HandlerRewardBinder,
+    _compute_idempotency_key,
     _compute_objective_fingerprint,
+    _compute_reward_delta,
 )
 from omnibase_infra.nodes.node_reward_binder_effect.models.model_evaluation_result import (
     ModelEvaluationResult,
@@ -191,12 +195,40 @@ class TestHandlerRewardBinderExecute:
         """Default ModelObjectiveSpec."""
         return _make_objective_spec()
 
+    @pytest.fixture
+    def policy_id(self) -> UUID:
+        """Default policy entity ID."""
+        return uuid4()
+
+    @pytest.fixture
+    def policy_type(self) -> EnumPolicyType:
+        """Default policy type."""
+        return EnumPolicyType.TOOL_RELIABILITY
+
+    def _make_envelope(
+        self,
+        result: ModelEvaluationResult,
+        spec: ModelObjectiveSpec,
+        policy_id: UUID,
+        policy_type: EnumPolicyType,
+    ) -> dict[str, object]:
+        """Build a full envelope with all required fields."""
+        return {
+            "correlation_id": uuid4(),
+            "evaluation_result": result,
+            "objective_spec": spec,
+            "policy_id": policy_id,
+            "policy_type": policy_type,
+        }
+
     @pytest.mark.asyncio
     async def test_returns_success_output(
         self,
         handler: HandlerRewardBinder,
         result: ModelEvaluationResult,
         spec: ModelObjectiveSpec,
+        policy_id: UUID,
+        policy_type: EnumPolicyType,
     ) -> None:
         """execute() returns ModelHandlerOutput with success=True."""
         corr_id = uuid4()
@@ -204,6 +236,8 @@ class TestHandlerRewardBinderExecute:
             "correlation_id": corr_id,
             "evaluation_result": result,
             "objective_spec": spec,
+            "policy_id": policy_id,
+            "policy_type": policy_type,
         }
         await handler.initialize({})
         handler_output = await handler.execute(envelope)
@@ -220,6 +254,8 @@ class TestHandlerRewardBinderExecute:
         handler: HandlerRewardBinder,
         result: ModelEvaluationResult,
         spec: ModelObjectiveSpec,
+        policy_id: UUID,
+        policy_type: EnumPolicyType,
     ) -> None:
         """Output objective_fingerprint matches SHA-256 of spec."""
         expected = _compute_objective_fingerprint(spec)
@@ -227,6 +263,8 @@ class TestHandlerRewardBinderExecute:
             "correlation_id": uuid4(),
             "evaluation_result": result,
             "objective_spec": spec,
+            "policy_id": policy_id,
+            "policy_type": policy_type,
         }
         await handler.initialize({})
         handler_output = await handler.execute(envelope)
@@ -243,6 +281,8 @@ class TestHandlerRewardBinderExecute:
         handler: HandlerRewardBinder,
         result: ModelEvaluationResult,
         spec: ModelObjectiveSpec,
+        policy_id: UUID,
+        policy_type: EnumPolicyType,
     ) -> None:
         """Publisher called in order: RewardAssigned -> PolicyStateUpdated.
 
@@ -252,6 +292,8 @@ class TestHandlerRewardBinderExecute:
             "correlation_id": uuid4(),
             "evaluation_result": result,
             "objective_spec": spec,
+            "policy_id": policy_id,
+            "policy_type": policy_type,
         }
         await handler.initialize({})
         await handler.execute(envelope)
@@ -272,6 +314,8 @@ class TestHandlerRewardBinderExecute:
         handler: HandlerRewardBinder,
         result: ModelEvaluationResult,
         spec: ModelObjectiveSpec,
+        policy_id: UUID,
+        policy_type: EnumPolicyType,
     ) -> None:
         """First publisher call is RewardAssigned with canonical score fields.
 
@@ -282,6 +326,8 @@ class TestHandlerRewardBinderExecute:
             "correlation_id": uuid4(),
             "evaluation_result": result,
             "objective_spec": spec,
+            "policy_id": policy_id,
+            "policy_type": policy_type,
         }
         await handler.initialize({})
         await handler.execute(envelope)
@@ -307,13 +353,17 @@ class TestHandlerRewardBinderExecute:
         handler: HandlerRewardBinder,
         result: ModelEvaluationResult,
         spec: ModelObjectiveSpec,
+        policy_id: UUID,
+        policy_type: EnumPolicyType,
     ) -> None:
-        """ModelRewardAssignedEvent has canonical fields and traceable evidence refs."""
+        """ModelRewardAssignedEvent has canonical shape: score fields + policy signal."""
         expected_item_ids = {str(item.item_id) for item in result.evidence_bundle.items}
         envelope: dict[str, object] = {
             "correlation_id": uuid4(),
             "evaluation_result": result,
             "objective_spec": spec,
+            "policy_id": policy_id,
+            "policy_type": policy_type,
         }
         await handler.initialize({})
         await handler.execute(envelope)
@@ -328,6 +378,14 @@ class TestHandlerRewardBinderExecute:
         assert reward_payload["latency"] == sv.latency
         assert reward_payload["maintainability"] == sv.maintainability
         assert reward_payload["human_time"] == sv.human_time
+        # Policy signal fields present (OMN-2928)
+        assert reward_payload["policy_id"] == str(policy_id)
+        assert reward_payload["policy_type"] == policy_type.value
+        assert "reward_delta" in reward_payload
+        assert -1.0 <= reward_payload["reward_delta"] <= 1.0
+        assert "idempotency_key" in reward_payload
+        assert len(reward_payload["idempotency_key"]) == 64  # SHA-256 hex
+        assert "occurred_at_utc" in reward_payload
         # Stub fields absent
         assert "composite_score" not in reward_payload
         assert "dimensions" not in reward_payload
@@ -345,12 +403,16 @@ class TestHandlerRewardBinderExecute:
         handler: HandlerRewardBinder,
         result: ModelEvaluationResult,
         spec: ModelObjectiveSpec,
+        policy_id: UUID,
+        policy_type: EnumPolicyType,
     ) -> None:
         """ModelPolicyStateUpdatedEvent payload includes both old_state and new_state."""
         envelope: dict[str, object] = {
             "correlation_id": uuid4(),
             "evaluation_result": result,
             "objective_spec": spec,
+            "policy_id": policy_id,
+            "policy_type": policy_type,
         }
         await handler.initialize({})
         await handler.execute(envelope)
@@ -367,12 +429,16 @@ class TestHandlerRewardBinderExecute:
         handler: HandlerRewardBinder,
         result: ModelEvaluationResult,
         spec: ModelObjectiveSpec,
+        policy_id: UUID,
+        policy_type: EnumPolicyType,
     ) -> None:
         """Output reward_assigned_event_ids contains exactly one event ID per run."""
         envelope: dict[str, object] = {
             "correlation_id": uuid4(),
             "evaluation_result": result,
             "objective_spec": spec,
+            "policy_id": policy_id,
+            "policy_type": policy_type,
         }
         await handler.initialize({})
         handler_output = await handler.execute(envelope)
@@ -387,12 +453,16 @@ class TestHandlerRewardBinderExecute:
         handler: HandlerRewardBinder,
         result: ModelEvaluationResult,
         spec: ModelObjectiveSpec,
+        policy_id: UUID,
+        policy_type: EnumPolicyType,
     ) -> None:
         """Output topics_published contains all three topic names."""
         envelope: dict[str, object] = {
             "correlation_id": uuid4(),
             "evaluation_result": result,
             "objective_spec": spec,
+            "policy_id": policy_id,
+            "policy_type": policy_type,
         }
         await handler.initialize({})
         handler_output = await handler.execute(envelope)
@@ -409,6 +479,8 @@ class TestHandlerRewardBinderExecute:
         handler: HandlerRewardBinder,
         result: ModelEvaluationResult,
         spec: ModelObjectiveSpec,
+        policy_id: UUID,
+        policy_type: EnumPolicyType,
     ) -> None:
         """Kafka publish failure is never swallowed -- it propagates to the caller."""
         handler._publisher = AsyncMock(side_effect=ConnectionError("Kafka down"))
@@ -417,6 +489,8 @@ class TestHandlerRewardBinderExecute:
             "correlation_id": uuid4(),
             "evaluation_result": result,
             "objective_spec": spec,
+            "policy_id": policy_id,
+            "policy_type": policy_type,
         }
         await handler.initialize({})
         with pytest.raises(ConnectionError, match="Kafka down"):
@@ -461,6 +535,8 @@ class TestHandlerRewardBinderExecute:
         self,
         result: ModelEvaluationResult,
         spec: ModelObjectiveSpec,
+        policy_id: UUID,
+        policy_type: EnumPolicyType,
     ) -> None:
         """Handler without publisher raises RuntimeHostError on execute()."""
         from omnibase_infra.errors import RuntimeHostError
@@ -470,6 +546,8 @@ class TestHandlerRewardBinderExecute:
             "correlation_id": uuid4(),
             "evaluation_result": result,
             "objective_spec": spec,
+            "policy_id": policy_id,
+            "policy_type": policy_type,
         }
         await handler.initialize({})
         with pytest.raises(RuntimeHostError, match="publisher"):
@@ -487,6 +565,48 @@ class TestHandlerRewardBinderExecute:
         assert handler.handler_category == EnumHandlerTypeCategory.EFFECT
 
     @pytest.mark.asyncio
+    async def test_missing_policy_id_raises(
+        self,
+        handler: HandlerRewardBinder,
+        result: ModelEvaluationResult,
+        spec: ModelObjectiveSpec,
+        policy_type: EnumPolicyType,
+    ) -> None:
+        """Missing policy_id raises RuntimeHostError."""
+        from omnibase_infra.errors import RuntimeHostError
+
+        envelope: dict[str, object] = {
+            "correlation_id": uuid4(),
+            "evaluation_result": result,
+            "objective_spec": spec,
+            "policy_type": policy_type,
+        }
+        await handler.initialize({})
+        with pytest.raises(RuntimeHostError, match="policy_id"):
+            await handler.execute(envelope)
+
+    @pytest.mark.asyncio
+    async def test_missing_policy_type_raises(
+        self,
+        handler: HandlerRewardBinder,
+        result: ModelEvaluationResult,
+        spec: ModelObjectiveSpec,
+        policy_id: UUID,
+    ) -> None:
+        """Missing policy_type raises RuntimeHostError."""
+        from omnibase_infra.errors import RuntimeHostError
+
+        envelope: dict[str, object] = {
+            "correlation_id": uuid4(),
+            "evaluation_result": result,
+            "objective_spec": spec,
+            "policy_id": policy_id,
+        }
+        await handler.initialize({})
+        with pytest.raises(RuntimeHostError, match="policy_type"):
+            await handler.execute(envelope)
+
+    @pytest.mark.asyncio
     async def test_initialize_and_shutdown(
         self,
         handler: HandlerRewardBinder,
@@ -496,3 +616,84 @@ class TestHandlerRewardBinderExecute:
         assert handler._initialized is True
         await handler.shutdown()
         assert handler._initialized is False
+
+
+# ==============================================================================
+# _compute_reward_delta
+# ==============================================================================
+
+
+class TestComputeRewardDelta:
+    """Tests for the _compute_reward_delta helper function."""
+
+    def test_perfect_scores_yield_positive_one(self) -> None:
+        sv = ModelScoreVector(
+            correctness=1.0,
+            safety=1.0,
+            cost=1.0,
+            latency=1.0,
+            maintainability=1.0,
+            human_time=1.0,
+        )
+        assert _compute_reward_delta(sv) == pytest.approx(1.0)
+
+    def test_zero_scores_yield_negative_one(self) -> None:
+        sv = ModelScoreVector(
+            correctness=0.0,
+            safety=0.0,
+            cost=0.0,
+            latency=0.0,
+            maintainability=0.0,
+            human_time=0.0,
+        )
+        assert _compute_reward_delta(sv) == pytest.approx(-1.0)
+
+    def test_half_scores_yield_zero(self) -> None:
+        sv = ModelScoreVector(
+            correctness=0.5,
+            safety=0.5,
+            cost=0.5,
+            latency=0.5,
+            maintainability=0.5,
+            human_time=0.5,
+        )
+        assert _compute_reward_delta(sv) == pytest.approx(0.0)
+
+    def test_result_clamped_to_range(self) -> None:
+        sv = ModelScoreVector(
+            correctness=1.0,
+            safety=1.0,
+            cost=1.0,
+            latency=1.0,
+            maintainability=1.0,
+            human_time=1.0,
+        )
+        delta = _compute_reward_delta(sv)
+        assert -1.0 <= delta <= 1.0
+
+
+# ==============================================================================
+# _compute_idempotency_key
+# ==============================================================================
+
+
+class TestComputeIdempotencyKey:
+    """Tests for the _compute_idempotency_key helper function."""
+
+    def test_returns_64_char_hex(self) -> None:
+        key = _compute_idempotency_key(uuid4(), uuid4(), uuid4())
+        assert len(key) == 64
+        assert all(c in "0123456789abcdef" for c in key)
+
+    def test_deterministic_for_same_inputs(self) -> None:
+        eid, pid, rid = uuid4(), uuid4(), uuid4()
+        assert _compute_idempotency_key(eid, pid, rid) == _compute_idempotency_key(
+            eid, pid, rid
+        )
+
+    def test_different_inputs_produce_different_keys(self) -> None:
+        eid1, eid2 = uuid4(), uuid4()
+        pid, rid = uuid4(), uuid4()
+        assert _compute_idempotency_key(eid1, pid, rid) != _compute_idempotency_key(
+            eid2, pid, rid
+        )

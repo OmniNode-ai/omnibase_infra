@@ -76,6 +76,7 @@ from omnibase_infra.services.observability.injection_effectiveness.models import
     ModelAgentMatchEvent,
     ModelContextUtilizationEvent,
     ModelLatencyBreakdownEvent,
+    ModelManifestInjectionLifecycleEvent,
 )
 from omnibase_infra.services.observability.injection_effectiveness.writer_postgres import (
     WriterInjectionEffectivenessPostgres,
@@ -159,6 +160,10 @@ TOPIC_TO_MODEL: dict[str, type[BaseModel]] = {
     "onex.evt.omniclaude.context-utilization.v1": ModelContextUtilizationEvent,
     "onex.evt.omniclaude.agent-match.v1": ModelAgentMatchEvent,
     "onex.evt.omniclaude.latency-breakdown.v1": ModelLatencyBreakdownEvent,
+    # Manifest injection lifecycle topics (OMN-1888 / OMN-2942)
+    "onex.evt.omniclaude.manifest-injection-started.v1": ModelManifestInjectionLifecycleEvent,
+    "onex.evt.omniclaude.manifest-injected.v1": ModelManifestInjectionLifecycleEvent,
+    "onex.evt.omniclaude.manifest-injection-failed.v1": ModelManifestInjectionLifecycleEvent,
 }
 
 # Map topics to writer method names
@@ -166,6 +171,10 @@ TOPIC_TO_WRITER_METHOD: dict[str, str] = {
     "onex.evt.omniclaude.context-utilization.v1": "write_context_utilization",
     "onex.evt.omniclaude.agent-match.v1": "write_agent_match",
     "onex.evt.omniclaude.latency-breakdown.v1": "write_latency_breakdowns",
+    # Manifest injection lifecycle topics (OMN-1888 / OMN-2942)
+    "onex.evt.omniclaude.manifest-injection-started.v1": "write_manifest_injection_lifecycle",
+    "onex.evt.omniclaude.manifest-injected.v1": "write_manifest_injection_lifecycle",
+    "onex.evt.omniclaude.manifest-injection-failed.v1": "write_manifest_injection_lifecycle",
 }
 
 
