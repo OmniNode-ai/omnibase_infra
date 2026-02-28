@@ -355,7 +355,6 @@ class TestProvisionedTopicSpecs:
             + len(ALL_OMNIMEMORY_TOPIC_SPECS)
             + len(ALL_OMNIBASE_INFRA_TOPIC_SPECS)
             + len(ALL_OMNICLAUDE_TOPIC_SPECS)
-            + len(ALL_OMNIBASE_INFRA_TOPIC_SPECS)
         )
         assert len(ALL_PROVISIONED_TOPIC_SPECS) == expected
 
