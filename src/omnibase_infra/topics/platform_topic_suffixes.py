@@ -847,6 +847,10 @@ Observability DLQ topics: 3 partitions each (matches agent-actions consumer
 throughput). Provisioned to guarantee broker topic existence when auto-creation
 is disabled (OMN-2945).
 
+Observability DLQ topics: 3 partitions each (matches agent-actions consumer
+throughput). Provisioned to guarantee broker topic existence when auto-creation
+is disabled (OMN-2945).
+
 Source: ``omniclaude/src/omniclaude/nodes/node_skill_*/contract.yaml``
 """
 
