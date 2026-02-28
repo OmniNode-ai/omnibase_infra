@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+# Ticket: OMN-3045
+name: "node_baselines_batch_compute"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  EFFECT node: 3-phase baselines batch computation. Derives treatment/control comparison data from agent_routing_decisions and agent_actions tables. Emits onex.evt.omnibase-infra.baselines-computed.v1 for omnidash Baselines dashboard when rows are written (D5: no emit on zero rows).
+
+input_model:
+  name: "ModelBaselinesBatchComputeCommand"
+  module: "omnibase_infra.nodes.node_baselines_batch_compute.models"
+  description: "Batch compute command with required correlation_id (D1)."
+output_model:
+  name: "ModelBaselinesBatchComputeOutput"
+  module: "omnibase_infra.nodes.node_baselines_batch_compute.models"
+  description: "Result row counts and snapshot_emitted flag."
+event_bus:
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.baselines-compute-requested.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.baselines-computed.v1"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "baselines.batch_compute"
+      handler:
+        name: "HandlerBaselinesBatchCompute"
+        module: "omnibase_infra.nodes.node_baselines_batch_compute.handlers.handler_baselines_batch_compute"
