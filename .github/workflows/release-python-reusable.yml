@@ -12,8 +12,6 @@ on:
         type: boolean
         default: true
     secrets:
-      PYPI_UPLOAD_URL:
-        required: false
       PYPI_TOKEN:
         required: false
 
@@ -74,16 +72,12 @@ jobs:
       - name: Publish to PyPI
         if: inputs.publish
         run: |
-          if [ -z "$UV_PUBLISH_URL" ] || [ -z "$UV_PUBLISH_TOKEN" ]; then
-            echo "ERROR: PYPI_UPLOAD_URL and PYPI_TOKEN secrets are required when publish is true"
+          if [ -z "$UV_PUBLISH_TOKEN" ]; then
+            echo "ERROR: PYPI_TOKEN secret is required when publish is true"
             exit 1
           fi
-          uv publish \
-            --publish-url "$UV_PUBLISH_URL" \
-            --token "$UV_PUBLISH_TOKEN" \
-            dist/*.whl dist/*.tar.gz
+          uv publish --token "$UV_PUBLISH_TOKEN" dist/*.whl dist/*.tar.gz
         env:
-          UV_PUBLISH_URL: ${{ secrets.PYPI_UPLOAD_URL }}
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
 
       - name: Generate checksums
