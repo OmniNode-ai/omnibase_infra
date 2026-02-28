@@ -106,7 +106,7 @@ class {class_name}(str, Enum):
     \"\"\"
 """
 
-_MEMBER_TEMPLATE = "    {key} = {value!r}  # {topic}"
+_MEMBER_TEMPLATE = '    {key} = "{value}"  # {topic}'
 
 _INIT_HEADER = """\
 # SPDX-License-Identifier: MIT

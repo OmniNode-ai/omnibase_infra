@@ -143,6 +143,22 @@ repos:
         files: '\.yaml$'
         pass_filenames: false
         stages: [pre-commit]
+      # Topic enum sync validation (pre-commit) — selective trigger [OMN-2967]
+      - id: onex-validate-topic-enums
+        name: Validate generated topic enums (in sync with contracts)
+        language: system
+        entry: uv run python scripts/generate_topic_enums.py --check
+        pass_filenames: false
+        files: '(contract\.yaml|scripts/generate_topic_enums\.py|src/omnibase_infra/tools/.*\.py|src/omnibase_infra/enums/generated/.*\.py)$'
+        stages: [pre-commit]
+      # Topic enum sync validation (pre-push) — always runs [OMN-2967]
+      - id: onex-validate-topic-enums-push
+        name: Validate generated topic enums (pre-push always)
+        language: system
+        entry: uv run python scripts/generate_topic_enums.py --check
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
       # Pattern validation - naming conventions
       - id: onex-validate-patterns
         name: ONEX Pattern Validation

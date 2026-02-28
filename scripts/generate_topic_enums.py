@@ -47,6 +47,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -228,6 +229,30 @@ def _run_generate(contracts_root: Path, output_dir: Path) -> int:
         print(f"ERROR: Failed to write generated files: {exc}", file=sys.stderr)
         return 3
 
+    # Apply ruff format so generated files are stable under the project's linter.
+    # This prevents a pre-commit ruff pass from modifying the files after generation,
+    # which would make --check report drift on a clean state.
+    try:
+        format_result = subprocess.run(
+            ["uv", "run", "ruff", "format", str(output_dir)],
+            cwd=_REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if format_result.returncode != 0:
+            print(
+                f"WARNING: ruff format exited {format_result.returncode} — "
+                f"generated files may not be ruff-stable.\n{format_result.stderr}",
+                file=sys.stderr,
+            )
+    except FileNotFoundError:
+        print(
+            "WARNING: 'uv' not found — skipping ruff format. "
+            "Generated files may not be ruff-stable.",
+            file=sys.stderr,
+        )
+
     # Remove stale enum_*_topic.py files (not in current output, not __init__.py)
     stale_removed: list[Path] = []
     if output_dir.exists():
@@ -289,11 +314,37 @@ def _run_check(contracts_root: Path, output_dir: Path) -> int:
         print(f"ERROR: Unexpected error during generation: {exc}", file=sys.stderr)
         return 3
 
+    # Apply ruff format to in-memory content via temp files so comparison is stable.
+    # The generator emits unformatted content; ruff reformats it on --generate.
+    # --check must compare the ruff-formatted version to what's on disk.
+    ruff_formatted: dict[Path, str] = {}
+    with tempfile.TemporaryDirectory() as _tmp_dir:
+        tmp_root = Path(_tmp_dir)
+        for expected_path, expected_content in rendered.items():
+            tmp_file = tmp_root / expected_path.name
+            tmp_file.write_text(expected_content, encoding="utf-8")
+        try:
+            subprocess.run(
+                ["uv", "run", "ruff", "format", str(tmp_root)],
+                cwd=_REPO_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except FileNotFoundError:
+            pass  # ruff not available; fall back to raw comparison
+        for expected_path in rendered:
+            tmp_file = tmp_root / expected_path.name
+            if tmp_file.exists():
+                ruff_formatted[expected_path] = tmp_file.read_text(encoding="utf-8")
+            else:
+                ruff_formatted[expected_path] = rendered[expected_path]
+
     drift_detected = False
     issues: list[str] = []
 
     # Check 1: Expected files exist on disk with correct content
-    for expected_path, expected_content in rendered.items():
+    for expected_path, expected_content in ruff_formatted.items():
         if not expected_path.exists():
             issues.append(f"  MISSING: {expected_path.relative_to(_REPO_ROOT)}")
             drift_detected = True
@@ -306,7 +357,7 @@ def _run_check(contracts_root: Path, output_dir: Path) -> int:
 
     # Check 2: No stale enum_*_topic.py files on disk
     expected_enum_filenames: set[str] = {
-        p.name for p in rendered if fnmatch.fnmatch(p.name, _STALE_PATTERN)
+        p.name for p in ruff_formatted if fnmatch.fnmatch(p.name, _STALE_PATTERN)
     }
     if output_dir.exists():
         for existing in output_dir.iterdir():
@@ -330,7 +381,7 @@ def _run_check(contracts_root: Path, output_dir: Path) -> int:
             print(issue)
         return 1
 
-    print(f"CHECK PASSED: {len(rendered)} generated file(s) are up to date.")
+    print(f"CHECK PASSED: {len(ruff_formatted)} generated file(s) are up to date.")
     return 0
 
 
