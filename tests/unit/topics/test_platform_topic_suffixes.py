@@ -1,13 +1,18 @@
 """Tests for platform, intelligence, omnimemory, and omniclaude topic suffix constants."""
 
+import importlib
+import os
+
 import pytest
 
 from omnibase_core.validation import validate_topic_suffix
 from omnibase_infra.topics import (
     ALL_INTELLIGENCE_TOPIC_SPECS,
+    ALL_OMNIBASE_INFRA_TOPIC_SPECS,
     ALL_OMNICLAUDE_TOPIC_SPECS,
     ALL_OMNIMEMORY_TOPIC_SPECS,
     ALL_PLATFORM_SUFFIXES,
+    ALL_PLATFORM_TOPIC_SPECS,
     ALL_PROVISIONED_SUFFIXES,
     ALL_PROVISIONED_TOPIC_SPECS,
     SUFFIX_CONTRACT_DEREGISTERED,
@@ -335,24 +340,38 @@ class TestProvisionedTopicSpecs:
             )
 
     def test_provisioned_contains_all_omnimemory(self) -> None:
-        """ALL_PROVISIONED_SUFFIXES must include all OmniMemory suffixes."""
+        """ALL_PROVISIONED_SUFFIXES includes OmniMemory suffixes iff OMNIMEMORY_ENABLED is truthy."""
         omnimemory_suffixes = {spec.suffix for spec in ALL_OMNIMEMORY_TOPIC_SPECS}
-        for suffix in omnimemory_suffixes:
-            assert suffix in ALL_PROVISIONED_SUFFIXES, (
-                f"OmniMemory suffix missing from provisioned: {suffix}"
-            )
+        enabled = os.environ.get("OMNIMEMORY_ENABLED", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if enabled:
+            for suffix in omnimemory_suffixes:
+                assert suffix in ALL_PROVISIONED_SUFFIXES, (
+                    f"OmniMemory suffix missing from provisioned when OMNIMEMORY_ENABLED=true: {suffix}"
+                )
+        else:
+            for suffix in omnimemory_suffixes:
+                assert suffix not in ALL_PROVISIONED_SUFFIXES, (
+                    f"OmniMemory suffix present in provisioned when OMNIMEMORY_ENABLED is falsy: {suffix}"
+                )
 
     def test_provisioned_count(self) -> None:
-        """Combined provisioned specs should equal platform + intelligence + omnimemory + omnibase_infra + omniclaude."""
-        from omnibase_infra.topics import (
-            ALL_OMNIBASE_INFRA_TOPIC_SPECS,
-            ALL_PLATFORM_TOPIC_SPECS,
-        )
-
+        """Combined provisioned specs count reflects whether OMNIMEMORY_ENABLED is set."""
+        enabled = os.environ.get("OMNIMEMORY_ENABLED", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        omnimemory_count = len(ALL_OMNIMEMORY_TOPIC_SPECS) if enabled else 0
         expected = (
             len(ALL_PLATFORM_TOPIC_SPECS)
             + len(ALL_INTELLIGENCE_TOPIC_SPECS)
-            + len(ALL_OMNIMEMORY_TOPIC_SPECS)
+            + omnimemory_count
             + len(ALL_OMNIBASE_INFRA_TOPIC_SPECS)
             + len(ALL_OMNICLAUDE_TOPIC_SPECS)
         )
@@ -475,3 +494,83 @@ class TestOmniClaudeTopicSuffixes:
     def test_omniclaude_is_tuple(self) -> None:
         """ALL_OMNICLAUDE_TOPIC_SPECS should be an immutable tuple."""
         assert isinstance(ALL_OMNICLAUDE_TOPIC_SPECS, tuple)
+
+
+class TestOmnimemoryEnabledGating:
+    """Tests for OMNIMEMORY_ENABLED feature-flag gating of topic provisioning.
+
+    The OMNIMEMORY_ENABLED env var controls whether omnimemory topic specs
+    are included in ALL_PROVISIONED_TOPIC_SPECS at import time. These tests
+    verify the gating logic by reloading the module with the env var set or
+    unset.
+    """
+
+    def _reload_specs(
+        self, env: dict[str, str]
+    ) -> tuple[tuple[object, ...], tuple[str, ...]]:
+        """Reload platform_topic_suffixes with overridden environment.
+
+        Returns (ALL_PROVISIONED_TOPIC_SPECS, ALL_PROVISIONED_SUFFIXES) from
+        the freshly-reloaded module.
+        """
+        import sys
+
+        # Declare before try so finally can always reference them safely.
+        mod_name = "omnibase_infra.topics.platform_topic_suffixes"
+        parent_name = "omnibase_infra.topics"
+
+        # Manipulate env before reload
+        old_env = os.environ.copy()
+        try:
+            os.environ.clear()
+            os.environ.update(old_env)
+            for key in ["OMNIMEMORY_ENABLED"]:
+                os.environ.pop(key, None)
+            os.environ.update(env)
+
+            # Force reimport of the module (and its parent package) so
+            # _omnimemory_enabled() re-evaluates with the new env.
+            if mod_name in sys.modules:
+                del sys.modules[mod_name]
+            if parent_name in sys.modules:
+                del sys.modules[parent_name]
+
+            import omnibase_infra.topics.platform_topic_suffixes as m
+
+            return m.ALL_PROVISIONED_TOPIC_SPECS, m.ALL_PROVISIONED_SUFFIXES
+        finally:
+            os.environ.clear()
+            os.environ.update(old_env)
+            # Re-delete and re-import to restore original module state
+            if mod_name in sys.modules:
+                del sys.modules[mod_name]
+            if parent_name in sys.modules:
+                del sys.modules[parent_name]
+            importlib.import_module(mod_name)
+
+    def test_omnimemory_topics_excluded_when_disabled(self) -> None:
+        """When OMNIMEMORY_ENABLED is unset, omnimemory topics must not be provisioned."""
+        _specs, suffixes = self._reload_specs({})
+        omnimemory_suffixes = {spec.suffix for spec in ALL_OMNIMEMORY_TOPIC_SPECS}
+        for suffix in omnimemory_suffixes:
+            assert suffix not in suffixes, (
+                f"OmniMemory suffix provisioned despite OMNIMEMORY_ENABLED being unset: {suffix}"
+            )
+
+    def test_omnimemory_topics_excluded_when_false(self) -> None:
+        """When OMNIMEMORY_ENABLED=false, omnimemory topics must not be provisioned."""
+        _specs, suffixes = self._reload_specs({"OMNIMEMORY_ENABLED": "false"})
+        omnimemory_suffixes = {spec.suffix for spec in ALL_OMNIMEMORY_TOPIC_SPECS}
+        for suffix in omnimemory_suffixes:
+            assert suffix not in suffixes, (
+                f"OmniMemory suffix provisioned despite OMNIMEMORY_ENABLED=false: {suffix}"
+            )
+
+    def test_omnimemory_topics_included_when_true(self) -> None:
+        """When OMNIMEMORY_ENABLED=true, omnimemory topics must be provisioned."""
+        _specs, suffixes = self._reload_specs({"OMNIMEMORY_ENABLED": "true"})
+        omnimemory_suffixes = {spec.suffix for spec in ALL_OMNIMEMORY_TOPIC_SPECS}
+        for suffix in omnimemory_suffixes:
+            assert suffix in suffixes, (
+                f"OmniMemory suffix missing from provisioned when OMNIMEMORY_ENABLED=true: {suffix}"
+            )

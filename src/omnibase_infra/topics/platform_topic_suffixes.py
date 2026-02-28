@@ -48,6 +48,8 @@ See Also:
 
 from __future__ import annotations
 
+import os
+
 from omnibase_core.errors import OnexError
 from omnibase_core.validation import validate_topic_suffix
 from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
@@ -854,10 +856,29 @@ Source: ``omniclaude/src/omniclaude/nodes/node_skill_*/contract.yaml``
 # COMBINED PROVISIONED TOPIC SPECS
 # =============================================================================
 
+
+def _omnimemory_enabled() -> bool:
+    """Return True when OMNIMEMORY_ENABLED is set to a truthy value.
+
+    Truthy values: "1", "true", "yes", "on" (case-insensitive).
+    Any other value (including empty string or unset) is falsy.
+
+    This function is called once at module import time to compute
+    ALL_PROVISIONED_TOPIC_SPECS. It reads directly from os.environ so
+    that tests can override via monkeypatch or environment manipulation.
+    """
+    return os.environ.get("OMNIMEMORY_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 ALL_PROVISIONED_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ALL_PLATFORM_TOPIC_SPECS
     + ALL_INTELLIGENCE_TOPIC_SPECS
-    + ALL_OMNIMEMORY_TOPIC_SPECS
+    + (ALL_OMNIMEMORY_TOPIC_SPECS if _omnimemory_enabled() else ())
     + ALL_OMNIBASE_INFRA_TOPIC_SPECS
     + ALL_OMNICLAUDE_TOPIC_SPECS
 )
@@ -866,6 +887,11 @@ ALL_PROVISIONED_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
 Combines platform-reserved, domain plugin, and OmniClaude skill topic specs
 into a single registry consumed by service_topic_manager.py. This is the single
 source of truth for topic creation.
+
+OmniMemory topics (ALL_OMNIMEMORY_TOPIC_SPECS) are included only when
+OMNIMEMORY_ENABLED is set to a truthy value ("1", "true", "yes", "on").
+When OMNIMEMORY_ENABLED is unset or falsy, omnimemory topics are not
+provisioned — avoiding orphan topics on brokers where omnimemory is inactive.
 """
 
 # =============================================================================
