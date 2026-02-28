@@ -77,6 +77,8 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolTopicCatalogService": "services/protocol_topic_catalog_service.py",
     "ProtocolManifestPersistence": "services/corpus_capture.py",
     "ProtocolSessionAggregator": "services/session/protocol_session_aggregator.py",
+    # [DI] Publisher callable boundary for HandlerBaselinesBatchCompute (OMN-3039)
+    "ProtocolPublisher": "nodes/node_baselines_batch_compute/handlers/handler_baselines_batch_compute.py",
     # === [MIXIN] Mixin host contracts ===
     "ProtocolCircuitBreakerAware": "mixins/protocol_circuit_breaker_aware.py",
     "ProtocolKafkaDlqHost": "event_bus/mixin_kafka_dlq.py",
