@@ -228,6 +228,9 @@ generated/
 reports/
 secrets/
 
+# Exception: contract-driven generated Python source must be committed
+!src/omnibase_infra/enums/generated/
+
 # Ignore sensitive and legacy files
 legacy/
 docs_private/
