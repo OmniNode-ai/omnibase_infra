@@ -635,6 +635,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
 
         async with db_operation_error_context(
             operation="write_manifest_injection_lifecycle",
+            target_name="manifest_injection_lifecycle",
             correlation_id=correlation_id,
         ):
             async with self._pool.acquire() as conn:
