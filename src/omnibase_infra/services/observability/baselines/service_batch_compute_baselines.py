@@ -100,6 +100,14 @@ _EMIT_REGISTRY.register(BASELINES_COMPUTED_REGISTRATION)
 class ServiceBatchComputeBaselines:
     """Batch computation engine for baselines treatment/control comparisons.
 
+    .. deprecated::
+        Use ``HandlerBaselinesBatchCompute`` instead. This service is
+        superseded by the canonical ONEX EFFECT node implementation
+        (OMN-3039). It will be removed in a future release.
+
+        Migration: replace ``ServiceBatchComputeBaselines(pool, event_bus=bus)``
+        with ``HandlerBaselinesBatchCompute(pool, publisher=pub.publish)``.
+
     Reads existing data from agent_routing_decisions and agent_actions
     and derives treatment vs control comparison data for the three
     baselines tables.
@@ -135,6 +143,14 @@ class ServiceBatchComputeBaselines:
                 snapshot event. When None, no event is emitted (e.g. during
                 migrations or offline batch runs). Lifecycle managed externally.
         """
+        import warnings
+
+        warnings.warn(
+            "ServiceBatchComputeBaselines is deprecated. "
+            "Use HandlerBaselinesBatchCompute instead (OMN-3039).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._pool = pool
         self._batch_size = batch_size
         self._query_timeout = query_timeout
