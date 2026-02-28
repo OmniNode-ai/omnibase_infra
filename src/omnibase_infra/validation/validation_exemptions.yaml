@@ -2631,6 +2631,21 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Pydantic Model Standards)
     ticket: OMN-2736
+  # ==========================================================================
+  # ContractTopicExtractor: event_name Field Exemption (OMN-2963)
+  # ==========================================================================
+  # event_name is a parsed component of a Kafka topic string
+  # (onex.<kind>.<producer>.<event-name>.<version>), not a reference to a
+  # domain entity requiring ID + display_name pattern. It is a plain string
+  # identifier extracted by regex from the 4th segment of the topic.
+  - file_pattern: 'contract_topic_extractor\.py'
+    violation_pattern: "Field 'event_name' might reference an entity"
+    reason: >
+      event_name is a parsed sub-field of a Kafka topic string (onex.<kind>.<producer>.<event-name>.<version>). It is the 4th dot-separated segment extracted by ContractTopicExtractor and validated against the regex ^[a-z0-9._-]+$. It is NOT a reference to a domain entity and does not require the ID + display_name pattern — there is no corresponding entity type or ID field in this context.
+
+    documentation:
+      - OMN-2963 (ContractTopicExtractor implementation)
+    ticket: OMN-2963
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
