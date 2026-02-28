@@ -67,6 +67,12 @@ from omnibase_infra.runtime.emit_daemon.topics import (
     BASELINES_COMPUTED_REGISTRATION,
     TOPIC_BASELINES_COMPUTED,
 )
+from omnibase_infra.services.observability.baselines.constants import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_QUERY_TIMEOUT,
+    TREATMENT_CONFIDENCE_THRESHOLD,
+    parse_execute_count,
+)
 from omnibase_infra.services.observability.baselines.models.model_baselines_breakdown_row import (
     ModelBaselinesBreakdownRow,
 )
@@ -89,15 +95,6 @@ logger = logging.getLogger(__name__)
 
 _EMIT_REGISTRY = EventRegistry()
 _EMIT_REGISTRY.register(BASELINES_COMPUTED_REGISTRATION)
-
-# Default batch size for processing routing decisions
-DEFAULT_BATCH_SIZE: int = 500
-
-# Default query timeout in seconds
-DEFAULT_QUERY_TIMEOUT: float = 60.0
-
-# Confidence threshold that separates treatment from control
-TREATMENT_CONFIDENCE_THRESHOLD: float = 0.8
 
 
 class ServiceBatchComputeBaselines:
@@ -819,35 +816,6 @@ class ServiceBatchComputeBaselines:
             },
         )
         return count
-
-
-def parse_execute_count(result: str) -> int:
-    """Parse row count from an asyncpg ``execute()`` result string.
-
-    asyncpg's ``execute()`` returns status strings such as ``"INSERT 0 42"``
-    or ``"UPDATE 42"``. This helper extracts the trailing integer which
-    represents the number of affected rows.
-
-    Note:
-        Although the parameter is annotated as ``str``, asyncpg's return
-        type is effectively ``Any``. A ``None`` or non-string value is
-        handled defensively and treated as ``0`` rows.
-
-    Args:
-        result: Status string returned by ``asyncpg.Connection.execute()``.
-            May be ``None`` or a non-string value in practice.
-
-    Returns:
-        Number of affected rows parsed from the last token, or ``0`` if
-        the value is ``None``, not a string, empty, or not parseable.
-    """
-    if result is None or not isinstance(result, str):
-        return 0
-    try:
-        parts = result.split()
-        return int(parts[-1])
-    except (IndexError, ValueError):
-        return 0
 
 
 __all__: list[str] = [
