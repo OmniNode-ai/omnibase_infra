@@ -251,7 +251,14 @@ class ContractConfigExtractor:
         """Extract config requirements from multiple contract files.
 
         Scans each path. If a path is a directory, recursively finds
-        all ``contract.yaml`` files within it.
+        all contract YAML files within it. Discovered patterns:
+
+        - ``contract.yaml`` -- canonical node contract (original convention)
+        - ``contract_*.yaml`` -- named contract variant (e.g. ``contract_omniclaude_runtime.yaml``)
+
+        Both patterns are supported so that repos adopting the named-contract
+        convention (introduced in OMN-2990) are visible to the seeder without
+        requiring files to be renamed or moved.
 
         Args:
             contract_paths: List of file or directory paths to scan.
@@ -264,7 +271,11 @@ class ContractConfigExtractor:
         files_to_scan: list[Path] = []
         for path in contract_paths:
             if path.is_dir():
-                files_to_scan.extend(sorted(path.rglob("contract.yaml")))
+                # Collect both naming conventions and deduplicate via a set
+                # before sorting so the final scan order is deterministic.
+                matched: set[Path] = set(path.rglob("contract.yaml"))
+                matched.update(path.rglob("contract_*.yaml"))
+                files_to_scan.extend(sorted(matched))
             elif path.is_file():
                 files_to_scan.append(path)
             else:
