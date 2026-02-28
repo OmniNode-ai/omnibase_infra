@@ -1860,7 +1860,7 @@ wheels = [
 [[package]]
 name = "omnibase-core"
 version = "0.21.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=85f79e091f30fc76f163eb06c89dd56e1299d778#85f79e091f30fc76f163eb06c89dd56e1299d778" }
 dependencies = [
     { name = "blake3" },
     { name = "click" },
@@ -1871,10 +1871,6 @@ dependencies = [
     { name = "jsonschema" },
     { name = "pydantic" },
     { name = "pyyaml" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/77/7b/0048cd126d25b5171d078ff7ee20af431d97ad625181d97a5eb07757b4e7/omnibase_core-0.21.0.tar.gz", hash = "sha256:6f15aba73e9da7df6a8341b2ea9f69f196c6a9e88af02937017e19c7b07956c1", size = 9127789, upload-time = "2026-02-27T15:30:41.645Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/45/2f/88610605739be6b464bac6df5e1911054e7abb1ca239efed246c69966858/omnibase_core-0.21.0-py3-none-any.whl", hash = "sha256:c17ad9789a7dac6d044c38f2a7cbd1f52a88325d2adf3294993fca8ceb45d2ab", size = 5089223, upload-time = "2026-02-27T15:30:44.045Z" },
 ]
 
 [[package]]
@@ -1966,7 +1962,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.20.0,<5.0.0" },
     { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<6.0.0" },
-    { name = "omnibase-core", specifier = ">=0.21.0,<0.22.0" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=85f79e091f30fc76f163eb06c89dd56e1299d778" },
     { name = "omnibase-spi", specifier = ">=0.14.0,<0.15.0" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp", specifier = ">=1.27.0,<2.0.0" },
