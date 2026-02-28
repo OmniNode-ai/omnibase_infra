@@ -193,6 +193,88 @@ metadata:
         assert EnumInfraTransportType.CONSUL in reqs.transport_types
         assert len(reqs.contract_paths) == 2
 
+    def test_extract_named_contract_variant(self, tmp_path: Path) -> None:
+        """Should find contract_*.yaml files in addition to contract.yaml (OMN-2995).
+
+        Repos that adopt the named-contract convention (e.g.
+        ``contract_omniclaude_runtime.yaml``) must be visible to the seeder
+        without renaming or moving the file.
+        """
+        (tmp_path / "contracts").mkdir()
+        (tmp_path / "contracts" / "contract_omniclaude_runtime.yaml").write_text(
+            """
+name: "omniclaude_runtime"
+dependencies:
+  - name: "contracts_root"
+    type: "environment"
+    env_var: "OMNICLAUDE_CONTRACTS_ROOT"
+    required: true
+"""
+        )
+        reqs = self.extractor.extract_from_paths([tmp_path])
+
+        assert len(reqs.contract_paths) == 1
+        dep_keys = [r.key for r in reqs.requirements]
+        assert "OMNICLAUDE_CONTRACTS_ROOT" in dep_keys
+
+    def test_extract_named_and_canonical_contracts_combined(
+        self, tmp_path: Path
+    ) -> None:
+        """Should find both contract.yaml and contract_*.yaml in the same tree (OMN-2995).
+
+        Verifies that both naming conventions co-exist correctly and that
+        deduplication prevents any path from appearing twice.
+        """
+        (tmp_path / "node_a").mkdir()
+        (tmp_path / "node_b").mkdir()
+
+        (tmp_path / "node_a" / "contract.yaml").write_text(
+            """
+name: "node_a"
+metadata:
+  transport_type: "database"
+"""
+        )
+        (tmp_path / "node_b" / "contract_node_b_runtime.yaml").write_text(
+            """
+name: "node_b_runtime"
+dependencies:
+  - name: "some_key"
+    type: "environment"
+    env_var: "NODE_B_RUNTIME_KEY"
+    required: false
+"""
+        )
+        reqs = self.extractor.extract_from_paths([tmp_path])
+
+        assert len(reqs.contract_paths) == 2
+        assert EnumInfraTransportType.DATABASE in reqs.transport_types
+        dep_keys = [r.key for r in reqs.requirements]
+        assert "NODE_B_RUNTIME_KEY" in dep_keys
+
+    def test_extract_named_contract_glob_does_not_match_canonical(
+        self, tmp_path: Path
+    ) -> None:
+        """contract_*.yaml glob must NOT match contract.yaml (OMN-2995).
+
+        The ``contract_*.yaml`` pattern requires an underscore before the
+        suffix, so ``contract.yaml`` is NOT a match. This test confirms that
+        a directory containing only ``contract.yaml`` yields exactly one
+        scanned file (not two from overlapping glob results).
+        """
+        (tmp_path / "contract.yaml").write_text(
+            """
+name: "canonical"
+metadata:
+  transport_type: "consul"
+"""
+        )
+        reqs = self.extractor.extract_from_paths([tmp_path])
+
+        # Only one file -- contract_paths must have exactly one entry.
+        assert len(reqs.contract_paths) == 1
+        assert EnumInfraTransportType.CONSUL in reqs.transport_types
+
     def test_extract_from_nonexistent_path(self) -> None:
         """Should handle nonexistent paths gracefully."""
         reqs = self.extractor.extract_from_paths([Path("/nonexistent/path")])
