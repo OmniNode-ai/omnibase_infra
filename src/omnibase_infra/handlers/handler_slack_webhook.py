@@ -908,7 +908,7 @@ class HandlerSlackWebhook:
                 "elements": [
                     {
                         "type": "mrkdwn",
-                        "text": f"Correlation: `{str(alert.correlation_id)[:16]}...`",
+                        "text": f"Correlation: `{alert.correlation_id}`",
                     }
                 ],
             }
