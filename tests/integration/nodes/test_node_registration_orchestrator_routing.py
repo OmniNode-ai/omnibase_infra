@@ -138,7 +138,7 @@ class TestHandlerRoutingContract:
             )
 
     def test_expected_handler_count(self, contract_data: dict) -> None:
-        """Verify contract defines exactly 5 handlers.
+        """Verify contract defines exactly 6 handlers.
 
         The registration orchestrator routes:
         1. ModelNodeIntrospectionEvent -> HandlerNodeIntrospected
@@ -146,6 +146,7 @@ class TestHandlerRoutingContract:
         3. ModelNodeRegistrationAcked -> HandlerNodeRegistrationAcked
         4. ModelNodeHeartbeatEvent -> HandlerNodeHeartbeat
         5. ModelTopicCatalogQuery -> HandlerTopicCatalogQuery  # OMN-2313
+        6. ModelTopicCatalogRequest -> HandlerCatalogRequest  # OMN-2923
         """
         handler_routing = contract_data.get("handler_routing", {})
         handlers = handler_routing.get("handlers", [])
