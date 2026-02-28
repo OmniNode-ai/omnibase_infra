@@ -132,8 +132,9 @@ class TestParseExecuteCount:
     def test_parse_none_returns_zero(self) -> None:
         assert parse_execute_count(None) == 0  # type: ignore[arg-type]
 
-    def test_parse_non_string_returns_zero(self) -> None:
-        assert parse_execute_count(123) == 0  # type: ignore[arg-type]
+    def test_parse_int_returns_int(self) -> None:
+        # Updated per OMN-3041: int driver variants are returned directly
+        assert parse_execute_count(123) == 123  # type: ignore[arg-type]
 
 
 class TestServiceBatchComputeBaselines:

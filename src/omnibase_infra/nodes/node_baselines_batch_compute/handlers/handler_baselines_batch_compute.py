@@ -1,71 +1,36 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Batch computation for baselines treatment/control comparisons.
+"""Handler that runs the 3-phase baselines batch computation as an EFFECT node.
 
-Derives A/B comparison data from the existing ``agent_routing_decisions``
-and ``agent_actions`` tables, populating the three baselines tables:
-``baselines_comparisons``, ``baselines_trend``, and ``baselines_breakdown``.
+Lifted from ServiceBatchComputeBaselines (OMN-3041). Follows the canonical
+ONEX EFFECT handler pattern (mirrors HandlerRewardBinder, OMN-2927).
 
-This service bridges the gap described in OMN-2305: the Baselines & ROI
-page (``/baselines``) falls back to mock data when the baselines tables
-are empty. This service seeds those tables with real comparison data
-derived from existing observability data.
+Key design decisions:
+    D1: correlation_id is REQUIRED in the command (no default).
+    D4: TREATMENT_CONFIDENCE_THRESHOLD imported from constants.py.
+    D5: Emit snapshot only when sum(parse_execute_count across phases) > 0.
+        No-op runs (all counts == 0) must NOT emit — avoids empty snapshots.
+    D6: Uses publisher callable matching PublisherTopicScoped.publish signature.
 
-Treatment vs Control Definition:
-    - **Treatment**: ``agent_routing_decisions`` rows with
-      ``confidence_score >= 0.8`` -- high-confidence selections indicating
-      active pattern injection context.
-    - **Control**: ``agent_routing_decisions`` rows with
-      ``confidence_score < 0.8`` or ``NULL`` -- low-confidence or no
-      injection context.
-
-This definition mirrors the ``cohort`` classification already used in
-the ``injection_effectiveness`` table, ensuring consistent A/B labeling
-across the observability stack.
-
-ROI Formula:
-    ``roi_pct = (treatment_success_rate - control_success_rate)
-               / control_success_rate * 100``
-
-    NULL when ``control_success_rate`` is zero or NULL (SQL handles
-    via ``NULLIF``).
-
-Design Decisions:
-    - Read from agent_routing_decisions + agent_actions (already populated)
-    - Write to baselines_comparisons, baselines_trend, baselines_breakdown
-    - Idempotent: ON CONFLICT DO UPDATE for all three tables
-    - Pool injection: asyncpg.Pool injected, lifecycle managed externally
-    - Phase isolation: each phase failure is caught and logged independently
-
-Related Tickets:
-    - OMN-2305: Create baselines tables and populate treatment/control comparisons
-
-Example:
-    >>> import asyncpg
-    >>> from omnibase_infra.services.observability.baselines.service_batch_compute_baselines import (
-    ...     ServiceBatchComputeBaselines,
-    ... )
-    >>>
-    >>> pool = await asyncpg.create_pool(dsn="postgresql://...")
-    >>> batch = ServiceBatchComputeBaselines(pool)
-    >>> result = await batch.compute_and_persist()
-    >>> print(f"Wrote {result.comparisons_rows} comparison rows")
+Ticket: OMN-3044
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID, uuid4
 
 import asyncpg
 
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from omnibase_infra.protocols import ProtocolEventBusLike
-from omnibase_infra.runtime.emit_daemon.event_registry import EventRegistry
-from omnibase_infra.runtime.emit_daemon.topics import (
-    BASELINES_COMPUTED_REGISTRATION,
-    TOPIC_BASELINES_COMPUTED,
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_baselines_batch_compute.models.model_baselines_batch_compute_command import (
+    ModelBaselinesBatchComputeCommand,
+)
+from omnibase_infra.nodes.node_baselines_batch_compute.models.model_baselines_batch_compute_output import (
+    ModelBaselinesBatchComputeOutput,
 )
 from omnibase_infra.services.observability.baselines.constants import (
     DEFAULT_BATCH_SIZE,
@@ -93,73 +58,76 @@ from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
-_EMIT_REGISTRY = EventRegistry()
-_EMIT_REGISTRY.register(BASELINES_COMPUTED_REGISTRATION)
+_TOPIC_BASELINES_COMPUTED = "onex.evt.omnibase-infra.baselines-computed.v1"
+_EVENT_TYPE_BASELINES_COMPUTED = "baselines.computed"
 
 
-class ServiceBatchComputeBaselines:
-    """Batch computation engine for baselines treatment/control comparisons.
+@runtime_checkable
+class ProtocolPublisher(Protocol):
+    """Protocol matching PublisherTopicScoped.publish signature.
 
-    .. deprecated::
-        Use ``HandlerBaselinesBatchCompute`` instead. This service is
-        superseded by the canonical ONEX EFFECT node implementation
-        (OMN-3039). It will be removed in a future release.
+    Verified against omnibase_infra/runtime/publisher_topic_scoped.py:203.
+    """
 
-        Migration: replace ``ServiceBatchComputeBaselines(pool, event_bus=bus)``
-        with ``HandlerBaselinesBatchCompute(pool, publisher=pub.publish)``.
+    async def __call__(
+        self,
+        event_type: str,
+        payload: object,
+        topic: str | None,
+        correlation_id: object,
+        **kwargs: object,
+    ) -> bool: ...
 
-    Reads existing data from agent_routing_decisions and agent_actions
-    and derives treatment vs control comparison data for the three
-    baselines tables.
 
-    The computation is idempotent: running it multiple times produces
-    the same result due to ON CONFLICT DO UPDATE handling.
+class HandlerBaselinesBatchCompute:
+    """EFFECT handler for 3-phase baselines batch computation.
+
+    Lifted from ServiceBatchComputeBaselines. Runs the three computation
+    phases (comparisons, trend, breakdown) and optionally emits a
+    baselines-computed snapshot event to Kafka via injected publisher.
+
+    The publisher callable is injected at construction time, enabling
+    easy mocking in tests without touching Kafka infrastructure.
 
     Attributes:
         _pool: Injected asyncpg connection pool.
-        _batch_size: Limit for per-phase SQL queries.
+        _publisher: Optional async callable for publishing to Kafka.
+        _batch_size: Row limit per phase.
         _query_timeout: Query timeout in seconds.
-
-    Example:
-        >>> pool = await asyncpg.create_pool(dsn="postgresql://...")
-        >>> batch = ServiceBatchComputeBaselines(pool, batch_size=200)
-        >>> result = await batch.compute_and_persist()
     """
 
     def __init__(
         self,
         pool: asyncpg.Pool,
+        publisher: Callable[..., Awaitable[bool]] | None = None,
         batch_size: int = DEFAULT_BATCH_SIZE,
         query_timeout: float = DEFAULT_QUERY_TIMEOUT,
-        event_bus: ProtocolEventBusLike | None = None,
     ) -> None:
-        """Initialize batch computation engine.
+        """Initialize the handler.
 
         Args:
             pool: asyncpg connection pool (lifecycle managed externally).
-            batch_size: Row limit per phase.
+            publisher: Optional async callable matching ProtocolPublisher.
+                When None, no snapshot event is emitted.
+            batch_size: Row limit per SQL phase.
             query_timeout: Query timeout in seconds.
-            event_bus: Optional event bus for emitting the baselines-computed
-                snapshot event. When None, no event is emitted (e.g. during
-                migrations or offline batch runs). Lifecycle managed externally.
         """
-        import warnings
-
-        warnings.warn(
-            "ServiceBatchComputeBaselines is deprecated. "
-            "Use HandlerBaselinesBatchCompute instead (OMN-3039).",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         self._pool = pool
+        self._publisher = publisher
         self._batch_size = batch_size
         self._query_timeout = query_timeout
-        self._event_bus = event_bus
 
-    async def compute_and_persist(
-        self,
-        correlation_id: UUID | None = None,
-    ) -> ModelBatchComputeBaselinesResult:
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        return EnumHandlerType.NODE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        return EnumHandlerTypeCategory.EFFECT
+
+    async def handle(
+        self, command: ModelBaselinesBatchComputeCommand
+    ) -> ModelBaselinesBatchComputeOutput:
         """Run the full baselines batch computation pipeline.
 
         Executes three computation phases sequentially:
@@ -167,26 +135,25 @@ class ServiceBatchComputeBaselines:
             2. Trend rows (per-cohort per-day time series)
             3. Breakdown rows (per-pattern treatment vs control)
 
-        All writes are idempotent (ON CONFLICT DO UPDATE).
-        Individual phase failures are caught and recorded in the result's
-        ``errors`` tuple rather than raised, so subsequent phases still run.
+        Partial snapshot policy (D5): emit only when
+        sum(parse_execute_count across phases) > 0.
+        No-op runs (all counts == 0) must NOT emit — avoids empty snapshots in omnidash.
 
         Args:
-            correlation_id: Optional correlation ID for tracing. A new
-                UUID is generated if not provided.
+            command: Batch compute command with required correlation_id.
 
         Returns:
-            ModelBatchComputeBaselinesResult with per-table row counts,
-            any phase error messages, and timestamps.
+            ModelBaselinesBatchComputeOutput with result row counts
+            and snapshot_emitted flag.
         """
-        effective_correlation_id = correlation_id or uuid4()
+        correlation_id = command.correlation_id
         started_at = datetime.now(UTC)
         errors: list[str] = []
 
         logger.info(
             "Starting baselines batch computation",
             extra={
-                "correlation_id": str(effective_correlation_id),
+                "correlation_id": str(correlation_id),
                 "batch_size": self._batch_size,
             },
         )
@@ -194,37 +161,31 @@ class ServiceBatchComputeBaselines:
         # Phase 1: baselines_comparisons (daily treatment vs control)
         comparisons_rows = 0
         try:
-            comparisons_rows = await self._compute_comparisons(effective_correlation_id)
+            comparisons_rows = await self._compute_comparisons(correlation_id)
         except Exception as e:
             safe_msg = sanitize_error_message(e)
             msg = f"Phase 1 (baselines_comparisons) failed: {safe_msg}"
-            logger.exception(
-                msg, extra={"correlation_id": str(effective_correlation_id)}
-            )
+            logger.exception(msg, extra={"correlation_id": str(correlation_id)})
             errors.append(msg)
 
         # Phase 2: baselines_trend (per-cohort per-day time series)
         trend_rows = 0
         try:
-            trend_rows = await self._compute_trend(effective_correlation_id)
+            trend_rows = await self._compute_trend(correlation_id)
         except Exception as e:
             safe_msg = sanitize_error_message(e)
             msg = f"Phase 2 (baselines_trend) failed: {safe_msg}"
-            logger.exception(
-                msg, extra={"correlation_id": str(effective_correlation_id)}
-            )
+            logger.exception(msg, extra={"correlation_id": str(correlation_id)})
             errors.append(msg)
 
         # Phase 3: baselines_breakdown (per-pattern treatment vs control)
         breakdown_rows = 0
         try:
-            breakdown_rows = await self._compute_breakdown(effective_correlation_id)
+            breakdown_rows = await self._compute_breakdown(correlation_id)
         except Exception as e:
             safe_msg = sanitize_error_message(e)
             msg = f"Phase 3 (baselines_breakdown) failed: {safe_msg}"
-            logger.exception(
-                msg, extra={"correlation_id": str(effective_correlation_id)}
-            )
+            logger.exception(msg, extra={"correlation_id": str(correlation_id)})
             errors.append(msg)
 
         completed_at = datetime.now(UTC)
@@ -241,7 +202,7 @@ class ServiceBatchComputeBaselines:
         logger.info(
             "Baselines batch computation completed",
             extra={
-                "correlation_id": str(effective_correlation_id),
+                "correlation_id": str(correlation_id),
                 "comparisons_rows": comparisons_rows,
                 "trend_rows": trend_rows,
                 "breakdown_rows": breakdown_rows,
@@ -251,98 +212,121 @@ class ServiceBatchComputeBaselines:
             },
         )
 
-        if self._event_bus is not None:
-            total_rows = result.total_rows
-            if total_rows == 0:
-                logger.warning(
-                    "Skipping baselines snapshot emit: no rows written in any phase",
-                    extra={
-                        "correlation_id": str(effective_correlation_id),
-                        "has_errors": result.has_errors,
-                    },
-                )
-            else:
+        # D5: Emit snapshot only when sum(parse_execute_count across phases) > 0.
+        # No-op runs (all counts == 0) must NOT emit — avoids empty snapshots in omnidash.
+        snapshot_emitted = False
+        if self._publisher is not None and result.total_rows > 0:
+            try:
                 await self._emit_snapshot(
-                    correlation_id=effective_correlation_id,
+                    result=result,
+                    correlation_id=correlation_id,
                     computed_at=completed_at,
                     started_at=started_at,
                 )
+                snapshot_emitted = True
+            except Exception as e:
+                safe_msg = sanitize_error_message(e)
+                msg = f"Snapshot emit failed: {safe_msg}"
+                logger.warning(
+                    "Failed to emit baselines-computed snapshot (non-fatal): %s",
+                    safe_msg,
+                    extra={"correlation_id": str(correlation_id)},
+                )
+                errors.append(msg)
+                # Rebuild result with the additional error
+                result = ModelBatchComputeBaselinesResult(
+                    comparisons_rows=comparisons_rows,
+                    trend_rows=trend_rows,
+                    breakdown_rows=breakdown_rows,
+                    errors=tuple(errors),
+                    started_at=started_at,
+                    completed_at=completed_at,
+                )
 
-        return result
+        return ModelBaselinesBatchComputeOutput(
+            result=result,
+            snapshot_emitted=snapshot_emitted,
+        )
+
+    async def _publish(
+        self,
+        *,
+        event_type: str,
+        topic: str,
+        payload: object,
+        correlation_id: UUID,
+    ) -> None:
+        """Publish via injected publisher. Errors propagate to caller.
+
+        Args:
+            event_type: Event type string.
+            topic: Kafka topic to publish to.
+            payload: JSON-serializable payload dict.
+            correlation_id: Correlation ID for tracing.
+        """
+        assert self._publisher is not None
+        await self._publisher(
+            event_type=event_type,
+            payload=payload,
+            topic=topic,
+            correlation_id=correlation_id,
+        )
 
     async def _emit_snapshot(
         self,
+        result: ModelBatchComputeBaselinesResult,
         correlation_id: UUID,
         computed_at: datetime,
         started_at: datetime,
     ) -> None:
-        """Read back the computed rows and emit a baselines-computed snapshot event.
-
-        Best-effort: logs a warning on failure but does not raise, because the
-        DB write already committed successfully before this is called.
+        """Read back computed rows and emit baselines-computed snapshot event.
 
         Args:
+            result: Computation result with row counts.
             correlation_id: Correlation ID for tracing.
             computed_at: When the batch computation completed.
             started_at: When the batch computation started (used as window_start).
         """
-        if self._event_bus is None:
-            return
+        snapshot_id = uuid4()
 
-        try:
-            snapshot_id = uuid4()
+        comparisons = await self._read_comparisons()
+        trend = await self._read_trend()
+        breakdown = await self._read_breakdown()
 
-            comparisons = await self._read_comparisons()
-            trend = await self._read_trend()
-            breakdown = await self._read_breakdown()
+        window_start = started_at if comparisons or trend else None
+        window_end = computed_at if comparisons or trend else None
 
-            window_start = started_at if comparisons or trend else None
-            window_end = computed_at if comparisons or trend else None
+        snapshot = ModelBaselinesSnapshotEvent(
+            snapshot_id=snapshot_id,
+            contract_version=1,
+            computed_at_utc=computed_at,
+            window_start_utc=window_start,
+            window_end_utc=window_end,
+            comparisons=comparisons,
+            trend=trend,
+            breakdown=breakdown,
+        )
 
-            snapshot = ModelBaselinesSnapshotEvent(
-                snapshot_id=snapshot_id,
-                contract_version=1,
-                computed_at_utc=computed_at,
-                window_start_utc=window_start,
-                window_end_utc=window_end,
-                comparisons=comparisons,
-                trend=trend,
-                breakdown=breakdown,
-            )
+        payload = snapshot.model_dump(mode="json")
 
-            payload = _EMIT_REGISTRY.inject_metadata(
-                event_type=BASELINES_COMPUTED_REGISTRATION.event_type,
-                payload=snapshot.model_dump(mode="json"),
-                correlation_id=str(correlation_id),
-            )
+        await self._publish(
+            event_type=_EVENT_TYPE_BASELINES_COMPUTED,
+            topic=_TOPIC_BASELINES_COMPUTED,
+            payload=payload,
+            correlation_id=correlation_id,
+        )
 
-            envelope: ModelEventEnvelope[dict[str, object]] = ModelEventEnvelope(
-                payload=payload,
-                correlation_id=correlation_id,
-                source_tool="ServiceBatchComputeBaselines",
-            )
-
-            await self._event_bus.publish_envelope(envelope, TOPIC_BASELINES_COMPUTED)
-
-            logger.info(
-                "Emitted baselines-computed snapshot event",
-                extra={
-                    "snapshot_id": str(snapshot_id),
-                    "correlation_id": str(correlation_id),
-                    "comparisons": len(comparisons),
-                    "trend": len(trend),
-                    "breakdown": len(breakdown),
-                    "topic": TOPIC_BASELINES_COMPUTED,
-                },
-            )
-
-        except Exception as e:
-            safe_msg = sanitize_error_message(e)
-            logger.warning(
-                "Failed to emit baselines-computed snapshot event (non-fatal): %s",
-                safe_msg,
-                extra={"correlation_id": str(correlation_id)},
-            )
+        logger.info(
+            "Emitted baselines-computed snapshot event",
+            extra={
+                "snapshot_id": str(snapshot_id),
+                "correlation_id": str(correlation_id),
+                "comparisons": len(comparisons),
+                "trend": len(trend),
+                "breakdown": len(breakdown),
+                "topic": _TOPIC_BASELINES_COMPUTED,
+            },
+        )
 
     async def _read_comparisons(self) -> list[ModelBaselinesComparisonRow]:
         """Read back rows from baselines_comparisons, ordered by date descending."""
@@ -407,8 +391,8 @@ class ServiceBatchComputeBaselines:
         treatment and control group metrics and writes one row per day
         to baselines_comparisons.
 
-        Treatment group: confidence_score >= 0.8
-        Control group: confidence_score < 0.8 OR NULL
+        Treatment group: confidence_score >= TREATMENT_CONFIDENCE_THRESHOLD (D4)
+        Control group: confidence_score < TREATMENT_CONFIDENCE_THRESHOLD OR NULL
 
         Args:
             correlation_id: Correlation ID for tracing.
@@ -416,13 +400,6 @@ class ServiceBatchComputeBaselines:
         Returns:
             Number of rows written.
         """
-        # This query:
-        # 1. Groups routing decisions by DATE(created_at)
-        # 2. Splits each day into treatment (confidence >= 0.8) and control groups
-        # 3. Joins agent_actions via LATERAL to compute per-session success rates
-        # 4. Aggregates to daily treatment/control metrics
-        # 5. Derives ROI as (treatment_success - control_success) / control_success
-        # 6. Upserts with ON CONFLICT DO UPDATE to ensure idempotency
         sql = """
             INSERT INTO baselines_comparisons (
                 comparison_date, period_label,
@@ -689,25 +666,9 @@ class ServiceBatchComputeBaselines:
     async def _compute_breakdown(self, correlation_id: UUID) -> int:
         """Derive per-pattern treatment vs control breakdown rows.
 
-        Groups agent_routing_decisions by selected_agent (treated as a
-        pattern proxy) and computes treatment/control split metrics.
-        Uses md5(selected_agent)::uuid for stable pattern identity.
-
-        Note:
-            **Hard cap, not true batching**: Groups by selected_agent
-            before applying LIMIT. If distinct agent count exceeds
-            batch_size, agents beyond the cap are silently skipped.
-            A warning is logged when the result count equals batch_size.
-
-            **Alphabetical truncation bias**: The inner CTE uses
-            ``ORDER BY selected_agent`` before ``LIMIT $1``. This means
-            the hard cap excludes agents whose names sort alphabetically
-            last, not agents with the fewest sessions. High-traffic agents
-            may be silently excluded if their names sort late.
-
-            **Time window**: Only agent_routing_decisions rows from the
-            past 90 days are included, filtered inside the agent_sessions
-            CTE via ``rd.created_at >= NOW() - INTERVAL '90 days'``.
+        Groups agent_routing_decisions by selected_agent and computes
+        treatment/control split metrics. Uses md5(selected_agent)::uuid
+        for stable pattern identity.
 
         Args:
             correlation_id: Correlation ID for tracing.
@@ -745,7 +706,6 @@ class ServiceBatchComputeBaselines:
                 ) action_stats ON TRUE
                 WHERE rd.selected_agent IS NOT NULL
                     AND rd.correlation_id IS NOT NULL
-                    -- Time window: restrict to past 90 days, consistent with comparisons and trend phases.
                     AND rd.created_at >= NOW() - INTERVAL '90 days'
             ),
             agent_agg AS (
@@ -768,7 +728,6 @@ class ServiceBatchComputeBaselines:
                 selected_agent AS pattern_label,
                 treatment_success_rate,
                 control_success_rate,
-                -- ROI: (treatment - control) / control * 100
                 CASE
                     WHEN control_success_rate IS NOT NULL
                         AND control_success_rate > 0
@@ -779,8 +738,6 @@ class ServiceBatchComputeBaselines:
                 sample_count,
                 treatment_count,
                 control_count,
-                -- Confidence proxy: treatment_success_rate when sample_count >= 20; NULL below threshold.
-                -- Not a statistical confidence interval.
                 CASE
                     WHEN sample_count >= 20
                         AND treatment_success_rate IS NOT NULL
@@ -834,10 +791,4 @@ class ServiceBatchComputeBaselines:
         return count
 
 
-__all__: list[str] = [
-    "ServiceBatchComputeBaselines",
-    "DEFAULT_BATCH_SIZE",
-    "DEFAULT_QUERY_TIMEOUT",
-    "TREATMENT_CONFIDENCE_THRESHOLD",
-    "parse_execute_count",
-]
+__all__: list[str] = ["HandlerBaselinesBatchCompute", "ProtocolPublisher"]
