@@ -409,8 +409,22 @@ Producer: agent-actions consumer (ServiceAgentActionsConsumer)
 Consumer: observability alerting, incident recovery tooling
 """
 
+SUFFIX_OMNICLAUDE_AGENT_OBSERVABILITY_DLQ: str = (
+    "onex.evt.omniclaude.agent-observability-dlq.v1"
+)
+"""Dead letter queue topic for the legacy agent-observability consumer.
+
+Messages that fail deserialization or exceed max retry count in
+the legacy ``consumers/agent_actions_consumer.py`` are forwarded to this topic.
+Matches ``TopicBase.AGENT_OBSERVABILITY_DLQ`` in omniclaude (OMN-2959).
+
+Producer: legacy agent-observability consumer (consumers/agent_actions_consumer.py)
+Consumer: observability alerting, incident recovery tooling
+"""
+
 _OMNICLAUDE_OBSERVABILITY_DLQ_TOPIC_SUFFIXES: tuple[str, ...] = (
     SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
+    SUFFIX_OMNICLAUDE_AGENT_OBSERVABILITY_DLQ,
 )
 """DLQ topic suffixes for OmniClaude observability consumers.
 
