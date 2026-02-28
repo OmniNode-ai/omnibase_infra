@@ -8,10 +8,17 @@ successes recorded during agent execution.
 
 Design Decisions:
     - frozen=True: Immutability for thread safety
-    - extra="forbid": Strict validation ensures schema compliance
+    - extra="ignore": Tolerates producer fields not in consumer schema (OMN-2986).
+      The omniclaude producer (action_event_publisher.py) emits additional fields
+      (action_details, debug_mode, timestamp) not present in this model. Using
+      extra="ignore" prevents spurious ValidationError → DLQ routing.
     - from_attributes=True: ORM/pytest-xdist compatibility
     - raw_payload: Optional field to preserve complete payload for schema tightening
-    - created_at: Required for TTL cleanup job (Phase 2)
+    - created_at: Defaults to ingestion time (UTC now) when absent from payload.
+      Producers emit "timestamp" not "created_at"; the default factory ensures
+      TTL cleanup has a valid timestamp.
+    - id: Auto-generated UUID when absent from producer payload. Producers do not
+      emit an "id" field; the consumer generates one at ingestion time.
 
 Idempotency:
     Table: agent_actions
@@ -22,19 +29,17 @@ Example:
     >>> from datetime import datetime, UTC
     >>> from uuid import uuid4
     >>> action = ModelAgentAction(
-    ...     id=uuid4(),
     ...     correlation_id=uuid4(),
     ...     agent_name="polymorphic-agent",
     ...     action_type="tool_call",
     ...     action_name="Bash",
-    ...     created_at=datetime.now(UTC),
     ... )
 """
 
 import json
 import logging
-from datetime import datetime
-from uuid import UUID
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -52,15 +57,21 @@ class ModelAgentAction(BaseModel):
 
     Represents a single action performed by an agent, such as a tool call,
     decision, error, or success. Uses frozen=True for thread safety and
-    extra="forbid" for strict schema compliance.
+    extra="ignore" to tolerate unknown producer fields without DLQ routing.
+
+    Schema Compatibility (OMN-2986):
+        The omniclaude action_event_publisher emits these fields that are NOT in
+        this model schema: action_details, debug_mode, timestamp. These are ignored
+        at ingestion. The producer does NOT emit ``id`` or ``created_at`` — both
+        default to auto-generated values at ingestion time.
 
     Attributes:
-        id: Unique identifier for this action (idempotency key).
+        id: Auto-generated UUID at ingestion (idempotency key, not from producer).
         correlation_id: Request correlation ID linking related actions.
         agent_name: Name of the agent that performed this action.
         action_type: Type of action (tool_call, decision, error, success).
         action_name: Specific name of the action or tool.
-        created_at: Timestamp when the action was recorded (TTL key).
+        created_at: Ingestion timestamp (UTC); defaults to now() when absent (TTL key).
         status: Optional status of the action (started, completed, failed).
         duration_ms: Optional duration of the action in milliseconds.
         result: Optional result summary or outcome.
@@ -70,12 +81,10 @@ class ModelAgentAction(BaseModel):
 
     Example:
         >>> action = ModelAgentAction(
-        ...     id=uuid4(),
         ...     correlation_id=uuid4(),
         ...     agent_name="code-reviewer",
         ...     action_type="decision",
         ...     action_name="approve_pr",
-        ...     created_at=datetime.now(UTC),
         ...     status="completed",
         ...     duration_ms=1234,
         ... )
@@ -83,15 +92,27 @@ class ModelAgentAction(BaseModel):
 
     model_config = ConfigDict(
         frozen=True,
-        extra="forbid",
+        extra="ignore",  # OMN-2986: producer emits unknown fields (action_details, debug_mode, timestamp)
         from_attributes=True,
     )
 
-    # ---- Required Fields ----
+    # ---- Auto-generated fields (not sent by producer) ----
     id: UUID = Field(
-        ...,
-        description="Unique identifier for this action (idempotency key).",
+        default_factory=uuid4,
+        description=(
+            "Unique identifier for this action (idempotency key). "
+            "Auto-generated at ingestion — omniclaude producer does not emit this field."
+        ),
     )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description=(
+            "Timestamp when the action was ingested (TTL key). "
+            "Defaults to UTC now — omniclaude producer emits 'timestamp' not 'created_at'."
+        ),
+    )
+
+    # ---- Required Fields (sent by producer) ----
     correlation_id: UUID = Field(
         ...,
         description="Request correlation ID linking related actions.",
@@ -105,10 +126,6 @@ class ModelAgentAction(BaseModel):
     )
     action_name: str = Field(  # ONEX_EXCLUDE: entity_reference - external payload
         ..., description="Specific name of the action or tool."
-    )
-    created_at: datetime = Field(
-        ...,
-        description="Timestamp when the action was recorded (TTL key).",
     )
 
     # ---- Optional Fields ----

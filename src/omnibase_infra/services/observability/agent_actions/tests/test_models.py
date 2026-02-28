@@ -3,7 +3,8 @@
 """Unit tests for agent_actions observability models.
 
 This module tests model validation behavior:
-    - All models use strict validation (extra="forbid", frozen=True)
+    - ModelAgentAction uses extra="ignore" (OMN-2986: tolerates unknown producer fields)
+    - All other models use strict validation (extra="forbid", frozen=True)
     - Type validation (UUID, datetime, dict[str, object])
     - Required vs optional field enforcement
 
@@ -63,7 +64,7 @@ class TestModelObservabilityEnvelopeStrict:
                 producer_id="test-producer",
                 schema_version="1.0.0",
                 extra1="value1",  # type: ignore[call-arg]
-                extra2="value2",  # type: ignore[call-arg]
+                extra2="value2",
             )
 
         errors = exc_info.value.errors()
@@ -125,62 +126,92 @@ class TestModelObservabilityEnvelopeStrict:
 
 
 class TestModelAgentActionStrict:
-    """Test that ModelAgentAction has strict validation (extra='forbid', frozen=True)."""
+    """Test ModelAgentAction validation and schema compatibility (OMN-2986).
 
-    def test_agent_action_rejects_extra_fields(self) -> None:
-        """Agent action should reject unknown fields with ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
-            ModelAgentAction(  # type: ignore[call-arg]
-                id=uuid4(),
-                correlation_id=uuid4(),
-                agent_name="test-agent",
-                action_type="tool_call",
-                action_name="Read",
-                created_at=datetime.now(UTC),
-                custom_field="should_fail",
-            )
+    ModelAgentAction uses extra="ignore" to tolerate producer fields not in the
+    consumer schema (action_details, debug_mode, timestamp from omniclaude). The
+    id and created_at fields auto-generate when absent from producer payloads.
+    """
 
-        errors = exc_info.value.errors()
-        error_types = {e["type"] for e in errors}
-        assert "extra_forbidden" in error_types
+    def test_agent_action_ignores_extra_fields(self) -> None:
+        """Agent action should silently ignore unknown producer fields (OMN-2986).
 
-    def test_agent_action_is_frozen(self) -> None:
-        """Agent action should be immutable after creation."""
-        action = ModelAgentAction(
-            id=uuid4(),
+        The omniclaude producer emits action_details, debug_mode, and timestamp
+        which are not in the consumer schema. These must be ignored, not rejected.
+        """
+        # Should NOT raise — extra fields are ignored
+        action = ModelAgentAction(  # type: ignore[call-arg]
             correlation_id=uuid4(),
             agent_name="test-agent",
             action_type="tool_call",
             action_name="Read",
-            created_at=datetime.now(UTC),
+            action_details={"file_path": "/foo/bar"},  # producer-only field
+            debug_mode=True,  # producer-only field
+            timestamp="2026-02-28T00:00:00Z",  # producer-only field
+        )
+        assert action.agent_name == "test-agent"
+
+    def test_agent_action_is_frozen(self) -> None:
+        """Agent action should be immutable after creation."""
+        action = ModelAgentAction(
+            correlation_id=uuid4(),
+            agent_name="test-agent",
+            action_type="tool_call",
+            action_name="Read",
         )
 
         with pytest.raises(ValidationError):
             action.agent_name = "new-agent"  # type: ignore[misc]
 
     def test_agent_action_required_fields_enforced(self) -> None:
-        """Agent action should enforce required fields."""
+        """Agent action should enforce required fields (OMN-2986: id and created_at auto-generate).
+
+        Only correlation_id, agent_name, action_type, and action_name are required
+        from the producer. id and created_at default to auto-generated values.
+        """
         with pytest.raises(ValidationError) as exc_info:
             ModelAgentAction()  # type: ignore[call-arg]
 
         errors = exc_info.value.errors()
         error_locs = {e["loc"][0] for e in errors}
-        assert "id" in error_locs
+        # id and created_at have defaults — not in error_locs
+        assert "id" not in error_locs
+        assert "created_at" not in error_locs
+        # These are still required from the producer
         assert "correlation_id" in error_locs
         assert "agent_name" in error_locs
         assert "action_type" in error_locs
         assert "action_name" in error_locs
-        assert "created_at" in error_locs
 
-    def test_agent_action_optional_fields_work(self) -> None:
-        """Agent action optional fields should default to None."""
+    def test_agent_action_id_auto_generated(self) -> None:
+        """Agent action id should auto-generate as UUID when not provided (OMN-2986)."""
         action = ModelAgentAction(
-            id=uuid4(),
             correlation_id=uuid4(),
             agent_name="test-agent",
             action_type="tool_call",
             action_name="Read",
-            created_at=datetime.now(UTC),
+        )
+        from uuid import UUID
+
+        assert isinstance(action.id, UUID)
+
+    def test_agent_action_created_at_auto_generated(self) -> None:
+        """Agent action created_at should default to UTC now when not provided (OMN-2986)."""
+        action = ModelAgentAction(
+            correlation_id=uuid4(),
+            agent_name="test-agent",
+            action_type="tool_call",
+            action_name="Read",
+        )
+        assert isinstance(action.created_at, datetime)
+
+    def test_agent_action_optional_fields_work(self) -> None:
+        """Agent action optional fields should default to None."""
+        action = ModelAgentAction(
+            correlation_id=uuid4(),
+            agent_name="test-agent",
+            action_type="tool_call",
+            action_name="Read",
         )
 
         assert action.status is None
@@ -390,7 +421,7 @@ class TestUUIDValidation:
         """UUID fields should accept valid UUID strings."""
         uid_str = str(uuid4())
         action = ModelAgentAction(
-            id=uid_str,  # type: ignore[arg-type]
+            id=uid_str,
             correlation_id=uuid4(),
             agent_name="test-agent",
             action_type="tool_call",
@@ -403,7 +434,7 @@ class TestUUIDValidation:
         """UUID fields should reject invalid UUID strings."""
         with pytest.raises(ValidationError) as exc_info:
             ModelAgentAction(
-                id="not-a-uuid",  # type: ignore[arg-type]
+                id="not-a-uuid",
                 correlation_id=uuid4(),
                 agent_name="test-agent",
                 action_type="tool_call",
@@ -441,7 +472,7 @@ class TestDatetimeValidation:
             agent_name="test-agent",
             action_type="tool_call",
             action_name="Read",
-            created_at=iso_str,  # type: ignore[arg-type]
+            created_at=iso_str,
         )
         assert action.created_at is not None
 
@@ -454,7 +485,7 @@ class TestDatetimeValidation:
                 agent_name="test-agent",
                 action_type="tool_call",
                 action_name="Read",
-                created_at="not-a-datetime",  # type: ignore[arg-type]
+                created_at="not-a-datetime",
             )
 
         errors = exc_info.value.errors()

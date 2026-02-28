@@ -19,13 +19,13 @@ Critical Invariant:
     Never commit offsets for partitions that had write failures in the batch.
 
 Topics consumed (OMN-2621: migrated 5 legacy bare names to ONEX canonical):
-    - onex.evt.omniclaude.agent-actions.v1         (was: agent-actions)
-    - onex.evt.omniclaude.routing-decision.v1      (was: agent-routing-decisions)
-    - onex.evt.omniclaude.agent-transformation.v1  (was: agent-transformation-events)
-    - onex.evt.omniclaude.performance-metrics.v1   (was: router-performance-metrics)
-    - onex.evt.omniclaude.detection-failure.v1     (was: agent-detection-failures)
-    - agent-execution-logs                         (unchanged — producer unconfirmed)
-    - onex.evt.omniclaude.agent-status.v1           (was: onex.evt.agent.status.v1, OMN-2846)
+    - onex.evt.omniclaude.agent-actions.v1           (was: agent-actions)
+    - onex.evt.omniclaude.routing-decision.v1        (was: agent-routing-decisions)
+    - onex.evt.omniclaude.agent-transformation.v1    (was: agent-transformation-events)
+    - onex.evt.omniclaude.performance-metrics.v1     (was: router-performance-metrics)
+    - onex.evt.omniclaude.detection-failure.v1       (was: agent-detection-failures)
+    - onex.evt.omniclaude.agent-execution-logs.v1    (was: agent-execution-logs, OMN-2902)
+    - onex.evt.omniclaude.agent-status.v1            (was: onex.evt.agent.status.v1, OMN-2846)
 
 Related Tickets:
     - OMN-1743: Migrate agent_actions_consumer to omnibase_infra (current)
@@ -164,27 +164,30 @@ def mask_dsn_password(dsn: str) -> str:
 
 # Map topics to their Pydantic model class.
 # OMN-2621: 5 legacy bare topic names replaced with ONEX canonical names.
-# "agent-execution-logs" is unchanged (producer unconfirmed).
-# "onex.evt.omniclaude.agent-status.v1" renamed from "onex.evt.agent.status.v1" (OMN-2846).
+# OMN-2902: "agent-execution-logs" renamed to "onex.evt.omniclaude.agent-execution-logs.v1".
+# OMN-2846: "onex.evt.omniclaude.agent-status.v1" renamed from "onex.evt.agent.status.v1".
+# OMN-2986: All topic names must match config.py (canonical ONEX names).
 TOPIC_TO_MODEL: dict[str, type[BaseModel]] = {
     "onex.evt.omniclaude.agent-actions.v1": ModelAgentAction,
     "onex.evt.omniclaude.routing-decision.v1": ModelRoutingDecision,
     "onex.evt.omniclaude.agent-transformation.v1": ModelTransformationEvent,
     "onex.evt.omniclaude.performance-metrics.v1": ModelPerformanceMetric,
     "onex.evt.omniclaude.detection-failure.v1": ModelDetectionFailure,
-    "agent-execution-logs": ModelExecutionLog,
+    "onex.evt.omniclaude.agent-execution-logs.v1": ModelExecutionLog,  # OMN-2902
     "onex.evt.omniclaude.agent-status.v1": ModelAgentStatusEvent,
 }
 
 # Map topics to writer method names.
 # OMN-2621: Keys updated to match ONEX canonical topic names.
+# OMN-2902: "agent-execution-logs" → "onex.evt.omniclaude.agent-execution-logs.v1".
+# OMN-2986: All topic names must match config.py (canonical ONEX names).
 TOPIC_TO_WRITER_METHOD: dict[str, str] = {
     "onex.evt.omniclaude.agent-actions.v1": "write_agent_actions",
     "onex.evt.omniclaude.routing-decision.v1": "write_routing_decisions",
     "onex.evt.omniclaude.agent-transformation.v1": "write_transformation_events",
     "onex.evt.omniclaude.performance-metrics.v1": "write_performance_metrics",
     "onex.evt.omniclaude.detection-failure.v1": "write_detection_failures",
-    "agent-execution-logs": "write_execution_logs",
+    "onex.evt.omniclaude.agent-execution-logs.v1": "write_execution_logs",  # OMN-2902
     "onex.evt.omniclaude.agent-status.v1": "write_agent_status_events",
 }
 

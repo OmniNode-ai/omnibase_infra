@@ -124,7 +124,7 @@ class TestTopicModelMapping:
             "onex.evt.omniclaude.agent-transformation.v1",
             "onex.evt.omniclaude.performance-metrics.v1",
             "onex.evt.omniclaude.detection-failure.v1",
-            "agent-execution-logs",
+            "onex.evt.omniclaude.agent-execution-logs.v1",  # OMN-2902: renamed from agent-execution-logs
             "onex.evt.omniclaude.agent-status.v1",
         }
         assert set(TOPIC_TO_MODEL.keys()) == expected_topics
@@ -133,6 +133,7 @@ class TestTopicModelMapping:
         """All configured topics should have corresponding writer methods.
 
         OMN-2621: 5 legacy bare topic names replaced with ONEX canonical names.
+        OMN-2902: agent-execution-logs → onex.evt.omniclaude.agent-execution-logs.v1.
         """
         expected_topics = {
             "onex.evt.omniclaude.agent-actions.v1",
@@ -140,7 +141,7 @@ class TestTopicModelMapping:
             "onex.evt.omniclaude.agent-transformation.v1",
             "onex.evt.omniclaude.performance-metrics.v1",
             "onex.evt.omniclaude.detection-failure.v1",
-            "agent-execution-logs",
+            "onex.evt.omniclaude.agent-execution-logs.v1",  # OMN-2902: renamed from agent-execution-logs
             "onex.evt.omniclaude.agent-status.v1",
         }
         assert set(TOPIC_TO_WRITER_METHOD.keys()) == expected_topics
@@ -179,7 +180,10 @@ class TestTopicModelMapping:
             TOPIC_TO_MODEL["onex.evt.omniclaude.detection-failure.v1"]
             is ModelDetectionFailure
         )
-        assert TOPIC_TO_MODEL["agent-execution-logs"] is ModelExecutionLog
+        assert (
+            TOPIC_TO_MODEL["onex.evt.omniclaude.agent-execution-logs.v1"]
+            is ModelExecutionLog
+        )  # OMN-2902
         assert (
             TOPIC_TO_MODEL["onex.evt.omniclaude.agent-status.v1"]
             is ModelAgentStatusEvent
