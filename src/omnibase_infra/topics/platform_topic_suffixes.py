@@ -841,7 +841,7 @@ ALL_OMNICLAUDE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
 """OmniClaude topic specs provisioned for skill orchestrator nodes and observability.
 
 Skill topics: 1 partition each (low-throughput skill dispatch -- each skill
-invocation is a single message). 206 topics total (68 skills x 3 topics each + 2 lifecycle topics [OMN-2934]).
+invocation is a single message). 207 topics total (68 skills x 3 topics each + 2 lifecycle topics [OMN-2934] + 1 DLQ topic [OMN-2945]).
 
 Observability DLQ topics: 3 partitions each (matches agent-actions consumer
 throughput). Provisioned to guarantee broker topic existence when auto-creation

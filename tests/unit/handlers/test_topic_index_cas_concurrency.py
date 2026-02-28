@@ -292,6 +292,7 @@ class TestCASConcurrentRegistrations:
         # Track how many put calls are made so we can confirm at least one retry.
         put_call_log: list[dict[str, object]] = []
         original_put = cas_aware_consul_client.kv.put.side_effect
+        initial_cas = 5
 
         def instrumented_put(
             key_arg: str,
@@ -299,6 +300,16 @@ class TestCASConcurrentRegistrations:
             flags: int | None = None,
             cas: int | None = None,
         ) -> bool:
+            # On the first attempt with the initial CAS index, simulate a
+            # concurrent writer by bumping the stored ModifyIndex and returning
+            # False — this forces the handler's retry loop to exercise the
+            # read-again path.
+            if cas == initial_cas and not put_call_log:
+                # Simulate concurrent writer: bump ModifyIndex so next read gets 6
+                current_val, _ = internal_store[key_arg]
+                internal_store[key_arg] = (current_val, initial_cas + 1)
+                put_call_log.append({"key": key_arg, "cas": cas, "result": False})
+                return False
             result = original_put(key_arg, value, flags=flags, cas=cas)
             put_call_log.append({"key": key_arg, "cas": cas, "result": result})
             return result
@@ -312,9 +323,8 @@ class TestCASConcurrentRegistrations:
             MockClient.return_value = cas_aware_consul_client
             await handler.initialize(consul_config)
 
-            # Adding a new subscriber — the initial CAS check will see index=5.
-            # The mock will accept it because we didn't race here.  But we can
-            # verify the CAS index supplied matches what was read.
+            # Adding a new subscriber — first CAS attempt will conflict (returns False),
+            # handler retries with updated ModifyIndex=6 and succeeds.
             await handler._add_subscriber_to_topic(topic, "new-node", uuid4())
 
         stored_bytes, _ = internal_store[key]
@@ -322,12 +332,21 @@ class TestCASConcurrentRegistrations:
         assert "new-node" in stored
         assert "pre-existing-node" in stored
 
-        # The put call should have supplied cas=5 (the index we read).
+        # At least 2 put calls: first conflict (cas=5), then success (cas=6).
         topic_puts = [p for p in put_call_log if key in p["key"]]
-        assert topic_puts, "No kv.put calls recorded for the topic key"
-        assert topic_puts[0]["cas"] == 5, (
-            f"Expected cas=5 (ModifyIndex from read), got {topic_puts[0]['cas']}"
+        assert len(topic_puts) >= 2, (
+            f"Expected at least 2 put attempts (conflict + retry), got {len(topic_puts)}"
         )
+        assert topic_puts[0]["cas"] == initial_cas, (
+            f"Expected first attempt cas={initial_cas}, got {topic_puts[0]['cas']}"
+        )
+        assert topic_puts[0]["result"] is False, (
+            "First attempt should have returned False (CAS conflict)"
+        )
+        assert topic_puts[1]["cas"] == initial_cas + 1, (
+            f"Expected retry cas={initial_cas + 1} (updated ModifyIndex), got {topic_puts[1]['cas']}"
+        )
+        assert topic_puts[1]["result"] is True, "Retry should have succeeded"
 
 
 __all__: list[str] = ["TestCASConcurrentRegistrations"]

@@ -467,9 +467,25 @@ class MixinConsulTopicIndex:
             )
 
             try:
-                subscribers: set[str] = (
-                    set(json.loads(existing_value)) if existing_value else set()
-                )
+                if existing_value:
+                    parsed = json.loads(existing_value)
+                    if not isinstance(parsed, list) or not all(
+                        isinstance(elem, str) for elem in parsed
+                    ):
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.CONSUL,
+                            operation="consul.kv_get_with_modify_index",
+                            target_name="consul_handler",
+                        )
+                        raise InfraConsulError(
+                            "Malformed Consul topic subscriber list: expected list[str]",
+                            context=context,
+                            consul_key=key,
+                        )
+                    subscribers: set[str] = set(parsed)
+                else:
+                    subscribers = set()
             except (json.JSONDecodeError, TypeError) as exc:
                 context = ModelInfraErrorContext.with_correlation(
                     correlation_id=correlation_id,
