@@ -160,10 +160,17 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN uv pip freeze | grep -v '^\(-e\|@\)' > /tmp/constraints.txt
 
 # Version must be compatible with constraints in /tmp/constraints.txt (generated from uv pip freeze)
+# omniintelligence and omninode-claude are installed together (both compatible with omnibase-infra==0.12.0).
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --constraint /tmp/constraints.txt \
     omniintelligence==0.6.0 \
-    omninode-claude==0.3.0 \
+    omninode-claude==0.3.0
+
+# omninode-memory==0.6.0 declares omnibase-infra<0.12.0 but is functionally compatible with 0.12.0.
+# A new omninode-memory release supporting omnibase-infra>=0.12.0 is tracked in OMN-3183.
+# Install with --no-deps to avoid resolver conflict until that release lands.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --no-deps \
     omninode-memory==0.6.0
 
 # ============================================================================
