@@ -2094,6 +2094,19 @@ class RuntimeHostProcess:
                         if db_url:
                             effective_config["dsn"] = db_url
 
+                    if handler_type == "mcp":
+                        # Inject MCP API key from env if available.
+                        # When no api_key is configured and auth is not explicitly
+                        # disabled, disable auth to allow local dev startup without
+                        # requiring Infisical/secret configuration.
+                        mcp_api_key = os.environ.get("MCP_API_KEY") or os.environ.get(
+                            "ONEX_MCP_API_KEY"
+                        )
+                        if mcp_api_key and "api_key" not in effective_config:
+                            effective_config["api_key"] = mcp_api_key
+                        elif "auth_enabled" not in effective_config and not mcp_api_key:
+                            effective_config["auth_enabled"] = False
+
                     # Pass empty dict if no config, not None
                     # Handlers expect dict interface (e.g., config.get("key"))
                     await handler_instance.initialize(effective_config)
