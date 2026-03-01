@@ -205,7 +205,7 @@ def test_render_enum_contains_correct_member(tmp_path: Path) -> None:
 
     enum_content = result[tmp_path / "enum_platform_topic.py"]
     assert "EVT_INTENT_CLASSIFIED_V1" in enum_content
-    assert "'onex.evt.platform.intent-classified.v1'" in enum_content
+    assert '"onex.evt.platform.intent-classified.v1"' in enum_content
 
 
 @pytest.mark.unit
