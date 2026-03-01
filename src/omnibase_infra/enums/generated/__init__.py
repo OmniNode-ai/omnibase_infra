@@ -8,6 +8,7 @@
 # To regenerate, run:
 #   uv run python scripts/generate_topic_enums.py
 #
+from .enum_omnibase_infra_topic import EnumOmnibaseInfraTopic
 from .enum_omnimemory_topic import EnumOmnimemoryTopic
 from .enum_platform_topic import EnumPlatformTopic
 from .enum_validation_topic import EnumValidationTopic
