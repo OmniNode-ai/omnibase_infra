@@ -280,8 +280,9 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         # Default: /app,/workspace,/tmp (standard container runtime paths).
         allowed_paths_raw: object = config.get("allowed_paths")
         if allowed_paths_raw is None:
-            env_paths = os.environ.get("FS_ALLOWED_PATHS", "/app,/workspace,/tmp")
-            allowed_paths_raw = [p.strip() for p in env_paths.split(",") if p.strip()]
+            _default = "/app,/workspace,/tmp"
+            _raw = os.environ.get("FS_ALLOWED_PATHS", _default)  # ONEX_EXCLUDE: env
+            allowed_paths_raw = [p.strip() for p in _raw.split(",") if p.strip()]
             logger.debug(
                 "allowed_paths not in config; using FS_ALLOWED_PATHS env var: %s",
                 allowed_paths_raw,

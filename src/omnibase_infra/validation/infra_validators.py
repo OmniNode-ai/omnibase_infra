@@ -1233,8 +1233,7 @@ def _count_non_optional_unions(
     """
     Count unions in a directory, excluding simple optional and isinstance patterns.
 
-    This function provides accurate union counting for threshold checks by
-    excluding:
+    Excludes:
     - Idiomatic `X | None` patterns (simple optionals) that are valid ONEX style
     - isinstance(x, A | B) patterns that are runtime type checks, not annotations
 

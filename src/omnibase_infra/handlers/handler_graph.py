@@ -260,14 +260,15 @@ class HandlerGraph(
         # (passed by _populate_handlers_from_registry via initialize(effective_config)).
         resolved_uri: str
         if isinstance(connection_uri, dict):
+            # Resolve URI from dict keys, then env vars, then hard-coded default.
+            _env_memgraph = os.environ.get("MEMGRAPH_BOLT_URI")  # ONEX_EXCLUDE: env
+            _env_graph = os.environ.get("GRAPH_BOLT_URI")  # ONEX_EXCLUDE: env
             resolved_uri = (
                 str(connection_uri["connection_uri"])
                 if "connection_uri" in connection_uri
                 else str(connection_uri["bolt_uri"])
                 if "bolt_uri" in connection_uri
-                else os.environ.get("MEMGRAPH_BOLT_URI")
-                or os.environ.get("GRAPH_BOLT_URI")
-                or "bolt://host.docker.internal:7687"
+                else _env_memgraph or _env_graph or "bolt://host.docker.internal:7687"
             )
             dict_auth = connection_uri.get("auth")
             if (
