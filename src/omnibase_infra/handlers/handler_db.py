@@ -71,6 +71,7 @@ Note:
 from __future__ import annotations
 
 import logging
+import os
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -305,7 +306,11 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             },
         )
 
-        dsn = config.get("dsn")
+        dsn = (
+            config.get("dsn")
+            or os.environ.get("OMNIBASE_INFRA_DB_URL")
+            or os.environ.get("DATABASE_URL")
+        )
         if not isinstance(dsn, str) or not dsn:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
@@ -314,7 +319,8 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 correlation_id=init_correlation_id,
             )
             raise RuntimeHostError(
-                "Missing or invalid 'dsn' in config - PostgreSQL connection string required",
+                "Missing or invalid 'dsn' in config - PostgreSQL connection string required "
+                "(also checked OMNIBASE_INFRA_DB_URL and DATABASE_URL env vars)",
                 context=ctx,
             )
 

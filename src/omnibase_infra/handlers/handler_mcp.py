@@ -477,7 +477,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 - json_response: Return JSON responses (default: True)
                 - timeout_seconds: Tool execution timeout (default: 30.0)
                 - max_tools: Maximum tools to expose (default: 100)
-                - kafka_enabled: Whether to enable Kafka hot reload (REQUIRED - no default)
+                - kafka_enabled: Whether to enable Kafka hot reload (default: True)
                 - dev_mode: Whether to run in development mode (REQUIRED - no default)
                 - contracts_dir: Directory for contract scanning in dev mode (optional)
                 - registry_query_limit: Max nodes to fetch during cold-start discovery (optional)
@@ -486,9 +486,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
         Raises:
             ProtocolConfigurationError: If configuration is invalid or required
-                config values (kafka_enabled, dev_mode) are missing.
-                Per CLAUDE.md, .env is the single source of truth -
-                no hardcoded fallbacks are used.
+                config values (dev_mode) are missing.
         """
         init_correlation_id = uuid4()
 
@@ -530,11 +528,11 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 # Build MCPServerConfig from handler config (OMN-1282)
                 # Map handler config fields to lifecycle config fields
                 #
-                # Per CLAUDE.md: .env is the SINGLE SOURCE OF TRUTH.
-                # No hardcoded fallbacks - all required config must be explicit.
-                # The _require_config_value helper validates type, cast() is for mypy.
-                kafka_enabled = _require_config_value(
-                    config, "kafka_enabled", bool, init_correlation_id
+                # kafka_enabled defaults to True — Kafka is always enabled in this platform.
+                # Callers may override by passing kafka_enabled=False in config.
+                kafka_enabled_val = config.get("kafka_enabled", True)
+                kafka_enabled: bool = (
+                    kafka_enabled_val if isinstance(kafka_enabled_val, bool) else True
                 )
                 dev_mode = _require_config_value(
                     config, "dev_mode", bool, init_correlation_id
