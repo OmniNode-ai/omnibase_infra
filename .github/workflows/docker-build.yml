@@ -38,9 +38,31 @@ env:
   IMAGE_NAME: omnibase-infra-runtime
 
 jobs:
+  # Validate Dockerfile plugin pin ranges before building.
+  # Catches exact-pin-without-no-deps issues and stale range upper bounds early,
+  # without waiting for the full Docker build (which can take 3-5 minutes).
+  # See: scripts/check_dockerfile_pins.py
+  dockerfile-pin-check:
+    name: Validate Dockerfile Plugin Pins
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate Dockerfile plugin pin ranges
+        run: python scripts/check_dockerfile_pins.py --dockerfile docker/Dockerfile.runtime
+
   # Build and validate Docker image
   docker-build:
     name: Build Runtime Image
+    needs: dockerfile-pin-check
     runs-on: ubuntu-latest
     permissions:
       contents: read
