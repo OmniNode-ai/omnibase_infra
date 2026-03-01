@@ -1,0 +1,20 @@
+# Topic Naming Lint Baseline (OMN-3188)
+#
+# Pre-existing topic naming violations tracked for future cleanup.
+# Topics listed here are excluded from the linter's failure criteria.
+#
+# DO NOT add new topics to this list. New violations must be fixed before merging.
+# Remove entries as violations are resolved.
+#
+# Format: one raw topic string per line (comments start with #)
+#
+# Tracked violations:
+#   onex.int.platform.runtime-tick.v1              — invalid kind 'int' (should be 'evt')
+#   onex.contract.resolve.completed                — only 4 segments (legacy topic)
+#   onex.contract.resolve.requested                — only 4 segments (legacy topic)
+#   onex.snapshot.platform.registration-snapshots.v1 — invalid kind 'snapshot'
+#
+onex.int.platform.runtime-tick.v1
+onex.contract.resolve.completed
+onex.contract.resolve.requested
+onex.snapshot.platform.registration-snapshots.v1

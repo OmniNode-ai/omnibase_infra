@@ -239,6 +239,15 @@ repos:
         types_or: [python, markdown]
         pass_filenames: true
         stages: [pre-commit]
+      # Topic naming lint — validate onex.{kind}.{producer}.{event}.v{n} convention (OMN-3188)
+      # Runs on contract*.yaml changes only to keep pre-commit fast
+      - id: topic-naming-lint
+        name: Topic Naming Lint
+        entry: uv run python scripts/validation/lint_topic_names.py --scan-contracts src/omnibase_infra/nodes
+        language: system
+        files: contract.*\.yaml$
+        pass_filenames: false
+        stages: [pre-commit]
 # Configuration
 default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit]
