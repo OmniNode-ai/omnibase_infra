@@ -78,8 +78,13 @@ _load_omnibase_env()
 _COOLDOWN_FILE = Path.home() / ".omnibase" / "monitor-cooldowns.json"
 _cooldown_lock = threading.Lock()
 
+# Exponential backoff: 5m → 10m → 20m → 40m → 60m (cap)
+_BACKOFF_BASE = 300  # 5 minutes
+_BACKOFF_CAP = 3600  # 1 hour max
 
-def _cooldown_read(container: str) -> float:
+
+def _cooldown_read(container: str) -> tuple[float, int]:
+    """Return (last_alert_time, alert_count) for container."""
     try:
         with _cooldown_lock:
             data = (
@@ -87,12 +92,13 @@ def _cooldown_read(container: str) -> float:
                 if _COOLDOWN_FILE.exists()
                 else {}
             )
-        return float(data.get(container, 0.0))
+        entry = data.get(container, {})
+        return float(entry.get("ts", 0.0)), int(entry.get("n", 0))
     except (OSError, ValueError, json.JSONDecodeError):
-        return 0.0
+        return 0.0, 0
 
 
-def _cooldown_write(container: str, ts: float) -> None:
+def _cooldown_write(container: str, ts: float, count: int) -> None:
     try:
         with _cooldown_lock:
             data = (
@@ -100,10 +106,15 @@ def _cooldown_write(container: str, ts: float) -> None:
                 if _COOLDOWN_FILE.exists()
                 else {}
             )
-            data[container] = ts
+            data[container] = {"ts": ts, "n": count}
             _COOLDOWN_FILE.write_text(json.dumps(data))
     except OSError:
         pass
+
+
+def _backoff_seconds(count: int) -> int:
+    """Exponential backoff: 5m, 10m, 20m, 40m, 60m (cap)."""
+    return min(_BACKOFF_BASE * (2**count), _BACKOFF_CAP)
 
 
 # Resolve docker binary at startup so subprocess calls work without a shell PATH.
@@ -283,12 +294,15 @@ class ContainerTailer(threading.Thread):
 
     def _maybe_alert(self, lines: list[str]) -> None:
         now = time.time()
-        last = _cooldown_read(self.container)
-        if now - last < self.cooldown:
-            remaining = int(self.cooldown - (now - last))
-            print(f"[monitor] Rate-limited {self.container} (cooldown {remaining}s)")
+        last, count = _cooldown_read(self.container)
+        wait = _backoff_seconds(count)
+        if now - last < wait:
+            remaining = int(wait - (now - last))
+            print(
+                f"[monitor] Rate-limited {self.container} (cooldown {remaining}s, alert #{count})"
+            )
             return
-        _cooldown_write(self.container, now)
+        _cooldown_write(self.container, now, count + 1)
         post_slack(self.bot_token, self.channel_id, self.container, lines, self.dry_run)
 
 
