@@ -4,20 +4,6 @@
 # This compose file provides the complete ONEX platform: infrastructure services
 # (PostgreSQL, Redpanda, Valkey) and runtime services (kernel, effects, workers).
 #
-# NOTE: Nested variable expansion caveat
-# --------------------------------------
-# Several DSN/URL values (OMNIBASE_INFRA_DB_URL, OMNIINTELLIGENCE_DB_URL,
-# OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN) use nested variable expansion, e.g.:
-#
-#   ${VAR:-outer-default-${INNER:-inner-default}}
-#
-# This syntax requires Docker Compose v2.20.0 or later and will SILENTLY produce
-# malformed values (e.g. literal "${POSTGRES_USER:-postgres}" in the DSN) on older
-# versions. Verify your version with: docker compose version
-#
-# RECOMMENDED: Set these *_URL / *_DSN variables explicitly in your .env file so
-# that nested expansion is never exercised and the DSN is always correct regardless
-# of the Compose version in use.
 #
 # Usage:
 #   # Core infrastructure only (postgres, redpanda, valkey)
@@ -115,9 +101,7 @@ x-runtime-env: &runtime-env
   # --- Bootstrap essentials (always needed) ---
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
-  # See top-of-file note re: nested variable expansion.
-  # RECOMMENDED: Set OMNIBASE_INFRA_DB_URL explicitly in .env instead.
-  OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for DB URL fallback}@postgres:5432/omnibase_infra}
+  OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:?OMNIBASE_INFRA_DB_URL must be set in ~/.omnibase/.env}
   KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
   ONEX_CONTRACTS_DIR: /app/contracts
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
@@ -147,9 +131,7 @@ x-runtime-env: &runtime-env
   VALKEY_PORT: ${VALKEY_PORT:-6379}
   VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
   # OmniIntelligence domain plugin
-  # See top-of-file note re: nested variable expansion.
-  # RECOMMENDED: Set OMNIINTELLIGENCE_DB_URL explicitly in .env instead.
-  OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for intelligence DB URL fallback}@postgres:5432/omniintelligence}
+  OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:?OMNIINTELLIGENCE_DB_URL must be set in ~/.omnibase/.env}
   # OmniMemory domain plugin
   OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-}
   # OmniClaude domain plugin (OMN-3182): required by PluginClaude.wire_dispatchers()
@@ -321,12 +303,9 @@ services:
       valkey:
         condition: service_healthy
     environment:
-      DB_CONNECTION_URI: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for Infisical DB}@postgres:5432/infisical_db
+      DB_CONNECTION_URI: ${INFISICAL_DB_CONNECTION_URI:?INFISICAL_DB_CONNECTION_URI must be set in ~/.omnibase/.env}
       # Redis URL for Infisical's cache backend (Valkey is Redis-compatible)
-      # NOTE: Uses VALKEY_PASSWORD variable interpolation so changing
-      # VALKEY_PASSWORD automatically updates this URL.
-      # Requires Docker Compose v2.20+ for nested variable expansion.
-      REDIS_URL: ${INFISICAL_REDIS_URL:-redis://:${VALKEY_PASSWORD:-valkey-dev-password}@valkey:6379}
+      REDIS_URL: ${INFISICAL_REDIS_URL:?INFISICAL_REDIS_URL must be set in ~/.omnibase/.env}
       # SECURITY: INFISICAL_ENCRYPTION_KEY and INFISICAL_AUTH_SECRET must be set
       # in .env (or environment). There are no inline defaults -- the service will
       # refuse to start without them to prevent running with known-insecure keys.
@@ -486,9 +465,7 @@ services:
       # NOTE: Uses dedicated OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN rather than
       # OMNIBASE_INFRA_DB_URL because this consumer uses pydantic-settings with the
       # OMNIBASE_INFRA_AGENT_ACTIONS_ prefix and may use a different DB role.
-      # See top-of-file note re: nested variable expansion.
-      # RECOMMENDED: Set OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN explicitly in .env instead.
-      OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: ${OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for agent-actions DSN}@postgres:5432/omnibase_infra}
+      OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: ${OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN:?OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN must be set in ~/.omnibase/.env}
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_SIZE: ${AGENT_ACTIONS_BATCH_SIZE:-100}
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_TIMEOUT_MS: ${AGENT_ACTIONS_BATCH_TIMEOUT_MS:-1000}
       OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_PORT: "8087"
@@ -536,7 +513,7 @@ services:
     command: ["python", "-m", "omnibase_infra.services.observability.skill_lifecycle.consumer"]
     environment:
       OMNIBASE_INFRA_SKILL_LIFECYCLE_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
-      OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN: ${OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for skill-lifecycle DSN}@postgres:5432/omnibase_infra}
+      OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN: ${OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN:?OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN must be set in ~/.omnibase/.env}
       OMNIBASE_INFRA_SKILL_LIFECYCLE_BATCH_SIZE: ${SKILL_LIFECYCLE_BATCH_SIZE:-100}
       OMNIBASE_INFRA_SKILL_LIFECYCLE_BATCH_TIMEOUT_MS: ${SKILL_LIFECYCLE_BATCH_TIMEOUT_MS:-1000}
       OMNIBASE_INFRA_SKILL_LIFECYCLE_HEALTH_CHECK_PORT: "8092"
