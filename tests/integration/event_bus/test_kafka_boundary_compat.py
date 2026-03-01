@@ -73,12 +73,12 @@ import pytest
 omniintelligence = pytest.importorskip(
     "omniintelligence",
     reason=(
-        "omniintelligence not installed. " "Run: uv pip install -e ../omniintelligence"
+        "omniintelligence not installed. Run: uv pip install -e ../omniintelligence"
     ),
 )
 omnimemory = pytest.importorskip(
     "omnimemory",
-    reason=("omnimemory not installed. " "Run: uv pip install -e ../omnimemory"),
+    reason=("omnimemory not installed. Run: uv pip install -e ../omnimemory"),
 )
 
 from omniintelligence.nodes.node_intent_classifier_compute.models.enum_intent_class import (
