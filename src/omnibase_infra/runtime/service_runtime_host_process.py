@@ -2107,6 +2107,16 @@ class RuntimeHostProcess:
                         elif "auth_enabled" not in effective_config and not mcp_api_key:
                             effective_config["auth_enabled"] = False
 
+                        # Skip the uvicorn server when running in-memory event bus
+                        # mode (e.g., tests). This prevents port-binding conflicts
+                        # when multiple RuntimeHostProcess instances start within the
+                        # same process (each would attempt to bind the same MCP port).
+                        if (
+                            "skip_server" not in effective_config
+                            and os.environ.get("ONEX_EVENT_BUS_TYPE") == "inmemory"
+                        ):
+                            effective_config["skip_server"] = True
+
                     # Pass empty dict if no config, not None
                     # Handlers expect dict interface (e.g., config.get("key"))
                     await handler_instance.initialize(effective_config)

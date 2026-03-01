@@ -77,7 +77,6 @@ capability_tags:
 
 # Real handler class paths from omnibase_infra.handlers
 REAL_HANDLER_HTTP_CLASS = "omnibase_infra.handlers.handler_http.HandlerHttpRest"
-REAL_HANDLER_CONSUL_CLASS = "omnibase_infra.handlers.handler_consul.HandlerConsul"
 
 
 # =============================================================================
@@ -175,7 +174,7 @@ class TestBootstrapModeLoadsOnlyBootstrapHandlers:
     In BOOTSTRAP mode, the runtime should:
     1. Only load handlers from HandlerBootstrapSource
     2. NOT load handlers from HandlerContractSource
-    3. Register all 5 core infrastructure handlers (consul, db, http, mcp, vault)
+    3. Register all core infrastructure handlers (db, http, mcp, vault)
     """
 
     @pytest.mark.asyncio
@@ -190,7 +189,7 @@ class TestBootstrapModeLoadsOnlyBootstrapHandlers:
             - RuntimeHostProcess.start() is called
 
         Then:
-            - Only bootstrap handlers (consul, db, http, mcp, vault) are registered
+            - Only bootstrap handlers (db, http, mcp, vault) are registered
             - Contract source is NOT queried
         """
         event_bus = EventBusInmemory()
@@ -409,7 +408,7 @@ class TestHybridModeContractFirstBootstrapFallback:
         Given:
             - RuntimeHostProcess configured with HYBRID mode
             - contract_paths with HTTP handler contract
-            - Bootstrap provides consul, db, http, mcp, vault handlers
+            - Bootstrap provides db, http, mcp, vault handlers
 
         When:
             - RuntimeHostProcess.start() is called
@@ -694,7 +693,6 @@ class TestHybridModeBootstrapOverride:
         # All bootstrap handlers should be included
         handler_ids = {d.handler_id for d in result.descriptors}
         expected_bootstrap_ids = {
-            "proto.consul",
             "proto.db",
             "proto.http",
             "proto.mcp",
@@ -1060,11 +1058,11 @@ class TestHandlerResolutionLogging:
                     "Expected log message with descriptor_count field"
                 )
 
-                # Verify count is reasonable (bootstrap has 4 handlers)
+                # Verify count is reasonable (bootstrap has 3 handlers: db, http, mcp)
                 for record in descriptor_count_logs:
                     count = record.__dict__.get("descriptor_count", 0)
-                    assert count >= 4, (
-                        f"Expected at least 4 bootstrap handlers, got {count}"
+                    assert count >= 3, (
+                        f"Expected at least 3 bootstrap handlers, got {count}"
                     )
 
             finally:
@@ -1352,14 +1350,13 @@ class TestHandlerSourceResolverIntegration:
 
         result = await resolver.resolve_handlers()
 
-        # Should have 4 bootstrap handlers
-        assert len(result.descriptors) == 4
+        # Should have 3 bootstrap handlers (db, http, mcp — consul removed from bootstrap)
+        assert len(result.descriptors) == 3
         assert len(result.validation_errors) == 0
 
         # Verify handler IDs
         handler_ids = {d.handler_id for d in result.descriptors}
         expected_ids = {
-            "proto.consul",
             "proto.db",
             "proto.http",
             "proto.mcp",
