@@ -169,6 +169,21 @@ class TestThrottleGuard:
         result = mod.check_throttle(last_sync_file)  # type: ignore[attr-defined]
         assert result is True, "Should return True (allow sync) when file is corrupt"
 
+    def test_passes_when_timestamp_is_in_future(self, tmp_path: Path) -> None:
+        """Should return True (allow sync) when last sync timestamp is in the future.
+
+        Clock skew can produce a future timestamp. Treating it as "no prior sync"
+        prevents the negative elapsed value from bypassing the throttle window.
+        """
+        mod = _import_script()
+        last_sync_file = tmp_path / "sync-omnibase-env.last"
+        # Write a timestamp 60 seconds in the future (simulates clock skew)
+        last_sync_file.write_text(str(time.time() + 60))
+        result = mod.check_throttle(last_sync_file)  # type: ignore[attr-defined]
+        assert result is True, (
+            "Should return True (allow sync) when timestamp is future"
+        )
+
     def test_throttle_window_is_5_minutes(self, tmp_path: Path) -> None:
         """Should use exactly 5-minute (300s) throttle window."""
         mod = _import_script()

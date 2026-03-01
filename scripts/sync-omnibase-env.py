@@ -45,12 +45,14 @@ Usage (normally invoked automatically from a shell hook or post-save script)::
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import logging
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -232,8 +234,6 @@ def acquire_flock(lock_file: Path) -> object | None:
         return fd
     except OSError as exc:
         fd.close()
-        import errno
-
         if exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
             # Lock is held by another process — expected during concurrent runs.
             logger.info("Another sync is already running — skipping (flock busy)")
@@ -315,7 +315,6 @@ def _run_seed_infisical(
     # Pass the filtered vars as KEY=VALUE environment so seed-infisical can
     # pick them up via --import-env-from-environ (if supported) or via env.
     # Simpler: write to a temp file and pass --import-env.
-    import tempfile
 
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".env", delete=False, prefix="sync-omnibase-env-"
