@@ -17,15 +17,10 @@ class EnumPlatformTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-
     CMD_INTENT_QUERY_DISTRIBUTION_V1 = "onex.cmd.platform.intent-query-distribution.v1"  # onex.cmd.platform.intent-query-distribution.v1
     CMD_INTENT_QUERY_SESSION_V1 = "onex.cmd.platform.intent-query-session.v1"  # onex.cmd.platform.intent-query-session.v1
-    CMD_LEDGER_APPEND_V1 = (
-        "onex.cmd.platform.ledger-append.v1"  # onex.cmd.platform.ledger-append.v1
-    )
-    CMD_LEDGER_QUERY_V1 = (
-        "onex.cmd.platform.ledger-query.v1"  # onex.cmd.platform.ledger-query.v1
-    )
+    CMD_LEDGER_APPEND_V1 = "onex.cmd.platform.ledger-append.v1"  # onex.cmd.platform.ledger-append.v1
+    CMD_LEDGER_QUERY_V1 = "onex.cmd.platform.ledger-query.v1"  # onex.cmd.platform.ledger-query.v1
     CMD_NODE_REGISTRATION_ACKED_V1 = "onex.cmd.platform.node-registration-acked.v1"  # onex.cmd.platform.node-registration-acked.v1
     CMD_REQUEST_INTROSPECTION_V1 = "onex.cmd.platform.request-introspection.v1"  # onex.cmd.platform.request-introspection.v1
     CMD_TOPIC_CATALOG_QUERY_V1 = "onex.cmd.platform.topic-catalog-query.v1"  # onex.cmd.platform.topic-catalog-query.v1
@@ -35,17 +30,11 @@ class EnumPlatformTopic(str, Enum):
     EVT_INTENT_CLASSIFIED_V1 = "onex.evt.platform.intent-classified.v1"  # onex.evt.platform.intent-classified.v1
     EVT_INTENT_DISTRIBUTION_RESULT_V1 = "onex.evt.platform.intent-distribution-result.v1"  # onex.evt.platform.intent-distribution-result.v1
     EVT_INTENT_SESSION_QUERY_RESULT_V1 = "onex.evt.platform.intent-session-query-result.v1"  # onex.evt.platform.intent-session-query-result.v1
-    EVT_INTENT_STORED_V1 = (
-        "onex.evt.platform.intent-stored.v1"  # onex.evt.platform.intent-stored.v1
-    )
-    EVT_LEDGER_APPENDED_V1 = (
-        "onex.evt.platform.ledger-appended.v1"  # onex.evt.platform.ledger-appended.v1
-    )
+    EVT_INTENT_STORED_V1 = "onex.evt.platform.intent-stored.v1"  # onex.evt.platform.intent-stored.v1
+    EVT_LEDGER_APPENDED_V1 = "onex.evt.platform.ledger-appended.v1"  # onex.evt.platform.ledger-appended.v1
     EVT_LEDGER_QUERY_RESULT_V1 = "onex.evt.platform.ledger-query-result.v1"  # onex.evt.platform.ledger-query-result.v1
     EVT_NODE_BECAME_ACTIVE_V1 = "onex.evt.platform.node-became-active.v1"  # onex.evt.platform.node-became-active.v1
-    EVT_NODE_HEARTBEAT_V1 = (
-        "onex.evt.platform.node-heartbeat.v1"  # onex.evt.platform.node-heartbeat.v1
-    )
+    EVT_NODE_HEARTBEAT_V1 = "onex.evt.platform.node-heartbeat.v1"  # onex.evt.platform.node-heartbeat.v1
     EVT_NODE_INTROSPECTION_V1 = "onex.evt.platform.node-introspection.v1"  # onex.evt.platform.node-introspection.v1
     EVT_NODE_LIVENESS_EXPIRED_V1 = "onex.evt.platform.node-liveness-expired.v1"  # onex.evt.platform.node-liveness-expired.v1
     EVT_NODE_REGISTRATION_V1 = "onex.evt.platform.node-registration.v1"  # onex.evt.platform.node-registration.v1
@@ -66,6 +55,4 @@ class EnumPlatformTopic(str, Enum):
     EVT_VALIDATION_LIFECYCLE_UPDATED_V1 = "onex.evt.platform.validation-lifecycle-updated.v1"  # onex.evt.platform.validation-lifecycle-updated.v1
     EVT_VALIDATION_PLAN_CREATED_V1 = "onex.evt.platform.validation-plan-created.v1"  # onex.evt.platform.validation-plan-created.v1
     EVT_VALIDATION_RESULT_PUBLISHED_V1 = "onex.evt.platform.validation-result-published.v1"  # onex.evt.platform.validation-result-published.v1
-    INTENT_RUNTIME_TICK_V1 = (
-        "onex.intent.platform.runtime-tick.v1"  # onex.intent.platform.runtime-tick.v1
-    )
+    INTENT_RUNTIME_TICK_V1 = "onex.intent.platform.runtime-tick.v1"  # onex.intent.platform.runtime-tick.v1

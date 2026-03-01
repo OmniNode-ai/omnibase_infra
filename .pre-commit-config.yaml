@@ -49,14 +49,14 @@ repos:
         entry: uv run ruff format
         language: system
         types: [python]
-        exclude: ^(archived/|tests/fixtures/|\.github/workflows/).*$
+        exclude: ^(archived/|tests/fixtures/|\.github/workflows/|src/omnibase_infra/enums/generated/).*$
         stages: [pre-commit]
       - id: ruff-fix
         name: ruff check (auto-fix linting + import sorting)
         entry: uv run ruff check --fix --exit-non-zero-on-fix
         language: system
         types: [python]
-        exclude: ^(archived/|tests/fixtures/|\.github/workflows/).*$
+        exclude: ^(archived/|tests/fixtures/|\.github/workflows/|src/omnibase_infra/enums/generated/).*$
         stages: [pre-commit]
         # Note: --exit-non-zero-on-fix ensures pre-commit fails if files were modified,
         # forcing you to re-stage the changes. This keeps pre-commit and CI in sync.

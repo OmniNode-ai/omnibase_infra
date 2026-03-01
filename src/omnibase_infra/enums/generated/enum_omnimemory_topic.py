@@ -17,9 +17,6 @@ class EnumOmnimemoryTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-
     EVT_POLICY_STATE_UPDATED_V1 = "onex.evt.omnimemory.policy-state-updated.v1"  # onex.evt.omnimemory.policy-state-updated.v1
     EVT_REWARD_ASSIGNED_V1 = "onex.evt.omnimemory.reward-assigned.v1"  # onex.evt.omnimemory.reward-assigned.v1
-    EVT_RUN_EVALUATED_V1 = (
-        "onex.evt.omnimemory.run-evaluated.v1"  # onex.evt.omnimemory.run-evaluated.v1
-    )
+    EVT_RUN_EVALUATED_V1 = "onex.evt.omnimemory.run-evaluated.v1"  # onex.evt.omnimemory.run-evaluated.v1
