@@ -47,8 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Renamed `PYPI_PRIVATE_*` secrets to `PYPI_*` for public PyPI (#495)
 
 ### Dependencies
-- `omnibase-core` pinned to ==0.22.0 (was >=0.21.0,<0.22.0)
-- `omnibase-spi` pinned to ==0.15.0 (was >=0.14.0,<0.15.0)
+- `omnibase-core` bumped to >=0.22.0,<0.23.0 (was >=0.21.0,<0.22.0); git source override removed
+- `omnibase-spi` bumped to >=0.15.0,<0.16.0 (was >=0.14.0,<0.15.0)
 
 ## [0.12.0] - 2026-02-27
 

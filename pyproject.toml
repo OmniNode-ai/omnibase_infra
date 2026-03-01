@@ -29,8 +29,8 @@ dependencies = [
     #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
     # Remember to switch back to PyPI versions before merging to main.
     #
-    "omnibase-core==0.22.0",
-    "omnibase-spi==0.15.0",
+    "omnibase-core>=0.22.0,<0.23.0",
+    "omnibase-spi>=0.15.0,<0.16.0",
 
     # ============================================================================
     # External Dependency Security Guidance
