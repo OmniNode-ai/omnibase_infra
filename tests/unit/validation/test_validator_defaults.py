@@ -123,11 +123,13 @@ class TestInfraValidatorConstants:
           - ModelBifrostRequest._coerce_messages(): list[JsonDict] | tuple[JsonDict, ...]
         - 130 (2026-02-27): OMN-2923 catalog responder topic-catalog-request.v1 (+1 union)
           - TopicCatalogDispatcher.handle(): ModelTopicCatalogQuery | ModelTopicCatalogRequest
+        - 131 (2026-03-01): OMN-3202 graph handler signature fix (+1 union)
+          - HandlerGraph.initialize(): dict[str, object] | str
 
-        Current: 130 (as of OMN-2923). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
+        Current: 131 (as of OMN-3202). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 130, (
-            "INFRA_MAX_UNIONS should be 130 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 131, (
+            "INFRA_MAX_UNIONS should be 131 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

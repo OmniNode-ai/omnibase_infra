@@ -274,8 +274,19 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             correlation_id=init_correlation_id,
         )
 
-        # Extract and validate allowed_paths (required)
-        allowed_paths_raw = config.get("allowed_paths")
+        # Extract and validate allowed_paths (required).
+        # Falls back to FS_ALLOWED_PATHS env var (comma-separated paths) when
+        # the registry-supplied config dict omits the key.
+        # Default: /app,/workspace,/tmp (standard container runtime paths).
+        allowed_paths_raw: object = config.get("allowed_paths")
+        if allowed_paths_raw is None:
+            env_paths = os.environ.get("FS_ALLOWED_PATHS", "/app,/workspace,/tmp")
+            allowed_paths_raw = [p.strip() for p in env_paths.split(",") if p.strip()]
+            logger.debug(
+                "allowed_paths not in config; using FS_ALLOWED_PATHS env var: %s",
+                allowed_paths_raw,
+                extra={"correlation_id": str(init_correlation_id)},
+            )
         if allowed_paths_raw is None:
             raise ProtocolConfigurationError(
                 "Missing required 'allowed_paths' configuration - filesystem handler "

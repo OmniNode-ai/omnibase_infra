@@ -470,7 +470,9 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #                     ModelBifrostRequest._coerce_messages(): list[JsonDict] | tuple[JsonDict, ...]
 # - 130 (2026-02-27): OMN-2923 catalog responder dispatcher
 #                     DispatcherCatalogRequest.handle(): ModelEventEnvelope[object] | dict[str, object]
-INFRA_MAX_UNIONS = 130
+# - 131 (2026-03-01): OMN-3202 graph handler signature fix
+#                     HandlerGraph.initialize(): dict[str, object] | str
+INFRA_MAX_UNIONS = 131
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

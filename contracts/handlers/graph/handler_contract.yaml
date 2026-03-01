@@ -29,3 +29,8 @@ security:
   trusted_namespace: omnibase_infra.handlers
   # Audit logging - enable for security-sensitive handlers
   audit_logging: true
+# Environment variable configuration (used when initialize() receives a dict
+# without an explicit connection_uri/bolt_uri key):
+#   MEMGRAPH_BOLT_URI  - Bolt URI for Memgraph (highest priority)
+#   GRAPH_BOLT_URI     - Bolt URI fallback
+#   Default: bolt://host.docker.internal:7687 (Memgraph in local Docker)

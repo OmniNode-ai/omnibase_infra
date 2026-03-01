@@ -136,12 +136,29 @@ class TestHandlerFileSystemInitialization:
         assert handler.transport_type == EnumInfraTransportType.FILESYSTEM
 
     @pytest.mark.asyncio
-    async def test_initialize_with_empty_config_raises_error(self, handler) -> None:
-        """Test handler raises error with empty config (requires allowed_paths)."""
-        with pytest.raises(ProtocolConfigurationError) as exc_info:
+    async def test_initialize_with_empty_config_uses_env_fallback(
+        self, handler
+    ) -> None:
+        """Test handler falls back to FS_ALLOWED_PATHS env var when config omits allowed_paths.
+
+        When _populate_handlers_from_registry calls initialize(effective_config) and the
+        registry config does not include allowed_paths, the handler falls back to
+        FS_ALLOWED_PATHS (comma-separated). If neither is set, defaults to
+        /app,/workspace,/tmp for standard container runtime paths.
+        """
+        import unittest.mock
+
+        with unittest.mock.patch.dict(
+            "os.environ",
+            {"FS_ALLOWED_PATHS": "/tmp"},
+            clear=False,
+        ):
             await handler.initialize({})
 
-        assert "allowed_paths" in str(exc_info.value).lower()
+        assert handler._initialized is True
+        # /tmp resolves to /private/tmp on macOS; compare via Path.resolve()
+        expected = Path("/tmp").resolve()
+        assert any(p == expected for p in handler._allowed_paths)
 
     @pytest.mark.asyncio
     async def test_initialize_with_allowed_paths_config(

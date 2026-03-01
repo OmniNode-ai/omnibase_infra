@@ -33,6 +33,7 @@ Circuit Breaker Pattern:
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 from collections.abc import Mapping
@@ -211,7 +212,7 @@ class HandlerGraph(
 
     async def initialize(  # type: ignore[override]
         self,
-        connection_uri: str,
+        connection_uri: dict[str, object] | str,
         auth: tuple[str, str] | None = None,
         *,
         options: Mapping[str, JsonType] | None = None,
@@ -223,8 +224,17 @@ class HandlerGraph(
         validates connectivity.
 
         Args:
-            connection_uri: Database connection URI (e.g., "bolt://localhost:7687").
+            connection_uri: Database connection URI string (e.g. "bolt://localhost:7687"),
+                OR a config dict passed by the handler registry.  When a dict is given,
+                the URI is resolved from the following keys in priority order:
+                  1. ``connection_uri``
+                  2. ``bolt_uri``
+                  3. ``MEMGRAPH_BOLT_URI`` environment variable
+                  4. ``GRAPH_BOLT_URI`` environment variable
+                  5. Hard-coded default ``bolt://host.docker.internal:7687``
+                Additional dict keys ``auth`` and ``options`` are also extracted.
             auth: Optional tuple of (username, password) for authentication.
+                Ignored when connection_uri is a dict that contains an ``auth`` key.
             options: Additional connection parameters:
                 - max_connection_pool_size: Maximum connections in pool (default: 50)
                 - database: Database name (default: "memgraph")
@@ -246,7 +256,37 @@ class HandlerGraph(
             },
         )
 
-        self._connection_uri = connection_uri
+        # Accept either a raw URI string (direct API usage) or a config dict
+        # (passed by _populate_handlers_from_registry via initialize(effective_config)).
+        resolved_uri: str
+        if isinstance(connection_uri, dict):
+            resolved_uri = (
+                str(connection_uri["connection_uri"])
+                if "connection_uri" in connection_uri
+                else str(connection_uri["bolt_uri"])
+                if "bolt_uri" in connection_uri
+                else os.environ.get("MEMGRAPH_BOLT_URI")
+                or os.environ.get("GRAPH_BOLT_URI")
+                or "bolt://host.docker.internal:7687"
+            )
+            dict_auth = connection_uri.get("auth")
+            if (
+                dict_auth is not None
+                and isinstance(dict_auth, (list, tuple))
+                and len(dict_auth) == 2
+            ):
+                auth = (str(dict_auth[0]), str(dict_auth[1]))
+            dict_options = connection_uri.get("options")
+            if (
+                dict_options is not None
+                and isinstance(dict_options, dict)
+                and options is None
+            ):
+                options = dict_options  # type: ignore[assignment]
+        else:
+            resolved_uri = connection_uri
+
+        self._connection_uri = resolved_uri
         opts = dict(options) if options else {}
 
         # Extract configuration options
@@ -272,7 +312,7 @@ class HandlerGraph(
         # Create async driver
         try:
             self._driver = AsyncGraphDatabase.driver(
-                connection_uri,
+                resolved_uri,
                 auth=auth,
                 max_connection_pool_size=self._pool_size,
                 encrypted=bool(encrypted) if encrypted else False,

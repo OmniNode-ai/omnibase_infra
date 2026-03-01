@@ -23,3 +23,7 @@ security:
   trusted_namespace: omnibase_infra.handlers
   # Audit logging - enable for security-sensitive handlers
   audit_logging: true
+# Environment variable configuration (used when initialize() receives a config
+# dict without an explicit allowed_paths key):
+#   FS_ALLOWED_PATHS - Comma-separated list of allowed directory paths
+#   Default: /app,/workspace,/tmp (standard container runtime paths)
