@@ -438,6 +438,72 @@ jobs:
             exit 1
           fi
 
+  # Cross-repo Kafka boundary compatibility test (OMN-3256)
+  # Verifies that producer and consumer Pydantic models can round-trip across
+  # the Kafka wire format.  Requires sibling repos omniintelligence + omnimemory.
+  # Pairs with known drift are marked xfail — they pass as XFAIL until the
+  # upstream fix (e.g. OMN-3248) lands, at which point xfail is removed.
+  kafka-boundary-compat:
+    name: Kafka Boundary Compat (OMN-3256)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@v4
+        with:
+          path: omnibase_infra
+
+      - name: Checkout omniintelligence (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: OmniNode-ai/omniintelligence
+          path: omniintelligence
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout omnimemory (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: OmniNode-ai/omnimemory
+          path: omnimemory
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Load cached uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-boundary-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('omnibase_infra/**/uv.lock') }}-${{ env.CACHE_VERSION }}
+          restore-keys: |
+            uv-boundary-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
+
+      - name: Install omnibase_infra dev dependencies
+        working-directory: omnibase_infra
+        run: uv sync
+
+      - name: Install sibling repos as editable (boundary test deps)
+        working-directory: omnibase_infra
+        run: uv pip install -e ../omniintelligence -e ../omnimemory
+
+      - name: Run Kafka boundary compatibility tests
+        working-directory: omnibase_infra
+        run: |
+          echo "================================================================"
+          echo "Kafka Boundary Compat Tests (OMN-3256)"
+          echo "xfail pairs = known drift tracked in open tickets (still PASS)"
+          echo "================================================================"
+          uv run pytest tests/integration/event_bus/test_kafka_boundary_compat.py \
+            -v --tb=short
+
   ai-slop-check:
     name: AI-Slop Pattern Check (strict, PR diff)
     runs-on: ubuntu-latest
