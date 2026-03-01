@@ -2082,6 +2082,18 @@ class RuntimeHostProcess:
                         if descriptor and descriptor.contract_config:
                             config_source = "contract+runtime_override"
 
+                    # Layer 3: Handler-specific env var injection
+                    # Inject well-known env vars into the effective config for handlers
+                    # that require them. This keeps handler code free of os.environ access
+                    # (per architecture invariant INV-3) while still supporting env-based
+                    # configuration for infrastructure handlers.
+                    if handler_type == "db" and "dsn" not in effective_config:
+                        db_url = os.environ.get(
+                            "OMNIBASE_INFRA_DB_URL"
+                        ) or os.environ.get("DATABASE_URL")
+                        if db_url:
+                            effective_config["dsn"] = db_url
+
                     # Pass empty dict if no config, not None
                     # Handlers expect dict interface (e.g., config.get("key"))
                     await handler_instance.initialize(effective_config)
