@@ -2,10 +2,9 @@
 # Copyright (c) 2025 OmniNode Team
 """Handler Bootstrap Source for Hardcoded Handler Registration.
 
-This module provides HandlerBootstrapSource, which centralizes all hardcoded handler
-wiring that was previously scattered in util_wiring.py. This source implements
-ProtocolContractSource and provides handler descriptors for the core infrastructure
-handlers (Consul, Database, HTTP, Vault, MCP).
+HandlerBootstrapSource centralizes all hardcoded handler wiring that was previously
+scattered in util_wiring.py. It implements ProtocolContractSource and provides
+handler descriptors for the core infrastructure handlers (Database, HTTP, MCP).
 
 Part of OMN-1087: HandlerBootstrapSource for hardcoded handler registration.
 
@@ -281,10 +280,10 @@ class HandlerBootstrapSource(
 ):  # naming-ok: Handler prefix required by ProtocolHandlerSource convention
     """Handler source that provides hardcoded bootstrap handler descriptors.
 
-    This class implements ProtocolContractSource by returning predefined handler
-    descriptors for core infrastructure handlers. Unlike HandlerContractSource
-    which discovers handlers from filesystem contracts, this source provides
-    handlers that are essential for the ONEX runtime bootstrap process.
+    Implements ProtocolContractSource by returning predefined handler descriptors
+    for core infrastructure handlers. Unlike HandlerContractSource which discovers
+    handlers from filesystem contracts, this source provides handlers essential
+    for the ONEX runtime bootstrap process.
 
     Protocol Compliance:
         This class explicitly inherits from ProtocolContractSource and implements
