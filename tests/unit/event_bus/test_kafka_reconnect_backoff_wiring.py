@@ -1,19 +1,25 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Unit tests verifying reconnect_backoff kwargs are wired to AIOKafka constructors.
+"""Unit tests verifying reconnect_backoff kwargs are NOT passed to AIOKafka constructors.
 
-Tests that reconnect_backoff_ms and reconnect_backoff_max_ms from
-ModelKafkaEventBusConfig are passed through to:
+Tests that reconnect_backoff_ms and reconnect_backoff_max_ms are absent from
+AIOKafkaProducer/Consumer init calls. These are kafka-python (sync) parameters
+that are not supported by aiokafka 0.11.x — passing them causes TypeError on
+every runtime start.
+
+Config model fields are preserved (OMN-2916) but must not be forwarded to aiokafka.
+
+Verifies the following constructors do NOT receive the invalid kwargs:
 1. AIOKafkaProducer in start()
 2. AIOKafkaProducer in _ensure_producer() (recreation after failure)
 3. AIOKafkaConsumer in _start_consumer_for_topic()
 
-OMN-2919
+OMN-3230
 """
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -40,10 +46,13 @@ def config_with_backoff() -> ModelKafkaEventBusConfig:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_start_producer_receives_reconnect_backoff_kwargs(
+async def test_start_producer_does_not_receive_reconnect_backoff_kwargs(
     config_with_backoff: ModelKafkaEventBusConfig,
 ) -> None:
-    """start() passes reconnect_backoff_ms and reconnect_backoff_max_ms to AIOKafkaProducer."""
+    """start() must NOT pass reconnect_backoff_ms or reconnect_backoff_max_ms to AIOKafkaProducer.
+
+    These are kafka-python (sync) params — aiokafka 0.11.x raises TypeError if they are present.
+    """
     mock_producer = AsyncMock()
     mock_producer.start = AsyncMock()
     mock_producer.stop = AsyncMock()
@@ -56,21 +65,25 @@ async def test_start_producer_receives_reconnect_backoff_kwargs(
         bus = EventBusKafka(config=config_with_backoff)
         await bus.start()
 
-        # Verify AIOKafkaProducer was constructed with the backoff kwargs
+        # Verify AIOKafkaProducer was NOT constructed with the invalid backoff kwargs
         assert mock_producer_cls.call_count == 1
         _, kwargs = mock_producer_cls.call_args
-        assert kwargs["reconnect_backoff_ms"] == TEST_RECONNECT_BACKOFF_MS
-        assert kwargs["reconnect_backoff_max_ms"] == TEST_RECONNECT_BACKOFF_MAX_MS
+        assert "reconnect_backoff_ms" not in kwargs, (
+            "reconnect_backoff_ms is not a valid aiokafka kwarg and must not be passed"
+        )
+        assert "reconnect_backoff_max_ms" not in kwargs, (
+            "reconnect_backoff_max_ms is not a valid aiokafka kwarg and must not be passed"
+        )
 
         await bus.close()
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_ensure_producer_receives_reconnect_backoff_kwargs(
+async def test_ensure_producer_does_not_receive_reconnect_backoff_kwargs(
     config_with_backoff: ModelKafkaEventBusConfig,
 ) -> None:
-    """_ensure_producer() passes reconnect_backoff_ms and reconnect_backoff_max_ms to AIOKafkaProducer.
+    """_ensure_producer() must NOT pass reconnect_backoff_ms or reconnect_backoff_max_ms to AIOKafkaProducer.
 
     Simulates producer recreation after failure: bus is started, producer is set
     to None (as happens after a publish failure), then _ensure_producer is called
@@ -99,21 +112,25 @@ async def test_ensure_producer_receives_reconnect_backoff_kwargs(
         async with bus._producer_lock:
             await bus._ensure_producer(uuid4())
 
-        # Verify recreation call also passes backoff kwargs
+        # Verify recreation call also does NOT pass invalid backoff kwargs
         assert mock_producer_cls.call_count == 1
         _, kwargs = mock_producer_cls.call_args
-        assert kwargs["reconnect_backoff_ms"] == TEST_RECONNECT_BACKOFF_MS
-        assert kwargs["reconnect_backoff_max_ms"] == TEST_RECONNECT_BACKOFF_MAX_MS
+        assert "reconnect_backoff_ms" not in kwargs, (
+            "reconnect_backoff_ms is not a valid aiokafka kwarg and must not be passed"
+        )
+        assert "reconnect_backoff_max_ms" not in kwargs, (
+            "reconnect_backoff_max_ms is not a valid aiokafka kwarg and must not be passed"
+        )
 
         await bus.close()
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_start_consumer_for_topic_receives_reconnect_backoff_kwargs(
+async def test_start_consumer_for_topic_does_not_receive_reconnect_backoff_kwargs(
     config_with_backoff: ModelKafkaEventBusConfig,
 ) -> None:
-    """_start_consumer_for_topic() passes reconnect_backoff_ms and reconnect_backoff_max_ms to AIOKafkaConsumer."""
+    """_start_consumer_for_topic() must NOT pass reconnect_backoff_ms or reconnect_backoff_max_ms to AIOKafkaConsumer."""
     mock_producer = AsyncMock()
     mock_producer.start = AsyncMock()
     mock_producer.stop = AsyncMock()
@@ -140,11 +157,15 @@ async def test_start_consumer_for_topic_receives_reconnect_backoff_kwargs(
         # Directly call _start_consumer_for_topic with a valid group_id
         await bus._start_consumer_for_topic("test-topic", "test-group")
 
-        # Verify AIOKafkaConsumer was constructed with the backoff kwargs
+        # Verify AIOKafkaConsumer was NOT constructed with the invalid backoff kwargs
         assert mock_consumer_cls.call_count == 1
         _, kwargs = mock_consumer_cls.call_args
-        assert kwargs["reconnect_backoff_ms"] == TEST_RECONNECT_BACKOFF_MS
-        assert kwargs["reconnect_backoff_max_ms"] == TEST_RECONNECT_BACKOFF_MAX_MS
+        assert "reconnect_backoff_ms" not in kwargs, (
+            "reconnect_backoff_ms is not a valid aiokafka kwarg and must not be passed"
+        )
+        assert "reconnect_backoff_max_ms" not in kwargs, (
+            "reconnect_backoff_max_ms is not a valid aiokafka kwarg and must not be passed"
+        )
 
         await bus.close()
 
