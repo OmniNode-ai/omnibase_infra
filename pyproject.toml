@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.12.0"
+version = "0.13.0"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{name = "OmniNode Team", email = "team@omninode.ai"}]
 license = {text = "MIT"}
@@ -29,12 +29,8 @@ dependencies = [
     #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
     # Remember to switch back to PyPI versions before merging to main.
     #
-    # omnibase-core: requires OMN-2754 (contract.resolve compute node) which
-    # landed on main after v0.20.0.  Using git source override until v0.21.0 is
-    # published; revert [tool.uv.sources] and pin >=0.21.0,<0.22.0 after release.
-    "omnibase-core>=0.21.0,<0.22.0",
-    # omnibase-spi v0.13.0: release chain bump for omnibase_infra 0.11.0
-    "omnibase-spi>=0.14.0,<0.15.0",
+    "omnibase-core>=0.22.0,<0.23.0",
+    "omnibase-spi>=0.15.0,<0.16.0",
 
     # ============================================================================
     # External Dependency Security Guidance
@@ -359,10 +355,7 @@ warn_required_dynamic_aliases = true
 warn_untyped_fields = true
 
 [tool.uv.sources]
-# omnibase-core: ModelRewardAssignedEvent merged in PR #579 after v0.21.0 was published.
-# Using git source override until a patch release (v0.21.1+) includes SHA 85f79e09.
-# Revert to PyPI pin once omnibase-core>=0.21.1 is published.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "85f79e091f30fc76f163eb06c89dd56e1299d778" }
+# omnibase-core and omnibase-spi are pinned to PyPI releases; no git source overrides needed.
 
 [tool.coverage.run]
 source = ["src/omnibase_infra"]
