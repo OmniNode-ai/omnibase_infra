@@ -48,7 +48,6 @@ from omnibase_infra.runtime.handler_bootstrap_source import (
     HandlerBootstrapSource,
 )
 from omnibase_infra.runtime.handler_registry import (
-    HANDLER_TYPE_CONSUL,
     HANDLER_TYPE_DATABASE,
     HANDLER_TYPE_HTTP,
     HANDLER_TYPE_MCP,
@@ -214,7 +213,7 @@ class TestBootstrapModeLoadsOnlyBootstrapHandlers:
 
             # Verify bootstrap handlers are in the singleton registry
             registry = get_handler_registry()
-            assert registry.is_registered(HANDLER_TYPE_CONSUL)
+            assert registry.is_registered(HANDLER_TYPE_DATABASE)
             assert registry.is_registered(HANDLER_TYPE_DATABASE)
             assert registry.is_registered(HANDLER_TYPE_HTTP)
             assert registry.is_registered(HANDLER_TYPE_MCP)
@@ -273,7 +272,7 @@ class TestBootstrapModeLoadsOnlyBootstrapHandlers:
 
                 # Verify bootstrap handlers are registered (confirming BOOTSTRAP mode worked)
                 registry = get_handler_registry()
-                assert registry.is_registered(HANDLER_TYPE_CONSUL)
+                assert registry.is_registered(HANDLER_TYPE_DATABASE)
                 assert registry.is_registered(HANDLER_TYPE_DATABASE)
                 assert registry.is_registered(HANDLER_TYPE_HTTP)
                 assert registry.is_registered(HANDLER_TYPE_MCP)
@@ -448,7 +447,7 @@ class TestHybridModeContractFirstBootstrapFallback:
                 # In HYBRID mode, bootstrap handlers should be available as fallback
                 registry = get_handler_registry()
                 # Bootstrap handlers should be registered (as fallback)
-                assert registry.is_registered(HANDLER_TYPE_CONSUL)
+                assert registry.is_registered(HANDLER_TYPE_DATABASE)
                 assert registry.is_registered(HANDLER_TYPE_DATABASE)
                 assert registry.is_registered(HANDLER_TYPE_MCP)
 
@@ -497,7 +496,7 @@ class TestHybridModeContractFirstBootstrapFallback:
 
             # All bootstrap handlers should be registered as fallback
             registry = get_handler_registry()
-            assert registry.is_registered(HANDLER_TYPE_CONSUL)
+            assert registry.is_registered(HANDLER_TYPE_DATABASE)
             assert registry.is_registered(HANDLER_TYPE_DATABASE)
             assert registry.is_registered(HANDLER_TYPE_HTTP)
             assert registry.is_registered(HANDLER_TYPE_MCP)
@@ -928,7 +927,7 @@ class TestExpiredBootstrapForcesContractMode:
 
                 # Bootstrap handlers should be available (HYBRID mode active)
                 registry = get_handler_registry()
-                assert registry.is_registered(HANDLER_TYPE_CONSUL)
+                assert registry.is_registered(HANDLER_TYPE_DATABASE)
 
             finally:
                 await process.stop()
@@ -1131,7 +1130,7 @@ class TestDefaultConfigUsesHybridMode:
 
                 # Bootstrap handlers should be available (HYBRID fallback)
                 registry = get_handler_registry()
-                assert registry.is_registered(HANDLER_TYPE_CONSUL)
+                assert registry.is_registered(HANDLER_TYPE_DATABASE)
                 assert registry.is_registered(HANDLER_TYPE_DATABASE)
                 assert registry.is_registered(HANDLER_TYPE_HTTP)
 
@@ -1176,7 +1175,7 @@ class TestDefaultConfigUsesHybridMode:
 
                 # Bootstrap handlers should be available
                 registry = get_handler_registry()
-                assert registry.is_registered(HANDLER_TYPE_CONSUL)
+                assert registry.is_registered(HANDLER_TYPE_DATABASE)
 
             finally:
                 await process.stop()
@@ -1307,7 +1306,7 @@ class TestInvalidConfigurationHandling:
 
                 # Bootstrap handlers should be available (no expiry applied)
                 registry = get_handler_registry()
-                assert registry.is_registered(HANDLER_TYPE_CONSUL)
+                assert registry.is_registered(HANDLER_TYPE_DATABASE)
 
             finally:
                 await process.stop()

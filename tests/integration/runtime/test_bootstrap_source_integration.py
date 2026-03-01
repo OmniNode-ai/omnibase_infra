@@ -8,7 +8,7 @@ handlers are loaded from descriptor-based definitions.
 
 Test Coverage:
 - HandlerBootstrapSource.discover_handlers() is called during runtime bootstrap
-- Core 4 handlers (consul, db, http, mcp) are loaded from bootstrap source
+- Core 3 handlers (db, http, mcp) are loaded from bootstrap source
 - Bootstrap handlers are registered before contract-based or default handlers
 - Bootstrap handlers are available after RuntimeHostProcess.start()
 
@@ -38,7 +38,6 @@ from omnibase_infra.runtime.handler_bootstrap_source import (
     HandlerBootstrapSource,
 )
 from omnibase_infra.runtime.handler_registry import (
-    HANDLER_TYPE_CONSUL,
     HANDLER_TYPE_DATABASE,
     HANDLER_TYPE_HTTP,
     HANDLER_TYPE_MCP,
@@ -68,24 +67,24 @@ class TestHandlerBootstrapSourceDiscovery:
 
     @pytest.mark.asyncio
     async def test_discover_handlers_returns_five_descriptors(self) -> None:
-        """HandlerBootstrapSource.discover_handlers() returns 4 handler descriptors.
+        """HandlerBootstrapSource.discover_handlers() returns 3 handler descriptors.
 
         Verifies:
         1. discover_handlers() returns ModelContractDiscoveryResult
-        2. Result contains exactly 4 descriptors (consul, db, http, mcp)
+        2. Result contains exactly 3 descriptors (db, http, mcp)
         3. No validation errors (hardcoded handlers are pre-validated)
         """
         source = HandlerBootstrapSource()
         result = await source.discover_handlers()
 
-        assert len(result.descriptors) == 4
+        assert len(result.descriptors) == 3
         assert len(result.validation_errors) == 0
 
     @pytest.mark.asyncio
     async def test_discover_handlers_includes_core_handlers(self) -> None:
-        """HandlerBootstrapSource includes consul, db, http, mcp handlers.
+        """HandlerBootstrapSource includes db, http, mcp handlers.
 
-        Verifies that all four core infrastructure handlers are present
+        Verifies that all three core infrastructure handlers are present
         in the discovery result.
         """
         source = HandlerBootstrapSource()
@@ -93,7 +92,6 @@ class TestHandlerBootstrapSourceDiscovery:
 
         handler_ids = {d.handler_id for d in result.descriptors}
         expected_ids = {
-            "proto.consul",
             "proto.db",
             "proto.http",
             "proto.mcp",
@@ -157,7 +155,7 @@ class TestBootstrapSourceRuntimeIntegration:
 
         Verifies:
         1. RuntimeHostProcess.start() registers bootstrap handlers
-        2. All 4 core handlers (consul, db, http, mcp) are in registry
+        2. All 3 core handlers (db, http, mcp) are in registry
         """
         event_bus = EventBusInmemory()
         process = RuntimeHostProcess(
@@ -175,7 +173,6 @@ class TestBootstrapSourceRuntimeIntegration:
 
             # Verify bootstrap handlers are in the singleton registry
             registry = get_handler_registry()
-            assert registry.is_registered(HANDLER_TYPE_CONSUL)
             assert registry.is_registered(HANDLER_TYPE_DATABASE)
             assert registry.is_registered(HANDLER_TYPE_HTTP)
             assert registry.is_registered(HANDLER_TYPE_MCP)
@@ -223,9 +220,8 @@ class TestBootstrapSourceRuntimeIntegration:
                 await process.start()
 
                 # Bootstrap handlers should be registered first
-                # (consul, db, http, mcp in some order)
+                # (db, http, mcp in some order)
                 bootstrap_handlers = {
-                    HANDLER_TYPE_CONSUL,
                     HANDLER_TYPE_DATABASE,
                     HANDLER_TYPE_HTTP,
                     HANDLER_TYPE_MCP,
@@ -390,8 +386,8 @@ class TestBootstrapSourceErrorHandling:
         original_import = __import__("importlib").import_module
 
         def failing_import(name: str, package: str | None = None) -> object:
-            if "handler_consul" in name:
-                raise ImportError("Simulated import error for consul handler")
+            if "handler_db" in name:
+                raise ImportError("Simulated import error for db handler")
             return original_import(name, package)
 
         with patch("importlib.import_module", side_effect=failing_import):
@@ -416,7 +412,7 @@ class TestBootstrapSourceErrorHandling:
                     # At least some handlers should be registered
                     registered = registry.list_protocols()
                     assert len(registered) >= 1, (
-                        "At least one handler should be registered despite consul failing"
+                        "At least one handler should be registered despite db handler failing"
                     )
 
                     # Check for error log about failed import

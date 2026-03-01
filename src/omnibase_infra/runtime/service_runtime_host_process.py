@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Runtime Host Process implementation for ONEX Infrastructure.
 
-This module implements the RuntimeHostProcess class, which is responsible for:
+Implements RuntimeHostProcess — responsible for:
 - Owning and managing an event bus instance (EventBusInmemory or EventBusKafka)
 - Registering handlers via the wiring module
 - Subscribing to event bus topics and routing envelopes to handlers
@@ -1837,7 +1837,7 @@ class RuntimeHostProcess:
     async def _discover_or_wire_handlers(self) -> None:
         """Discover and register handlers for the runtime.
 
-        This method implements the handler discovery/wiring step (Step 3) of the
+        Implements the handler discovery/wiring step (Step 3) of the
         start() sequence. It uses HandlerSourceResolver to discover handlers
         based on the configured source mode.
 
@@ -3792,7 +3792,7 @@ class RuntimeHostProcess:
     async def get_subscribers_for_topic(self, topic: str) -> list[UUID]:
         """Query Consul for node IDs that subscribe to a topic.
 
-        This method provides dynamic topic-to-subscriber lookup via Consul KV store.
+        Provides dynamic topic-to-subscriber lookup via Consul KV store.
         Topics are stored at `onex/topics/{topic}/subscribers` and contain a JSON
         array of node UUID strings.
 
@@ -5134,7 +5134,7 @@ class RuntimeHostProcess:
         response and returns False.
 
         Fail-Open Semantics:
-            This method implements **fail-open** error handling: if the
+            Implements **fail-open** error handling: if the
             idempotency store is unavailable or throws an error, the message
             is allowed through for processing (with a warning log).
 
