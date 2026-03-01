@@ -5,7 +5,7 @@ Unit tests for HandlerBootstrapSource hardcoded handler registration.
 
 Tests the HandlerBootstrapSource functionality including:
 - Protocol compliance with ProtocolContractSource
-- Bootstrap handler discovery (consul, db, http, mcp)
+- Bootstrap handler discovery (db, http, mcp)
 - ModelHandlerDescriptor validation for all bootstrap handlers
 - Graceful mode behavior (API consistency)
 - Idempotency of discover_handlers() calls
@@ -18,7 +18,7 @@ Related:
 Expected Behavior:
     HandlerBootstrapSource implements ProtocolContractSource from omnibase_infra.
     It provides hardcoded handler descriptors for core infrastructure handlers
-    (Consul, Database, HTTP, MCP, Vault) without requiring contract.yaml files.
+    (Database, HTTP, MCP) without requiring contract.yaml files.
 
     The source_type property returns "BOOTSTRAP" as per the implementation.
     All handlers have handler_kind="effect" since they perform external I/O.
@@ -46,7 +46,6 @@ from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSour
 # Expected bootstrap handler IDs (using "proto." prefix for protocol identity namespace)
 EXPECTED_HANDLER_IDS = frozenset(
     {
-        "proto.consul",
         "proto.db",
         "proto.http",
         "proto.mcp",
@@ -60,12 +59,12 @@ EXPECTED_HANDLER_KIND = "effect"
 EXPECTED_VERSION = "1.0.0"
 
 # Expected count of bootstrap handlers
-EXPECTED_HANDLER_COUNT = 4
+EXPECTED_HANDLER_COUNT = 3
 
 # Performance threshold: 20ms allows for contract YAML file I/O during handler
 # discovery. Pre-OMN-1282 threshold was 10ms when no contract files were loaded.
 # Current overhead comes from:
-# - Reading handler_contract.yaml for each bootstrap handler (4 handlers)
+# - Reading handler_contract.yaml for each bootstrap handler (3 handlers)
 # - YAML parsing via yaml.safe_load()
 # - Path resolution and symlink handling
 # - CI environment disk I/O variance
@@ -180,11 +179,10 @@ class TestHandlerBootstrapSourceDiscovery:
         assert hasattr(result, "validation_errors")
 
     @pytest.mark.asyncio
-    async def test_discovers_exactly_four_handlers(self) -> None:
-        """discover_handlers() should return exactly 4 bootstrap handlers.
+    async def test_discovers_exactly_three_handlers(self) -> None:
+        """discover_handlers() should return exactly 3 bootstrap handlers.
 
         The bootstrap handlers are:
-        - bootstrap.consul: HashiCorp Consul service discovery
         - bootstrap.db: PostgreSQL database operations
         - bootstrap.http: HTTP REST protocol
         - bootstrap.mcp: Model Context Protocol for AI agent integration
@@ -203,7 +201,7 @@ class TestHandlerBootstrapSourceDiscovery:
         """All discovered handlers should have expected handler_id values.
 
         Handler IDs must follow the pattern "bootstrap.<service_name>" where
-        service_name is one of: consul, db, http, mcp.
+        service_name is one of: db, http, mcp.
         """
         source = HandlerBootstrapSource()
 
@@ -233,7 +231,7 @@ class TestHandlerBootstrapSourceDiscovery:
         """All bootstrap handlers should have handler_kind='effect'.
 
         Effect handlers perform external I/O operations with infrastructure services.
-        All bootstrap handlers interact with external systems (Consul, DB, HTTP, Vault).
+        All bootstrap handlers interact with external systems (DB, HTTP, MCP).
         """
         source = HandlerBootstrapSource()
 
@@ -282,7 +280,6 @@ class TestHandlerBootstrapSourceDiscovery:
         result = await source.discover_handlers()
 
         expected_paths = {
-            "proto.consul": "contracts/handlers/consul/handler_contract.yaml",
             "proto.db": "contracts/handlers/db/handler_contract.yaml",
             "proto.http": "contracts/handlers/http/handler_contract.yaml",
             "proto.mcp": "src/omnibase_infra/contracts/handlers/mcp/handler_contract.yaml",
@@ -462,24 +459,6 @@ class TestHandlerBootstrapSourceDescriptors:
         assert input_models == {expected_input}, (
             f"Expected input_model '{expected_input}', got {input_models}"
         )
-
-    @pytest.mark.asyncio
-    async def test_consul_handler_descriptor_content(self) -> None:
-        """Verify the Consul handler descriptor has expected content."""
-        source = HandlerBootstrapSource()
-
-        result = await source.discover_handlers()
-
-        consul_descriptors = [
-            d for d in result.descriptors if d.handler_id == "proto.consul"
-        ]
-
-        assert len(consul_descriptors) == 1, "Should have exactly one Consul handler"
-
-        descriptor = consul_descriptors[0]
-        assert descriptor.name == "Consul Handler"
-        assert "consul" in descriptor.description.lower()
-        assert descriptor.handler_kind == "effect"
 
     @pytest.mark.asyncio
     async def test_db_handler_descriptor_content(self) -> None:

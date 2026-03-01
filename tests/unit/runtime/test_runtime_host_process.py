@@ -693,11 +693,10 @@ class TestRuntimeHostProcessLifecycle:
     async def test_start_registers_bootstrap_handlers(self) -> None:
         """Test that start() registers bootstrap handlers.
 
-        The RuntimeHostProcess should register bootstrap handlers (consul, db,
-        http, vault) via HandlerBootstrapSource when started.
+        The RuntimeHostProcess should register bootstrap handlers (db, http, mcp)
+        via HandlerBootstrapSource when started.
         """
         from omnibase_infra.runtime.handler_registry import (
-            HANDLER_TYPE_CONSUL,
             HANDLER_TYPE_DATABASE,
             HANDLER_TYPE_HTTP,
             get_handler_registry,
@@ -709,7 +708,6 @@ class TestRuntimeHostProcessLifecycle:
         try:
             # Verify bootstrap handlers are registered
             registry = get_handler_registry()
-            assert registry.is_registered(HANDLER_TYPE_CONSUL)
             assert registry.is_registered(HANDLER_TYPE_DATABASE)
             assert registry.is_registered(HANDLER_TYPE_HTTP)
         finally:

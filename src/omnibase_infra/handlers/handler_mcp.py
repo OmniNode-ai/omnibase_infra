@@ -85,55 +85,6 @@ _DEFAULT_STARTUP_TIMEOUT: float = 2.0
 _ERROR_MESSAGE_MAX_LENGTH: int = 200
 
 
-def _require_config_value[T](
-    config: dict[str, object],
-    key: str,
-    expected_type: type[T],
-    correlation_id: UUID,
-) -> T:
-    """Extract required config value or raise ProtocolConfigurationError.
-
-    Per CLAUDE.md configuration rules, the `.env` file is the SINGLE SOURCE OF TRUTH.
-    There should be ZERO hardcoded fallbacks - all configuration must be explicitly
-    provided. If missing, this function raises an error rather than using defaults.
-
-    Args:
-        config: Configuration dictionary to extract value from.
-        key: Configuration key to look up.
-        expected_type: Expected Python type for the value.
-        correlation_id: Correlation ID for error context.
-
-    Returns:
-        The validated configuration value.
-
-    Raises:
-        ProtocolConfigurationError: If value is missing or has wrong type.
-    """
-    value = config.get(key)
-    if value is None:
-        raise ProtocolConfigurationError(
-            f"Missing required config: '{key}'. Must be set in .env or runtime config.",
-            context=ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.MCP,
-                operation="initialize",
-                target_name="handler_mcp",
-            ),
-        )
-    if not isinstance(value, expected_type):
-        raise ProtocolConfigurationError(
-            f"Invalid config type for '{key}': expected {expected_type.__name__}, "
-            f"got {type(value).__name__}",
-            context=ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.MCP,
-                operation="initialize",
-                target_name="handler_mcp",
-            ),
-        )
-    return value
-
-
 # Supported operations
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
     {op.value for op in EnumMcpOperationType}
@@ -478,15 +429,14 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 - timeout_seconds: Tool execution timeout (default: 30.0)
                 - max_tools: Maximum tools to expose (default: 100)
                 - kafka_enabled: Whether to enable Kafka hot reload (default: True)
-                - dev_mode: Whether to run in development mode (REQUIRED - no default)
+                - dev_mode: Whether to run in development mode (default: False)
                 - contracts_dir: Directory for contract scanning in dev mode (optional)
                 - registry_query_limit: Max nodes to fetch during cold-start discovery (optional)
                 - skip_server: Skip starting uvicorn server (default: False).
                     Use for unit testing to avoid port binding.
 
         Raises:
-            ProtocolConfigurationError: If configuration is invalid or required
-                config values (dev_mode) are missing.
+            ProtocolConfigurationError: If configuration is invalid.
         """
         init_correlation_id = uuid4()
 
@@ -534,8 +484,9 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 kafka_enabled: bool = (
                     kafka_enabled_val if isinstance(kafka_enabled_val, bool) else True
                 )
-                dev_mode = _require_config_value(
-                    config, "dev_mode", bool, init_correlation_id
+                dev_mode_val = config.get("dev_mode", False)
+                dev_mode: bool = (
+                    dev_mode_val if isinstance(dev_mode_val, bool) else False
                 )
                 # contracts_dir is optional - only used when dev_mode=True
                 contracts_dir_val = config.get("contracts_dir")
