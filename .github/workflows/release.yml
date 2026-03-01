@@ -62,6 +62,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Verify version_compatibility.py fallback matrix is in sync
+        run: uv run python scripts/update_version_matrix.py --check
+
       - name: Build wheel + sdist
         run: uv build
 

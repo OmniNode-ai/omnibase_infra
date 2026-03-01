@@ -6,10 +6,9 @@ This module verifies that omnibase_core and omnibase_spi versions meet the
 minimum requirements for omnibase_infra at startup. It logs resolved versions
 and fails fast with a clear error message if incompatible packages are detected.
 
-The version matrix is defined here as the single source of truth and mirrors
-the constraints in pyproject.toml. This runtime check catches version
-mismatches that could occur from manual installs, editable mode conflicts,
-or CI caching issues.
+The version matrix is derived at import time from pyproject.toml, so it stays
+automatically in sync with the declared dependency bounds after every version
+bump. No manual update of this file is required when bumping dependencies.
 
 Architecture:
     Called during RuntimeHostProcess.start() before any other initialization.
@@ -18,18 +17,28 @@ Architecture:
 
 Related:
     - OMN-758: INFRA-017: Version compatibility matrix check
-    - pyproject.toml: Declarative dependency constraints
+    - OMN-3203: Automate version_compatibility.py matrix updates
+    - pyproject.toml: Declarative dependency constraints (single source of truth)
     - service_runtime_host_process.py: Runtime startup integration
+    - scripts/update_version_matrix.py: Standalone BUMP-phase update script
 
 .. versionadded:: 0.11.0
+.. versionchanged:: next (OMN-3203) Matrix auto-derived from pyproject.toml
 """
 
 from __future__ import annotations
 
 import logging
+import re
+import tomllib
 from dataclasses import dataclass
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Packages whose version bounds we track in the matrix.
+# Add entries here if new ONEX internal dependencies are introduced.
+_TRACKED_PACKAGES: tuple[str, ...] = ("omnibase_core", "omnibase_spi")
 
 
 @dataclass(frozen=True)
@@ -47,19 +56,100 @@ class VersionConstraint:
     max_version: str
 
 
+def _locate_pyproject() -> Path | None:
+    """Walk up from this file's location to find pyproject.toml.
+
+    Returns:
+        Path to pyproject.toml, or None if not found (e.g. installed package
+        without source tree present).
+    """
+    candidate = Path(__file__).resolve()
+    for _ in range(10):
+        candidate = candidate.parent
+        pyproject = candidate / "pyproject.toml"
+        if pyproject.is_file():
+            return pyproject
+    return None
+
+
+def _parse_dep_bounds(spec: str) -> tuple[str, str] | None:
+    """Extract (min_version, max_version) from a PEP 508 specifier like
+    ``omnibase-core>=0.22.0,<0.23.0``.
+
+    Args:
+        spec: A single dependency string from pyproject.toml.
+
+    Returns:
+        (min_version, max_version) tuple, or None if bounds are incomplete.
+    """
+    min_match = re.search(r">=\s*([0-9][^\s,;\"']*)", spec)
+    max_match = re.search(r"<\s*([0-9][^\s,;\"']*)", spec)
+    if min_match and max_match:
+        return min_match.group(1), max_match.group(1)
+    return None
+
+
+def _build_matrix_from_pyproject(
+    tracked: tuple[str, ...] = _TRACKED_PACKAGES,
+) -> list[VersionConstraint] | None:
+    """Build the version matrix by reading pyproject.toml.
+
+    Args:
+        tracked: Package names (underscore form) to include in the matrix.
+
+    Returns:
+        List of VersionConstraint objects, or None if pyproject.toml could
+        not be located or parsed.
+    """
+    pyproject_path = _locate_pyproject()
+    if pyproject_path is None:
+        return None
+
+    try:
+        with open(pyproject_path, "rb") as fh:
+            data = tomllib.load(fh)
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+
+    dependencies: list[str] = data.get("project", {}).get("dependencies", [])
+
+    # Build a normalised-name → spec map
+    spec_map: dict[str, str] = {}
+    for dep in dependencies:
+        # Normalise hyphens to underscores for lookup
+        dep_clean = dep.strip().strip("\"'")
+        # Split on the first version operator to get the package name
+        name_part = re.split(r"[><=!~]", dep_clean, maxsplit=1)[0].strip()
+        normalised = name_part.replace("-", "_")
+        spec_map[normalised] = dep_clean
+
+    constraints: list[VersionConstraint] = []
+    for pkg in tracked:
+        spec = spec_map.get(pkg)
+        if spec is None:
+            # Package not in pyproject.toml — skip rather than hard-fail
+            continue
+        bounds = _parse_dep_bounds(spec)
+        if bounds is None:
+            continue
+        min_ver, max_ver = bounds
+        constraints.append(
+            VersionConstraint(package=pkg, min_version=min_ver, max_version=max_ver)
+        )
+
+    return constraints if constraints else None
+
+
 # ============================================================================
 # VERSION COMPATIBILITY MATRIX
 # ============================================================================
-# This matrix defines the version constraints for omnibase_infra's dependencies.
-# It MUST be kept in sync with pyproject.toml.
+# Derived automatically from pyproject.toml at import time (OMN-3203).
+# No manual update needed — just bump pyproject.toml and the matrix follows.
 #
-# When bumping dependency versions:
-#   1. Update pyproject.toml
-#   2. Update this matrix
-#   3. Run tests to verify
-#
-# Format: VersionConstraint(package, min_version_inclusive, max_version_exclusive)
-VERSION_MATRIX: list[VersionConstraint] = [
+# If pyproject.toml cannot be found (e.g. installed package without source),
+# we fall back to the last-known-good hardcoded values so the runtime check
+# still operates rather than silently skipping.
+_FALLBACK_MATRIX: list[VersionConstraint] = [
     VersionConstraint(
         package="omnibase_core",
         min_version="0.22.0",
@@ -71,6 +161,10 @@ VERSION_MATRIX: list[VersionConstraint] = [
         max_version="0.16.0",
     ),
 ]
+
+VERSION_MATRIX: list[VersionConstraint] = (
+    _build_matrix_from_pyproject() or _FALLBACK_MATRIX
+)
 
 
 def _parse_version(version_str: str) -> tuple[int, ...]:
