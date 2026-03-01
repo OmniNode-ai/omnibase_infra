@@ -22,6 +22,7 @@
 12. [Contract-Driven Config Discovery](#contract-driven-config-discovery)
 13. [Agent-Driven Development](#agent-driven-development)
 14. [Common Pitfalls](#common-pitfalls)
+15. [Release Process](#release-process)
 
 ---
 
@@ -758,6 +759,49 @@ loader = HandlerPluginLoader(
     allowed_namespaces=["omnibase_infra.", "omnibase_core.", "myapp.handlers."]
 )
 ```
+
+---
+
+## Release Process
+
+### Version Compatibility Matrix (OMN-3203)
+
+`src/omnibase_infra/runtime/version_compatibility.py` maintains a runtime
+check that verified installed `omnibase_core` and `omnibase_spi` versions match
+the constraints declared in `pyproject.toml`.
+
+**How it works (after OMN-3203):**
+
+`VERSION_MATRIX` is derived **automatically at import time** from `pyproject.toml`.
+No manual update is required when bumping dependency versions — just update
+`pyproject.toml` and the matrix follows.
+
+A `_FALLBACK_MATRIX` with hardcoded values is used when `pyproject.toml` is
+not present (e.g. installed package without source tree).  The fallback is kept
+in sync with the `scripts/update_version_matrix.py` script.
+
+**Release checklist for dependency bumps:**
+
+1. Update `pyproject.toml` with new `>=X.Y.Z,<A.B.C` bounds.
+2. Run `uv sync` to update `uv.lock`.
+3. Run `uv run pytest tests/unit/runtime/test_version_compatibility.py` — the
+   `test_matrix_matches_pyproject` test will catch any remaining drift.
+4. The release workflow runs `scripts/update_version_matrix.py --check` as a
+   pre-build gate; it also updates the fallback in-place if needed.
+
+**Scripts:**
+
+```bash
+# Check that _FALLBACK_MATRIX matches pyproject.toml (CI mode — exits 1 on drift)
+uv run python scripts/update_version_matrix.py --check
+
+# Update _FALLBACK_MATRIX in-place
+uv run python scripts/update_version_matrix.py
+```
+
+**What NOT to do:** Do not manually edit the `VERSION_MATRIX` or
+`_FALLBACK_MATRIX` in `version_compatibility.py`.  Let `pyproject.toml` be the
+single source of truth.
 
 ---
 
