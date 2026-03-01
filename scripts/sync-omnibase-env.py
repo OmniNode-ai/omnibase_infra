@@ -178,7 +178,19 @@ def check_throttle(last_sync_file: Path) -> bool:
             last_sync_file,
         )
         return True
-    elapsed = time.time() - last_ts
+    now = time.time()
+    elapsed = now - last_ts
+    if elapsed < 0:
+        # Clock skew: timestamp is in the future — treat as "no prior sync" to
+        # avoid bypassing the throttle window with a large negative elapsed value.
+        logger.warning(
+            "Last-sync timestamp %.0f is in the future (now=%.0f, delta=%.0f s) "
+            "— treating as no prior sync",
+            last_ts,
+            now,
+            elapsed,
+        )
+        return True
     if elapsed < THROTTLE_SECONDS:
         logger.info(
             "Last sync was %.0f seconds ago (throttle window: %d s) — skipping",
@@ -214,14 +226,20 @@ def acquire_flock(lock_file: Path) -> object | None:
         the lock could not be acquired (another process has it).
     """
     lock_file.parent.mkdir(parents=True, exist_ok=True)
-    fd = open(lock_file, "w")
+    fd = open(lock_file, "w")  # noqa: SIM115 — intentionally kept open to hold the flock
     try:
         fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         return fd
-    except OSError:
+    except OSError as exc:
         fd.close()
-        logger.info("Another sync is already running — skipping (flock busy)")
-        return None
+        import errno
+
+        if exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+            # Lock is held by another process — expected during concurrent runs.
+            logger.info("Another sync is already running — skipping (flock busy)")
+            return None
+        # Unexpected I/O error (e.g. filesystem failure) — propagate.
+        raise
 
 
 def release_flock(fd: object) -> None:
@@ -316,7 +334,7 @@ def _run_seed_infisical(
             len(filtered_vars),
             dry_run,
         )
-        result = subprocess.run(cmd, check=False)
+        result = subprocess.run(cmd, check=False, timeout=30)
         return result.returncode
     finally:
         tmp_path.unlink(missing_ok=True)
@@ -362,7 +380,7 @@ def main(
     try:
         check_env_file(env_file)
     except FileNotFoundError as exc:
-        logger.error("%s", exc)
+        logger.exception("%s", exc)
         return 1
 
     # -------------------------------------------------------------------

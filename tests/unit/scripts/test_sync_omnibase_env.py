@@ -17,9 +17,8 @@ from __future__ import annotations
 import importlib
 import sys
 import time
-from collections.abc import Generator
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -47,6 +46,7 @@ def _import_script() -> object:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestInfisicalAddrGuard:
     """INFISICAL_ADDR guard: skip sync if INFISICAL_ADDR is not set or empty."""
 
@@ -79,6 +79,7 @@ class TestInfisicalAddrGuard:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestEnvFileGuard:
     """Env file guard: fail clearly if ~/.omnibase/.env does not exist."""
 
@@ -103,6 +104,7 @@ class TestEnvFileGuard:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestUvGuard:
     """uv guard: degrade gracefully if uv is not available."""
 
@@ -130,6 +132,7 @@ class TestUvGuard:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestThrottleGuard:
     """Throttle guard: skip if last sync was within 5 minutes."""
 
@@ -189,6 +192,7 @@ class TestThrottleGuard:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestFlockGuard:
     """flock guard: prevent concurrent runs."""
 
@@ -236,6 +240,7 @@ class TestFlockGuard:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestBootstrapKeyExclusion:
     """Bootstrap keys must NOT be synced to Infisical."""
 
@@ -297,6 +302,7 @@ class TestBootstrapKeyExclusion:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestLastSyncFilePath:
     """Verify the default last-sync file path constant."""
 
@@ -305,12 +311,12 @@ class TestLastSyncFilePath:
         mod = _import_script()
         path = mod.LAST_SYNC_FILE  # type: ignore[attr-defined]
         assert isinstance(path, Path), "LAST_SYNC_FILE should be a Path"
-        assert str(path).endswith(
-            "sync-omnibase-env.last"
-        ), "LAST_SYNC_FILE should end with sync-omnibase-env.last"
-        assert ".cache/omnibase" in str(
-            path
-        ), "LAST_SYNC_FILE should be under ~/.cache/omnibase/"
+        assert str(path).endswith("sync-omnibase-env.last"), (
+            "LAST_SYNC_FILE should end with sync-omnibase-env.last"
+        )
+        assert ".cache/omnibase" in str(path), (
+            "LAST_SYNC_FILE should be under ~/.cache/omnibase/"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +324,7 @@ class TestLastSyncFilePath:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestMainEntryPoint:
     """Smoke tests for the main() function guard ordering."""
 
