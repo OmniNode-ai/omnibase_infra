@@ -93,11 +93,44 @@ uv run python -c "from omnibase_infra.nodes.node_hello_effect.node import NodeHe
 - [uv](https://docs.astral.sh/uv/) for dependency management
 - Docker (optional, for infrastructure services)
 
+## Install Model
+
+`omnibase_infra` supports two installation modes depending on your use case.
+
+**Pip install** (library use and runtime CLIs — no clone needed):
+
+```bash
+pip install omnibase-infra
+# or
+uv add omnibase-infra
+```
+
+Use this when you want to:
+- Import `omnibase_infra` as a library dependency in another ONEX service
+- Run the bundled runtime via `onex-runtime`
+- Use `omni-infra`, `onex-status`, or other bundled CLIs
+
+**Clone** (operational bootstrapping and active development — clone required):
+
+```bash
+git clone https://github.com/OmniNode-ai/omnibase_infra.git
+cd omnibase_infra
+uv sync
+```
+
+Use this when you want to:
+- Run `scripts/seed-infisical.py`, `scripts/bootstrap-infisical.sh`, or `scripts/provision-infisical.py`
+- Develop or modify nodes and handlers in this repo
+- Run CI validators (`scripts/validate.py`) locally
+
+> The `scripts/` directory is **not bundled** in the pip package. Any workflow that references
+> `uv run python scripts/seed-infisical.py` requires a local clone.
+
 ## Installation
 
 ```bash
-# Clone and install
-git clone <repo-url> omnibase_infra
+# Clone and install (for development or operational scripting)
+git clone https://github.com/OmniNode-ai/omnibase_infra.git
 cd omnibase_infra
 uv sync
 

@@ -20,6 +20,39 @@ This repository provides the **infrastructure layer** for ONEX-based systems. Wh
 
 Built on `omnibase-core` ^0.8.0 and `omnibase-spi` ^0.5.0.
 
+## Install Model
+
+`omnibase_infra` serves two distinct purposes depending on how you use it:
+
+### As a library / runtime (pip install)
+
+```bash
+pip install omnibase-infra
+# or
+uv add omnibase-infra
+```
+
+This gives you the Python library and bundled runtime CLIs (`onex-runtime`, `omni-infra`,
+`onex-status`, etc.). No clone required for library use or running the runtime.
+
+### For operational bootstrapping (clone required)
+
+The **operational scripts** in `scripts/` are not bundled in the pip package. A local
+clone is required to run them:
+
+```bash
+git clone https://github.com/OmniNode-ai/omnibase_infra.git
+cd omnibase_infra
+uv sync
+```
+
+**Scripts that require a clone:**
+- `scripts/seed-infisical.py` — Populate Infisical from contract YAMLs
+- `scripts/bootstrap-infisical.sh` — Full first-time Infisical bootstrap
+- `scripts/provision-infisical.py` — Create machine identities
+
+See [CLAUDE.md — Install Model](CLAUDE.md#install-model) for the full decision matrix.
+
 ## Quick Start
 
 ```bash

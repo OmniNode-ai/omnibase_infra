@@ -61,6 +61,79 @@ We explicitly do **NOT** optimize for:
 
 ---
 
+## Install Model
+
+`omnibase_infra` ships as both a **pip-installable package** and a **cloneable repository**.
+The two serve different purposes.
+
+### Pip Package (library + runtime CLIs)
+
+Install via pip for:
+- Using `omnibase_infra` as a library dependency in other ONEX services
+- Running the bundled runtime CLIs
+
+```bash
+pip install omnibase-infra
+# or
+uv add omnibase-infra
+```
+
+**Bundled CLI entry points** (available after `pip install omnibase-infra`):
+
+| Command | Entry Point | Purpose |
+|---------|-------------|---------|
+| `omni-infra` | `omnibase_infra.cli.commands:cli` | General CLI |
+| `onex-runtime` | `omnibase_infra.runtime.kernel:main` | Start ONEX runtime |
+| `onex-infra-test` | `omnibase_infra.cli.infra_test.cli:cli` | Infra test runner |
+| `onex-git-hook-relay` | `omnibase_infra.cli.git_hook_relay:main` | Git hook relay |
+| `onex-linear-relay` | `omnibase_infra.cli.linear_relay:main` | Linear relay |
+| `onex-status` | `omnibase_infra.tui.__main__:run_status_tui` | Status TUI |
+
+### Local Clone (operational scripts)
+
+A **local clone is required** to run the operational scripts in `scripts/`. These scripts
+are **not bundled** in the pip package — they live only in the repository source tree.
+
+```bash
+git clone https://github.com/OmniNode-ai/omnibase_infra.git
+cd omnibase_infra
+uv sync
+```
+
+**Scripts that require a local clone:**
+
+| Script | Purpose | Requires Clone |
+|--------|---------|---------------|
+| `scripts/seed-infisical.py` | Populate Infisical from contract YAMLs | Yes |
+| `scripts/bootstrap-infisical.sh` | Full first-time bootstrap sequence | Yes |
+| `scripts/provision-infisical.py` | Create machine identities, write credentials back to `~/.omnibase/.env` | Yes |
+| `scripts/setup-infisical-identity.sh` | Create runtime/admin machine identities | Yes |
+| `scripts/create_kafka_topics.py` | Create Kafka/Redpanda topics | Yes |
+| `scripts/validate.py` | Run ONEX validators | Yes |
+| All other `scripts/*.py` | Operational, CI, or dev tooling | Yes |
+
+**Why scripts require a clone:** These scripts scan the repository source tree directly
+(e.g., `seed-infisical.py` iterates over `src/omnibase_infra/nodes/*/contract.yaml`),
+write back to `~/.omnibase/.env`, or depend on shell tooling co-located with the repo.
+
+### Decision Summary
+
+| Use Case | Install Method |
+|----------|---------------|
+| Add `omnibase_infra` as a library dependency | `pip install omnibase-infra` |
+| Run ONEX runtime services | `pip install omnibase-infra` → `onex-runtime` |
+| Bootstrap Infisical (first-time setup) | Clone + `scripts/bootstrap-infisical.sh` |
+| Seed Infisical from contracts | Clone + `uv run python scripts/seed-infisical.py` |
+| Provision machine identities | Clone + `uv run python scripts/provision-infisical.py` |
+| Run CI validators | Clone + `uv run python scripts/validate.py` |
+| Develop nodes and handlers | Clone (full dev environment) |
+
+> **Note on `sync-omnibase-env.py`**: This script is **not** part of `omnibase_infra`.
+> It is provided by the `omniclaude` plugin and installed separately. See the
+> [omniclaude README](https://github.com/OmniNode-ai/omniclaude) for details.
+
+---
+
 ## Quick Reference
 
 ```bash
