@@ -176,8 +176,8 @@ Usage:
     ```
 
 Protocol Compatibility:
-    This class implements ProtocolEventBus from omnibase_core using duck typing
-    (no explicit inheritance required per ONEX patterns).
+    Duck-typed against ProtocolEventBus (omnibase_core). No explicit inheritance
+    per ONEX patterns — structural compatibility is verified at startup.
 
     TODO: Consider formalizing the EventBusKafka interface as a Protocol
     (ProtocolEventBusKafka) in the future to enable better static type checking
