@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  OmniNode container log monitor — macOS LaunchAgent
+
+  Install:
+    cp scripts/launchd/com.omninode.monitor-logs.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.omninode.monitor-logs.plist
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.omninode.monitor-logs.plist
+    rm ~/Library/LaunchAgents/com.omninode.monitor-logs.plist
+
+  Logs: ~/.omnibase/monitor-logs.log
+
+  Requires:
+    - SLACK_WEBHOOK_URL set in ~/.omnibase/.env
+    - Docker installed at /usr/local/bin/docker (or discoverable via PATH)
+    - omnibase_infra repo at /Volumes/PRO-G40/Code/omni_home/omnibase_infra
+
+  Update OMNIBASE_INFRA_REPO_PATH below if your repo lives elsewhere.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.omninode.monitor-logs</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/python3.12</string>
+        <!-- Update this path if your repo is in a different location -->
+        <string>/Volumes/PRO-G40/Code/omni_home/omnibase_infra/scripts/monitor_logs.py</string>
+    </array>
+
+    <!-- launchd doesn't inherit shell PATH; set it explicitly -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <!-- Start immediately on load and on every login -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart automatically if the process exits (crash, Docker restart, etc.) -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Wait 10s before restarting after a crash (avoids tight crash loops) -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jonah/.omnibase/monitor-logs.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jonah/.omnibase/monitor-logs.log</string>
+</dict>
+</plist>
