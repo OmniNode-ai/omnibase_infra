@@ -106,7 +106,7 @@ class {class_name}(str, Enum):
     \"\"\"
 """
 
-_MEMBER_TEMPLATE = "    {key} = {value!r}  # {topic}"
+_MEMBER_TEMPLATE = '    {key} = "{value}"  # {topic}'
 
 _INIT_HEADER = """\
 # SPDX-License-Identifier: MIT
@@ -248,7 +248,6 @@ class TopicEnumGenerator:
                     key=key, value=topic_value, topic=topic_value
                 )
                 content += "\n"
-            content += "\n"  # trailing newline
 
             result[file_path] = content
             class_exports.append((filename[:-3], class_name))  # strip .py
@@ -258,7 +257,6 @@ class TopicEnumGenerator:
         init_content = _INIT_HEADER
         for stem, class_name in class_exports:
             init_content += f"from .{stem} import {class_name}\n"
-        init_content += "\n"
 
         result[init_path] = init_content
 

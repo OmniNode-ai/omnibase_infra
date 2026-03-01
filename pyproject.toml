@@ -165,6 +165,7 @@ exclude = [
     "**/archive/**",
     "**/__pycache__/**",
     "**/site-packages/**",
+    "**/enums/generated/**",
 ]
 
 [tool.ruff.format]
