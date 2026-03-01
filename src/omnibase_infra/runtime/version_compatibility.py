@@ -62,13 +62,13 @@ class VersionConstraint:
 VERSION_MATRIX: list[VersionConstraint] = [
     VersionConstraint(
         package="omnibase_core",
-        min_version="0.21.0",
-        max_version="0.22.0",
+        min_version="0.22.0",
+        max_version="0.23.0",
     ),
     VersionConstraint(
         package="omnibase_spi",
-        min_version="0.14.0",
-        max_version="0.15.0",
+        min_version="0.15.0",
+        max_version="0.16.0",
     ),
 ]
 
