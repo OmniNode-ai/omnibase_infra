@@ -1,0 +1,188 @@
+# docker-compose.runners.yml
+# OmniNode self-hosted GitHub Actions runners
+# Ticket: OMN-3276 / Epic: OMN-3273
+#
+# Runs 5 identical runner containers (omninode-runner-1 through omninode-runner-5).
+# Each runner registers with GitHub org OmniNode-ai in the 'omnibase-ci' runner group.
+#
+# Prerequisites:
+#   - Build the runner image first (OMN-3275):
+#       docker build -t omninode-runner:latest docker/runners/
+#   - Set RUNNER_TOKEN in environment or .env file
+#       Generate at: https://github.com/organizations/OmniNode-ai/settings/actions/runners/new
+#       Token is valid for 1 hour. After registration, entrypoint.sh caches credentials.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.runners.yml up -d
+#   docker compose -f docker/docker-compose.runners.yml down
+#   docker compose -f docker/docker-compose.runners.yml ps
+#
+# Validate config (checks mem_limit/cpus/pids_limit not silently dropped):
+#   docker compose -f docker/docker-compose.runners.yml config
+#
+# HOST SYSCTL REQUIREMENT (192.168.86.201 Linux host):
+# Large Python test suites trigger inotify exhaustion without this setting.
+#
+#   sudo sysctl -w fs.inotify.max_user_watches=524288
+#   sudo sysctl -w fs.inotify.max_user_instances=1024
+#
+# To persist across reboots, add to /etc/sysctl.d/99-omninode-runners.conf:
+#   fs.inotify.max_user_watches = 524288
+#   fs.inotify.max_user_instances = 1024
+#
+# Verify: cat /proc/sys/fs/inotify/max_user_watches
+#
+# Resource allocation per runner (5 runners on RTX 5090 host with ample RAM):
+#   mem_limit: 6g     — 30 GB total across 5 runners
+#   cpus: "4.0"       — 4 vCPUs per runner (20 total; host has 24+ cores)
+#   pids_limit: 4096  — prevents fork bombs from runaway test processes
+#
+# NOTE: mem_limit/cpus/pids_limit are Compose v2 top-level resource keys.
+# Do NOT use deploy.resources — those are Swarm-only and silently ignored here.
+services:
+  omninode-runner-1:
+    image: omninode-runner:latest
+    container_name: omninode-runner-1
+    restart: unless-stopped
+    mem_limit: 6g
+    cpus: "4.0"
+    pids_limit: 4096
+    environment:
+      RUNNER_NAME: omninode-runner-1
+      RUNNER_LABELS: self-hosted,omnibase-ci,linux,x64
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      RUNNER_TOKEN: ${RUNNER_TOKEN}
+      RUNNER_GROUP: omnibase-ci
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-1-creds:/home/runner/.runner-creds
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f Runner.Listener > /dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  omninode-runner-2:
+    image: omninode-runner:latest
+    container_name: omninode-runner-2
+    restart: unless-stopped
+    mem_limit: 6g
+    cpus: "4.0"
+    pids_limit: 4096
+    environment:
+      RUNNER_NAME: omninode-runner-2
+      RUNNER_LABELS: self-hosted,omnibase-ci,linux,x64
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      RUNNER_TOKEN: ${RUNNER_TOKEN}
+      RUNNER_GROUP: omnibase-ci
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-2-creds:/home/runner/.runner-creds
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f Runner.Listener > /dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  omninode-runner-3:
+    image: omninode-runner:latest
+    container_name: omninode-runner-3
+    restart: unless-stopped
+    mem_limit: 6g
+    cpus: "4.0"
+    pids_limit: 4096
+    environment:
+      RUNNER_NAME: omninode-runner-3
+      RUNNER_LABELS: self-hosted,omnibase-ci,linux,x64
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      RUNNER_TOKEN: ${RUNNER_TOKEN}
+      RUNNER_GROUP: omnibase-ci
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-3-creds:/home/runner/.runner-creds
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f Runner.Listener > /dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  omninode-runner-4:
+    image: omninode-runner:latest
+    container_name: omninode-runner-4
+    restart: unless-stopped
+    mem_limit: 6g
+    cpus: "4.0"
+    pids_limit: 4096
+    environment:
+      RUNNER_NAME: omninode-runner-4
+      RUNNER_LABELS: self-hosted,omnibase-ci,linux,x64
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      RUNNER_TOKEN: ${RUNNER_TOKEN}
+      RUNNER_GROUP: omnibase-ci
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-4-creds:/home/runner/.runner-creds
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f Runner.Listener > /dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  omninode-runner-5:
+    image: omninode-runner:latest
+    container_name: omninode-runner-5
+    restart: unless-stopped
+    mem_limit: 6g
+    cpus: "4.0"
+    pids_limit: 4096
+    environment:
+      RUNNER_NAME: omninode-runner-5
+      RUNNER_LABELS: self-hosted,omnibase-ci,linux,x64
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      RUNNER_TOKEN: ${RUNNER_TOKEN}
+      RUNNER_GROUP: omnibase-ci
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-5-creds:/home/runner/.runner-creds
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f Runner.Listener > /dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  runner-1-creds:
+    name: omninode-runner-1-creds
+  runner-2-creds:
+    name: omninode-runner-2-creds
+  runner-3-creds:
+    name: omninode-runner-3-creds
+  runner-4-creds:
+    name: omninode-runner-4-creds
+  runner-5-creds:
+    name: omninode-runner-5-creds

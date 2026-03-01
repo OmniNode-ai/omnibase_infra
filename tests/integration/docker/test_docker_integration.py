@@ -1055,9 +1055,12 @@ class TestDockerComposeProfiles:
         if not docker_available:
             pytest.skip("Docker daemon not available")
 
-        # Set required environment variables for validation
-        # Includes Infisical vars because docker-compose.infra.yml uses
-        # fail-fast :? syntax that requires them even for config validation
+        # Set required environment variables for validation.
+        # All :? required vars must be set even for config validation; the PR
+        # that removed nested expansion (OMN-3266) moved DSN/URL construction
+        # out of compose into ~/.omnibase/.env, so these now use :? fail-fast.
+        _pg_dsn = "postgresql://postgres:test@postgres:5432/omnibase_infra"
+        _intel_dsn = "postgresql://postgres:test@postgres:5432/omniintelligence"
         env = os.environ.copy()
         env.update(
             {
@@ -1065,6 +1068,12 @@ class TestDockerComposeProfiles:
                 "VALKEY_PASSWORD": "test",
                 "INFISICAL_ENCRYPTION_KEY": "0" * 64,
                 "INFISICAL_AUTH_SECRET": "test-auth-secret",
+                "OMNIBASE_INFRA_DB_URL": _pg_dsn,
+                "OMNIINTELLIGENCE_DB_URL": _intel_dsn,
+                "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:test@postgres:5432/infisical_db",
+                "INFISICAL_REDIS_URL": "redis://:test@valkey:6379",
+                "OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN": _pg_dsn,
+                "OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN": _pg_dsn,
             }
         )
 

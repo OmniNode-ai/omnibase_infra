@@ -36,7 +36,16 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci","linux","x64"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
     timeout-minutes: 10
 
     steps:
@@ -76,7 +85,16 @@ jobs:
   # ONEX validation - Infrastructure-specific validators
   onex-validation:
     name: ONEX Validators
-    runs-on: ubuntu-latest
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci","linux","x64"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
     timeout-minutes: 10
 
     steps:
@@ -140,7 +158,16 @@ jobs:
   # Prevents stale fingerprint artifacts from being merged (OMN-2149)
   fingerprint-check:
     name: Fingerprint Check
-    runs-on: ubuntu-latest
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci","linux","x64"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
     timeout-minutes: 5
 
     steps:
@@ -178,7 +205,16 @@ jobs:
   # Runs in CI mode (skips live infra checks) as pre-deploy validation
   demo-loop-gate:
     name: Demo Loop Gate
-    runs-on: ubuntu-latest
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci","linux","x64"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
     timeout-minutes: 5
 
     steps:
@@ -217,7 +253,16 @@ jobs:
   # Part of DB-per-repo refactor (OMN-2055), tracking: OMN-2071
   migration-freeze:
     name: Migration Freeze Check
-    runs-on: ubuntu-latest
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci","linux","x64"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
     timeout-minutes: 5
 
     steps:
@@ -233,7 +278,16 @@ jobs:
   # Ensures generated enum files stay in sync with contract.yaml definitions
   topic-enum-drift:
     name: Topic Enum Drift Check
-    runs-on: ubuntu-latest
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci","linux","x64"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
     timeout-minutes: 5
 
     steps:
@@ -272,7 +326,16 @@ jobs:
   # Validates onex.{kind}.{producer}.{event}.v{n} format in all contract.yaml files
   topic-naming-lint:
     name: Topic Naming Lint
-    runs-on: ubuntu-latest
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci","linux","x64"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
     timeout-minutes: 5
 
     steps:
@@ -313,7 +376,16 @@ jobs:
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/10)
     needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint]
-    runs-on: ubuntu-latest
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci","linux","x64"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -375,7 +447,16 @@ jobs:
   # ============================================================================
   tests-gate:
     name: CI Tests Gate
-    runs-on: ubuntu-latest
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci","linux","x64"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
     needs: test-parallel
     if: always()
     steps:
@@ -391,7 +472,16 @@ jobs:
 
   test-summary:
     name: Test Summary
-    runs-on: ubuntu-latest
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci","linux","x64"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
     needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint]
     if: always()
 
@@ -445,7 +535,16 @@ jobs:
   # upstream fix (e.g. OMN-3248) lands, at which point xfail is removed.
   kafka-boundary-compat:
     name: Kafka Boundary Compat (OMN-3256)
-    runs-on: ubuntu-latest
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci","linux","x64"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
     timeout-minutes: 10
 
     steps:
@@ -506,7 +605,16 @@ jobs:
 
   ai-slop-check:
     name: AI-Slop Pattern Check (strict, PR diff)
-    runs-on: ubuntu-latest
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci","linux","x64"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
     steps:
       - uses: actions/checkout@v4
         with:

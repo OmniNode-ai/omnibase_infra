@@ -38,7 +38,16 @@ env:
 jobs:
   slow-tests:
     name: Slow & Chaos Tests
-    runs-on: ubuntu-latest
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci","linux","x64"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
     timeout-minutes: 60  # Extended timeout for slow tests
 
     steps:
@@ -94,7 +103,16 @@ jobs:
   # Summary job to report overall status
   nightly-summary:
     name: Nightly Summary
-    runs-on: ubuntu-latest
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci","linux","x64"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
     needs: [slow-tests]
     if: always()
 
