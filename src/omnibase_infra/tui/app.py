@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from textual.app import App, ComposeResult
+from textual.app import App
 from textual.binding import Binding
 
 from omnibase_infra.tui.consumers.consumer_status import (
@@ -56,11 +56,9 @@ class StatusApp(App[None]):
         Binding("o", "open_pr", "Open PR"),
     ]
 
-    def compose(self) -> ComposeResult:
-        yield ScreenStatus()
-
     async def on_mount(self) -> None:
         """Push the status screen and start the Kafka consumer task."""
+        await self.push_screen(ScreenStatus())
         self._consumer_task: asyncio.Task[None] = asyncio.create_task(
             consume_all(self),
             name="onex-tui-kafka-consumer",
