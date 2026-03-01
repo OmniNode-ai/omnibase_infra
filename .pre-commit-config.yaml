@@ -239,13 +239,15 @@ repos:
         types_or: [python, markdown]
         pass_filenames: true
         stages: [pre-commit]
-      # Topic naming lint — validate onex.{kind}.{producer}.{event}.v{n} convention (OMN-3188)
-      # Runs on contract*.yaml changes only to keep pre-commit fast
+      # Topic naming lint — validate onex.{kind}.{producer}.{event}.v{n} convention
+      # (OMN-3188: YAML contracts; OMN-3259: Python enum/constant files)
+      # Triggers on contract*.yaml OR any *.py change; always scans full source tree.
       - id: topic-naming-lint
         name: Topic Naming Lint
-        entry: uv run python scripts/validation/lint_topic_names.py --scan-contracts src/omnibase_infra/nodes
+        entry: bash scripts/validation/run_topic_lint.sh
         language: system
-        files: contract.*\.yaml$
+        types_or: [yaml, python]
+        files: (contract.*\.yaml|\.py)$
         pass_filenames: false
         stages: [pre-commit]
 # Configuration

@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
 #
-# Topic Naming Linter (OMN-3188).
+# Topic Naming Linter (OMN-3188, OMN-3259).
 #
-# Validates that all topic strings in contract.yaml files follow the canonical
-# ONEX naming convention:
+# Validates that all topic strings in contract.yaml files AND Python source
+# files follow the canonical ONEX naming convention:
 #
 #   onex.{kind}.{producer}.{event-slug}.v{n}
 #
@@ -23,6 +23,9 @@
 # Usage:
 #   uv run python scripts/validation/lint_topic_names.py --topic TOPIC
 #   uv run python scripts/validation/lint_topic_names.py --scan-contracts ROOT
+#   uv run python scripts/validation/lint_topic_names.py --scan-python ROOT
+#   uv run python scripts/validation/lint_topic_names.py \
+#       --scan-contracts ROOT_YAML --scan-python ROOT_PY
 #
 # Exit codes:
 #   0  all topics valid (or no topics found)
@@ -32,6 +35,8 @@
 from __future__ import annotations
 
 import argparse
+import ast
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -43,9 +48,15 @@ import yaml
 # ---------------------------------------------------------------------------
 
 _VALID_KINDS: frozenset[str] = frozenset({"evt", "cmd", "dlq", "intent"})
-_VALID_SEGMENT_PATTERN = __import__("re").compile(r"^[a-z0-9._-]+$")
-_VALID_PRODUCER_PATTERN = __import__("re").compile(r"^[a-z0-9-]+$")
-_VALID_VERSION_PATTERN = __import__("re").compile(r"^v[1-9]\d*$|^v1$")
+_VALID_SEGMENT_PATTERN = re.compile(r"^[a-z0-9._-]+$")
+_VALID_PRODUCER_PATTERN = re.compile(r"^[a-z0-9-]+$")
+_VALID_VERSION_PATTERN = re.compile(r"^v[1-9]\d*$|^v1$")
+
+# Regex to detect strings that look like complete ONEX topic names (for Python
+# scanning).  We require the string to start with 'onex.' AND end with a version
+# suffix (e.g. '.v1', '.v12').  This excludes partial-prefix strings like
+# "onex.evt.platform." which are used for topic filtering, not as topic names.
+_ONEX_TOPIC_HEURISTIC = re.compile(r"^onex\..*\.v\d+$")
 
 # YAML keys that may contain topic strings — mirrors ContractTopicExtractor logic
 _EVENT_SECTION_KEYS: tuple[str, ...] = (
@@ -206,6 +217,96 @@ def scan_contracts(contracts_root: Path) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Python source scanning (OMN-3259)
+# ---------------------------------------------------------------------------
+
+
+class _OnexTopicVisitor(ast.NodeVisitor):
+    """AST visitor that collects ONEX topic string constants from Python source.
+
+    Extracts string literals that start with 'onex.' from:
+    - StrEnum / TopicBase subclass member values
+    - Module-level TOPIC_* constant assignments
+    - Any string literal starting with 'onex.' in the module scope
+
+    Suppression: lines annotated with ``# noqa: topic-naming-lint`` are skipped.
+    """
+
+    def __init__(self, filepath: Path, source_lines: list[str]) -> None:
+        self.filepath = filepath
+        self.source_lines = source_lines
+        self.topics: list[tuple[str, int]] = []  # (topic_value, lineno)
+
+    def _is_suppressed(self, lineno: int) -> bool:
+        if lineno < 1 or lineno > len(self.source_lines):
+            return False
+        line = self.source_lines[lineno - 1]
+        return "noqa: topic-naming-lint" in line
+
+    def visit_Constant(self, node: ast.Constant) -> None:
+        if isinstance(node.value, str) and _ONEX_TOPIC_HEURISTIC.match(node.value):
+            if not self._is_suppressed(node.lineno):
+                self.topics.append((node.value, node.lineno))
+        self.generic_visit(node)
+
+
+def _extract_topics_from_python_file(
+    py_path: Path,
+) -> list[tuple[str, int]]:
+    """
+    Parse a Python file with AST and return all string literals that start
+    with 'onex.' as (value, lineno) pairs.
+
+    Returns an empty list if the file cannot be parsed (e.g., syntax errors).
+    """
+    try:
+        source = py_path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+
+    try:
+        tree = ast.parse(source, filename=str(py_path))
+    except SyntaxError:
+        return []
+
+    source_lines = source.splitlines()
+    visitor = _OnexTopicVisitor(py_path, source_lines)
+    visitor.visit(tree)
+    return visitor.topics
+
+
+def scan_python(python_root: Path) -> list[str]:
+    """
+    Recursively scan *python_root* for *.py files and validate all ONEX
+    topic string literals found within them.
+
+    *python_root* may be a directory (scanned recursively) or a single .py
+    file (scanned directly).
+
+    Only strings that start with 'onex.' and end with a version suffix are
+    checked; all others are ignored.
+    Lines suppressed with ``# noqa: topic-naming-lint`` are skipped.
+
+    Returns a list of violation strings (empty list = all clean).
+    """
+    all_violations: list[str] = []
+    if python_root.is_file():
+        py_files: list[Path] = [python_root]
+    else:
+        py_files = sorted(python_root.rglob("*.py"))
+
+    for py_path in py_files:
+        topics = _extract_topics_from_python_file(py_path)
+        for raw, lineno in topics:
+            result = lint_topic(raw)
+            if not result.is_valid:
+                for violation in result.violations:
+                    all_violations.append(f"{py_path}:{lineno}: {violation}")
+
+    return all_violations
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -229,21 +330,33 @@ def _load_baseline(baseline_path: Path) -> frozenset[str]:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="ONEX topic naming linter — validates contract.yaml topic strings",
+        description=(
+            "ONEX topic naming linter — validates topic strings in "
+            "contract.yaml files and Python source files"
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument(
+    mode_group = parser.add_mutually_exclusive_group(required=True)
+    mode_group.add_argument(
         "--topic",
         metavar="TOPIC",
         help="Validate a single topic string",
     )
-    group.add_argument(
+    mode_group.add_argument(
         "--scan-contracts",
         metavar="ROOT",
         type=Path,
         help="Recursively scan ROOT for contract.yaml files and validate all topics",
+    )
+    mode_group.add_argument(
+        "--scan-python",
+        metavar="ROOT",
+        type=Path,
+        help=(
+            "Recursively scan ROOT for *.py files and validate all ONEX topic "
+            "string literals (strings starting with 'onex.')"
+        ),
     )
     parser.add_argument(
         "--baseline",
@@ -282,13 +395,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"ERROR: {violation}", file=sys.stderr)
             return 1
 
-    # --scan-contracts mode
-    root: Path = args.scan_contracts
-    if not root.exists():
-        print(f"ERROR: contracts root does not exist: {root}", file=sys.stderr)
-        return 2
-
-    # Resolve baseline path
+    # Resolve baseline path (used by both scan modes)
     baseline: frozenset[str] = frozenset()
     if not args.no_baseline:
         baseline_path: Path
@@ -299,7 +406,21 @@ def main(argv: list[str] | None = None) -> int:
             baseline_path = Path(__file__).parent / "topic_naming_baseline.txt"
         baseline = _load_baseline(baseline_path)
 
-    violations = scan_contracts(root)
+    if args.scan_contracts is not None:
+        root: Path = args.scan_contracts
+        if not root.exists():
+            print(f"ERROR: contracts root does not exist: {root}", file=sys.stderr)
+            return 2
+        violations = scan_contracts(root)
+        label = str(root)
+    else:
+        # --scan-python mode
+        py_root: Path = args.scan_python
+        if not py_root.exists():
+            print(f"ERROR: python root does not exist: {py_root}", file=sys.stderr)
+            return 2
+        violations = scan_python(py_root)
+        label = str(py_root)
 
     # Filter out baseline-suppressed topics
     active_violations: list[str] = []
@@ -320,7 +441,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not active_violations:
         if not args.quiet:
-            print(f"OK: no topic naming violations found under {root}")
+            print(f"OK: no topic naming violations found under {label}")
         return 0
 
     for violation in active_violations:
