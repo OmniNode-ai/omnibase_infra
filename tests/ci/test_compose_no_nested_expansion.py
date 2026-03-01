@@ -20,6 +20,15 @@ _NESTED_EXPANSION_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*:-[^}]*\$\{[A-Za-z
 _DOCKER_DIR = Path(__file__).parent.parent.parent / "docker"
 _COMPOSE_FILES = list(_DOCKER_DIR.glob("docker-compose*.yml"))
 
+# Guard against silently skipped test when no compose files are found.
+# If the docker/ directory is missing or renamed, _COMPOSE_FILES will be
+# empty and pytest.mark.parametrize will silently collect zero test cases
+# rather than failing.  This assertion catches that at collection time.
+assert _COMPOSE_FILES, (
+    f"No docker-compose*.yml files found in {_DOCKER_DIR}. "
+    "Has the docker/ directory been moved or renamed?"
+)
+
 
 def _find_violations(path: Path) -> list[tuple[int, str]]:
     violations = []
@@ -29,6 +38,7 @@ def _find_violations(path: Path) -> list[tuple[int, str]]:
     return violations
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("compose_file", _COMPOSE_FILES, ids=lambda p: p.name)
 def test_no_nested_variable_expansion(compose_file: Path) -> None:
     """Fail if any compose file contains nested ${OUTER:-..${INNER..}} expansion.
