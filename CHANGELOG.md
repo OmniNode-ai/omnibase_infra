@@ -5,6 +5,51 @@ All notable changes to the ONEX Infrastructure (omnibase_infra) will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-02-28
+
+### Added
+- Contract-driven Kafka topic creator script `create_kafka_topics.py` (OMN-2965, #488)
+- `TopicEnumGenerator` — per-producer enum rendering (OMN-2964, #487)
+- `ContractTopicExtractor` for contract-driven topic parsing (OMN-2963, #486)
+- `generate_topic_enums.py` script and initial generated enum files (OMN-2966, #490)
+- AI-slop checker Phase 2 rollout (#491)
+- Catalog responder for `topic-catalog-request.v1` (OMN-2923, #469)
+- `NodeBaselinesBatchCompute` EFFECT node (OMN-3039, #497)
+- Skill lifecycle consumer and topic provisioning (OMN-2934, #475)
+- Consumer for manifest injection lifecycle events (OMN-2942, #481)
+- Decision-recorded topics to intelligence provisioning registry (OMN-2943, #477)
+- Reconnect backoff kwargs wired to AIOKafkaProducer/Consumer sites (OMN-2919, #467)
+- `reconnect_backoff_ms`/`max_ms` to `ModelKafkaEventBusConfig` (OMN-2916, #466)
+- Configurable Redpanda memory and connection limits (OMN-2917, #465)
+- Canonical `ModelRewardAssignedEvent` with policy signal fields (OMN-2928, #470)
+- `omninode-claude` plugin install in `Dockerfile.runtime` (OMN-3182, #498)
+- E2E automated regression for contract-driven topic enum pipeline (OMN-3186, #499)
+
+### Fixed
+- Add 21 missing omnimemory topics to provisioning registry (OMN-2941, #480)
+- Add `agent-observability` DLQ topic to provisioning registry (OMN-2959, #484)
+- Gate omnimemory topic provisioning behind `OMNIMEMORY_ENABLED` flag (OMN-2944, #479)
+- Resolve 503 health check and DLQ validation failures in agent-actions (OMN-2986, #494)
+- Extend contract discovery to find `contract_*.yaml` files (OMN-2995, #496)
+- CAS-atomic topic subscriber index writes in Consul (OMN-2345, #483)
+- Correct `TOPIC_SESSION_OUTCOME_CANONICAL` producer segment to `omniclaude` (OMN-2946, #476)
+- Correct gmail-archive-purged topic name hyphen in producer segment (OMN-2937, #473)
+- Retire orphan `policy-state-updated` topic constant (OMN-2931, #474)
+- Retire orphan `run-evaluated` topic and stale model (OMN-2929, #471)
+- Remove stale `run_evaluated` capability from registry (OMN-2930, #472)
+- Replace stub `ModelScoreVector` with canonical omnibase_core model (OMN-2927, #468)
+- Update handler count assertions for `HandlerCatalogRequest` (#485)
+- Show full correlation UUID in Slack context block (#489)
+- Remove stale omninode_bridge comment from docker-build workflow (#482)
+- Tune AI-slop checker v1.0 — scope `step_narration` to markdown only (OMN-3191, #500)
+
+### Changed
+- Renamed `PYPI_PRIVATE_*` secrets to `PYPI_*` for public PyPI (#495)
+
+### Dependencies
+- `omnibase-core` pinned to ==0.22.0 (was >=0.21.0,<0.22.0)
+- `omnibase-spi` pinned to ==0.15.0 (was >=0.14.0,<0.15.0)
+
 ## [0.12.0] - 2026-02-27
 
 ### Changed
