@@ -165,20 +165,40 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --constraint /tmp/constraints.txt \
     omniintelligence==0.6.0
 
-# omninode-claude==0.3.0 declares older omnibase-spi/omnibase-core pins that conflict with
-# the constraints file. Install with --no-deps since it is a runtime plugin whose
-# interface compatibility is verified at startup, not at install time.
-# A new omninode-claude release supporting omnibase-infra>=0.13.0 is tracked in OMN-3182.
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --no-deps \
-    omninode-claude==0.3.0
+# ============================================================================
+# RUNTIME PLUGIN INSTALLATION — --no-deps PATTERN
+# ============================================================================
+# omninode-claude and omninode-memory are optional runtime plugins, not build-time
+# dependencies. They declare omnibase-spi / omnibase-infra version constraints that
+# may lag behind coordinated releases of the ONEX core packages.
+#
+# We install them with --no-deps so the pip resolver cannot mutate any transitive
+# dependency already locked by uv (e.g. omnibase-spi, omnibase-core). Interface
+# compatibility is verified at container startup by the handler loader, not at
+# install time.
+#
+# Range pins (>=X,<Y) are used instead of exact pins (==X) to avoid breaking every
+# coordinated release that bumps a transitive dep. The upper bound is set to the
+# next BREAKING minor release so this Dockerfile does not silently pull in an
+# incompatible future version. Update the upper bound when adopting a new major
+# or when a new release explicitly supports the bumped core packages.
+#
+# Related tickets: OMN-3182 (omninode-claude native-pin), OMN-3183 (omninode-memory native-pin)
+# ============================================================================
 
-# omninode-memory==0.6.0 declares omnibase-infra<0.12.0 but is functionally compatible with 0.12.0.
-# A new omninode-memory release supporting omnibase-infra>=0.12.0 is tracked in OMN-3183.
-# Install with --no-deps to avoid resolver conflict until that release lands.
+# omninode-claude: runtime plugin for Claude-based agent actions.
+# Installs with --no-deps (see pattern above). Range pin absorbs patch/minor
+# releases while blocking incompatible future majors.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps \
-    omninode-memory==0.6.0
+    "omninode-claude>=0.3.0,<0.5.0"
+
+# omninode-memory: runtime plugin for memory/retrieval capabilities.
+# Installs with --no-deps (see pattern above). Range pin absorbs patch/minor
+# releases while blocking incompatible future majors.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --no-deps \
+    "omninode-memory>=0.6.0,<0.8.0"
 
 # ============================================================================
 # Runtime Stage - Minimal production image
