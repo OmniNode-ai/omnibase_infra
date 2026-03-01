@@ -49,7 +49,7 @@
 
     <!-- Wait 10s before restarting after a crash (avoids tight crash loops) -->
     <key>ThrottleInterval</key>
-    <integer>10</integer>
+    <integer>60</integer>
 
     <key>StandardOutPath</key>
     <string>/Users/jonah/.omnibase/monitor-logs.log</string>

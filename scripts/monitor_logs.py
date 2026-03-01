@@ -15,10 +15,10 @@
 #   python scripts/monitor_logs.py --cooldown 120      # Override per-container cooldown (seconds)
 #
 # Required env vars (from ~/.omnibase/.env):
-#   SLACK_WEBHOOK_URL  -- Slack incoming webhook URL
+#   SLACK_BOT_TOKEN    -- Slack bot OAuth token (xoxb-...)
+#   SLACK_CHANNEL_ID   -- Slack channel ID to post alerts to
 #
 # Optional env vars:
-#   SLACK_CHANNEL_ID   -- Channel override (webhook already targets a channel)
 #   MONITOR_PROJECTS   -- Comma-separated compose project names (default: omnibase-infra-runtime,omnibase-infra)
 #   MONITOR_COOLDOWN   -- Per-container alert cooldown in seconds (default: 300)
 
@@ -71,6 +71,41 @@ def _load_omnibase_env() -> None:
 
 _load_omnibase_env()
 
+# ---------------------------------------------------------------------------
+# Persistent cooldown (survives monitor restarts / launchd KeepAlive bounces)
+# ---------------------------------------------------------------------------
+
+_COOLDOWN_FILE = Path.home() / ".omnibase" / "monitor-cooldowns.json"
+_cooldown_lock = threading.Lock()
+
+
+def _cooldown_read(container: str) -> float:
+    try:
+        with _cooldown_lock:
+            data = (
+                json.loads(_COOLDOWN_FILE.read_text())
+                if _COOLDOWN_FILE.exists()
+                else {}
+            )
+        return float(data.get(container, 0.0))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return 0.0
+
+
+def _cooldown_write(container: str, ts: float) -> None:
+    try:
+        with _cooldown_lock:
+            data = (
+                json.loads(_COOLDOWN_FILE.read_text())
+                if _COOLDOWN_FILE.exists()
+                else {}
+            )
+            data[container] = ts
+            _COOLDOWN_FILE.write_text(json.dumps(data))
+    except OSError:
+        pass
+
+
 # Resolve docker binary at startup so subprocess calls work without a shell PATH.
 _DOCKER = shutil.which("docker") or "/usr/local/bin/docker"
 
@@ -106,26 +141,21 @@ IGNORE_PATTERN = re.compile(
 
 
 def post_slack(
-    webhook_url: str, container: str, lines: list[str], dry_run: bool
+    bot_token: str, channel_id: str, container: str, lines: list[str], dry_run: bool
 ) -> None:
     timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     text = "\n".join(lines)[:MAX_SLACK_CHARS]
 
     payload = {
+        "channel": channel_id,
+        "text": f":rotating_light: *Container error:* `{container}` — {timestamp}",
         "blocks": [
             {
-                "type": "header",
-                "text": {
-                    "type": "plain_text",
-                    "text": f"🚨 Container error: {container}",
-                },
-            },
-            {
                 "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": f"*Container:*\n`{container}`"},
-                    {"type": "mrkdwn", "text": f"*Time:*\n{timestamp}"},
-                ],
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f":rotating_light: *Container error:* `{container}`\n*Time:* {timestamp}",
+                },
             },
             {
                 "type": "section",
@@ -134,7 +164,7 @@ def post_slack(
                     "text": f"```\n{text}\n```",
                 },
             },
-        ]
+        ],
     }
 
     if dry_run:
@@ -144,16 +174,20 @@ def post_slack(
 
     try:
         data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(  # noqa: S310
-            webhook_url,
+        req = urllib.request.Request(
+            "https://slack.com/api/chat.postMessage",
             data=data,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {bot_token}",
+            },
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
-            if resp.status != 200:
+            result = json.loads(resp.read())
+            if not result.get("ok"):
                 print(
-                    f"[monitor] Slack returned {resp.status} for {container}",
+                    f"[monitor] Slack API error for {container}: {result.get('error')}",
                     file=sys.stderr,
                 )
     except Exception as exc:
@@ -172,18 +206,19 @@ class ContainerTailer(threading.Thread):
     def __init__(
         self,
         container: str,
-        webhook_url: str,
+        bot_token: str,
+        channel_id: str,
         cooldown: int,
         dry_run: bool,
         stop_event: threading.Event,
     ) -> None:
         super().__init__(name=f"tail-{container}", daemon=True)
         self.container = container
-        self.webhook_url = webhook_url
+        self.bot_token = bot_token
+        self.channel_id = channel_id
         self.cooldown = cooldown
         self.dry_run = dry_run
         self.stop_event = stop_event
-        self._last_alert: float = 0.0
         self._context: deque[str] = deque(maxlen=CONTEXT_LINES)
 
     def run(self) -> None:
@@ -247,13 +282,14 @@ class ContainerTailer(threading.Thread):
             print(f"[monitor] Stopped watching {self.container}")
 
     def _maybe_alert(self, lines: list[str]) -> None:
-        now = time.monotonic()
-        if now - self._last_alert < self.cooldown:
-            remaining = int(self.cooldown - (now - self._last_alert))
+        now = time.time()
+        last = _cooldown_read(self.container)
+        if now - last < self.cooldown:
+            remaining = int(self.cooldown - (now - last))
             print(f"[monitor] Rate-limited {self.container} (cooldown {remaining}s)")
             return
-        self._last_alert = now
-        post_slack(self.webhook_url, self.container, lines, self.dry_run)
+        _cooldown_write(self.container, now)
+        post_slack(self.bot_token, self.channel_id, self.container, lines, self.dry_run)
 
 
 # ---------------------------------------------------------------------------
@@ -265,12 +301,14 @@ class LogMonitor:
     def __init__(
         self,
         projects: list[str],
-        webhook_url: str,
+        bot_token: str,
+        channel_id: str,
         cooldown: int,
         dry_run: bool,
     ) -> None:
         self.projects = projects
-        self.webhook_url = webhook_url
+        self.bot_token = bot_token
+        self.channel_id = channel_id
         self.cooldown = cooldown
         self.dry_run = dry_run
         self._tailers: dict[str, ContainerTailer] = {}
@@ -303,7 +341,12 @@ class LogMonitor:
                 return
             stop_event = threading.Event()
             tailer = ContainerTailer(
-                container, self.webhook_url, self.cooldown, self.dry_run, stop_event
+                container,
+                self.bot_token,
+                self.channel_id,
+                self.cooldown,
+                self.dry_run,
+                stop_event,
             )
             tailer.start()
             self._tailers[container] = tailer
@@ -389,10 +432,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    webhook_url = os.getenv("SLACK_WEBHOOK_URL", "")
-    if not webhook_url and not args.dry_run:
+    bot_token = os.getenv("SLACK_BOT_TOKEN", "")
+    channel_id = os.getenv("SLACK_CHANNEL_ID", "")
+    if (not bot_token or not channel_id) and not args.dry_run:
         print(
-            "ERROR: SLACK_WEBHOOK_URL not set. Run with --dry-run or set SLACK_WEBHOOK_URL.",
+            "ERROR: SLACK_BOT_TOKEN and SLACK_CHANNEL_ID must be set. "
+            "Run with --dry-run to test without posting.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -408,7 +453,8 @@ def main() -> None:
 
     monitor = LogMonitor(
         projects=projects,
-        webhook_url=webhook_url,
+        bot_token=bot_token,
+        channel_id=channel_id,
         cooldown=args.cooldown,
         dry_run=args.dry_run,
     )
