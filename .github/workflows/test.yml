@@ -229,11 +229,50 @@ jobs:
       - name: Check migration freeze
         run: ./scripts/check_migration_freeze.sh --ci
 
+  # Topic enum drift check -- CI gate for contract-driven topic enum pipeline (OMN-3187)
+  # Ensures generated enum files stay in sync with contract.yaml definitions
+  topic-enum-drift:
+    name: Topic Enum Drift Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Load cached uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/uv.lock') }}-${{ env.CACHE_VERSION }}
+          restore-keys: |
+            uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Check topic enum drift
+        run: |
+          echo "================================================================"
+          echo "Topic Enum Drift Check (OMN-3187)"
+          echo "================================================================"
+          uv run python scripts/generate_topic_enums.py --check
+
   # Parallel test execution - 10 splits for ~927 tests each
   # Split strategy: 9265 tests / 10 = ~927 tests per split (~3-4 min each)
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/10)
-    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate]
+    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -313,7 +352,7 @@ jobs:
   test-summary:
     name: Test Summary
     runs-on: ubuntu-latest
-    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate]
+    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift]
     if: always()
 
     steps:
@@ -325,13 +364,15 @@ jobs:
           migrationfreeze="${{ needs.migration-freeze.result }}"
           fingerprint="${{ needs.fingerprint-check.result }}"
           demoloop="${{ needs.demo-loop-gate.result }}"
+          topicenumdrift="${{ needs.topic-enum-drift.result }}"
 
           if [[ "$gate" == "success" ]] && \
              [[ "$lint" == "success" ]] && \
              [[ "$onex" == "success" ]] && \
              [[ "$migrationfreeze" == "success" ]] && \
              [[ "$fingerprint" == "success" ]] && \
-             [[ "$demoloop" == "success" ]]; then
+             [[ "$demoloop" == "success" ]] && \
+             [[ "$topicenumdrift" == "success" ]]; then
             echo "All checks passed successfully"
             echo "CI Tests Gate (10 splits): Passed"
             echo "Code Quality: Passed"
@@ -339,6 +380,7 @@ jobs:
             echo "Migration Freeze: Passed"
             echo "Fingerprint Check: Passed"
             echo "Demo Loop Gate: Passed"
+            echo "Topic Enum Drift Check: Passed"
             exit 0
           else
             echo "Checks failed"
@@ -348,6 +390,7 @@ jobs:
             echo "Migration Freeze: $migrationfreeze"
             echo "Fingerprint Check: $fingerprint"
             echo "Demo Loop Gate: $demoloop"
+            echo "Topic Enum Drift Check: $topicenumdrift"
             exit 1
           fi
 
