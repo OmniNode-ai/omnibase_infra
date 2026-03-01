@@ -268,11 +268,51 @@ jobs:
           echo "================================================================"
           uv run python scripts/generate_topic_enums.py --check
 
+  # Topic naming lint -- CI gate for ONEX topic naming convention (OMN-3188)
+  # Validates onex.{kind}.{producer}.{event}.v{n} format in all contract.yaml files
+  topic-naming-lint:
+    name: Topic Naming Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Load cached uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/uv.lock') }}-${{ env.CACHE_VERSION }}
+          restore-keys: |
+            uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Lint topic names
+        run: |
+          echo "================================================================"
+          echo "Topic Naming Lint (OMN-3188)"
+          echo "================================================================"
+          uv run python scripts/validation/lint_topic_names.py \
+            --scan-contracts src/omnibase_infra/nodes
+
   # Parallel test execution - 10 splits for ~927 tests each
   # Split strategy: 9265 tests / 10 = ~927 tests per split (~3-4 min each)
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/10)
-    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift]
+    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -352,7 +392,7 @@ jobs:
   test-summary:
     name: Test Summary
     runs-on: ubuntu-latest
-    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift]
+    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint]
     if: always()
 
     steps:
@@ -365,6 +405,7 @@ jobs:
           fingerprint="${{ needs.fingerprint-check.result }}"
           demoloop="${{ needs.demo-loop-gate.result }}"
           topicenumdrift="${{ needs.topic-enum-drift.result }}"
+          topicnaminglint="${{ needs.topic-naming-lint.result }}"
 
           if [[ "$gate" == "success" ]] && \
              [[ "$lint" == "success" ]] && \
@@ -372,7 +413,8 @@ jobs:
              [[ "$migrationfreeze" == "success" ]] && \
              [[ "$fingerprint" == "success" ]] && \
              [[ "$demoloop" == "success" ]] && \
-             [[ "$topicenumdrift" == "success" ]]; then
+             [[ "$topicenumdrift" == "success" ]] && \
+             [[ "$topicnaminglint" == "success" ]]; then
             echo "All checks passed successfully"
             echo "CI Tests Gate (10 splits): Passed"
             echo "Code Quality: Passed"
@@ -381,6 +423,7 @@ jobs:
             echo "Fingerprint Check: Passed"
             echo "Demo Loop Gate: Passed"
             echo "Topic Enum Drift Check: Passed"
+            echo "Topic Naming Lint: Passed"
             exit 0
           else
             echo "Checks failed"
@@ -391,6 +434,7 @@ jobs:
             echo "Fingerprint Check: $fingerprint"
             echo "Demo Loop Gate: $demoloop"
             echo "Topic Enum Drift Check: $topicenumdrift"
+            echo "Topic Naming Lint: $topicnaminglint"
             exit 1
           fi
 
