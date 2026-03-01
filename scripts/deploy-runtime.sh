@@ -47,6 +47,9 @@ readonly RUNTIME_SERVICES=(
     runtime-effects
     runtime-worker
     agent-actions-consumer
+    skill-lifecycle-consumer
+    intelligence-api
+    omninode-contract-resolver
 )
 
 # Minimum Docker Compose version (nested variable expansion support)
