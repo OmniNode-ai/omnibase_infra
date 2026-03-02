@@ -1,0 +1,34 @@
+{
+    "node_id": "node_validation_ledger_projection_compute",
+    "ticket_id": "OMN-3388",
+    "input": {
+        "topic": "onex.evt.validation.cross-repo-run-started.v1",
+        "fixture": {
+            "event_type": "validation.cross_repo_run_started",
+            "source": "node_validation_ledger_projection_compute",
+            "payload": {
+                "run_id": "test-run-3388",
+                "repos": ["omnibase_infra", "omnibase_core"],
+                "triggered_by": "golden_path_test",
+                "timestamp": "2026-03-02T00:00:00Z"
+            }
+        }
+    },
+    "output": {
+        "topic": "onex.evt.validation.cross-repo-run-started.v1"
+    },
+    "timeout_ms": 15000,
+    "assertions": [
+        {
+            "field": "event_type",
+            "op": "eq",
+            "expected": "validation.cross_repo_run_started"
+        },
+        {
+            "field": "payload.run_id",
+            "op": "eq",
+            "expected": "test-run-3388"
+        }
+    ],
+    "_comment": "Consumer-only projection node: subscribes to 3 cross-repo validation topics, no publish_topics. Outputs ModelValidationLedgerEntry (not Kafka). Echo pattern used: input == output topic to verify Kafka reachability for the primary subscribed topic."
+}
