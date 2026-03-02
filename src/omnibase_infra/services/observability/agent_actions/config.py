@@ -193,6 +193,30 @@ class ConfigAgentActionsConsumer(BaseSettings):
             "Configure via OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_POLL_STALENESS_SECONDS env var."
         ),
     )
+    health_check_dlq_rate_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "DLQ rate threshold above which the health check reports DEGRADED status "
+            "with reason 'dlq_rate_exceeded'. Computed as messages_sent_to_dlq / "
+            "messages_received. A value of 0.5 means more than 50%% of received "
+            "messages are going to the DLQ (validation failures). Only evaluated when "
+            "messages_received >= 10 to avoid false positives on cold start. "
+            "Configure via OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_DLQ_RATE_THRESHOLD env var."
+        ),
+    )
+    health_check_dlq_min_messages: int = Field(
+        default=10,
+        ge=1,
+        le=1000,
+        description=(
+            "Minimum number of received messages required before the DLQ rate "
+            "threshold is evaluated. Prevents false DEGRADED status on cold start "
+            "when only a few messages have been processed. Default is 10. "
+            "Configure via OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_DLQ_MIN_MESSAGES env var."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_topic_configuration(self) -> Self:

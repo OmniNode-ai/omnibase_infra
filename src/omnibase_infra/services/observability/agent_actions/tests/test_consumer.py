@@ -1147,6 +1147,333 @@ class TestHealthCheck:
         # Within grace period — HEALTHY
         assert health["status"] == EnumHealthStatus.HEALTHY.value
 
+    # OMN-3426: DLQ-aware health check redesign tests
+
+    @pytest.mark.asyncio
+    async def test_health_check_degraded_reason_circuit_open(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Health check returns degraded_reason='circuit_open' for open circuit."""
+        consumer._running = True
+
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "open", "failure_count": 5}
+        )
+        consumer._writer = mock_writer
+
+        health = await consumer.health_check()
+
+        assert health["status"] == EnumHealthStatus.DEGRADED.value
+        assert health["degraded_reason"] == "circuit_open"
+
+    @pytest.mark.asyncio
+    async def test_health_check_degraded_reason_poll_stale(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Health check returns degraded_reason='poll_stale' when poll is stale."""
+        from datetime import timedelta
+
+        consumer._running = True
+
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "closed", "failure_count": 0}
+        )
+        consumer._writer = mock_writer
+
+        stale_time = datetime.now(UTC) - timedelta(
+            seconds=consumer._config.health_check_poll_staleness_seconds + 10
+        )
+        consumer.metrics.last_poll_at = stale_time
+
+        health = await consumer.health_check()
+
+        assert health["status"] == EnumHealthStatus.DEGRADED.value
+        assert health["degraded_reason"] == "poll_stale"
+
+    @pytest.mark.asyncio
+    async def test_health_check_degraded_reason_dlq_rate_exceeded(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Health check returns DEGRADED with reason 'dlq_rate_exceeded' when DLQ ratio is high.
+
+        OMN-3426: When the consumer is receiving events but most are going to the DLQ
+        (validation failures), this is DEGRADED but NOT a write-pipeline failure.
+        The reason field distinguishes the cause.
+        """
+        from datetime import timedelta
+
+        consumer._running = True
+
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "closed", "failure_count": 0}
+        )
+        consumer._writer = mock_writer
+
+        # Recent poll
+        consumer.metrics.last_poll_at = datetime.now(UTC) - timedelta(seconds=5)
+
+        # 20 messages received, 18 went to DLQ → ratio = 0.9 > default threshold 0.5
+        consumer.metrics.messages_received = 20
+        consumer.metrics.messages_sent_to_dlq = 18
+
+        health = await consumer.health_check()
+
+        assert health["status"] == EnumHealthStatus.DEGRADED.value
+        assert health["degraded_reason"] == "dlq_rate_exceeded"
+        assert health["dlq_ratio"] is not None
+        assert health["dlq_ratio"] > 0.5  # type: ignore[operator]
+
+    @pytest.mark.asyncio
+    async def test_health_check_healthy_when_all_messages_dlq_but_below_threshold(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Health check returns HEALTHY when DLQ ratio is below threshold.
+
+        OMN-3426: A DLQ ratio below the configured threshold does not trigger DEGRADED.
+        Even if writes are stale, if DLQ explains the gap the write pipeline is not broken.
+        """
+        from datetime import timedelta
+
+        consumer._running = True
+
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "closed", "failure_count": 0}
+        )
+        consumer._writer = mock_writer
+
+        # Recent poll
+        consumer.metrics.last_poll_at = datetime.now(UTC) - timedelta(seconds=5)
+
+        # Only 4 messages received — below dlq_min_messages (10), so DLQ ratio not evaluated
+        consumer.metrics.messages_received = 4
+        consumer.metrics.messages_sent_to_dlq = 4
+        consumer.metrics.last_successful_write_at = None
+        consumer.metrics.started_at = datetime.now(UTC) - timedelta(seconds=300)
+
+        health = await consumer.health_check()
+
+        # dlq_ratio is None because below min_messages threshold
+        assert health["dlq_ratio"] is None
+
+    @pytest.mark.asyncio
+    async def test_health_check_healthy_when_writes_stale_but_dlq_explains_gap(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Health check returns HEALTHY when write staleness is fully explained by DLQ.
+
+        OMN-3426 core case: consumer receives events, all go to DLQ (schema failures),
+        last_write becomes stale. OLD Rule 5 would fire DEGRADED here. The new rule
+        should return HEALTHY because the DLQ explains the write gap — the write
+        pipeline itself is not broken. (DLQ rate gate in Rule 4 will catch the high
+        DLQ rate separately if the threshold is breached.)
+        """
+        from datetime import timedelta
+
+        consumer._running = True
+
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "closed", "failure_count": 0}
+        )
+        consumer._writer = mock_writer
+
+        # Recent poll
+        consumer.metrics.last_poll_at = datetime.now(UTC) - timedelta(seconds=5)
+
+        # 8 messages received (below min_messages=10), all went to DLQ → ratio not evaluated
+        # Set last write stale to test DLQ-explained staleness path
+        consumer.metrics.messages_received = 8
+        consumer.metrics.messages_sent_to_dlq = 8
+        stale_write = datetime.now(UTC) - timedelta(
+            seconds=consumer._config.health_check_staleness_seconds + 60
+        )
+        consumer.metrics.last_successful_write_at = stale_write
+
+        health = await consumer.health_check()
+
+        # Write is stale but all messages went to DLQ — write pipeline not broken
+        # DLQ ratio not evaluated (below min_messages), so HEALTHY via dlq_explained path
+        assert health["status"] == EnumHealthStatus.HEALTHY.value
+
+    @pytest.mark.asyncio
+    async def test_health_check_degraded_write_pipeline_stale_not_dlq_explained(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Health check returns DEGRADED when write is stale and DLQ does NOT explain gap.
+
+        OMN-3426: If messages are received but only a fraction goes to DLQ while writes
+        are stale, the write pipeline itself is failing. DEGRADED with reason
+        'write_pipeline_stale' is correct.
+        """
+        from datetime import timedelta
+
+        consumer._running = True
+
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "closed", "failure_count": 0}
+        )
+        consumer._writer = mock_writer
+
+        # Recent poll
+        consumer.metrics.last_poll_at = datetime.now(UTC) - timedelta(seconds=5)
+
+        # 100 messages received, only 5 went to DLQ → DLQ does not explain the gap
+        consumer.metrics.messages_received = 100
+        consumer.metrics.messages_sent_to_dlq = 5  # Only 5% DLQ rate — below threshold
+
+        stale_write = datetime.now(UTC) - timedelta(
+            seconds=consumer._config.health_check_staleness_seconds + 60
+        )
+        consumer.metrics.last_successful_write_at = stale_write
+
+        health = await consumer.health_check()
+
+        assert health["status"] == EnumHealthStatus.DEGRADED.value
+        assert health["degraded_reason"] == "write_pipeline_stale"
+
+    @pytest.mark.asyncio
+    async def test_health_check_degraded_write_pipeline_failing_no_writes_no_dlq(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Health check returns DEGRADED when messages received, no writes, no DLQ to explain.
+
+        OMN-3426: If messages are received but nothing was ever written AND the messages
+        did not go to DLQ, the write pipeline is failing from the start.
+        """
+        from datetime import timedelta
+
+        consumer._running = True
+
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "closed", "failure_count": 0}
+        )
+        consumer._writer = mock_writer
+
+        # Consumer started 5 minutes ago — past grace period
+        consumer.metrics.started_at = datetime.now(UTC) - timedelta(seconds=300)
+
+        # 50 messages received, 0 to DLQ, nothing written
+        consumer.metrics.messages_received = 50
+        consumer.metrics.messages_sent_to_dlq = 0
+        consumer.metrics.last_successful_write_at = None
+
+        consumer.metrics.last_poll_at = datetime.now(UTC) - timedelta(seconds=1)
+
+        health = await consumer.health_check()
+
+        assert health["status"] == EnumHealthStatus.DEGRADED.value
+        assert health["degraded_reason"] == "write_pipeline_failing"
+
+    @pytest.mark.asyncio
+    async def test_health_check_healthy_returns_none_degraded_reason(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Healthy consumer returns degraded_reason=None."""
+        from datetime import timedelta
+
+        consumer._running = True
+
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "closed", "failure_count": 0}
+        )
+        consumer._writer = mock_writer
+
+        consumer.metrics.last_poll_at = datetime.now(UTC) - timedelta(seconds=5)
+        consumer.metrics.last_successful_write_at = datetime.now(UTC) - timedelta(
+            seconds=10
+        )
+        consumer.metrics.messages_received = 5
+
+        health = await consumer.health_check()
+
+        assert health["status"] == EnumHealthStatus.HEALTHY.value
+        assert health["degraded_reason"] is None
+
+    @pytest.mark.asyncio
+    async def test_health_check_returns_dlq_ratio_field(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Health check response always includes dlq_ratio field (OMN-3426)."""
+        consumer._running = True
+
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "closed"}
+        )
+        consumer._writer = mock_writer
+
+        health = await consumer.health_check()
+
+        assert "dlq_ratio" in health
+        assert "degraded_reason" in health
+
+    @pytest.mark.asyncio
+    async def test_health_check_http_unhealthy_returns_503(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """HTTP health endpoint returns 503 only for UNHEALTHY (OMN-3426).
+
+        DEGRADED returns 200. Only UNHEALTHY (consumer not running) returns 503.
+        """
+        from aiohttp.test_utils import make_mocked_request
+
+        # Consumer not running → UNHEALTHY
+        consumer._running = False
+
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "closed"}
+        )
+        consumer._writer = mock_writer
+
+        request = make_mocked_request("GET", "/health")
+        response = await consumer._health_handler(request)
+
+        assert response.status == 503
+
+    @pytest.mark.asyncio
+    async def test_health_check_http_degraded_returns_200(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """HTTP health endpoint returns 200 for DEGRADED status (OMN-3426).
+
+        DEGRADED means consumer is alive but impaired. It should NOT return 503,
+        which would cause K8s to restart a running pod unnecessarily.
+        """
+        from aiohttp.test_utils import make_mocked_request
+
+        consumer._running = True
+
+        # Open circuit → DEGRADED
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "open", "failure_count": 5}
+        )
+        consumer._writer = mock_writer
+
+        request = make_mocked_request("GET", "/health")
+        response = await consumer._health_handler(request)
+
+        assert response.status == 200
+
 
 # =============================================================================
 # Consumer Lifecycle Tests

@@ -1397,21 +1397,69 @@ class AgentActionsConsumer:
             },
         )
 
+    def _compute_dlq_ratio(self, metrics_snapshot: dict[str, object]) -> float | None:
+        """Compute the DLQ ratio from a metrics snapshot.
+
+        Returns messages_sent_to_dlq / messages_received, or None if not enough
+        messages have been received to compute a meaningful ratio.
+
+        A ratio of 1.0 means all received messages went to the DLQ (100% failure rate).
+        A ratio of 0.0 means no messages went to the DLQ (0% failure rate).
+
+        Args:
+            metrics_snapshot: Snapshot from ConsumerMetrics.snapshot().
+
+        Returns:
+            Float in [0.0, 1.0] if messages_received >= dlq_min_messages threshold,
+            None otherwise (not enough data to compute).
+        """
+        messages_received = metrics_snapshot.get("messages_received", 0)
+        messages_sent_to_dlq = metrics_snapshot.get("messages_sent_to_dlq", 0)
+
+        if not isinstance(messages_received, int) or not isinstance(
+            messages_sent_to_dlq, int
+        ):
+            return None
+
+        if messages_received < self._config.health_check_dlq_min_messages:
+            return None
+
+        return messages_sent_to_dlq / messages_received
+
     def _determine_health_status(
         self,
         metrics_snapshot: dict[str, object],
         circuit_state: dict[str, JsonType],
-    ) -> EnumHealthStatus:
+    ) -> tuple[EnumHealthStatus, str | None]:
         """Determine consumer health status based on current state.
 
         Health status determination rules (in priority order):
         1. UNHEALTHY: Consumer is not running (stopped or crashed)
         2. DEGRADED: Circuit breaker is open or half-open (database issues, retrying)
         3. DEGRADED: Last poll exceeds poll staleness threshold (consumer not polling)
-        4. DEGRADED: Messages received but no writes AND consumer running > 60s
-           (startup grace period exceeded with unwritten messages — write pipeline failing)
-        5. DEGRADED: Last successful write exceeds staleness threshold (with messages received)
-        6. HEALTHY: All other cases (running, circuit closed, recent activity, idle, or in grace period)
+        4. DEGRADED (dlq_rate_exceeded): DLQ ratio exceeds threshold — consumer is
+           receiving events but validation failures accumulate in DLQ
+        5. DEGRADED (write_pipeline_stale): Messages received, last write is stale,
+           AND DLQ does not explain the write gap (partial DLQ rate)
+        6. DEGRADED (write_pipeline_failing): Messages received > 60s ago, no writes
+           ever, DLQ does not fully explain the missing writes
+        7. HEALTHY: All other cases (running, circuit closed, recent activity,
+           idle consumer, startup grace period, or DLQ-explained write gap)
+
+        Rule 5 redesign (OMN-3426):
+            The original rule fired DEGRADED whenever last_write was stale and
+            messages_received > 0. This triggered a persistent 503 when the consumer
+            was healthy but receiving only schema-failing events (all going to DLQ,
+            no DB writes). The redesign distinguishes:
+              - All-DLQ traffic (messages_received == messages_sent_to_dlq):
+                DEGRADED with reason='dlq_rate_exceeded' — not a write-pipeline failure
+              - Partial or no DLQ (some messages should have written but didn't):
+                DEGRADED with reason='write_pipeline_stale' — actual write failure
+
+        HTTP status mapping (OMN-3426):
+            HEALTHY  → 200
+            DEGRADED → 200  (consumer alive; use reason field to distinguish cause)
+            UNHEALTHY → 503 (consumer not running — K8s should restart)
 
         An idle consumer (zero messages received) is always HEALTHY regardless of uptime.
         The 60-second startup grace period covers the case where messages arrive before
@@ -1424,19 +1472,22 @@ class AgentActionsConsumer:
                 containing at minimum a "state" key.
 
         Returns:
-            EnumHealthStatus indicating current health:
-                - HEALTHY: Fully operational
-                - DEGRADED: Running but with issues (circuit open/half-open, stale polls/writes)
-                - UNHEALTHY: Not running
+            Tuple of (EnumHealthStatus, degraded_reason | None) where degraded_reason
+            is set only when status is DEGRADED:
+                - 'circuit_open': Circuit breaker is open or half-open
+                - 'poll_stale': Last Kafka poll exceeds staleness threshold
+                - 'dlq_rate_exceeded': DLQ ratio above threshold (validation failures)
+                - 'write_pipeline_stale': Write is stale with unexplained traffic gap
+                - 'write_pipeline_failing': No writes ever with unexplained traffic gap
         """
         # Rule 1: Consumer not running -> UNHEALTHY
         if not self._running:
-            return EnumHealthStatus.UNHEALTHY
+            return EnumHealthStatus.UNHEALTHY, None
 
         # Rule 2: Circuit breaker open or half-open -> DEGRADED
         circuit_breaker_state = circuit_state.get("state")
         if circuit_breaker_state in ("open", "half_open"):
-            return EnumHealthStatus.DEGRADED
+            return EnumHealthStatus.DEGRADED, "circuit_open"
 
         # Rule 3: Check poll staleness (consumer not polling Kafka)
         last_poll = metrics_snapshot.get("last_poll_at")
@@ -1445,61 +1496,99 @@ class AgentActionsConsumer:
                 last_poll_dt = datetime.fromisoformat(str(last_poll))
                 poll_age_seconds = (datetime.now(UTC) - last_poll_dt).total_seconds()
                 if poll_age_seconds > self._config.health_check_poll_staleness_seconds:
-                    # Poll exceeds staleness threshold -> DEGRADED
-                    return EnumHealthStatus.DEGRADED
+                    return EnumHealthStatus.DEGRADED, "poll_stale"
             except (ValueError, TypeError):
-                # Parse error - continue to other checks
                 pass
+
+        messages_received = metrics_snapshot.get("messages_received", 0)
+        messages_sent_to_dlq = metrics_snapshot.get("messages_sent_to_dlq", 0)
+
+        # Rule 4 (OMN-3426): DLQ rate gate — fires before write-staleness check.
+        # If the DLQ ratio exceeds the threshold, the consumer is processing events
+        # but validation failures are accumulating. This is DEGRADED regardless of
+        # write staleness.
+        dlq_ratio = self._compute_dlq_ratio(metrics_snapshot)
+        if (
+            dlq_ratio is not None
+            and dlq_ratio > self._config.health_check_dlq_rate_threshold
+        ):
+            return EnumHealthStatus.DEGRADED, "dlq_rate_exceeded"
 
         # Check for recent successful write (within staleness threshold)
         last_write = metrics_snapshot.get("last_successful_write_at")
-        messages_received = metrics_snapshot.get("messages_received", 0)
 
         if last_write is None:
-            # No writes yet - only DEGRADED if messages were received but not written
-            # (i.e., messages came in but the write pipeline is failing).
-            # An idle consumer on an empty topic has no messages received, so it is
-            # healthy regardless of uptime.
+            # No writes yet.
             if not isinstance(messages_received, int) or messages_received == 0:
-                # Rule 4 (revised): No messages received at all -> idle consumer, HEALTHY
-                return EnumHealthStatus.HEALTHY
-            # Messages have been received but none written - check startup grace period
+                # No messages received at all -> idle consumer, HEALTHY
+                return EnumHealthStatus.HEALTHY, None
+
+            # Messages received but no writes. Check whether all messages are DLQ-explained
+            # before applying the startup grace period.
+            dlq_explained = (
+                isinstance(messages_sent_to_dlq, int)
+                and isinstance(messages_received, int)
+                and messages_sent_to_dlq >= messages_received
+                and messages_received > 0
+            )
+
+            if dlq_explained:
+                # All received messages went to DLQ — write gap is fully explained.
+                # Rule 4 already gates on dlq_rate_threshold; if we reach here the ratio
+                # is below threshold (e.g. threshold=1.0 and ratio=1.0 is not > 1.0).
+                # Report HEALTHY; Rule 4 will catch it if threshold is breached.
+                return EnumHealthStatus.HEALTHY, None
+
+            # Messages received, no writes, not DLQ-explained — check grace period.
             started_at_str = metrics_snapshot.get("started_at")
             if started_at_str is not None:
                 try:
                     started_at_dt = datetime.fromisoformat(str(started_at_str))
                     age_seconds = (datetime.now(UTC) - started_at_dt).total_seconds()
                     if age_seconds <= 60.0:
-                        # Rule 6: Consumer just started, healthy even without writes
-                        return EnumHealthStatus.HEALTHY
+                        # Rule 7: Consumer just started, healthy even without writes
+                        return EnumHealthStatus.HEALTHY, None
                     else:
-                        # Rule 4: Consumer running > 60s, messages received but no writes -> DEGRADED
-                        return EnumHealthStatus.DEGRADED
+                        # Rule 6: Consumer running > 60s, messages received but no writes
+                        # and DLQ does not explain the gap -> write pipeline failing
+                        return EnumHealthStatus.DEGRADED, "write_pipeline_failing"
                 except (ValueError, TypeError):
-                    # Parse error - fallback to healthy
-                    return EnumHealthStatus.HEALTHY
+                    return EnumHealthStatus.HEALTHY, None
             else:
-                # No started_at timestamp (shouldn't happen) - assume healthy
-                return EnumHealthStatus.HEALTHY
+                return EnumHealthStatus.HEALTHY, None
         else:
-            # Check if last write was recent (within staleness threshold)
-            # Only consider stale if we have received messages (active traffic)
+            # Have a last_write timestamp. Check staleness only with active traffic.
             try:
                 last_write_dt = datetime.fromisoformat(str(last_write))
                 write_age_seconds = (datetime.now(UTC) - last_write_dt).total_seconds()
-                if (
+
+                if not (
                     write_age_seconds > self._config.health_check_staleness_seconds
                     and isinstance(messages_received, int)
                     and messages_received > 0
                 ):
-                    # Rule 5: Last write exceeds staleness threshold with traffic -> DEGRADED
-                    return EnumHealthStatus.DEGRADED
-                else:
-                    # Rule 6: Recent write or no traffic -> HEALTHY
-                    return EnumHealthStatus.HEALTHY
+                    # Rule 7: Recent write, no traffic, or write is fresh -> HEALTHY
+                    return EnumHealthStatus.HEALTHY, None
+
+                # Write is stale with traffic. Determine if DLQ explains the gap.
+                # If all messages since the last write went to DLQ, the write
+                # pipeline is not broken — validation failures explain the staleness.
+                dlq_explained = (
+                    isinstance(messages_sent_to_dlq, int)
+                    and isinstance(messages_received, int)
+                    and messages_sent_to_dlq >= messages_received
+                    and messages_received > 0
+                )
+
+                if dlq_explained:
+                    # DLQ fully explains the write gap. Rule 4 handles DLQ rate
+                    # alerting; here the write pipeline itself is not the problem.
+                    return EnumHealthStatus.HEALTHY, None
+
+                # Rule 5 (OMN-3426): Write is stale AND DLQ does not explain the gap.
+                return EnumHealthStatus.DEGRADED, "write_pipeline_stale"
             except (ValueError, TypeError):
-                # Parse error - fallback to healthy
-                return EnumHealthStatus.HEALTHY
+                return EnumHealthStatus.HEALTHY, None
 
     async def _health_handler(self, request: web.Request) -> web.Response:
         """Handle health check requests.
@@ -1508,6 +1597,13 @@ class AgentActionsConsumer:
         - Consumer running state
         - Circuit breaker state (from writer)
         - Last successful write timestamp
+        - DLQ rate (OMN-3426: new metric to distinguish idle vs failing consumer)
+
+        HTTP status mapping (OMN-3426):
+            200: HEALTHY or DEGRADED — consumer is alive; use "status" + "degraded_reason"
+                 fields to distinguish. DEGRADED does not return 503; only a truly
+                 disconnected/stopped consumer (UNHEALTHY) warrants a non-200 probe failure.
+            503: UNHEALTHY — consumer is not running; K8s should restart the pod.
 
         Args:
             request: aiohttp request object.
@@ -1519,9 +1615,14 @@ class AgentActionsConsumer:
         circuit_state = self._writer.get_circuit_breaker_state() if self._writer else {}
 
         # Determine health status using shared logic
-        status = self._determine_health_status(metrics_snapshot, circuit_state)
+        status, degraded_reason = self._determine_health_status(
+            metrics_snapshot, circuit_state
+        )
 
-        response_body = {
+        # Compute DLQ ratio for response body
+        dlq_ratio = self._compute_dlq_ratio(metrics_snapshot)
+
+        response_body: dict[str, object] = {
             "status": status.value,
             "consumer_running": self._running,
             "consumer_id": self._consumer_id,
@@ -1530,11 +1631,16 @@ class AgentActionsConsumer:
             "circuit_breaker_state": circuit_state.get("state", "unknown"),
             "messages_processed": metrics_snapshot.get("messages_processed", 0),
             "messages_failed": metrics_snapshot.get("messages_failed", 0),
+            "messages_sent_to_dlq": metrics_snapshot.get("messages_sent_to_dlq", 0),
             "batches_processed": metrics_snapshot.get("batches_processed", 0),
+            "dlq_ratio": dlq_ratio,
+            "degraded_reason": degraded_reason,
         }
 
-        # Return appropriate HTTP status code
-        http_status = 200 if status == EnumHealthStatus.HEALTHY else 503
+        # HTTP status: UNHEALTHY → 503 (consumer not running, K8s restart probe).
+        # HEALTHY and DEGRADED both return 200 — DEGRADED means alive-but-impaired,
+        # not dead. Use "status" + "degraded_reason" fields to drive alerting.
+        http_status = 503 if status == EnumHealthStatus.UNHEALTHY else 200
 
         return web.json_response(response_body, status=http_status)
 
@@ -1549,7 +1655,12 @@ class AgentActionsConsumer:
 
         Returns:
             Dictionary with health status including:
-                - status: Overall health (healthy, degraded, unhealthy)
+                - status: Overall health ('healthy', 'degraded', 'unhealthy')
+                - degraded_reason: Reason string when status is 'degraded', else None.
+                  Values: 'circuit_open', 'poll_stale', 'dlq_rate_exceeded',
+                          'write_pipeline_stale', 'write_pipeline_failing'
+                - dlq_ratio: Fraction of received messages sent to DLQ (float or None
+                  if fewer than dlq_min_messages have been received)
                 - consumer_running: Whether consume loop is active
                 - circuit_breaker_state: Current circuit breaker state
                 - consumer_id: Unique consumer identifier
@@ -1559,10 +1670,16 @@ class AgentActionsConsumer:
         circuit_state = self._writer.get_circuit_breaker_state() if self._writer else {}
 
         # Determine health status using shared logic
-        status = self._determine_health_status(metrics_snapshot, circuit_state)
+        status, degraded_reason = self._determine_health_status(
+            metrics_snapshot, circuit_state
+        )
+
+        dlq_ratio = self._compute_dlq_ratio(metrics_snapshot)
 
         return {
             "status": status.value,
+            "degraded_reason": degraded_reason,
+            "dlq_ratio": dlq_ratio,
             "consumer_running": self._running,
             "consumer_id": self._consumer_id,
             "group_id": self._config.kafka_group_id,
