@@ -196,7 +196,7 @@ class TestHealthStatusStartupGrace:
             "started_at": started,
         }
         circuit: dict[str, JsonType] = {"state": "closed"}
-        status = mock_consumer._determine_health_status(metrics, circuit)
+        status, _ = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.HEALTHY
 
     def test_past_startup_grace_period_is_degraded(
@@ -212,7 +212,7 @@ class TestHealthStatusStartupGrace:
             "started_at": started,
         }
         circuit: dict[str, JsonType] = {"state": "closed"}
-        status = mock_consumer._determine_health_status(metrics, circuit)
+        status, _ = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.DEGRADED
 
     def test_idle_consumer_always_healthy(
@@ -227,7 +227,7 @@ class TestHealthStatusStartupGrace:
             "started_at": (now - timedelta(hours=24)).isoformat(),
         }
         circuit: dict[str, JsonType] = {"state": "closed"}
-        status = mock_consumer._determine_health_status(metrics, circuit)
+        status, _ = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.HEALTHY
 
 
@@ -251,7 +251,7 @@ class TestHealthStatusStaleness:
             "started_at": (now - timedelta(hours=1)).isoformat(),
         }
         circuit: dict[str, JsonType] = {"state": "closed"}
-        status = mock_consumer._determine_health_status(metrics, circuit)
+        status, _ = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.HEALTHY
 
     def test_poll_exceeding_staleness_threshold_is_degraded(
@@ -267,7 +267,7 @@ class TestHealthStatusStaleness:
             "started_at": (now - timedelta(hours=1)).isoformat(),
         }
         circuit: dict[str, JsonType] = {"state": "closed"}
-        status = mock_consumer._determine_health_status(metrics, circuit)
+        status, _ = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.DEGRADED
 
     def test_write_staleness_within_threshold_is_healthy(
@@ -283,7 +283,7 @@ class TestHealthStatusStaleness:
             "started_at": (now - timedelta(hours=1)).isoformat(),
         }
         circuit: dict[str, JsonType] = {"state": "closed"}
-        status = mock_consumer._determine_health_status(metrics, circuit)
+        status, _ = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.HEALTHY
 
     def test_write_staleness_exceeding_threshold_is_degraded(
@@ -299,7 +299,7 @@ class TestHealthStatusStaleness:
             "started_at": (now - timedelta(hours=1)).isoformat(),
         }
         circuit: dict[str, JsonType] = {"state": "closed"}
-        status = mock_consumer._determine_health_status(metrics, circuit)
+        status, _ = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.DEGRADED
 
 
@@ -322,7 +322,7 @@ class TestHealthStatusCircuitBreaker:
             "started_at": datetime.now(UTC).isoformat(),
         }
         circuit: dict[str, JsonType] = {"state": "closed"}
-        status = mock_consumer._determine_health_status(metrics, circuit)
+        status, _ = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.UNHEALTHY
 
     def test_circuit_open_is_degraded(
@@ -336,7 +336,7 @@ class TestHealthStatusCircuitBreaker:
             "started_at": datetime.now(UTC).isoformat(),
         }
         circuit: dict[str, JsonType] = {"state": "open"}
-        status = mock_consumer._determine_health_status(metrics, circuit)
+        status, _ = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.DEGRADED
 
     def test_circuit_half_open_is_degraded(
@@ -350,7 +350,7 @@ class TestHealthStatusCircuitBreaker:
             "started_at": datetime.now(UTC).isoformat(),
         }
         circuit: dict[str, JsonType] = {"state": "half_open"}
-        status = mock_consumer._determine_health_status(metrics, circuit)
+        status, _ = mock_consumer._determine_health_status(metrics, circuit)
         assert status == EnumHealthStatus.DEGRADED
 
 
