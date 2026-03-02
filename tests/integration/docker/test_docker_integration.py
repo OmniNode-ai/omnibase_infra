@@ -1074,6 +1074,9 @@ class TestDockerComposeProfiles:
                 "INFISICAL_REDIS_URL": "redis://:test@valkey:6379",
                 "OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN": _pg_dsn,
                 "OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN": _pg_dsn,
+                # OMN-3299: Redpanda removed from local compose; KAFKA_BOOTSTRAP_SERVERS
+                # now uses :? fail-fast — must be set explicitly for config validation.
+                "KAFKA_BOOTSTRAP_SERVERS": "192.168.86.200:29092",
             }
         )
 
