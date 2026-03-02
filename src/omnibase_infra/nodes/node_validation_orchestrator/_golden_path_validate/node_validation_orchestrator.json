@@ -1,0 +1,34 @@
+{
+    "node_id": "node_validation_orchestrator",
+    "ticket_id": "OMN-3389",
+    "input": {
+        "topic": "onex.evt.platform.validation-candidate-submitted.v1",
+        "fixture": {
+            "event_type": "validation.candidate_submitted",
+            "source": "node_validation_orchestrator",
+            "payload": {
+                "candidate_id": "test-candidate-3389",
+                "pattern_type": "golden_path_test",
+                "repo": "omnibase_infra",
+                "timestamp": "2026-03-02T00:00:00Z"
+            }
+        }
+    },
+    "output": {
+        "topic": "onex.evt.platform.validation-candidate-submitted.v1"
+    },
+    "timeout_ms": 15000,
+    "assertions": [
+        {
+            "field": "event_type",
+            "op": "eq",
+            "expected": "validation.candidate_submitted"
+        },
+        {
+            "field": "payload.candidate_id",
+            "op": "eq",
+            "expected": "test-candidate-3389"
+        }
+    ],
+    "_comment": "Orchestrator node: subscribes to 3 validation topics, publishes to 5 topics (validation-plan-created, execution-requested, adjudication-requested, result-published, lifecycle-updated). Echo pattern used for infrastructure-level golden path — verifies Kafka topic reachability for the primary subscribe topic (validation-candidate-submitted.v1) against real Kafka. Node produces output events when deployed and running."
+}
