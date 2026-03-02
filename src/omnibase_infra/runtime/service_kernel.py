@@ -51,6 +51,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import signal
 import sys
 import time
@@ -160,6 +161,84 @@ DEFAULT_GROUP_ID = "onex-runtime"
 # Port validation constants
 MIN_PORT = 1
 MAX_PORT = 65535
+
+# Kafka broker allowlist validation
+# Patterns that are unconditionally rejected — they point at local or
+# container-internal brokers that cannot reach the production Redpanda cluster.
+_KAFKA_BROKER_DENYLIST_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^localhost:"),
+    re.compile(r"^redpanda:"),
+    re.compile(r"^127\.0\.0\.1:"),
+    re.compile(r"^0\.0\.0\.0:"),
+)
+
+# Environment variable name for the operator-supplied allowlist.
+# Value: comma-separated host prefixes, e.g. "192.168.86.,10.0.0."
+# When unset, only the built-in denylist is enforced.
+ENV_KAFKA_BROKER_ALLOWLIST = "KAFKA_BROKER_ALLOWLIST"
+
+
+def validate_kafka_broker_allowlist(
+    bootstrap_servers: str,
+    correlation_id: object | None = None,
+) -> None:
+    """Validate that a Kafka broker address is not a known-bad local target.
+
+    Called during bootstrap() before any Kafka consumers or producers are
+    started. Raises ProtocolConfigurationError immediately if the value
+    matches any entry in the denylist, providing a clear error message
+    rather than a confusing connection-refused timeout seconds later.
+
+    The allowlist is configurable via KAFKA_BROKER_ALLOWLIST (comma-separated
+    host prefixes). When set, *any* broker that matches at least one prefix
+    passes validation regardless of the denylist. When unset only the
+    denylist is applied — any non-denied value is accepted.
+
+    Args:
+        bootstrap_servers: Raw value of KAFKA_BOOTSTRAP_SERVERS.
+        correlation_id: Optional correlation ID for structured error context.
+
+    Raises:
+        ProtocolConfigurationError: If the broker value matches a denylist
+            pattern and does not match any allowlist prefix.
+    """
+    context = ModelInfraErrorContext(
+        transport_type=EnumInfraTransportType.KAFKA,
+        operation="validate_kafka_broker",
+        correlation_id=correlation_id,
+    )
+
+    # Read operator-supplied allowlist (comma-separated host prefixes)
+    raw_allowlist = os.getenv(ENV_KAFKA_BROKER_ALLOWLIST, "")
+    allowlist_prefixes: list[str] = [
+        p.strip() for p in raw_allowlist.split(",") if p.strip()
+    ]
+
+    # Validate each broker in the comma-separated list
+    for broker in bootstrap_servers.split(","):
+        broker = broker.strip()
+        if not broker:
+            continue
+
+        # If operator allowlist is configured and broker matches a prefix: accept
+        if allowlist_prefixes and any(
+            broker.startswith(prefix) for prefix in allowlist_prefixes
+        ):
+            continue
+
+        # Check against the built-in denylist
+        for pattern in _KAFKA_BROKER_DENYLIST_PATTERNS:
+            if pattern.match(broker):
+                raise ProtocolConfigurationError(
+                    f"KAFKA_BOOTSTRAP_SERVERS value '{broker}' is not allowed. "
+                    f"Local/container broker addresses are rejected at boot to "
+                    f"prevent silent misconfiguration. "
+                    f"Expected a remote broker address (e.g., '192.168.86.200:29092'). "
+                    f"Set KAFKA_BROKER_ALLOWLIST to override (comma-separated prefixes).",
+                    context=context,
+                    rejected_broker=broker,
+                    parameter="KAFKA_BOOTSTRAP_SERVERS",
+                )
 
 
 def _get_contracts_dir() -> Path:
@@ -571,6 +650,16 @@ async def bootstrap() -> int:
         )
         environment: str = _kafka_env_from_env or config.event_bus.environment
         kafka_bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
+        if not kafka_bootstrap_servers:
+            logger.warning(
+                "KAFKA_BOOTSTRAP_SERVERS is not set. "
+                "Kafka event bus will not be available unless ONEX_EVENT_BUS_TYPE=kafka "
+                "is also requested, in which case startup will fail. "
+                "Set KAFKA_BOOTSTRAP_SERVERS to the broker address "
+                "(e.g., '192.168.86.200:29092') to enable Kafka. "
+                "(correlation_id=%s)",
+                correlation_id,
+            )
 
         # Check for ONEX_EVENT_BUS_TYPE environment variable override
         # This allows CI/testing environments to force inmemory event bus
@@ -636,6 +725,22 @@ async def bootstrap() -> int:
                 "or use event_bus.type='inmemory' for local development.",
                 context=context,
                 parameter="KAFKA_BOOTSTRAP_SERVERS",
+            )
+
+        # Validate that the broker address is not a local/container broker.
+        # This guard runs whenever Kafka is selected AND a bootstrap_servers
+        # value is present. It fires *before* any connection attempt so that
+        # misconfiguration is caught immediately at boot rather than producing
+        # a confusing connection-refused error minutes later.
+        # Warn-only when unset (unset case already handled above for Kafka mode).
+        if kafka_bootstrap_servers:
+            validate_kafka_broker_allowlist(kafka_bootstrap_servers, correlation_id)
+        elif not use_kafka:
+            # Inmemory mode with no broker configured: log at DEBUG only.
+            logger.debug(
+                "KAFKA_BOOTSTRAP_SERVERS is not set; using inmemory event bus "
+                "(correlation_id=%s)",
+                correlation_id,
             )
 
         event_bus_start_time = time.time()
