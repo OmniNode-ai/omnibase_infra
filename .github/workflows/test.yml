@@ -371,11 +371,61 @@ jobs:
           uv run python scripts/validation/lint_topic_names.py \
             --scan-contracts src/omnibase_infra/nodes
 
+  # Arch invariants: block raw topic literals in production code (OMN-3343)
+  # Scans src/**/*.py for onex.(evt|cmd).* string literals outside canonical
+  # topic definition files. Pre-existing violations are suppressed via baseline.
+  arch-invariants:
+    name: Arch Invariants (OMN-3343)
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Load cached uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/uv.lock') }}-${{ env.CACHE_VERSION }}
+          restore-keys: |
+            uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Check for raw topic literals in production code
+        run: |
+          echo "================================================================"
+          echo "Arch Invariants: Raw Topic Literal Check (OMN-3343)"
+          echo "================================================================"
+          uv run python scripts/validation/check_topic_literals.py \
+            --baseline scripts/validation/topic_literal_baseline.txt
+
   # Parallel test execution - 10 splits for ~927 tests each
   # Split strategy: 9265 tests / 10 = ~927 tests per split (~3-4 min each)
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/10)
-    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint]
+    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, arch-invariants]
     # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
     runs-on: >-
       ${{
@@ -482,7 +532,7 @@ jobs:
         && fromJSON('["self-hosted","omnibase-ci"]')
         || fromJSON('["ubuntu-latest"]')
       }}
-    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint]
+    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, arch-invariants]
     if: always()
 
     steps:
@@ -496,6 +546,7 @@ jobs:
           demoloop="${{ needs.demo-loop-gate.result }}"
           topicenumdrift="${{ needs.topic-enum-drift.result }}"
           topicnaminglint="${{ needs.topic-naming-lint.result }}"
+          archinvariants="${{ needs.arch-invariants.result }}"
 
           if [[ "$gate" == "success" ]] && \
              [[ "$lint" == "success" ]] && \
@@ -504,7 +555,8 @@ jobs:
              [[ "$fingerprint" == "success" ]] && \
              [[ "$demoloop" == "success" ]] && \
              [[ "$topicenumdrift" == "success" ]] && \
-             [[ "$topicnaminglint" == "success" ]]; then
+             [[ "$topicnaminglint" == "success" ]] && \
+             [[ "$archinvariants" == "success" ]]; then
             echo "All checks passed successfully"
             echo "CI Tests Gate (10 splits): Passed"
             echo "Code Quality: Passed"
@@ -514,6 +566,7 @@ jobs:
             echo "Demo Loop Gate: Passed"
             echo "Topic Enum Drift Check: Passed"
             echo "Topic Naming Lint: Passed"
+            echo "Arch Invariants: Passed"
             exit 0
           else
             echo "Checks failed"
@@ -525,6 +578,7 @@ jobs:
             echo "Demo Loop Gate: $demoloop"
             echo "Topic Enum Drift Check: $topicenumdrift"
             echo "Topic Naming Lint: $topicnaminglint"
+            echo "Arch Invariants: $archinvariants"
             exit 1
           fi
 
