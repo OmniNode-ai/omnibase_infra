@@ -1,0 +1,149 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+# Ticket: OMN-3425
+#
+# Schema contract for onex.evt.omniclaude.routing-decision.v1
+#
+# This file is the single source of truth for the routing-decision event schema.
+# Both the omniclaude producer and the omnibase_infra consumer are CI-gated against
+# this contract (OMN-3425: cross-repo schema handshake gate).
+#
+# Retirement path for ModelRoutingDecisionIngest (OMN-3424):
+#   When omniclaude producer aligns to emit all required fields with canonical names,
+#   the ingest shim can be removed and the consumer can deserialize directly into
+#   ModelRoutingDecision. The CI gate in this contract detects any drift before it
+#   reaches production.
+#
+# Producer: omniclaude/plugins/onex/hooks/lib/route_via_events_wrapper.py
+#           (function: _build_routing_decision_payload)
+# Consumer: omnibase_infra/src/omnibase_infra/services/observability/agent_actions/consumer.py
+# Strict model: omnibase_infra/src/.../models/model_routing_decision.py
+
+topic: "onex.evt.omniclaude.routing-decision.v1"
+schema_version: "1.0.0"
+ticket: "OMN-3425"
+description: >
+  Canonical schema for the routing-decision Kafka event emitted by omniclaude
+  whenever an agent routing decision is made. This contract gates both the
+  producer (must emit required fields with canonical names) and the consumer
+  (must accept a contract-shaped payload via ModelRoutingDecision directly).
+
+producer:
+  repo: "omniclaude"
+  file: "plugins/onex/hooks/lib/route_via_events_wrapper.py"
+  function: "_build_routing_decision_payload"
+
+consumer:
+  repo: "omnibase_infra"
+  file: "src/omnibase_infra/services/observability/agent_actions/consumer.py"
+  model: "ModelRoutingDecision"
+  ingest_shim: "ModelRoutingDecisionIngest"
+  ingest_shim_retirement_ticket: "OMN-3424"
+
+# Required fields — the producer MUST emit all of these with the canonical names
+# listed here. The CI gate (test_routing_decision_schema_handshake.py) fails if
+# any required field is missing from the producer payload.
+required_fields:
+  - name: "id"
+    type: "uuid"
+    description: "Unique identifier for this decision (idempotency key). Server-generated UUID."
+  - name: "correlation_id"
+    type: "uuid"
+    description: "Request correlation ID linking related events."
+  - name: "selected_agent"
+    type: "string"
+    description: "Name of the agent selected to handle the request."
+  - name: "confidence_score"
+    type: "float"
+    constraints:
+      ge: 0.0
+      le: 1.0
+    description: "Confidence score for the selection. CANONICAL NAME: confidence_score (not confidence)."
+  - name: "created_at"
+    type: "datetime"
+    description: "Timestamp when the decision was made. Must be ISO-8601 UTC."
+
+# Optional fields — the producer MAY emit these
+optional_fields:
+  - name: "domain"
+    type: "string"
+    nullable: true
+    description: "Domain classification for the request."
+  - name: "routing_reason"
+    type: "string"
+    nullable: true
+    description: "Explanation for the routing decision. CANONICAL NAME: routing_reason (not reasoning)."
+  - name: "claude_session_id"
+    type: "string"
+    nullable: true
+    description: "Claude session identifier. CANONICAL NAME: claude_session_id (not session_id)."
+  - name: "routing_method"
+    type: "string"
+    nullable: true
+    description: "Routing method used (e.g., SEMANTIC, FALLBACK, RULE_BASED)."
+  - name: "latency_ms"
+    type: "integer"
+    nullable: true
+    description: "End-to-end routing duration in milliseconds."
+  - name: "request_type"
+    type: "string"
+    nullable: true
+    description: "Type of request being routed."
+  - name: "alternatives"
+    type: "array"
+    nullable: true
+    description: "Alternative agents considered during routing."
+  - name: "metadata"
+    type: "object"
+    nullable: true
+    description: "Additional metadata about the decision."
+  - name: "project_path"
+    type: "string"
+    nullable: true
+    description: "Absolute path to the project being worked on."
+  - name: "project_name"
+    type: "string"
+    nullable: true
+    description: "Human-readable project name."
+
+# Fields that were renamed — the ingest shim handles these until the producer aligns
+renamed_fields:
+  - producer_name: "confidence"
+    canonical_name: "confidence_score"
+    shim_status: "active"
+    retirement_ticket: "OMN-3424"
+  - producer_name: "reasoning"
+    canonical_name: "routing_reason"
+    shim_status: "active"
+    retirement_ticket: "OMN-3424"
+  - producer_name: "session_id"
+    canonical_name: "claude_session_id"
+    shim_status: "active"
+    retirement_ticket: "OMN-3424"
+  - producer_name: "emitted_at"
+    canonical_name: "created_at"
+    shim_status: "active"
+    retirement_ticket: "OMN-3424"
+
+# Fields collapsed into metadata by the aligned producer (route_via_events_wrapper.py)
+collapsed_fields:
+  - name: "routing_method"
+    note: "Collapsed into metadata dict by route_via_events_wrapper; also emitted as top-level field"
+  - name: "routing_policy"
+    note: "Collapsed into metadata dict; not a canonical top-level field"
+  - name: "routing_path"
+    note: "Collapsed into metadata dict; not a canonical top-level field"
+  - name: "latency_ms"
+    note: "Collapsed into metadata dict by route_via_events_wrapper; also emitted as top-level field"
+  - name: "event_attempted"
+    note: "Collapsed into metadata dict; not a canonical field"
+
+# CI gate test location
+ci_gate:
+  test_file: "src/omnibase_infra/services/observability/agent_actions/tests/test_routing_decision_schema_handshake.py"
+  test_class: "TestRoutingDecisionSchemaHandshake"
+  failure_criteria:
+    - "Any required field missing from contract-shaped producer payload"
+    - "ModelRoutingDecision rejects a contract-shaped payload"
+    - "Contract YAML missing any field declared in ModelRoutingDecision required fields"
+    - "Renamed field reaches consumer without shim normalization"
