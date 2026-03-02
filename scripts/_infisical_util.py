@@ -14,6 +14,7 @@ that it can be imported before any project dependencies are installed.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -94,3 +95,75 @@ def _parse_env_file(env_path: Path) -> dict[str, str]:
             values[key] = value
     logger.info("Parsed %d values from %s", len(values), env_path)
     return values
+
+
+def update_env_file(env_path: Path, updates: dict[str, str]) -> None:
+    """Write or update key=value pairs in a .env file, always overwriting existing keys.
+
+    Unlike the conservative ``_write_env_vars`` in ``provision-infisical.py``,
+    this function always overwrites existing keys.  This is intentional for
+    credential-rotation use cases (e.g. ``provision-keycloak.py``) where client
+    secrets are regenerated on every run and must be written unconditionally.
+
+    Behaviour:
+    - Existing uncommented keys are updated in-place (value always overwritten).
+    - Keys that do not exist yet are appended at the end of the file.
+    - Commented-out lines (``# KEY=value``) are left untouched; the key is
+      appended as a new uncommented entry.
+    - Preserves ``export KEY=value`` prefix for lines that already use it.
+    - Writes atomically via a ``.tmp`` rename (POSIX ``os.rename``).
+    - Creates the parent directory with mode ``0o700`` if it does not exist.
+    - The file (and its ``.tmp`` staging file) is created/kept at ``0o600``.
+
+    Args:
+        env_path: Path to the ``.env`` file.
+        updates: Mapping of variable names to their new string values.
+
+    .. versionadded:: 0.12.0
+        Added for use by ``provision-keycloak.py`` (OMN-3362).
+    """
+    lines: list[str] = []
+    if env_path.is_file():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+
+    existing: dict[str, int] = {}  # key -> line index (uncommented lines only)
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        if "=" in stripped:
+            key = stripped.partition("=")[0].strip().removeprefix("export ").strip()
+            existing[key] = i
+
+    appended: list[str] = []
+    for key, value in updates.items():
+        if key in existing:
+            current_line = lines[existing[key]]
+            had_export = current_line.lstrip().startswith("export ")
+            prefix = "export " if had_export else ""
+            lines[existing[key]] = f"{prefix}{key}={value}"
+            logger.info("  Updated %s", key)
+        else:
+            appended.append(f"{key}={value}")
+            logger.info("  Added %s", key)
+
+    if appended:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.append("# --- Keycloak credentials (provisioned automatically) ---")
+        lines.extend(appended)
+
+    content = "\n".join(lines) + "\n"
+    env_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tmp = env_path.with_name(env_path.name + ".tmp")
+    fd = os.open(str(tmp), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, content.encode("utf-8"))
+    finally:
+        os.close(fd)
+    try:
+        tmp.replace(env_path)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+    logger.info("Wrote %d key(s) to %s", len(updates), env_path)
