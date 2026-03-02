@@ -195,7 +195,7 @@ class HandlerLinearDbErrorReporter:
         # 1. Dedup check
         existing = await self._lookup_fingerprint(event.fingerprint)
         if existing is not None:
-            issue_id, issue_url, current_count = existing
+            issue_id, issue_url, _ = existing
             new_count = await self._increment_occurrence(event.fingerprint)
             logger.info(
                 "DB error fingerprint already tracked — incrementing occurrence_count "
@@ -216,7 +216,7 @@ class HandlerLinearDbErrorReporter:
             linear_issue_id, linear_issue_url = await self._create_linear_issue(event)
         except Exception as exc:
             sanitized = sanitize_error_message(exc)
-            logger.error(
+            logger.exception(
                 "Failed to create Linear ticket (fingerprint=%s): %s",
                 event.fingerprint,
                 sanitized,

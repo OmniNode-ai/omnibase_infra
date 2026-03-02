@@ -74,7 +74,7 @@ class NodeDbErrorLinearEffect(NodeEffect):
     Dependency Injection:
         HandlerLinearDbErrorReporter is instantiated by callers with its
         dependencies (linear_api_key, linear_team_id, db_pool).
-        This node contains NO instance variables for the handler.
+        Constructor injection keeps the node stateless.
 
     Example:
         ```python

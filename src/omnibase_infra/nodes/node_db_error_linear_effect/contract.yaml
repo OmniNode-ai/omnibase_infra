@@ -18,7 +18,6 @@
 # Related Tickets:
 #   - OMN-3408: Kafka Consumer -> Linear Ticket Reporter (ONEX Node)
 #   - OMN-3407: PostgreSQL Error Emitter (hard prerequisite)
-
 # Contract identifiers
 name: "node_db_error_linear_effect"
 contract_name: "node_db_error_linear_effect"
@@ -31,17 +30,11 @@ node_version:
   major: 1
   minor: 0
   patch: 0
-
 # Node type
 node_type: "EFFECT_GENERIC"
-
 # Description
 description: >
-  Effect node that consumes PostgreSQL error events from
-  onex.evt.omnibase-infra.db-error.v1 and creates Linear tickets for unique
-  errors. Deduplication is performed via a db_error_tickets PostgreSQL table
-  keyed on the error fingerprint. Repeat occurrences increment
-  occurrence_count without creating duplicate tickets.
+  Effect node that consumes PostgreSQL error events from onex.evt.omnibase-infra.db-error.v1 and creates Linear tickets for unique errors. Deduplication is performed via a db_error_tickets PostgreSQL table keyed on the error fingerprint. Repeat occurrences increment occurrence_count without creating duplicate tickets.
 
 # =============================================================================
 # EVENT BUS SUBSCRIPTION (Kafka topic wiring)
@@ -58,7 +51,6 @@ event_bus:
   subscribe_topics:
     - "onex.evt.omnibase-infra.db-error.v1"
   publish_topics: []
-
 # Strongly typed I/O models
 input_model:
   name: "ModelDbErrorEvent"
@@ -68,7 +60,6 @@ output_model:
   name: "ModelDbErrorTicketResult"
   module: "omnibase_infra.handlers.models.model_db_error_ticket_result"
   description: "Result of the dedup check + Linear ticket create/skip operation."
-
 # =============================================================================
 # HANDLER ROUTING (Declarative Handler Dispatch)
 # =============================================================================
@@ -86,7 +77,6 @@ handler_routing:
         - issue_id
         - issue_url
         - occurrence_count
-
 # =============================================================================
 # ERROR HANDLING
 # =============================================================================
@@ -125,7 +115,6 @@ error_handling:
       description: "asyncpg pool not available for dedup check"
       recoverable: false
       retry_strategy: "none"
-
 # IO operations
 io_operations:
   - operation: "report_error"
@@ -147,7 +136,6 @@ io_operations:
       - issue_url
       - occurrence_count
       - correlation_id
-
 # Dependencies
 dependencies:
   - name: "linear_api_key"
@@ -168,7 +156,6 @@ dependencies:
     type: "library"
     library: "httpx"
     description: "Async HTTP client for Linear GraphQL API"
-
 # Capabilities
 capabilities:
   - name: "linear_ticket_creation"
@@ -179,7 +166,6 @@ capabilities:
     description: "Increment occurrence_count for repeat errors without creating new tickets"
   - name: "retry_with_backoff"
     description: "Retry transient Linear API failures with exponential backoff"
-
 # Health check
 health_check:
   enabled: true
@@ -194,7 +180,6 @@ health_check:
       check_type: "environment"
       env_var: "LINEAR_TEAM_ID"
       description: "Verify LINEAR_TEAM_ID is set"
-
 # Metadata
 metadata:
   author: "OmniNode Team"
