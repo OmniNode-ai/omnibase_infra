@@ -133,7 +133,8 @@ def ensure_keycloak_db(postgres_password: str, postgres_port: int = 5436) -> Non
             ],
             capture_output=True,
             text=True,
-            timeout=10, check=False,
+            timeout=10,
+            check=False,
         )
         container_id = result.stdout.strip()
         if not container_id:
@@ -154,7 +155,8 @@ def ensure_keycloak_db(postgres_password: str, postgres_port: int = 5436) -> Non
             ],
             capture_output=True,
             text=True,
-            timeout=15, check=False,
+            timeout=15,
+            check=False,
         )
         if check.stdout.strip() == "1":
             log("keycloak database already exists (via docker exec)")
@@ -248,7 +250,7 @@ def get_admin_token(kc_url: str, username: str, password: str) -> str:
         timeout=10,
     )
     r.raise_for_status()
-    token = r.json()["access_token"]
+    token: str = r.json()["access_token"]
     log(f"Admin token acquired {_secret_repr(token)}")
     return token
 
@@ -387,7 +389,7 @@ def provision_onex_admin_client(kc_url: str, token: str) -> str:
         f"{base}/clients/{client_uuid}/client-secret", headers=headers, timeout=10
     )
     secret_resp.raise_for_status()
-    secret = secret_resp.json()["value"]
+    secret: str = secret_resp.json()["value"]
     log(f"onex-admin client secret rotated {_secret_repr(secret)}")
     return secret
 
@@ -489,7 +491,7 @@ def provision_onex_service_client(kc_url: str, realm: str, token: str) -> str:
         f"{base}/clients/{client_uuid}/client-secret", headers=headers, timeout=10
     )
     secret_resp.raise_for_status()
-    secret = secret_resp.json()["value"]
+    secret: str = secret_resp.json()["value"]
     log(f"onex-service client secret rotated {_secret_repr(secret)}")
     return secret
 
