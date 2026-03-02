@@ -18,28 +18,22 @@
 #           (function: _build_routing_decision_payload)
 # Consumer: omnibase_infra/src/omnibase_infra/services/observability/agent_actions/consumer.py
 # Strict model: omnibase_infra/src/.../models/model_routing_decision.py
-
 topic: "onex.evt.omniclaude.routing-decision.v1"
 schema_version: "1.0.0"
 ticket: "OMN-3425"
 description: >
-  Canonical schema for the routing-decision Kafka event emitted by omniclaude
-  whenever an agent routing decision is made. This contract gates both the
-  producer (must emit required fields with canonical names) and the consumer
-  (must accept a contract-shaped payload via ModelRoutingDecision directly).
+  Canonical schema for the routing-decision Kafka event emitted by omniclaude whenever an agent routing decision is made. This contract gates both the producer (must emit required fields with canonical names) and the consumer (must accept a contract-shaped payload via ModelRoutingDecision directly).
 
 producer:
   repo: "omniclaude"
   file: "plugins/onex/hooks/lib/route_via_events_wrapper.py"
   function: "_build_routing_decision_payload"
-
 consumer:
   repo: "omnibase_infra"
   file: "src/omnibase_infra/services/observability/agent_actions/consumer.py"
   model: "ModelRoutingDecision"
   ingest_shim: "ModelRoutingDecisionIngest"
   ingest_shim_retirement_ticket: "OMN-3424"
-
 # Required fields — the producer MUST emit all of these with the canonical names
 # listed here. The CI gate (test_routing_decision_schema_handshake.py) fails if
 # any required field is missing from the producer payload.
@@ -62,7 +56,6 @@ required_fields:
   - name: "created_at"
     type: "datetime"
     description: "Timestamp when the decision was made. Must be ISO-8601 UTC."
-
 # Optional fields — the producer MAY emit these
 optional_fields:
   - name: "domain"
@@ -105,7 +98,6 @@ optional_fields:
     type: "string"
     nullable: true
     description: "Human-readable project name."
-
 # Fields that were renamed — the ingest shim handles these until the producer aligns
 renamed_fields:
   - producer_name: "confidence"
@@ -124,7 +116,6 @@ renamed_fields:
     canonical_name: "created_at"
     shim_status: "active"
     retirement_ticket: "OMN-3424"
-
 # Fields collapsed into metadata by the aligned producer (route_via_events_wrapper.py)
 collapsed_fields:
   - name: "routing_method"
@@ -137,7 +128,6 @@ collapsed_fields:
     note: "Collapsed into metadata dict by route_via_events_wrapper; also emitted as top-level field"
   - name: "event_attempted"
     note: "Collapsed into metadata dict; not a canonical field"
-
 # CI gate test location
 ci_gate:
   test_file: "src/omnibase_infra/services/observability/agent_actions/tests/test_routing_decision_schema_handshake.py"
