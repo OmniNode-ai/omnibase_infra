@@ -933,7 +933,14 @@ class AgentActionsConsumer:
                         + self._config.poll_timeout_buffer_seconds,
                     )
                 except TimeoutError:
-                    # Poll timeout is normal, continue loop
+                    # Poll timeout is normal (happens during Kafka reconnect or
+                    # low-traffic periods). Still record the poll attempt so
+                    # last_poll_at stays fresh and the health check does not
+                    # flip to DEGRADED while aiokafka is reconnecting.
+                    # Without this, health_check_poll_staleness_seconds (default
+                    # 60s) fires after the first coordinator-dead window even
+                    # though the consumer loop is still running. (OMN-3430)
+                    await self.metrics.record_polled()
                     continue
 
                 # Record poll time even if no messages - prevents false DEGRADED

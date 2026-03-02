@@ -16,6 +16,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -26,6 +27,7 @@ import pytest
 from aiohttp.test_utils import TestClient
 
 from omnibase_core.errors import OnexError
+from omnibase_core.types import JsonType
 from omnibase_infra.services.observability.agent_actions.config import (
     ConfigAgentActionsConsumer,
 )
@@ -1306,6 +1308,116 @@ class TestRunMethod:
             await consumer.run()
 
 
+# =============================================================================
+# Kafka Reconnect Health Regression Tests (OMN-3430)
+# =============================================================================
+
+
+class TestKafkaReconnectHealth:
+    """Regression tests for OMN-3430.
+
+    When aiokafka is in its internal reconnect/retry loop, every getmany()
+    call blocks until asyncio.wait_for fires a TimeoutError.  Before the fix,
+    the TimeoutError handler called ``continue`` without updating
+    ``last_poll_at``, causing the poll-staleness check to flip health to
+    DEGRADED after 60 s even though the consumer loop was still running.
+    """
+
+    @pytest.mark.asyncio
+    async def test_record_polled_called_on_timeout(
+        self, consumer: AgentActionsConsumer
+    ) -> None:
+        """TimeoutError from getmany must still update last_poll_at (OMN-3430).
+
+        Simulates the Kafka-coordinator-dead scenario where every getmany()
+        call times out.  Verifies that after a single poll-loop iteration that
+        hits TimeoutError, last_poll_at is not None (i.e. record_polled was
+        called inside the TimeoutError handler).
+
+        Implementation: patch asyncio.wait_for so the first call raises
+        TimeoutError (and sets _running=False to stop the loop), then confirm
+        the metrics were updated.
+        """
+        # Consumer must be in running state for the loop to execute.
+        consumer._running = True
+
+        # last_poll_at should be None before any iteration.
+        assert consumer.metrics.last_poll_at is None
+
+        call_count = 0
+
+        async def _wait_for_side_effect(coro: object, timeout: float) -> object:
+            nonlocal call_count
+            call_count += 1
+            # Stop the loop so _consume_loop exits after this iteration.
+            consumer._running = False
+            raise TimeoutError
+
+        mock_kafka = AsyncMock()
+        consumer._consumer = mock_kafka
+
+        with patch(
+            "omnibase_infra.services.observability.agent_actions.consumer.asyncio.wait_for",
+            side_effect=_wait_for_side_effect,
+        ):
+            await consumer._consume_loop(uuid4())
+
+        # After the TimeoutError iteration, last_poll_at must have been updated.
+        assert consumer.metrics.last_poll_at is not None, (
+            "record_polled() was not called during TimeoutError — "
+            "health check will report DEGRADED during Kafka reconnect (OMN-3430)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_poll_staleness_not_triggered_during_kafka_timeout(
+        self, consumer: AgentActionsConsumer
+    ) -> None:
+        """Health stays non-DEGRADED even after repeated poll timeouts (OMN-3430).
+
+        Verifies end-to-end: after a sequence of getmany() TimeoutErrors,
+        _determine_health_status does NOT return DEGRADED due to poll staleness
+        because record_polled() keeps last_poll_at fresh.
+
+        This tests the full chain: TimeoutError → record_polled() → fresh
+        last_poll_at → health check passes staleness check → not DEGRADED.
+        """
+        consumer._running = True
+
+        iteration = 0
+
+        async def _wait_for_side_effect(coro: object, timeout: float) -> object:
+            nonlocal iteration
+            iteration += 1
+            # Stop the loop after 3 iterations to keep the test fast.
+            if iteration >= 3:
+                consumer._running = False
+            raise TimeoutError
+
+        mock_kafka = AsyncMock()
+        consumer._consumer = mock_kafka
+
+        with patch(
+            "omnibase_infra.services.observability.agent_actions.consumer.asyncio.wait_for",
+            side_effect=_wait_for_side_effect,
+        ):
+            await consumer._consume_loop(uuid4())
+
+        # Confirm last_poll_at is fresh (within poll_staleness threshold).
+        assert consumer.metrics.last_poll_at is not None
+        now = datetime.now(UTC)
+        poll_age = (now - consumer.metrics.last_poll_at).total_seconds()
+        assert poll_age < consumer._config.health_check_poll_staleness_seconds, (
+            f"last_poll_at is {poll_age:.1f}s old, exceeds staleness threshold "
+            f"{consumer._config.health_check_poll_staleness_seconds}s"
+        )
+
+        # Health status should NOT be DEGRADED due to poll staleness.
+        metrics_snapshot = await consumer.metrics.snapshot()
+        circuit_state: dict[str, JsonType] = {"state": "closed"}
+        status = consumer._determine_health_status(metrics_snapshot, circuit_state)
+        assert status != EnumHealthStatus.DEGRADED
+
+
 __all__ = [
     "TestMaskDsnPassword",
     "TestTopicModelMapping",
@@ -1318,4 +1430,5 @@ __all__ = [
     "TestConsumerLifecycle",
     "TestCommitOffsets",
     "TestRunMethod",
+    "TestKafkaReconnectHealth",
 ]
