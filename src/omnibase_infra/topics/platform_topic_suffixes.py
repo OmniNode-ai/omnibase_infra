@@ -375,6 +375,23 @@ Producer: NodeGmailArchiveCleanupEffect / HandlerGmailArchiveCleanup
 Consumer: None (intentionally fire-and-forget; see OMN-2937)
 """
 
+# Full topic name (not a suffix) — named as such to be unambiguous.
+# Used by monitor_logs.py postgres error emitter and downstream consumers.
+TOPIC_DB_ERROR_V1: str = "onex.evt.omnibase-infra.db-error.v1"
+"""Full topic name for PostgreSQL error events (OMN-3407).
+
+Published by the postgres error emitter in ``scripts/monitor_logs.py`` when
+a PostgreSQL ERROR log block is detected and deduplicated. Each event carries
+a ``ModelDbErrorEvent`` payload (JSON-serialized).
+
+Producer: monitor_logs.py PostgresErrorEmitter
+Consumer: OMN-3406 CI UUID cast misuse validator (omniintelligence)
+
+Note: Named ``TOPIC_DB_ERROR_V1`` (full name, not a suffix) to make it
+unambiguous that callers use this string directly rather than composing it
+with a tenant/namespace prefix.
+"""
+
 # =============================================================================
 # OMNIBASE_INFRA DOMAIN TOPIC SPEC REGISTRY
 # =============================================================================
@@ -382,11 +399,14 @@ Consumer: None (intentionally fire-and-forget; see OMN-2937)
 ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     # Gmail cleanup events (3 partitions — low-throughput, one event per run)
     ModelTopicSpec(suffix=SUFFIX_GMAIL_ARCHIVE_PURGED, partitions=3),
+    # PostgreSQL error events (3 partitions — low-throughput, error-driven)
+    ModelTopicSpec(suffix=TOPIC_DB_ERROR_V1, partitions=3),
 )
 """Omnibase_infra domain topic specs for internal effect nodes.
 
-Currently covers gmail cleanup events. Topics are provisioned so the correct
-broker topic name exists even if no consumer is registered yet.
+Covers gmail cleanup events and PostgreSQL error events. Topics are
+provisioned so the correct broker topic name exists even if no consumer
+is registered yet.
 """
 
 # =============================================================================
