@@ -139,6 +139,16 @@ class ModelRoutingDecision(BaseModel):
         description="Claude Code session identifier.",
     )
 
+    # ---- Routing Analytics (OMN-3422) ----
+    routing_method: str | None = Field(
+        default=None,
+        description="Routing method used (e.g., SEMANTIC, FALLBACK, RULE_BASED).",
+    )
+    latency_ms: int | None = Field(
+        default=None,
+        description="End-to-end routing duration in milliseconds.",
+    )
+
     def __str__(self) -> str:
         """Return concise string representation for logging.
 
