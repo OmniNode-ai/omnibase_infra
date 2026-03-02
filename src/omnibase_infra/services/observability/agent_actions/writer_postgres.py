@@ -2,9 +2,9 @@
 # Copyright (c) 2025 OmniNode Team
 """PostgreSQL Writer for Agent Actions Observability.
 
-This module provides a PostgreSQL writer for persisting agent observability
-events consumed from Kafka. It handles batch inserts with idempotency
-guarantees and circuit breaker resilience.
+Persists agent observability events consumed from Kafka to PostgreSQL.
+Handles batch inserts with idempotency guarantees and circuit breaker
+resilience via MixinAsyncCircuitBreaker.
 
 Design Decisions:
     - Pool injection: asyncpg.Pool is injected, not created/managed
@@ -65,6 +65,9 @@ from omnibase_infra.services.observability.agent_actions.models import (
     ModelPerformanceMetric,
     ModelRoutingDecision,
     ModelTransformationEvent,
+)
+from omnibase_infra.services.observability.agent_actions.models.model_routing_decision_ingest import (
+    ModelRoutingDecisionIngest,
 )
 
 logger = logging.getLogger(__name__)
@@ -306,13 +309,17 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
 
     async def write_routing_decisions(
         self,
-        events: list[ModelRoutingDecision],
+        events: list[ModelRoutingDecision] | list[ModelRoutingDecisionIngest],
         correlation_id: UUID | None = None,
     ) -> int:
         """Write batch of routing decision events to PostgreSQL.
 
         Uses INSERT ... ON CONFLICT (id) DO NOTHING for idempotency.
         Append-only audit log - duplicates are silently ignored.
+
+        Accepts both ModelRoutingDecision (strict, internal) and
+        ModelRoutingDecisionIngest (permissive, Kafka boundary) — both expose
+        the same field names used in the INSERT statement.
 
         Args:
             events: List of routing decision events to write.
@@ -325,6 +332,8 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If operation times out.
             InfraUnavailableError: If circuit breaker is open.
+
+        Invariant: placeholder count == parameter tuple length == 15.
         """
         if not events:
             return 0
@@ -345,13 +354,16 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
             correlation_id=op_correlation_id,
         )
 
+        # OMN-3422: Added routing_method ($14) and latency_ms ($15).
+        # Invariant: 15 columns, 15 placeholders ($1..$15), 15 params per row.
         sql = """
             INSERT INTO agent_routing_decisions (
                 id, correlation_id, selected_agent, confidence_score, created_at,
                 request_type, alternatives, routing_reason, domain, metadata,
-                project_path, project_name, claude_session_id
+                project_path, project_name, claude_session_id,
+                routing_method, latency_ms
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             ON CONFLICT (id) DO NOTHING
         """
 
@@ -361,19 +373,21 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
                     sql,
                     [
                         (
-                            e.id,
-                            e.correlation_id,
-                            e.selected_agent,
-                            e.confidence_score,
-                            e.created_at,
-                            e.request_type,
-                            self._serialize_list(e.alternatives),
-                            e.routing_reason,
-                            e.domain,
-                            self._serialize_json(e.metadata),
-                            e.project_path,
-                            e.project_name,
-                            e.claude_session_id,
+                            e.id,  # $1
+                            e.correlation_id,  # $2
+                            e.selected_agent,  # $3
+                            e.confidence_score,  # $4
+                            e.created_at,  # $5
+                            e.request_type,  # $6
+                            self._serialize_list(e.alternatives),  # $7
+                            e.routing_reason,  # $8
+                            e.domain,  # $9
+                            self._serialize_json(e.metadata),  # $10
+                            e.project_path,  # $11
+                            e.project_name,  # $12
+                            e.claude_session_id,  # $13
+                            e.routing_method,  # $14
+                            e.latency_ms,  # $15
                         )
                         for e in events
                     ],

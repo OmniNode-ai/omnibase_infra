@@ -17,11 +17,13 @@
       "adminUrl": "https://app.omninode.ai",
       "redirectUris": [
         "https://app.omninode.ai/*",
-        "http://localhost:3000/*"
+        "http://localhost:3000/*",
+        "http://localhost:8080/*"
       ],
       "webOrigins": [
         "https://app.omninode.ai",
-        "http://localhost:3000"
+        "http://localhost:3000",
+        "http://localhost:8080"
       ],
       "protocol": "openid-connect",
       "publicClient": true,

@@ -150,6 +150,8 @@ class TestTopicModelMapping:
         """Topic to model mapping should be correct.
 
         OMN-2621: Asserts ONEX canonical topic names, not legacy bare names.
+        OMN-3422: routing-decision.v1 now uses ModelRoutingDecisionIngest (permissive
+            ingest model at Kafka boundary) instead of ModelRoutingDecision (strict).
         """
         from omnibase_infra.services.observability.agent_actions.models import (
             ModelAgentAction,
@@ -157,16 +159,19 @@ class TestTopicModelMapping:
             ModelDetectionFailure,
             ModelExecutionLog,
             ModelPerformanceMetric,
-            ModelRoutingDecision,
             ModelTransformationEvent,
+        )
+        from omnibase_infra.services.observability.agent_actions.models.model_routing_decision_ingest import (
+            ModelRoutingDecisionIngest,
         )
 
         assert (
             TOPIC_TO_MODEL["onex.evt.omniclaude.agent-actions.v1"] is ModelAgentAction
         )
+        # OMN-3422: uses ingest model at Kafka boundary to tolerate producer field names
         assert (
             TOPIC_TO_MODEL["onex.evt.omniclaude.routing-decision.v1"]
-            is ModelRoutingDecision
+            is ModelRoutingDecisionIngest
         )
         assert (
             TOPIC_TO_MODEL["onex.evt.omniclaude.agent-transformation.v1"]
@@ -1262,6 +1267,8 @@ class TestHealthCheck:
 
         # dlq_ratio is None because below min_messages threshold
         assert health["dlq_ratio"] is None
+        # Consumer is HEALTHY: no write gap (no writes yet), below DLQ threshold
+        assert health["status"] == EnumHealthStatus.HEALTHY.value
 
     @pytest.mark.asyncio
     async def test_health_check_healthy_when_writes_stale_but_dlq_explains_gap(

@@ -200,9 +200,9 @@ class ConfigAgentActionsConsumer(BaseSettings):
         description=(
             "DLQ rate threshold above which the health check reports DEGRADED status "
             "with reason 'dlq_rate_exceeded'. Computed as messages_sent_to_dlq / "
-            "messages_received. A value of 0.5 means more than 50%% of received "
+            "messages_received. A value of 0.5 means more than 50% of received "
             "messages are going to the DLQ (validation failures). Only evaluated when "
-            "messages_received >= 10 to avoid false positives on cold start. "
+            "messages_received >= health_check_dlq_min_messages to avoid false positives on cold start. "
             "Configure via OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_DLQ_RATE_THRESHOLD env var."
         ),
     )

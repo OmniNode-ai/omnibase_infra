@@ -2,8 +2,9 @@
 # Copyright (c) 2025 OmniNode Team
 """Async Kafka Consumer for Agent Actions Observability.
 
-Consumes agent observability events from multiple Kafka topics, validates them
-using Pydantic models, and persists them to PostgreSQL via WriterAgentActionsPostgres.
+Consumes agent observability events from multiple Kafka topics, validates each
+event against its registered Pydantic model, and persists batches to PostgreSQL
+via WriterAgentActionsPostgres.
 
 Design Decisions:
     - Per-partition offset tracking: Commit only successfully persisted partitions
@@ -83,6 +84,9 @@ from omnibase_infra.services.observability.agent_actions.models import (
     ModelPerformanceMetric,
     ModelRoutingDecision,
     ModelTransformationEvent,
+)
+from omnibase_infra.services.observability.agent_actions.models.model_routing_decision_ingest import (
+    ModelRoutingDecisionIngest,
 )
 from omnibase_infra.services.observability.agent_actions.writer_postgres import (
     WriterAgentActionsPostgres,
@@ -166,9 +170,13 @@ def mask_dsn_password(dsn: str) -> str:
 # OMN-2902: "agent-execution-logs" renamed to "onex.evt.omniclaude.agent-execution-logs.v1".
 # OMN-2846: "onex.evt.omniclaude.agent-status.v1" renamed from "onex.evt.agent.status.v1".
 # OMN-2986: All topic names must match config.py (canonical ONEX names).
+# OMN-3422: routing-decision.v1 uses permissive ingest model at Kafka boundary.
+#   ModelRoutingDecisionIngest maps producer field names (confidence, reasoning,
+#   session_id, emitted_at) to internal conventions. ModelRoutingDecision (strict)
+#   is preserved for all downstream use.
 TOPIC_TO_MODEL: dict[str, type[BaseModel]] = {
     "onex.evt.omniclaude.agent-actions.v1": ModelAgentAction,
-    "onex.evt.omniclaude.routing-decision.v1": ModelRoutingDecision,
+    "onex.evt.omniclaude.routing-decision.v1": ModelRoutingDecisionIngest,  # OMN-3422: was ModelRoutingDecision
     "onex.evt.omniclaude.agent-transformation.v1": ModelTransformationEvent,
     "onex.evt.omniclaude.performance-metrics.v1": ModelPerformanceMetric,
     "onex.evt.omniclaude.detection-failure.v1": ModelDetectionFailure,
@@ -238,12 +246,18 @@ class ConsumerMetrics:
         per_topic_processed: Per-topic message processed counts.
         per_topic_failed: Per-topic message failure counts.
         batch_latency_ms: List of recent batch latency samples (ring buffer, max 100).
+        baseline_messages_received: Snapshot of messages_received at last successful write.
+        baseline_messages_sent_to_dlq: Snapshot of messages_sent_to_dlq at last successful write.
 
     Phase 2 Additions (OMN-1768):
         - Per-topic counters for received/processed/failed
         - Batch latency tracking (ring buffer of recent samples)
         - DLQ message counter
         - Optional metrics export hooks for external systems
+
+    OMN-3426 Additions:
+        - Baseline counters captured at last successful write to enable delta-based
+          DLQ-explained checks (avoids false positives from lifetime counters).
     """
 
     MAX_LATENCY_SAMPLES: int = 100
@@ -260,6 +274,12 @@ class ConsumerMetrics:
         self.last_successful_write_at: datetime | None = None
         self.started_at: datetime = datetime.now(UTC)
         self._lock = asyncio.Lock()
+
+        # Baseline counters captured at last successful write (OMN-3426).
+        # Used to compute deltas for DLQ-explained health checks so that
+        # historical traffic does not cause false-positive HEALTHY results.
+        self.baseline_messages_received: int = 0
+        self.baseline_messages_sent_to_dlq: int = 0
 
         # Per-topic counters (Phase 2 - OMN-1768)
         self.per_topic_received: dict[str, int] = {}
@@ -332,6 +352,11 @@ class ConsumerMetrics:
     async def record_processed(self, count: int = 1, topic: str | None = None) -> None:
         """Record successfully processed messages.
 
+        Also captures baseline snapshots of messages_received and
+        messages_sent_to_dlq at the time of the write. These baselines are used
+        by the health check to compute deltas (traffic since last write) so that
+        historical DLQ totals do not produce false DLQ-explained results.
+
         Args:
             count: Number of messages processed.
             topic: Optional topic name for per-topic tracking.
@@ -339,6 +364,9 @@ class ConsumerMetrics:
         async with self._lock:
             self.messages_processed += count
             self.last_successful_write_at = datetime.now(UTC)
+            # Capture baseline counters at write time (OMN-3426)
+            self.baseline_messages_received = self.messages_received
+            self.baseline_messages_sent_to_dlq = self.messages_sent_to_dlq
             if topic is not None:
                 self.per_topic_processed[topic] = (
                     self.per_topic_processed.get(topic, 0) + count
@@ -453,6 +481,10 @@ class ConsumerMetrics:
                     else None
                 ),
                 "started_at": self.started_at.isoformat(),
+                # Baseline counters at last successful write (OMN-3426).
+                # Used by health checks to compute deltas (traffic since last write).
+                "baseline_messages_received": self.baseline_messages_received,
+                "baseline_messages_sent_to_dlq": self.baseline_messages_sent_to_dlq,
                 "per_topic_received": dict(self.per_topic_received),
                 "per_topic_processed": dict(self.per_topic_processed),
                 "per_topic_failed": dict(self.per_topic_failed),
@@ -1570,13 +1602,31 @@ class AgentActionsConsumer:
                     return EnumHealthStatus.HEALTHY, None
 
                 # Write is stale with traffic. Determine if DLQ explains the gap.
+                # Use deltas since the last successful write to avoid false results
+                # from historical lifetime counters (OMN-3426 / CodeRabbit fix).
+                baseline_received = metrics_snapshot.get(
+                    "baseline_messages_received", 0
+                )
+                baseline_dlq = metrics_snapshot.get("baseline_messages_sent_to_dlq", 0)
+                delta_received = (
+                    messages_received - baseline_received
+                    if isinstance(messages_received, int)
+                    and isinstance(baseline_received, int)
+                    else 0
+                )
+                delta_dlq = (
+                    messages_sent_to_dlq - baseline_dlq
+                    if isinstance(messages_sent_to_dlq, int)
+                    and isinstance(baseline_dlq, int)
+                    else 0
+                )
                 # If all messages since the last write went to DLQ, the write
                 # pipeline is not broken — validation failures explain the staleness.
                 dlq_explained = (
-                    isinstance(messages_sent_to_dlq, int)
-                    and isinstance(messages_received, int)
-                    and messages_sent_to_dlq >= messages_received
-                    and messages_received > 0
+                    isinstance(delta_dlq, int)
+                    and isinstance(delta_received, int)
+                    and delta_dlq >= delta_received
+                    and delta_received > 0
                 )
 
                 if dlq_explained:

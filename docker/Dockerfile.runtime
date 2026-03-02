@@ -159,26 +159,25 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # reproducible.
 RUN uv pip freeze | grep -v '^\(-e\|@\)' > /tmp/constraints.txt
 
-# Install omninode-intelligence (formerly omniintelligence) constrained to prevent version drift.
-# omninode-intelligence==0.8.0 is compatible with omnibase-infra==0.13.0.
-# NOTE: package was renamed from omniintelligence → omninode-intelligence on PyPI at 0.7.0.
-# 0.8.0 is the latest available release; bump to 0.9.0 when published (OMN-3301).
+# Install omninode-claude and omninode-memory first; install omninode-intelligence LAST.
+# REASON: omninode-claude==0.4.0 hard-pins omninode-intelligence==0.8.0 as an exact dep.
+# --no-deps prevents that exact pin from downgrading our 0.9.0 install.
+# omnibase-core==0.22.0, omnibase-infra==0.13.0, omnibase-spi==0.15.0 already satisfied.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --constraint /tmp/constraints.txt \
-    omninode-intelligence==0.8.0
-
-# omninode-claude==0.4.0 declares exact pins omnibase-core==0.22.0, omnibase-infra==0.13.0,
-# omnibase-spi==0.15.0 that are already satisfied by the constraint file. --no-deps removed
-# now that 0.4.0 is compatible with omnibase-infra==0.13.0 (resolves OMN-3182).
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --constraint /tmp/constraints.txt \
+    uv pip install --no-deps \
     omninode-claude==0.4.0
 
 # omninode-memory==0.6.1 declares omnibase-infra<0.14.0,>=0.13.0 — fully compatible.
-# --no-deps removed now that 0.6.1 correctly declares the supported range (resolves OMN-3183).
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --constraint /tmp/constraints.txt \
     omninode-memory==0.6.1
+
+# Install omninode-intelligence LAST to ensure 0.9.1 is not downgraded by omninode-claude's
+# exact pin (==0.8.0). 0.9.1 adds type casts to fix PostgreSQL type inference (OMN-3301).
+# NOTE: package was renamed from omniintelligence → omninode-intelligence on PyPI at 0.7.0.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --constraint /tmp/constraints.txt \
+    omninode-intelligence==0.9.1
 
 # ============================================================================
 # Runtime Stage - Minimal production image
