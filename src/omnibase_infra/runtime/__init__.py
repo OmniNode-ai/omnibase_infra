@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Runtime module for omnibase_infra.
+"""Runtime module for omnibase_infra.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides the runtime infrastructure for the ONEX infrastructure layer,
 including three SINGLE SOURCE OF TRUTH registries and the runtime execution host.
@@ -87,6 +87,7 @@ from omnibase_infra.runtime.handler_registry import (
 from omnibase_infra.runtime.service_kernel import bootstrap as kernel_bootstrap
 from omnibase_infra.runtime.service_kernel import load_runtime_config
 from omnibase_infra.runtime.service_kernel import main as kernel_main
+from omnibase_infra.runtime.service_kernel import validate_kafka_broker_allowlist
 from omnibase_infra.runtime.service_message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.runtime.models import (
     ModelContractLoadResult,
@@ -376,6 +377,7 @@ __all__: list[str] = [
     "kernel_bootstrap",
     "kernel_main",
     "load_runtime_config",
+    "validate_kafka_broker_allowlist",
     "propagate_chain_context",
     "register_handlers_from_config",
     "validate_dispatch_chain",
