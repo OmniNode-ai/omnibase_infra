@@ -19,3 +19,4 @@ class EnumOmnibaseInfraTopic(str, Enum):
     """
     CMD_BASELINES_COMPUTE_REQUESTED_V1 = "onex.cmd.omnibase-infra.baselines-compute-requested.v1"  # onex.cmd.omnibase-infra.baselines-compute-requested.v1
     EVT_BASELINES_COMPUTED_V1 = "onex.evt.omnibase-infra.baselines-computed.v1"  # onex.evt.omnibase-infra.baselines-computed.v1
+    EVT_DB_ERROR_V1 = "onex.evt.omnibase-infra.db-error.v1"  # onex.evt.omnibase-infra.db-error.v1
