@@ -5,6 +5,10 @@ PostgreSQL ERROR log line is detected. Events are deduplicated via Valkey
 using a SHA-256 fingerprint before publish.
 
 Topic: ``onex.evt.omnibase-infra.db-error.v1`` (TOPIC_DB_ERROR_V1)
+
+Related Tickets:
+    - OMN-3407: PostgreSQL error event emitter
+    - OMN-3408: Kafka consumer -> Linear ticket reporter
 """
 
 from __future__ import annotations

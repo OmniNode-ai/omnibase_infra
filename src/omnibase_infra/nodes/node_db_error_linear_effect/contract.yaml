@@ -1,0 +1,210 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeDbErrorLinearEffect
+#
+# Consumes onex.evt.omnibase-infra.db-error.v1 events and auto-creates
+# Linear tickets for unique PostgreSQL errors, with dedup and frequency
+# tracking via a db_error_tickets PostgreSQL table.
+#
+# Kafka Subscription Wiring:
+#   The runtime reads event_bus.subscribe_topics to wire Kafka subscriptions
+#   via EventBusSubcontractWiring (see PluginRegistration.start_consumers).
+#   Any ProtocolDomainPlugin that calls load_event_bus_subcontract on this
+#   contract will subscribe to TOPIC_DB_ERROR_V1 and route messages through
+#   the MessageDispatchEngine to HandlerLinearDbErrorReporter.
+#
+# Related Tickets:
+#   - OMN-3408: Kafka Consumer -> Linear Ticket Reporter (ONEX Node)
+#   - OMN-3407: PostgreSQL Error Emitter (hard prerequisite)
+
+# Contract identifiers
+name: "node_db_error_linear_effect"
+contract_name: "node_db_error_linear_effect"
+node_name: "node_db_error_linear_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+
+# Node type
+node_type: "EFFECT_GENERIC"
+
+# Description
+description: >
+  Effect node that consumes PostgreSQL error events from
+  onex.evt.omnibase-infra.db-error.v1 and creates Linear tickets for unique
+  errors. Deduplication is performed via a db_error_tickets PostgreSQL table
+  keyed on the error fingerprint. Repeat occurrences increment
+  occurrence_count without creating duplicate tickets.
+
+# =============================================================================
+# EVENT BUS SUBSCRIPTION (Kafka topic wiring)
+# =============================================================================
+# The runtime reads subscribe_topics to wire consumer subscriptions via
+# EventBusSubcontractWiring (PluginRegistration.start_consumers pattern).
+# Adding TOPIC_DB_ERROR_V1 here is the complete and only wiring required.
+# =============================================================================
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.evt.omnibase-infra.db-error.v1"
+  publish_topics: []
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelDbErrorEvent"
+  module: "omnibase_infra.handlers.models.model_db_error_event"
+  description: "Structured PostgreSQL error event from Kafka."
+output_model:
+  name: "ModelDbErrorTicketResult"
+  module: "omnibase_infra.handlers.models.model_db_error_ticket_result"
+  description: "Result of the dedup check + Linear ticket create/skip operation."
+
+# =============================================================================
+# HANDLER ROUTING (Declarative Handler Dispatch)
+# =============================================================================
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "report_error"
+      handler:
+        name: "HandlerLinearDbErrorReporter"
+        module: "omnibase_infra.handlers.handler_linear_db_error_reporter"
+      description: "Dedup check -> Linear issueCreate mutation -> db_error_tickets insert"
+      output_fields:
+        - created
+        - skipped
+        - issue_id
+        - issue_url
+        - occurrence_count
+
+# =============================================================================
+# ERROR HANDLING
+# =============================================================================
+error_handling:
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 1000
+    max_delay_ms: 8000
+    exponential_base: 2
+    retry_on:
+      - "LINEAR_API_TIMEOUT"
+      - "LINEAR_API_CONNECTION_ERROR"
+      - "LINEAR_API_SERVER_ERROR"
+  error_types:
+    - name: "LINEAR_NOT_CONFIGURED"
+      description: "LINEAR_API_KEY or LINEAR_TEAM_ID not set"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "LINEAR_API_TIMEOUT"
+      description: "Linear GraphQL request timed out"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "LINEAR_API_CONNECTION_ERROR"
+      description: "Failed to connect to Linear API"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "LINEAR_API_SERVER_ERROR"
+      description: "Linear API returned 5xx response"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "LINEAR_API_CLIENT_ERROR"
+      description: "Linear API returned 4xx response (non-retryable)"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "DB_POOL_UNAVAILABLE"
+      description: "asyncpg pool not available for dedup check"
+      recoverable: false
+      retry_strategy: "none"
+
+# IO operations
+io_operations:
+  - operation: "report_error"
+    description: "Create Linear ticket for a unique PostgreSQL error, or increment occurrence_count for a known fingerprint"
+    input_fields:
+      - error_code
+      - error_message
+      - hint
+      - detail
+      - sql_statement
+      - table_name
+      - fingerprint
+      - first_seen_at
+      - service
+    output_fields:
+      - created
+      - skipped
+      - issue_id
+      - issue_url
+      - occurrence_count
+      - correlation_id
+
+# Dependencies
+dependencies:
+  - name: "linear_api_key"
+    type: "environment"
+    env_var: "LINEAR_API_KEY"
+    description: "Linear API key for GraphQL mutations"
+    required: true
+  - name: "linear_team_id"
+    type: "environment"
+    env_var: "LINEAR_TEAM_ID"
+    description: "Linear team ID for issue creation"
+    required: true
+  - name: "db_pool"
+    type: "service"
+    description: "asyncpg pool for db_error_tickets dedup table"
+    required: true
+  - name: "httpx"
+    type: "library"
+    library: "httpx"
+    description: "Async HTTP client for Linear GraphQL API"
+
+# Capabilities
+capabilities:
+  - name: "linear_ticket_creation"
+    description: "Create Linear issues via GraphQL issueCreate mutation"
+  - name: "error_deduplication"
+    description: "Prevent duplicate tickets via db_error_tickets fingerprint lookup"
+  - name: "occurrence_tracking"
+    description: "Increment occurrence_count for repeat errors without creating new tickets"
+  - name: "retry_with_backoff"
+    description: "Retry transient Linear API failures with exponential backoff"
+
+# Health check
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  checks:
+    - name: "linear_configured"
+      check_type: "environment"
+      env_var: "LINEAR_API_KEY"
+      description: "Verify LINEAR_API_KEY is set"
+    - name: "linear_team_configured"
+      check_type: "environment"
+      env_var: "LINEAR_TEAM_ID"
+      description: "Verify LINEAR_TEAM_ID is set"
+
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-03-02"
+  updated: "2026-03-02"
+  tags:
+    - effect
+    - linear
+    - postgresql
+    - error-reporting
+    - deduplication
+    - kafka-consumer
