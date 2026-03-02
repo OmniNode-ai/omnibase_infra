@@ -11,7 +11,7 @@
 #   # Core infrastructure only (postgres, valkey)
 #   docker compose -f docker/docker-compose.infra.yml up -d
 #
-#   # With runtime services
+#   # With runtime services (connects to REMOTE Redpanda via /etc/hosts)
 #   docker compose -f docker/docker-compose.infra.yml --profile runtime up -d
 #
 #   # With Consul (service discovery)
@@ -30,6 +30,9 @@
 #   # Build runtime and start
 #   docker compose -f docker/docker-compose.infra.yml --profile runtime up -d --build
 #
+#   # LOCAL Redpanda (opt-in only — normally use remote at 192.168.86.200)
+#   docker compose -f docker/docker-compose.infra.yml --profile local-redpanda up -d redpanda
+#
 #   # Stop services
 #   docker compose -f docker/docker-compose.infra.yml down
 #
@@ -43,11 +46,19 @@
 #   - secrets: Infisical for secrets management
 #   - full: All services (infrastructure + runtime + consul + secrets)
 #   - bootstrap: Infrastructure + secrets (for bootstrap-infisical.sh sequence)
+#   - local-redpanda: LOCAL Redpanda instance (opt-in; default is REMOTE at 192.168.86.200)
+#
+# Redpanda / Kafka:
+#   The platform uses the REMOTE Redpanda at 192.168.86.200 by default.
+#   /etc/hosts maps omnibase-infra-redpanda -> 192.168.86.200 so containers
+#   connect via KAFKA_BOOTSTRAP_SERVERS=omnibase-infra-redpanda:9092 without
+#   any local container. Start --profile local-redpanda only for isolated local dev.
 #
 # External Ports:
 #   Infrastructure:
 #     - PostgreSQL: 5436 (internal 5432)
 #     - Valkey: 16379 (internal 6379)
+#     - Redpanda: 29092 (internal 9092) [local-redpanda profile only]
 #     - Consul: 28500 (internal 8500) [consul profile]
 #     - Infisical: 8880 (internal 8080) [secrets profile]
 #   Runtime:
@@ -179,6 +190,54 @@ services:
     restart: unless-stopped
     labels:
       - "com.omninode.service=postgres"
+      - "com.omninode.layer=infrastructure"
+  # ==========================================================================
+  # Redpanda - Kafka-Compatible Event Streaming (LOCAL OPT-IN ONLY)
+  # ==========================================================================
+  # NOTE: The platform uses the REMOTE Redpanda at 192.168.86.200 by default.
+  # This service is gated behind the "local-redpanda" profile so it does NOT
+  # start unless explicitly requested. Runtime services connect to the remote
+  # instance via /etc/hosts (omnibase-infra-redpanda -> 192.168.86.200).
+  #
+  # To start local Redpanda for isolated development:
+  #   docker compose -f docker/docker-compose.infra.yml --profile local-redpanda up -d redpanda
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-redpanda
+    profiles: ["local-redpanda"]
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:${REDPANDA_EXTERNAL_PORT:-29092}
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:${REDPANDA_PANDAPROXY_PORT:-18082}
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --mode dev-container
+      - --smp 1
+      - --memory ${REDPANDA_MEMORY:-8G}
+      - --kafka-connections-max ${REDPANDA_KAFKA_CONNECTIONS_MAX:-10000}
+      - --default-log-level=warn
+    ports:
+      - "${REDPANDA_EXTERNAL_PORT:-29092}:19092"
+      # Pandaproxy (REST API for Kafka)
+      - "${REDPANDA_PANDAPROXY_PORT:-18082}:18082"
+      # Schema Registry
+      - "${REDPANDA_SCHEMA_REGISTRY_PORT:-18081}:18081"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    networks:
+      - omnibase-infra-network
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true' || exit 1"]
+      start_period: 30s
+    logging: *logging-defaults
+    restart: unless-stopped
+    labels:
+      - "com.omninode.service=redpanda"
       - "com.omninode.layer=infrastructure"
   # ==========================================================================
   # Topic Provisioning
@@ -619,6 +678,8 @@ volumes:
   # Infrastructure volumes
   postgres_data:
     name: omnibase-infra-postgres-data
+  redpanda_data:
+    name: omnibase-infra-redpanda-data
   valkey_data:
     name: omnibase-infra-valkey-data
   consul_data:
