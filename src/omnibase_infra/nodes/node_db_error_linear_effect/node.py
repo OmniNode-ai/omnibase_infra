@@ -57,6 +57,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+from omnibase_core.models.container import ModelONEXContainer
 from omnibase_core.nodes.node_effect import NodeEffect
 
 
@@ -72,9 +73,10 @@ class NodeDbErrorLinearEffect(NodeEffect):
         - report_error: Dedup check -> Linear ticket create -> DB insert
 
     Dependency Injection:
-        HandlerLinearDbErrorReporter is instantiated by callers with its
-        dependencies (linear_api_key, linear_team_id, db_pool).
-        Constructor injection keeps the node stateless.
+        Callers must instantiate HandlerLinearDbErrorReporter with
+        linear_api_key, linear_team_id, and db_pool and pass it via the
+        container.  This node does not retain a handler instance as an
+        attribute — no handler dependencies are stored as instance variables.
 
     Example:
         ```python
@@ -109,6 +111,9 @@ class NodeDbErrorLinearEffect(NodeEffect):
         result = await handler.handle(event)
         ```
     """
+
+    def __init__(self, container: ModelONEXContainer) -> None:
+        super().__init__(container)
 
     # Pure declarative shell — all behaviour defined in contract.yaml
 

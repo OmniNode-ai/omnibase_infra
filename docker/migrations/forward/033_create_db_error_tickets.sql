@@ -26,9 +26,8 @@ CREATE TABLE IF NOT EXISTS db_error_tickets (
     last_seen_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Index for fast fingerprint lookup (dedup check hot path)
-CREATE INDEX IF NOT EXISTS idx_db_error_tickets_fingerprint
-    ON db_error_tickets (fingerprint);
+-- Note: fingerprint has a UNIQUE constraint which auto-creates a btree index;
+-- no additional index is needed for the dedup check hot path.
 
 -- Index for recency queries (most recently active errors first)
 CREATE INDEX IF NOT EXISTS idx_db_error_tickets_last_seen_at

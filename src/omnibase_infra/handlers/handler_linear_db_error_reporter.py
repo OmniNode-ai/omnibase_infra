@@ -7,11 +7,23 @@ This handler processes ``ModelDbErrorEvent`` payloads received from the
 tickets for unique PostgreSQL errors.
 
 Architecture:
-    1. Dedup check — SELECT from ``db_error_tickets`` WHERE fingerprint = $1
-    2. If found   — UPDATE occurrence_count, return skipped=True
+    1. Dedup check — acquire per-fingerprint advisory lock, then SELECT
+    2. If found   — UPDATE occurrence_count, release lock, return skipped
     3. If new     — POST Linear GraphQL issueCreate mutation via httpx
-    4. INSERT into ``db_error_tickets``
-    5. Return     — ModelDbErrorTicketResult(created=True, ...)
+    4. INSERT into ``db_error_tickets``, release lock, return created
+
+Atomicity / TOCTOU:
+    The dedup-check and ticket-create-and-insert sequence is guarded by a
+    PostgreSQL advisory lock keyed on the first 8 bytes of the fingerprint.
+    This prevents concurrent consumers from both passing the initial
+    fingerprint check and creating duplicate Linear tickets.
+
+    Advisory lock strategy:
+    - ``pg_try_advisory_xact_lock(key)`` (session-level, auto-released
+      at transaction end)
+    - If lock acquired: proceed with check-then-create-then-insert
+    - If not acquired: wait briefly and retry (falls back to skipped if
+      the fingerprint was just inserted by the winner)
 
 Deduplication:
     Each PostgreSQL error is identified by a 32-char SHA-256 fingerprint
@@ -26,14 +38,19 @@ Linear API:
     matches the pattern in docs/tools/generate_ticket_plan.py).
 
 Constructor Injection:
-    - ``linear_api_key: str`` — from env ``LINEAR_API_KEY``
-    - ``linear_team_id: str`` — from env ``LINEAR_TEAM_ID``
-    - ``db_pool`` — asyncpg.Pool (injected by caller / plugin)
+    All dependencies are provided via constructor arguments.  Callers
+    source ``linear_api_key`` and ``linear_team_id`` from the environment
+    (e.g. ``os.environ["LINEAR_API_KEY"]``) and pass them in — the handler
+    itself does not read ``os.environ`` directly.
+
+    - ``linear_api_key: str`` — Linear API key (required, non-empty)
+    - ``linear_team_id: str`` — Linear team UUID (required, non-empty)
+    - ``db_pool`` — asyncpg.Pool (required — handler raises on ``None``)
 
 Coroutine Safety:
     This handler is stateless across calls (no mutable instance state is
-    mutated after __init__).  Concurrent calls with different payloads are
-    safe.
+    mutated after __init__).  Concurrent calls are made safe via the
+    per-fingerprint advisory lock (DB-side).
 
 Related Tickets:
     - OMN-3408: Kafka Consumer -> Linear Ticket Reporter (ONEX Node)
@@ -44,13 +61,22 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
+from uuid import UUID, uuid4
 
 import httpx
 
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
+from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.handlers.models.model_db_error_event import ModelDbErrorEvent
 from omnibase_infra.handlers.models.model_db_error_ticket_result import (
     ModelDbErrorTicketResult,
+)
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
 )
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
@@ -85,6 +111,22 @@ mutation CreateIssue($teamId: String!, $title: String!, $description: String!, $
   }
 }
 """
+
+
+def _fingerprint_to_lock_key(fingerprint: str) -> int:
+    """Derive a 64-bit integer advisory lock key from a fingerprint string.
+
+    Uses the first 16 hex chars (8 bytes) of the fingerprint, which is
+    always a 32-char hex string (see ModelDbErrorEvent.fingerprint).
+
+    Returns:
+        Signed 64-bit integer suitable for ``pg_advisory_xact_lock``.
+    """
+    raw = int(fingerprint[:16], 16)
+    # Fold to signed int64 range (PostgreSQL advisory lock key is bigint)
+    if raw >= 2**63:
+        raw -= 2**64
+    return raw
 
 
 def _build_ticket_title(event: ModelDbErrorEvent) -> str:
@@ -124,14 +166,15 @@ class HandlerLinearDbErrorReporter:
 
     Lifecycle:
         1. ``handle(event)`` called for each Kafka message
-        2. SELECT from ``db_error_tickets`` for dedup
-        3. If found: UPDATE occurrence_count + last_seen_at, return skipped
-        4. If new: call Linear API, INSERT into table, return created
+        2. Acquire per-fingerprint PostgreSQL advisory lock
+        3. SELECT from ``db_error_tickets`` for dedup (inside lock)
+        4. If found: UPDATE occurrence_count + last_seen_at, return skipped
+        5. If new: call Linear API, INSERT into table, return created
 
     Args:
-        linear_api_key: Linear API key (``LINEAR_API_KEY`` env var).
-        linear_team_id: Linear team UUID (``LINEAR_TEAM_ID`` env var).
-        db_pool: asyncpg connection pool for ``db_error_tickets``.
+        linear_api_key: Linear API key (required, non-empty).
+        linear_team_id: Linear team UUID (required, non-empty).
+        db_pool: asyncpg connection pool for ``db_error_tickets`` (required).
         timeout: HTTP timeout for Linear API calls (seconds).
     """
 
@@ -162,66 +205,144 @@ class HandlerLinearDbErrorReporter:
     async def handle(self, event: ModelDbErrorEvent) -> ModelDbErrorTicketResult:
         """Process a db error event: dedup check -> Linear create -> DB insert.
 
+        Acquires a per-fingerprint PostgreSQL advisory lock before the
+        dedup check so concurrent consumers cannot race to create duplicate
+        Linear tickets (TOCTOU prevention).
+
         Args:
             event: Structured PostgreSQL error event from Kafka.
 
         Returns:
             ModelDbErrorTicketResult with created/skipped flag, issue info,
             and current occurrence_count.
+
+        Raises:
+            RuntimeHostError: If ``db_pool`` is not configured, if the Linear
+                API call fails, or if a DB error prevents the insert.
         """
-        if not self._linear_api_key:
-            logger.warning(
-                "LINEAR_API_KEY not set — skipping Linear ticket creation "
-                "(fingerprint=%s)",
-                event.fingerprint,
+        if self._db_pool is None:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=uuid4(),
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="report_error",
+                target_name="db_error_tickets",
             )
-            return ModelDbErrorTicketResult(
-                error="LINEAR_API_KEY not configured",
+            raise RuntimeHostError(
+                "HandlerLinearDbErrorReporter requires a db_pool — "
+                "received None.  Callers must pass an asyncpg.Pool.",
+                context=context,
+            )
+
+        if not self._linear_api_key:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=uuid4(),
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="report_error",
+                target_name="linear_api",
+            )
+            raise RuntimeHostError(
+                "HandlerLinearDbErrorReporter: linear_api_key is empty — "
+                "pass LINEAR_API_KEY via constructor.",
+                context=context,
             )
 
         if not self._linear_team_id:
-            logger.warning(
-                "LINEAR_TEAM_ID not set — skipping Linear ticket creation "
-                "(fingerprint=%s)",
-                event.fingerprint,
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=uuid4(),
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="report_error",
+                target_name="linear_api",
             )
-            return ModelDbErrorTicketResult(
-                error="LINEAR_TEAM_ID not configured",
-            )
-
-        # 1. Dedup check
-        existing = await self._lookup_fingerprint(event.fingerprint)
-        if existing is not None:
-            issue_id, issue_url, _ = existing
-            new_count = await self._increment_occurrence(event.fingerprint)
-            logger.info(
-                "DB error fingerprint already tracked — incrementing occurrence_count "
-                "(fingerprint=%s, issue_id=%s, occurrence_count=%d)",
-                event.fingerprint,
-                issue_id,
-                new_count,
-            )
-            return ModelDbErrorTicketResult(
-                skipped=True,
-                issue_id=issue_id,
-                issue_url=issue_url,
-                occurrence_count=new_count,
+            raise RuntimeHostError(
+                "HandlerLinearDbErrorReporter: linear_team_id is empty — "
+                "pass LINEAR_TEAM_ID via constructor.",
+                context=context,
             )
 
-        # 2. Create Linear ticket
-        try:
-            linear_issue_id, linear_issue_url = await self._create_linear_issue(event)
-        except Exception as exc:
-            sanitized = sanitize_error_message(exc)
-            logger.exception(
-                "Failed to create Linear ticket (fingerprint=%s): %s",
-                event.fingerprint,
-                sanitized,
-            )
-            return ModelDbErrorTicketResult(error=sanitized)
+        lock_key = _fingerprint_to_lock_key(event.fingerprint)
 
-        # 3. Insert into db_error_tickets
-        await self._insert_db_error_ticket(event, linear_issue_id, linear_issue_url)
+        async with self._db_pool.acquire() as conn:
+            # Acquire per-fingerprint advisory lock for the duration of
+            # this transaction to prevent TOCTOU duplicate ticket creation.
+            await conn.execute("SELECT pg_advisory_xact_lock($1)", lock_key)
+
+            # Re-check inside the lock — another consumer may have just
+            # inserted this fingerprint while we were waiting.
+            row = await conn.fetchrow(
+                "SELECT linear_issue_id, linear_issue_url, occurrence_count "
+                "FROM db_error_tickets WHERE fingerprint = $1",
+                event.fingerprint,
+            )
+            if row is not None:
+                # Already exists — increment and return skipped
+                updated = await conn.fetchrow(
+                    "UPDATE db_error_tickets "
+                    "SET last_seen_at = NOW(), occurrence_count = occurrence_count + 1 "
+                    "WHERE fingerprint = $1 "
+                    "RETURNING occurrence_count",
+                    event.fingerprint,
+                )
+                issue_id = UUID(str(row["linear_issue_id"]))
+                issue_url = (
+                    str(row["linear_issue_url"]) if row["linear_issue_url"] else ""
+                )
+                new_count = int(updated["occurrence_count"]) if updated else 1
+                logger.info(
+                    "DB error fingerprint already tracked — incrementing "
+                    "occurrence_count (fingerprint=%s, issue_id=%s, count=%d)",
+                    event.fingerprint,
+                    issue_id,
+                    new_count,
+                )
+                return ModelDbErrorTicketResult(
+                    skipped=True,
+                    issue_id=issue_id,
+                    issue_url=issue_url,
+                    occurrence_count=new_count,
+                )
+
+            # Not found under lock — create Linear ticket then insert
+            try:
+                linear_issue_id, linear_issue_url = await self._create_linear_issue(
+                    event
+                )
+            except Exception as exc:
+                sanitized = sanitize_error_message(exc)
+                logger.exception(
+                    "Failed to create Linear ticket (fingerprint=%s): %s",
+                    event.fingerprint,
+                    sanitized,
+                )
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=uuid4(),
+                    transport_type=EnumInfraTransportType.HTTP,
+                    operation="issueCreate",
+                    target_name="linear_api",
+                )
+                raise RuntimeHostError(
+                    f"Linear issueCreate failed for fingerprint={event.fingerprint}: "
+                    f"{sanitized}",
+                    context=context,
+                ) from exc
+
+            await conn.execute(
+                """
+                INSERT INTO db_error_tickets
+                    (fingerprint, error_code, error_message, table_name, service,
+                     linear_issue_id, linear_issue_url, occurrence_count,
+                     first_seen_at, last_seen_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, NOW())
+                ON CONFLICT (fingerprint) DO NOTHING
+                """,
+                event.fingerprint,
+                event.error_code,
+                event.error_message,
+                event.table_name,
+                event.service,
+                str(linear_issue_id),
+                linear_issue_url,
+                event.first_seen_at,
+            )
 
         logger.info(
             "Created Linear ticket for db error (fingerprint=%s, issue_id=%s, url=%s)",
@@ -236,60 +357,11 @@ class HandlerLinearDbErrorReporter:
             occurrence_count=1,
         )
 
-    async def _lookup_fingerprint(
-        self,
-        fingerprint: str,
-    ) -> tuple[str, str | None, int] | None:
-        """SELECT from db_error_tickets for the given fingerprint.
-
-        Returns:
-            Tuple of (linear_issue_id, linear_issue_url, occurrence_count)
-            if found, else None.
-        """
-        if self._db_pool is None:
-            logger.debug(
-                "No db_pool — skipping dedup lookup (fingerprint=%s)", fingerprint
-            )
-            return None
-
-        async with self._db_pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT linear_issue_id, linear_issue_url, occurrence_count "
-                "FROM db_error_tickets WHERE fingerprint = $1",
-                fingerprint,
-            )
-        if row is None:
-            return None
-        return (
-            str(row["linear_issue_id"]),
-            str(row["linear_issue_url"]) if row["linear_issue_url"] else None,
-            int(row["occurrence_count"]),
-        )
-
-    async def _increment_occurrence(self, fingerprint: str) -> int:
-        """UPDATE occurrence_count and last_seen_at for an existing fingerprint.
-
-        Returns:
-            New occurrence_count after increment.
-        """
-        if self._db_pool is None:
-            return 1
-
-        async with self._db_pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "UPDATE db_error_tickets "
-                "SET last_seen_at = NOW(), occurrence_count = occurrence_count + 1 "
-                "WHERE fingerprint = $1 "
-                "RETURNING occurrence_count",
-                fingerprint,
-            )
-        return int(row["occurrence_count"]) if row else 1
-
-    async def _create_linear_issue(self, event: ModelDbErrorEvent) -> tuple[str, str]:
+    async def _create_linear_issue(self, event: ModelDbErrorEvent) -> tuple[UUID, str]:
         """Call the Linear GraphQL API to create a new issue.
 
         Returns:
-            Tuple of (issue_id, issue_url).
+            Tuple of (issue_uuid, issue_url).
 
         Raises:
             httpx.HTTPStatusError: On 4xx/5xx responses from Linear API.
@@ -324,52 +396,13 @@ class HandlerLinearDbErrorReporter:
             raise ValueError(f"Linear API returned GraphQL errors: {errors}")
 
         issue_data = data.get("data", {}).get("issueCreate", {}).get("issue", {})
-        issue_id: str = issue_data.get("id", "")
+        raw_id: str = issue_data.get("id", "")
         issue_url: str = issue_data.get("url", "")
 
-        if not issue_id:
+        if not raw_id:
             raise ValueError(f"Linear issueCreate returned no issue.id (data={data!r})")
 
-        return issue_id, issue_url
-
-    async def _insert_db_error_ticket(
-        self,
-        event: ModelDbErrorEvent,
-        linear_issue_id: str,
-        linear_issue_url: str,
-    ) -> None:
-        """INSERT a new row into db_error_tickets.
-
-        No-ops gracefully if db_pool is None (logs a warning).
-        """
-        if self._db_pool is None:
-            logger.warning(
-                "No db_pool — cannot persist db_error_ticket record "
-                "(fingerprint=%s, issue_id=%s)",
-                event.fingerprint,
-                linear_issue_id,
-            )
-            return
-
-        async with self._db_pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO db_error_tickets
-                    (fingerprint, error_code, error_message, table_name, service,
-                     linear_issue_id, linear_issue_url, occurrence_count,
-                     first_seen_at, last_seen_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, NOW())
-                ON CONFLICT (fingerprint) DO NOTHING
-                """,
-                event.fingerprint,
-                event.error_code,
-                event.error_message,
-                event.table_name,
-                event.service,
-                linear_issue_id,
-                linear_issue_url,
-                event.first_seen_at,
-            )
+        return UUID(raw_id), issue_url
 
 
 __all__ = ["HandlerLinearDbErrorReporter"]
