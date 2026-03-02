@@ -3,10 +3,17 @@
 # Copyright (c) 2025 OmniNode Team
 #
 # monitor_logs.py -- Real-time container log monitoring with Slack alerts
+#                    and PostgreSQL error event emission to Kafka (OMN-3407)
 #
 # Watches OmniNode containers, filters for ERROR/CRITICAL/exception lines,
 # and posts rate-limited alerts to Slack. Dynamically picks up containers
 # as they start and drops them when they stop.
+#
+# PostgreSQL error monitoring (OMN-3407):
+#   Discovers postgres containers dynamically (by label or name prefix), captures
+#   multi-line ERROR blocks, computes a SHA-256 dedup fingerprint, and emits
+#   structured ModelDbErrorEvent payloads to Kafka topic TOPIC_DB_ERROR_V1.
+#   Dedup keys are stored in Valkey ONLY after a successful Kafka publish.
 #
 # Usage:
 #   python scripts/monitor_logs.py                     # Watch all OmniNode containers
@@ -21,10 +28,15 @@
 # Optional env vars:
 #   MONITOR_PROJECTS   -- Comma-separated compose project names (default: omnibase-infra-runtime,omnibase-infra)
 #   MONITOR_COOLDOWN   -- Per-container alert cooldown in seconds (default: 300)
+#   KAFKA_BOOTSTRAP_SERVERS -- Kafka bootstrap servers for DB error events
+#   VALKEY_HOST        -- Valkey/Redis host for dedup (default: localhost)
+#   VALKEY_PORT        -- Valkey/Redis port for dedup (default: 16379)
+#   VALKEY_DB          -- Valkey/Redis database index (default: 0)
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -144,6 +156,443 @@ IGNORE_PATTERN = re.compile(
     r"|(DEBUG.*error|error.*DEBUG)",
     re.IGNORECASE,
 )
+
+# ---------------------------------------------------------------------------
+# PostgreSQL error emitter (OMN-3407)
+# ---------------------------------------------------------------------------
+
+# Full topic name for PostgreSQL error events.
+_TOPIC_DB_ERROR_V1 = "onex.evt.omnibase-infra.db-error.v1"
+
+# Max lines to accumulate into a single postgres error block.
+_PG_BLOCK_MAX_LINES = 20
+
+# Postgres timestamp+pid prefix pattern — marks the start of a new log entry.
+# Example: "2026-03-02 12:34:56.789 UTC [1234] "
+_PG_LOG_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
+
+# PostgreSQL ERROR line pattern. Matches:
+#   "ERROR:  [42883] operator does not exist"
+#   "ERROR:  relation \"foo\" does not exist"
+_PG_ERROR_LINE = re.compile(
+    r"\bERROR:\s+(?:\[(?P<sqlstate>[A-Z0-9]{5})\]\s+)?(?P<message>.+)"
+)
+
+# Optional supplementary field patterns
+_PG_HINT_LINE = re.compile(r"\bHINT:\s+(?P<hint>.+)")
+_PG_DETAIL_LINE = re.compile(r"\bDETAIL:\s+(?P<detail>.+)")
+_PG_STATEMENT_LINE = re.compile(r"\bSTATEMENT:\s+(?P<statement>.+)")
+_PG_CONTEXT_LINE = re.compile(r"\bCONTEXT:\s+(?P<context>.+)")
+
+# Best-effort table name extraction from error messages and SQL statements.
+# Matches: relation "foo", table "foo", into "foo", from "foo"
+_PG_TABLE_RE = re.compile(
+    r'(?:relation|table|into|from)\s+"(?P<table>[^"]+)"',
+    re.IGNORECASE,
+)
+
+# SQL string literal pattern for normalization: 'value'
+_SQL_STRING_LITERAL = re.compile(r"'[^']*'")
+
+
+def _normalize_text(text: str) -> str:
+    """Strip whitespace, collapse runs, and remove SQL string literals."""
+    text = _SQL_STRING_LITERAL.sub("''", text)
+    return " ".join(text.split())
+
+
+def _compute_fingerprint(
+    error_code: str | None,
+    error_message: str,
+    table_name: str | None,
+    sql_statement: str | None,
+) -> str:
+    """Return SHA-256 fingerprint of normalized error fields, truncated to 32 chars."""
+    parts = ":".join(
+        [
+            error_code or "",
+            _normalize_text(error_message),
+            table_name or "",
+            _normalize_text(sql_statement or ""),
+        ]
+    )
+    return hashlib.sha256(parts.encode()).hexdigest()[:32]
+
+
+def _extract_table_name(error_message: str, sql_statement: str | None) -> str | None:
+    """Best-effort extraction of table name from error message or SQL statement."""
+    for text in (error_message, sql_statement or ""):
+        m = _PG_TABLE_RE.search(text)
+        if m:
+            return m.group("table")
+    return None
+
+
+def _parse_postgres_error_block(
+    lines: list[str],
+) -> dict[str, str | None] | None:
+    """Parse a list of log lines into postgres error fields.
+
+    Returns a dict with keys: error_code, error_message, hint, detail,
+    sql_statement, table_name — or None if no ERROR line is found.
+    All values are str | None.
+    """
+    error_code: str | None = None
+    error_message: str | None = None
+    hint: str | None = None
+    detail: str | None = None
+    sql_statement: str | None = None
+
+    for line in lines:
+        if error_message is None:
+            m = _PG_ERROR_LINE.search(line)
+            if m:
+                error_code = m.group("sqlstate")
+                error_message = m.group("message").strip()
+            continue
+        # Already have error_message — try supplementary fields
+        if hint is None:
+            mh = _PG_HINT_LINE.search(line)
+            if mh:
+                hint = mh.group("hint").strip()
+                continue
+        if detail is None:
+            md = _PG_DETAIL_LINE.search(line)
+            if md:
+                detail = md.group("detail").strip()
+                continue
+        if sql_statement is None:
+            ms = _PG_STATEMENT_LINE.search(line)
+            if ms:
+                sql_statement = ms.group("statement").strip()
+                continue
+
+    if error_message is None:
+        return None
+
+    table_name = _extract_table_name(error_message, sql_statement)
+    return {
+        "error_code": error_code,
+        "error_message": error_message,
+        "hint": hint,
+        "detail": detail,
+        "sql_statement": sql_statement,
+        "table_name": table_name,
+    }
+
+
+def _discover_postgres_containers() -> list[str]:
+    """Return names of running postgres containers.
+
+    Discovery strategy (in order):
+    1. Match by compose service label ``com.docker.compose.service=postgres``
+    2. Match by container name exact ``omnibase-infra-postgres``
+    3. Match by container name prefix ``omnibase-infra-postgres-``
+
+    Returns a deduplicated, sorted list of container names. Logs a warning
+    if no containers are found.
+    """
+    found: set[str] = set()
+
+    # Strategy 1: compose service label
+    result = subprocess.run(
+        [
+            _DOCKER,
+            "ps",
+            "--filter",
+            "label=com.docker.compose.service=postgres",
+            "--format",
+            "{{.Names}}",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    for name in result.stdout.strip().splitlines():
+        if name.strip():
+            found.add(name.strip())
+
+    # Strategy 2 & 3: name exact or prefix match
+    result2 = subprocess.run(
+        [_DOCKER, "ps", "--format", "{{.Names}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    for name in result2.stdout.strip().splitlines():
+        name = name.strip()
+        if name == "omnibase-infra-postgres" or name.startswith(
+            "omnibase-infra-postgres-"
+        ):
+            found.add(name)
+
+    if not found:
+        print(
+            "[monitor] WARNING: no postgres container found at startup; "
+            "postgres error monitoring inactive",
+            file=sys.stderr,
+        )
+    return sorted(found)
+
+
+class PostgresErrorEmitter:
+    """Monitors a postgres container log stream and emits error events to Kafka.
+
+    Deduplication is performed via Valkey (Redis-compatible). The Valkey key
+    is set **only after** a successful Kafka publish. If Kafka is unavailable,
+    the error is logged and the dedup key is not set — allowing retry on the
+    next occurrence.
+    """
+
+    def __init__(self, container: str, dry_run: bool) -> None:
+        self.container = container
+        self.dry_run = dry_run
+        # These hold runtime-imported clients whose types are not available at
+        # type-check time (optional dependencies confluent-kafka and redis).
+        # Using Any avoids false attr-defined errors under mypy --strict.
+        from typing import Any
+
+        self._producer: Any = None  # confluent_kafka.Producer
+        self._valkey: Any = None  # redis.Redis
+        self._init_ok = self._init_clients()
+
+    def _init_clients(self) -> bool:
+        """Attempt to initialise Kafka producer and Valkey client.
+
+        Returns True if both clients initialised successfully.  On import
+        error (library not installed) or missing env var, logs a warning
+        and returns False — the emitter is silently disabled.
+        """
+        kafka_servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "")
+        if not kafka_servers:
+            print(
+                "[monitor] KAFKA_BOOTSTRAP_SERVERS not set; "
+                "postgres Kafka emission disabled",
+                file=sys.stderr,
+            )
+            return False
+
+        try:
+            import confluent_kafka
+
+            self._producer = confluent_kafka.Producer(
+                {
+                    "bootstrap.servers": kafka_servers,
+                    "acks": "all",
+                    "enable.idempotence": "true",
+                    "retries": 5,
+                    "request.timeout.ms": 10000,
+                }
+            )
+        except ImportError:
+            print(
+                "[monitor] confluent-kafka not installed; "
+                "postgres Kafka emission disabled",
+                file=sys.stderr,
+            )
+            return False
+        except Exception as exc:
+            print(
+                f"[monitor] Failed to create Kafka producer: {exc}; "
+                "postgres Kafka emission disabled",
+                file=sys.stderr,
+            )
+            return False
+
+        try:
+            import redis
+
+            valkey_host = os.environ.get("VALKEY_HOST", "localhost")
+            valkey_port = int(os.environ.get("VALKEY_PORT", "16379"))
+            valkey_db = int(os.environ.get("VALKEY_DB", "0"))
+            self._valkey = redis.Redis(
+                host=valkey_host,
+                port=valkey_port,
+                db=valkey_db,
+                socket_timeout=5,
+                decode_responses=True,
+            )
+        except ImportError:
+            print(
+                "[monitor] redis library not installed; "
+                "postgres Kafka emission disabled",
+                file=sys.stderr,
+            )
+            return False
+        except Exception as exc:
+            print(
+                f"[monitor] Failed to create Valkey client: {exc}; "
+                "postgres Kafka emission disabled",
+                file=sys.stderr,
+            )
+            return False
+
+        return True
+
+    def maybe_emit(self, lines: list[str]) -> None:
+        """Parse error block from lines and emit to Kafka if not deduplicated."""
+        if not self._init_ok:
+            return
+
+        parsed = _parse_postgres_error_block(lines)
+        if parsed is None:
+            return
+
+        error_message = parsed["error_message"]
+        if not error_message:
+            return
+
+        fingerprint = _compute_fingerprint(
+            error_code=parsed["error_code"],
+            error_message=error_message,
+            table_name=parsed["table_name"],
+            sql_statement=parsed["sql_statement"],
+        )
+
+        # Dedup check
+        dedup_key = f"pg_err_dedup:{fingerprint}"
+        try:
+            if self._valkey is not None:
+                existing = self._valkey.get(dedup_key)
+                if existing:
+                    return
+        except Exception as exc:
+            print(
+                f"[monitor] Valkey dedup check failed for {self.container}: {exc}; "
+                "will emit without dedup",
+                file=sys.stderr,
+            )
+
+        event_payload = {
+            "error_code": parsed["error_code"],
+            "error_message": error_message,
+            "hint": parsed["hint"],
+            "detail": parsed["detail"],
+            "sql_statement": parsed["sql_statement"],
+            "table_name": parsed["table_name"],
+            "fingerprint": fingerprint,
+            "first_seen_at": datetime.now(UTC).isoformat(),
+            "service": self.container,
+        }
+
+        if self.dry_run:
+            print(f"[DRY RUN] Would emit postgres error event for {self.container}:")
+            print(json.dumps(event_payload, indent=2))
+            return
+
+        # Kafka publish
+        published = False
+        try:
+            payload_bytes = json.dumps(event_payload).encode("utf-8")
+            if self._producer is not None:
+                self._producer.produce(
+                    topic=_TOPIC_DB_ERROR_V1,
+                    value=payload_bytes,
+                    key=fingerprint.encode("utf-8"),
+                )
+                self._producer.flush(timeout=10)
+                published = True
+                print(
+                    f"[monitor] Emitted postgres error event "
+                    f"(fingerprint={fingerprint}) from {self.container}"
+                )
+        except Exception as exc:
+            print(
+                f"[monitor] Kafka publish failed for {self.container}: {exc}; "
+                "dedup key not set — will retry on next occurrence",
+                file=sys.stderr,
+            )
+
+        # Set dedup key ONLY after successful publish
+        if published:
+            try:
+                if self._valkey is not None:
+                    # TTL: 24 hours — avoid infinite suppression of recurring errors
+                    self._valkey.setex(dedup_key, 86400, "1")
+            except Exception as exc:
+                print(
+                    f"[monitor] Failed to set Valkey dedup key for {self.container}: {exc}",
+                    file=sys.stderr,
+                )
+
+
+class PostgresErrorTailer(threading.Thread):
+    """Tails a postgres container log stream and delegates to PostgresErrorEmitter.
+
+    Runs as a daemon thread alongside the existing ContainerTailer instances.
+    Captures multi-line error blocks by detecting ERROR: lines and accumulating
+    subsequent lines until a new log entry begins or the block size limit is hit.
+    """
+
+    def __init__(
+        self,
+        container: str,
+        dry_run: bool,
+        stop_event: threading.Event,
+    ) -> None:
+        super().__init__(name=f"pg-err-{container}", daemon=True)
+        self.container = container
+        self.dry_run = dry_run
+        self.stop_event = stop_event
+        self._emitter = PostgresErrorEmitter(container, dry_run)
+
+    def run(self) -> None:
+        cmd = [
+            _DOCKER,
+            "logs",
+            "--follow",
+            "--since",
+            "0s",
+            "--timestamps",
+            self.container,
+        ]
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        except Exception as exc:
+            print(
+                f"[monitor] Cannot tail postgres container {self.container}: {exc}",
+                file=sys.stderr,
+            )
+            return
+
+        print(f"[monitor] Watching postgres errors: {self.container}")
+
+        in_error_block = False
+        error_block: list[str] = []
+
+        try:
+            for line in proc.stdout:  # type: ignore[union-attr]
+                if self.stop_event.is_set():
+                    break
+                line = line.rstrip()
+
+                # Detect start of a new log entry (timestamp prefix)
+                is_new_entry = bool(_PG_LOG_PREFIX.search(line))
+
+                if in_error_block:
+                    if is_new_entry or len(error_block) >= _PG_BLOCK_MAX_LINES:
+                        # Flush the completed block
+                        self._emitter.maybe_emit(error_block)
+                        error_block = []
+                        in_error_block = False
+
+                # Check if this line starts an ERROR block
+                if _PG_ERROR_LINE.search(line):
+                    in_error_block = True
+                    error_block = [line]
+                elif in_error_block:
+                    error_block.append(line)
+        finally:
+            # Flush any remaining block
+            if error_block:
+                self._emitter.maybe_emit(error_block)
+            proc.terminate()
+            print(f"[monitor] Stopped watching postgres errors: {self.container}")
 
 
 # ---------------------------------------------------------------------------
@@ -390,6 +839,7 @@ class LogMonitor:
         self.cooldown = cooldown
         self.dry_run = dry_run
         self._tailers: dict[str, ContainerTailer] = {}
+        self._pg_tailers: dict[str, PostgresErrorTailer] = {}
         self._lock = threading.Lock()
 
     def _get_project_containers(self) -> list[str]:
@@ -436,10 +886,25 @@ class LogMonitor:
             # ContainerTailer is daemon; process termination handles cleanup
             print(f"[monitor] Container gone: {container}")
 
+    def _start_pg_tailer(self, container: str) -> None:
+        """Start a PostgresErrorTailer for the given container if not already running."""
+        with self._lock:
+            existing = self._pg_tailers.get(container)
+            if existing and existing.is_alive():
+                return
+            stop_event = threading.Event()
+            tailer = PostgresErrorTailer(container, self.dry_run, stop_event)
+            tailer.start()
+            self._pg_tailers[container] = tailer
+
     def run(self) -> None:
-        # Start tailers for already-running containers
+        # Start tailers for already-running project containers
         for container in self._get_project_containers():
             self._start_tailer(container)
+
+        # Start postgres error tailers for any running postgres containers
+        for pg_container in _discover_postgres_containers():
+            self._start_pg_tailer(pg_container)
 
         # Watch for container start/die events
         cmd = [
@@ -472,6 +937,11 @@ class LogMonitor:
                 current = set(self._get_project_containers())
                 if action == "start" and container in current:
                     self._start_tailer(container)
+                    # Also start a postgres error tailer if this is a postgres container
+                    if container == "omnibase-infra-postgres" or container.startswith(
+                        "omnibase-infra-postgres-"
+                    ):
+                        self._start_pg_tailer(container)
                 elif action == "die" and container in project_containers:
                     self._stop_tailer(container)
 
