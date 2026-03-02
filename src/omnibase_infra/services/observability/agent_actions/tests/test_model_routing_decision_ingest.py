@@ -189,9 +189,8 @@ class TestTimestampNormalization:
             }
         )
         assert m.created_at.tzinfo is not None
-        assert (
-            m.created_at.tzinfo == UTC or m.created_at.utcoffset().total_seconds() == 0
-        )  # type: ignore[union-attr]
+        # _ensure_utc validator converts naive datetimes to UTC
+        assert m.created_at.tzinfo == UTC
 
     @pytest.mark.unit
     def test_created_at_defaults_to_now_when_absent(self) -> None:
