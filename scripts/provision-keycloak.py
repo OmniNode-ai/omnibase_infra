@@ -595,8 +595,8 @@ def seed_infisical(
         for k, v in shared_vars.items():
             log(f"  {k}={v}")
         log("[DRY RUN] Would seed /services/onex-api/auth/ with:")
-        for k in secret_vars:
-            log(f"  {k}={_secret_repr(secret_vars[k])}")
+        for k, v in secret_vars.items():
+            log(f"  {k}={_secret_repr(v)}")
         return
 
     try:
@@ -842,7 +842,7 @@ def main(argv: list[str] | None = None) -> int:
         log("Interrupted")
         return 130
     except Exception as exc:
-        logger.error("provision-keycloak.py failed: %s", exc)
+        logger.exception("provision-keycloak.py failed: %s", exc)
         return 1
 
 
