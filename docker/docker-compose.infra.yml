@@ -103,7 +103,7 @@ x-runtime-env: &runtime-env
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:?OMNIBASE_INFRA_DB_URL must be set in ~/.omnibase/.env}
-  KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:?KAFKA_BOOTSTRAP_SERVERS must be set in ~/.omnibase/.env (e.g. 192.168.86.200:29092)}
+  KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:?KAFKA_BOOTSTRAP_SERVERS must be set in ~/.omnibase/.env (remote Redpanda host:port)}
   ONEX_CONTRACTS_DIR: /app/contracts
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
   ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
@@ -418,7 +418,7 @@ services:
         condition: service_healthy
     command: ["python", "-m", "omnibase_infra.services.observability.agent_actions.consumer"]
     environment:
-      OMNIBASE_INFRA_AGENT_ACTIONS_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:?KAFKA_BOOTSTRAP_SERVERS must be set in ~/.omnibase/.env (e.g. 192.168.86.200:29092)}
+      OMNIBASE_INFRA_AGENT_ACTIONS_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:?KAFKA_BOOTSTRAP_SERVERS must be set in ~/.omnibase/.env (remote Redpanda host:port)}
       # NOTE: Uses dedicated OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN rather than
       # OMNIBASE_INFRA_DB_URL because this consumer uses pydantic-settings with the
       # OMNIBASE_INFRA_AGENT_ACTIONS_ prefix and may use a different DB role.
@@ -467,7 +467,7 @@ services:
         condition: service_healthy
     command: ["python", "-m", "omnibase_infra.services.observability.skill_lifecycle.consumer"]
     environment:
-      OMNIBASE_INFRA_SKILL_LIFECYCLE_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:?KAFKA_BOOTSTRAP_SERVERS must be set in ~/.omnibase/.env (e.g. 192.168.86.200:29092)}
+      OMNIBASE_INFRA_SKILL_LIFECYCLE_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:?KAFKA_BOOTSTRAP_SERVERS must be set in ~/.omnibase/.env (remote Redpanda host:port)}
       OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN: ${OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN:?OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN must be set in ~/.omnibase/.env}
       OMNIBASE_INFRA_SKILL_LIFECYCLE_BATCH_SIZE: ${SKILL_LIFECYCLE_BATCH_SIZE:-100}
       OMNIBASE_INFRA_SKILL_LIFECYCLE_BATCH_TIMEOUT_MS: ${SKILL_LIFECYCLE_BATCH_TIMEOUT_MS:-1000}

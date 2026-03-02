@@ -596,25 +596,22 @@ class TestDockerNetworkSecurity:
         )
 
         # Services should use internal Docker service names, not external hosts
-        # These patterns indicate proper internal service communication
+        # These patterns indicate proper internal service communication.
+        # Note: Redpanda (Kafka) was removed from local compose (OMN-3299) — the
+        # platform uses remote Redpanda exclusively via KAFKA_BOOTSTRAP_SERVERS.
         internal_service_patterns = [
             "postgres:5432",  # Internal PostgreSQL
-            "redpanda:9092",  # Internal Redpanda/Kafka
             "valkey:6379",  # Internal Valkey/Redis
             "consul:8500",  # Internal Consul (optional profile)
         ]
 
         # Verify at least some internal service references exist.
-        # Threshold is 1: the PR that removed nested variable expansion
-        # (OMN-3266) moved all DSN/URL construction to ~/.omnibase/.env,
-        # so postgres:5432 no longer appears as an inline fallback in the
-        # compose file.  redpanda:9092 remains (Kafka advertise-kafka-addr),
-        # which is sufficient to confirm internal service naming is in use.
+        # Threshold is 1: services communicate via Docker service names.
         internal_refs_found = sum(
             1 for pattern in internal_service_patterns if pattern in content
         )
         assert internal_refs_found >= 1, (
-            f"Expected internal service name references (e.g., redpanda:9092), "
+            f"Expected internal service name references (e.g., valkey:6379), "
             f"found {internal_refs_found}"
         )
 
