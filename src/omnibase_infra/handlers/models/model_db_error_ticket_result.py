@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelDbErrorTicketResult(BaseModel):
@@ -32,32 +32,48 @@ class ModelDbErrorTicketResult(BaseModel):
         - neither           — operation failed; see ``error`` field
     """
 
-    correlation_id: UUID = Field(default_factory=uuid4)
-    """UUID for distributed tracing."""
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    created: bool = False
-    """True when a new Linear ticket was created for this fingerprint."""
+    correlation_id: UUID = Field(
+        default_factory=uuid4,
+        description="UUID for distributed tracing of this report_error operation.",
+    )
 
-    skipped: bool = False
-    """True when the fingerprint already exists — occurrence_count incremented."""
+    created: bool = Field(
+        False,
+        description="True when a new Linear ticket was created for this fingerprint.",
+    )
 
-    issue_id: str | None = None
-    """Linear issue ID (e.g. ``"abc-123-uuid"``).
+    skipped: bool = Field(
+        False,
+        description="True when the fingerprint already exists — occurrence_count incremented.",
+    )
 
-    Present on both ``created`` and ``skipped`` outcomes.
-    """
+    issue_id: UUID | None = Field(
+        None,
+        description=(
+            "Linear issue UUID. "
+            "Present on both created and skipped outcomes; None on failure."
+        ),
+    )
 
-    issue_url: str | None = None
-    """Linear issue URL.
+    issue_url: str = Field(
+        "",
+        description=(
+            "Linear issue URL. "
+            "Present on both created and skipped outcomes; empty string on failure."
+        ),
+    )
 
-    Present on both ``created`` and ``skipped`` outcomes.
-    """
+    occurrence_count: int = Field(
+        1,
+        description="Current occurrence_count from db_error_tickets after the operation.",
+    )
 
-    occurrence_count: int = 1
-    """Current ``occurrence_count`` from ``db_error_tickets`` after the operation."""
-
-    error: str | None = None
-    """Sanitized error message when the operation failed (neither created nor skipped)."""
+    error: str = Field(
+        "",
+        description="Sanitized error message when the operation failed (neither created nor skipped).",
+    )
 
 
 __all__ = ["ModelDbErrorTicketResult"]
