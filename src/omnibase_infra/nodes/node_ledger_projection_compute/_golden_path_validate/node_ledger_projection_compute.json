@@ -1,0 +1,33 @@
+{
+    "node_id": "node_ledger_projection_compute",
+    "ticket_id": "OMN-3387",
+    "input": {
+        "topic": "onex.evt.platform.node-heartbeat.v1",
+        "fixture": {
+            "event_type": "node.heartbeat",
+            "source": "node_ledger_projection_compute",
+            "payload": {
+                "node_id": "node_ledger_projection_compute",
+                "status": "healthy",
+                "timestamp": "2026-03-02T00:00:00Z"
+            }
+        }
+    },
+    "output": {
+        "topic": "onex.evt.platform.node-heartbeat.v1"
+    },
+    "timeout_ms": 15000,
+    "assertions": [
+        {
+            "field": "event_type",
+            "op": "eq",
+            "expected": "node.heartbeat"
+        },
+        {
+            "field": "payload.node_id",
+            "op": "eq",
+            "expected": "node_ledger_projection_compute"
+        }
+    ],
+    "_comment": "Consumer-only audit node: subscribes to 7 platform topics, emits ModelIntent (not Kafka). Golden path verifies Kafka topic reachability and event round-trip for the primary subscribed topic (node-heartbeat.v1). input == output because this node has no publish_topics."
+}

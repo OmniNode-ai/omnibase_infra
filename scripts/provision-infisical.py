@@ -287,6 +287,7 @@ def _create_infisical_folders(
         "kafka",
         "vault",
         "qdrant",
+        "auth",  # Keycloak OIDC config (added for Keycloak integration)
     ),
 ) -> None:
     """Create the /shared/<transport> folder structure in every environment.

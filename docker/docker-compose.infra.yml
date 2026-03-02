@@ -20,6 +20,9 @@
 #   # With secrets management (Infisical)
 #   docker compose -f docker/docker-compose.infra.yml --profile secrets up -d
 #
+#   # With Keycloak (local OIDC/auth)
+#   docker compose -f docker/docker-compose.infra.yml --profile auth up -d
+#
 #   # Full stack (all services)
 #   docker compose -f docker/docker-compose.infra.yml --profile full up -d
 #
@@ -44,7 +47,8 @@
 #   - runtime: ONEX runtime services (omninode-runtime, effects, workers, observability)
 #   - consul: HashiCorp Consul for service discovery
 #   - secrets: Infisical for secrets management
-#   - full: All services (infrastructure + runtime + consul + secrets)
+#   - auth: Keycloak OIDC/auth service (local dev)
+#   - full: All services (infrastructure + runtime + consul + secrets + auth)
 #   - bootstrap: Infrastructure + secrets (for bootstrap-infisical.sh sequence)
 #   - local-redpanda: LOCAL Redpanda instance (opt-in; default is REMOTE at 192.168.86.200)
 #
@@ -61,6 +65,7 @@
 #     - Redpanda: 29092 (internal 9092) [local-redpanda profile only]
 #     - Consul: 28500 (internal 8500) [consul profile]
 #     - Infisical: 8880 (internal 8080) [secrets profile]
+#     - Keycloak: 28080 (internal 8080) [auth profile]
 #   Runtime:
 #     - omninode-runtime: 8085 [runtime profile]
 #     - runtime-effects: 8086 [runtime profile]
@@ -148,6 +153,16 @@ x-runtime-env: &runtime-env
   OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-}
   # OmniClaude domain plugin (OMN-3182): required by PluginClaude.wire_dispatchers()
   OMNICLAUDE_CONTRACTS_ROOT: ${OMNICLAUDE_CONTRACTS_ROOT:-}
+  # --- Keycloak / Auth (auth profile, OMN-3361) ---
+  # KEYCLOAK_ADMIN_URL: internal container DNS — NEVER set to localhost here.
+  # KEYCLOAK_ISSUER: external browser-visible URL — must match token iss claim.
+  KEYCLOAK_ADMIN_URL: ${KEYCLOAK_ADMIN_URL:-http://keycloak:8080}
+  KEYCLOAK_REALM: ${KEYCLOAK_REALM:-omninode}
+  KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-onex-admin}
+  KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+  KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:28080/realms/omninode}
+  ONEX_SERVICE_CLIENT_ID: ${ONEX_SERVICE_CLIENT_ID:-onex-service}
+  ONEX_SERVICE_CLIENT_SECRET: ${ONEX_SERVICE_CLIENT_SECRET:-}
 # ==========================================================================
 # Services
 # ==========================================================================
@@ -181,6 +196,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations/forward:/docker-entrypoint-initdb.d:ro
+      - ./postgres/init/02-keycloak-db.sql:/docker-entrypoint-initdb.d/02-keycloak-db.sql:ro
     networks:
       - omnibase-infra-network
     healthcheck:
@@ -348,6 +364,55 @@ services:
     labels:
       - "com.omninode.service=infisical"
       - "com.omninode.layer=infrastructure"
+  # ==========================================================================
+  # Keycloak - OIDC / Auth Service (Auth Profile) [OMN-3361]
+  # ==========================================================================
+  # Local Keycloak for OIDC authentication in dev. Eliminates dependency on
+  # auth.omninode.ai for local development.
+  #
+  # Usage:
+  #   docker compose -f docker/docker-compose.infra.yml --profile auth up -d
+  #   # Then provision service clients:
+  #   uv run python scripts/provision-keycloak.py --kc-url http://localhost:28080 \
+  #     --realm omninode --admin-username admin \
+  #     --admin-password "${KEYCLOAK_ADMIN_PASSWORD:-keycloak-dev-password}"
+  #
+  # Realm JSON is imported at startup via --import-realm (start-dev command).
+  # onex-service and onex-admin clients are created dynamically by provision-keycloak.py.
+  # No compose healthcheck — provision-keycloak.py handles readiness polling.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3.3
+    container_name: omnibase-infra-keycloak
+    profiles: ["auth", "full"]
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-keycloak-dev-password}
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_PORT: "8080"
+      KC_HOSTNAME_STRICT: "false"
+      # KC_HOSTNAME_STRICT_HTTPS removed: not supported in Keycloak 26+
+      KC_LOG_LEVEL: INFO
+    ports:
+      - "28080:8080" # +20000 per omnibase convention; verify no existing service on 28080 before use
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+      - ./keycloak/omninode-realm.json:/opt/keycloak/data/import/omninode-realm.json:ro
+    networks:
+      - omnibase-infra-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *logging-defaults
+    restart: unless-stopped
+    labels:
+      - "com.omninode.service=keycloak"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.ticket=OMN-3361"
   # ==========================================================================
   # ONEX Runtime - Main Kernel (Runtime Profile)
   # ==========================================================================
@@ -684,6 +749,8 @@ volumes:
     name: omnibase-infra-valkey-data
   consul_data:
     name: omnibase-infra-consul-data
+  keycloak_data:
+    name: omnibase-infra-keycloak-data
   # Runtime volumes
   runtime_logs:
     name: omninode-runtime-logs

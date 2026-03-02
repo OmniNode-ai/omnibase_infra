@@ -6,18 +6,24 @@
 # with Infisical secrets management.
 #
 # Bootstrap Startup Chain (OMN-2287):
-#   Step 1: PostgreSQL starts (POSTGRES_PASSWORD from .env)
-#   Step 2: Valkey starts
-#   Step 3: Infisical starts (depends_on: postgres + valkey healthy)
-#   Step 4: Identity provisioning (first-time only)
-#   Step 5: Seed runs (populates Infisical from contracts + .env values)
-#   Step 6: Runtime services start (prefetch from Infisical)
+#   Step 1:   PostgreSQL starts (POSTGRES_PASSWORD from .env)
+#   Step 2:   Valkey starts
+#   Step 3:   Infisical starts (depends_on: postgres + valkey healthy)
+#   Step 3.5: Keycloak starts (--profile auth) + provision-keycloak.py runs
+#             Skip with: --skip-keycloak or SKIP_KEYCLOAK=1
+#   Step 4:   Identity provisioning (first-time only)
+#   Step 5:   Seed runs (populates Infisical from contracts + .env values)
+#   Step 6:   Runtime services start (prefetch from Infisical)
 #
 # Usage:
 #   ./scripts/bootstrap-infisical.sh                   # Full bootstrap
 #   ./scripts/bootstrap-infisical.sh --skip-seed       # Skip seed step
 #   ./scripts/bootstrap-infisical.sh --skip-identity   # Skip identity setup
+#   ./scripts/bootstrap-infisical.sh --skip-keycloak   # Skip Keycloak start + provisioning
 #   ./scripts/bootstrap-infisical.sh --dry-run         # Show what would happen
+#
+# Env opt-outs:
+#   SKIP_KEYCLOAK=1  ./scripts/bootstrap-infisical.sh  # Same as --skip-keycloak
 #
 # Prerequisites:
 #   - Docker Compose v2.20+
@@ -38,6 +44,13 @@ OMNIBASE_ENV="${HOME}/.omnibase/.env"
 # Defaults
 SKIP_SEED=false
 SKIP_IDENTITY=false
+# SKIP_KEYCLOAK can be set via env (SKIP_KEYCLOAK=1) or --skip-keycloak flag.
+# Normalise "1" → "true" so the if-check below is consistent.
+if [[ "${SKIP_KEYCLOAK:-0}" == "1" ]]; then
+    SKIP_KEYCLOAK=true
+else
+    SKIP_KEYCLOAK=false
+fi
 DRY_RUN=false
 COMPOSE_CMD="docker compose"
 POSTGRES_DB="${POSTGRES_DB:-omnibase_infra}"
@@ -76,6 +89,10 @@ while [[ $# -gt 0 ]]; do
             SKIP_IDENTITY=true
             shift
             ;;
+        --skip-keycloak)
+            SKIP_KEYCLOAK=true
+            shift
+            ;;
         --dry-run)
             DRY_RUN=true
             shift
@@ -86,6 +103,7 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --skip-seed       Skip the Infisical seed step"
             echo "  --skip-identity   Skip identity provisioning"
+            echo "  --skip-keycloak   Skip Keycloak start + provisioning (or set SKIP_KEYCLOAK=1)"
             echo "  --dry-run         Show what would happen without executing"
             echo "  --help, -h        Show this help message"
             exit 0
@@ -207,6 +225,54 @@ if [[ "${DRY_RUN}" != "true" ]]; then
 fi
 
 # ============================================================================
+# Step 3.5: Start Keycloak (auth profile) + provision service clients
+# ============================================================================
+if [[ "${SKIP_KEYCLOAK}" != "true" ]]; then
+    log_step "3.5a" "Starting Keycloak (--profile auth)"
+
+    run_cmd $COMPOSE_CMD -f "${COMPOSE_FILE}" --profile auth up -d keycloak
+
+    log_step "3.5b" "Provisioning Keycloak clients"
+
+    PROVISION_KC_SCRIPT="${SCRIPT_DIR}/provision-keycloak.py"
+    if [[ -f "${PROVISION_KC_SCRIPT}" ]]; then
+        # Export all vars to child process so provision-keycloak.py sees .env values.
+        set -a; source "${ENV_FILE}"; set +a
+        if [[ -f "${OMNIBASE_ENV}" ]]; then
+            set -a; source "${OMNIBASE_ENV}"; set +a
+        fi
+        if [[ "${DRY_RUN}" == "true" ]]; then
+            run_cmd uv run python "${PROVISION_KC_SCRIPT}" \
+                --kc-url "http://localhost:28080" \
+                --realm "omninode" \
+                --admin-username "${KEYCLOAK_ADMIN_USERNAME:-admin}" \
+                --admin-password "${KEYCLOAK_ADMIN_PASSWORD:-keycloak-dev-password}" \
+                --env-file "${OMNIBASE_ENV}" \
+                --dry-run
+        else
+            run_cmd uv run python "${PROVISION_KC_SCRIPT}" \
+                --kc-url "http://localhost:28080" \
+                --realm "omninode" \
+                --admin-username "${KEYCLOAK_ADMIN_USERNAME:-admin}" \
+                --admin-password "${KEYCLOAK_ADMIN_PASSWORD:-keycloak-dev-password}" \
+                --env-file "${OMNIBASE_ENV}"
+
+            # Re-source so KEYCLOAK_* vars are present in the environment for
+            # runtime containers started in step 6.
+            if [[ -f "${OMNIBASE_ENV}" ]]; then
+                set -a; source "${OMNIBASE_ENV}"; set +a
+                log_info "Sourced ${OMNIBASE_ENV} (KEYCLOAK_* vars now in environment)"
+            fi
+        fi
+    else
+        log_warn "provision-keycloak.py not found: ${PROVISION_KC_SCRIPT}"
+        log_warn "Skipping Keycloak client provisioning (will be available after OMN-3362 merges)"
+    fi
+else
+    log_info "Skipping Keycloak (--skip-keycloak / SKIP_KEYCLOAK=1)"
+fi
+
+# ============================================================================
 # Step 4: Identity provisioning (first-time only)
 # ============================================================================
 if [[ "${SKIP_IDENTITY}" != "true" ]]; then
@@ -305,6 +371,12 @@ echo "Services:"
 echo "  PostgreSQL:  localhost:${POSTGRES_EXTERNAL_PORT:-5436}"
 echo "  Valkey:      localhost:${VALKEY_EXTERNAL_PORT:-16379}"
 echo "  Infisical:   localhost:${INFISICAL_EXTERNAL_PORT:-8880}"
+if [[ "${SKIP_KEYCLOAK}" != "true" ]]; then
+echo "  Keycloak:    localhost:28080"
+fi
 echo "  Runtime:     localhost:${RUNTIME_MAIN_PORT:-8085}"
 echo ""
 echo "Infisical UI:  http://localhost:${INFISICAL_EXTERNAL_PORT:-8880}"
+if [[ "${SKIP_KEYCLOAK}" != "true" ]]; then
+echo "Keycloak UI:   http://localhost:28080"
+fi

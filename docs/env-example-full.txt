@@ -668,3 +668,25 @@ ONEX_OUTPUT_TOPIC=responses
 # Default: 1000 (1 second)
 # Example: 1000 (balanced), 500 (low latency), 5000 (high throughput)
 # AGENT_ACTIONS_BATCH_TIMEOUT_MS=1000
+
+# =============================================================================
+# Keycloak (local Docker, --profile auth)
+# =============================================================================
+# Written by provision-keycloak.py. Do not set manually.
+#
+# KEYCLOAK_ADMIN_URL: ALWAYS internal (http://keycloak:8080).
+#   Used by: runtime containers, onex-api. Never set to localhost.
+#   onex-api in k8s gets this via Infisical /services/onex-api/auth/.
+#
+# KEYCLOAK_ISSUER: ALWAYS external browser-visible URL.
+#   Must match the `iss` claim in Keycloak-issued tokens.
+#   Tokens are issued with iss = http://localhost:28080/realms/omninode in local dev.
+#
+KEYCLOAK_ADMIN_URL=http://keycloak:8080
+KEYCLOAK_REALM=omninode
+KEYCLOAK_ADMIN_CLIENT_ID=onex-admin
+KEYCLOAK_ADMIN_CLIENT_SECRET=          # restricted: /services/onex-api/auth/ in Infisical
+KEYCLOAK_ISSUER=http://localhost:28080/realms/omninode
+ONEX_SERVICE_CLIENT_ID=onex-service
+ONEX_SERVICE_CLIENT_SECRET=            # restricted: /services/onex-api/auth/ in Infisical
+# KEYCLOAK_ADMIN_PASSWORD is NOT stored here (transient, bootstrap-only input)

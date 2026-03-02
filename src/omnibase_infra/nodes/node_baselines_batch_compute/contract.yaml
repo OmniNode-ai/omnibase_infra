@@ -20,8 +20,6 @@ output_model:
   module: "omnibase_infra.nodes.node_baselines_batch_compute.models"
   description: "Result row counts and snapshot_emitted flag."
 event_bus:
-  subscribe_topics:
-    - "onex.cmd.omnibase-infra.baselines-compute-requested.v1"
   publish_topics:
     - "onex.evt.omnibase-infra.baselines-computed.v1"
 handler_routing:
