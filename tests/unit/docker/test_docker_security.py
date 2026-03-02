@@ -570,7 +570,7 @@ class TestDockerNetworkSecurity:
         The consolidated docker-compose.infra.yml provides all services locally,
         using internal Docker service names for communication. This is more secure
         than depending on external hosts because:
-        - No hardcoded external IP addresses
+        - No hardcoded external IP addresses (except intentional Redpanda broker — see below)
         - Services communicate via isolated Docker network
         - External access only through configurable published ports
 
@@ -581,18 +581,36 @@ class TestDockerNetworkSecurity:
         Plus:
         - 127.0.0.0/8 (localhost/loopback)
         - 169.254.0.0/16 (link-local/APIPA)
+
+        Exemption (OMN-3413): Kafka/Redpanda broker addresses (*_KAFKA_BOOTSTRAP_SERVERS
+        and KAFKA_BOOTSTRAP_SERVERS keys) are intentionally hardcoded as literals rather
+        than interpolated from host env vars. This prevents ``bus-cloud`` sessions on the
+        host from contaminating container routing (two-bus policy). Lines whose first
+        non-whitespace token ends in ``KAFKA_BOOTSTRAP_SERVERS:`` are excluded from the
+        private-IP check.
         """
         compose_file = COMPOSE_FILE_PATH
-        content = compose_file.read_text()
+        raw_lines = compose_file.read_text().splitlines()
+
+        # Strip lines that are intentional Kafka broker address assignments.
+        # These match the pattern: optional-whitespace + *KAFKA_BOOTSTRAP_SERVERS: "..."
+        # Per OMN-3413, broker IPs are hardcoded to prevent bus-cloud host contamination.
+        kafka_broker_line = re.compile(r"^\s*\w*KAFKA_BOOTSTRAP_SERVERS\s*:")
+        filtered_lines = [
+            line for line in raw_lines if not kafka_broker_line.match(line)
+        ]
+        content = "\n".join(filtered_lines)
 
         # Should NOT have hardcoded private IP addresses in non-comment lines
+        # (outside of the Kafka broker exemption above).
         # Uses PRIVATE_IP_PATTERN which covers all RFC 1918 ranges plus
         # localhost and link-local. See module-level docstring for details.
         matches = PRIVATE_IP_PATTERN.findall(content)
         assert not matches, (
             f"Found hardcoded private IP addresses: {matches}\n"
             "Configuration should use Docker service names or environment variables "
-            "instead of hardcoded IPs for portability."
+            "instead of hardcoded IPs for portability.\n"
+            "Note: KAFKA_BOOTSTRAP_SERVERS lines are exempt (OMN-3413 two-bus policy)."
         )
 
         # Services should use internal Docker service names, not external hosts.
