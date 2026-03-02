@@ -78,6 +78,15 @@ event_bus:
     - "onex.evt.platform.node-liveness-expired.v1"
     - "onex.evt.platform.topic-catalog-response.v1"
     - "onex.evt.platform.topic-catalog-changed.v1"
+    # Platform lifecycle events emitted during registration workflow [OMN-3368]
+    - "onex.evt.platform.node-registration.v1"
+    - "onex.evt.platform.node-heartbeat.v1"
+    - "onex.evt.platform.node-introspection.v1"
+    - "onex.evt.platform.registry-request-introspection.v1"
+    - "onex.evt.platform.fsm-state-transitions.v1"
+    - "onex.intent.platform.runtime-tick.v1"
+    - "onex.cmd.platform.request-introspection.v1"
+    - "onex.snapshot.platform.registration-snapshots.v1"
 input_model:
   name: "ModelOrchestratorInput"
   module: "omnibase_infra.nodes.node_registration_orchestrator.models"
