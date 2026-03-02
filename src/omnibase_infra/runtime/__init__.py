@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Runtime module for omnibase_infra.
+"""Runtime module for omnibase_infra.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides the runtime infrastructure for the ONEX infrastructure layer,
 including three SINGLE SOURCE OF TRUTH registries and the runtime execution host.

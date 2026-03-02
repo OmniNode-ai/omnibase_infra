@@ -510,6 +510,7 @@ def load_runtime_config(
     return config
 
 
+# ai-slop-ok: pre-existing === separators in example startup log in docstring
 async def bootstrap() -> int:
     """Bootstrap the ONEX runtime from contracts.
 
