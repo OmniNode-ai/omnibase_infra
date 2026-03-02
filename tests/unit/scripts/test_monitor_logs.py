@@ -25,7 +25,7 @@ _MODULE_NAME = "monitor_logs"
 
 def _import() -> Any:
     if _MODULE_NAME in sys.modules:
-        return sys.modules[_MODULE_NAME]
+        return importlib.reload(sys.modules[_MODULE_NAME])
     return importlib.import_module(_MODULE_NAME)
 
 
