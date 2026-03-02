@@ -114,7 +114,7 @@ def _cooldown_write(container: str, ts: float, count: int) -> None:
 
 def _backoff_seconds(count: int) -> int:
     """Exponential backoff: 5m, 10m, 20m, 40m, 60m (cap)."""
-    return min(_BACKOFF_BASE * (2**count), _BACKOFF_CAP)
+    return int(min(_BACKOFF_BASE * (2**count), _BACKOFF_CAP))
 
 
 # Resolve docker binary at startup so subprocess calls work without a shell PATH.
@@ -150,12 +150,68 @@ IGNORE_PATTERN = re.compile(
 # Slack
 # ---------------------------------------------------------------------------
 
+# The mrkdwn code-fence wrapper adds exactly 8 chars: "```\n" (4) + "\n```" (4).
+# Cap log text at (MAX_SLACK_CHARS - 8) so the assembled field stays within limit.
+_BLOCK_TEXT_LIMIT = MAX_SLACK_CHARS - 8
+
+# Matches ANSI CSI sequences (colors, cursor), OSC sequences (hyperlinks, titles),
+# and two-byte Fe escape sequences (e.g. ESC [ ... m, ESC ] ... BEL).
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[mGKHF]|\x1b\].*?\x07|\x1b[@-_]")
+
+
+def _sanitize_log_text(text: str) -> str:
+    """Strip ANSI escape codes and non-printable control chars from log content.
+
+    Newlines are preserved; every other control character is replaced with '?'
+    so the structure of the log excerpt remains readable.
+    """
+    text = _ANSI_ESCAPE.sub("", text)
+    return "".join(ch if ch >= " " or ch == "\n" else "?" for ch in text)
+
+
+def _post_slack_plain_text(
+    bot_token: str, channel_id: str, container: str, lines: list[str]
+) -> None:
+    """Fallback: post a plain-text message (no blocks) when blocks are rejected."""
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    text = _sanitize_log_text("\n".join(lines))[:MAX_SLACK_CHARS]
+    fallback_payload = {
+        "channel": channel_id,
+        "text": (
+            f":rotating_light: *Container error:* `{container}` — {timestamp}\n"
+            f"```\n{text}\n```"
+        ),
+    }
+    try:
+        data = json.dumps(fallback_payload).encode("utf-8")
+        req = urllib.request.Request(
+            "https://slack.com/api/chat.postMessage",
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {bot_token}",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+            result = json.loads(resp.read())
+            if not result.get("ok"):
+                print(
+                    f"[monitor] Slack fallback error for {container}: {result.get('error')}",
+                    file=sys.stderr,
+                )
+    except Exception as exc:
+        print(
+            f"[monitor] Failed to post Slack fallback for {container}: {exc}",
+            file=sys.stderr,
+        )
+
 
 def post_slack(
     bot_token: str, channel_id: str, container: str, lines: list[str], dry_run: bool
 ) -> None:
     timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    text = "\n".join(lines)[:MAX_SLACK_CHARS]
+    text = _sanitize_log_text("\n".join(lines))[:_BLOCK_TEXT_LIMIT]
 
     payload = {
         "channel": channel_id,
@@ -197,10 +253,18 @@ def post_slack(
         with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
             result = json.loads(resp.read())
             if not result.get("ok"):
-                print(
-                    f"[monitor] Slack API error for {container}: {result.get('error')}",
-                    file=sys.stderr,
-                )
+                error = result.get("error")
+                if error == "invalid_blocks":
+                    print(
+                        f"[monitor] invalid_blocks for {container}, retrying with plain text",
+                        file=sys.stderr,
+                    )
+                    _post_slack_plain_text(bot_token, channel_id, container, lines)
+                else:
+                    print(
+                        f"[monitor] Slack API error for {container}: {error}",
+                        file=sys.stderr,
+                    )
     except Exception as exc:
         print(
             f"[monitor] Failed to post Slack alert for {container}: {exc}",
