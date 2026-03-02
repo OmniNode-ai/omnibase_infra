@@ -457,6 +457,7 @@ services:
       - "com.omninode.service=runtime-main"
       - "com.omninode.layer=runtime"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+      - "autoheal=true"
   # ==========================================================================
   # ONEX Runtime - Effects Handler (Runtime Profile)
   # ==========================================================================
@@ -492,6 +493,7 @@ services:
       - "com.omninode.service=runtime-effects"
       - "com.omninode.layer=runtime"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+      - "autoheal=true"
   # ==========================================================================
   # ONEX Runtime - Workers (Runtime Profile)
   # ==========================================================================
@@ -533,6 +535,7 @@ services:
       - "com.omninode.service=runtime-worker"
       - "com.omninode.layer=runtime"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+      - "autoheal=true"
   # ==========================================================================
   # Agent Actions Consumer - Observability (Runtime Profile)
   # ==========================================================================
@@ -582,6 +585,7 @@ services:
       - "com.omninode.service=agent-actions-consumer"
       - "com.omninode.layer=runtime"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+      - "autoheal=true"
   # ==========================================================================
   # Skill Lifecycle Consumer - Observability (Runtime Profile) [OMN-2934]
   # ==========================================================================
@@ -626,6 +630,7 @@ services:
       - "com.omninode.service=skill-lifecycle-consumer"
       - "com.omninode.layer=runtime"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+      - "autoheal=true"
   # ==========================================================================
   # OmniIntelligence HTTP API - Pattern Query Service (Runtime Profile)
   # ==========================================================================
@@ -735,6 +740,41 @@ services:
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
       - "com.omninode.ticket=OMN-2756"
       - "com.omninode.transitional=true"
+  # ==========================================================================
+  # Autoheal - Automatic restart of unhealthy containers (OMN-3428)
+  # ==========================================================================
+  # Rationale: Docker restart: unless-stopped only fires on process exit, not
+  # on healthcheck failure. Kafka consumer services (aiokafka) can enter a
+  # permanent retry loop after a broker disconnect without exiting, leaving
+  # the container alive but unhealthy. Autoheal fills that gap.
+  #
+  # Scope: only containers labeled autoheal=true are watched (not infra services
+  # like postgres/valkey, which could cascade-fail dependents if restarted).
+  #
+  # Profiles: runtime, full only. Not active in dev/bootstrap/auth/consul profiles.
+  #
+  # LOCAL INFRA ONLY: docker.sock mount grants root-equivalent Docker control.
+  # Do not use this pattern in shared or multi-user environments.
+  #
+  # Rollback per-container: remove autoheal=true label from the service in this
+  #   file, then: docker compose -f docker/docker-compose.infra.yml --profile runtime up -d --no-build
+  # Rollback entire watchdog:
+  #   docker compose -f docker/docker-compose.infra.yml --profile runtime stop autoheal
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    container_name: omnibase-infra-autoheal
+    profiles: ["runtime", "full"]
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: 60
+      AUTOHEAL_START_PERIOD: 60
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    logging: *logging-defaults
+    labels:
+      - "com.omninode.service=autoheal"
+      - "com.omninode.layer=infrastructure"
 # ==========================================================================
 # Network Configuration
 # ==========================================================================
