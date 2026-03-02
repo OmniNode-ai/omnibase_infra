@@ -56,6 +56,10 @@ event_bus:
     - "onex.evt.platform.validation-adjudication-requested.v1"
     - "onex.evt.platform.validation-result-published.v1"
     - "onex.evt.platform.validation-lifecycle-updated.v1"
+    # Cross-repo validation run lifecycle events [OMN-3370]
+    - "onex.evt.validation.cross-repo-run-started.v1"
+    - "onex.evt.validation.cross-repo-run-completed.v1"
+    - "onex.evt.validation.violations-batch.v1"
 # Handler Routing Configuration
 # ==============================
 # Declarative mapping of consumed events to handler implementations.
