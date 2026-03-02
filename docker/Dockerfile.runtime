@@ -160,12 +160,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN uv pip freeze | grep -v '^\(-e\|@\)' > /tmp/constraints.txt
 
 # Install omninode-intelligence (formerly omniintelligence) constrained to prevent version drift.
-# omninode-intelligence==0.8.0 is compatible with omnibase-infra==0.13.0.
+# omninode-intelligence==0.9.0 is compatible with omnibase-infra==0.13.0.
 # NOTE: package was renamed from omniintelligence → omninode-intelligence on PyPI at 0.7.0.
-# 0.8.0 is the latest available release; bump to 0.9.0 when published (OMN-3301).
+# 0.9.0 includes the query_patterns positional param fix (OMN-3301).
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --constraint /tmp/constraints.txt \
-    omninode-intelligence==0.8.0
+    omninode-intelligence==0.9.0
 
 # omninode-claude==0.4.0 declares exact pins omnibase-core==0.22.0, omnibase-infra==0.13.0,
 # omnibase-spi==0.15.0 that are already satisfied by the constraint file. --no-deps removed
