@@ -347,8 +347,13 @@ class PostgresErrorEmitter:
     def __init__(self, container: str, dry_run: bool) -> None:
         self.container = container
         self.dry_run = dry_run
-        self._producer: object | None = None  # confluent_kafka.Producer
-        self._valkey: object | None = None  # redis.Redis
+        # These hold runtime-imported clients whose types are not available at
+        # type-check time (optional dependencies confluent-kafka and redis).
+        # Using Any avoids false attr-defined errors under mypy --strict.
+        from typing import Any
+
+        self._producer: Any = None  # confluent_kafka.Producer
+        self._valkey: Any = None  # redis.Redis
         self._init_ok = self._init_clients()
 
     def _init_clients(self) -> bool:
@@ -368,7 +373,7 @@ class PostgresErrorEmitter:
             return False
 
         try:
-            import confluent_kafka  # type: ignore[import-untyped]
+            import confluent_kafka
 
             self._producer = confluent_kafka.Producer(
                 {
@@ -395,7 +400,7 @@ class PostgresErrorEmitter:
             return False
 
         try:
-            import redis  # type: ignore[import-untyped]
+            import redis
 
             valkey_host = os.environ.get("VALKEY_HOST", "localhost")
             valkey_port = int(os.environ.get("VALKEY_PORT", "16379"))
@@ -447,8 +452,8 @@ class PostgresErrorEmitter:
         # Dedup check
         dedup_key = f"pg_err_dedup:{fingerprint}"
         try:
-            if self._valkey is not None:  # type: ignore[union-attr]
-                existing = self._valkey.get(dedup_key)  # type: ignore[union-attr]
+            if self._valkey is not None:
+                existing = self._valkey.get(dedup_key)
                 if existing:
                     return
         except Exception as exc:
@@ -479,13 +484,13 @@ class PostgresErrorEmitter:
         published = False
         try:
             payload_bytes = json.dumps(event_payload).encode("utf-8")
-            if self._producer is not None:  # type: ignore[union-attr]
-                self._producer.produce(  # type: ignore[union-attr]
+            if self._producer is not None:
+                self._producer.produce(
                     topic=_TOPIC_DB_ERROR_V1,
                     value=payload_bytes,
                     key=fingerprint.encode("utf-8"),
                 )
-                self._producer.flush(timeout=10)  # type: ignore[union-attr]
+                self._producer.flush(timeout=10)
                 published = True
                 print(
                     f"[monitor] Emitted postgres error event "
@@ -501,9 +506,9 @@ class PostgresErrorEmitter:
         # Set dedup key ONLY after successful publish
         if published:
             try:
-                if self._valkey is not None:  # type: ignore[union-attr]
+                if self._valkey is not None:
                     # TTL: 24 hours — avoid infinite suppression of recurring errors
-                    self._valkey.setex(dedup_key, 86400, "1")  # type: ignore[union-attr]
+                    self._valkey.setex(dedup_key, 86400, "1")
             except Exception as exc:
                 print(
                     f"[monitor] Failed to set Valkey dedup key for {self.container}: {exc}",
