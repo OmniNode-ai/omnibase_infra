@@ -108,6 +108,16 @@ state_machine:
   persistence_enabled: true
   terminal_states: []
   # verdict_emitted is NOT a true terminal — it resets to collecting
+# Event Bus Configuration [OMN-3371]
+event_bus:
+  version:
+    major: 0
+    minor: 1
+    patch: 0
+  publish_topics:
+    - "onex.evt.platform.validation-adjudication-completed.v1"
+  subscribe_topics:
+    - "onex.evt.platform.validation-candidate-submitted.v1"
 # Intent Emission Configuration
 # ============================
 intent_emission:

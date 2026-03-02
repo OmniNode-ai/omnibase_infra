@@ -36,6 +36,14 @@ output_model:
   name: "ModelExecutorResult"
   module: "omnibase_infra.nodes.node_validation_executor.models"
   description: "Aggregated result of all check executions."
+# Event Bus Configuration [OMN-3371]
+event_bus:
+  version:
+    major: 0
+    minor: 1
+    patch: 0
+  publish_topics:
+    - "onex.evt.platform.validation-checks-completed.v1"
 # Capability declaration
 capabilities:
   - name: "validation.execute_checks"

@@ -36,6 +36,14 @@ output_model:
   name: "ModelLifecycleResult"
   module: "omnibase_infra.nodes.node_pattern_lifecycle_effect.models"
   description: "Result of the lifecycle tier update operation."
+# Event Bus Configuration [OMN-3371]
+event_bus:
+  version:
+    major: 0
+    minor: 1
+    patch: 0
+  publish_topics:
+    - "onex.evt.platform.validation-candidate-submitted.v1"
 # Capability declaration
 capabilities:
   - name: "lifecycle.update"
