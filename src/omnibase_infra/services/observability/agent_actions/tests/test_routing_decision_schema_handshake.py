@@ -79,7 +79,7 @@ _RENAMED_FIELDS: dict[str, str] = {
 def contract_yaml() -> dict[str, object]:
     """Load and parse the routing_decision_v1.yaml contract."""
     assert _CONTRACT_PATH.exists(), (
-        f"Contract YAML not found: {_CONTRACT_PATH}\n" f"Create it at: {_CONTRACT_PATH}"
+        f"Contract YAML not found: {_CONTRACT_PATH}\nCreate it at: {_CONTRACT_PATH}"
     )
     with open(_CONTRACT_PATH) as f:
         return yaml.safe_load(f)  # type: ignore[no-any-return]
