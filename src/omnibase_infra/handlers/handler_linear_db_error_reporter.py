@@ -43,7 +43,6 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
-import os
 from typing import TYPE_CHECKING
 
 import httpx
@@ -138,17 +137,15 @@ class HandlerLinearDbErrorReporter:
 
     def __init__(
         self,
-        linear_api_key: str | None = None,
-        linear_team_id: str | None = None,
+        linear_api_key: str = "",
+        linear_team_id: str = "",
         db_pool: asyncpg.Pool | None = None,
         timeout: float = _DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
-        self._linear_api_key: str = linear_api_key or os.environ.get(
-            "LINEAR_API_KEY", ""
-        )
-        self._linear_team_id: str = linear_team_id or os.environ.get(
-            "LINEAR_TEAM_ID", ""
-        )
+        # Callers source these from the environment and pass them in.
+        # This handler does not read os.environ directly (architecture invariant).
+        self._linear_api_key = linear_api_key
+        self._linear_team_id = linear_team_id
         self._db_pool = db_pool
         self._timeout = timeout
 
