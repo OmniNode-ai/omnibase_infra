@@ -2,9 +2,9 @@
 # Copyright (c) 2025 OmniNode Team
 """Async Kafka Consumer for Agent Actions Observability.
 
-This module provides an async Kafka consumer for agent observability events.
-Events are consumed from multiple topics, validated using Pydantic models,
-and persisted to PostgreSQL via the WriterAgentActionsPostgres.
+Consumes agent observability events from multiple Kafka topics, validates each
+event against its registered Pydantic model, and persists batches to PostgreSQL
+via WriterAgentActionsPostgres.
 
 Design Decisions:
     - Per-partition offset tracking: Commit only successfully persisted partitions

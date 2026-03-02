@@ -2,9 +2,9 @@
 # Copyright (c) 2025 OmniNode Team
 """PostgreSQL Writer for Agent Actions Observability.
 
-This module provides a PostgreSQL writer for persisting agent observability
-events consumed from Kafka. It handles batch inserts with idempotency
-guarantees and circuit breaker resilience.
+Persists agent observability events consumed from Kafka to PostgreSQL.
+Handles batch inserts with idempotency guarantees and circuit breaker
+resilience via MixinAsyncCircuitBreaker.
 
 Design Decisions:
     - Pool injection: asyncpg.Pool is injected, not created/managed

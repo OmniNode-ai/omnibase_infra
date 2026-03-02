@@ -504,9 +504,9 @@ class TestWriterFieldPresence:
             }
         )
         for field in self.WRITER_FIELDS:
-            assert hasattr(
-                m, field
-            ), f"Writer field '{field}' missing from ingest model"
+            assert hasattr(m, field), (
+                f"Writer field '{field}' missing from ingest model"
+            )
 
     @pytest.mark.unit
     def test_writer_field_count_is_15(self) -> None:
