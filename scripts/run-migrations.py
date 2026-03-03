@@ -124,7 +124,7 @@ async def run(db_url: str, dry_run: bool, target: int | None) -> int:
                 print(f"  warning: migration directory not found: {migration_dir}")
                 continue
             files = sorted(
-                [f for f in migration_dir.glob("*.sql")],
+                migration_dir.glob("*.sql"),
                 key=lambda f: f.name,
             )
             validate_no_duplicates(files)
@@ -161,7 +161,8 @@ def restamp_fingerprint() -> None:
         result = subprocess.run(
             [sys.executable, str(stamp_script), "stamp"],
             capture_output=True,
-            text=True, check=False,
+            text=True,
+            check=False,
         )
         if result.returncode != 0:
             print(f"  warning: fingerprint restamp failed: {result.stderr.strip()}")
