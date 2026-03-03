@@ -48,7 +48,9 @@ OMNIBASE_INFRA_SCHEMA_MANIFEST = ModelSchemaManifest(
         "baselines_comparisons",
         "baselines_trend",
         "contracts",
+        "db_error_tickets",
         "db_metadata",
+        "gmail_intent_evaluations",
         "injection_effectiveness",
         "latency_breakdowns",
         "llm_call_metrics",
@@ -57,6 +59,7 @@ OMNIBASE_INFRA_SCHEMA_MANIFEST = ModelSchemaManifest(
         "pattern_hit_rates",
         "registration_projections",
         "router_performance_metrics",
+        "skill_executions",
         "topics",
     ),
 )
