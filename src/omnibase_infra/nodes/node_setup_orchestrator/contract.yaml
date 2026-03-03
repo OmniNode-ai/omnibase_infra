@@ -9,11 +9,7 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 description: >
-  ORCHESTRATOR node that coordinates the full platform setup workflow:
-  cloud gate check (I8) → preflight validation → local Docker Compose
-  provisioning → Infisical bootstrap → post-provision health validation.
-  Emits a structured sequence of lifecycle events (SETUP_EVENT_TYPES).
-  No result field — orchestrators emit events only (Invariant I5).
+  ORCHESTRATOR node that coordinates the full platform setup workflow: cloud gate check (I8) → preflight validation → local Docker Compose provisioning → Infisical bootstrap → post-provision health validation. Emits a structured sequence of lifecycle events (SETUP_EVENT_TYPES). No result field — orchestrators emit events only (Invariant I5).
 
 input_model:
   name: "ModelSetupOrchestratorInput"
