@@ -532,7 +532,7 @@ jobs:
         && fromJSON('["self-hosted","omnibase-ci"]')
         || fromJSON('["ubuntu-latest"]')
       }}
-    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, arch-invariants]
+    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, arch-invariants, migration-integration]
     if: always()
 
     steps:
@@ -547,6 +547,7 @@ jobs:
           topicenumdrift="${{ needs.topic-enum-drift.result }}"
           topicnaminglint="${{ needs.topic-naming-lint.result }}"
           archinvariants="${{ needs.arch-invariants.result }}"
+          migrationintegration="${{ needs.migration-integration.result }}"
 
           if [[ "$gate" == "success" ]] && \
              [[ "$lint" == "success" ]] && \
@@ -556,7 +557,8 @@ jobs:
              [[ "$demoloop" == "success" ]] && \
              [[ "$topicenumdrift" == "success" ]] && \
              [[ "$topicnaminglint" == "success" ]] && \
-             [[ "$archinvariants" == "success" ]]; then
+             [[ "$archinvariants" == "success" ]] && \
+             [[ "$migrationintegration" == "success" ]]; then
             echo "All checks passed successfully"
             echo "CI Tests Gate (10 splits): Passed"
             echo "Code Quality: Passed"
@@ -567,6 +569,7 @@ jobs:
             echo "Topic Enum Drift Check: Passed"
             echo "Topic Naming Lint: Passed"
             echo "Arch Invariants: Passed"
+            echo "Migration Integration: Passed"
             exit 0
           else
             echo "Checks failed"
@@ -579,6 +582,7 @@ jobs:
             echo "Topic Enum Drift Check: $topicenumdrift"
             echo "Topic Naming Lint: $topicnaminglint"
             echo "Arch Invariants: $archinvariants"
+            echo "Migration Integration: $migrationintegration"
             exit 1
           fi
 
@@ -656,6 +660,71 @@ jobs:
           echo "================================================================"
           uv run pytest tests/integration/event_bus/test_kafka_boundary_compat.py \
             -v --tb=short
+
+  # Migration integration test -- spins up real Postgres, applies all migrations,
+  # and asserts every manifest table exists (OMN-3529)
+  migration-integration:
+    name: Migration Integration Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: omnibase_infra
+        ports:
+          - 5436:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Apply all migrations
+        env:
+          OMNIBASE_INFRA_DB_URL: postgresql://postgres:test_password@localhost:5436/omnibase_infra
+        run: |
+          uv run python scripts/run-migrations.py
+
+      - name: Assert manifest tables exist
+        env:
+          PGPASSWORD: test_password
+        run: |
+          psql -h localhost -p 5436 -U postgres -d omnibase_infra -c "
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+            ORDER BY table_name;
+          " | tee /tmp/tables.txt
+
+          for table in agent_actions agent_detection_failures agent_execution_logs \
+              agent_routing_decisions agent_status_events agent_transformation_events \
+              baselines_breakdown baselines_comparisons baselines_trend \
+              contracts db_error_tickets db_metadata gmail_intent_evaluations \
+              injection_effectiveness latency_breakdowns llm_call_metrics \
+              llm_cost_aggregates manifest_injection_lifecycle pattern_hit_rates \
+              registration_projections router_performance_metrics skill_executions topics \
+              schema_migrations; do
+            if ! grep -q "$table" /tmp/tables.txt; then
+              echo "FAIL: expected table '$table' not found in database"
+              exit 1
+            fi
+          done
+          echo "All 24 tables present."
 
   ai-slop-check:
     name: AI-Slop Pattern Check (strict, PR diff)
