@@ -190,7 +190,12 @@ def ensure_keycloak_db(postgres_password: str, postgres_port: int = 5436) -> Non
 
 
 def wait_for_keycloak(kc_url: str, timeout_s: int = 120) -> None:
-    """Poll ``{kc_url}/health/ready`` until status is UP or timeout expires.
+    """Poll Keycloak until the master realm endpoint responds or timeout expires.
+
+    Keycloak 26 dev mode (``start-dev``) does not expose ``/health/ready``
+    by default — the MicroProfile Health extension is not loaded in that
+    configuration.  We fall back to probing ``/realms/master``, which returns
+    200 with a JSON realm descriptor as soon as Keycloak is fully initialised.
 
     Args:
         kc_url: External base URL (e.g. ``http://localhost:28080``).
@@ -201,14 +206,13 @@ def wait_for_keycloak(kc_url: str, timeout_s: int = 120) -> None:
     """
     import httpx
 
-    log(
-        f"Waiting for Keycloak readiness at {kc_url}/health/ready (timeout {timeout_s}s)"
-    )
+    probe_url = f"{kc_url}/realms/master"
+    log(f"Waiting for Keycloak readiness at {probe_url} (timeout {timeout_s}s)")
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         try:
-            r = httpx.get(f"{kc_url}/health/ready", timeout=5)
-            if r.status_code == 200 and r.json().get("status") == "UP":
+            r = httpx.get(probe_url, timeout=5)
+            if r.status_code == 200 and r.json().get("realm") == "master":
                 log("Keycloak is ready")
                 return
         except Exception:
@@ -218,6 +222,66 @@ def wait_for_keycloak(kc_url: str, timeout_s: int = 120) -> None:
         f"Keycloak not ready after {timeout_s}s at {kc_url}.  "
         "Check: docker compose --profile auth logs keycloak"
     )
+
+
+# ---------------------------------------------------------------------------
+# Step 4.2b — Patch master realm SSL to NONE for local dev
+# ---------------------------------------------------------------------------
+
+
+def patch_master_realm_ssl_none(
+    postgres_password: str, postgres_port: int = 5436
+) -> None:
+    """Set ``ssl_required='NONE'`` on the master realm and omninode realm.
+
+    Keycloak 26 initialises the master realm with ``ssl_required='EXTERNAL'``
+    by default, which blocks plain-HTTP password-grant token requests even
+    when the server is running in ``start-dev`` mode.  We patch both realms
+    directly in the keycloak database so that local dev works without TLS.
+
+    This is idempotent — safe to call on every provision run.
+
+    .. warning::
+        This is a local-dev-only convenience.  In production environments,
+        Keycloak should run behind a TLS-terminating reverse proxy with
+        ``ssl_required`` left at its default.
+
+    Args:
+        postgres_password: Password for the postgres superuser.
+        postgres_port: External postgres port (default 5436).
+    """
+    log("Patching master and omninode realm ssl_required to NONE (local dev)")
+    try:
+        import psycopg2  # type: ignore[import-untyped]
+
+        conn = psycopg2.connect(
+            host="localhost",
+            port=postgres_port,
+            user="postgres",
+            password=postgres_password,
+            dbname="keycloak",
+            connect_timeout=10,
+        )
+        conn.autocommit = True
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE realm SET ssl_required = 'NONE'"
+                    " WHERE name IN ('master', 'omninode')"
+                    " AND ssl_required != 'NONE'"
+                )
+                if cur.rowcount:
+                    log(f"  ssl_required patched to NONE on {cur.rowcount} realm(s)")
+                else:
+                    log("  ssl_required already NONE on master + omninode realms")
+        finally:
+            conn.close()
+    except ImportError:
+        log(
+            "psycopg2 not available — skipping ssl_required patch (may fail on token grant)"
+        )
+    except Exception as exc:
+        log(f"Warning: could not patch ssl_required: {exc} — continuing anyway")
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +364,8 @@ def provision_onex_admin_client(kc_url: str, token: str) -> str:
     """Create the ``onex-admin`` confidential client in the master realm.
 
     Assigns ``manage-users`` and ``view-users`` roles from the
-    ``realm-management`` client.  Rotates the client secret.
+    ``omninode-realm`` client (KC 26+) or ``realm-management`` client (KC ≤25).
+    Rotates the client secret.
 
     Used by onex-api's ``provision.py`` to PATCH user attributes
     (tenant_id, tenant_slug) via the KC Admin REST API.
@@ -309,7 +374,7 @@ def provision_onex_admin_client(kc_url: str, token: str) -> str:
         The rotated client secret (never logged verbatim).
 
     Raises:
-        RuntimeError: If ``realm-management`` client is not found.
+        RuntimeError: If neither ``omninode-realm`` nor ``realm-management`` client is found.
     """
     import httpx
 
@@ -356,15 +421,30 @@ def provision_onex_admin_client(kc_url: str, token: str) -> str:
     sa_resp.raise_for_status()
     sa_id = sa_resp.json()["id"]
 
-    # Find realm-management client (always present in standard Keycloak)
-    mgmt_resp = httpx.get(
-        f"{base}/clients?clientId=realm-management", headers=headers, timeout=10
-    )
-    mgmt_resp.raise_for_status()
-    if not mgmt_resp.json():
+    # Find the cross-realm management client for the target realm.
+    #
+    # Keycloak 25 and earlier: master realm has a single ``realm-management``
+    # client that provides management roles for all realms.
+    #
+    # Keycloak 26+: master realm has per-realm management clients named
+    # ``<realm-name>-realm`` (e.g. ``omninode-realm``) instead of the shared
+    # ``realm-management`` client.
+    #
+    # We probe both names in order so the script works across KC versions.
+    realm_mgmt_client_id: str | None = None
+    for candidate in ("omninode-realm", "realm-management"):
+        mgmt_resp = httpx.get(
+            f"{base}/clients?clientId={candidate}", headers=headers, timeout=10
+        )
+        mgmt_resp.raise_for_status()
+        if mgmt_resp.json():
+            realm_mgmt_client_id = candidate
+            break
+
+    if realm_mgmt_client_id is None:
         raise RuntimeError(
-            "realm-management client not found in master realm.  "
-            "This indicates a non-standard Keycloak installation."
+            "Neither 'omninode-realm' nor 'realm-management' client found in "
+            "master realm.  This indicates a non-standard Keycloak installation."
         )
     mgmt_id = mgmt_resp.json()[0]["id"]
 
@@ -774,6 +854,12 @@ def main(argv: list[str] | None = None) -> int:
             log(f"[DRY RUN] Would wait for Keycloak readiness at {args.kc_url}")
         else:
             wait_for_keycloak(args.kc_url)
+
+        # Step 4.2b — patch master realm SSL to NONE so plain-HTTP token grants work
+        if args.dry_run:
+            log("[DRY RUN] Would patch master/omninode realm ssl_required to NONE")
+        else:
+            patch_master_realm_ssl_none(postgres_password, args.postgres_port)
 
         # Step 4.3
         if args.dry_run:

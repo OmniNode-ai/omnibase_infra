@@ -3,6 +3,7 @@
   "realm": "omninode",
   "displayName": "OmniNode",
   "enabled": true,
+  "sslRequired": "none",
   "registrationAllowed": true,
   "resetPasswordAllowed": true,
   "loginWithEmailAllowed": true,
