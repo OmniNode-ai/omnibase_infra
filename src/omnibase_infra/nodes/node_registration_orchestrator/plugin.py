@@ -981,6 +981,7 @@ class PluginRegistration:
                 container=config.container,
                 engine=config.dispatch_engine,
                 correlation_id=correlation_id,
+                event_bus=config.event_bus,
             )
 
             duration = time.time() - start_time

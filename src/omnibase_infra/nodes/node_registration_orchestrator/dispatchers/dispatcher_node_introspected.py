@@ -150,11 +150,18 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
         >>> result = await dispatcher.handle(envelope)
     """
 
-    def __init__(self, handler: HandlerNodeIntrospected) -> None:
+    def __init__(
+        self,
+        handler: HandlerNodeIntrospected,
+        event_bus: ProtocolEventBus | None = None,
+    ) -> None:
         """Initialize dispatcher with wrapped handler and circuit breaker.
 
         Args:
             handler: HandlerNodeIntrospected instance to delegate to.
+            event_bus: Optional event bus for direct-publishing the auto-ACK
+                command (Path B, OMN-3444). When None, auto-ACK is silently
+                skipped even if ONEX_REGISTRATION_AUTO_ACK=true.
 
         Circuit Breaker:
             Initialized with KAFKA transport settings per dispatcher_resilience.md:
@@ -162,6 +169,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             - reset_timeout=20.0: 20 seconds before testing recovery
         """
         self._handler = handler
+        self._event_bus = event_bus
 
         # Initialize circuit breaker using mixin pattern
         # Configuration follows docs/patterns/dispatcher_resilience.md guidelines
@@ -304,6 +312,42 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             handler_output = await self._handler.handle(handler_envelope)
             output_events = list(handler_output.events)
             output_intents = handler_output.intents
+
+            # Auto-ACK (Path B, OMN-3444): direct-publish ack when the reducer transitions
+            # to AWAITING_ACK. Gate: ModelNodeRegistrationAccepted in output events.
+            # Published directly to _ACK_TOPIC (NOT in output_events — framework routes
+            # those to the wrong topic via single fixed output_topic).
+            if (
+                _auto_ack_enabled()
+                and self._event_bus is not None
+                and any(
+                    isinstance(e, ModelNodeRegistrationAccepted) for e in output_events
+                )
+            ):
+                auto_ack_payload = ModelNodeRegistrationAcked(
+                    node_id=payload.node_id,
+                    correlation_id=correlation_id,
+                    timestamp=now,
+                )
+                ack_envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+                    envelope_id=uuid4(),
+                    payload=auto_ack_payload,
+                    envelope_timestamp=now,
+                    correlation_id=correlation_id,
+                    source=self.dispatcher_id,
+                )
+                await self._event_bus.publish_envelope(
+                    ack_envelope,
+                    topic=_ACK_TOPIC,
+                )
+                logger.debug(
+                    "Auto-ACK published for node %s (ONEX_REGISTRATION_AUTO_ACK=true)",
+                    payload.node_id,
+                    extra={
+                        "node_id": str(payload.node_id),
+                        "correlation_id": str(correlation_id),
+                    },
+                )
 
             completed_at = datetime.now(UTC)
             duration_ms = (completed_at - started_at).total_seconds() * 1000

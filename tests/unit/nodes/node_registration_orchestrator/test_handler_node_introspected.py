@@ -870,93 +870,9 @@ class TestCapabilitiesJsonbCompatibility:
 
 
 class TestHandlerNodeIntrospectedAutoAck:
-    """Tests for ONEX_REGISTRATION_AUTO_ACK feature (OMN-3444)."""
+    """Stub class: auto-ACK tests moved to test_dispatcher_node_introspected.py (OMN-3444).
 
-    _ACK_TOPIC = "onex.cmd.platform.node-registration-acked.v1"
-
-    @pytest.mark.asyncio
-    @pytest.mark.unit
-    async def test_introspected_handler_publishes_auto_ack_on_awaiting_ack_transition(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Gate: decision.new_state == AWAITING_ACK triggers auto-ACK publish.
-
-        When ONEX_REGISTRATION_AUTO_ACK=true and the reducer transitions to
-        AWAITING_ACK, the handler must direct-publish ModelNodeRegistrationAcked
-        to the ack topic. The ack must NOT appear in output.events.
-        """
-        from omnibase_core.protocols.event_bus.protocol_event_bus import (
-            ProtocolEventBus,
-        )
-        from omnibase_infra.models.registration.commands.model_node_registration_acked import (
-            ModelNodeRegistrationAcked,
-        )
-
-        monkeypatch.setenv("ONEX_REGISTRATION_AUTO_ACK", "true")
-
-        mock_event_bus = AsyncMock(spec=ProtocolEventBus)
-        mock_reader = create_mock_projection_reader()
-        mock_reader.get_entity_state.return_value = None  # New node -> AWAITING_ACK
-
-        handler = HandlerNodeIntrospected(
-            mock_reader,
-            create_default_reducer(),
-            event_bus=mock_event_bus,
-        )
-
-        node_id = uuid4()
-        introspection_event = create_introspection_event(node_id=node_id)
-        envelope = create_envelope(introspection_event, now=TEST_NOW)
-
-        output = await handler.handle(envelope)
-
-        # publish_envelope must be called exactly once
-        mock_event_bus.publish_envelope.assert_awaited_once()
-
-        call_args = mock_event_bus.publish_envelope.call_args
-        # Envelope is passed as the first positional arg or as keyword 'envelope'
-        published_envelope = call_args.kwargs.get("envelope") or call_args.args[0]
-        assert isinstance(published_envelope, ModelEventEnvelope)
-        published_payload = published_envelope.payload
-        assert isinstance(published_payload, ModelNodeRegistrationAcked)
-        assert published_payload.node_id == node_id
-        assert published_payload.correlation_id is not None
-        assert published_payload.timestamp is not None
-
-        # Topic must be passed as keyword arg
-        assert call_args.kwargs.get("topic") == self._ACK_TOPIC
-
-        # The ack command must NOT appear in handler output.events
-        ack_in_events = [
-            e for e in output.events if isinstance(e, ModelNodeRegistrationAcked)
-        ]
-        assert len(ack_in_events) == 0
-
-    @pytest.mark.asyncio
-    @pytest.mark.unit
-    async def test_introspected_handler_no_auto_ack_when_flag_disabled(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """When ONEX_REGISTRATION_AUTO_ACK is not set, no publish must occur."""
-        from omnibase_core.protocols.event_bus.protocol_event_bus import (
-            ProtocolEventBus,
-        )
-
-        monkeypatch.delenv("ONEX_REGISTRATION_AUTO_ACK", raising=False)
-
-        mock_event_bus = AsyncMock(spec=ProtocolEventBus)
-        mock_reader = create_mock_projection_reader()
-        mock_reader.get_entity_state.return_value = None  # New node
-
-        handler = HandlerNodeIntrospected(
-            mock_reader,
-            create_default_reducer(),
-            event_bus=mock_event_bus,
-        )
-
-        introspection_event = create_introspection_event()
-        envelope = create_envelope(introspection_event, now=TEST_NOW)
-
-        await handler.handle(envelope)
-
-        mock_event_bus.publish_envelope.assert_not_awaited()
+    The handler no longer holds event_bus — auto-ACK is now the dispatcher's
+    responsibility (architecture invariant: handlers cannot have event_bus access).
+    See DispatcherNodeIntrospected and test_dispatcher_node_introspected.py.
+    """
