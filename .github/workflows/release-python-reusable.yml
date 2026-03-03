@@ -69,6 +69,11 @@ jobs:
             exit 1
           }
 
+      - name: Smoke test — install wheel and verify import
+        run: |
+          pip install dist/*.whl
+          python -c "import omnibase_infra; print('import omnibase_infra OK')"
+
       - name: Publish to PyPI
         if: inputs.publish
         run: |
