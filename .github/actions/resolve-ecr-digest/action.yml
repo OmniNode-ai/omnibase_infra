@@ -1,0 +1,184 @@
+name: 'Resolve ECR Digest'
+description: 'Resolve an ECR image digest from a commit SHA tag with retry logic and validation'
+author: 'OmniNode'
+inputs:
+  commit-sha:
+    description: 'The commit SHA to look up in ECR (full 40-char or short 7-char)'
+    required: true
+  ecr-registry:
+    description: 'ECR registry URL (e.g., 123456789012.dkr.ecr.us-east-1.amazonaws.com)'
+    required: true
+  ecr-repository:
+    description: 'ECR repository name (e.g., omnicloud/core)'
+    required: true
+  aws-region:
+    description: 'AWS region for ECR'
+    required: false
+    default: 'us-east-1'
+  fail-on-missing:
+    description: 'Whether to fail the action if digest is not found (set to "false" for graceful handling)'
+    required: false
+    default: 'true'
+  max-attempts:
+    description: 'Maximum number of retry attempts (default: 5)'
+    required: false
+    default: '5'
+  initial-delay:
+    description: 'Initial delay in seconds before first retry (default: 2)'
+    required: false
+    default: '2'
+  max-delay:
+    description: 'Maximum delay in seconds between retries (default: 60)'
+    required: false
+    default: '60'
+  backoff-factor:
+    description: 'Exponential backoff multiplier (default: 2)'
+    required: false
+    default: '2'
+outputs:
+  digest:
+    description: 'The resolved sha256 digest (empty if not found and fail-on-missing is false)'
+    value: ${{ steps.resolve.outputs.digest }}
+  # Output naming convention: Use underscores (image_ref) not hyphens for consistency
+  # with GitHub Actions best practices (outputs are accessed as steps.<id>.outputs.<name>)
+  # and to avoid issues with bracket notation in workflow references.
+  image_ref:
+    description: 'Full image reference with digest (e.g., registry/repo@sha256:abc123...)'
+    value: ${{ steps.resolve.outputs.image_ref }}
+  found:
+    description: 'Whether the digest was found ("true" or "false")'
+    value: ${{ steps.resolve.outputs.found }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve ECR image digest
+      id: resolve
+      shell: bash
+      env:
+        COMMIT_SHA: ${{ inputs.commit-sha }}
+        ECR_REGISTRY: ${{ inputs.ecr-registry }}
+        ECR_REPOSITORY: ${{ inputs.ecr-repository }}
+        AWS_REGION: ${{ inputs.aws-region }}
+        FAIL_ON_MISSING: ${{ inputs.fail-on-missing }}
+        MAX_ATTEMPTS: ${{ inputs.max-attempts }}
+        INITIAL_DELAY: ${{ inputs.initial-delay }}
+        MAX_DELAY: ${{ inputs.max-delay }}
+        BACKOFF_FACTOR: ${{ inputs.backoff-factor }}
+        # AWS CLI timeout settings prevent indefinite hangs on network issues
+        AWS_CLI_CONNECT_TIMEOUT: '10'
+        AWS_CLI_READ_TIMEOUT: '30'
+      run: |
+        # Validate commit SHA format (7-40 lowercase hex characters)
+        if [[ ! "$COMMIT_SHA" =~ ^[a-f0-9]{7,40}$ ]]; then
+          echo "::error::Invalid commit SHA format: $COMMIT_SHA"
+          echo "Expected: 7-40 lowercase hex characters"
+          exit 1
+        fi
+
+        # Validate numeric inputs with reasonable upper bounds
+        if ! [[ "$MAX_ATTEMPTS" =~ ^[0-9]+$ ]] || [ "$MAX_ATTEMPTS" -lt 1 ] || [ "$MAX_ATTEMPTS" -gt 20 ]; then
+          echo "::error::Invalid max-attempts: $MAX_ATTEMPTS (must be 1-20)"
+          exit 1
+        fi
+
+        if ! [[ "$INITIAL_DELAY" =~ ^[0-9]+$ ]] || [ "$INITIAL_DELAY" -lt 1 ] || [ "$INITIAL_DELAY" -gt 60 ]; then
+          echo "::error::Invalid initial-delay: $INITIAL_DELAY (must be 1-60 seconds)"
+          exit 1
+        fi
+
+        if ! [[ "$MAX_DELAY" =~ ^[0-9]+$ ]] || [ "$MAX_DELAY" -lt 1 ] || [ "$MAX_DELAY" -gt 300 ]; then
+          echo "::error::Invalid max-delay: $MAX_DELAY (must be 1-300 seconds)"
+          exit 1
+        fi
+
+        if ! [[ "$BACKOFF_FACTOR" =~ ^[0-9]+$ ]] || [ "$BACKOFF_FACTOR" -lt 1 ] || [ "$BACKOFF_FACTOR" -gt 10 ]; then
+          echo "::error::Invalid backoff-factor: $BACKOFF_FACTOR (must be 1-10)"
+          exit 1
+        fi
+
+        echo "Querying ECR for digest of ${ECR_REPOSITORY}:${COMMIT_SHA}..."
+        echo "Configuration: max-attempts=${MAX_ATTEMPTS}, initial-delay=${INITIAL_DELAY}s, max-delay=${MAX_DELAY}s, backoff-factor=${BACKOFF_FACTOR}"
+
+        # Verify repository exists before retry loop
+        echo "Verifying ECR repository exists..."
+        if ! aws ecr describe-repositories \
+            --region "$AWS_REGION" \
+            --repository-names "$ECR_REPOSITORY" 2>&1; then
+          echo "::error::ECR repository '${ECR_REPOSITORY}' does not exist or is not accessible in region ${AWS_REGION}"
+          exit 1
+        fi
+        echo "Repository verified: ${ECR_REPOSITORY}"
+
+        # Query ECR for the image digest with retry logic for eventual consistency
+        DIGEST=""
+        DELAY="$INITIAL_DELAY"
+        for i in $(seq 1 "$MAX_ATTEMPTS"); do
+          echo "Attempt $i/$MAX_ATTEMPTS: Querying ECR for image digest..."
+
+          # Capture both stdout and stderr for proper error logging
+          ECR_OUTPUT=$(aws ecr describe-images \
+            --region "$AWS_REGION" \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=${COMMIT_SHA}" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text 2>&1) || true
+
+          # Check if output contains an error
+          if echo "$ECR_OUTPUT" | grep -q "ImageNotFoundException\|error\|Error"; then
+            echo "::debug::ECR query returned: $ECR_OUTPUT"
+            DIGEST=""
+          else
+            DIGEST="$ECR_OUTPUT"
+          fi
+
+          if [[ -n "$DIGEST" && "$DIGEST" != "None" && "$DIGEST" != "null" ]]; then
+            echo "Digest resolved on attempt $i"
+            break
+          fi
+
+          if [[ $i -lt $MAX_ATTEMPTS ]]; then
+            echo "Attempt $i: Image not yet available, waiting ${DELAY}s before retry..."
+            sleep "$DELAY"
+            # Calculate next delay with exponential backoff, capped at max-delay
+            DELAY=$((DELAY * BACKOFF_FACTOR))
+            if [[ $DELAY -gt $MAX_DELAY ]]; then
+              DELAY=$MAX_DELAY
+            fi
+          fi
+        done
+
+        # Handle digest not found
+        if [[ -z "$DIGEST" || "$DIGEST" == "None" || "$DIGEST" == "null" ]]; then
+          if [[ "$FAIL_ON_MISSING" == "true" ]]; then
+            echo "::error::Failed to resolve digest for ${ECR_REPOSITORY}:${COMMIT_SHA} after ${MAX_ATTEMPTS} attempts"
+            echo "Ensure the image was built and pushed to ECR with this commit SHA."
+            exit 1
+          else
+            echo "::warning::Digest not available after ${MAX_ATTEMPTS} attempts"
+            echo "::notice title=Digest Not Found::No image digest available for ${ECR_REPOSITORY}:${COMMIT_SHA}." \
+              "This may be expected if the image hasn't been built yet."
+            echo "digest=" >> $GITHUB_OUTPUT
+            echo "image_ref=" >> $GITHUB_OUTPUT
+            echo "found=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+        fi
+
+        # Validate digest format (sha256:<64 hex characters>)
+        if [[ ! "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+          echo "::error::Invalid digest format: $DIGEST"
+          echo "Expected format: sha256:<64 hex characters>"
+          exit 1
+        fi
+
+        # Build full image reference
+        IMAGE_REF="${ECR_REGISTRY}/${ECR_REPOSITORY}@${DIGEST}"
+
+        # Set outputs
+        echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
+        echo "image_ref=${IMAGE_REF}" >> $GITHUB_OUTPUT
+        echo "found=true" >> $GITHUB_OUTPUT
+
+        # Log success
+        echo "Resolved digest: ${DIGEST}"
+        echo "Full image ref: ${IMAGE_REF}"
