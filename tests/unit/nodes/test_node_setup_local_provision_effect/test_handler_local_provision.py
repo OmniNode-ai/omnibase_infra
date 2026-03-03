@@ -155,9 +155,9 @@ class TestHandlerLocalProvision:
         assert len(captured_cmd) == 1
         cmd = captured_cmd[0]
         profile_indices = [i for i, v in enumerate(cmd) if v == "--profile"]
-        assert (
-            len(profile_indices) == 1
-        ), f"Expected exactly 1 --profile flag, got {len(profile_indices)}: {cmd}"
+        assert len(profile_indices) == 1, (
+            f"Expected exactly 1 --profile flag, got {len(profile_indices)}: {cmd}"
+        )
         assert cmd[profile_indices[0] + 1] == "secrets"
 
     async def test_no_duplicate_profiles_when_two_services_share_profile(
@@ -238,9 +238,9 @@ class TestHandlerLocalProvision:
         assert len(captured_cmd) == 1
         cmd = captured_cmd[0]
         profile_indices = [i for i, v in enumerate(cmd) if v == "--profile"]
-        assert (
-            len(profile_indices) == 1
-        ), f"Expected exactly 1 --profile infra (deduped), got {len(profile_indices)}: {cmd}"
+        assert len(profile_indices) == 1, (
+            f"Expected exactly 1 --profile infra (deduped), got {len(profile_indices)}: {cmd}"
+        )
         assert cmd[profile_indices[0] + 1] == "infra"
 
     async def test_failed_subprocess_returns_services_failed(
