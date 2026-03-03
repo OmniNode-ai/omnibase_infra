@@ -785,7 +785,7 @@ services:
   # Host browsers access the UI at http://localhost:6006.
   # OMN-3542: Added as a runtime-profile service alongside intelligence-api.
   phoenix:
-    image: arizephoenix/phoenix:7.6.0
+    image: arizephoenix/phoenix:latest
     container_name: omnibase-infra-phoenix
     profiles: ["runtime", "full"]
     environment:
