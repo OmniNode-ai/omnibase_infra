@@ -220,21 +220,33 @@ def validate_kafka_broker_allowlist(
         if not broker:
             continue
 
-        # If operator allowlist is configured and broker matches a prefix: accept
-        if allowlist_prefixes and any(
-            broker.startswith(prefix) for prefix in allowlist_prefixes
-        ):
-            continue
+        if allowlist_prefixes:
+            # Strict allowlist mode: when KAFKA_BROKER_ALLOWLIST is set, only
+            # brokers whose address starts with a listed prefix are accepted.
+            # Brokers not matching any prefix are rejected — this prevents
+            # unintended connections to off-allowlist hosts.
+            if any(broker.startswith(prefix) for prefix in allowlist_prefixes):
+                continue
+            raise ProtocolConfigurationError(
+                f"KAFKA_BOOTSTRAP_SERVERS value '{broker}' is not permitted. "
+                f"KAFKA_BROKER_ALLOWLIST is set but '{broker}' does not start with "
+                f"any listed prefix ({', '.join(allowlist_prefixes)}). "
+                f"Add the appropriate prefix to KAFKA_BROKER_ALLOWLIST to permit it.",
+                context=context,
+                rejected_broker=broker,
+                parameter="KAFKA_BOOTSTRAP_SERVERS",
+            )
 
-        # Check against the built-in denylist
+        # Denylist-only mode (no allowlist configured): reject known-bad patterns
         for pattern in _KAFKA_BROKER_DENYLIST_PATTERNS:
             if pattern.match(broker):
                 raise ProtocolConfigurationError(
                     f"KAFKA_BOOTSTRAP_SERVERS value '{broker}' is not allowed. "
                     f"Local/container broker addresses are rejected at boot to "
                     f"prevent silent misconfiguration. "
-                    f"Expected a remote broker address (e.g., '192.168.86.200:29092'). "
-                    f"Set KAFKA_BROKER_ALLOWLIST to override (comma-separated prefixes).",
+                    f"Set KAFKA_BROKER_ALLOWLIST to override (comma-separated prefixes, e.g., "
+                    f"KAFKA_BROKER_ALLOWLIST=redpanda: for local Docker containers, "
+                    f"or KAFKA_BROKER_ALLOWLIST=localhost: for host scripts and tests).",
                     context=context,
                     rejected_broker=broker,
                     parameter="KAFKA_BOOTSTRAP_SERVERS",
@@ -657,7 +669,7 @@ async def bootstrap() -> int:
                 "Kafka event bus will not be available unless ONEX_EVENT_BUS_TYPE=kafka "
                 "is also requested, in which case startup will fail. "
                 "Set KAFKA_BOOTSTRAP_SERVERS to the broker address "
-                "(e.g., '192.168.86.200:29092') to enable Kafka. "
+                "(e.g., 'redpanda:9092' for local Docker, or a remote broker address) to enable Kafka. "
                 "(correlation_id=%s)",
                 correlation_id,
             )

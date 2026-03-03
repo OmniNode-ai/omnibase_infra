@@ -160,9 +160,9 @@ class TestEnvExampleSecurity:
             keyword for keyword in security_keywords if keyword in content
         ]
 
-        assert len(found_keywords) >= 2, (
-            f"Missing security warnings (found: {found_keywords})"
-        )
+        assert (
+            len(found_keywords) >= 2
+        ), f"Missing security warnings (found: {found_keywords})"
 
     def test_passwords_require_explicit_values(self) -> None:
         """Verify password variables are clearly marked as requiring explicit values.
@@ -206,9 +206,7 @@ class TestEnvExampleSecurity:
                 or "CRITICAL" in section_text
             )
 
-            assert has_warning, (
-                f"{var} should have security warning in comments (checked {len(section_lines)} lines)"
-            )
+            assert has_warning, f"{var} should have security warning in comments (checked {len(section_lines)} lines)"
 
 
 @pytest.mark.unit
@@ -245,9 +243,9 @@ class TestDockerfileSecurity:
             re.search(pattern, content) for pattern in user_creation_patterns
         )
 
-        assert found_user_creation, (
-            "Dockerfile must create a non-root user with useradd/adduser"
-        )
+        assert (
+            found_user_creation
+        ), "Dockerfile must create a non-root user with useradd/adduser"
 
     def test_switches_to_non_root_user(self) -> None:
         """Verify Dockerfile switches to non-root user before running application.
@@ -262,9 +260,9 @@ class TestDockerfileSecurity:
         user_directive_pattern = r"^USER\s+(?!root\b)\w+"
         found_user_directive = re.search(user_directive_pattern, content, re.MULTILINE)
 
-        assert found_user_directive, (
-            "Dockerfile must switch to non-root user with USER directive"
-        )
+        assert (
+            found_user_directive
+        ), "Dockerfile must switch to non-root user with USER directive"
 
     def test_does_not_run_as_root(self) -> None:
         """Verify Dockerfile does not explicitly run as root user.
@@ -397,14 +395,14 @@ class TestDockerComposeSecurity:
 
         # Should use ${POSTGRES_PASSWORD:?...} fail-fast pattern for the postgres
         # service definition, which causes docker compose to abort if unset.
-        assert "POSTGRES_PASSWORD:?" in content, (
-            "POSTGRES_PASSWORD should use ${VAR:?error} fail-fast syntax"
-        )
+        assert (
+            "POSTGRES_PASSWORD:?" in content
+        ), "POSTGRES_PASSWORD should use ${VAR:?error} fail-fast syntax"
 
         # Should NOT have default value pattern (${VAR:-default})
-        assert "POSTGRES_PASSWORD:-" not in content, (
-            "POSTGRES_PASSWORD should NOT have default value (security risk)"
-        )
+        assert (
+            "POSTGRES_PASSWORD:-" not in content
+        ), "POSTGRES_PASSWORD should NOT have default value (security risk)"
 
     def test_valkey_password_configuration(self) -> None:
         """Verify Valkey password (VALKEY_PASSWORD env var) is properly configured.
@@ -428,15 +426,15 @@ class TestDockerComposeSecurity:
         assert "VALKEY_PASSWORD" in content, "Missing VALKEY_PASSWORD configuration"
 
         # Should use ${VALKEY_PASSWORD} pattern with environment variable substitution
-        assert "${VALKEY_PASSWORD" in content, (
-            "VALKEY_PASSWORD should use ${VAR} syntax"
-        )
+        assert (
+            "${VALKEY_PASSWORD" in content
+        ), "VALKEY_PASSWORD should use ${VAR} syntax"
 
         # Verify Valkey service exists and uses secure network isolation
         assert "valkey:" in content, "Missing Valkey service definition"
-        assert "omnibase-infra-network" in content, (
-            "Valkey should be isolated to internal network"
-        )
+        assert (
+            "omnibase-infra-network" in content
+        ), "Valkey should be isolated to internal network"
 
     def test_no_hardcoded_credentials(self) -> None:
         """Verify docker-compose does not contain hardcoded credentials.
@@ -474,9 +472,9 @@ class TestDockerComposeSecurity:
             1 for keyword in security_keywords if keyword in content
         )
 
-        assert found_security_comments >= 2, (
-            "Missing security documentation in comments"
-        )
+        assert (
+            found_security_comments >= 2
+        ), "Missing security documentation in comments"
 
     def test_port_exposure_is_controlled(self) -> None:
         """Verify exposed ports are intentional and documented.
@@ -498,9 +496,9 @@ class TestDockerComposeSecurity:
             has_env_var = re.search(env_var_pattern, content)
 
             # Port should either be configurable or be a standard runtime port
-            assert has_env_var or port == "8085", (
-                f"Port {port} should be configurable via environment variable"
-            )
+            assert (
+                has_env_var or port == "8085"
+            ), f"Port {port} should be configurable via environment variable"
 
     def test_resource_limits_defined(self) -> None:
         """Verify resource limits are defined for security and stability.
@@ -535,9 +533,9 @@ class TestDockerComposeSecurity:
         safe_policies = ["unless-stopped", "on-failure", "no"]
 
         for policy in restart_policies:
-            assert policy in safe_policies, (
-                f"Unsafe restart policy: {policy} (use unless-stopped or on-failure)"
-            )
+            assert (
+                policy in safe_policies
+            ), f"Unsafe restart policy: {policy} (use unless-stopped or on-failure)"
 
 
 @pytest.mark.unit
@@ -582,40 +580,28 @@ class TestDockerNetworkSecurity:
         - 127.0.0.0/8 (localhost/loopback)
         - 169.254.0.0/16 (link-local/APIPA)
 
-        Exemption (OMN-3413): Kafka/Redpanda broker addresses (*_KAFKA_BOOTSTRAP_SERVERS
-        and KAFKA_BOOTSTRAP_SERVERS keys) are intentionally hardcoded as literals rather
-        than interpolated from host env vars. This prevents ``bus-cloud`` sessions on the
-        host from contaminating container routing (two-bus policy). Lines whose first
-        non-whitespace token ends in ``KAFKA_BOOTSTRAP_SERVERS:`` are excluded from the
-        private-IP check.
+        OMN-3431: Redpanda is now a local Docker service using the internal hostname
+        ``redpanda:9092``. No private IP addresses appear in compose — the OMN-3413
+        exemption is no longer needed.
         """
         compose_file = COMPOSE_FILE_PATH
         raw_lines = compose_file.read_text().splitlines()
 
-        # Strip lines that are intentional Kafka broker address assignments.
-        # These match the pattern: optional-whitespace + *KAFKA_BOOTSTRAP_SERVERS: "..."
-        # Per OMN-3413, broker IPs are hardcoded to prevent bus-cloud host contamination.
-        kafka_broker_line = re.compile(r"^\s*\w*KAFKA_BOOTSTRAP_SERVERS\s*:")
-        filtered_lines = [
-            line for line in raw_lines if not kafka_broker_line.match(line)
-        ]
-        content = "\n".join(filtered_lines)
+        content = "\n".join(raw_lines)
 
-        # Should NOT have hardcoded private IP addresses in non-comment lines
-        # (outside of the Kafka broker exemption above).
+        # Should NOT have hardcoded private IP addresses in non-comment lines.
         # Uses PRIVATE_IP_PATTERN which covers all RFC 1918 ranges plus
         # localhost and link-local. See module-level docstring for details.
+        # Note: Redpanda is now a local Docker service (OMN-3431). It uses the
+        # Docker-internal hostname redpanda:9092, not a private IP address.
         matches = PRIVATE_IP_PATTERN.findall(content)
         assert not matches, (
             f"Found hardcoded private IP addresses: {matches}\n"
             "Configuration should use Docker service names or environment variables "
-            "instead of hardcoded IPs for portability.\n"
-            "Note: KAFKA_BOOTSTRAP_SERVERS lines are exempt (OMN-3413 two-bus policy)."
+            "instead of hardcoded IPs for portability."
         )
 
         # Services should use internal Docker service names, not external hosts.
-        # Note: Redpanda (Kafka) was removed from local compose (OMN-3299) — the
-        # platform uses remote Redpanda exclusively via KAFKA_BOOTSTRAP_SERVERS.
         # DSN/URL construction was also moved to ~/.omnibase/.env (PR #513/OMN-3266),
         # so host:port patterns no longer appear as inline fallbacks in compose.
         # Instead, verify that internal service names are defined as top-level keys.
@@ -644,9 +630,9 @@ class TestDockerNetworkSecurity:
 
         # Should have network references in services
         # Look for services section and verify network usage
-        assert "omnibase-infra-network" in content, (
-            "Services should reference custom network"
-        )
+        assert (
+            "omnibase-infra-network" in content
+        ), "Services should reference custom network"
 
 
 # ============================================================================

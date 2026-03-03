@@ -57,7 +57,7 @@ class TestValidateKafkaBrokerAllowlist:
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             validate_kafka_broker_allowlist("localhost:9092")
         error_msg = str(exc_info.value)
-        assert "192.168.86.200:29092" in error_msg or "remote broker" in error_msg
+        assert "KAFKA_BROKER_ALLOWLIST" in error_msg
 
     # ------------------------------------------------------------------
     # Accepted patterns — remote broker addresses
@@ -118,10 +118,28 @@ class TestValidateKafkaBrokerAllowlist:
             with pytest.raises(ProtocolConfigurationError):
                 validate_kafka_broker_allowlist("localhost:9092")
 
+    def test_allowlist_prefix_does_not_match_substring(self) -> None:
+        """SECURITY: localhost: allowlist must not match evil-localhost.example.com.
+
+        If this test fails, the allowlist uses substring (in) instead of prefix
+        (startswith) matching. Fix the implementation immediately — this is a
+        security boundary violation.
+        """
+        with patch.dict("os.environ", {ENV_KAFKA_BROKER_ALLOWLIST: "localhost:"}):
+            with pytest.raises(ProtocolConfigurationError):
+                validate_kafka_broker_allowlist("evil-localhost.example.com:9092")
+
     def test_multi_broker_one_denied(self) -> None:
-        """A comma-separated list with one denied broker raises."""
+        """Comma-separated list raises if any broker matches the denylist.
+
+        kafka.internal.company.com:9092 passes (not on denylist).
+        redpanda:9092 fails (matches ^redpanda: pattern).
+        The error message must name the denied broker.
+        """
         with pytest.raises(ProtocolConfigurationError) as exc_info:
-            validate_kafka_broker_allowlist("192.168.86.200:29092,redpanda:9092")
+            validate_kafka_broker_allowlist(
+                "kafka.internal.company.com:9092,redpanda:9092"
+            )
         assert "redpanda:9092" in str(exc_info.value)
 
     # ------------------------------------------------------------------
