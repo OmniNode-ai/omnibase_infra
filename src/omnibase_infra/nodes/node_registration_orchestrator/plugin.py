@@ -651,7 +651,16 @@ class PluginRegistration:
         try:
             schema_sql = schema_file.read_text()
             async with self._pool.acquire() as conn:
-                await conn.execute(schema_sql)
+                async with conn.transaction():
+                    # Serialize concurrent schema initialization across multiple
+                    # service instances starting simultaneously. Without this lock
+                    # two processes racing to CREATE INDEX IF NOT EXISTS on the same
+                    # table deadlock on catalog-level ShareUpdateExclusiveLock.
+                    # pg_advisory_xact_lock releases automatically at transaction end.
+                    await conn.execute(
+                        "SELECT pg_advisory_xact_lock(hashtext('registration_projection_schema_init'))"
+                    )
+                    await conn.execute(schema_sql)
             logger.info(
                 "Registration projection schema initialized (correlation_id=%s)",
                 correlation_id,
