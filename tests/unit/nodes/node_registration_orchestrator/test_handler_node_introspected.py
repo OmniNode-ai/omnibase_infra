@@ -247,9 +247,9 @@ class TestHandlerNodeIntrospectedSkipsBlockingStates:
 
         assert isinstance(output, ModelHandlerOutput)
         assert len(output.events) == 0, f"Expected no events for state {blocking_state}"
-        assert len(output.intents) == 0, (
-            f"Expected no intents for state {blocking_state}"
-        )
+        assert (
+            len(output.intents) == 0
+        ), f"Expected no intents for state {blocking_state}"
 
 
 class TestHandlerNodeIntrospectedRetriableStates:
@@ -831,9 +831,9 @@ class TestCapabilitiesJsonbCompatibility:
         caps = record["data"]["capabilities"]
 
         # asyncpg JSONB codec expects a Python dict, not a JSON string
-        assert isinstance(caps, dict), (
-            f"Expected dict for JSONB, got {type(caps).__name__}: {caps!r}"
-        )
+        assert isinstance(
+            caps, dict
+        ), f"Expected dict for JSONB, got {type(caps).__name__}: {caps!r}"
 
         # Verify the dict contains expected capability fields
         assert caps.get("postgres") is True
