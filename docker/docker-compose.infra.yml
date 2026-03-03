@@ -71,6 +71,24 @@
 #     - intelligence-api: 8053 [runtime profile]
 #     - contract-resolver: 8091 [runtime profile] (OMN-2756 transitional bridge)
 #     - skill-lifecycle-consumer: 8092 [runtime profile] (OMN-2934)
+#
+# Dashboard Requirements (OMN-3337):
+#   Several omnidash dashboards require the runtime profile to be active:
+#
+#   Cost Trends dashboard (llm_cost_aggregates):
+#     Requires: --profile runtime
+#     Producer: runtime-effects (NodeLlmInferenceEffect → ServiceLlmMetricsPublisher)
+#     Topic:    onex.evt.omniintelligence.llm-call-completed.v1
+#     Note: LLM inference calls must be routed through the ONEX node pipeline,
+#           not directly to the LLM endpoint, for cost events to be generated.
+#
+#   Skill Executions dashboard (skill_executions):
+#     Requires: --profile runtime
+#     Producer: skill-lifecycle-consumer (already wired)
+#
+#   To start all runtime services:
+#     docker compose -f docker/docker-compose.infra.yml --profile runtime up -d
+#
 name: omnibase-infra
 # ==========================================================================
 # IMPORTANT: Requires Docker Compose v2.20.0 or later (nested variable expansion).
