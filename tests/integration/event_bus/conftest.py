@@ -2,16 +2,13 @@
 # Copyright (c) 2025 OmniNode Team
 """Pytest fixtures for Kafka event bus integration tests.
 
-This module provides fixtures for managing Kafka topics in integration tests.
+Kafka topic management fixtures for integration tests.
 The Redpanda broker (configured via KAFKA_BOOTSTRAP_SERVERS env var) has topic
 auto-creation disabled, so topics must be created explicitly before use.
 
-==============================================================================
-IMPORTANT: Bus Isolation (OMN-3476)
-==============================================================================
-
-This conftest enforces bus_local isolation for all integration tests in this
-directory. The ``pytest_configure`` hook pins ``KAFKA_BOOTSTRAP_SERVERS`` to
+Bus Isolation (OMN-3476)
+------------------------
+The ``pytest_configure`` hook in this file pins ``KAFKA_BOOTSTRAP_SERVERS`` to
 ``localhost:19092`` (local Docker Redpanda) and sets ``KAFKA_BROKER_ALLOWLIST``
 to allow both ``localhost:19092`` and ``127.0.0.1:19092`` before any test
 collection runs.
@@ -23,11 +20,9 @@ This prevents integration tests from accidentally hitting the cloud bus
 (``localhost:29092``) or triggering ``validate_kafka_broker_allowlist``
 failures when KAFKA_BROKER_ALLOWLIST is unset.
 
-==============================================================================
-IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)
-==============================================================================
-
-This module provides **function-scoped** async fixtures for Kafka topic
+Event Loop Scope (pytest-asyncio 0.25+)
+----------------------------------------
+All fixtures here are **function-scoped** async fixtures for Kafka topic
 management. With pytest-asyncio 0.25+, the default event loop scope is
 "function", which works correctly with these fixtures.
 
