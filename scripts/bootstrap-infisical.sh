@@ -7,6 +7,7 @@
 #
 # Bootstrap Startup Chain (OMN-2287):
 #   Step 1:   PostgreSQL starts (POSTGRES_PASSWORD from .env)
+#   Step 1b:  Pending migrations applied (run-migrations.py, OMN-3528)
 #   Step 2:   Valkey starts
 #   Step 3:   Infisical starts (depends_on: postgres + valkey healthy)
 #   Step 3.5: Keycloak starts (--profile auth) + provision-keycloak.py runs
@@ -176,6 +177,22 @@ if [[ "${DRY_RUN}" != "true" ]]; then
         sleep 2
     done
     log_info "PostgreSQL is healthy"
+fi
+
+# ============================================================================
+# Step 1b: Apply pending database migrations
+# ============================================================================
+log_step "1b" "Apply pending database migrations"
+
+if [[ "${DRY_RUN}" != "true" ]]; then
+    if uv run python "${SCRIPT_DIR}/run-migrations.py" --db-url "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@localhost:${POSTGRES_EXTERNAL_PORT:-5436}/${POSTGRES_DB:-omnibase_infra}"; then
+        log_info "Migrations applied."
+    else
+        log_error "Migration runner failed. Aborting bootstrap."
+        exit 1
+    fi
+else
+    log_info "[DRY-RUN] Would run: uv run python ${SCRIPT_DIR}/run-migrations.py --db-url postgresql://${POSTGRES_USER:-postgres}:***@localhost:${POSTGRES_EXTERNAL_PORT:-5436}/${POSTGRES_DB:-omnibase_infra}"
 fi
 
 # ============================================================================
