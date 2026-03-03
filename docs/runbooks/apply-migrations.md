@@ -1,0 +1,235 @@
+# Apply Migrations Runbook
+
+## When to Run This
+
+- After pulling new code that contains new migration files
+- After environment rebuild / fresh Docker volume
+- After incident recovery — DB may have been restored from backup
+- When `check_schema_fingerprint.py verify` fails with a count mismatch
+
+## Prerequisites
+
+```bash
+# Always source credentials before any DB operation
+source ~/.omnibase/.env
+
+# Verify the DB URL is set
+echo "DB URL: ${OMNIBASE_INFRA_DB_URL:-(not set)}"
+```
+
+If `OMNIBASE_INFRA_DB_URL` is not set, the migration runner will exit with an error.
+Set it in `~/.omnibase/.env` (see `docs/getting-started/` for setup instructions).
+
+## Check Current State
+
+Connect to the database and inspect what has already been applied:
+
+```bash
+# Connect to DB
+source ~/.omnibase/.env
+psql -h localhost -p 5436 -U postgres -d omnibase_infra
+```
+
+```sql
+-- List all applied migrations in order
+SELECT migration_id, source_set, applied_at
+FROM schema_migrations
+ORDER BY applied_at;
+
+-- Count applied migrations
+SELECT COUNT(*) FROM schema_migrations;
+```
+
+If the `schema_migrations` table does not exist yet, the migration runner will create it
+automatically on first run. You will see:
+
+```
+psql: error: relation "schema_migrations" does not exist
+```
+
+This is expected on a fresh database — proceed with the apply step below.
+
+## Dry Run (see what would be applied without changing anything)
+
+```bash
+source ~/.omnibase/.env
+uv run python scripts/run-migrations.py --dry-run
+```
+
+Expected output shows each pending migration prefixed with `[dry-run]`:
+
+```
+Applying 3 pending migration(s)...
+  [dry-run] would apply: docker/034_some_migration.sql
+  [dry-run] would apply: docker/035_another_migration.sql
+  [dry-run] would apply: docker/036_create_schema_migrations.sql
+```
+
+If output is `No pending migrations.` — the database is already up to date.
+
+## Apply All Pending Migrations
+
+```bash
+source ~/.omnibase/.env
+uv run python scripts/run-migrations.py
+```
+
+The runner:
+1. Creates `schema_migrations` table if it does not exist
+2. Compares pending files against the `schema_migrations` table
+3. Applies each pending migration in sequence-number order
+4. Records each applied migration in `schema_migrations`
+5. Automatically restamps `docker/migrations/schema_fingerprint.sha256`
+
+Expected output:
+
+```
+Applying 2 pending migration(s)...
+  applied: docker/035_another_migration.sql
+  applied: docker/036_create_schema_migrations.sql
+  fingerprint restamped.
+```
+
+## Apply Up To a Specific Sequence Number
+
+To apply only up to a given sequence number (e.g., stop before 036):
+
+```bash
+source ~/.omnibase/.env
+uv run python scripts/run-migrations.py --target 035
+```
+
+This is useful when rolling out migrations incrementally or when investigating a regression
+introduced by a specific migration.
+
+## Verify Schema Fingerprint
+
+After applying migrations, verify the fingerprint artifact matches the migration files:
+
+```bash
+python scripts/check_schema_fingerprint.py verify
+```
+
+Expected: exit 0 with no output (silent success).
+
+If the fingerprint is stale (exit code 2), the committed artifact does not match the current
+migration files. This typically means:
+- A migration file was added or modified without restamping
+- The runner was interrupted before restamping completed
+
+## If Fingerprint Mismatch Persists After Restart
+
+Manually restamp the artifact:
+
+```bash
+uv run python -m omnibase_infra.runtime.util_schema_fingerprint stamp
+```
+
+Or use the check script directly:
+
+```bash
+python scripts/check_schema_fingerprint.py stamp
+```
+
+Commit the updated `docker/migrations/schema_fingerprint.sha256` artifact:
+
+```bash
+git add docker/migrations/schema_fingerprint.sha256
+git commit -m "chore: restamp schema fingerprint"
+```
+
+## Emergency Rollback
+
+Rollback scripts are in `docker/migrations/rollback/`. Each script reverses exactly one
+forward migration. Apply manually via psql:
+
+```bash
+source ~/.omnibase/.env
+psql -h localhost -p 5436 -U postgres -d omnibase_infra \
+  -f docker/migrations/rollback/rollback_036_create_schema_migrations.sql
+```
+
+After rolling back, remove the tracking row from `schema_migrations` if the table still
+exists:
+
+```sql
+DELETE FROM schema_migrations WHERE migration_id = 'docker/036_create_schema_migrations.sql';
+```
+
+If rolling back migration 036 itself (the `schema_migrations` table creation), the table
+will be dropped by the rollback script — no DELETE is required.
+
+### Rolling back multiple migrations
+
+Apply rollbacks in reverse sequence-number order:
+
+```bash
+source ~/.omnibase/.env
+PSQL="psql -h localhost -p 5436 -U postgres -d omnibase_infra"
+$PSQL -f docker/migrations/rollback/rollback_036_create_schema_migrations.sql
+$PSQL -f docker/migrations/rollback/rollback_035_another_migration.sql
+```
+
+After rollback, restamp the fingerprint to reflect the new state:
+
+```bash
+python scripts/check_schema_fingerprint.py stamp
+```
+
+## Writer-Migration Bypass Comment
+
+CI enforces that any PR touching a `writer_postgres.py` or `handler_*_postgres.py` file
+must include a corresponding migration file. If a PR modifies one of these files but truly
+requires no schema change, add this comment near the top of the file:
+
+```python
+# no-migration: <reason explaining why no schema change is needed>
+```
+
+This bypasses the `check_migration_required.py` CI gate for that file.
+
+Example valid reasons:
+- `# no-migration: refactoring query logic only, schema unchanged`
+- `# no-migration: adding index hint via query parameter, no DDL needed`
+
+## Troubleshooting
+
+### `asyncpg.exceptions.ConnectionDoesNotExistError`
+
+The database is not running. Start it:
+
+```bash
+docker compose -f docker/docker-compose.infra.yml up -d omnibase-infra-postgres
+```
+
+### `OMNIBASE_INFRA_DB_URL required`
+
+The environment variable is not set. Source credentials:
+
+```bash
+source ~/.omnibase/.env
+```
+
+### `duplicate sequence number` error
+
+Two migration files share a leading sequence number (e.g., `035_foo.sql` and `035_bar.sql`).
+This is a development error — rename one of the files and update the fingerprint artifact.
+
+### Migration applied but `schema_migrations` row missing
+
+If a migration applied successfully but was not tracked (e.g., the runner was killed mid-run),
+manually insert the tracking row:
+
+```sql
+INSERT INTO schema_migrations (migration_id, checksum, source_set)
+VALUES (
+  'docker/035_another_migration.sql',
+  encode(sha256(pg_read_binary_file('...')::bytea), 'hex'),
+  'docker'
+)
+ON CONFLICT DO NOTHING;
+```
+
+Or re-run `run-migrations.py` — it uses `ON CONFLICT DO NOTHING` so re-applying is safe
+for already-applied migrations that have tracking rows. For migrations without tracking rows,
+wrap in a transaction and check for idempotency before re-applying.
