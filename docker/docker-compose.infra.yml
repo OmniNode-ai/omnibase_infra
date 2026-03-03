@@ -236,7 +236,6 @@ services:
       - --mode dev-container
       - --smp 1
       - --memory ${REDPANDA_MEMORY:-8G}
-      - --kafka-connections-max ${REDPANDA_KAFKA_CONNECTIONS_MAX:-10000}
       - --default-log-level=warn
     ports:
       - "${REDPANDA_EXTERNAL_PORT:-19092}:19092"
