@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+"""Input model for the setup validate effect node.
+
+Ticket: OMN-3491
+"""
+
+from __future__ import annotations
+
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_core.models.core.model_deployment_topology import ModelDeploymentTopology
+
+
+class ModelSetupValidateEffectInput(BaseModel):
+    """Input envelope for the setup validate effect node.
+
+    The validate node performs end-to-end health checks on all services
+    defined in the topology after provisioning is complete.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
+
+    topology: ModelDeploymentTopology = Field(
+        ...,
+        description="Deployment topology describing which services to validate.",
+    )
+    correlation_id: UUID = Field(
+        ...,
+        description="Correlation ID for tracing.",
+    )
+    timeout_seconds: int = Field(
+        default=60,
+        ge=1,
+        description="Per-service health check timeout in seconds.",
+    )
+
+
+__all__: list[str] = ["ModelSetupValidateEffectInput"]
