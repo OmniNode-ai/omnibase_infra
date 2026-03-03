@@ -5,6 +5,70 @@ All notable changes to the ONEX Infrastructure (omnibase_infra) will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-03-03
+
+### Added
+- Migrate event bus to local Docker Redpanda (OMN-3431, #557)
+- `ONEX_REGISTRATION_AUTO_ACK` direct-publish ack command (OMN-3444, #558)
+- `TCB_OUTCOME_REGISTRATION` topic (OMN-3107, #560)
+- Wire `NodeBaselinesBatchCompute` to daily scheduler (OMN-3335, #564)
+- Autoheal sidecar for aiokafka stuck-state recovery (OMN-3428, #553)
+- Keycloak service + postgres init script (OMN-3361, #534)
+- `provision-keycloak.py` + `update_env_file` utility (OMN-3362, #537)
+- Keycloak step 3.5 in `bootstrap-infisical.sh` (OMN-3363, #538)
+- Infisical auth transport folder and Keycloak vars documentation (OMN-3364, #536)
+- Kafka consumer → Linear ticket reporter in container log monitor (OMN-3408, #539)
+- PostgreSQL error event emitter in monitor (OMN-3407, #535)
+- Container log monitor with Slack alerts (#524)
+- Golden-path fixture for `node_ledger_projection_compute` (OMN-3387, #540)
+- Golden-path fixture for `node_validation_ledger_projection_compute` (OMN-3388, #541)
+- Golden-path fixture for `node_validation_orchestrator` (OMN-3389, #543)
+- Arch-invariants CI gate for raw topic literals (OMN-3343, #533)
+- Hardcode broker addresses in docker-compose (OMN-3413, #549)
+- `sync-omnibase-env.py` with 5-guard TDD implementation (OMN-3243, #512)
+- Topic naming lint extended to Python enum files (OMN-3259, #514)
+- `update-plugin-pins.py` to pin omninode plugins to latest PyPI versions (OMN-3287, #523)
+- Kafka broker allowlist validator at `ServiceKernel.bootstrap()` (OMN-3300, #530)
+- Topic naming linter pre-commit + CI gate (OMN-3188, #503)
+- Self-hosted GitHub Actions runners — Dockerfile, compose, deploy script (OMN-3275/3276/3277, #518, #520, #521)
+- Conditional self-hosted runner routing in CI workflows (OMN-3278, #522)
+- Cross-repo Kafka boundary compat test (OMN-3256, #515)
+
+### Fixed
+- **Remove `reconnect_backoff_ms`/`reconnect_backoff_max_ms` kwargs unsupported by aiokafka==0.11.0** (#508, #511) — resolves emit daemon crash on startup
+- Update `last_poll_at` on `TimeoutError` to prevent false 503 after Kafka reconnect (OMN-3430, #554)
+- Wire `TimeoutCoordinator` into `HandlerRuntimeTick` (OMN-3441, #556)
+- Redesign health rule 5 — distinguish idle vs failing consumer (OMN-3426, #552)
+- Kafka topic drift — register missing publish_topics in `node_registration_orchestrator` (OMN-3368/3369, #545, #546)
+- Kafka topic drift — remove orphaned subscribe_topic from `node_baselines_batch_compute` (OMN-3367, #544)
+- Kafka topic drift — register cross-repo validation publish_topics (OMN-3370/3371, #547, #548)
+- Permissive ingest model for routing-decision schema drift (OMN-3422, #551)
+- Omniweb Keycloak client redirect URI (OMN-3419, #550)
+- `provision-keycloak.py` compatibility for Keycloak 26 (OMN-3460, #563)
+- Monitor: VALKEY_PASSWORD forwarded to Redis dedup auth (OMN-3407, #562)
+- Monitor: CodeRabbit review findings addressed (OMN-3408, #542)
+- Isolate `config_prefetcher` from host env in integration tests (#559)
+- Handlers: consul contract, db DSN resolution, MCP `kafka_enabled` default (#509)
+- Handlers: graph handler signature mismatch and filesystem `allowed_paths` (#510)
+- TUI: push `ScreenStatus` via `push_screen()` instead of `compose()` (#505)
+- Compose: remove nested variable expansion, add CI guard (#513)
+- Docker: bump `omninode-intelligence` pin to 0.9.0 (OMN-3301, #529, #532)
+- Remove stale local Redpanda from compose + fix `ONEX_ENVIRONMENT` default (OMN-3299, #525)
+- Fix `invalid_blocks` Slack API error in `monitor_logs` (OMN-3311, #526)
+- Extend `RUNTIME_SERVICES` to all 7 services (OMN-3285, #519)
+- Self-hosted runner routing labels (OMN-3273, #531)
+- Switch omninode-claude/memory to range pins with `--no-deps` (OMN-3202, #506)
+- Guard cross-repo dispatch steps against missing `CROSS_REPO_PAT` (OMN-3200, #504)
+
+### Changed
+- Gate local Redpanda behind `local-redpanda` compose profile (#528)
+- Cross-repo schema handshake gate for `routing-decision.v1` (OMN-3425, #555)
+- Automate `version_compatibility.py` matrix updates (OMN-3203, #507)
+- Expose `ONEX_REGISTRATION_AUTO_ACK` to runtime containers (OMN-3446, #561)
+
+### Reverted
+- Remove wrong k3s manifests accidentally merged in #569 (OMN-3488, #570)
+
 ## [0.13.0] - 2026-02-28
 
 ### Added
