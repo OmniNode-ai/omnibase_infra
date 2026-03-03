@@ -124,7 +124,7 @@ async def run(db_url: str, dry_run: bool, target: int | None) -> int:
                 print(f"  warning: migration directory not found: {migration_dir}")
                 continue
             files = sorted(
-                list(migration_dir.glob("*.sql")),
+                migration_dir.glob("*.sql"),
                 key=lambda f: f.name,
             )
             validate_no_duplicates(files)
