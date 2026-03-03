@@ -129,9 +129,9 @@ class HandlerSetupOrchestrator:
 
         Asserts (runtime-checked) that event_type is in SETUP_EVENT_TYPES (I6).
         """
-        assert (
-            event_type in SETUP_EVENT_TYPES
-        ), f"event_type '{event_type}' is not in SETUP_EVENT_TYPES"
+        assert event_type in SETUP_EVENT_TYPES, (
+            f"event_type '{event_type}' is not in SETUP_EVENT_TYPES"
+        )
         return ModelSetupEvent(
             event_type=event_type,
             payload=payload or {},

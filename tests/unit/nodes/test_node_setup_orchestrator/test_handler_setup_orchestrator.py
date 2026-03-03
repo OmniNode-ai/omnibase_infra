@@ -342,6 +342,6 @@ class TestHandlerSetupOrchestrator:
         result = await handler.handle(topology, corr_id, "/tmp/compose.yml")
 
         for event in result.result.events:
-            assert (
-                event.event_type in SETUP_EVENT_TYPES
-            ), f"I6 violated: event_type '{event.event_type}' is not in SETUP_EVENT_TYPES"
+            assert event.event_type in SETUP_EVENT_TYPES, (
+                f"I6 violated: event_type '{event.event_type}' is not in SETUP_EVENT_TYPES"
+            )
