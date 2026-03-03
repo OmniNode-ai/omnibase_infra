@@ -210,7 +210,7 @@ class HandlerLocalProvision:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout_bytes, stderr_bytes = await proc.communicate()
+        _stdout_bytes, stderr_bytes = await proc.communicate()
         returncode = proc.returncode
 
         if returncode != 0:
