@@ -36,17 +36,27 @@ BASELINES_COMPUTED_REGISTRATION = ModelEventRegistration(
     schema_version="1.0.0",
 )
 
+TCB_OUTCOME_REGISTRATION = ModelEventRegistration(
+    event_type="tcb.outcome",
+    topic_template=TOPIC_PHASE_METRICS,
+    partition_key_field="ticket_id",
+    required_fields=("ticket_id", "outcome"),
+    schema_version="1.0.0",
+)
+
 # All known event registrations for omnibase_infra.
 # Add new registrations to this tuple. CLI stamp/verify and startup
 # validation all use this list as the canonical source of truth.
 ALL_EVENT_REGISTRATIONS: tuple[ModelEventRegistration, ...] = (
     PHASE_METRICS_REGISTRATION,
     BASELINES_COMPUTED_REGISTRATION,
+    TCB_OUTCOME_REGISTRATION,
 )
 
 __all__: list[str] = [
     "ALL_EVENT_REGISTRATIONS",
     "BASELINES_COMPUTED_REGISTRATION",
+    "TCB_OUTCOME_REGISTRATION",
     "TOPIC_BASELINES_COMPUTED",
     "TOPIC_PHASE_METRICS",
     "TOPIC_NOTIFICATION_BLOCKED",
