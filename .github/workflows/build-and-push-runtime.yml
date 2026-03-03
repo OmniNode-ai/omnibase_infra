@@ -1,0 +1,218 @@
+# Build and push omnibase_infra runtime image to ECR
+#
+# Triggers on push to main for runtime-related paths.
+# Uses OIDC (no long-lived credentials) to assume omninode-github-actions-role.
+# Pushes to ECR with commit SHA tag; never uses :latest.
+# Outputs image digest for use in Phase 4 kustomize override.
+#
+# ECR repository: 272493677981.dkr.ecr.us-east-1.amazonaws.com/omninode-runtime
+# IAM role: arn:aws:iam::272493677981:role/omninode-github-actions-role
+
+name: Build and push runtime image to ECR
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docker/Dockerfile.runtime'
+      - 'docker/entrypoint-runtime.sh'
+      - 'src/**'
+      - 'contracts/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/build-and-push-runtime.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: build-runtime-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REPOSITORY: omninode-runtime
+  UV_VERSION: "0.6.14"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  build-and-push:
+    name: Build and push runtime image
+    runs-on: ubuntu-latest
+    # Timeout breakdown (cold cache worst case):
+    #   Docker build:        ~14 min
+    #   ECR push:            ~5 min
+    #   GHA cache export:    ~15 min
+    #   Total:               ~34 min — 45 min gives comfortable buffer
+    timeout-minutes: 45
+
+    outputs:
+      image_digest: ${{ steps.resolve-digest.outputs.digest }}
+      image_ref: ${{ steps.resolve-digest.outputs.image_ref }}
+      commit_sha: ${{ github.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64
+
+      - name: Configure AWS credentials (OIDC -> omninode-github-actions-role)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/omninode-github-actions-role
+          role-session-name: gha-build-push-runtime
+
+      - name: Verify AWS caller identity
+        shell: bash
+        env:
+          AWS_CLI_CONNECT_TIMEOUT: '10'
+          AWS_CLI_READ_TIMEOUT: '30'
+        run: aws sts get-caller-identity
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Extract metadata
+        id: meta
+        run: |
+          SHA_SHORT="${GITHUB_SHA::7}"
+          echo "sha_short=${SHA_SHORT}" >> $GITHUB_OUTPUT
+          echo "image_repo=${ECR_REGISTRY}/${ECR_REPOSITORY}" >> $GITHUB_OUTPUT
+          echo "build_date=$(date -u +'%Y%m%d')" >> $GITHUB_OUTPUT
+
+          # Build tags — commit SHA only (no :latest per DoD)
+          IMAGE_REPO="${ECR_REGISTRY}/${ECR_REPOSITORY}"
+          TAGS="${IMAGE_REPO}:${GITHUB_SHA}"
+          TAGS="${TAGS},${IMAGE_REPO}:${SHA_SHORT}"
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+
+      - name: Generate build timestamp
+        id: timestamp
+        run: echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
+      - name: Build runtime image (local)
+        id: build-local
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.runtime
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            RUNTIME_VERSION=${{ github.ref_name }}
+            BUILD_DATE=${{ steps.timestamp.outputs.build_date }}
+            VCS_REF=${{ github.sha }}
+            RUNTIME_SOURCE_HASH=${{ steps.meta.outputs.sha_short }}
+            UV_VERSION=${{ env.UV_VERSION }}
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.34.1
+        with:
+          image-ref: '${{ steps.meta.outputs.image_repo }}:${{ github.sha }}'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Push image to Amazon ECR
+        if: success()
+        shell: bash
+        run: |
+          echo "Trivy scan passed — pushing image to ECR..."
+          IFS=',' read -ra TAGS <<< "${{ steps.meta.outputs.tags }}"
+          for TAG in "${TAGS[@]}"; do
+            echo "Pushing: ${TAG}"
+            docker push "${TAG}"
+          done
+          echo "All tags pushed successfully"
+
+      # ECR eventual consistency: brief delay before digest is resolvable.
+      # The composite action retries with exponential backoff (up to 5 attempts).
+      - name: Resolve ECR image digest for commit SHA
+        id: resolve-digest
+        uses: ./.github/actions/resolve-ecr-digest
+        with:
+          commit-sha: ${{ github.sha }}
+          ecr-registry: ${{ env.ECR_REGISTRY }}
+          ecr-repository: ${{ env.ECR_REPOSITORY }}
+          aws-region: ${{ env.AWS_REGION }}
+          fail-on-missing: 'true'
+
+      - name: Verify digest format
+        shell: bash
+        run: |
+          DIGEST="${{ steps.resolve-digest.outputs.digest }}"
+          if [[ ! "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::Digest format invalid: $DIGEST"
+            exit 1
+          fi
+          echo "Digest verified: $DIGEST"
+          echo "Full image ref: ${{ steps.resolve-digest.outputs.image_ref }}"
+
+      - name: Create digest mapping artifact
+        shell: bash
+        run: |
+          mkdir -p ops/digests
+
+          jq -n \
+            --arg sha "$GITHUB_SHA" \
+            --arg sha_short "${{ steps.meta.outputs.sha_short }}" \
+            --arg repo "${{ steps.meta.outputs.image_repo }}" \
+            --arg digest "${{ steps.resolve-digest.outputs.digest }}" \
+            --arg ref "${{ steps.resolve-digest.outputs.image_ref }}" \
+            --arg date "${{ steps.meta.outputs.build_date }}" \
+            --arg branch "$GITHUB_REF_NAME" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_num "$GITHUB_RUN_NUMBER" \
+            '{
+              commit_sha: $sha,
+              commit_sha_short: $sha_short,
+              image_repo: $repo,
+              image_digest: $digest,
+              image_ref: $ref,
+              build_date: $date,
+              branch: $branch,
+              workflow_run_id: $run_id,
+              workflow_run_number: $run_num
+            }' > ops/digests/build-manifest.json
+
+          echo "Build manifest:"
+          cat ops/digests/build-manifest.json
+
+      - name: Upload digest mapping artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-manifest-${{ github.sha }}
+          path: ops/digests/build-manifest.json
+          retention-days: 90
+
+      - name: Generate build summary
+        if: always()
+        shell: bash
+        run: |
+          echo "# Runtime Image Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Build Info" >> $GITHUB_STEP_SUMMARY
+          echo "- Repository: \`${ECR_REGISTRY}/${ECR_REPOSITORY}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit SHA: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Digest: \`${{ steps.resolve-digest.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Full ref: \`${{ steps.resolve-digest.outputs.image_ref }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Platform: linux/amd64" >> $GITHUB_STEP_SUMMARY
+          echo "- Branch: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> Use the digest above (not a tag) for the Phase 4 kustomize image override." >> $GITHUB_STEP_SUMMARY
