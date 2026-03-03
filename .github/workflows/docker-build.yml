@@ -67,7 +67,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    timeout-minutes: 20
+    timeout-minutes: 45
 
     outputs:
       image_id: ${{ steps.build.outputs.imageid }}
