@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+# Ticket: OMN-3495
+name: "node_setup_orchestrator"
+node_type: "ORCHESTRATOR_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  ORCHESTRATOR node that coordinates the full platform setup workflow:
+  cloud gate check (I8) → preflight validation → local Docker Compose
+  provisioning → Infisical bootstrap → post-provision health validation.
+  Emits a structured sequence of lifecycle events (SETUP_EVENT_TYPES).
+  No result field — orchestrators emit events only (Invariant I5).
+
+input_model:
+  name: "ModelSetupOrchestratorInput"
+  module: "omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_orchestrator_input"
+  description: "Input envelope for the setup orchestration workflow."
+output_model:
+  name: "ModelSetupOrchestratorOutput"
+  module: "omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_orchestrator_output"
+  description: "Ordered sequence of setup lifecycle events. No result field (I5)."
+io_operations:
+  - name: "orchestrate_setup"
+    description: "Coordinate all 4 effect nodes sequentially with cloud gate, preflight, provision, infisical, and validate steps."
+    input_fields: ["topology", "correlation_id", "compose_file_path", "dry_run"]
+    output_fields: ["correlation_id", "events"]
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "orchestrate_setup"
+      handler:
+        name: "HandlerSetupOrchestrator"
+        module: "omnibase_infra.nodes.node_setup_orchestrator.handlers.handler_setup_orchestrator"
+capabilities:
+  - "setup.orchestrate"
+  - "setup.cloud.gate"
+  - "setup.preflight"
+  - "setup.provision"
+  - "setup.infisical"
+  - "setup.validate"

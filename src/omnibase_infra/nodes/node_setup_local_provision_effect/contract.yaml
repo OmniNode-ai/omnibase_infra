@@ -9,11 +9,7 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 description: >
-  EFFECT node that provisions, tears down, and checks status of local Docker Compose
-  services defined in a ModelDeploymentTopology. Runs docker compose up -d (provision),
-  docker compose down (teardown), and docker compose ps (status). Deduplicates
-  --profile flags across services sharing the same profile. Async-polls ports
-  until healthy or max_wait_seconds is exceeded.
+  EFFECT node that provisions, tears down, and checks status of local Docker Compose services defined in a ModelDeploymentTopology. Runs docker compose up -d (provision), docker compose down (teardown), and docker compose ps (status). Deduplicates --profile flags across services sharing the same profile. Async-polls ports until healthy or max_wait_seconds is exceeded.
 
 input_model:
   name: "ModelLocalProvisionEffectInput"
