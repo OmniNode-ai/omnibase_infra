@@ -62,6 +62,68 @@ def file_checksum(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def split_sql_statements(sql: str) -> list[str]:
+    """Split SQL text into individual statements, respecting dollar-quoting.
+
+    Needed for migrations that contain CREATE INDEX CONCURRENTLY, which cannot
+    run inside a multi-statement simple-query block (Postgres wraps those in an
+    implicit transaction).
+    """
+    statements: list[str] = []
+    current: list[str] = []
+    dollar_tag: str | None = None
+    i = 0
+
+    while i < len(sql):
+        # Detect start/end of dollar-quoted string ($$ or $tag$)
+        if sql[i] == "$" and dollar_tag is None:
+            j = sql.index("$", i + 1) + 1 if "$" in sql[i + 1 :] else i + 1
+            tag = sql[i:j]
+            if j > i + 1:  # at least $$ (two chars)
+                current.append(tag)
+                dollar_tag = tag
+                i = j
+                continue
+        if dollar_tag is not None:
+            end = sql.find(dollar_tag, i)
+            if end == -1:
+                current.append(sql[i:])
+                i = len(sql)
+            else:
+                end += len(dollar_tag)
+                current.append(sql[i:end])
+                dollar_tag = None
+                i = end
+            continue
+
+        if sql[i] == ";":
+            current.append(";")
+            stmt = "".join(current).strip()
+            if stmt and stmt != ";":
+                statements.append(stmt)
+            current = []
+            i += 1
+            continue
+
+        current.append(sql[i])
+        i += 1
+
+    # Trailing statement without semicolon
+    remainder = "".join(current).strip()
+    if remainder:
+        statements.append(remainder)
+
+    # Filter out statements that contain only whitespace/comments with no SQL keywords.
+    def _has_sql_content(stmt: str) -> bool:
+        for line in stmt.splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("--"):
+                return True
+        return False
+
+    return [s for s in statements if _has_sql_content(s)]
+
+
 async def ensure_schema_migrations_table(conn: asyncpg.Connection) -> None:
     """Create schema_migrations if it does not exist (idempotent)."""
     await conn.execute("""
@@ -97,7 +159,15 @@ async def apply_migration(
         print(f"  [dry-run] would apply: {mid}")
         return
 
-    await conn.execute(sql)
+    # Migrations that use CREATE INDEX CONCURRENTLY cannot run inside an implicit
+    # transaction block (which Postgres creates when you send multiple statements
+    # via the simple-query protocol). Execute each statement individually so that
+    # every statement runs in its own autocommit context.
+    if "CONCURRENTLY" in sql.upper():
+        for stmt in split_sql_statements(sql):
+            await conn.execute(stmt)
+    else:
+        await conn.execute(sql)
     await conn.execute(
         """
         INSERT INTO public.schema_migrations (migration_id, checksum, source_set)

@@ -38,3 +38,30 @@ class TestSequenceNumberExtraction:
         ]
         with pytest.raises(ValueError, match="duplicate sequence number 6"):
             runner.validate_no_duplicates(files)
+
+
+@pytest.mark.unit
+class TestSplitSqlStatements:
+    def test_splits_simple_statements(self):
+        runner = load_runner()
+        sql = "CREATE TABLE a (id INT);\nCREATE TABLE b (id INT);"
+        stmts = runner.split_sql_statements(sql)
+        assert len(stmts) == 2
+        assert "CREATE TABLE a" in stmts[0]
+        assert "CREATE TABLE b" in stmts[1]
+
+    def test_preserves_dollar_quoted_blocks(self):
+        runner = load_runner()
+        sql = "DO $$ BEGIN RAISE NOTICE 'hi;there'; END $$;\nCREATE INDEX CONCURRENTLY idx ON t (c);"
+        stmts = runner.split_sql_statements(sql)
+        assert len(stmts) == 2
+        assert "DO $$" in stmts[0]
+        assert "RAISE NOTICE 'hi;there'" in stmts[0]
+        assert "CREATE INDEX CONCURRENTLY" in stmts[1]
+
+    def test_skips_comment_only_fragments(self):
+        runner = load_runner()
+        sql = "-- just a comment\nCREATE TABLE x (id INT);"
+        stmts = runner.split_sql_statements(sql)
+        assert len(stmts) == 1
+        assert "CREATE TABLE x" in stmts[0]
