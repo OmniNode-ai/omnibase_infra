@@ -8,6 +8,7 @@ Ticket: OMN-3495
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from uuid import UUID
 
 if TYPE_CHECKING:
     from omnibase_core.models.core.model_deployment_topology import (
@@ -30,7 +31,7 @@ class ProtocolProvisionEffect(Protocol):
         self,
         topology: ModelDeploymentTopology,
         compose_file_path: str,
-        correlation_id: object,
+        correlation_id: UUID,
     ) -> ModelLocalProvisionEffectOutput:
         """Start local Docker Compose services.
 

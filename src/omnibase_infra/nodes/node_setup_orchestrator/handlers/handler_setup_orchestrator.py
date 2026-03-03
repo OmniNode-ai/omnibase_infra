@@ -127,11 +127,15 @@ class HandlerSetupOrchestrator:
     ) -> ModelSetupEvent:
         """Construct a ModelSetupEvent.
 
-        Asserts (runtime-checked) that event_type is in SETUP_EVENT_TYPES (I6).
+        Validates that event_type is in SETUP_EVENT_TYPES (I6).
+
+        Raises:
+            ValueError: If event_type is not in SETUP_EVENT_TYPES.
         """
-        assert event_type in SETUP_EVENT_TYPES, (
-            f"event_type '{event_type}' is not in SETUP_EVENT_TYPES"
-        )
+        if event_type not in SETUP_EVENT_TYPES:
+            raise ValueError(
+                f"I6 violated: event_type '{event_type}' is not in SETUP_EVENT_TYPES"
+            )
         return ModelSetupEvent(
             event_type=event_type,
             payload=payload or {},
