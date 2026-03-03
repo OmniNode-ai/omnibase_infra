@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: MIT  # ai-slop-ok: pre-existing module docstring opener
 # Copyright (c) 2025 OmniNode Team
 """Registration domain wiring for MessageDispatchEngine integration.
 
