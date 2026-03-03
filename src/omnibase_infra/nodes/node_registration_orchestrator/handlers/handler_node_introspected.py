@@ -32,6 +32,7 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from datetime import datetime
 from uuid import UUID, uuid4
@@ -43,8 +44,12 @@ from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
     EnumInfraTransportType,
+    EnumRegistrationState,
 )
 from omnibase_infra.errors import ModelInfraErrorContext
+from omnibase_infra.models.registration.commands.model_node_registration_acked import (
+    ModelNodeRegistrationAcked,
+)
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
 )
@@ -55,9 +60,23 @@ from omnibase_infra.nodes.node_registration_orchestrator.services import (
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
 )
+from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.utils import validate_timezone_aware_with_context
 
 logger = logging.getLogger(__name__)
+
+_ENV_AUTO_ACK = "ONEX_REGISTRATION_AUTO_ACK"
+_ACK_TOPIC = "onex.cmd.platform.node-registration-acked.v1"
+
+
+def _auto_ack_enabled() -> bool:
+    """Return True when ONEX_REGISTRATION_AUTO_ACK=true in the environment.
+
+    This flag is intended for local/dev use only. In production the external
+    node sends its own ack command; enabling auto-ACK there would bypass the
+    distributed handshake. See OMN-3444 production safety note.
+    """
+    return os.environ.get(_ENV_AUTO_ACK, "false").lower() == "true"
 
 
 class HandlerNodeIntrospected:
@@ -125,6 +144,7 @@ class HandlerNodeIntrospected:
         projection_reader: ProjectionReaderRegistration,
         reducer: RegistrationReducerService,
         topic_store: ServiceIntrospectionTopicStore | None = None,
+        event_bus: ProtocolEventBusLike | None = None,
     ) -> None:
         """Initialize the handler with a projection reader and reducer service.
 
@@ -146,10 +166,14 @@ class HandlerNodeIntrospected:
                 this handler populates the store on every introspection event so
                 that HandlerCatalogRequest can assemble catalog responses.
                 When None, topic accumulation is skipped (backward compatible).
+            event_bus: Optional event bus for direct-publishing the auto-ACK
+                command (Path B, OMN-3444). When None, auto-ACK is silently
+                skipped even if ONEX_REGISTRATION_AUTO_ACK=true.
         """
         self._projection_reader = projection_reader
         self._reducer = reducer
         self._topic_store = topic_store
+        self._event_bus = event_bus
 
     @property
     def handler_id(self) -> str:
@@ -270,6 +294,28 @@ class HandlerNodeIntrospected:
                 result=None,
                 processing_time_ms=processing_time_ms,
                 timestamp=now,
+            )
+
+        # Auto-ACK (Path B, OMN-3444): direct-publish ack command when the
+        # reducer transitions to AWAITING_ACK and the feature flag is enabled.
+        # The ack is published directly to _ACK_TOPIC and is intentionally
+        # NOT included in output.events (framework would route it to the wrong
+        # topic via the single fixed output_topic).
+        if (
+            _auto_ack_enabled()
+            and self._event_bus is not None
+            and decision.new_state == EnumRegistrationState.AWAITING_ACK
+        ):
+            auto_ack = ModelNodeRegistrationAcked(
+                node_id=node_id,
+                correlation_id=correlation_id,
+                timestamp=now,
+            )
+            await self._event_bus.publish_envelope(auto_ack, topic=_ACK_TOPIC)
+            logger.debug(
+                "Auto-ACK published for node %s (ONEX_REGISTRATION_AUTO_ACK=true)",
+                node_id,
+                extra={"node_id": str(node_id), "correlation_id": str(correlation_id)},
             )
 
         logger.info(

@@ -680,6 +680,7 @@ async def wire_registration_handlers(
             projection_reader,
             reducer=reducer,
             topic_store=topic_store,
+            event_bus=event_bus,
         )
         await container.service_registry.register_instance(
             interface=HandlerNodeIntrospected,
@@ -849,6 +850,7 @@ async def wire_registration_handlers(
             projection_reader,
             reducer=reducer,
             topic_store=topic_store,
+            event_bus=event_bus,
         )
         # Re-register to replace the earlier instance
         await container.service_registry.register_instance(
