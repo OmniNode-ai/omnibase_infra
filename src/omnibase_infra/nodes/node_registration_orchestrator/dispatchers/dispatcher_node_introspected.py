@@ -4,8 +4,8 @@
 # TRY400 disabled: logger.error is intentional to avoid leaking sensitive data in stack traces
 """Dispatcher adapter for HandlerNodeIntrospected.
 
-This module provides a ProtocolMessageDispatcher adapter that wraps
-HandlerNodeIntrospected for integration with MessageDispatchEngine.
+ProtocolMessageDispatcher adapter that wraps HandlerNodeIntrospected for
+integration with MessageDispatchEngine.
 
 The adapter:
 - Deserializes ModelEventEnvelope payload to ModelNodeIntrospectionEvent
@@ -336,8 +336,11 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
                     correlation_id=correlation_id,
                     source=self.dispatcher_id,
                 )
+                # ModelEventEnvelope is structurally compatible with ProtocolEventEnvelope
+                # but lacks the async get_payload() method; mixin_node_introspection uses
+                # the same pattern (mixin_node_introspection.py:2276).
                 await self._event_bus.publish_envelope(
-                    ack_envelope,
+                    ack_envelope,  # type: ignore[arg-type]
                     topic=_ACK_TOPIC,
                 )
                 logger.debug(

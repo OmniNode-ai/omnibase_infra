@@ -2,10 +2,9 @@
 # Copyright (c) 2025 OmniNode Team
 """Registration domain plugin for kernel-level initialization.
 
-This module provides the PluginRegistration class, which implements
-ProtocolDomainPlugin for the Registration domain. It encapsulates all
-Registration-specific initialization code that was previously embedded
-in kernel.py.
+PluginRegistration implements ProtocolDomainPlugin for the Registration
+domain, encapsulating all Registration-specific initialization code
+that was previously embedded in kernel.py.
 
 The plugin handles:
     - PostgreSQL pool creation for registration projections
