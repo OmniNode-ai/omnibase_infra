@@ -7,6 +7,23 @@ The Redpanda broker (configured via KAFKA_BOOTSTRAP_SERVERS env var) has topic
 auto-creation disabled, so topics must be created explicitly before use.
 
 ==============================================================================
+IMPORTANT: Bus Isolation (OMN-3476)
+==============================================================================
+
+This conftest enforces bus_local isolation for all integration tests in this
+directory. The ``pytest_configure`` hook pins ``KAFKA_BOOTSTRAP_SERVERS`` to
+``localhost:19092`` (local Docker Redpanda) and sets ``KAFKA_BROKER_ALLOWLIST``
+to allow both ``localhost:19092`` and ``127.0.0.1:19092`` before any test
+collection runs.
+
+``pytest_unconfigure`` restores the original values (or removes the variables
+if they were not previously set) after the test session ends.
+
+This prevents integration tests from accidentally hitting the cloud bus
+(``localhost:29092``) or triggering ``validate_kafka_broker_allowlist``
+failures when KAFKA_BROKER_ALLOWLIST is unset.
+
+==============================================================================
 IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)
 ==============================================================================
 
@@ -68,6 +85,7 @@ Implementation Note:
 
 Related Tickets:
     - OMN-1361: pytest-asyncio 0.25+ upgrade and loop_scope configuration
+    - OMN-3476: pytest_configure bus_local isolation for integration tests
 """
 
 from __future__ import annotations
@@ -90,12 +108,92 @@ pytestmark = [
 ]
 
 # =============================================================================
+# Bus Isolation Hooks (OMN-3476)
+# =============================================================================
+# These session-scoped hooks fire before test collection starts, ensuring
+# KAFKA_BOOTSTRAP_SERVERS and KAFKA_BROKER_ALLOWLIST are set to the local
+# Docker Redpanda bus for all integration tests in this directory.
+#
+# This prevents accidental hits against the cloud bus (localhost:29092) or
+# validate_kafka_broker_allowlist failures when KAFKA_BROKER_ALLOWLIST is unset.
+#
+# The previous values (if any) are stored on the config object and restored
+# by pytest_unconfigure after the session ends.
+
+_BUS_LOCAL_BOOTSTRAP: str = "localhost:19092"
+# Allow both hostname forms: code may normalize to 127.0.0.1 internally
+_BUS_LOCAL_ALLOWLIST: str = "localhost:19092,127.0.0.1:19092"
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Force bus_local Kafka config for all integration tests in this process.
+
+    Pins KAFKA_BOOTSTRAP_SERVERS to the local Docker Redpanda broker and
+    sets KAFKA_BROKER_ALLOWLIST to permit both localhost:19092 and
+    127.0.0.1:19092. Called before test collection so the values are
+    already in place when module-level code (e.g. _kafka_config_validation)
+    runs.
+
+    Related: OMN-3476
+    """
+    _prev_servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS")
+    _prev_allowlist = os.environ.get("KAFKA_BROKER_ALLOWLIST")
+    os.environ["KAFKA_BOOTSTRAP_SERVERS"] = _BUS_LOCAL_BOOTSTRAP
+    os.environ["KAFKA_BROKER_ALLOWLIST"] = _BUS_LOCAL_ALLOWLIST
+    # Store originals so pytest_unconfigure can restore them
+    config._kafka_isolation_prev = (_prev_servers, _prev_allowlist)  # type: ignore[attr-defined]
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    """Restore original Kafka env vars after the test session ends.
+
+    Related: OMN-3476
+    """
+    prev = getattr(config, "_kafka_isolation_prev", (None, None))
+    _prev_servers, _prev_allowlist = prev
+    if _prev_servers is None:
+        os.environ.pop("KAFKA_BOOTSTRAP_SERVERS", None)
+    else:
+        os.environ["KAFKA_BOOTSTRAP_SERVERS"] = _prev_servers
+    if _prev_allowlist is None:
+        os.environ.pop("KAFKA_BROKER_ALLOWLIST", None)
+    else:
+        os.environ["KAFKA_BROKER_ALLOWLIST"] = _prev_allowlist
+
+
+# =============================================================================
+# Canary Test
+# =============================================================================
+
+
+def test_kafka_integration_env_is_bus_local() -> None:
+    """Guard: integration tests must always use bus_local (localhost:19092).
+
+    This test verifies that pytest_configure successfully pinned the Kafka
+    environment to the local Docker Redpanda bus before any test ran.
+    A failure here means the bus isolation hook did not execute or was
+    overridden by an outer conftest.
+
+    Related: OMN-3476
+    """
+    assert os.environ.get("KAFKA_BOOTSTRAP_SERVERS") == _BUS_LOCAL_BOOTSTRAP, (
+        f"KAFKA_BOOTSTRAP_SERVERS must be '{_BUS_LOCAL_BOOTSTRAP}', "
+        f"got: {os.environ.get('KAFKA_BOOTSTRAP_SERVERS')!r}"
+    )
+    assert _BUS_LOCAL_BOOTSTRAP in os.environ.get("KAFKA_BROKER_ALLOWLIST", ""), (
+        f"KAFKA_BROKER_ALLOWLIST must contain '{_BUS_LOCAL_BOOTSTRAP}', "
+        f"got: {os.environ.get('KAFKA_BROKER_ALLOWLIST')!r}"
+    )
+
+
+# =============================================================================
 # Configuration
 # =============================================================================
 
 # KAFKA_BOOTSTRAP_SERVERS must be set via environment variable.
 # No hardcoded default to ensure portability across CI/CD environments.
-# Tests will skip via fixture if not set. Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:29092
+# Tests will skip via fixture if not set. Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:19092
+# NOTE: pytest_configure above sets this to localhost:19092 before collection.
 #
 # VALIDATION: The value is validated at module load time via validate_bootstrap_servers().
 # This validation checks for:
