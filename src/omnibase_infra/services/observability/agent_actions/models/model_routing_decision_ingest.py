@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# EXPIRY: 2026-04-01 or v0.6.0 (whichever first) — see OMN-3469 for retirement criteria
+# BLOCKED ON: handler_routing_emitter.py (omniclaude) still emits old-shape fields
+#   (session_id, confidence, emitted_at) — shim cannot be retired until Producer 1 is aligned
 """Permissive ingest model for the routing-decision Kafka topic.
 
 Used exclusively at the Kafka boundary for onex.evt.omniclaude.routing-decision.v1.
