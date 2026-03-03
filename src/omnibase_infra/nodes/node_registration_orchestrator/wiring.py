@@ -72,6 +72,7 @@ if TYPE_CHECKING:
     import asyncpg
 
     from omnibase_core.container import ModelONEXContainer
+    from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
     from omnibase_infra.handlers.handler_consul import HandlerConsul
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeHeartbeat,
@@ -550,6 +551,7 @@ async def wire_registration_handlers(
     projector: ProjectorShell | None = None,
     consul_handler: HandlerConsul | None = None,
     snapshot_publisher: ProtocolSnapshotPublisher | None = None,
+    event_bus: ProtocolEventBus | None = None,
     correlation_id: UUID | None = None,
 ) -> WiringResult:
     """Register registration orchestrator handlers with the container.
@@ -571,6 +573,11 @@ async def wire_registration_handlers(
         snapshot_publisher: Optional ProtocolSnapshotPublisher for publishing
             compacted snapshots to Kafka. If provided, handlers will publish
             snapshots after state transitions (best-effort, non-blocking).
+        event_bus: Optional ProtocolEventBus for timeout event emission.
+            When provided along with projector, wires TimeoutCoordinator into
+            HandlerRuntimeTick so ack_timeout_emitted_at is stamped after each
+            timeout emission (prevents re-detection on every RuntimeTick).
+            When None, HandlerRuntimeTick uses the legacy inline path.
         correlation_id: Optional correlation ID for error tracking. If not provided,
             one will be auto-generated when errors are raised.
 
@@ -686,10 +693,40 @@ async def wire_registration_handlers(
         services_registered.append("HandlerNodeIntrospected")
         logger.debug("Registered HandlerNodeIntrospected in container")
 
+        # Wire TimeoutCoordinator when both event_bus and projector are available.
+        # Without event_bus, ack_timeout_emitted_at cannot be stamped after publish,
+        # so the coordinator path is skipped and the legacy inline path is used.
+        timeout_coordinator = None
+        if event_bus is not None and projector is not None:
+            from omnibase_infra.nodes.node_registration_orchestrator.timeout_coordinator import (
+                TimeoutCoordinator,
+            )
+            from omnibase_infra.services import (
+                ServiceTimeoutEmitter,
+                ServiceTimeoutScanner,
+            )
+
+            _scanner = ServiceTimeoutScanner(
+                container=container,
+                projection_reader=projection_reader,
+            )
+            _emitter = ServiceTimeoutEmitter(
+                container=container,
+                timeout_query=_scanner,
+                event_bus=event_bus,
+                projector=projector,
+            )
+            timeout_coordinator = TimeoutCoordinator(
+                timeout_query=_scanner,
+                timeout_emission=_emitter,
+            )
+            logger.debug("TimeoutCoordinator wired into HandlerRuntimeTick")
+
         handler_runtime_tick = HandlerRuntimeTick(
             projection_reader,
             reducer=reducer,
             snapshot_publisher=snapshot_publisher,
+            timeout_coordinator=timeout_coordinator,
         )
         await container.service_registry.register_instance(
             interface=HandlerRuntimeTick,

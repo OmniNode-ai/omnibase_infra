@@ -541,6 +541,86 @@ class TestHandlerRuntimeTickInjectedNow:
         assert output.events[0].emitted_at == custom_now
 
 
+class TestHandlerRuntimeTickTimeoutCoordinator:
+    """Test that handler delegates to TimeoutCoordinator when wired."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_handler_delegates_to_coordinator_and_returns_no_events(
+        self,
+    ) -> None:
+        """Given a HandlerRuntimeTick wired with a TimeoutCoordinator,
+        When handle() is called,
+        Then coordinator.coordinate() is called with tick and domain='registration',
+        And output.events == () (coordinator already published; no double-publish),
+        And output.intents == ().
+        """
+        from omnibase_infra.nodes.node_registration_orchestrator.timeout_coordinator import (
+            ModelTimeoutCoordinationResult,
+            TimeoutCoordinator,
+        )
+
+        mock_reader = create_mock_projection_reader()
+        coordinator = AsyncMock(spec=TimeoutCoordinator)
+        tick = create_runtime_tick(now=TEST_NOW)
+        coordinator.coordinate.return_value = ModelTimeoutCoordinationResult(
+            tick_id=tick.tick_id,
+            tick_now=TEST_NOW,
+            ack_timeouts_found=0,
+            liveness_expirations_found=0,
+            ack_timeouts_emitted=0,
+            liveness_expirations_emitted=0,
+            markers_updated=0,
+            coordination_time_ms=1.0,
+            query_time_ms=0.5,
+            emission_time_ms=0.5,
+            success=True,
+        )
+        handler = HandlerRuntimeTick(
+            mock_reader, _DEFAULT_REDUCER, timeout_coordinator=coordinator
+        )
+        envelope = create_envelope(
+            tick, now=TEST_NOW, correlation_id=tick.correlation_id
+        )
+
+        output = await handler.handle(envelope)
+
+        # domain passed explicitly — no reliance on default
+        coordinator.coordinate.assert_awaited_once_with(tick, domain="registration")
+        # coordinator already published; no double-publish
+        assert output.events == ()
+        assert output.intents == ()
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_handler_without_coordinator_uses_legacy_path(self) -> None:
+        """Given a HandlerRuntimeTick without TimeoutCoordinator (coordinator=None),
+        When handle() is called with an overdue ack,
+        Then legacy path executes and events are returned normally.
+        """
+        mock_reader = create_mock_projection_reader()
+        node_id = uuid4()
+        overdue_projection = create_projection(
+            entity_id=node_id,
+            state=EnumRegistrationState.AWAITING_ACK,
+            ack_deadline=TEST_NOW - timedelta(minutes=5),
+            ack_timeout_emitted_at=None,
+        )
+        mock_reader.get_overdue_ack_registrations.return_value = [overdue_projection]
+
+        # No timeout_coordinator — legacy path
+        handler = HandlerRuntimeTick(mock_reader, _DEFAULT_REDUCER)
+        tick = create_runtime_tick(now=TEST_NOW)
+        envelope = create_envelope(
+            tick, now=TEST_NOW, correlation_id=tick.correlation_id
+        )
+
+        output = await handler.handle(envelope)
+
+        assert len(output.events) == 1
+        assert isinstance(output.events[0], ModelNodeRegistrationAckTimedOut)
+
+
 class TestHandlerRuntimeTickTimezoneValidation:
     """Test that handler validates timezone-awareness of envelope timestamp."""
 

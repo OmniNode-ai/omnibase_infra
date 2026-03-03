@@ -66,6 +66,9 @@ from omnibase_infra.utils import (
 )
 
 if TYPE_CHECKING:
+    from omnibase_infra.nodes.node_registration_orchestrator.timeout_coordinator import (
+        TimeoutCoordinator,
+    )
     from omnibase_infra.protocols.protocol_snapshot_publisher import (
         ProtocolSnapshotPublisher,
     )
@@ -97,6 +100,9 @@ class HandlerRuntimeTick:
         _projection_reader: Reader for registration projection state.
         _reducer: Pure-function service for timeout decisions.
         _snapshot_publisher: Optional publisher for tombstone snapshots.
+        _timeout_coordinator: Optional coordinator for timeout emission with
+            marker stamping. When present, replaces the legacy inline
+            timeout-detection path.
 
     Example:
         >>> from datetime import datetime, timezone
@@ -126,6 +132,7 @@ class HandlerRuntimeTick:
         projection_reader: ProjectionReaderRegistration,
         reducer: RegistrationReducerService,
         snapshot_publisher: ProtocolSnapshotPublisher | None = None,
+        timeout_coordinator: TimeoutCoordinator | None = None,
     ) -> None:
         """Initialize the handler with a projection reader and reducer service.
 
@@ -135,10 +142,16 @@ class HandlerRuntimeTick:
             snapshot_publisher: Optional ProtocolSnapshotPublisher for publishing
                 tombstones when nodes expire. If None, tombstone publishing is skipped.
                 Tombstone publishing is always best-effort and non-blocking.
+            timeout_coordinator: Optional TimeoutCoordinator for emitting timeout
+                events and stamping ack_timeout_emitted_at markers. When provided,
+                the coordinator path is taken and events=() is returned (coordinator
+                already published; no double-publish). When None, the legacy inline
+                timeout-detection path is used.
         """
         self._projection_reader = projection_reader
         self._reducer = reducer
         self._snapshot_publisher = snapshot_publisher
+        self._timeout_coordinator = timeout_coordinator
 
     @property
     def handler_id(self) -> str:
@@ -214,6 +227,26 @@ class HandlerRuntimeTick:
             correlation_id=correlation_id,
         )
         validate_timezone_aware_with_context(now, ctx)
+
+        # Coordinator path: delegate to TimeoutCoordinator when wired.
+        # Single side-effecting operation (best-effort, at-least-once).
+        # Emitter stamps ack_timeout_emitted_at only after publish success.
+        # events=() is mandatory here — coordinator already published; no double-publish.
+        if self._timeout_coordinator is not None:
+            await self._timeout_coordinator.coordinate(tick, domain="registration")
+            processing_time_ms = (time.perf_counter() - start_time) * 1000
+            return ModelHandlerOutput(
+                input_envelope_id=envelope.envelope_id,
+                correlation_id=correlation_id,
+                handler_id=self.handler_id,
+                node_kind=self.node_kind,
+                events=(),
+                intents=(),
+                projections=(),
+                result=None,
+                processing_time_ms=processing_time_ms,
+                timestamp=now,
+            )
 
         # 1. Query overdue projections (I/O stays in handler)
         overdue_ack = await self._projection_reader.get_overdue_ack_registrations(

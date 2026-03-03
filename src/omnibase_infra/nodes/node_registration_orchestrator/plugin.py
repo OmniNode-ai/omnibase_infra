@@ -894,6 +894,7 @@ class PluginRegistration:
                 projector=self._projector,
                 consul_handler=self._consul_handler,
                 snapshot_publisher=self._snapshot_publisher,
+                event_bus=config.event_bus,
                 correlation_id=correlation_id,
             )
             duration = time.time() - start_time
