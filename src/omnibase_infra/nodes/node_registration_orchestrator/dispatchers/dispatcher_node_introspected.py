@@ -57,6 +57,7 @@ Related:
 from __future__ import annotations
 
 import logging
+import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
@@ -65,6 +66,7 @@ from pydantic import ValidationError
 
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
 from omnibase_infra.enums import (
     EnumDispatchStatus,
     EnumInfraTransportType,
@@ -73,12 +75,19 @@ from omnibase_infra.enums import (
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.models.registration.commands.model_node_registration_acked import (
+    ModelNodeRegistrationAcked,
+)
+from omnibase_infra.models.registration.events.model_node_registration_accepted import (
+    ModelNodeRegistrationAccepted,
+)
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.dispatchers._util_envelope_extract import (
     extract_envelope_fields,
 )
+from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION_ACKED
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
@@ -94,6 +103,18 @@ logger = logging.getLogger(__name__)
 # Note: Internal identifier for logging/metrics, NOT the actual Kafka topic.
 # Actual topic is configured via ModelDispatchRoute.topic_pattern.
 TOPIC_ID_NODE_INTROSPECTION = "node.introspection"
+
+_ENV_AUTO_ACK = "ONEX_REGISTRATION_AUTO_ACK"
+_ACK_TOPIC: str = SUFFIX_NODE_REGISTRATION_ACKED
+
+
+def _auto_ack_enabled() -> bool:
+    """Return True when ONEX_REGISTRATION_AUTO_ACK=true in the environment.
+
+    Intended for local/dev use only — in production external nodes send their
+    own ack command, bypassing the distributed handshake.  See OMN-3444.
+    """
+    return os.environ.get(_ENV_AUTO_ACK, "false").lower() == "true"
 
 
 class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
