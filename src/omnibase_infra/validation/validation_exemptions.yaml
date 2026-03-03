@@ -307,16 +307,6 @@ pattern_exemptions:
   # ==========================================================================
   # Infrastructure handlers require multiple methods for: connection lifecycle,
   # operation dispatching, health checks, and protocol-specific operations.
-  - file_pattern: 'handler_consul\.py'
-    class_pattern: "Class 'HandlerConsul'"
-    violation_pattern: 'has \d+ methods'
-    reason: >
-      Infrastructure handler pattern requires multiple methods: connection lifecycle (connect, disconnect), operation dispatch (handle_operation, handle_kv_*, handle_service_*), properties (handler_type, handler_category), and health/describe methods. This is standard for infrastructure handlers.
-
-    documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
-      - CLAUDE.md (Infrastructure Patterns - Adapter Pattern)
-    ticket: OMN-1092
   # ==========================================================================
   # Projector Schema Model Exemptions (OMN-1168)
   # ==========================================================================
@@ -722,29 +712,6 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Container-Based Dependency Injection)
     ticket: OMN-529
-  # ==========================================================================
-  # Consul Service ID Exemptions (OMN-889)
-  # ==========================================================================
-  # consul_service_id is a Consul-specific identifier that is a user-defined string,
-  # NOT a UUID. The Consul API accepts any string as a service ID. This field is
-  # named with the 'consul_' prefix to clarify it's a Consul concept.
-  - file_pattern: 'model_consul_register_payload\.py'
-    violation_pattern: "Field 'consul_service_id' should use UUID"
-    reason: >
-      consul_service_id is a Consul-specific identifier that is a user-defined string, not a UUID. The Consul API accepts any string as a service ID.
-
-    documentation:
-      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
-      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
-    ticket: OMN-889
-  - file_pattern: 'model_consul_deregister_payload\.py'
-    violation_pattern: "Field 'consul_service_id' should use UUID"
-    reason: >
-      consul_service_id is a Consul-specific identifier that is a user-defined string, not a UUID. The Consul API accepts any string as a service ID.
-
-    documentation:
-      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
-    ticket: OMN-889
   # ==========================================================================
   # MessageTypeRegistry Exemptions (OMN-983)
   # ==========================================================================

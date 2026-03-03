@@ -46,12 +46,6 @@ from typing import Annotated
 
 from pydantic import Field
 
-from omnibase_infra.nodes.node_registration_orchestrator.models.model_consul_intent_payload import (
-    ModelConsulIntentPayload,
-)
-from omnibase_infra.nodes.node_registration_orchestrator.models.model_consul_registration_intent import (
-    ModelConsulRegistrationIntent,
-)
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_postgres_intent_payload import (
     ModelPostgresIntentPayload,
 )
@@ -63,7 +57,7 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_registry_i
 )
 
 # Type alias for intent payloads
-IntentPayload = ModelConsulIntentPayload | ModelPostgresIntentPayload
+IntentPayload = ModelPostgresIntentPayload
 
 # =============================================================================
 # Discriminated Union Definitions
@@ -80,16 +74,13 @@ IntentPayload = ModelConsulIntentPayload | ModelPostgresIntentPayload
 # This enables type narrowing based on the `kind` field
 # SYNC: Must include all types registered in RegistryIntent
 ModelRegistrationIntent = Annotated[
-    ModelConsulRegistrationIntent | ModelPostgresUpsertIntent,
+    ModelPostgresUpsertIntent,
     Field(discriminator="kind"),
 ]
 
 # Explicit list of intent model classes in the union
 # Used by validate_union_registry_sync() for verification
-_UNION_INTENT_TYPES: tuple[type, ...] = (
-    ModelConsulRegistrationIntent,
-    ModelPostgresUpsertIntent,
-)
+_UNION_INTENT_TYPES: tuple[type, ...] = (ModelPostgresUpsertIntent,)
 
 
 def validate_union_registry_sync() -> tuple[bool, list[str]]:
@@ -167,8 +158,6 @@ def get_union_intent_types() -> tuple[type, ...]:
 
 __all__ = [
     "IntentPayload",
-    "ModelConsulIntentPayload",
-    "ModelConsulRegistrationIntent",
     "ModelPostgresIntentPayload",
     "ModelPostgresUpsertIntent",
     "ModelRegistrationIntent",

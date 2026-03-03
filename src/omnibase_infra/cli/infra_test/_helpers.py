@@ -26,22 +26,6 @@ def get_broker() -> str:
     )  # kafka-fallback-ok — integration test default
 
 
-def get_consul_addr() -> str:
-    """Resolve Consul HTTP address from environment.
-
-    Returns:
-        Full Consul HTTP URL (e.g. ``http://localhost:8500``).
-    """
-    host = os.getenv("CONSUL_HOST", "localhost")
-    port = os.getenv("CONSUL_PORT", "8500")
-    scheme = os.getenv("CONSUL_SCHEME", "http")
-    if scheme not in ("http", "https"):
-        raise ValueError(f"CONSUL_SCHEME must be 'http' or 'https', got {scheme!r}.")
-    if not port.isdigit():
-        raise ValueError(f"CONSUL_PORT must be numeric, got {port!r}.")
-    return f"{scheme}://{host}:{port}"
-
-
 def get_postgres_dsn() -> str:
     """Get PostgreSQL DSN from OMNIBASE_INFRA_DB_URL.
 

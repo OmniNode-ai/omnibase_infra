@@ -9,7 +9,6 @@ Supported transport types:
     - HTTP: REST API transport
     - DATABASE: PostgreSQL and other database connections
     - KAFKA: Kafka message broker
-    - CONSUL: Consul service discovery and KV operations
     - INFISICAL: Infisical secret management
     - VALKEY: Valkey (Redis-compatible) cache/messaging
     - GRPC: gRPC protocol
@@ -23,7 +22,6 @@ Supported transport types:
     - BRIDGE: Cross-domain bridge transport for multi-bus topic routing
 
 Each transport type has a corresponding handler implementation:
-    - HandlerConsul: Service registration, health checks, KV store operations
     - HandlerInfisical: Secret retrieval, caching, batch fetch (OMN-2286)
     - EventBusKafka: Event publishing/subscription, consumer groups
     - EventBusInmemory: In-memory event bus for testing and local development
@@ -45,7 +43,6 @@ class EnumInfraTransportType(str, Enum):
         HTTP: HTTP/REST API transport
         DATABASE: Database connection transport (PostgreSQL, etc.)
         KAFKA: Kafka message broker transport
-        CONSUL: Consul discovery transport
         INFISICAL: Infisical secret management transport (OMN-2286)
         VALKEY: Valkey (Redis-compatible) cache/message transport
         GRPC: gRPC protocol transport
@@ -62,7 +59,6 @@ class EnumInfraTransportType(str, Enum):
     HTTP = "http"
     DATABASE = "db"
     KAFKA = "kafka"
-    CONSUL = "consul"
     INFISICAL = "infisical"
     VALKEY = "valkey"
     GRPC = "grpc"

@@ -5,7 +5,7 @@
 This package provides intent effect adapters that bridge intent payloads
 (produced by handlers/reducers) to actual infrastructure operations. Each
 adapter accepts a typed intent payload and executes the corresponding
-effect-layer operation (PostgreSQL upsert, Consul registration, etc.).
+effect-layer operation (PostgreSQL upsert, etc.).
 
 Architecture:
     Handler -> ModelIntent(payload) -> IntentExecutor -> IntentEffect -> Infrastructure
@@ -22,12 +22,6 @@ Related:
 .. versionadded:: 0.7.0
 """
 
-from omnibase_infra.runtime.intent_effects.intent_effect_consul_deregister import (
-    IntentEffectConsulDeregister,
-)
-from omnibase_infra.runtime.intent_effects.intent_effect_consul_register import (
-    IntentEffectConsulRegister,
-)
 from omnibase_infra.runtime.intent_effects.intent_effect_postgres_update import (
     IntentEffectPostgresUpdate,
 )
@@ -36,8 +30,6 @@ from omnibase_infra.runtime.intent_effects.intent_effect_postgres_upsert import 
 )
 
 __all__: list[str] = [
-    "IntentEffectConsulDeregister",
-    "IntentEffectConsulRegister",
     "IntentEffectPostgresUpdate",
     "IntentEffectPostgresUpsert",
 ]

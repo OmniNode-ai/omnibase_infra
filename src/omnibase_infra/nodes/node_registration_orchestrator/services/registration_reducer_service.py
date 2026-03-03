@@ -24,10 +24,8 @@ Related Tickets:
 
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
 from datetime import datetime, timedelta
-from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
@@ -69,9 +67,6 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_co
 )
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_decision import (
     ModelReducerDecision,
-)
-from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
-    ModelPayloadConsulRegister,
 )
 from omnibase_infra.nodes.reducers.models.model_payload_postgres_update_registration import (
     ModelPayloadPostgresUpdateRegistration,
@@ -125,7 +120,6 @@ class RegistrationReducerService:
         ack_timeout_seconds: Timeout in seconds for node acknowledgment.
         liveness_interval_seconds: Interval in seconds for liveness deadline.
         liveness_window_seconds: Window in seconds for heartbeat liveness extension.
-        consul_enabled: Whether to emit consul.register intents.
     """
 
     def __init__(
@@ -133,7 +127,6 @@ class RegistrationReducerService:
         ack_timeout_seconds: float = 30.0,
         liveness_interval_seconds: int = 60,
         liveness_window_seconds: float = 90.0,
-        consul_enabled: bool = True,
     ) -> None:
         """Initialize the reducer service with timing and feature configuration.
 
@@ -141,12 +134,10 @@ class RegistrationReducerService:
             ack_timeout_seconds: How long to wait for a node ack before timeout.
             liveness_interval_seconds: Initial liveness deadline offset from activation.
             liveness_window_seconds: Liveness deadline extension per heartbeat.
-            consul_enabled: Whether to emit Consul registration intents.
         """
         self._ack_timeout_seconds = ack_timeout_seconds
         self._liveness_interval_seconds = liveness_interval_seconds
         self._liveness_window_seconds = liveness_window_seconds
-        self._consul_enabled = consul_enabled
 
     @property
     def liveness_interval_seconds(self) -> int:
@@ -175,7 +166,6 @@ class RegistrationReducerService:
             - ModelNodeRegistrationInitiated event
             - ModelNodeRegistrationAccepted event
             - PostgreSQL upsert intent (state=AWAITING_ACK)
-            - Consul register intent (if consul_enabled)
 
         Args:
             projection: Current registration projection, or None for new nodes.
@@ -275,16 +265,6 @@ class RegistrationReducerService:
                 payload=postgres_payload,
             )
         )
-
-        # Intent 2: Consul service registration (conditional)
-        if self._consul_enabled:
-            consul_intent = self._build_consul_intent(
-                event=event,
-                node_id=node_id,
-                correlation_id=correlation_id,
-            )
-            if consul_intent is not None:
-                intents.append(consul_intent)
 
         return ModelReducerDecision(
             action="emit",
@@ -529,106 +509,6 @@ class RegistrationReducerService:
                 f"{sum(1 for e in events if isinstance(e, ModelNodeRegistrationAckTimedOut))} ack, "
                 f"{sum(1 for e in events if isinstance(e, ModelNodeLivenessExpired))} liveness"
             ),
-        )
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _sanitize_tool_name(name: str) -> str:
-        """Sanitize tool name for use in Consul tags.
-
-        Converts free-form text into stable, Consul-safe identifiers.
-
-        Transformation rules:
-            1. Convert to lowercase
-            2. Replace non-alphanumeric characters with dashes
-            3. Collapse multiple consecutive dashes into one
-            4. Remove leading/trailing dashes
-            5. Truncate to 63 characters (Consul tag limit)
-
-        Args:
-            name: Raw tool name or description text.
-
-        Returns:
-            Sanitized string suitable for Consul tags (lowercase, alphanumeric
-            with dashes, max 63 chars).
-        """
-        sanitized = re.sub(r"[^a-zA-Z0-9]+", "-", name.lower())
-        sanitized = sanitized.strip("-")
-        return sanitized[:63]
-
-    def _build_consul_intent(
-        self,
-        event: ModelNodeIntrospectionEvent,
-        node_id: UUID,
-        correlation_id: UUID,
-    ) -> ModelIntent | None:
-        """Build a Consul service registration intent from introspection event.
-
-        Extracts service name, tags, address, and port from the event to
-        construct a ModelPayloadConsulRegister intent payload.
-
-        Args:
-            event: The node introspection event.
-            node_id: UUID of the node being registered.
-            correlation_id: Correlation ID for distributed tracing.
-
-        Returns:
-            ModelIntent for Consul registration, or None if consul is disabled.
-        """
-        node_type = event.node_type
-        service_name = f"onex-{node_type.value}"
-        service_id = f"onex-{node_type.value}-{node_id}"
-
-        # Build tags
-        tags: list[str] = ["onex", f"node-type:{node_type.value}"]
-
-        # Add MCP tags for orchestrators with MCP config enabled
-        mcp_config = (
-            event.declared_capabilities.mcp
-            if event.declared_capabilities is not None
-            else None
-        )
-        if node_type.value == "orchestrator" and mcp_config is not None:
-            if mcp_config.expose:
-                mcp_tool_name_raw = mcp_config.tool_name
-                if not mcp_tool_name_raw:
-                    node_name = event.metadata.description if event.metadata else None
-                    mcp_tool_name_raw = node_name or service_name
-                mcp_tool_name = self._sanitize_tool_name(mcp_tool_name_raw)
-                tags.extend(["mcp-enabled", f"mcp-tool:{mcp_tool_name}"])
-
-        # Extract address and port from endpoints if available
-        address: str | None = None
-        port: int | None = None
-        endpoints = event.endpoints
-        if endpoints:
-            health_url = endpoints.get("health") or endpoints.get("api")
-            if health_url:
-                try:
-                    parsed = urlparse(health_url)
-                    if parsed.hostname:
-                        address = parsed.hostname
-                    if parsed.port:
-                        port = parsed.port
-                except ValueError:
-                    pass
-
-        consul_payload = ModelPayloadConsulRegister(
-            correlation_id=correlation_id,
-            service_id=service_id,
-            service_name=service_name,
-            tags=tags,
-            address=address,
-            port=port,
-        )
-
-        return ModelIntent(
-            intent_type=consul_payload.intent_type,
-            target=f"consul://service/{service_name}",
-            payload=consul_payload,
         )
 
 

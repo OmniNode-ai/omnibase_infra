@@ -13,12 +13,6 @@ Available Models:
     - ModelPayloadPostgresUpdateRegistration: Payload for PostgreSQL UPDATE intents
 """
 
-from omnibase_infra.nodes.reducers.models.model_payload_consul_deregister import (
-    ModelPayloadConsulDeregister,
-)
-from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
-    ModelPayloadConsulRegister,
-)
 from omnibase_infra.nodes.reducers.models.model_payload_ledger_append import (
     ModelPayloadLedgerAppend,
 )
@@ -42,8 +36,6 @@ from omnibase_infra.nodes.reducers.models.model_registration_state import (
 )
 
 __all__ = [
-    "ModelPayloadConsulDeregister",
-    "ModelPayloadConsulRegister",
     "ModelPayloadLedgerAppend",
     "ModelPayloadPostgresUpdateRegistration",
     "ModelPayloadPostgresUpsertRegistration",

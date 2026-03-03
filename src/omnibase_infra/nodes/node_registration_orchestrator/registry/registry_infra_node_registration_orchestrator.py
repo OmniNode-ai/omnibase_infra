@@ -25,7 +25,6 @@ Handler Dependencies:
     All handlers require RegistrationReducerService for pure-function decisions.
     Some handlers optionally accept:
     - ProjectorShell: For projection persistence
-    - HandlerConsul: For Consul service registration (dual registration)
 
 Handler Dependency Map - Design Trade-off:
     The ``handler_dependencies`` dict in ``create_registry()`` requires manual
@@ -69,12 +68,11 @@ Usage:
         RegistrationReducerService,
     )
 
-    reducer = RegistrationReducerService(consul_enabled=True)
+    reducer = RegistrationReducerService()
     registry = RegistryInfraNodeRegistrationOrchestrator.create_registry(
         projection_reader=reader,
         reducer=reducer,
         projector=projector,
-        consul_handler=consul_handler,
     )
     # registry is frozen and thread-safe
 
@@ -87,6 +85,7 @@ Related Tickets:
     - OMN-1102: Make NodeRegistrationOrchestrator fully declarative
     - OMN-888 (C1): Registration Orchestrator
     - OMN-1006: Node Heartbeat for Liveness Tracking
+    - OMN-3540: Remove Consul entirely from omnibase_infra runtime
 """
 
 from __future__ import annotations
@@ -242,7 +241,6 @@ def _load_handler_class(class_name: str, module_path: str) -> type[object]:
 
 
 if TYPE_CHECKING:
-    from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.nodes.node_registration_orchestrator.services import (
         RegistrationReducerService,
     )
@@ -268,12 +266,11 @@ class RegistryInfraNodeRegistrationOrchestrator:
 
     Usage:
         ```python
-        reducer = RegistrationReducerService(consul_enabled=True)
+        reducer = RegistrationReducerService()
         registry = RegistryInfraNodeRegistrationOrchestrator.create_registry(
             projection_reader=reader,
             reducer=reducer,
             projector=projector,
-            consul_handler=consul_handler,
         )
         handler = registry.get_handler_by_id("handler-node-introspected")
         result = await handler.handle(envelope)
@@ -285,7 +282,6 @@ class RegistryInfraNodeRegistrationOrchestrator:
         projection_reader: ProjectionReaderRegistration,
         reducer: RegistrationReducerService,
         projector: ProjectorShell | None = None,
-        _consul_handler: HandlerConsul | None = None,
         catalog_service: ServiceTopicCatalog | None = None,
         *,
         require_heartbeat_handler: bool = True,
@@ -322,11 +318,10 @@ class RegistryInfraNodeRegistrationOrchestrator:
                 Instantiated by the caller (typically ``wire_registration_handlers``
                 in wiring.py) and registered in ``ModelONEXContainer`` before being
                 passed here. This ensures the reducer's configuration (e.g.,
-                consul_enabled, ack_timeout_seconds) is managed at the container
-                wiring layer, not duplicated in the registry.
+                ack_timeout_seconds) is managed at the container wiring layer,
+                not duplicated in the registry.
             projector: Projector for state persistence. Required for
                 HandlerNodeHeartbeat to persist heartbeat timestamps.
-            consul_handler: Optional Consul handler for service registration.
             catalog_service: Optional ServiceTopicCatalog for topic catalog queries.
                 Required for HandlerTopicCatalogQuery. When absent, the handler is
                 not registered and topic catalog queries will not be handled.
@@ -351,16 +346,15 @@ class RegistryInfraNodeRegistrationOrchestrator:
         Example:
             ```python
             # Production usage - reducer and projector required
-            reducer = RegistrationReducerService(consul_enabled=True)
+            reducer = RegistrationReducerService()
             registry = RegistryInfraNodeRegistrationOrchestrator.create_registry(
                 projection_reader=reader,
                 reducer=reducer,
                 projector=projector,
-                consul_handler=consul_handler,
             )
 
             # Testing without heartbeat support (explicit opt-in)
-            reducer = RegistrationReducerService(consul_enabled=False)
+            reducer = RegistrationReducerService()
             registry = RegistryInfraNodeRegistrationOrchestrator.create_registry(
                 projection_reader=reader,
                 reducer=reducer,
@@ -526,18 +520,15 @@ class RegistryInfraNodeRegistrationOrchestrator:
             #   - This is intentional: handlers should fail-fast with clear messages
             #     rather than silently receiving no projection_reader parameter
             #
-            # WHY projector and consul_handler are only included when not None:
-            #   - These are OPTIONAL dependencies used by specific handlers
+            # WHY projector is only included when not None:
+            #   - projector is an OPTIONAL dependency used by specific handlers
             #   - projector: Only handlers that persist state changes need this
             #     (e.g., HandlerNodeHeartbeat for updating heartbeat timestamps)
-            #   - consul_handler: Only handlers that interact with service discovery
-            #     (e.g., HandlerNodeIntrospected for dual Consul registration)
             #   - Passing None would override handler defaults or cause TypeErrors
             #
             # Summary:
             #   projection_reader: Always pass (even if None) -> handlers validate and fail-fast
             #   projector: Optional -> pass only if provided
-            #   consul_handler: Optional -> pass only if provided
             filtered_deps = {
                 k: v
                 for k, v in deps.items()

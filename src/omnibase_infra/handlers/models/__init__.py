@@ -17,19 +17,6 @@ Database Models:
     ModelDbQueryResponse: Full database query response envelope
     ModelDbDescribeResponse: Database handler metadata and capabilities
 
-Consul Models:
-    ModelConsulHandlerPayload: Payload containing Consul operation results
-    ModelConsulHandlerResponse: Full Consul handler response envelope
-    EnumConsulOperationType: Discriminator enum for Consul operation types
-    ModelConsulKVItem: Single KV item from recurse query
-    ModelConsulKVGetFoundPayload: Payload for consul.kv_get when key is found
-    ModelConsulKVGetNotFoundPayload: Payload for consul.kv_get when key not found
-    ModelConsulKVGetRecursePayload: Payload for consul.kv_get with recurse=True
-    ModelConsulKVPutPayload: Payload for consul.kv_put result
-    ModelConsulRegisterPayload: Payload for consul.register result
-    ModelConsulDeregisterPayload: Payload for consul.deregister result
-    ConsulPayload: Discriminated union of all Consul payload types
-
 Qdrant Models:
     ModelQdrantHandlerPayload: Payload containing Qdrant operation results
     ModelQdrantHandlerResponse: Full Qdrant handler response envelope
@@ -89,18 +76,6 @@ Gmail Models:
     ModelGmailMessage: Immutable representation of a Gmail message with decoded body
 """
 
-from omnibase_infra.handlers.models.consul import (
-    ConsulPayload,
-    EnumConsulOperationType,
-    ModelConsulDeregisterPayload,
-    ModelConsulHandlerPayload,
-    ModelConsulKVGetFoundPayload,
-    ModelConsulKVGetNotFoundPayload,
-    ModelConsulKVGetRecursePayload,
-    ModelConsulKVItem,
-    ModelConsulKVPutPayload,
-    ModelConsulRegisterPayload,
-)
 from omnibase_infra.handlers.models.enum_alert_severity import EnumAlertSeverity
 from omnibase_infra.handlers.models.http import (
     EnumHttpOperationType,
@@ -109,9 +84,6 @@ from omnibase_infra.handlers.models.http import (
     ModelHttpGetPayload,
     ModelHttpHandlerPayload,
     ModelHttpPostPayload,
-)
-from omnibase_infra.handlers.models.model_consul_handler_response import (
-    ModelConsulHandlerResponse,
 )
 from omnibase_infra.handlers.models.model_db_describe_response import (
     ModelDbDescribeResponse,
@@ -203,22 +175,9 @@ from omnibase_infra.handlers.models.model_slack_alert_result import (
 )
 
 __all__: list[str] = [
-    "ConsulPayload",
-    # Consul payload types (discriminated union)
-    "EnumConsulOperationType",
     # HTTP payload types (discriminated union)
     "EnumHttpOperationType",
     "HttpPayload",
-    "ModelConsulDeregisterPayload",
-    # Consul wrapper models
-    "ModelConsulHandlerPayload",
-    "ModelConsulHandlerResponse",
-    "ModelConsulKVGetFoundPayload",
-    "ModelConsulKVGetNotFoundPayload",
-    "ModelConsulKVGetRecursePayload",
-    "ModelConsulKVItem",
-    "ModelConsulKVPutPayload",
-    "ModelConsulRegisterPayload",
     # Database models
     "ModelDbQueryPayload",
     "ModelDbQueryResponse",

@@ -110,7 +110,6 @@ from omnibase_infra.errors.error_architecture_violation import (
 from omnibase_infra.errors.error_binding_resolution import BindingResolutionError
 from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
 from omnibase_infra.errors.error_compute_registry import ComputeRegistryError
-from omnibase_infra.errors.error_consul import InfraConsulError
 from omnibase_infra.errors.error_container_wiring import (
     ContainerValidationError,
     ContainerWiringError,
@@ -186,8 +185,6 @@ __all__: list[str] = [
     "EventRegistryFingerprintMissingError",
     "InfraAuthenticationError",
     "InfraConnectionError",
-    # Service-specific connection errors
-    "InfraConsulError",
     # Protocol/format errors
     "InfraProtocolError",
     "InfraRateLimitedError",

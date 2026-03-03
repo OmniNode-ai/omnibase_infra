@@ -38,7 +38,6 @@ class CapabilityInferenceRules:
     # Default intent pattern -> capability tag mappings
     DEFAULT_INTENT_PATTERNS: dict[str, str] = {
         "postgres.": "postgres.storage",
-        "consul.": "consul.registration",
         "kafka.": "kafka.messaging",
         "valkey.": "valkey.caching",
         "http.": "http.transport",
@@ -103,7 +102,7 @@ class CapabilityInferenceRules:
             - "postgres.kafka.hybrid" matches "postgres." only (NOT both postgres and kafka)
 
         Args:
-            intent_types: List of intent type strings (e.g., ["postgres.upsert", "consul.register"])
+            intent_types: List of intent type strings (e.g., ["postgres.upsert"])
 
         Returns:
             Sorted list of inferred capability tags (deduplicated)

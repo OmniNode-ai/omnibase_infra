@@ -20,12 +20,11 @@ Usage:
         RegistrationReducerService,
     )
 
-    reducer = RegistrationReducerService(consul_enabled=True)
+    reducer = RegistrationReducerService()
     registry = RegistryInfraNodeRegistrationOrchestrator.create_registry(
         projection_reader=reader,
         reducer=reducer,
         projector=projector,
-        consul_handler=consul_handler,
     )
     # registry is frozen and thread-safe
 

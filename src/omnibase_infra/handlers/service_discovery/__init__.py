@@ -6,7 +6,6 @@ This module provides pluggable handler implementations for service discovery
 operations, supporting the capability-oriented node architecture.
 
 Handlers:
-    - HandlerServiceDiscoveryConsul: Consul-backed service discovery
     - HandlerServiceDiscoveryMock: In-memory mock for testing
 
 Models:
@@ -18,9 +17,6 @@ Protocols:
     - ProtocolDiscoveryOperations: Discovery operations protocol definition
 """
 
-from omnibase_infra.handlers.service_discovery.handler_service_discovery_consul import (
-    HandlerServiceDiscoveryConsul,
-)
 from omnibase_infra.handlers.service_discovery.handler_service_discovery_mock import (
     HandlerServiceDiscoveryMock,
 )
@@ -34,7 +30,6 @@ from omnibase_infra.handlers.service_discovery.protocol_discovery_operations imp
 )
 
 __all__: list[str] = [
-    "HandlerServiceDiscoveryConsul",
     "HandlerServiceDiscoveryMock",
     "ModelDiscoveryResult",
     "ModelHandlerRegistrationResult",

@@ -28,7 +28,6 @@ Intent Typing:
     - Follows ONEX duck typing principles while maintaining type safety
 
     Current implementations:
-    - ModelConsulRegistrationIntent (kind="consul"): Consul service registration
     - ModelPostgresUpsertIntent (kind="postgres"): PostgreSQL upsert operations
 
     For type hints in external code, use ProtocolRegistrationIntent from

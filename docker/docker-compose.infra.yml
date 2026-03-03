@@ -15,9 +15,6 @@
 #   # With runtime services
 #   docker compose -f docker/docker-compose.infra.yml --profile runtime up -d
 #
-#   # With Consul (service discovery)
-#   docker compose -f docker/docker-compose.infra.yml --profile consul up -d
-#
 #   # With secrets management (Infisical)
 #   docker compose -f docker/docker-compose.infra.yml --profile secrets up -d
 #
@@ -43,10 +40,9 @@
 # Profiles:
 #   - (default): Core infrastructure (postgres, valkey, redpanda)
 #   - runtime: ONEX runtime services (omninode-runtime, effects, workers, observability)
-#   - consul: HashiCorp Consul for service discovery
 #   - secrets: Infisical for secrets management
 #   - auth: Keycloak OIDC/auth service (local dev)
-#   - full: All services (infrastructure + runtime + consul + secrets + auth)
+#   - full: All services (infrastructure + runtime + secrets + auth)
 #   - bootstrap: Infrastructure + secrets (for bootstrap-infisical.sh sequence)
 #
 # Redpanda / Kafka:
@@ -61,7 +57,6 @@
 #     - PostgreSQL: 5436 (internal 5432)
 #     - Valkey: 16379 (internal 6379)
 #     - Redpanda: 19092 (internal 9092) [always-on; 29092 reserved for cloud bus tunnel]
-#     - Consul: 28500 (internal 8500) [consul profile]
 #     - Infisical: 8880 (internal 8080) [secrets profile]
 #     - Keycloak: 28080 (internal 8080) [auth profile]
 #   Runtime:
@@ -165,8 +160,6 @@ x-runtime-env: &runtime-env
   # (the default) to allow standard environment variable resolution as fallback.
   INFISICAL_REQUIRED: ${INFISICAL_REQUIRED:-}
   # --- Fallback values (used when Infisical is not configured) ---
-  CONSUL_HOST: ${CONSUL_HOST:-consul}
-  CONSUL_PORT: ${CONSUL_PORT:-8500}
   VALKEY_HOST: ${VALKEY_HOST:-valkey}
   VALKEY_PORT: ${VALKEY_PORT:-6379}
   VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
@@ -326,29 +319,6 @@ services:
     restart: unless-stopped
     labels:
       - "com.omninode.service=valkey"
-      - "com.omninode.layer=infrastructure"
-  # ==========================================================================
-  # Consul - Service Discovery (Optional)
-  # ==========================================================================
-  consul:
-    image: hashicorp/consul:1.18
-    container_name: omnibase-infra-consul
-    profiles: ["consul", "full"]
-    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0 -data-dir=/consul/data
-    ports:
-      - "${CONSUL_EXTERNAL_PORT:-28500}:8500"
-      - "${CONSUL_DNS_PORT:-8600}:8600/udp"
-    volumes:
-      - consul_data:/consul/data
-    networks:
-      - omnibase-infra-network
-    healthcheck:
-      !!merge <<: *healthcheck-defaults
-      test: ["CMD", "consul", "members"]
-    logging: *logging-defaults
-    restart: unless-stopped
-    labels:
-      - "com.omninode.service=consul"
       - "com.omninode.layer=infrastructure"
   # ==========================================================================
   # Infisical - Secrets Management (Optional)
@@ -817,7 +787,7 @@ services:
   # Scope: only containers labeled autoheal=true are watched (not infra services
   # like postgres/valkey, which could cascade-fail dependents if restarted).
   #
-  # Profiles: runtime, full only. Not active in dev/bootstrap/auth/consul profiles.
+  # Profiles: runtime, full only. Not active in dev/bootstrap/auth profiles.
   #
   # LOCAL INFRA ONLY: docker.sock mount grants root-equivalent Docker control.
   # Do not use this pattern in shared or multi-user environments.
@@ -859,8 +829,6 @@ volumes:
     name: omnibase-infra-redpanda-data
   valkey_data:
     name: omnibase-infra-valkey-data
-  consul_data:
-    name: omnibase-infra-consul-data
   keycloak_data:
     name: omnibase-infra-keycloak-data
   # Runtime volumes

@@ -94,9 +94,6 @@ Operations are routed by extracting the prefix before the first dot."""
 HANDLER_TYPE_KAFKA: str = "kafka"
 """Kafka message broker protocol handler type."""
 
-HANDLER_TYPE_CONSUL: str = "consul"
-"""HashiCorp Consul service discovery protocol handler type."""
-
 HANDLER_TYPE_VALKEY: str = "valkey"
 """Valkey (Redis-compatible) cache/message protocol handler type.
 
@@ -300,7 +297,6 @@ __all__: list[str] = [
     # Event bus kind constants
     "EVENT_BUS_INMEMORY",
     "EVENT_BUS_KAFKA",
-    "HANDLER_TYPE_CONSUL",
     "HANDLER_TYPE_DATABASE",
     "HANDLER_TYPE_GRPC",
     "HANDLER_TYPE_GRAPH",

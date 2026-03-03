@@ -16,14 +16,14 @@ Implementation Status:
     - Runtime routes confirmations based on event_type
 
 Confirmation Event Flow:
-    1. Reducer emits intents (consul.register, postgres.upsert_registration)
+    1. Reducer emits intents (postgres.upsert_registration)
     2. Effect nodes execute intents and perform I/O
     3. Effect nodes publish confirmation events to Kafka
     4. Runtime routes confirmations to RegistrationReducer.reduce_confirmation()
     5. Reducer updates state: pending -> partial -> complete (or -> failed)
 
 Event Types:
-    - consul.registered: Consul service registration completed
+
     - postgres.registration_upserted: PostgreSQL record upsert completed
 
     Both event types may indicate success or failure via the ``success`` field.
@@ -107,14 +107,14 @@ class ModelRegistrationConfirmation(BaseModel):
         >>> from uuid import uuid4
         >>> from omnibase_infra.enums import EnumConfirmationEventType
         >>> confirmation = ModelRegistrationConfirmation(
-        ...     event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
+        ...     event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
         ...     correlation_id=uuid4(),
         ...     node_id=uuid4(),
         ...     success=True,
         ...     timestamp=datetime.now(UTC),
         ... )
         >>> confirmation.event_type
-        <EnumConfirmationEventType.CONSUL_REGISTERED: 'consul.registered'>
+        <EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED: 'postgres.registration_upserted'>
         >>> confirmation.success
         True
 

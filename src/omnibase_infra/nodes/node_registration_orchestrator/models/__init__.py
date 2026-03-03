@@ -9,12 +9,6 @@ including configuration, input, output, intent, and timeout event models.
 from omnibase_infra.models.registration.events.model_node_registration_ack_timed_out import (
     ModelNodeRegistrationAckTimedOut,
 )
-from omnibase_infra.nodes.node_registration_orchestrator.models.model_consul_intent_payload import (
-    ModelConsulIntentPayload,
-)
-from omnibase_infra.nodes.node_registration_orchestrator.models.model_consul_registration_intent import (
-    ModelConsulRegistrationIntent,
-)
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_intent_execution_result import (
     ModelIntentExecutionResult,
 )
@@ -65,8 +59,6 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_registry_i
 __all__ = [
     "IntentPayload",
     "RegistryIntent",
-    "ModelConsulIntentPayload",
-    "ModelConsulRegistrationIntent",
     "ModelIntentExecutionResult",
     "ModelNodeLivenessExpired",
     "ModelNodeRegistrationAckTimedOut",

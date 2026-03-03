@@ -68,7 +68,6 @@ from omnibase_infra.runtime.envelope_validator import (
 from omnibase_infra.runtime.handler_registry import (
     EVENT_BUS_INMEMORY,
     EVENT_BUS_KAFKA,
-    HANDLER_TYPE_CONSUL,
     HANDLER_TYPE_DATABASE,
     HANDLER_TYPE_GRPC,
     HANDLER_TYPE_HTTP,
@@ -305,7 +304,6 @@ __all__: list[str] = [
     # Event bus kind constants
     "EVENT_BUS_INMEMORY",
     "EVENT_BUS_KAFKA",
-    "HANDLER_TYPE_CONSUL",
     "HANDLER_TYPE_DATABASE",
     "HANDLER_TYPE_GRPC",
     # Handler type constants

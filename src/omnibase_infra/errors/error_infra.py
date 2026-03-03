@@ -53,15 +53,14 @@ NOT_FOUND Classification Patterns:
     2. **Response-based NOT_FOUND** (for valid "empty" responses):
        When absence is a valid outcome (not an error), return a discriminated
        union variant. This is used by:
-       - ``EnumConsulOperationType.KV_GET_NOT_FOUND``: When a Consul key doesn't exist
        - Handler responses with optional data fields
 
        Callers check the response type to determine if data was found:
 
        .. code-block:: python
 
-           result = await consul_handler.kv_get("my/key")
-           if result.operation_type == EnumConsulOperationType.KV_GET_NOT_FOUND:
+           result = await backend_handler.get("my/key")
+           if result.operation_type == OperationType.NOT_FOUND:
                # Key doesn't exist - valid "empty" response
                return default_value
            else:
@@ -255,7 +254,7 @@ class InfraConnectionError(RuntimeHostError):
     in the context:
         - DATABASE -> DATABASE_CONNECTION_ERROR
         - HTTP, GRPC -> NETWORK_ERROR
-        - KAFKA, CONSUL, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP, LLM -> SERVICE_UNAVAILABLE
+        - KAFKA, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP, LLM -> SERVICE_UNAVAILABLE
         - None (no context) -> SERVICE_UNAVAILABLE
 
     Example:
@@ -297,7 +296,6 @@ class InfraConnectionError(RuntimeHostError):
         EnumInfraTransportType.HTTP: EnumCoreErrorCode.NETWORK_ERROR,
         EnumInfraTransportType.GRPC: EnumCoreErrorCode.NETWORK_ERROR,
         EnumInfraTransportType.KAFKA: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
-        EnumInfraTransportType.CONSUL: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.INFISICAL: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.VALKEY: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.RUNTIME: EnumCoreErrorCode.OPERATION_FAILED,
@@ -324,7 +322,7 @@ class InfraConnectionError(RuntimeHostError):
             Appropriate EnumCoreErrorCode for the transport type:
                 - DATABASE -> DATABASE_CONNECTION_ERROR
                 - HTTP, GRPC -> NETWORK_ERROR
-                - KAFKA, CONSUL, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP, LLM, None -> SERVICE_UNAVAILABLE
+                - KAFKA, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP, LLM, None -> SERVICE_UNAVAILABLE
         """
         if context is None:
             return cls._TRANSPORT_ERROR_CODE_MAP[None]
@@ -344,7 +342,7 @@ class InfraConnectionError(RuntimeHostError):
         The error code is automatically selected based on context.transport_type:
             - DATABASE -> DATABASE_CONNECTION_ERROR
             - HTTP, GRPC -> NETWORK_ERROR
-            - KAFKA, CONSUL, VAULT, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP -> SERVICE_UNAVAILABLE
+            - KAFKA, VAULT, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP -> SERVICE_UNAVAILABLE
             - None (no context) -> SERVICE_UNAVAILABLE
 
         Args:

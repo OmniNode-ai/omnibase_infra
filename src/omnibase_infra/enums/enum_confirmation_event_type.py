@@ -16,11 +16,9 @@ class EnumConfirmationEventType(str, Enum):
     successfully processes a registration operation.
 
     Attributes:
-        CONSUL_REGISTERED: Service successfully registered with Consul
         POSTGRES_REGISTRATION_UPSERTED: Registration record upserted in PostgreSQL
     """
 
-    CONSUL_REGISTERED = "consul.registered"
     POSTGRES_REGISTRATION_UPSERTED = "postgres.registration_upserted"
 
 

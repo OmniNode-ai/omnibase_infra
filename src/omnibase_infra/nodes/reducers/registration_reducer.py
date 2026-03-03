@@ -353,9 +353,6 @@ from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
     ModelNodeRegistrationRecord,
 )
-from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
-    ModelPayloadConsulRegister,
-)
 from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
     ModelPayloadPostgresUpsertRegistration,
 )
@@ -656,7 +653,6 @@ class RegistrationReducer:
         # =====================================================================
         # CONFIRMATION FLOW STEP 2: Build intents for Effect layer
         # These intents describe the desired I/O operations:
-        #   - consul.register: Register service in Consul
         #   - postgres.upsert_registration: Upsert record in PostgreSQL
         #
         # The correlation_id is propagated to enable confirmation tracking.
@@ -666,12 +662,11 @@ class RegistrationReducer:
         # =====================================================================
 
         correlation_id = event.correlation_id or event_id
-        consul_intent = self._build_consul_intent(event, correlation_id)
         postgres_intent = self._build_postgres_intent(event, correlation_id)
 
         # Collect non-None intents
         intents: tuple[ModelIntent, ...] = tuple(
-            intent for intent in [consul_intent, postgres_intent] if intent is not None
+            intent for intent in [postgres_intent] if intent is not None
         )
 
         # =====================================================================
@@ -823,58 +818,6 @@ class RegistrationReducer:
         )
 
         return uuid5(_NAMESPACE_REGISTRATION, canonical_content)
-
-    def _build_consul_intent(
-        self,
-        event: ModelNodeIntrospectionEvent,
-        correlation_id: UUID,
-    ) -> ModelIntent | None:
-        """Build Consul registration intent (pure, no I/O).
-
-        Creates a ModelIntent that describes the desired Consul service
-        registration. The Effect layer is responsible for executing this intent.
-
-        Args:
-            event: Introspection event containing node data.
-            correlation_id: Correlation ID for tracing.
-
-        Returns:
-            ModelIntent with intent_type matching payload.intent_type for routing.
-        """
-        service_id = f"onex-{event.node_type.value}-{event.node_id}"
-        service_name = f"onex-{event.node_type.value}"
-        tags = [
-            f"node_type:{event.node_type.value}",
-            f"node_version:{event.node_version}",
-        ]
-
-        # Build health check configuration if health endpoint is provided
-        health_endpoint = event.endpoints.get("health") if event.endpoints else None
-        health_check: dict[str, str] | None = None
-        if health_endpoint:
-            health_check = {
-                "HTTP": health_endpoint,
-                "Interval": "10s",
-                "Timeout": "5s",
-            }
-
-        # Build typed Consul registration payload (implements ProtocolIntentPayload)
-        consul_payload = ModelPayloadConsulRegister(
-            correlation_id=correlation_id,
-            node_id=str(event.node_id),
-            service_id=service_id,
-            service_name=service_name,
-            tags=tags,
-            health_check=health_check,
-            event_bus_config=event.event_bus,  # Pass through from introspection event
-        )
-
-        # ModelIntent.payload expects ProtocolIntentPayload, which our model implements
-        return ModelIntent(
-            intent_type=consul_payload.intent_type,
-            target=f"consul://service/{service_name}",
-            payload=consul_payload,
-        )
 
     def _build_postgres_intent(
         self,
@@ -1029,7 +972,6 @@ class RegistrationReducer:
         # Step 5: Failure path
         if not confirmation.success:
             failure_map: dict[EnumConfirmationEventType, FailureReason] = {
-                EnumConfirmationEventType.CONSUL_REGISTERED: "consul_failed",
                 EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED: "postgres_failed",
             }
             failure_reason = failure_map.get(confirmation.event_type)
@@ -1067,9 +1009,7 @@ class RegistrationReducer:
             )
 
         # Step 6: Success path
-        if confirmation.event_type == EnumConfirmationEventType.CONSUL_REGISTERED:
-            new_state = state.with_consul_confirmed(event_id)
-        elif (
+        if (
             confirmation.event_type
             == EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED
         ):

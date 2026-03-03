@@ -65,7 +65,6 @@ from omnibase_infra.enums import (
 )
 from omnibase_infra.errors import (
     EnvelopeValidationError,
-    InfraConsulError,
     InfraTimeoutError,
     InfraUnavailableError,
     ModelInfraErrorContext,
@@ -3918,17 +3917,6 @@ class RuntimeHostProcess:
                 extra={
                     "topic": topic,
                     "error": str(e),
-                },
-            )
-            return []
-        except InfraConsulError as e:
-            logger.warning(
-                "Consul error querying topic subscribers",
-                extra={
-                    "topic": topic,
-                    "error": str(e),
-                    "error_type": "InfraConsulError",
-                    "consul_key": getattr(e, "consul_key", None),
                 },
             )
             return []

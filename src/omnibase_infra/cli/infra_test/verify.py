@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Verification commands for infrastructure state.
 
-Provides commands to verify the state of Consul, PostgreSQL, Kafka topics,
+Provides commands to verify the state of PostgreSQL, Kafka topics,
 snapshot topics, and idempotency of the registration pipeline.
 """
 
@@ -19,7 +19,6 @@ from rich.table import Table
 
 from omnibase_infra.cli.infra_test._helpers import (
     get_broker,
-    get_consul_addr,
     get_postgres_dsn,
 )
 
@@ -40,15 +39,14 @@ def verify() -> None:
 @verify.command("registry")
 @click.option("--node-id", default=None, help="Filter by specific node UUID.")
 def verify_registry(node_id: str | None) -> None:
-    """Check registration state in Consul and PostgreSQL.
+    """Check registration state in PostgreSQL.
 
-    Queries both Consul's KV store and PostgreSQL's registration_projections
-    table to verify that node registrations are persisted correctly.
+    Queries PostgreSQL's registration_projections table to verify that
+    node registrations are persisted correctly.
     """
-    consul_ok = _verify_consul_registry(node_id)
     postgres_ok = _verify_postgres_registry(node_id)
 
-    if consul_ok and postgres_ok:
+    if postgres_ok:
         console.print("[bold green]Registry verification: PASS[/bold green]")
     else:
         console.print("[bold red]Registry verification: FAIL[/bold red]")
@@ -294,99 +292,6 @@ def verify_idempotency(topic: str, repetitions: int) -> None:
 # =============================================================================
 # Internal helpers
 # =============================================================================
-
-
-def _verify_consul_registry(node_id: str | None) -> bool:
-    """Verify registrations in Consul KV store."""
-    consul_addr = get_consul_addr()
-
-    console.print(f"[bold blue]Checking Consul registry ({consul_addr})...[/bold blue]")
-
-    import httpx
-
-    try:
-        url = f"{consul_addr}/v1/kv/onex/services/?keys"
-        resp = httpx.get(url, timeout=5.0)
-        resp.raise_for_status()
-        keys = resp.json()
-    except (httpx.HTTPError, ValueError) as e:
-        # KV not populated or unreachable -- fall back to service catalog
-        # ValueError catches json.JSONDecodeError (its subclass) for non-JSON responses
-        console.print(
-            f"  [dim]KV lookup failed ({type(e).__name__}), trying service catalog...[/dim]"
-        )
-        try:
-            url = f"{consul_addr}/v1/agent/services"
-            resp = httpx.get(url, timeout=5.0)
-            resp.raise_for_status()
-            services = resp.json()
-
-            onex_services = {k: v for k, v in services.items() if "onex" in k.lower()}
-
-            if not onex_services:
-                if node_id:
-                    console.print(
-                        f"  [red]Node {node_id} not found in Consul services.[/red]"
-                    )
-                    return False
-                console.print("  [yellow]No ONEX services found in Consul.[/yellow]")
-                return True  # Not a failure if nothing registered yet
-
-            table = Table(title="Consul ONEX Services")
-            table.add_column("Service ID", style="cyan")
-            table.add_column("Service Name")
-            table.add_column("Tags")
-
-            matched = 0
-            for sid, svc in onex_services.items():
-                if node_id and node_id not in sid:
-                    continue
-                matched += 1
-                table.add_row(
-                    sid, svc.get("Service", ""), ", ".join(svc.get("Tags", []))
-                )
-
-            console.print(table)
-            if node_id and matched == 0:
-                console.print(
-                    f"  [red]Node {node_id} not found in Consul services.[/red]"
-                )
-                return False
-            return True
-        except (httpx.HTTPError, ValueError) as e:
-            console.print(
-                f"  [red]Cannot reach Consul at {consul_addr}: {type(e).__name__}: {e}[/red]"
-            )
-            return False
-
-    if not keys:
-        if node_id:
-            console.print(f"  [red]Node {node_id} not found in Consul KV.[/red]")
-            return False
-        console.print("  [yellow]No ONEX service keys in Consul KV.[/yellow]")
-        return True
-
-    table = Table(title="Consul KV Service Keys")
-    table.add_column("Key", style="cyan")
-
-    matched = 0
-    for key in keys:
-        if node_id and node_id not in key:
-            continue
-        matched += 1
-        table.add_row(key)
-
-    console.print(table)
-    if node_id and matched == 0:
-        console.print(f"  [red]Node {node_id} not found in Consul KV.[/red]")
-        return False
-    if node_id:
-        console.print(
-            f"  [green]{matched} matching service key(s) found (of {len(keys)} total).[/green]"
-        )
-    else:
-        console.print(f"  [green]{len(keys)} service key(s) found.[/green]")
-    return True
 
 
 def _verify_postgres_registry(node_id: str | None) -> bool:
