@@ -200,9 +200,9 @@ class TestDockerBuild:
             assert first_result.returncode == 0, "First build failed"
 
             # Verify cache mount usage in Dockerfile
-            assert "mount=type=cache" in dockerfile_path.read_text(), (
-                "Dockerfile should use BuildKit cache mounts"
-            )
+            assert (
+                "mount=type=cache" in dockerfile_path.read_text()
+            ), "Dockerfile should use BuildKit cache mounts"
 
         finally:
             subprocess.run(
@@ -424,9 +424,9 @@ class TestDockerSecurity:
             )
 
             # test -e returns 0 if file exists, 1 if not
-            assert result.returncode == 1, (
-                f"Sensitive file/directory exists in image: {path}"
-            )
+            assert (
+                result.returncode == 1
+            ), f"Sensitive file/directory exists in image: {path}"
 
 
 # =============================================================================
@@ -970,9 +970,9 @@ class TestDockerResourceLimits:
         """Verify docker-compose defines resource reservations."""
         content = compose_file_path.read_text()
 
-        assert "reservations:" in content, (
-            "docker-compose should define resource reservations"
-        )
+        assert (
+            "reservations:" in content
+        ), "docker-compose should define resource reservations"
 
 
 # =============================================================================
@@ -1076,7 +1076,7 @@ class TestDockerComposeProfiles:
                 "OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN": _pg_dsn,
                 # OMN-3299: Redpanda removed from local compose; KAFKA_BOOTSTRAP_SERVERS
                 # now uses :? fail-fast — must be set explicitly for config validation.
-                "KAFKA_BOOTSTRAP_SERVERS": "192.168.86.200:29092",
+                "KAFKA_BOOTSTRAP_SERVERS": "192.168.86.200:29092",  # kafka-fallback-ok — test fixture; M2 Ultra Kafka decommissioned OMN-3431
             }
         )
 

@@ -345,7 +345,9 @@ class TestValidateBootstrapServers:
 
     def test_mixed_ipv4_and_ipv6_servers(self) -> None:
         """Test validation passes for mixed IPv4 and IPv6 servers."""
-        result = validate_bootstrap_servers("192.168.1.1:9092,[::1]:9093")
+        result = validate_bootstrap_servers(
+            "192.168.1.1:9092,[::1]:9093"  # kafka-fallback-ok — testing mixed IPv4/IPv6 validation
+        )
         assert result.is_valid is True
         assert result.host == "192.168.1.1"
         assert result.port == "9092"

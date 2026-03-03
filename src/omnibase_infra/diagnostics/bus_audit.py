@@ -9,7 +9,7 @@ Usage:
     from omnibase_infra.diagnostics import AuditConfig, run_audit
 
     config = AuditConfig(
-        broker="192.168.86.200:29092",
+        broker="localhost:19092",
         expected_topics=["onex.evt.platform.node-registration.v1"],
     )
     report = run_audit(config)
@@ -83,7 +83,7 @@ class AuditConfig:
     """Configuration for a bus health audit run.
 
     Attributes:
-        broker: Kafka bootstrap servers string (e.g., ``192.168.86.200:29092``).
+        broker: Kafka bootstrap servers string (e.g., ``localhost:19092``).
         expected_topics: Topic names that MUST exist on the broker.
         legacy_topics: Known non-ONEX topic names (classified LEGACY, not NON_COMPLIANT).
         topic_schema_map: Mapping of topic name to Pydantic model class for schema validation.

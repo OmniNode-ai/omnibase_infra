@@ -66,11 +66,15 @@ class TestValidateKafkaBrokerAllowlist:
     def test_accepts_production_broker(self) -> None:
         """Remote IP address passes without error."""
         # Should not raise
-        validate_kafka_broker_allowlist("192.168.86.200:29092")
+        validate_kafka_broker_allowlist(
+            "192.168.86.200:29092"  # kafka-fallback-ok — testing allowlist validation logic
+        )
 
     def test_accepts_multi_broker_all_valid(self) -> None:
         """Comma-separated list of valid brokers all pass."""
-        validate_kafka_broker_allowlist("192.168.86.200:29092,192.168.86.201:29092")
+        validate_kafka_broker_allowlist(
+            "192.168.86.200:29092,192.168.86.201:29092"  # kafka-fallback-ok — testing allowlist validation logic
+        )
 
     def test_accepts_hostname_not_on_denylist(self) -> None:
         """Arbitrary hostname not on the denylist is accepted."""

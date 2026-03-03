@@ -13,7 +13,7 @@ Test Categories:
     - Error Handling: Graceful failure handling
 
 Environment Variables:
-    KAFKA_BOOTSTRAP_SERVERS: Kafka broker address (e.g., "192.168.86.200:29092")
+    KAFKA_BOOTSTRAP_SERVERS: Kafka broker address (e.g., "localhost:19092")
 
 References:
     - Linear Ticket: OMN-1764
@@ -92,7 +92,9 @@ class SimpleContextValue:
 @pytest.fixture
 def kafka_bootstrap_servers() -> str:
     """Get Kafka bootstrap servers from environment."""
-    return os.getenv("KAFKA_BOOTSTRAP_SERVERS", "192.168.86.200:29092")
+    return os.getenv(
+        "KAFKA_BOOTSTRAP_SERVERS", "localhost:19092"
+    )  # kafka-fallback-ok — integration test default; M2 Ultra Kafka decommissioned OMN-3431
 
 
 @pytest.fixture
@@ -221,12 +223,12 @@ class TestProtocolCompliance:
         adapter: object,
     ) -> None:
         """Verify publish method exists and is async."""
-        assert hasattr(adapter, "publish"), (
-            "AdapterProtocolEventPublisherKafka missing required method: publish"
-        )
-        assert asyncio.iscoroutinefunction(adapter.publish), (
-            "publish must be an async method"
-        )
+        assert hasattr(
+            adapter, "publish"
+        ), "AdapterProtocolEventPublisherKafka missing required method: publish"
+        assert asyncio.iscoroutinefunction(
+            adapter.publish
+        ), "publish must be an async method"
 
     def test_publish_signature_matches_protocol(
         self,
@@ -272,33 +274,33 @@ class TestProtocolCompliance:
             "partition_key",
         ]:
             param = sig.parameters[optional_param]
-            assert param.default is None, (
-                f"{optional_param} parameter must have default value of None"
-            )
+            assert (
+                param.default is None
+            ), f"{optional_param} parameter must have default value of None"
 
     def test_get_metrics_method_exists_and_is_async(
         self,
         adapter: object,
     ) -> None:
         """Verify get_metrics method exists and is async."""
-        assert hasattr(adapter, "get_metrics"), (
-            "AdapterProtocolEventPublisherKafka missing required method: get_metrics"
-        )
-        assert asyncio.iscoroutinefunction(adapter.get_metrics), (
-            "get_metrics must be an async method"
-        )
+        assert hasattr(
+            adapter, "get_metrics"
+        ), "AdapterProtocolEventPublisherKafka missing required method: get_metrics"
+        assert asyncio.iscoroutinefunction(
+            adapter.get_metrics
+        ), "get_metrics must be an async method"
 
     def test_close_method_exists_and_is_async(
         self,
         adapter: object,
     ) -> None:
         """Verify close method exists and is async."""
-        assert hasattr(adapter, "close"), (
-            "AdapterProtocolEventPublisherKafka missing required method: close"
-        )
-        assert asyncio.iscoroutinefunction(adapter.close), (
-            "close must be an async method"
-        )
+        assert hasattr(
+            adapter, "close"
+        ), "AdapterProtocolEventPublisherKafka missing required method: close"
+        assert asyncio.iscoroutinefunction(
+            adapter.close
+        ), "close must be an async method"
 
     def test_close_signature_matches_protocol(
         self,
@@ -315,9 +317,9 @@ class TestProtocolCompliance:
         assert "timeout_seconds" in params, "close must have timeout_seconds parameter"
 
         timeout_param = sig.parameters["timeout_seconds"]
-        assert timeout_param.default == 30.0, (
-            f"timeout_seconds must default to 30.0, got {timeout_param.default}"
-        )
+        assert (
+            timeout_param.default == 30.0
+        ), f"timeout_seconds must default to 30.0, got {timeout_param.default}"
 
     @pytest.mark.asyncio
     async def test_publish_returns_bool(
@@ -343,9 +345,9 @@ class TestProtocolCompliance:
         """Verify get_metrics returns dict with expected keys."""
         metrics = await adapter.get_metrics()
 
-        assert isinstance(metrics, dict), (
-            f"get_metrics must return dict, got {type(metrics)}"
-        )
+        assert isinstance(
+            metrics, dict
+        ), f"get_metrics must return dict, got {type(metrics)}"
 
         # Verify required metric keys per protocol docstring
         required_keys = [
@@ -996,9 +998,9 @@ class TestErrorHandling:
         )
 
         # Result should be bool (True or False depending on broker config)
-        assert isinstance(result, bool), (
-            f"publish should return bool, not raise. Got {type(result)}"
-        )
+        assert isinstance(
+            result, bool
+        ), f"publish should return bool, not raise. Got {type(result)}"
 
     @pytest.mark.asyncio
     async def test_metrics_track_failures(

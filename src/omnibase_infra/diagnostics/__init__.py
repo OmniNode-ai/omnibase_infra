@@ -7,7 +7,7 @@ Generic, domain-free diagnostic engine. Reusable by any ONEX repository.
 Quick Start:
     >>> from omnibase_infra.diagnostics import AuditConfig, run_audit
     >>> config = AuditConfig(
-    ...     broker="192.168.86.200:29092",
+    ...     broker="localhost:19092",
     ...     expected_topics=["onex.evt.platform.node-registration.v1"],
     ... )
     >>> report = run_audit(config)
