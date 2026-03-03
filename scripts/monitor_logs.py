@@ -32,6 +32,7 @@
 #   VALKEY_HOST        -- Valkey/Redis host for dedup (default: localhost)
 #   VALKEY_PORT        -- Valkey/Redis port for dedup (default: 16379)
 #   VALKEY_DB          -- Valkey/Redis database index (default: 0)
+#   VALKEY_PASSWORD    -- Valkey/Redis password for authentication (required when auth is enabled)
 
 from __future__ import annotations
 
@@ -405,10 +406,12 @@ class PostgresErrorEmitter:
             valkey_host = os.environ.get("VALKEY_HOST", "localhost")
             valkey_port = int(os.environ.get("VALKEY_PORT", "16379"))
             valkey_db = int(os.environ.get("VALKEY_DB", "0"))
+            valkey_password = os.environ.get("VALKEY_PASSWORD")
             self._valkey = redis.Redis(
                 host=valkey_host,
                 port=valkey_port,
                 db=valkey_db,
+                password=valkey_password,
                 socket_timeout=5,
                 decode_responses=True,
             )
