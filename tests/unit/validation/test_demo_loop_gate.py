@@ -853,9 +853,9 @@ class TestConstants:
 
     def test_all_canonical_topics_are_onex_format(self) -> None:
         for topic in CANONICAL_EVENT_TOPICS:
-            assert topic.startswith(
-                "onex."
-            ), f"Topic {topic} doesn't start with 'onex.'"
+            assert topic.startswith("onex."), (
+                f"Topic {topic} doesn't start with 'onex.'"
+            )
             parts = topic.split(".")
             assert len(parts) == 5, f"Topic {topic} doesn't have 5 segments"
 
@@ -864,9 +864,9 @@ class TestConstants:
 
     def test_legacy_mappings_values_are_canonical(self) -> None:
         for legacy, canonical in LEGACY_TOPIC_MAPPINGS.items():
-            assert (
-                "cmd" in legacy or "legacy" in legacy.lower()
-            ), f"Legacy topic '{legacy}' doesn't look legacy"
-            assert (
-                "evt" in canonical
-            ), f"Canonical topic '{canonical}' doesn't use 'evt' kind"
+            assert "cmd" in legacy or "legacy" in legacy.lower(), (
+                f"Legacy topic '{legacy}' doesn't look legacy"
+            )
+            assert "evt" in canonical, (
+                f"Canonical topic '{canonical}' doesn't use 'evt' kind"
+            )

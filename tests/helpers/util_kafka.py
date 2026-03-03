@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Kafka testing utilities for integration tests.
+"""Shared Kafka test utilities for integration and unit tests.
 
-This module provides shared utilities for Kafka-based integration tests,
-including consumer readiness polling and topic management helpers.
+Covers consumer readiness polling and topic management helpers.
 
 Available Utilities:
     - wait_for_consumer_ready: Poll for Kafka consumer readiness with exponential backoff

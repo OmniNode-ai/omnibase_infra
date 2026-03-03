@@ -414,14 +414,14 @@ class TestDlqPublishing:
             )
 
             # Verify handler was called and failed
-            assert (
-                handler_call_count >= 1
-            ), "Handler should have been called at least once"
+            assert handler_call_count >= 1, (
+                "Handler should have been called at least once"
+            )
 
             # Verify DLQ message was actually received
-            assert (
-                len(dlq_messages_received) >= 1
-            ), "DLQ message should have been received after handler failure"
+            assert len(dlq_messages_received) >= 1, (
+                "DLQ message should have been received after handler failure"
+            )
 
             # Verify DLQ message contains expected structure
             dlq_msg = dlq_messages_received[0]
@@ -730,20 +730,20 @@ class TestDlqMetrics:
             f"successful_publishes should be incremented from {initial_successful} to {initial_successful + 1}, "
             f"got {final_metrics.successful_publishes}"
         )
-        assert (
-            final_metrics.failed_publishes == initial_failed
-        ), f"failed_publishes should remain at {initial_failed}, got {final_metrics.failed_publishes}"
+        assert final_metrics.failed_publishes == initial_failed, (
+            f"failed_publishes should remain at {initial_failed}, got {final_metrics.failed_publishes}"
+        )
         # Verify per-topic and per-error-type metrics
-        assert (
-            final_metrics.get_topic_count(created_unique_topic) >= 1
-        ), f"topic_counts[{created_unique_topic}] should be at least 1"
-        assert (
-            final_metrics.get_error_type_count("RuntimeError") >= 1
-        ), "error_type_counts['RuntimeError'] should be at least 1"
+        assert final_metrics.get_topic_count(created_unique_topic) >= 1, (
+            f"topic_counts[{created_unique_topic}] should be at least 1"
+        )
+        assert final_metrics.get_error_type_count("RuntimeError") >= 1, (
+            "error_type_counts['RuntimeError'] should be at least 1"
+        )
         # Verify timestamp was set
-        assert (
-            final_metrics.last_publish_at is not None
-        ), "last_publish_at should be set after successful publish"
+        assert final_metrics.last_publish_at is not None, (
+            "last_publish_at should be set after successful publish"
+        )
 
     async def test_dlq_metrics_increment_on_full_flow(
         self,
@@ -793,8 +793,8 @@ class TestDlqMetrics:
         # Check metrics - in full flow, timing may be unpredictable
         # but total_publishes should at least not decrease
         final_metrics = started_dlq_bus.dlq_metrics
-        assert (
-            final_metrics.total_publishes >= initial_total
-        ), f"total_publishes should be at least {initial_total}, got {final_metrics.total_publishes}"
+        assert final_metrics.total_publishes >= initial_total, (
+            f"total_publishes should be at least {initial_total}, got {final_metrics.total_publishes}"
+        )
 
         await unsub()

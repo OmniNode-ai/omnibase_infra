@@ -10,7 +10,6 @@ These tests require:
 Run with: RUN_HEAVY_TESTS=1 pytest tests/integration/correlation/test_correlation_propagation_heavy.py -v
 
 Test Categories
-===============
 
 HTTP Boundary Tests:
     Tests that verify correlation IDs propagate correctly through HTTP calls
