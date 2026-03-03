@@ -118,7 +118,7 @@ async def kafka_event_bus_with_dlq(
     # Create config with DLQ enabled
     config = ModelKafkaEventBusConfig(
         bootstrap_servers=kafka_bootstrap_servers,
-        environment="dlq-integration-test",
+        environment="local",
         timeout_seconds=TEST_TIMEOUT_SECONDS,
         max_retry_attempts=2,  # Low retry count for faster testing
         retry_backoff_base=0.1,  # Fast backoff for testing

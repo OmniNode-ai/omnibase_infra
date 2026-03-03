@@ -98,7 +98,7 @@ async def kafka_event_bus(
 
     config = ModelKafkaEventBusConfig(
         bootstrap_servers=kafka_bootstrap_servers,
-        environment="integration-test",
+        environment="local",
         timeout_seconds=TEST_TIMEOUT_SECONDS,
         max_retry_attempts=2,
         retry_backoff_base=0.5,
