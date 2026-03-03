@@ -98,6 +98,11 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolRegistrationPersistence": "nodes/node_registration_storage_effect/protocols/protocol_registration_persistence.py",
     "ProtocolDiscoveryOperations": "nodes/node_service_discovery_effect/protocols/protocol_discovery_operations.py",
     "ProtocolLedgerPersistence": "nodes/node_ledger_write_effect/protocols/protocol_ledger_persistence.py",
+    # [NODE] DI boundaries for NodeSetupOrchestrator — narrow effect interfaces injected via constructor
+    "ProtocolPreflightEffect": "nodes/node_setup_orchestrator/protocols/protocol_preflight_effect.py",
+    "ProtocolProvisionEffect": "nodes/node_setup_orchestrator/protocols/protocol_provision_effect.py",
+    "ProtocolInfisicalEffect": "nodes/node_setup_orchestrator/protocols/protocol_infisical_effect.py",
+    "ProtocolValidateEffect": "nodes/node_setup_orchestrator/protocols/protocol_validate_effect.py",
     # === [RUNTIME] Runtime-internal protocols ===
     "ProtocolContractDescriptor": "runtime/protocol_contract_descriptor.py",
     "ProtocolContractSource": "runtime/protocol_contract_source.py",
