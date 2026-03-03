@@ -61,12 +61,13 @@ from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
 )
 from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
+from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION_ACKED
 from omnibase_infra.utils import validate_timezone_aware_with_context
 
 logger = logging.getLogger(__name__)
 
 _ENV_AUTO_ACK = "ONEX_REGISTRATION_AUTO_ACK"
-_ACK_TOPIC = "onex.cmd.platform.node-registration-acked.v1"
+_ACK_TOPIC: str = SUFFIX_NODE_REGISTRATION_ACKED
 
 
 def _auto_ack_enabled() -> bool:

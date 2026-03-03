@@ -2,8 +2,8 @@
 # Copyright (c) 2025 OmniNode Team
 """Registration domain wiring for MessageDispatchEngine integration.
 
-This module provides domain-specific wiring functions for the Registration
-orchestrator, enabling dispatchers to be registered with MessageDispatchEngine.
+Domain-specific wiring functions for the Registration orchestrator, enabling
+dispatchers to be registered with MessageDispatchEngine.
 
 The wiring follows the domain-driven design principle where Registration-specific
 code (dispatchers, route IDs, handlers) lives in the Registration domain rather
