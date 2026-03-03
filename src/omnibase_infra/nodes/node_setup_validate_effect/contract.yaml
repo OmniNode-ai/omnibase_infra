@@ -9,9 +9,7 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 description: >
-  EFFECT node that validates TCP/HTTP health for all LOCAL-mode services
-  in the deployment topology after provisioning is complete. Services with
-  a health_check_path use HTTP GET; others use TCP connect.
+  EFFECT node that validates TCP/HTTP health for all LOCAL-mode services in the deployment topology after provisioning is complete. Services with a health_check_path use HTTP GET; others use TCP connect.
 
 input_model:
   name: "ModelSetupValidateEffectInput"

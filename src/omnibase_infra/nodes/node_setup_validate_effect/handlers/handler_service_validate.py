@@ -87,10 +87,9 @@ async def _check_tcp_health(
         Tuple of (reachable: bool, response_time_ms: float).
     """
     start = time.monotonic()
-    reader: asyncio.StreamReader | None = None
     writer: asyncio.StreamWriter | None = None
     try:
-        reader, writer = await asyncio.wait_for(
+        _, writer = await asyncio.wait_for(
             asyncio.open_connection(host, port),
             timeout=timeout_s,
         )

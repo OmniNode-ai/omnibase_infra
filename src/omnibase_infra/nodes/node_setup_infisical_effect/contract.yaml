@@ -9,9 +9,7 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 description: >
-  EFFECT node that bootstraps the Infisical secret store by running
-  provision-infisical.py (identity setup) and seed-infisical.py (secret
-  population) in sequence. Part of the setup orchestration workflow.
+  EFFECT node that bootstraps the Infisical secret store by running provision-infisical.py (identity setup) and seed-infisical.py (secret population) in sequence. Part of the setup orchestration workflow.
 
 input_model:
   name: "ModelInfisicalSetupEffectInput"
