@@ -885,16 +885,16 @@ class TestHandlerNodeIntrospectedAutoAck:
         AWAITING_ACK, the handler must direct-publish ModelNodeRegistrationAcked
         to the ack topic. The ack must NOT appear in output.events.
         """
+        from omnibase_core.protocols.event_bus.protocol_event_bus import (
+            ProtocolEventBus,
+        )
         from omnibase_infra.models.registration.commands.model_node_registration_acked import (
             ModelNodeRegistrationAcked,
-        )
-        from omnibase_infra.protocols.protocol_event_bus_like import (
-            ProtocolEventBusLike,
         )
 
         monkeypatch.setenv("ONEX_REGISTRATION_AUTO_ACK", "true")
 
-        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
+        mock_event_bus = AsyncMock(spec=ProtocolEventBus)
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None  # New node -> AWAITING_ACK
 
@@ -914,7 +914,10 @@ class TestHandlerNodeIntrospectedAutoAck:
         mock_event_bus.publish_envelope.assert_awaited_once()
 
         call_args = mock_event_bus.publish_envelope.call_args
-        published_payload = call_args.args[0]
+        # Envelope is passed as the first positional arg or as keyword 'envelope'
+        published_envelope = call_args.kwargs.get("envelope") or call_args.args[0]
+        assert isinstance(published_envelope, ModelEventEnvelope)
+        published_payload = published_envelope.payload
         assert isinstance(published_payload, ModelNodeRegistrationAcked)
         assert published_payload.node_id == node_id
         assert published_payload.correlation_id is not None
@@ -935,13 +938,13 @@ class TestHandlerNodeIntrospectedAutoAck:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """When ONEX_REGISTRATION_AUTO_ACK is not set, no publish must occur."""
-        from omnibase_infra.protocols.protocol_event_bus_like import (
-            ProtocolEventBusLike,
+        from omnibase_core.protocols.event_bus.protocol_event_bus import (
+            ProtocolEventBus,
         )
 
         monkeypatch.delenv("ONEX_REGISTRATION_AUTO_ACK", raising=False)
 
-        mock_event_bus = AsyncMock(spec=ProtocolEventBusLike)
+        mock_event_bus = AsyncMock(spec=ProtocolEventBus)
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None  # New node
 
