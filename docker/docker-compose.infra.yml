@@ -167,6 +167,10 @@ x-runtime-env: &runtime-env
   KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:28080/realms/omninode}
   ONEX_SERVICE_CLIENT_ID: ${ONEX_SERVICE_CLIENT_ID:-onex-service}
   ONEX_SERVICE_CLIENT_SECRET: ${ONEX_SERVICE_CLIENT_SECRET:-}
+  # --- Registration lifecycle (OMN-3446) ---
+  # Auto-ACK local/internal nodes after introspection. Never set in production —
+  # external nodes send their own ack. Default empty = disabled.
+  ONEX_REGISTRATION_AUTO_ACK: ${ONEX_REGISTRATION_AUTO_ACK:-}
 # ==========================================================================
 # Services
 # ==========================================================================
