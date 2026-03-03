@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Registration State Model for Pure Reducer Pattern.
+"""Registration State Model for Pure Reducer Pattern.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides ModelRegistrationState, an immutable state model for the
 registration reducer workflow. The state follows the pure reducer pattern

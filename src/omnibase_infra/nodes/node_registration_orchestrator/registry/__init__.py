@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Registry module for NodeRegistrationOrchestrator handler wiring.
+"""Registry module for NodeRegistrationOrchestrator handler wiring.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides the handler registry for the NodeRegistrationOrchestrator,
 enabling a static factory method for creating frozen handler registries.

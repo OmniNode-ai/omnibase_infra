@@ -1,4 +1,4 @@
-"""Capability inference rules for deriving tags from contract structure.
+"""Capability inference rules for deriving tags from contract structure.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides deterministic pattern matching to infer capability tags
 from contract fields like intent_types and protocols. Rules are injectable

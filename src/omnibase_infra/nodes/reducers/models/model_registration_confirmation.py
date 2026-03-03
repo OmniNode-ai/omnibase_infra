@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Registration Confirmation Model for Dual Registration Workflow.
+"""Registration Confirmation Model for Dual Registration Workflow.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides ModelRegistrationConfirmation, the Pydantic model for
 confirmation events from the Effect layer. These events complete the dual

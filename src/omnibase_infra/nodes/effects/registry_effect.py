@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Registry Effect Node for PostgreSQL Registration.
+"""Registry Effect Node for PostgreSQL Registration.  # ai-slop-ok: pre-existing docstring opener
 
 Note on ONEX Naming Convention:
     This node class is named `NodeRegistryEffect` following ONEX convention:

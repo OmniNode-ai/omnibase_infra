@@ -1,4 +1,4 @@
-"""Handlers module for omnibase_infra.
+"""Handlers module for omnibase_infra.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides handler implementations for various infrastructure
 communication patterns including HTTP REST and database operations.

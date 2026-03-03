@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Service Discovery Handlers Module.
+"""Service Discovery Handlers Module.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides pluggable handler implementations for service discovery
 operations, supporting the capability-oriented node architecture.

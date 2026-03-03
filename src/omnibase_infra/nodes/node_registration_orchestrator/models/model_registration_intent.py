@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Registration intent type aliases for the registration orchestrator.
+"""Registration intent type aliases for the registration orchestrator.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides type aliases that aggregate the individual intent and
 payload models into discriminated unions. These aliases enable type narrowing

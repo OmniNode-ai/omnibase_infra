@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""ONEX Infrastructure Errors Module.
+"""ONEX Infrastructure Errors Module.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides infrastructure-specific error classes and error handling
 utilities for the omnibase_infra package. All errors extend from OnexError

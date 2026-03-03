@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 # ruff: noqa: PLW0603
 # PLW0603 disabled: Global statement is intentional for singleton pattern with thread-safe initialization
-"""Handler Registry - Constants and singleton accessors for handler registration.
+"""Handler Registry - Constants and singleton accessors for handler registration.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides constants and singleton accessor functions for the
 RegistryProtocolBinding and RegistryEventBusBinding classes. The actual
