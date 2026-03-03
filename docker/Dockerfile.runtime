@@ -151,36 +151,37 @@ COPY src/ ./src/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev
 
-# Install omniintelligence as a composition-layer dependency.
-# This is NOT declared in pyproject.toml because it is a runtime plugin,
-# not a build-time dependency of omnibase_infra. Installing it here enables
+# Install ONEX plugin composition-layer dependencies.
+# These are NOT declared in pyproject.toml because they are runtime plugins,
+# not build-time dependencies of omnibase_infra. Installing them here enables
 # plugin auto-discovery by the runtime's handler loader.
 #
-# We freeze the venv's installed packages into a constraints file so that
-# pip cannot mutate any transitive dependency version already locked by
-# uv (e.g. python-dotenv). This ensures the runtime image is fully
-# reproducible.
-RUN uv pip freeze | grep -v '^\(-e\|@\)' > /tmp/constraints.txt
-
+# All ONEX shared packages (omnibase-core==0.22.0, omnibase-infra==0.13.0,
+# omnibase-spi==0.15.0) are already satisfied by the uv sync step above.
+# External deps of each plugin are resolved by uv against PyPI normally.
+#
 # Install omninode-claude and omninode-memory first; install omninode-intelligence LAST.
 # REASON: omninode-claude==0.4.0 hard-pins omninode-intelligence==0.8.0 as an exact dep.
-# --no-deps prevents that exact pin from downgrading our 0.9.0 install.
-# omnibase-core==0.22.0, omnibase-infra==0.13.0, omnibase-spi==0.15.0 already satisfied.
+# --no-deps prevents that exact pin from downgrading our 0.9.1 install.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps \
     omninode-claude==0.4.0
 
-# omninode-memory==0.6.1 declares omnibase-infra<0.14.0,>=0.13.0 — fully compatible.
+# omninode-memory==0.6.1 requires omnibase-core>=0.22.0,<0.23.0 — already satisfied.
+# Pin omnibase-core==0.22.0 explicitly to prevent uv from upgrading it.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --constraint /tmp/constraints.txt \
-    omninode-memory==0.6.1
+    uv pip install \
+    "omninode-memory==0.6.1" \
+    "omnibase-core==0.22.0"
 
 # Install omninode-intelligence LAST to ensure 0.9.1 is not downgraded by omninode-claude's
 # exact pin (==0.8.0). 0.9.1 adds type casts to fix PostgreSQL type inference (OMN-3301).
 # NOTE: package was renamed from omniintelligence → omninode-intelligence on PyPI at 0.7.0.
+# Pin omnibase-core==0.22.0 explicitly to prevent version drift.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --constraint /tmp/constraints.txt \
-    omninode-intelligence==0.9.1
+    uv pip install \
+    "omninode-intelligence==0.9.1" \
+    "omnibase-core==0.22.0"
 
 # ============================================================================
 # Runtime Stage - Minimal production image
