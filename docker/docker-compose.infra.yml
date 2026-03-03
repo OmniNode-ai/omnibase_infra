@@ -2,17 +2,17 @@
 # ONEX Infrastructure & Runtime Services
 #
 # This compose file provides the complete ONEX platform: infrastructure services
-# (PostgreSQL, Valkey) and runtime services (kernel, effects, workers).
-# NOTE: Redpanda (Kafka) runs remotely at 192.168.86.200:29092. Broker addresses
-# are hardcoded as literals (not interpolated from host env) so running
-# bus-cloud on the host cannot contaminate container routing.
+# (PostgreSQL, Valkey, Redpanda) and runtime services (kernel, effects, workers).
+# OMN-3431: Local Docker Redpanda replaces the remote M2 Ultra broker (always-on).
+# Broker addresses are hardcoded as literals (not interpolated from host env) so
+# running bus-cloud on the host cannot contaminate container routing.
 #
 #
 # Usage:
-#   # Core infrastructure only (postgres, valkey)
+#   # Core infrastructure only (postgres, valkey, redpanda)
 #   docker compose -f docker/docker-compose.infra.yml up -d
 #
-#   # With runtime services (connects to REMOTE Redpanda via /etc/hosts)
+#   # With runtime services
 #   docker compose -f docker/docker-compose.infra.yml --profile runtime up -d
 #
 #   # With Consul (service discovery)
@@ -34,9 +34,6 @@
 #   # Build runtime and start
 #   docker compose -f docker/docker-compose.infra.yml --profile runtime up -d --build
 #
-#   # LOCAL Redpanda (opt-in only — normally use remote at 192.168.86.200)
-#   docker compose -f docker/docker-compose.infra.yml --profile local-redpanda up -d redpanda
-#
 #   # Stop services
 #   docker compose -f docker/docker-compose.infra.yml down
 #
@@ -44,26 +41,26 @@
 #   docker compose -f docker/docker-compose.infra.yml down -v
 #
 # Profiles:
-#   - (default): Core infrastructure (postgres, valkey)
+#   - (default): Core infrastructure (postgres, valkey, redpanda)
 #   - runtime: ONEX runtime services (omninode-runtime, effects, workers, observability)
 #   - consul: HashiCorp Consul for service discovery
 #   - secrets: Infisical for secrets management
 #   - auth: Keycloak OIDC/auth service (local dev)
 #   - full: All services (infrastructure + runtime + consul + secrets + auth)
 #   - bootstrap: Infrastructure + secrets (for bootstrap-infisical.sh sequence)
-#   - local-redpanda: LOCAL Redpanda instance (opt-in; default is REMOTE at 192.168.86.200)
 #
 # Redpanda / Kafka:
-#   The platform uses the REMOTE Redpanda at 192.168.86.200 by default.
-#   /etc/hosts maps omnibase-infra-redpanda -> 192.168.86.200 so containers
-#   connect via KAFKA_BOOTSTRAP_SERVERS=omnibase-infra-redpanda:9092 without
-#   any local container. Start --profile local-redpanda only for isolated local dev.
+#   OMN-3431: Local Docker Redpanda is the default event bus (always-on, no profile needed).
+#   Containers use redpanda:9092 (Docker-internal). Host scripts use localhost:19092.
+#   Cloud bus (localhost:29092, launchd tunnel) is a separate bus for interactive dev sessions.
+#   Invariant: NO Docker service inherits KAFKA_BOOTSTRAP_SERVERS from the host environment.
+#              All broker addresses are hardcoded literals in compose.
 #
 # External Ports:
 #   Infrastructure:
 #     - PostgreSQL: 5436 (internal 5432)
 #     - Valkey: 16379 (internal 6379)
-#     - Redpanda: 29092 (internal 9092) [local-redpanda profile only]
+#     - Redpanda: 19092 (internal 9092) [always-on; 29092 reserved for cloud bus tunnel]
 #     - Consul: 28500 (internal 8500) [consul profile]
 #     - Infisical: 8880 (internal 8080) [secrets profile]
 #     - Keycloak: 28080 (internal 8080) [auth profile]
@@ -120,8 +117,11 @@ x-runtime-env: &runtime-env
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:?OMNIBASE_INFRA_DB_URL must be set in ~/.omnibase/.env}
-  # Hardcoded literal: never inherit from host shell env (bus-cloud contamination prevention)
-  KAFKA_BOOTSTRAP_SERVERS: "192.168.86.200:29092"
+  # Hardcoded literals: never inherit from host shell env (bus-cloud contamination prevention)
+  # OMN-3431: Local Docker Redpanda — containers use Docker-internal redpanda:9092
+  KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+  # Allowlist lets service_kernel.py's denylist accept Docker-internal redpanda: hostname
+  KAFKA_BROKER_ALLOWLIST: "redpanda:"
   # Always local for containers — never inherit BUS_ID=cloud from a bus-cloud shell
   BUS_ID: "local"
   ONEX_CONTRACTS_DIR: /app/contracts
@@ -216,24 +216,22 @@ services:
       - "com.omninode.service=postgres"
       - "com.omninode.layer=infrastructure"
   # ==========================================================================
-  # Redpanda - Kafka-Compatible Event Streaming (LOCAL OPT-IN ONLY)
+  # Redpanda - Kafka-Compatible Event Streaming (LOCAL DOCKER, ALWAYS-ON)
   # ==========================================================================
-  # NOTE: The platform uses the REMOTE Redpanda at 192.168.86.200 by default.
-  # This service is gated behind the "local-redpanda" profile so it does NOT
-  # start unless explicitly requested. Runtime services connect to the remote
-  # instance via /etc/hosts (omnibase-infra-redpanda -> 192.168.86.200).
-  #
-  # To start local Redpanda for isolated development:
-  #   docker compose -f docker/docker-compose.infra.yml --profile local-redpanda up -d redpanda
+  # OMN-3431: Local Docker Redpanda replaces the remote M2 Ultra broker.
+  # Containers: redpanda:9092 (Docker-internal). Host: localhost:19092 (external).
+  # Cloud bus (localhost:29092, launchd tunnel) is a separate bus for dev sessions.
+  # Invariant: NO Docker service inherits KAFKA_BOOTSTRAP_SERVERS from the host env.
+  #            All broker addresses are hardcoded literals in compose.
+  # Memory: REDPANDA_MEMORY defaults to 8G. Override via env for constrained hosts.
   redpanda:
     image: redpandadata/redpanda:v24.2.7
     container_name: omnibase-infra-redpanda
-    profiles: ["local-redpanda"]
     command:
       - redpanda
       - start
       - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
-      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:${REDPANDA_EXTERNAL_PORT:-29092}
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:${REDPANDA_EXTERNAL_PORT:-19092}
       - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
       - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:${REDPANDA_PANDAPROXY_PORT:-18082}
       - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
@@ -242,10 +240,9 @@ services:
       - --mode dev-container
       - --smp 1
       - --memory ${REDPANDA_MEMORY:-8G}
-      - --kafka-connections-max ${REDPANDA_KAFKA_CONNECTIONS_MAX:-10000}
       - --default-log-level=warn
     ports:
-      - "${REDPANDA_EXTERNAL_PORT:-29092}:19092"
+      - "${REDPANDA_EXTERNAL_PORT:-19092}:19092"
       # Pandaproxy (REST API for Kafka)
       - "${REDPANDA_PANDAPROXY_PORT:-18082}:18082"
       # Schema Registry
@@ -432,6 +429,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redpanda:
+        condition: service_healthy
     environment:
       !!merge <<: *runtime-env
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-omninode-runtime-main}
@@ -473,6 +472,8 @@ services:
     depends_on:
       omninode-runtime:
         condition: service_healthy
+      redpanda:
+        condition: service_healthy
     environment:
       !!merge <<: *runtime-env
       OTEL_SERVICE_NAME: omninode-runtime-effects
@@ -507,6 +508,8 @@ services:
     profiles: ["runtime", "full"]
     depends_on:
       omninode-runtime:
+        condition: service_healthy
+      redpanda:
         condition: service_healthy
     environment:
       !!merge <<: *runtime-env
@@ -551,10 +554,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redpanda:
+        condition: service_healthy
     command: ["python", "-m", "omnibase_infra.services.observability.agent_actions.consumer"]
     environment:
       # Hardcoded literal: never inherit from host shell env (bus-cloud contamination prevention)
-      OMNIBASE_INFRA_AGENT_ACTIONS_KAFKA_BOOTSTRAP_SERVERS: "192.168.86.200:29092"
+      # OMN-3431: Local Docker Redpanda
+      OMNIBASE_INFRA_AGENT_ACTIONS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       # NOTE: Uses dedicated OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN rather than
       # OMNIBASE_INFRA_DB_URL because this consumer uses pydantic-settings with the
       # OMNIBASE_INFRA_AGENT_ACTIONS_ prefix and may use a different DB role.
@@ -602,10 +608,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redpanda:
+        condition: service_healthy
     command: ["python", "-m", "omnibase_infra.services.observability.skill_lifecycle.consumer"]
     environment:
       # Hardcoded literal: never inherit from host shell env (bus-cloud contamination prevention)
-      OMNIBASE_INFRA_SKILL_LIFECYCLE_KAFKA_BOOTSTRAP_SERVERS: "192.168.86.200:29092"
+      # OMN-3431: Local Docker Redpanda
+      OMNIBASE_INFRA_SKILL_LIFECYCLE_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN: ${OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN:?OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN must be set in ~/.omnibase/.env}
       OMNIBASE_INFRA_SKILL_LIFECYCLE_BATCH_SIZE: ${SKILL_LIFECYCLE_BATCH_SIZE:-100}
       OMNIBASE_INFRA_SKILL_LIFECYCLE_BATCH_TIMEOUT_MS: ${SKILL_LIFECYCLE_BATCH_TIMEOUT_MS:-1000}
@@ -646,6 +655,8 @@ services:
     profiles: ["runtime", "full"]
     depends_on:
       postgres:
+        condition: service_healthy
+      redpanda:
         condition: service_healthy
     command:
       - uvicorn
@@ -702,6 +713,8 @@ services:
     profiles: ["runtime", "full"]
     depends_on:
       omninode-runtime:
+        condition: service_healthy
+      redpanda:
         condition: service_healthy
     command:
       - uvicorn

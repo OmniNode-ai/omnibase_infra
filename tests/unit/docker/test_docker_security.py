@@ -582,40 +582,28 @@ class TestDockerNetworkSecurity:
         - 127.0.0.0/8 (localhost/loopback)
         - 169.254.0.0/16 (link-local/APIPA)
 
-        Exemption (OMN-3413): Kafka/Redpanda broker addresses (*_KAFKA_BOOTSTRAP_SERVERS
-        and KAFKA_BOOTSTRAP_SERVERS keys) are intentionally hardcoded as literals rather
-        than interpolated from host env vars. This prevents ``bus-cloud`` sessions on the
-        host from contaminating container routing (two-bus policy). Lines whose first
-        non-whitespace token ends in ``KAFKA_BOOTSTRAP_SERVERS:`` are excluded from the
-        private-IP check.
+        OMN-3431: Redpanda is now a local Docker service using the internal hostname
+        ``redpanda:9092``. No private IP addresses appear in compose — the OMN-3413
+        exemption is no longer needed.
         """
         compose_file = COMPOSE_FILE_PATH
         raw_lines = compose_file.read_text().splitlines()
 
-        # Strip lines that are intentional Kafka broker address assignments.
-        # These match the pattern: optional-whitespace + *KAFKA_BOOTSTRAP_SERVERS: "..."
-        # Per OMN-3413, broker IPs are hardcoded to prevent bus-cloud host contamination.
-        kafka_broker_line = re.compile(r"^\s*\w*KAFKA_BOOTSTRAP_SERVERS\s*:")
-        filtered_lines = [
-            line for line in raw_lines if not kafka_broker_line.match(line)
-        ]
-        content = "\n".join(filtered_lines)
+        content = "\n".join(raw_lines)
 
-        # Should NOT have hardcoded private IP addresses in non-comment lines
-        # (outside of the Kafka broker exemption above).
+        # Should NOT have hardcoded private IP addresses in non-comment lines.
         # Uses PRIVATE_IP_PATTERN which covers all RFC 1918 ranges plus
         # localhost and link-local. See module-level docstring for details.
+        # Note: Redpanda is now a local Docker service (OMN-3431). It uses the
+        # Docker-internal hostname redpanda:9092, not a private IP address.
         matches = PRIVATE_IP_PATTERN.findall(content)
         assert not matches, (
             f"Found hardcoded private IP addresses: {matches}\n"
             "Configuration should use Docker service names or environment variables "
-            "instead of hardcoded IPs for portability.\n"
-            "Note: KAFKA_BOOTSTRAP_SERVERS lines are exempt (OMN-3413 two-bus policy)."
+            "instead of hardcoded IPs for portability."
         )
 
         # Services should use internal Docker service names, not external hosts.
-        # Note: Redpanda (Kafka) was removed from local compose (OMN-3299) — the
-        # platform uses remote Redpanda exclusively via KAFKA_BOOTSTRAP_SERVERS.
         # DSN/URL construction was also moved to ~/.omnibase/.env (PR #513/OMN-3266),
         # so host:port patterns no longer appear as inline fallbacks in compose.
         # Instead, verify that internal service names are defined as top-level keys.
