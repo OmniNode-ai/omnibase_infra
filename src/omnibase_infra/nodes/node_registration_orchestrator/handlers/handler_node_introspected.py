@@ -40,6 +40,7 @@ from uuid import UUID, uuid4
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
@@ -60,7 +61,6 @@ from omnibase_infra.nodes.node_registration_orchestrator.services import (
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
 )
-from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION_ACKED
 from omnibase_infra.utils import validate_timezone_aware_with_context
 
@@ -145,7 +145,7 @@ class HandlerNodeIntrospected:
         projection_reader: ProjectionReaderRegistration,
         reducer: RegistrationReducerService,
         topic_store: ServiceIntrospectionTopicStore | None = None,
-        event_bus: ProtocolEventBusLike | None = None,
+        event_bus: ProtocolEventBus | None = None,
     ) -> None:
         """Initialize the handler with a projection reader and reducer service.
 
@@ -312,7 +312,17 @@ class HandlerNodeIntrospected:
                 correlation_id=correlation_id,
                 timestamp=now,
             )
-            await self._event_bus.publish_envelope(auto_ack, topic=_ACK_TOPIC)
+            ack_envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+                payload=auto_ack,
+                correlation_id=correlation_id,
+            )
+            # ModelEventEnvelope is structurally compatible with ProtocolEventEnvelope
+            # but lacks the async get_payload() method; mixin_node_introspection uses
+            # the same pattern (mixin_node_introspection.py:2276).
+            await self._event_bus.publish_envelope(
+                ack_envelope,  # type: ignore[arg-type]
+                topic=_ACK_TOPIC,
+            )
             logger.debug(
                 "Auto-ACK published for node %s (ONEX_REGISTRATION_AUTO_ACK=true)",
                 node_id,
