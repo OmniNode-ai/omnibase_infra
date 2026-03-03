@@ -29,9 +29,8 @@ dependencies = [
     #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
     # Remember to switch back to PyPI versions before merging to main.
     #
-    "omnibase-core>=0.22.0,<0.23.0",
+    "omnibase-core>=0.23.0,<0.24.0",
     "omnibase-spi>=0.15.0,<0.16.0",
-
     # ============================================================================
     # External Dependency Security Guidance
     # ============================================================================
@@ -48,34 +47,28 @@ dependencies = [
     # - If git-sourced external deps are added in the future, prefer commit SHAs over tags:
     #   - SHAs are immutable; tags can be force-pushed
     #   - SHAs provide audit trail and tamper-evidence
-
     # Core dependencies
     "pydantic>=2.11.7,<3.0.0",
     "fastapi>=0.120.1,<0.121.0",
     "uvicorn>=0.32.0,<0.33.0",
     "pyyaml>=6.0.2,<7.0.0",
     "aiohttp>=3.9.0,<4.0.0",
-
     # Database dependencies (for PostgreSQL connection manager)
     "asyncpg>=0.29.0,<0.30.0",
     "psycopg2-binary>=2.9.10,<3.0.0",
-
     # Service integration dependencies (for the actual tools we're migrating)
-    "python-consul2>=0.1.5,<0.2.0",  # For Consul adapter tools (fork with meta/metadata support)
-    "redis>=6.0.0,<7.0.0",  # For Redis/Valkey integration (redis-py 6.x required by omnibase_core)
-    "aiokafka>=0.11.0,<0.12.0",  # For Kafka tools (async Python client)
-    "confluent-kafka>=2.12.0,<3.0.0",  # For Kafka integration (C-based high-performance client)
-    "infisicalsdk>=1.0.15,<2.0.0",  # For Infisical secret management (OMN-2286)
-
+    "python-consul2>=0.1.5,<0.2.0", # For Consul adapter tools (fork with meta/metadata support)
+    "redis>=6.0.0,<7.0.0", # For Redis/Valkey integration (redis-py 6.x required by omnibase_core)
+    "aiokafka>=0.11.0,<0.12.0", # For Kafka tools (async Python client)
+    "confluent-kafka>=2.12.0,<3.0.0", # For Kafka integration (C-based high-performance client)
+    "infisicalsdk>=1.0.15,<2.0.0", # For Infisical secret management (OMN-2286)
     # Vector and graph database dependencies (for Qdrant and Memgraph handlers)
-    "qdrant-client>=1.12.0,<2.0.0",  # Vector database client for semantic search
-    "neo4j>=5.15.0,<6.0.0",  # Bolt/Cypher client for Memgraph graph database
-
+    "qdrant-client>=1.12.0,<2.0.0", # Vector database client for semantic search
+    "neo4j>=5.15.0,<6.0.0", # Bolt/Cypher client for Memgraph graph database
     # CLI Dependencies
     "click>=8.1.0,<9.0.0",
     "rich>=13.7.0,<14.0.0",
-    "textual>=0.89.0,<8.0.0",  # Terminal UI framework for onex-status TUI (OMN-2657)
-
+    "textual>=0.89.0,<8.0.0", # Terminal UI framework for onex-status TUI (OMN-2657)
     # System utilities
     # cryptography: Transitive dependency (via omnibase_core -> paramiko/pyopenssl).
     # Explicitly declared here to enforce minimum version for security compliance.
@@ -85,32 +78,29 @@ dependencies = [
     "cryptography>=46.0.3,<47.0.0",
     "jinja2>=3.1.6,<4.0.0",
     "aiofiles>=23.2.1,<24.0.0",
-    "dependency-injector>=4.48.1,<5.0.0",  # Enhanced dependency injection
-
+    "dependency-injector>=4.48.1,<5.0.0", # Enhanced dependency injection
     # Tracing and observability dependencies
-    "sqlparse>=0.4.4,<0.6.0",  # For secure SQL query sanitization in tracing
-    "structlog>=23.2.0,<24.0.0",  # Structured logging
-    "prometheus-client>=0.19.0,<0.20.0",  # Metrics collection
-    "opentelemetry-api>=1.27.0,<2.0.0",  # OpenTelemetry API
-    "opentelemetry-sdk>=1.27.0,<2.0.0",  # OpenTelemetry SDK
-    "opentelemetry-exporter-otlp>=1.27.0,<2.0.0",  # OTLP exporter
-    "opentelemetry-instrumentation>=0.48b0,<0.49",  # Base instrumentation
-    "opentelemetry-instrumentation-fastapi>=0.48b0,<0.49",  # FastAPI tracing
-    "opentelemetry-instrumentation-asyncpg>=0.48b0,<0.49",  # AsyncPG tracing
-    "opentelemetry-instrumentation-aiohttp-client>=0.48b0,<0.49",  # AIOHTTP tracing
-    "opentelemetry-instrumentation-kafka-python>=0.48b0,<0.49",  # Kafka tracing
-    "opentelemetry-instrumentation-redis>=0.48b0,<0.49",  # Redis tracing
-
+    "sqlparse>=0.4.4,<0.6.0", # For secure SQL query sanitization in tracing
+    "structlog>=23.2.0,<24.0.0", # Structured logging
+    "prometheus-client>=0.19.0,<0.20.0", # Metrics collection
+    "opentelemetry-api>=1.27.0,<2.0.0", # OpenTelemetry API
+    "opentelemetry-sdk>=1.27.0,<2.0.0", # OpenTelemetry SDK
+    "opentelemetry-exporter-otlp>=1.27.0,<2.0.0", # OTLP exporter
+    "opentelemetry-instrumentation>=0.48b0,<0.49", # Base instrumentation
+    "opentelemetry-instrumentation-fastapi>=0.48b0,<0.49", # FastAPI tracing
+    "opentelemetry-instrumentation-asyncpg>=0.48b0,<0.49", # AsyncPG tracing
+    "opentelemetry-instrumentation-aiohttp-client>=0.48b0,<0.49", # AIOHTTP tracing
+    "opentelemetry-instrumentation-kafka-python>=0.48b0,<0.49", # Kafka tracing
+    "opentelemetry-instrumentation-redis>=0.48b0,<0.49", # Redis tracing
     # MCP (Model Context Protocol) integration
-    "mcp>=1.25.0,<2.0.0",  # Anthropic MCP SDK for streamable HTTP transport
-
+    "mcp>=1.25.0,<2.0.0", # Anthropic MCP SDK for streamable HTTP transport
     # Additional infrastructure dependencies
-    "httpx>=0.28.1,<0.29.0",  # Modern HTTP client (>=0.27.1 required by MCP SDK)
-    "tenacity>=9.0.0,<10.0.0",  # Retry and resilience patterns
-    "circuitbreaker>=2.0.0,<3.0.0",  # Circuit breaker pattern
-    "slowapi>=0.1.9,<0.2.0",  # Rate limiting
-    "pydantic-settings>=2.2.1,<3.0.0",  # Settings management
-    "jsonschema>=4.20.0,<5.0.0",  # JSON schema validation
+    "httpx>=0.28.1,<0.29.0", # Modern HTTP client (>=0.27.1 required by MCP SDK)
+    "tenacity>=9.0.0,<10.0.0", # Retry and resilience patterns
+    "circuitbreaker>=2.0.0,<3.0.0", # Circuit breaker pattern
+    "slowapi>=0.1.9,<0.2.0", # Rate limiting
+    "pydantic-settings>=2.2.1,<3.0.0", # Settings management
+    "jsonschema>=4.20.0,<5.0.0", # JSON schema validation
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -355,7 +345,10 @@ warn_required_dynamic_aliases = true
 warn_untyped_fields = true
 
 [tool.uv.sources]
-# omnibase-core and omnibase-spi are pinned to PyPI releases; no git source overrides needed.
+# NOTE: omnibase-core is temporarily pinned to a git SHA for OMN-3491.
+# ModelDeploymentTopology/EnumDeploymentMode (OMN-3490) merged to main but not yet released to PyPI.
+# Revert to PyPI version (>=0.24.0,<0.25.0) once omnibase-core 0.24.0 is released.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "50eeed8d8a8ff779114c60f08c99155d7f3ba35a" }
 
 [tool.coverage.run]
 source = ["src/omnibase_infra"]
