@@ -2,7 +2,9 @@
 # Copyright (c) 2026 OmniNode Team
 """Setup validate effect node package.
 
-Ticket: OMN-3491
+Ticket: OMN-3491 / OMN-3494
 """
 
-__all__: list[str] = []
+from omnibase_infra.nodes.node_setup_validate_effect.node import NodeSetupValidateEffect
+
+__all__: list[str] = ["NodeSetupValidateEffect"]

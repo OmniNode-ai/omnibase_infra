@@ -38,6 +38,11 @@ class ModelSetupNodeHealthResult(BaseModel):
         default=None,
         description="Optional extended detail or error context.",
     )
+    response_time_ms: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Round-trip latency of the health check in milliseconds.",
+    )
 
 
 # Public alias for backward-compatibility with ticket spec naming.
