@@ -20,9 +20,9 @@ class TestGetBroker:
     """Test Kafka broker address resolution."""
 
     def test_default_value(self) -> None:
-        """Returns localhost:29092 when env var is unset."""
+        """Returns localhost:19092 when env var is unset."""
         with patch.dict("os.environ", {}, clear=True):
-            assert get_broker() == "localhost:29092"
+            assert get_broker() == "localhost:19092"
 
     def test_from_env(self) -> None:
         """Returns value from KAFKA_BOOTSTRAP_SERVERS."""
