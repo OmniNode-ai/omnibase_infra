@@ -42,6 +42,12 @@ spec:
           # Update in sync with local omnibase_infra Docker Redpanda version.
           image: docker.redpanda.com/redpandadata/redpanda:v24.2.7
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
           command:
             - /usr/bin/rpk
             - redpanda

@@ -7,8 +7,7 @@
 #   1. ClusterIP (omninode-redpanda) — internal cluster access on port 9092
 #   2. NodePort  (omninode-redpanda-external) — exposes port 29092 on the host node
 #      This is the SSH tunnel target:
-#        Mac: localhost:29092  →  SSH  →  192.168.86.201:29092  →  redpanda pod:9092
----
+#        Mac: localhost:29092  →  SSH  →  192.168.86.201:29092  →  redpanda pod:9093 (external listener)
 # Internal ClusterIP service — used by in-cluster consumers
 apiVersion: v1
 kind: Service
@@ -63,12 +62,7 @@ spec:
     app: omninode-redpanda
   ports:
     - name: kafka-nodeport
-      port: 9092
-      targetPort: kafka-internal
+      port: 9093
+      targetPort: kafka-external
       nodePort: 29092
-      protocol: TCP
-    - name: admin-nodeport
-      port: 9644
-      targetPort: admin
-      nodePort: 30644
       protocol: TCP

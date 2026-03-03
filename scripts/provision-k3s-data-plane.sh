@@ -94,11 +94,24 @@ if ssh_run "which k3s > /dev/null 2>&1"; then
   K3S_INSTALLED_VER=$(ssh_run "k3s --version 2>/dev/null | head -1 || echo unknown")
   info "k3s already installed: ${K3S_INSTALLED_VER}"
 else
-  info "k3s not found — installing ${K3S_VERSION}..."
-  if dry "INSTALL_K3S_VERSION=${K3S_VERSION} curl -sfL https://get.k3s.io | sh -"; then
+  info "k3s not found — configuring NodePort range and installing ${K3S_VERSION}..."
+
+  # Configure k3s to allow NodePort 29092 (below default 30000-32767 range).
+  # This must be done before k3s starts so the API server picks up the flag.
+  K3S_CONFIG="kube-apiserver-arg:\n  - service-node-port-range=1024-65535\n"
+  if dry "mkdir -p /etc/rancher/k3s && echo '${K3S_CONFIG}' > /etc/rancher/k3s/config.yaml"; then
     :  # dry run, skip
   else
-    ssh_sudo "INSTALL_K3S_VERSION=${K3S_VERSION} curl -sfL https://get.k3s.io | sh -"
+    ssh_sudo "mkdir -p /etc/rancher/k3s && printf '${K3S_CONFIG}' > /etc/rancher/k3s/config.yaml"
+    info "k3s config written: service-node-port-range=1024-65535"
+  fi
+
+  # Install k3s — INSTALL_K3S_VERSION must be set for the sh invocation (right side of pipe),
+  # not for curl. Placing it before the pipe only exports it to curl, not to the installer.
+  if dry "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=${K3S_VERSION} sh -"; then
+    :  # dry run, skip
+  else
+    ssh_sudo "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=${K3S_VERSION} sh -"
   fi
 fi
 
@@ -188,4 +201,4 @@ fi
 echo "=== END ==="
 echo ""
 info "Done. OMN-3488 provisioning complete."
-info "Next: Update OMN-3478 with K3S_BIND_ADDR=192.168.86.201 and rewrite tunnel script."
+info "Next: Update OMN-3478 with K3S_BIND_ADDR=${TARGET_HOST} and rewrite tunnel script."

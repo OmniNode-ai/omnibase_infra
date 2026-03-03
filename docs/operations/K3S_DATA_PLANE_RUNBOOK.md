@@ -11,12 +11,12 @@
 
 This runbook covers the single-node k3s cluster on `192.168.86.201` that hosts the cloud data-plane bus. The cloud bus exposes Redpanda via NodePort so the Mac can reach it through an SSH tunnel.
 
-```
+```text
 Mac (localhost:29092)
   ↕ SSH tunnel (launchd: ai.omninode.redpanda-tunnel)
 192.168.86.201:29092  (NodePort → omninode-redpanda-external svc)
   ↕ k3s kube-proxy
-data-plane/omninode-redpanda pod  (Redpanda broker, port 9092)
+data-plane/omninode-redpanda pod  (Redpanda external listener, port 9093)
 ```
 
 **Bus selection**: this is the `cloud` bus. Activate with `bus-cloud` in your shell.
@@ -50,7 +50,14 @@ See `~/.claude/CLAUDE.md` "Bus Selection Policy" for the full two-bus architectu
 1. **Install k3s**:
    ```bash
    ssh jonah@192.168.86.201
-   INSTALL_K3S_VERSION=v1.31.4+k3s1 sudo curl -sfL https://get.k3s.io | sh -
+   # Configure NodePort range to allow 29092 (below k3s default 30000-32767):
+   sudo mkdir -p /etc/rancher/k3s
+   sudo tee /etc/rancher/k3s/config.yaml <<'EOF'
+   kube-apiserver-arg:
+     - service-node-port-range=1024-65535
+   EOF
+   # Install with pinned version — INSTALL_K3S_VERSION must be set for sh (right of pipe):
+   curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.31.4+k3s1 sh -
    sudo systemctl enable k3s --now
    sudo systemctl status k3s
    ```
@@ -161,7 +168,7 @@ ssh jonah@192.168.86.201 \
 
 ### k3s kubeconfig location on host
 
-```
+```text
 /etc/rancher/k3s/k3s.yaml
 ```
 
@@ -172,10 +179,8 @@ Always prefix kubectl commands with `sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml` 
 After OMN-3478 tunnel is active (`bus-cloud`), you can use a local kubeconfig:
 
 ```bash
-# On Mac — retrieve and patch for tunnel use
-ssh jonah@192.168.86.201 "sudo cat /etc/rancher/k3s/k3s.yaml" \
-  | sed 's|https://127.0.0.1:6443|https://127.0.0.1:6443|' \
-  > ~/.kube/omninode-mvp1
+# On Mac — retrieve kubeconfig (already points to 127.0.0.1:6443 for tunnel use)
+ssh jonah@192.168.86.201 "sudo cat /etc/rancher/k3s/k3s.yaml" > ~/.kube/omninode-mvp1
 
 chmod 600 ~/.kube/omninode-mvp1
 export KUBECONFIG=~/.kube/omninode-mvp1
@@ -188,8 +193,9 @@ Note: `~/.kube/omninode-mvp1` already points to `https://127.0.0.1:6443` (SSH tu
 
 ```bash
 # Pin version in provision-k3s-data-plane.sh → K3S_VERSION var, then re-run:
+# INSTALL_K3S_VERSION must be set for sh (right of pipe), not for curl:
 ssh jonah@192.168.86.201 \
-  "INSTALL_K3S_VERSION=<new-version> sudo curl -sfL https://get.k3s.io | sh -"
+  "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=<new-version> sh -"
 ```
 
 ### View k3s service logs
@@ -252,7 +258,7 @@ EOF"
 
 Then install / restart:
 ```bash
-ssh jonah@192.168.86.201 "INSTALL_K3S_VERSION=v1.31.4+k3s1 sudo curl -sfL https://get.k3s.io | sh -"
+ssh jonah@192.168.86.201 "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.31.4+k3s1 sh -"
 ```
 
 ---
