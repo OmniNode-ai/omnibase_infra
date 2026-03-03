@@ -71,6 +71,7 @@
 #     - intelligence-api: 8053 [runtime profile]
 #     - contract-resolver: 8091 [runtime profile] (OMN-2756 transitional bridge)
 #     - skill-lifecycle-consumer: 8092 [runtime profile] (OMN-2934)
+#     - phoenix: 6006 [runtime profile] (OMN-3542, LLM observability OTLP HTTP + UI)
 #
 # Dashboard Requirements (OMN-3337):
 #   Several omnidash dashboards require the runtime profile to be active:
@@ -776,6 +777,36 @@ services:
       - "com.omninode.ticket=OMN-2756"
       - "com.omninode.transitional=true"
   # ==========================================================================
+  # Arize Phoenix - LLM Observability (OTLP HTTP Backend) [Runtime Profile]
+  # ==========================================================================
+  # Arize Phoenix provides LLM observability: traces, spans, and evals for ONEX
+  # LLM inference calls. Accepts OTLP HTTP on port 6006 and serves its UI there too.
+  # Docker-internal consumers reach Phoenix at phoenix:6006.
+  # Host browsers access the UI at http://localhost:6006.
+  # OMN-3542: Added as a runtime-profile service alongside intelligence-api.
+  phoenix:
+    image: arizephoenix/phoenix:7.6.0
+    container_name: omnibase-infra-phoenix
+    profiles: ["runtime", "full"]
+    environment:
+      PHOENIX_WORKING_DIR: /data
+    ports:
+      - "6006:6006"
+    volumes:
+      - phoenix_data:/data
+    networks:
+      - omnibase-infra-network
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "curl -sf http://localhost:6006/healthz || exit 1"]
+      start_period: 20s
+    logging: *logging-defaults
+    restart: unless-stopped
+    labels:
+      - "com.omninode.service=phoenix"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.ticket=OMN-3542"
+  # ==========================================================================
   # Autoheal - Automatic restart of unhealthy containers (OMN-3428)
   # ==========================================================================
   # Rationale: Docker restart: unless-stopped only fires on process exit, not
@@ -847,3 +878,5 @@ volumes:
     name: omninode-agent-actions-logs
   contract_resolver_logs:
     name: omninode-contract-resolver-logs
+  phoenix_data:
+    name: omnibase-infra-phoenix-data
