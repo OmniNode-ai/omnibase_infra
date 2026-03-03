@@ -66,7 +66,7 @@ def _check_port_free(host: str, port: int) -> bool:
 
 def _omnibase_dir() -> Path:
     """Returns the omnibase directory path from env or default."""
-    env = os.environ.get("OMNIBASE_DIR")
+    env = os.environ.get("OMNIBASE_DIR")  # ONEX_EXCLUDE
     return Path(env) if env else Path.home() / ".omnibase"
 
 
@@ -183,7 +183,7 @@ def _check_python_version() -> ModelPreflightCheckResult:
 
 def _check_postgres_password() -> ModelPreflightCheckResult:
     """Check POSTGRES_PASSWORD env var is set and non-empty."""
-    val = os.environ.get("POSTGRES_PASSWORD")
+    val = os.environ.get("POSTGRES_PASSWORD")  # ONEX_EXCLUDE
     if not val:
         return ModelPreflightCheckResult(
             check_key="postgres_password_set",
