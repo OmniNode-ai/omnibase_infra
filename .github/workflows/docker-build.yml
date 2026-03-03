@@ -67,6 +67,12 @@ jobs:
     permissions:
       contents: read
       packages: write
+    # Timeout breakdown (main branch worst case):
+    #   Docker build (cold cache): ~14 min
+    #   GHCR push (main only):     ~5 min
+    #   GHA cache export (mode=max): ~15-17 min
+    #   Total on main:             ~34-36 min
+    # PRs skip GHCR push so fit in ~32 min. 45 min gives a comfortable buffer.
     timeout-minutes: 45
 
     outputs:
