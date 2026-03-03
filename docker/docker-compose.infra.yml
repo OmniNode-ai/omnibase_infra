@@ -791,7 +791,7 @@ services:
     environment:
       PHOENIX_WORKING_DIR: /data
     ports:
-      - "6006:6006"
+      - "${PHOENIX_PORT:-6006}:6006"
     volumes:
       - phoenix_data:/data
     networks:

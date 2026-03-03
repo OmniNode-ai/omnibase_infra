@@ -619,6 +619,7 @@ ONEX_OUTPUT_TOPIC=responses
 # Arize Phoenix (LLM observability — OTLP HTTP backend) [OMN-3542]
 # Phoenix runs as a runtime-profile Docker service (omnibase-infra-phoenix).
 # Docker-internal consumers reach it at phoenix:6006; host scripts use localhost:6006.
+# PHOENIX_PORT=6006
 # PHOENIX_OTEL_ENDPOINT=http://localhost:6006/v1/traces
 # PHOENIX_OTEL_ENABLED=true
 
