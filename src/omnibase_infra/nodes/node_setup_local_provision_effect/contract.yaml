@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+# Ticket: OMN-3493
+name: "node_setup_local_provision_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  EFFECT node that provisions, tears down, and checks status of local Docker Compose
+  services defined in a ModelDeploymentTopology. Runs docker compose up -d (provision),
+  docker compose down (teardown), and docker compose ps (status). Deduplicates
+  --profile flags across services sharing the same profile. Async-polls ports
+  until healthy or max_wait_seconds is exceeded.
+
+input_model:
+  name: "ModelLocalProvisionEffectInput"
+  module: "omnibase_infra.nodes.node_setup_local_provision_effect.models.model_local_provision_effect_input"
+  description: "Input envelope for local provision effect operations."
+output_model:
+  name: "ModelLocalProvisionEffectOutput"
+  module: "omnibase_infra.nodes.node_setup_local_provision_effect.models.model_local_provision_effect_output"
+  description: "Result of local provision effect operations."
+io_operations:
+  - name: "provision_local"
+    description: "Start local services via docker compose up -d and poll until healthy."
+    input_fields: ["topology", "compose_file_path", "correlation_id", "max_wait_seconds"]
+    output_fields: ["success", "services_started", "error"]
+  - name: "teardown_local"
+    description: "Stop and remove local services via docker compose down."
+    input_fields: ["topology", "compose_file_path", "correlation_id"]
+    output_fields: ["success", "services_stopped", "error"]
+  - name: "status_check"
+    description: "Query which local services are currently running."
+    input_fields: ["topology", "compose_file_path", "correlation_id"]
+    output_fields: ["success", "services_running", "error"]
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "provision_local"
+      handler:
+        name: "HandlerLocalProvision"
+        module: "omnibase_infra.nodes.node_setup_local_provision_effect.handlers.handler_local_provision"
+    - operation: "teardown_local"
+      handler:
+        name: "HandlerLocalTeardown"
+        module: "omnibase_infra.nodes.node_setup_local_provision_effect.handlers.handler_local_teardown"
+    - operation: "status_check"
+      handler:
+        name: "HandlerLocalStatus"
+        module: "omnibase_infra.nodes.node_setup_local_provision_effect.handlers.handler_local_status"
+capabilities:
+  - "local_provision.start"
+  - "local_provision.stop"
+  - "local_provision.status"
