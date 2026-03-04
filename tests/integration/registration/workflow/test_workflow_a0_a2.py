@@ -2,9 +2,9 @@
 # Copyright (c) 2025 OmniNode Team
 """Tests A0, A1, A2 for OMN-915 mocked E2E registration workflow.
 
-This module provides mocked E2E tests proving the registration architecture
-with ZERO real infrastructure. All Consul/PostgreSQL/Kafka operations are
-replaced with controllable test doubles.
+Proves the registration architecture with ZERO real infrastructure.
+All PostgreSQL/Kafka operations are replaced with controllable test
+doubles (Consul removed in OMN-3540).
 
 Test Scenarios:
     A0 - Purity Gate: Verify reducer performs no I/O, effect handles all external calls

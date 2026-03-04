@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""  # ai-slop-ok: pre-existingE2E tests for ONEX 2-way registration pattern.
+"""# ai-slop-ok: pre-existingE2E tests for ONEX 2-way registration pattern.
 
 This module contains end-to-end integration tests for the node registration
 workflow, validating the complete registration flow against real infrastructure

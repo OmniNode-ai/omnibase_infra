@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""  # ai-slop-ok: pre-existingPytest fixtures for registration workflow integration tests.
+"""# ai-slop-ok: pre-existingPytest fixtures for registration workflow integration tests.
 
 This module provides fixtures that wire the complete registration workflow:
 1. RegistrationReducer for intent computation
@@ -210,7 +210,7 @@ class ProtocolRegistryRequestFactory(Protocol):
 
 
 class IntrospectableTestNode(MixinNodeIntrospection):
-    """  # ai-slop-ok: pre-existingTest node that implements MixinNodeIntrospection for testing.
+    """# ai-slop-ok: pre-existingTest node that implements MixinNodeIntrospection for testing.
 
     This node provides a minimal implementation suitable for testing
     the introspection workflow without real infrastructure.

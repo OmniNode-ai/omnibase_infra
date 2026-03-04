@@ -98,15 +98,15 @@ class TestReducerPurityInspection:
 
         Pure reducers are synchronous. Async implies I/O waiting.
         """
-        assert not inspect.iscoroutinefunction(
-            RegistrationReducer.reduce
-        ), "reduce() must be synchronous. Async methods imply I/O operations."
+        assert not inspect.iscoroutinefunction(RegistrationReducer.reduce), (
+            "reduce() must be synchronous. Async methods imply I/O operations."
+        )
 
     def test_reduce_reset_is_not_coroutine(self) -> None:
         """Verify reduce_reset() is synchronous (not async)."""
-        assert not inspect.iscoroutinefunction(
-            RegistrationReducer.reduce_reset
-        ), "reduce_reset() must be synchronous. Async methods imply I/O operations."
+        assert not inspect.iscoroutinefunction(RegistrationReducer.reduce_reset), (
+            "reduce_reset() must be synchronous. Async methods imply I/O operations."
+        )
 
     def test_reducer_has_no_mutable_instance_state(self) -> None:
         """Verify reducer instances have no mutable state after initialization.
@@ -188,13 +188,13 @@ class TestReducerPurityInspection:
         return_annotation = sig.return_annotation
 
         # Should return ModelReducerOutput[ModelRegistrationState]
-        assert (
-            return_annotation != inspect.Signature.empty
-        ), "reduce() must have a return type annotation"
+        assert return_annotation != inspect.Signature.empty, (
+            "reduce() must have a return type annotation"
+        )
         # Check it's not None type
-        assert return_annotation is not type(
-            None
-        ), "reduce() must return an output, not None"
+        assert return_annotation is not type(None), (
+            "reduce() must return an output, not None"
+        )
 
 
 # =============================================================================
@@ -243,15 +243,15 @@ class TestNoSideEffects:
             f"Input state.status was mutated: "
             f"{state_before.status} -> {original_state.status}"
         )
-        assert (
-            original_state.node_id == state_before.node_id
-        ), "Input state.node_id was mutated"
-        assert (
-            original_state.consul_confirmed == state_before.consul_confirmed
-        ), "Input state.consul_confirmed was mutated"
-        assert (
-            original_state.postgres_confirmed == state_before.postgres_confirmed
-        ), "Input state.postgres_confirmed was mutated"
+        assert original_state.node_id == state_before.node_id, (
+            "Input state.node_id was mutated"
+        )
+        assert original_state.consul_confirmed == state_before.consul_confirmed, (
+            "Input state.consul_confirmed was mutated"
+        )
+        assert original_state.postgres_confirmed == state_before.postgres_confirmed, (
+            "Input state.postgres_confirmed was mutated"
+        )
         assert (
             original_state.last_processed_event_id
             == state_before.last_processed_event_id
@@ -282,18 +282,18 @@ class TestNoSideEffects:
         _output = reducer.reduce(state, original_event)
 
         # Verify input event was NOT mutated
-        assert (
-            original_event.node_id == event_before.node_id
-        ), "Input event.node_id was mutated"
-        assert (
-            original_event.node_type == event_before.node_type
-        ), "Input event.node_type was mutated"
-        assert (
-            original_event.correlation_id == event_before.correlation_id
-        ), "Input event.correlation_id was mutated"
-        assert (
-            original_event.timestamp == event_before.timestamp
-        ), "Input event.timestamp was mutated"
+        assert original_event.node_id == event_before.node_id, (
+            "Input event.node_id was mutated"
+        )
+        assert original_event.node_type == event_before.node_type, (
+            "Input event.node_type was mutated"
+        )
+        assert original_event.correlation_id == event_before.correlation_id, (
+            "Input event.correlation_id was mutated"
+        )
+        assert original_event.timestamp == event_before.timestamp, (
+            "Input event.timestamp was mutated"
+        )
 
     def test_reducer_instance_unchanged_after_reduce(
         self,
@@ -370,9 +370,9 @@ class TestNoSideEffects:
             and not isinstance(value, property | classmethod | staticmethod)
         }
 
-        assert (
-            class_vars_before == class_vars_after
-        ), "Class-level variables were mutated during reduce() execution"
+        assert class_vars_before == class_vars_after, (
+            "Class-level variables were mutated during reduce() execution"
+        )
 
 
 # =============================================================================
@@ -459,7 +459,9 @@ class TestStateIsolation:
         for i, (status, node_id, intent_count) in enumerate(results):
             assert status == "pending", f"Call {i} produced unexpected status: {status}"
             assert node_id is not None, f"Call {i} produced None node_id"
-            assert intent_count == 1, f"Call {i} produced {intent_count} intents (PostgreSQL only, OMN-3540)"
+            assert intent_count == 1, (
+                f"Call {i} produced {intent_count} intents (PostgreSQL only, OMN-3540)"
+            )
 
     def test_reducer_output_is_independent_of_input_reference(
         self,
@@ -533,15 +535,15 @@ class TestStateIsolation:
         # All results must be identical
         first_result = results[0]
         for i, result in enumerate(results[1:], start=2):
-            assert (
-                result.result.status == first_result.result.status
-            ), f"Thread {i} status mismatch"
-            assert (
-                result.result.node_id == first_result.result.node_id
-            ), f"Thread {i} node_id mismatch"
-            assert len(result.intents) == len(
-                first_result.intents
-            ), f"Thread {i} intent count mismatch"
+            assert result.result.status == first_result.result.status, (
+                f"Thread {i} status mismatch"
+            )
+            assert result.result.node_id == first_result.result.node_id, (
+                f"Thread {i} node_id mismatch"
+            )
+            assert len(result.intents) == len(first_result.intents), (
+                f"Thread {i} intent count mismatch"
+            )
 
     def test_state_changes_only_through_events(
         self,
@@ -595,9 +597,9 @@ class TestStateIsolation:
         state = ModelRegistrationState()
 
         # Verify frozen=True is configured
-        assert (
-            state.model_config.get("frozen") is True
-        ), "ModelRegistrationState must have frozen=True in model_config"
+        assert state.model_config.get("frozen") is True, (
+            "ModelRegistrationState must have frozen=True in model_config"
+        )
 
         # Attempt to mutate should raise ValidationError (Pydantic V2 frozen model)
         with pytest.raises(ValidationError):

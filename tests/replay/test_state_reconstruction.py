@@ -386,9 +386,9 @@ class TestMultipleReconstructionScenarios:
             output = reducer.reduce(fresh_state, event)
 
             # Verify processing
-            assert (
-                output.result.status == "pending"
-            ), f"Node type {node_type} failed to transition to pending"
+            assert output.result.status == "pending", (
+                f"Node type {node_type} failed to transition to pending"
+            )
             assert output.result.node_id == node_id
             assert len(output.intents) == 1  # PostgreSQL only (OMN-3540)
 
@@ -440,15 +440,15 @@ class TestEventLogConsistency:
         first_result = results[0]
         for i, result in enumerate(results[1:], start=2):
             assert result.status == first_result.status, f"Replay {i} status mismatch"
-            assert (
-                result.node_id == first_result.node_id
-            ), f"Replay {i} node_id mismatch"
-            assert (
-                result.consul_confirmed == first_result.consul_confirmed
-            ), f"Replay {i} consul_confirmed mismatch"
-            assert (
-                result.postgres_confirmed == first_result.postgres_confirmed
-            ), f"Replay {i} postgres_confirmed mismatch"
+            assert result.node_id == first_result.node_id, (
+                f"Replay {i} node_id mismatch"
+            )
+            assert result.consul_confirmed == first_result.consul_confirmed, (
+                f"Replay {i} consul_confirmed mismatch"
+            )
+            assert result.postgres_confirmed == first_result.postgres_confirmed, (
+                f"Replay {i} postgres_confirmed mismatch"
+            )
             assert (
                 result.last_processed_event_id == first_result.last_processed_event_id
             ), f"Replay {i} last_processed_event_id mismatch"

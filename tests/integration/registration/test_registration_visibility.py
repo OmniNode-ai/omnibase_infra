@@ -65,17 +65,17 @@ class TestRegistrationHandlerInterface:
         assert hasattr(HandlerNodeIntrospected, "handle")
         handle_method = HandlerNodeIntrospected.handle
         assert callable(handle_method)
-        assert asyncio.iscoroutinefunction(
-            handle_method
-        ), "HandlerNodeIntrospected.handle must be async"
+        assert asyncio.iscoroutinefunction(handle_method), (
+            "HandlerNodeIntrospected.handle must be async"
+        )
 
         # Verify handle method signature accepts 'envelope' parameter
         sig = inspect.signature(handle_method)
         param_names = list(sig.parameters.keys())
         # First param is 'self', second should be 'envelope'
-        assert (
-            "envelope" in param_names
-        ), f"handle() must accept 'envelope' parameter, got: {param_names}"
+        assert "envelope" in param_names, (
+            f"handle() must accept 'envelope' parameter, got: {param_names}"
+        )
 
     @pytest.mark.asyncio
     async def test_handler_produces_output_for_new_node(self) -> None:
@@ -118,14 +118,14 @@ class TestRegistrationHandlerInterface:
         # Verify output structure - handler should emit registration initiated event
         assert output is not None
         assert output.events is not None
-        assert (
-            len(output.events) > 0
-        ), "Handler should emit at least one event for a new node"
+        assert len(output.events) > 0, (
+            "Handler should emit at least one event for a new node"
+        )
         # Verify intents were generated (at least postgres upsert)
         assert output.intents is not None
-        assert (
-            len(output.intents) > 0
-        ), "Handler should emit at least one intent for a new node"
+        assert len(output.intents) > 0, (
+            "Handler should emit at least one intent for a new node"
+        )
         # Verify correlation_id propagation
         assert output.correlation_id == correlation_id
 
@@ -147,9 +147,9 @@ class TestRegistrationHandlerProperties:
         ]
 
         for prop_name in expected_properties:
-            assert hasattr(
-                HandlerNodeIntrospected, prop_name
-            ), f"HandlerNodeIntrospected must have '{prop_name}' property"
+            assert hasattr(HandlerNodeIntrospected, prop_name), (
+                f"HandlerNodeIntrospected must have '{prop_name}' property"
+            )
 
     def test_handler_message_types_includes_introspection_event(self) -> None:
         """Verify the handler declares ModelNodeIntrospectionEvent in its

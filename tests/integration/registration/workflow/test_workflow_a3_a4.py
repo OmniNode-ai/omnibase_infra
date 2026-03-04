@@ -337,9 +337,9 @@ class TestA4IdempotentReplay:
         # Verify reducer detected duplicate and returned same state with NO intents
         assert state_after_replay.status == state_after_first.status
         assert state_after_replay.node_id == state_after_first.node_id
-        assert (
-            len(reducer_output_2.intents) == 0
-        ), "Duplicate event should produce no intents"
+        assert len(reducer_output_2.intents) == 0, (
+            "Duplicate event should produce no intents"
+        )
 
         # Reducer was called but detected duplicate
         assert tracked_reducer.reduce_call_count == 2
@@ -352,14 +352,14 @@ class TestA4IdempotentReplay:
         assert effect_response_2.status == "success"
 
         # Verify backends were NOT called again (idempotency store tracked them)
-        assert (
-            postgres_adapter.call_count == first_postgres_call_count
-        ), "PostgreSQL should NOT be called again (idempotency)"
+        assert postgres_adapter.call_count == first_postgres_call_count, (
+            "PostgreSQL should NOT be called again (idempotency)"
+        )
 
         # === VERIFY NO DUPLICATE REGISTRATIONS ===
-        assert (
-            len(postgres_adapter.registrations) == 1
-        ), "Should have exactly 1 PostgreSQL registration"
+        assert len(postgres_adapter.registrations) == 1, (
+            "Should have exactly 1 PostgreSQL registration"
+        )
 
         # === VERIFY IDEMPOTENCY STORE STATE ===
         completed_backends = await tracked_effect.get_completed_backends(

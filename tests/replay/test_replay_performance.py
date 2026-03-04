@@ -2,9 +2,8 @@
 # Copyright (c) 2025 OmniNode Team
 """Replay Performance Tests for OMN-955.
 
-This module provides performance tests for large event replay sequences.
-These tests measure and validate performance characteristics of the replay
-system under load conditions.
+Performance tests for large event replay sequences — measures and validates
+replay system behavior under load conditions.
 
 Statistical Rigor:
     - All performance tests use multiple iterations (not single runs)

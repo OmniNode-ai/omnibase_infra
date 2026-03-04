@@ -144,23 +144,23 @@ class TestContractIntegration:
         assert model_class.__name__ == class_name
 
         # Verify it's a Pydantic model via duck typing (check for model_fields attribute)
-        assert hasattr(
-            model_class, "model_fields"
-        ), f"{class_name} must be a Pydantic model with 'model_fields'"
+        assert hasattr(model_class, "model_fields"), (
+            f"{class_name} must be a Pydantic model with 'model_fields'"
+        )
 
         # Verify required fields are present
         required_fields = {"introspection_event", "correlation_id"}
         actual_fields = set(model_class.model_fields.keys())
         missing_fields = required_fields - actual_fields
-        assert (
-            not missing_fields
-        ), f"{class_name} missing required fields: {missing_fields}"
+        assert not missing_fields, (
+            f"{class_name} missing required fields: {missing_fields}"
+        )
 
         # Verify model is subclass of BaseModel via duck typing
         # (has model_validate method which is BaseModel behavior)
-        assert hasattr(
-            model_class, "model_validate"
-        ), f"{class_name} must have 'model_validate' method (Pydantic BaseModel)"
+        assert hasattr(model_class, "model_validate"), (
+            f"{class_name} must have 'model_validate' method (Pydantic BaseModel)"
+        )
 
     def test_output_model_importable(self, contract_data: dict) -> None:
         """Test that output model specified in contract is importable and valid.
@@ -185,9 +185,9 @@ class TestContractIntegration:
         assert model_class.__name__ == class_name
 
         # Verify it's a Pydantic model via duck typing (check for model_fields attribute)
-        assert hasattr(
-            model_class, "model_fields"
-        ), f"{class_name} must be a Pydantic model with 'model_fields'"
+        assert hasattr(model_class, "model_fields"), (
+            f"{class_name} must be a Pydantic model with 'model_fields'"
+        )
 
         # Verify required fields are present for orchestrator output
         required_fields = {
@@ -198,14 +198,14 @@ class TestContractIntegration:
         }
         actual_fields = set(model_class.model_fields.keys())
         missing_fields = required_fields - actual_fields
-        assert (
-            not missing_fields
-        ), f"{class_name} missing required fields: {missing_fields}"
+        assert not missing_fields, (
+            f"{class_name} missing required fields: {missing_fields}"
+        )
 
         # Verify model is subclass of BaseModel via duck typing
-        assert hasattr(
-            model_class, "model_validate"
-        ), f"{class_name} must have 'model_validate' method (Pydantic BaseModel)"
+        assert hasattr(model_class, "model_validate"), (
+            f"{class_name} must have 'model_validate' method (Pydantic BaseModel)"
+        )
 
 
 # =============================================================================
@@ -271,9 +271,9 @@ class TestWorkflowGraphIntegration:
         for node in nodes:
             deps = node.get("depends_on", [])
             for dep in deps:
-                assert (
-                    dep in node_ids
-                ), f"Node {node['node_id']} depends on non-existent node: {dep}"
+                assert dep in node_ids, (
+                    f"Node {node['node_id']} depends on non-existent node: {dep}"
+                )
 
     def test_execution_graph_has_no_cycles(self, contract_data: dict) -> None:
         """Test that execution graph has no circular dependencies."""
@@ -322,9 +322,9 @@ class TestWorkflowGraphIntegration:
 
         for node in nodes:
             node_type = node.get("node_type", "").lower()
-            assert (
-                node_type in valid_types
-            ), f"Invalid node_type '{node_type}' for node {node['node_id']}"
+            assert node_type in valid_types, (
+                f"Invalid node_type '{node_type}' for node {node['node_id']}"
+            )
 
     def test_postgres_step_is_effect(self, contract_data: dict) -> None:
         """Test that PostgreSQL registration step is an effect node."""
@@ -335,9 +335,9 @@ class TestWorkflowGraphIntegration:
         # Find the postgres registration node
         for node in nodes:
             if "postgres" in node["node_id"].lower():
-                assert (
-                    node["node_type"].lower() == "effect_generic"
-                ), "Postgres registration should be effect_generic type"
+                assert node["node_type"].lower() == "effect_generic", (
+                    "Postgres registration should be effect_generic type"
+                )
                 break
         else:
             pytest.fail("execute_postgres_registration node not found")
@@ -350,9 +350,9 @@ class TestWorkflowGraphIntegration:
 
         for node in nodes:
             if node["node_id"] == "compute_intents":
-                assert (
-                    node["node_type"].lower() == "reducer_generic"
-                ), "compute_intents should be reducer_generic type"
+                assert node["node_type"].lower() == "reducer_generic", (
+                    "compute_intents should be reducer_generic type"
+                )
                 break
         else:
             pytest.fail("compute_intents node not found")
@@ -578,26 +578,26 @@ class TestErrorHandlingIntegration:
             assert field in retry_policy, f"Missing retry policy field: {field}"
 
         # Validate specific values match contract
-        assert (
-            retry_policy["max_retries"] == 3
-        ), f"max_retries should be 3, got {retry_policy['max_retries']}"
-        assert (
-            retry_policy["initial_delay_ms"] == 100
-        ), f"initial_delay_ms should be 100, got {retry_policy['initial_delay_ms']}"
-        assert (
-            retry_policy["max_delay_ms"] == 5000
-        ), f"max_delay_ms should be 5000, got {retry_policy['max_delay_ms']}"
-        assert (
-            retry_policy["exponential_base"] == 2
-        ), f"exponential_base should be 2, got {retry_policy['exponential_base']}"
+        assert retry_policy["max_retries"] == 3, (
+            f"max_retries should be 3, got {retry_policy['max_retries']}"
+        )
+        assert retry_policy["initial_delay_ms"] == 100, (
+            f"initial_delay_ms should be 100, got {retry_policy['initial_delay_ms']}"
+        )
+        assert retry_policy["max_delay_ms"] == 5000, (
+            f"max_delay_ms should be 5000, got {retry_policy['max_delay_ms']}"
+        )
+        assert retry_policy["exponential_base"] == 2, (
+            f"exponential_base should be 2, got {retry_policy['exponential_base']}"
+        )
 
         # Validate retry_on is a list with expected length
-        assert isinstance(
-            retry_policy["retry_on"], list
-        ), f"retry_on should be a list, got {type(retry_policy['retry_on']).__name__}"
-        assert (
-            len(retry_policy["retry_on"]) == 3
-        ), f"retry_on should have 3 entries, got {len(retry_policy['retry_on'])}"
+        assert isinstance(retry_policy["retry_on"], list), (
+            f"retry_on should be a list, got {type(retry_policy['retry_on']).__name__}"
+        )
+        assert len(retry_policy["retry_on"]) == 3, (
+            f"retry_on should have 3 entries, got {len(retry_policy['retry_on'])}"
+        )
 
     def test_circuit_breaker_configured(self, contract_data: dict) -> None:
         """Test circuit breaker is properly configured with expected values.
@@ -612,23 +612,23 @@ class TestErrorHandlingIntegration:
         circuit_breaker = contract_data["error_handling"]["circuit_breaker"]
 
         # Validate enabled flag
-        assert (
-            circuit_breaker.get("enabled", False) is True
-        ), "Circuit breaker must be enabled"
+        assert circuit_breaker.get("enabled", False) is True, (
+            "Circuit breaker must be enabled"
+        )
 
         # Validate failure threshold with specific value
-        assert (
-            "failure_threshold" in circuit_breaker
-        ), "Circuit breaker missing 'failure_threshold' field"
+        assert "failure_threshold" in circuit_breaker, (
+            "Circuit breaker missing 'failure_threshold' field"
+        )
         assert circuit_breaker["failure_threshold"] == 5, (
             f"Circuit breaker failure_threshold should be 5, "
             f"got {circuit_breaker['failure_threshold']}"
         )
 
         # Validate reset timeout with specific value
-        assert (
-            "reset_timeout_ms" in circuit_breaker
-        ), "Circuit breaker missing 'reset_timeout_ms' field"
+        assert "reset_timeout_ms" in circuit_breaker, (
+            "Circuit breaker missing 'reset_timeout_ms' field"
+        )
         assert circuit_breaker["reset_timeout_ms"] == 60000, (
             f"Circuit breaker reset_timeout_ms should be 60000, "
             f"got {circuit_breaker['reset_timeout_ms']}"
@@ -670,24 +670,24 @@ class TestErrorHandlingIntegration:
             assert "name" in error_type, f"Error type missing 'name': {error_type}"
             assert error_type["name"], "Error type 'name' cannot be empty"
 
-            assert (
-                "description" in error_type
-            ), f"Error type '{error_type['name']}' missing 'description'"
-            assert error_type[
-                "description"
-            ], f"Error type '{error_type['name']}' has empty 'description'"
+            assert "description" in error_type, (
+                f"Error type '{error_type['name']}' missing 'description'"
+            )
+            assert error_type["description"], (
+                f"Error type '{error_type['name']}' has empty 'description'"
+            )
 
-            assert (
-                "recoverable" in error_type
-            ), f"Error type '{error_type['name']}' missing 'recoverable'"
+            assert "recoverable" in error_type, (
+                f"Error type '{error_type['name']}' missing 'recoverable'"
+            )
             assert isinstance(error_type["recoverable"], bool), (
                 f"Error type '{error_type['name']}' 'recoverable' must be boolean, "
                 f"got {type(error_type['recoverable']).__name__}"
             )
 
-            assert (
-                "retry_strategy" in error_type
-            ), f"Error type '{error_type['name']}' missing 'retry_strategy'"
+            assert "retry_strategy" in error_type, (
+                f"Error type '{error_type['name']}' missing 'retry_strategy'"
+            )
 
         # Validate specific error configurations match contract
         assert error_map["ReducerError"]["recoverable"] is True
@@ -717,9 +717,9 @@ class TestErrorHandlingIntegration:
         expected_retryable = {"EffectExecutionError", "ConnectionError", "TimeoutError"}
         actual_retryable = set(retry_on)
 
-        assert (
-            len(retry_on) == 3
-        ), f"Expected exactly 3 retryable errors, found {len(retry_on)}: {retry_on}"
+        assert len(retry_on) == 3, (
+            f"Expected exactly 3 retryable errors, found {len(retry_on)}: {retry_on}"
+        )
 
         assert expected_retryable == actual_retryable, (
             f"Retryable errors mismatch.\n"
@@ -756,17 +756,17 @@ class TestEventIntegration:
                 f"ONEX topic must have 5 dot-separated segments, "
                 f"got {len(segments)}: {topic}"
             )
-            assert (
-                segments[0] == "onex"
-            ), f"ONEX topic must start with 'onex', got: {topic}"
+            assert segments[0] == "onex", (
+                f"ONEX topic must start with 'onex', got: {topic}"
+            )
             assert segments[1] in (
                 "evt",
                 "cmd",
                 "intent",
             ), f"ONEX topic segment 2 must be evt/cmd/intent, got: {topic}"
-            assert segments[4].startswith(
-                "v"
-            ), f"ONEX topic must end with version segment (v<N>), got: {topic}"
+            assert segments[4].startswith("v"), (
+                f"ONEX topic must end with version segment (v<N>), got: {topic}"
+            )
 
     def test_published_events_have_topics(self, contract_data: dict) -> None:
         """Test that published events have topic patterns."""
@@ -786,9 +786,9 @@ class TestEventIntegration:
 
             # All subscribed intents should have routing
             for intent in intent_config["subscribed_intents"]:
-                assert (
-                    intent in intent_config["intent_routing_table"]
-                ), f"Missing routing for intent: {intent}"
+                assert intent in intent_config["intent_routing_table"], (
+                    f"Missing routing for intent: {intent}"
+                )
 
 
 # =============================================================================
@@ -847,17 +847,17 @@ class TestNodeIntegration:
         orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
 
         # Verify type via duck typing (check for class name match)
-        assert (
-            orchestrator.__class__.__name__ == "NodeRegistrationOrchestrator"
-        ), "Instantiated object must be NodeRegistrationOrchestrator"
+        assert orchestrator.__class__.__name__ == "NodeRegistrationOrchestrator", (
+            "Instantiated object must be NodeRegistrationOrchestrator"
+        )
 
         # Verify container reference is stored
-        assert hasattr(
-            orchestrator, "container"
-        ), "Orchestrator must have 'container' attribute"
-        assert (
-            orchestrator.container is simple_mock_container
-        ), "Container reference must match provided container"
+        assert hasattr(orchestrator, "container"), (
+            "Orchestrator must have 'container' attribute"
+        )
+        assert orchestrator.container is simple_mock_container, (
+            "Container reference must match provided container"
+        )
 
     def test_node_inherits_base_class(self, simple_mock_container: MagicMock) -> None:
         """Test that node inherits from NodeOrchestrator base class.
@@ -878,23 +878,23 @@ class TestNodeIntegration:
         ]
 
         for method_name in required_methods:
-            assert hasattr(
-                orchestrator, method_name
-            ), f"Orchestrator must have '{method_name}' method from NodeOrchestrator"
-            assert callable(
-                getattr(orchestrator, method_name)
-            ), f"'{method_name}' must be callable"
+            assert hasattr(orchestrator, method_name), (
+                f"Orchestrator must have '{method_name}' method from NodeOrchestrator"
+            )
+            assert callable(getattr(orchestrator, method_name)), (
+                f"'{method_name}' must be callable"
+            )
 
         # Verify it has container attribute (set by NodeOrchestrator.__init__)
-        assert hasattr(
-            orchestrator, "container"
-        ), "Orchestrator must have 'container' attribute from base class"
+        assert hasattr(orchestrator, "container"), (
+            "Orchestrator must have 'container' attribute from base class"
+        )
 
         # Verify class hierarchy by checking MRO contains expected base class name
         mro_names = [cls.__name__ for cls in orchestrator.__class__.__mro__]
-        assert (
-            "NodeOrchestrator" in mro_names
-        ), f"NodeOrchestrator must be in MRO, found: {mro_names}"
+        assert "NodeOrchestrator" in mro_names, (
+            f"NodeOrchestrator must be in MRO, found: {mro_names}"
+        )
 
     def test_node_is_declarative(self, simple_mock_container: MagicMock) -> None:
         """Test that node has no custom imperative methods."""
@@ -910,9 +910,9 @@ class TestNodeIntegration:
         ]
 
         for method in imperative_methods:
-            assert not hasattr(
-                orchestrator, method
-            ), f"Found imperative method: {method}"
+            assert not hasattr(orchestrator, method), (
+                f"Found imperative method: {method}"
+            )
 
 
 # =============================================================================
@@ -965,12 +965,12 @@ class TestDependencyStructure:
 
         for dep in deps:
             assert "name" in dep, f"Dependency missing 'name' field: {dep}"
-            assert (
-                "type" in dep
-            ), f"Dependency '{dep.get('name', 'unknown')}' missing 'type' field"
-            assert (
-                "description" in dep
-            ), f"Dependency '{dep.get('name', 'unknown')}' missing 'description' field"
+            assert "type" in dep, (
+                f"Dependency '{dep.get('name', 'unknown')}' missing 'type' field"
+            )
+            assert "description" in dep, (
+                f"Dependency '{dep.get('name', 'unknown')}' missing 'description' field"
+            )
 
     def test_dependency_types_valid(self, contract_data: dict) -> None:
         """Test that dependency types are valid ONEX types."""
@@ -1704,7 +1704,9 @@ class TestWorkflowExecutionWithMocks:
         # Verify type via duck typing (check class name, not isinstance)
         assert (
             orchestrator_with_mocks.__class__.__name__ == "NodeRegistrationOrchestrator"
-        ), f"Expected NodeRegistrationOrchestrator, got {orchestrator_with_mocks.__class__.__name__}"
+        ), (
+            f"Expected NodeRegistrationOrchestrator, got {orchestrator_with_mocks.__class__.__name__}"
+        )
 
         # Verify orchestrator has required methods from NodeOrchestrator base
         required_methods = [
@@ -1713,17 +1715,17 @@ class TestWorkflowExecutionWithMocks:
             "get_node_type",
         ]
         for method_name in required_methods:
-            assert hasattr(
-                orchestrator_with_mocks, method_name
-            ), f"Orchestrator must have '{method_name}' method"
-            assert callable(
-                getattr(orchestrator_with_mocks, method_name)
-            ), f"'{method_name}' must be callable"
+            assert hasattr(orchestrator_with_mocks, method_name), (
+                f"Orchestrator must have '{method_name}' method"
+            )
+            assert callable(getattr(orchestrator_with_mocks, method_name)), (
+                f"'{method_name}' must be callable"
+            )
 
         # Verify container is properly injected
-        assert hasattr(
-            orchestrator_with_mocks, "container"
-        ), "Orchestrator must have 'container' attribute"
+        assert hasattr(orchestrator_with_mocks, "container"), (
+            "Orchestrator must have 'container' attribute"
+        )
 
     def test_mock_container_provides_dependencies(
         self,
@@ -1737,15 +1739,15 @@ class TestWorkflowExecutionWithMocks:
         and correct method signatures, rather than using isinstance checks.
         """
         # Verify mocks are accessible via container
-        assert hasattr(
-            simple_mock_container, "_test_reducer"
-        ), "Container must have '_test_reducer' attribute"
-        assert hasattr(
-            simple_mock_container, "_test_effect"
-        ), "Container must have '_test_effect' attribute"
-        assert hasattr(
-            simple_mock_container, "_test_emitter"
-        ), "Container must have '_test_emitter' attribute"
+        assert hasattr(simple_mock_container, "_test_reducer"), (
+            "Container must have '_test_reducer' attribute"
+        )
+        assert hasattr(simple_mock_container, "_test_effect"), (
+            "Container must have '_test_effect' attribute"
+        )
+        assert hasattr(simple_mock_container, "_test_emitter"), (
+            "Container must have '_test_emitter' attribute"
+        )
 
         # Use shared conformance helpers for protocol verification
         assert_reducer_protocol_interface(simple_mock_container._test_reducer)
@@ -1824,6 +1826,6 @@ class TestParallelExecutionStructure:
         ]
 
         # Execution mode is sequential (single backend)
-        assert (
-            rules["execution_mode"] == "sequential"
-        ), f"execution_mode should be 'sequential', got {rules['execution_mode']}"
+        assert rules["execution_mode"] == "sequential", (
+            f"execution_mode should be 'sequential', got {rules['execution_mode']}"
+        )
