@@ -205,7 +205,7 @@ workflow_coordination:
           description: "Aggregate registration results"
           depends_on: ["execute_postgres_registration"]
           step_config:
-            aggregation_strategy: "all_or_partial"
+            aggregation_strategy: "all_or_none"
         - node_id: "publish_outcome"
           node_type: EFFECT_GENERIC
           description: "Publish registration outcome event"
