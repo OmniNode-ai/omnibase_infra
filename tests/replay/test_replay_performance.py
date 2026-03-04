@@ -493,9 +493,9 @@ class TestChaosReplayPerformance:
         expected_threshold = (
             (event_count / 1000) * REPLAY_1000_EVENTS_THRESHOLD_SECONDS * 1.5
         )
-        assert (
-            elapsed < expected_threshold
-        ), f"Chaos replay took {elapsed:.2f}s, expected < {expected_threshold:.2f}s"
+        assert elapsed < expected_threshold, (
+            f"Chaos replay took {elapsed:.2f}s, expected < {expected_threshold:.2f}s"
+        )
 
         events_per_second = event_count / elapsed
         print(
