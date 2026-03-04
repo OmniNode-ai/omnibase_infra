@@ -327,9 +327,9 @@ class TestFSMStateImmutability:
         for i, state in enumerate(states):
             for j, other in enumerate(states):
                 if i != j:
-                    assert (
-                        state is not other
-                    ), f"State {i} and {j} should be different instances"
+                    assert state is not other, (
+                        f"State {i} and {j} should be different instances"
+                    )
 
         # Verify expected statuses in order
         expected_statuses = ["idle", "pending", "complete", "idle"]

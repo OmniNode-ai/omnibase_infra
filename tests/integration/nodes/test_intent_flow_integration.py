@@ -166,16 +166,18 @@ class TestReducerExtensionTypeEmission:
 
         # Verify each intent uses extension-type format with typed payloads
         for intent in output.intents:
-            assert isinstance(
-                intent, ModelIntent
-            ), f"Intent should be ModelIntent, got {type(intent).__name__}"
-            assert (
-                intent.intent_type
-            ), f"intent_type should be set, got '{intent.intent_type}'"
+            assert isinstance(intent, ModelIntent), (
+                f"Intent should be ModelIntent, got {type(intent).__name__}"
+            )
+            assert intent.intent_type, (
+                f"intent_type should be set, got '{intent.intent_type}'"
+            )
             assert isinstance(
                 intent.payload,
                 ModelPayloadPostgresUpsertRegistration,
-            ), f"payload should be typed payload class, got {type(intent.payload).__name__}"
+            ), (
+                f"payload should be typed payload class, got {type(intent.payload).__name__}"
+            )
 
     def test_postgres_intent_intent_type_format(
         self,
@@ -267,9 +269,9 @@ class TestExtensionTypeIntentRouting:
                         routed_handlers.append(handler)
 
         # Verify postgres handler was selected
-        assert (
-            "postgres_handler" in routed_handlers
-        ), "Postgres handler should be routed"
+        assert "postgres_handler" in routed_handlers, (
+            "Postgres handler should be routed"
+        )
 
     def test_unknown_intent_type_routing(self) -> None:
         """Verify routing handles unknown intent_type gracefully.
@@ -298,9 +300,9 @@ class TestExtensionTypeIntentRouting:
         incomplete_routing_table: dict[str, str] = {}
 
         handler = incomplete_routing_table.get(intent.payload.intent_type)
-        assert (
-            handler is None
-        ), "Missing intent_type in routing table should return None"
+        assert handler is None, (
+            "Missing intent_type in routing table should return None"
+        )
 
     def test_intent_type_correlation_id_preservation(
         self,

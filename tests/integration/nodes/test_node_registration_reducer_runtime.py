@@ -167,9 +167,9 @@ class TestIntentEmissionOnIntrospectionEvent:
         output = reducer.reduce(initial_state, event)
 
         # Assert - should have at least 1 intent
-        assert (
-            len(output.intents) >= 1
-        ), f"Expected at least 1 intent (postgres), got {len(output.intents)}"
+        assert len(output.intents) >= 1, (
+            f"Expected at least 1 intent (postgres), got {len(output.intents)}"
+        )
 
         # Verify postgres intent type via payload.intent_type (two-layer architecture)
         # Outer intent_type is always "extension", routing key is in payload

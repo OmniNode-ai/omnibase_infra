@@ -84,9 +84,9 @@ class TestBootstrapHandlerDescriptorRequiredHandlerClass:
         # Verify the error mentions handler_class field
         errors = exc_info.value.errors()
         handler_class_errors = [e for e in errors if "handler_class" in str(e["loc"])]
-        assert (
-            len(handler_class_errors) > 0
-        ), "Expected validation error for missing handler_class"
+        assert len(handler_class_errors) > 0, (
+            "Expected validation error for missing handler_class"
+        )
 
     def test_handler_class_required_fails_when_none(self) -> None:
         """Explicitly passing handler_class=None should raise ValidationError."""
@@ -434,9 +434,9 @@ class TestBootstrapHandlerDescriptorIntegration:
         result = await source.discover_handlers()
 
         for descriptor in result.descriptors:
-            assert (
-                descriptor.handler_class is not None
-            ), f"Handler {descriptor.handler_id} missing handler_class"
+            assert descriptor.handler_class is not None, (
+                f"Handler {descriptor.handler_id} missing handler_class"
+            )
             assert len(descriptor.handler_class) > 0
 
 

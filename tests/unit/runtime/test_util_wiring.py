@@ -65,20 +65,20 @@ def test_intent_handler_in_known_handlers() -> None:
     from omnibase_infra.runtime.handler_registry import HANDLER_TYPE_INTENT
     from omnibase_infra.runtime.util_wiring import _HANDLER_CONTRACT_PATHS
 
-    assert (
-        HANDLER_TYPE_INTENT in _HANDLER_CONTRACT_PATHS
-    ), f"HANDLER_TYPE_INTENT ('{HANDLER_TYPE_INTENT}') should be in _HANDLER_CONTRACT_PATHS"
+    assert HANDLER_TYPE_INTENT in _HANDLER_CONTRACT_PATHS, (
+        f"HANDLER_TYPE_INTENT ('{HANDLER_TYPE_INTENT}') should be in _HANDLER_CONTRACT_PATHS"
+    )
 
     contract_path = _HANDLER_CONTRACT_PATHS[HANDLER_TYPE_INTENT]
-    assert isinstance(
-        contract_path, Path
-    ), f"Contract path should be a Path object, got {type(contract_path)}"
-    assert (
-        contract_path.name == "contract.yaml"
-    ), f"Contract path should end with 'contract.yaml', got '{contract_path.name}'"
-    assert "intent" in str(
-        contract_path
-    ), f"Contract path should contain 'intent', got '{contract_path}'"
+    assert isinstance(contract_path, Path), (
+        f"Contract path should be a Path object, got {type(contract_path)}"
+    )
+    assert contract_path.name == "contract.yaml", (
+        f"Contract path should end with 'contract.yaml', got '{contract_path.name}'"
+    )
+    assert "intent" in str(contract_path), (
+        f"Contract path should contain 'intent', got '{contract_path}'"
+    )
 
 
 def test_intent_handler_type_constant_value() -> None:
@@ -89,9 +89,9 @@ def test_intent_handler_type_constant_value() -> None:
     """
     from omnibase_infra.runtime.handler_registry import HANDLER_TYPE_INTENT
 
-    assert (
-        HANDLER_TYPE_INTENT == "intent"
-    ), f"HANDLER_TYPE_INTENT should be 'intent', got '{HANDLER_TYPE_INTENT}'"
+    assert HANDLER_TYPE_INTENT == "intent", (
+        f"HANDLER_TYPE_INTENT should be 'intent', got '{HANDLER_TYPE_INTENT}'"
+    )
 
 
 def test_wire_default_handlers_returns_expected_structure() -> None:
@@ -154,13 +154,13 @@ def test_known_handlers_includes_all_expected_types() -> None:
     ]
 
     for handler_type in expected_handlers:
-        assert (
-            handler_type in _HANDLER_CONTRACT_PATHS
-        ), f"Handler type '{handler_type}' should be in _HANDLER_CONTRACT_PATHS"
+        assert handler_type in _HANDLER_CONTRACT_PATHS, (
+            f"Handler type '{handler_type}' should be in _HANDLER_CONTRACT_PATHS"
+        )
         contract_path = _HANDLER_CONTRACT_PATHS[handler_type]
-        assert isinstance(
-            contract_path, Path
-        ), f"Contract path for '{handler_type}' should be a Path object"
+        assert isinstance(contract_path, Path), (
+            f"Contract path for '{handler_type}' should be a Path object"
+        )
 
 
 def test_wire_default_handlers_includes_inmemory_event_bus() -> None:
@@ -192,6 +192,6 @@ def test_wire_default_handlers_includes_inmemory_event_bus() -> None:
     ):
         summary = wire_default_handlers()
 
-    assert (
-        EVENT_BUS_INMEMORY in summary["event_buses"]
-    ), "In-memory event bus should be registered"
+    assert EVENT_BUS_INMEMORY in summary["event_buses"], (
+        "In-memory event bus should be registered"
+    )

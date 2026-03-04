@@ -985,9 +985,9 @@ class TestUnionRegistrySync:
         for union_type in union_types:
             # Get the kind from the class default
             kind_default = getattr(union_type, "model_fields", {}).get("kind")
-            assert (
-                kind_default is not None
-            ), f"Invalid union type '{union_type.__name__}': expected 'kind' field, got None"
+            assert kind_default is not None, (
+                f"Invalid union type '{union_type.__name__}': expected 'kind' field, got None"
+            )
 
             kind_value = kind_default.default
             assert RegistryIntent.is_registered(kind_value), (
@@ -1012,9 +1012,9 @@ class TestUnionRegistrySync:
         union_types = set(get_union_intent_types())
         registry_types = set(RegistryIntent.get_all_types().values())
 
-        assert (
-            union_types == registry_types
-        ), f"Union types {union_types} do not match registry types {registry_types}"
+        assert union_types == registry_types, (
+            f"Union types {union_types} do not match registry types {registry_types}"
+        )
 
     def test_sync_validation_detects_missing_from_union(self) -> None:
         """Sync validation detects when a type is registered but not in union.

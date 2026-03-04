@@ -68,7 +68,6 @@ class RegistryInfraRegistryEffect:
         Args:
             container: ONEX dependency injection container. Must have the
                 following protocols registered:
-                - ProtocolConsulClient: Consul service discovery operations
                 - ProtocolPostgresAdapter: PostgreSQL registration persistence
                 - ProtocolEffectIdempotencyStore: Idempotency tracking
                 - ProtocolCircuitBreaker: Backend circuit breaker protection
@@ -81,7 +80,6 @@ class RegistryInfraRegistryEffect:
 
         Example:
             >>> container = ModelONEXContainer()
-            >>> container.register(ProtocolConsulClient, consul_client)
             >>> container.register(ProtocolPostgresAdapter, postgres_adapter)
             >>> effect = RegistryInfraRegistryEffect.create(container)
 
@@ -110,7 +108,6 @@ class RegistryInfraRegistryEffect:
         .. versionadded:: 0.5.0
         """
         return [
-            "ProtocolConsulClient",
             "ProtocolPostgresAdapter",
             "ProtocolEffectIdempotencyStore",
             "ProtocolCircuitBreaker",

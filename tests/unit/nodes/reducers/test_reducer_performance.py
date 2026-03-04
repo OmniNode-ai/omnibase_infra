@@ -396,9 +396,9 @@ class TestReducerPerformanceEdgeCases:
         assert output.result.status == "pending"
 
         max_allowed_ms = PERF_THRESHOLD_REDUCE_MS * SAFETY_MARGIN
-        assert (
-            elapsed_ms < max_allowed_ms
-        ), f"Reduce with empty endpoints took {elapsed_ms:.2f}ms, exceeds threshold"
+        assert elapsed_ms < max_allowed_ms, (
+            f"Reduce with empty endpoints took {elapsed_ms:.2f}ms, exceeds threshold"
+        )
 
     def test_reduce_with_many_endpoints_still_fast(
         self,
@@ -430,9 +430,9 @@ class TestReducerPerformanceEdgeCases:
         assert output.result.status == "pending"
 
         max_allowed_ms = PERF_THRESHOLD_REDUCE_MS * SAFETY_MARGIN
-        assert (
-            elapsed_ms < max_allowed_ms
-        ), f"Reduce with many endpoints took {elapsed_ms:.2f}ms, exceeds threshold"
+        assert elapsed_ms < max_allowed_ms, (
+            f"Reduce with many endpoints took {elapsed_ms:.2f}ms, exceeds threshold"
+        )
 
     def test_reduce_reset_is_fast(self) -> None:
         """reduce_reset() should be fast as it's a simple state transition."""
@@ -476,12 +476,12 @@ class TestThresholdConstants:
     def test_threshold_constants_are_positive(self) -> None:
         """Verify all threshold constants are positive numbers."""
         assert PERF_THRESHOLD_REDUCE_MS > 0, "Reduce threshold must be positive"
-        assert (
-            PERF_THRESHOLD_INTENT_BUILD_MS > 0
-        ), "Intent build threshold must be positive"
-        assert (
-            PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS > 0
-        ), "Idempotency threshold must be positive"
+        assert PERF_THRESHOLD_INTENT_BUILD_MS > 0, (
+            "Intent build threshold must be positive"
+        )
+        assert PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS > 0, (
+            "Idempotency threshold must be positive"
+        )
 
     def test_threshold_hierarchy_is_logical(self) -> None:
         """Verify threshold hierarchy makes sense.
@@ -510,15 +510,15 @@ class TestThresholdConstants:
         """
         # These match the documented values in the module docstring
         # and the environment variable defaults
-        assert (
-            PERF_THRESHOLD_REDUCE_MS == 300.0
-        ), f"Reduce threshold changed from documented 300ms to {PERF_THRESHOLD_REDUCE_MS}ms"
-        assert (
-            PERF_THRESHOLD_INTENT_BUILD_MS == 50.0
-        ), f"Intent build threshold changed from documented 50ms to {PERF_THRESHOLD_INTENT_BUILD_MS}ms"
-        assert (
-            PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS == 1.0
-        ), f"Idempotency threshold changed from documented 1ms to {PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS}ms"
+        assert PERF_THRESHOLD_REDUCE_MS == 300.0, (
+            f"Reduce threshold changed from documented 300ms to {PERF_THRESHOLD_REDUCE_MS}ms"
+        )
+        assert PERF_THRESHOLD_INTENT_BUILD_MS == 50.0, (
+            f"Intent build threshold changed from documented 50ms to {PERF_THRESHOLD_INTENT_BUILD_MS}ms"
+        )
+        assert PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS == 1.0, (
+            f"Idempotency threshold changed from documented 1ms to {PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS}ms"
+        )
 
 
 __all__ = [

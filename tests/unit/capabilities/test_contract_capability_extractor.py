@@ -1431,30 +1431,30 @@ class TestRealContractModels:
         result = extractor.extract(contract)
 
         # Verify extraction succeeded
-        assert (
-            result is not None
-        ), "Extraction should succeed for real ModelContractEffect"
+        assert result is not None, (
+            "Extraction should succeed for real ModelContractEffect"
+        )
 
         # Verify intent_types were extracted from event_type.primary_events
-        assert (
-            "NodeRegistered" in result.intent_types
-        ), f"Expected 'NodeRegistered' in intent_types, got {result.intent_types}"
-        assert (
-            "NodeUpdated" in result.intent_types
-        ), f"Expected 'NodeUpdated' in intent_types, got {result.intent_types}"
-        assert (
-            "NodeDeleted" in result.intent_types
-        ), f"Expected 'NodeDeleted' in intent_types, got {result.intent_types}"
+        assert "NodeRegistered" in result.intent_types, (
+            f"Expected 'NodeRegistered' in intent_types, got {result.intent_types}"
+        )
+        assert "NodeUpdated" in result.intent_types, (
+            f"Expected 'NodeUpdated' in intent_types, got {result.intent_types}"
+        )
+        assert "NodeDeleted" in result.intent_types, (
+            f"Expected 'NodeDeleted' in intent_types, got {result.intent_types}"
+        )
 
         # Verify intent_types are sorted (determinism requirement)
-        assert result.intent_types == sorted(
-            result.intent_types
-        ), "intent_types should be sorted for deterministic output"
+        assert result.intent_types == sorted(result.intent_types), (
+            "intent_types should be sorted for deterministic output"
+        )
 
         # Verify contract_type is correctly extracted
-        assert (
-            result.contract_type == "effect"
-        ), f"Expected contract_type 'effect', got '{result.contract_type}'"
+        assert result.contract_type == "effect", (
+            f"Expected contract_type 'effect', got '{result.contract_type}'"
+        )
 
     def test_effect_contract_without_event_type(
         self,
@@ -1490,9 +1490,9 @@ class TestRealContractModels:
         assert result is not None, "Extraction should succeed when event_type is None"
 
         # Verify intent_types is empty (no events to extract)
-        assert (
-            result.intent_types == []
-        ), f"Expected empty intent_types when event_type is None, got {result.intent_types}"
+        assert result.intent_types == [], (
+            f"Expected empty intent_types when event_type is None, got {result.intent_types}"
+        )
 
         # Verify contract_type is still correctly extracted
         assert result.contract_type == "effect"
@@ -1538,9 +1538,9 @@ class TestRealContractModels:
         assert result is not None
 
         # Verify intent_types contains the single event
-        assert result.intent_types == [
-            "SingleEvent"
-        ], f"Expected ['SingleEvent'], got {result.intent_types}"
+        assert result.intent_types == ["SingleEvent"], (
+            f"Expected ['SingleEvent'], got {result.intent_types}"
+        )
 
     def test_effect_contract_full_extraction(
         self,

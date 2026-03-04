@@ -39,7 +39,7 @@ Usage:
         container = ModelONEXContainer()
         container.register(
             ProtocolDiscoveryOperations,
-            consul_handler_instance,
+            discovery_handler_instance,
         )
 
         # Create node

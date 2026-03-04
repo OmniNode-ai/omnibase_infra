@@ -53,7 +53,7 @@ Example:
         container = ModelONEXContainer()
         RegistryInfraServiceDiscovery.register_with_handler(
             container,
-            handler=consul_handler,
+            handler=discovery_handler,
         )
 
         # Create node

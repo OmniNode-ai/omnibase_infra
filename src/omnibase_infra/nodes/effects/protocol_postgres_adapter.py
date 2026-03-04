@@ -13,7 +13,6 @@ Concurrency Safety:
 
 Related:
     - NodeRegistryEffect: Effect node that uses this protocol
-    - ProtocolConsulClient: Protocol for Consul backend
     - ModelBackendResult: Structured result model for backend operations
 """
 

@@ -2035,9 +2035,7 @@ class TestCircuitBreakerNonApplicability:
         for intent in output.intents:
             # Intents are declarative descriptions using extension payload
             assert intent.intent_type
-            assert intent.payload.intent_type in (
-                "postgres.upsert_registration",
-            )
+            assert intent.payload.intent_type in ("postgres.upsert_registration",)
             assert intent.target is not None
 
             # Verify payloads are typed models (ProtocolIntentPayload implementations)
@@ -2687,7 +2685,11 @@ class TestEdgeCasesComprehensive:
         # Verify long version is preserved in postgres intent
         # (consul removed in OMN-3540)
         postgres_intent = next(
-            (i for i in output.intents if i.intent_type == "postgres.upsert_registration"),
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "postgres.upsert_registration"
+            ),
             None,
         )
         assert postgres_intent is not None
@@ -2831,7 +2833,11 @@ class TestEdgeCasesComprehensive:
 
         # Verify nil UUID appears in postgres intent (consul removed OMN-3540)
         postgres_intent = next(
-            (i for i in output.intents if i.intent_type == "postgres.upsert_registration"),
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "postgres.upsert_registration"
+            ),
             None,
         )
         assert postgres_intent is not None
@@ -4380,9 +4386,7 @@ class TestPropertyBasedStateInvariants:
         initial_status=st.sampled_from(["pending"]),
     )
     @settings(max_examples=10)
-    def test_confirmation_order_invariant(
-        self, initial_status: str
-    ) -> None:
+    def test_confirmation_order_invariant(self, initial_status: str) -> None:
         """Property: PostgreSQL confirmation always produces 'complete' state.
 
         With consul removed (OMN-3540), only postgres confirmation exists.
@@ -4408,7 +4412,9 @@ class TestPropertyBasedStateInvariants:
         assert complete.status == "complete", (
             f"Final status should be 'complete', got '{complete.status}'"
         )
-        assert complete.consul_confirmed is False, "Consul should not be confirmed (removed OMN-3540)"
+        assert complete.consul_confirmed is False, (
+            "Consul should not be confirmed (removed OMN-3540)"
+        )
         assert complete.postgres_confirmed is True, "Postgres should be confirmed"
         assert complete.node_id == node_id, "node_id should be preserved"
         assert complete.failure_reason is None, (
@@ -4609,7 +4615,11 @@ class TestBoundaryConditions:
 
         # Verify min UUID appears correctly in postgres intent (consul removed OMN-3540)
         postgres_intent = next(
-            (i for i in output.intents if i.intent_type == "postgres.upsert_registration"),
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "postgres.upsert_registration"
+            ),
             None,
         )
         assert postgres_intent is not None
@@ -4663,7 +4673,11 @@ class TestBoundaryConditions:
 
         # Verify minimal version is preserved in postgres intent (consul removed OMN-3540)
         postgres_intent = next(
-            (i for i in output.intents if i.intent_type == "postgres.upsert_registration"),
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "postgres.upsert_registration"
+            ),
             None,
         )
         assert postgres_intent is not None
