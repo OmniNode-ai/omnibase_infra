@@ -1011,6 +1011,86 @@ shutdown:
         assert call_kwargs["port"] == DEFAULT_HTTP_PORT
         assert call_kwargs["version"] == KERNEL_VERSION
 
+    async def test_bootstrap_logs_run_loop_entered_and_shutdown_reason(
+        self,
+        mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that bootstrap emits RUN_LOOP_ENTERED and RUN_LOOP_EXITED logs (OMN-3591).
+
+        The run-loop markers let operators verify in ``docker logs`` that the
+        kernel reached the blocking wait and did not exit prematurely.
+        """
+        with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            with caplog.at_level(
+                "INFO", logger="omnibase_infra.runtime.service_kernel"
+            ):
+                exit_code = await bootstrap()
+
+        assert exit_code == 0
+
+        # Verify RUN_LOOP_ENTERED is logged
+        run_loop_entered = [
+            r for r in caplog.records if "RUN_LOOP_ENTERED" in r.message
+        ]
+        assert len(run_loop_entered) == 1, (
+            "Expected exactly one RUN_LOOP_ENTERED log message"
+        )
+
+        # Verify RUN_LOOP_EXITED is logged with reason
+        run_loop_exited = [r for r in caplog.records if "RUN_LOOP_EXITED" in r.message]
+        assert len(run_loop_exited) == 1, (
+            "Expected exactly one RUN_LOOP_EXITED log message"
+        )
+        # When no signal triggers shutdown (mock returns immediately),
+        # the reason should be "unknown" (no signal handler was invoked)
+        assert "reason=unknown" in run_loop_exited[0].message
+
+    async def test_bootstrap_banner_includes_runtime_profile(
+        self,
+        mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that bootstrap banner includes RUNTIME_PROFILE (OMN-3591).
+
+        Workers set RUNTIME_PROFILE=workers so operators can distinguish
+        main/effects/workers in container logs.
+        """
+        monkeypatch.setenv("RUNTIME_PROFILE", "workers")
+
+        with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            with caplog.at_level(
+                "INFO", logger="omnibase_infra.runtime.service_kernel"
+            ):
+                exit_code = await bootstrap()
+
+        assert exit_code == 0
+
+        # Find the banner log message (contains the "=" separator)
+        banner_msgs = [
+            r.message for r in caplog.records if "ONEX Runtime Kernel" in r.message
+        ]
+        assert len(banner_msgs) >= 1, "Expected banner log message"
+        # Banner should include profile
+        assert "Profile: workers" in banner_msgs[0]
+
 
 class TestConfigureLogging:
     """Tests for configure_logging function."""
