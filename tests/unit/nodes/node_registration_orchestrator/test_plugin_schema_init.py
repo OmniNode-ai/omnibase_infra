@@ -285,18 +285,18 @@ class TestSchemaInitAdvisoryLock:
         ):
             await plugin._initialize_schema(config)  # type: ignore[attr-defined]
 
-        assert (
-            conn.execute.call_count == 2
-        ), f"Expected 2 execute() calls, got {conn.execute.call_count}"
+        assert conn.execute.call_count == 2, (
+            f"Expected 2 execute() calls, got {conn.execute.call_count}"
+        )
         first_call_sql: str = conn.execute.call_args_list[0][0][0]
         second_call_sql: str = conn.execute.call_args_list[1][0][0]
 
-        assert (
-            "pg_advisory_xact_lock" in first_call_sql
-        ), f"First execute() should be advisory lock, got: {first_call_sql!r}"
-        assert (
-            second_call_sql == schema_sql_text
-        ), f"Second execute() should be schema SQL, got: {second_call_sql!r}"
+        assert "pg_advisory_xact_lock" in first_call_sql, (
+            f"First execute() should be advisory lock, got: {first_call_sql!r}"
+        )
+        assert second_call_sql == schema_sql_text, (
+            f"Second execute() should be schema SQL, got: {second_call_sql!r}"
+        )
 
 
 # =============================================================================
@@ -384,9 +384,9 @@ class TestSchemaInitIdempotency:
 
         # Must NOT have WARNING-level log for this specific duplicate error
         warning_msgs = [r for r in caplog.records if r.levelno == logging.WARNING]
-        assert not any(
-            "duplicate" in r.message.lower() for r in warning_msgs
-        ), f"Unexpected WARNING for duplicate table error: {[r.message for r in warning_msgs]}"
+        assert not any("duplicate" in r.message.lower() for r in warning_msgs), (
+            f"Unexpected WARNING for duplicate table error: {[r.message for r in warning_msgs]}"
+        )
 
 
 # =============================================================================
@@ -458,9 +458,9 @@ class TestSchemaInitErrorHandling:
             await plugin._initialize_schema(config)  # type: ignore[attr-defined]
 
         warning_msgs = [r for r in caplog.records if r.levelno == logging.WARNING]
-        assert any(
-            "pool" in r.message.lower() for r in warning_msgs
-        ), f"Expected WARNING about pool being None. Got: {[r.message for r in warning_msgs]}"
+        assert any("pool" in r.message.lower() for r in warning_msgs), (
+            f"Expected WARNING about pool being None. Got: {[r.message for r in warning_msgs]}"
+        )
 
     @pytest.mark.unit
     async def test_missing_schema_file_returns_early_without_error(
@@ -482,9 +482,9 @@ class TestSchemaInitErrorHandling:
             await plugin._initialize_schema(config)  # type: ignore[attr-defined]
 
         warning_msgs = [r for r in caplog.records if r.levelno == logging.WARNING]
-        assert any(
-            "schema file" in r.message.lower() for r in warning_msgs
-        ), f"Expected WARNING about missing schema file. Got: {[r.message for r in warning_msgs]}"
+        assert any("schema file" in r.message.lower() for r in warning_msgs), (
+            f"Expected WARNING about missing schema file. Got: {[r.message for r in warning_msgs]}"
+        )
 
         # Pool should NOT have been touched (early return before pool access)
         pool.acquire.assert_not_called()
