@@ -43,6 +43,7 @@ import os
 import re
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -599,6 +600,179 @@ class PostgresErrorTailer(threading.Thread):
 
 
 # ---------------------------------------------------------------------------
+# Restart watcher (OMN-3596)
+# ---------------------------------------------------------------------------
+
+_RESTART_HWM_FILE = Path(
+    os.environ.get(
+        "MONITOR_RESTART_HWM_FILE",
+        str(Path.home() / ".omnibase" / "monitor-restart-hwm.json"),
+    )
+)
+_restart_hwm_lock = threading.Lock()
+
+# Default restart-count delta that triggers an alert.
+_RESTART_THRESHOLD = 3
+
+# Default polling interval in seconds.
+_RESTART_POLL_INTERVAL = 60
+
+
+def _restart_hwm_read(container: str) -> int:
+    """Return the last-seen restart count for *container* (0 if unknown or corrupt)."""
+    try:
+        with _restart_hwm_lock:
+            data = (
+                json.loads(_RESTART_HWM_FILE.read_text())
+                if _RESTART_HWM_FILE.exists()
+                else {}
+            )
+        return int(data.get(container, 0))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return 0
+
+
+def _restart_hwm_write(container: str, count: int) -> None:
+    """Persist *count* as the high-water mark for *container*.
+
+    Creates parent directories if needed.  If the file contains corrupt JSON
+    it is silently reset to ``{}``.  Uses tmp+rename for atomic writes.
+    """
+    try:
+        with _restart_hwm_lock:
+            _RESTART_HWM_FILE.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                data: dict[str, int] = (
+                    json.loads(_RESTART_HWM_FILE.read_text())
+                    if _RESTART_HWM_FILE.exists()
+                    else {}
+                )
+            except (json.JSONDecodeError, ValueError):
+                data = {}
+            data[container] = count
+            tmp = _RESTART_HWM_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data))
+            tmp.rename(_RESTART_HWM_FILE)
+    except OSError:
+        pass
+
+
+def _get_worker_state(container: str) -> dict[str, int | str] | None:
+    """Return restart count, status, and exit code for *container* via ``docker inspect``.
+
+    Returns ``None`` if the inspect call fails or returns no data.
+    """
+    result = subprocess.run(
+        [
+            _DOCKER,
+            "inspect",
+            "--format",
+            "json",
+            container,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        items = json.loads(result.stdout)
+        if not items:
+            return None
+        item = items[0]
+        return {
+            "restart_count": int(item.get("RestartCount", 0)),
+            "status": str(item.get("State", {}).get("Status", "unknown")),
+            "exit_code": int(item.get("State", {}).get("ExitCode", -1)),
+        }
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return None
+
+
+def _restart_containers_from_env() -> list[str] | None:
+    """Return an explicit container list from ``MONITOR_RESTART_CONTAINERS`` or ``None``."""
+    raw = os.environ.get("MONITOR_RESTART_CONTAINERS")
+    if not raw:
+        return None
+    return sorted(name.strip() for name in raw.split(",") if name.strip())
+
+
+class RestartWatcher(threading.Thread):
+    """Daemon thread that polls ``docker inspect`` for restart-count deltas.
+
+    When the restart-count delta since the last high-water mark reaches
+    *threshold*, a Slack alert is posted.  The HWM is persisted to disk so
+    it survives process restarts.
+    """
+
+    def __init__(
+        self,
+        containers: list[str],
+        bot_token: str,
+        channel_id: str,
+        dry_run: bool,
+        stop_event: threading.Event,
+        interval: int = _RESTART_POLL_INTERVAL,
+        threshold: int = _RESTART_THRESHOLD,
+    ) -> None:
+        super().__init__(name="restart-watcher", daemon=True)
+        self.containers = containers
+        self.bot_token = bot_token
+        self.channel_id = channel_id
+        self.dry_run = dry_run
+        self.stop_event = stop_event
+        self.interval = interval
+        self.threshold = threshold
+
+    def run(self) -> None:
+        print(
+            f"[monitor] RestartWatcher started (containers={len(self.containers)}, "
+            f"interval={self.interval}s, threshold={self.threshold})"
+        )
+        while not self.stop_event.is_set():
+            self._check()
+            self.stop_event.wait(timeout=self.interval)
+
+    def _check(self) -> None:
+        for container in self.containers:
+            state = _get_worker_state(container)
+            if state is None:
+                continue
+            current = int(state["restart_count"])
+            hwm = _restart_hwm_read(container)
+            delta = current - hwm
+
+            if delta < 0:
+                # Container was recreated — reset HWM without alerting
+                _restart_hwm_write(container, current)
+                continue
+
+            if delta >= self.threshold:
+                self._alert(container, state)
+                _restart_hwm_write(container, current)
+            elif delta > 0:
+                # Below threshold — update HWM silently
+                _restart_hwm_write(container, current)
+
+    def _alert(self, container: str, state: dict[str, int | str]) -> None:
+        hostname = socket.gethostname()
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        lines = [
+            f":warning: *Restart loop detected:* `{container}`",
+            f"*Status:* {state['status']}  |  *Exit code:* {state['exit_code']}",
+            f"*Restart count:* {state['restart_count']}",
+            f"*Host:* {hostname}  |  *Time:* {timestamp}",
+        ]
+        if self.dry_run:
+            print(f"[DRY RUN] Would post restart alert for {container}:")
+            for line in lines:
+                print(f"  {line}")
+            return
+        post_slack(self.bot_token, self.channel_id, container, lines, self.dry_run)
+
+
+# ---------------------------------------------------------------------------
 # Slack
 # ---------------------------------------------------------------------------
 
@@ -909,6 +1083,23 @@ class LogMonitor:
         for pg_container in _discover_postgres_containers():
             self._start_pg_tailer(pg_container)
 
+        # Start restart watcher (OMN-3596)
+        _restart_stop = threading.Event()
+        explicit_containers = _restart_containers_from_env()
+        restart_containers = (
+            explicit_containers
+            if explicit_containers is not None
+            else sorted(set(self._get_project_containers()))
+        )
+        restart_watcher = RestartWatcher(
+            containers=restart_containers,
+            bot_token=self.bot_token,
+            channel_id=self.channel_id,
+            dry_run=self.dry_run,
+            stop_event=_restart_stop,
+        )
+        restart_watcher.start()
+
         # Watch for container start/die events
         cmd = [
             _DOCKER,
@@ -952,6 +1143,7 @@ class LogMonitor:
         except KeyboardInterrupt:
             print("\n[monitor] Shutting down...")
         finally:
+            _restart_stop.set()
             proc.terminate()
 
 
