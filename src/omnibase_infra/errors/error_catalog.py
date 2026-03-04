@@ -1,30 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Error Catalog - Common Resolution Patterns for Infrastructure Errors.
-
-This module provides a centralized catalog of error resolution patterns,
-mapping transport types and error classes to human-readable resolution
-suggestions and retry guidance.
-
-The catalog is used by ``RuntimeHostError`` to automatically populate
-``suggested_resolution`` and ``retry_after_seconds`` on the error context
-when these fields are not explicitly provided.
-
-Usage:
-    The catalog is consumed automatically by ``RuntimeHostError.__init__``
-    when a ``ModelInfraErrorContext`` is provided without a
-    ``suggested_resolution``. Callers can also query the catalog directly::
-
-        from omnibase_infra.errors.error_catalog import get_resolution
-
-        suggestion = get_resolution(
-            error_class="InfraConnectionError",
-            transport_type=EnumInfraTransportType.DATABASE,
-        )
-
-.. versionadded:: 0.9.0
-    Part of OMN-518 error context enhancement.
-"""
+"""Error resolution catalog mapping transport types to retry guidance (OMN-518)."""
 
 from __future__ import annotations
 
