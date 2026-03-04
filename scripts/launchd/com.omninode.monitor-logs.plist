@@ -14,7 +14,7 @@
   Logs: ~/.omnibase/monitor-logs.log
 
   Requires:
-    - SLACK_WEBHOOK_URL set in ~/.omnibase/.env
+    - SLACK_BOT_TOKEN + SLACK_CHANNEL_ID set in ~/.omnibase/.env
     - Docker installed at /usr/local/bin/docker (or discoverable via PATH)
     - omnibase_infra repo at /Volumes/PRO-G40/Code/omni_home/omnibase_infra
 

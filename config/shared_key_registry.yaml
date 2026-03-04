@@ -111,8 +111,8 @@ shared:
     - QDRANT_API_KEY
     - QDRANT_URL
   # NOT prefetched by ConfigPrefetcher — no EnumInfraTransportType.ENV entry; keys resolved via shell env fallback.
+  # SLACK_WEBHOOK_URL removed (OMN-3332) — Web API-only mode enforced.
   "/shared/env/":
-    - SLACK_WEBHOOK_URL
     - SLACK_BOT_TOKEN
     - SLACK_CHANNEL_ID
 # Keys that must NEVER be seeded into Infisical.

@@ -8,7 +8,7 @@ notification topics from Kafka and routes events to the Slack alerter.
 Architecture:
     ```
     +-----------------+     Kafka     +----------------------+     Slack
-    | Event Publisher  | ------------> | NotificationConsumer | ------------> Webhook
+    | Event Publisher  | ------------> | NotificationConsumer | ------------> Web API
     | (omniclaude3)    |   Topics:     | (this file)          |   via
     +-----------------+   blocked/    +----------------------+   HandlerSlackWebhook
                           completed
@@ -25,7 +25,8 @@ Example Usage:
     # Create consumer with Kafka event bus
     consumer = NotificationConsumer(
         event_bus=kafka_event_bus,
-        webhook_url=os.getenv("SLACK_WEBHOOK_URL"),
+        bot_token=os.getenv("SLACK_BOT_TOKEN"),
+        default_channel=os.getenv("SLACK_CHANNEL_ID"),
     )
 
     # Start consuming (blocks until stopped)
@@ -95,7 +96,8 @@ class NotificationConsumer:
     Example:
         >>> consumer = NotificationConsumer(
         ...     event_bus=kafka_event_bus,
-        ...     webhook_url="https://hooks.slack.com/...",
+        ...     bot_token="xoxb-...",
+        ...     default_channel="C01234567",
         ... )
         >>> await consumer.start()
     """
@@ -103,7 +105,6 @@ class NotificationConsumer:
     def __init__(
         self,
         event_bus: ProtocolEventBusLike,
-        webhook_url: str | None = None,
         bot_token: str | None = None,
         default_channel: str | None = None,
     ) -> None:
@@ -111,15 +112,13 @@ class NotificationConsumer:
 
         Args:
             event_bus: Kafka event bus for subscribing to notification topics.
-            webhook_url: Optional Slack webhook URL. If not provided, reads
-                from SLACK_WEBHOOK_URL environment variable.
-            bot_token: Optional Slack Bot Token for Web API mode. If set,
-                the handler uses chat.postMessage which supports threading.
+            bot_token: Optional Slack Bot Token for Web API. If not provided,
+                reads from SLACK_BOT_TOKEN environment variable.
             default_channel: Optional default channel ID for Web API posts.
+                If not provided, reads from SLACK_CHANNEL_ID environment variable.
         """
         self._event_bus = event_bus
         self._handler = HandlerSlackWebhook(
-            webhook_url=webhook_url,
             bot_token=bot_token,
             default_channel=default_channel,
         )
@@ -127,10 +126,7 @@ class NotificationConsumer:
         self._consumer_tasks: list[asyncio.Task[None]] = []
         self._shutdown_event = asyncio.Event()
 
-        logger.debug(
-            "NotificationConsumer initialized",
-            extra={"mode": "web_api" if self._handler.uses_web_api else "webhook"},
-        )
+        logger.debug("NotificationConsumer initialized")
 
     async def start(self) -> None:
         """Start consuming notification events.

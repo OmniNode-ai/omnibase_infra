@@ -55,7 +55,7 @@ from pathlib import Path
 
 
 def _load_omnibase_env() -> None:
-    """Load ~/.omnibase/.env into os.environ if SLACK_WEBHOOK_URL is not set.
+    """Load ~/.omnibase/.env into os.environ if SLACK_BOT_TOKEN is not set.
 
     Handles quoted values and comment lines. Skips lines that would
     overwrite values already present in the environment (shell wins).

@@ -100,7 +100,7 @@ class AdapterPipelineAlertBridge(MixinAsyncCircuitBreaker):
 
     Example:
         >>> bridge = AdapterPipelineAlertBridge(
-        ...     slack_handler=HandlerSlackWebhook(webhook_url="https://..."),
+        ...     slack_handler=HandlerSlackWebhook(bot_token="xoxb-...", default_channel="C01234567"),
         ...     environment="prod",
         ... )
         >>> # Register DLQ callback

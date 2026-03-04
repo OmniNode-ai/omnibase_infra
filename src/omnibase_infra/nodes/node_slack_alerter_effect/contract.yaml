@@ -5,28 +5,29 @@
 # Node: NodeSlackAlerterEffect
 #
 # This contract defines the interface for the Slack Alerter Effect node,
-# which sends infrastructure alerts to Slack via the Web API or webhooks.
+# which sends infrastructure alerts to Slack via the Web API.
 # The node uses declarative operation routing to dispatch operations to the handler.
 #
 # Related Tickets:
 #   - OMN-1905: Add declarative Slack webhook handler to omnibase_infra
+#   - OMN-3332: Remove SLACK_WEBHOOK_URL fallback, enforce Web API-only
 # Contract identifiers
 name: "node_slack_alerter_effect"
 contract_name: "node_slack_alerter_effect"
 node_name: "node_slack_alerter_effect"
 contract_version:
-  major: 1
-  minor: 1
+  major: 2
+  minor: 0
   patch: 0
 node_version:
-  major: 1
-  minor: 1
+  major: 2
+  minor: 0
   patch: 0
 # Node type
 node_type: "EFFECT_GENERIC"
 # Description
 description: >
-  Effect node for Slack alerting. Sends infrastructure alerts to Slack channels using either the Web API (chat.postMessage with threading support) or incoming webhooks, with Block Kit formatting, retry with exponential backoff, and rate limit handling. Uses declarative operation routing to dispatch to the HandlerSlackWebhook.
+  Effect node for Slack alerting. Sends infrastructure alerts to Slack channels using the Web API (chat.postMessage with threading support), with Block Kit formatting, retry with exponential backoff, and rate limit handling. Uses declarative operation routing to dispatch to the HandlerSlackWebhook.
 
 # Strongly typed I/O models
 input_model:
@@ -105,7 +106,7 @@ error_handling:
   # Error type definitions
   error_types:
     - name: "SLACK_NOT_CONFIGURED"
-      description: "Neither SLACK_BOT_TOKEN (Web API) nor SLACK_WEBHOOK_URL (webhook) is configured, or SLACK_CHANNEL_ID is missing for Web API mode"
+      description: "SLACK_BOT_TOKEN is not configured, or SLACK_CHANNEL_ID is missing"
       recoverable: false
       retry_strategy: "none"
     - name: "SLACK_RATE_LIMITED"
@@ -130,10 +131,6 @@ error_handling:
       retry_strategy: "conditional"
     - name: "SLACK_API_ERROR"
       description: "Slack Web API returned ok=false with non-retryable error"
-      recoverable: false
-      retry_strategy: "none"
-    - name: "SLACK_WEBHOOK_ERROR"
-      description: "Slack webhook returned HTTP 200 with error body (e.g. invalid_payload, no_service)"
       recoverable: false
       retry_strategy: "none"
 # IO operations (EFFECT node specific)
@@ -177,16 +174,11 @@ dependencies:
     type: "library"
     library: "aiohttp"
     description: "Async HTTP client for webhook and Web API requests"
-  - name: "slack_webhook_url"
-    type: "environment"
-    env_var: "SLACK_WEBHOOK_URL"
-    description: "Slack incoming webhook URL (fallback mode)"
-    required: false
   - name: "slack_bot_token"
     type: "environment"
     env_var: "SLACK_BOT_TOKEN"
-    description: "Slack Bot Token for Web API mode (preferred, supports threading)"
-    required: false
+    description: "Slack Bot Token for Web API (required)"
+    required: true
   - name: "slack_channel_id"
     type: "environment"
     env_var: "SLACK_CHANNEL_ID"
@@ -307,18 +299,17 @@ health_check:
     - name: "slack_configured"
       check_type: "environment"
       env_var: "SLACK_BOT_TOKEN"
-      fallback_env_var: "SLACK_WEBHOOK_URL"
-      description: "Verify either SLACK_BOT_TOKEN or SLACK_WEBHOOK_URL is configured"
+      description: "Verify SLACK_BOT_TOKEN is configured"
 # Metadata
 metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-04"
-  updated: "2026-02-10"
+  updated: "2026-03-04"
   tags:
     - effect
     - slack
     - alerting
-    - webhook
+    - web-api
     - infrastructure
     - block-kit

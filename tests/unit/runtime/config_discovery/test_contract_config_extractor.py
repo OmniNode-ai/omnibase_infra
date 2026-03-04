@@ -84,13 +84,13 @@ metadata:
             """
 name: "slack_alerter"
 dependencies:
-  - name: "slack_webhook_url"
-    type: "environment"
-    env_var: "SLACK_WEBHOOK_URL"
-    required: false
   - name: "slack_bot_token"
     type: "environment"
     env_var: "SLACK_BOT_TOKEN"
+    required: true
+  - name: "slack_channel_id"
+    type: "environment"
+    env_var: "SLACK_CHANNEL_ID"
     required: false
   - name: "http_client"
     type: "library"
@@ -104,9 +104,9 @@ dependencies:
             r for r in reqs.requirements if r.source_field.startswith("dependencies[")
         ]
         assert len(env_reqs) == 2
-        assert env_reqs[0].key == "SLACK_WEBHOOK_URL"
-        assert env_reqs[0].required is False
-        assert env_reqs[1].key == "SLACK_BOT_TOKEN"
+        assert env_reqs[0].key == "SLACK_BOT_TOKEN"
+        assert env_reqs[0].required is True
+        assert env_reqs[1].key == "SLACK_CHANNEL_ID"
 
     def test_extract_unknown_transport_type(self, tmp_path: Path) -> None:
         """Should log error for unknown transport types."""

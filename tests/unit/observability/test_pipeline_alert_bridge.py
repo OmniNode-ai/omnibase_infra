@@ -47,7 +47,7 @@ from omnibase_infra.observability.wiring_health.model_wiring_health_alert import
 @pytest.fixture
 def mock_slack_handler() -> HandlerSlackWebhook:
     """Create a mock Slack handler with successful delivery."""
-    handler = HandlerSlackWebhook(webhook_url="https://test.slack.com/webhook")
+    handler = HandlerSlackWebhook(bot_token="xoxb-test", default_channel="C01234567")
     handler.handle = AsyncMock(  # type: ignore[method-assign]
         return_value=ModelSlackAlertResult(
             success=True,
@@ -485,7 +485,9 @@ class TestDeliveryFailureHandling:
         sample_dlq_event: ModelDlqEvent,
     ) -> None:
         """Verify Slack delivery failure does not crash the bridge."""
-        handler = HandlerSlackWebhook(webhook_url="https://test.slack.com/webhook")
+        handler = HandlerSlackWebhook(
+            bot_token="xoxb-test", default_channel="C01234567"
+        )
         handler.handle = AsyncMock(  # type: ignore[method-assign]
             return_value=ModelSlackAlertResult(
                 success=False,
@@ -517,7 +519,9 @@ class TestDeliveryFailureHandling:
         crashes the caller (DLQ processing, health checks, etc.). The exception
         is logged but not re-raised.
         """
-        handler = HandlerSlackWebhook(webhook_url="https://test.slack.com/webhook")
+        handler = HandlerSlackWebhook(
+            bot_token="xoxb-test", default_channel="C01234567"
+        )
         handler.handle = AsyncMock(  # type: ignore[method-assign]
             side_effect=RuntimeError("Connection refused")
         )
@@ -586,7 +590,9 @@ class TestCircuitBreakerBehavior:
     @pytest.fixture
     def failing_handler(self) -> HandlerSlackWebhook:
         """Create a Slack handler that always raises on handle()."""
-        handler = HandlerSlackWebhook(webhook_url="https://test.slack.com/webhook")
+        handler = HandlerSlackWebhook(
+            bot_token="xoxb-test", default_channel="C01234567"
+        )
         handler.handle = AsyncMock(  # type: ignore[method-assign]
             side_effect=RuntimeError("Slack unavailable"),
         )
@@ -720,7 +726,9 @@ class TestCircuitBreakerBehavior:
     ) -> None:
         """A successful delivery resets the failure counter, preventing the
         circuit from opening on sporadic errors."""
-        handler = HandlerSlackWebhook(webhook_url="https://test.slack.com/webhook")
+        handler = HandlerSlackWebhook(
+            bot_token="xoxb-test", default_channel="C01234567"
+        )
 
         # First 3 calls fail, 4th succeeds, then 3 more fail
         failure_result = RuntimeError("Slack unavailable")

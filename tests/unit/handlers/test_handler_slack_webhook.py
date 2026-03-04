@@ -2,14 +2,13 @@
 # Copyright (c) 2025 OmniNode Team
 """Unit tests for HandlerSlackWebhook.
 
-Tests the Slack webhook handler's core functionality including:
+Tests the Slack handler's core functionality including:
 - Block Kit message formatting
 - Retry logic with exponential backoff
 - Rate limit handling (HTTP 429)
 - Error handling and sanitization
 - Configuration validation
 - Web API mode (chat.postMessage) with threading
-- Webhook fallback mode
 
 All tests use mocked HTTP responses to avoid external dependencies.
 """
@@ -42,12 +41,11 @@ from omnibase_infra.handlers.models.model_slack_alert import (
 def _clear_slack_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
     """Remove ambient Slack credentials from the environment for test isolation.
 
-    Prevents SLACK_BOT_TOKEN, SLACK_WEBHOOK_URL, and SLACK_CHANNEL_ID present in
-    the developer's shell from leaking into handler constructor env-var lookups and
-    affecting test assertions about mode selection.
+    Prevents SLACK_BOT_TOKEN and SLACK_CHANNEL_ID present in the developer's
+    shell from leaking into handler constructor env-var lookups and affecting
+    test assertions about mode selection.
     """
     monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
-    monkeypatch.delenv("SLACK_WEBHOOK_URL", raising=False)
     monkeypatch.delenv("SLACK_CHANNEL_ID", raising=False)
 
 
@@ -152,62 +150,16 @@ class TestModelSlackAlertResult:
 
 
 class TestHandlerSlackWebhook:
-    """Tests for HandlerSlackWebhook webhook mode."""
-
-    @pytest.fixture
-    def webhook_url(self) -> str:
-        """Return test webhook URL."""
-        return "https://hooks.slack.com/services/T00/B00/XXX"
-
-    @pytest.fixture
-    def handler(self, webhook_url: str) -> HandlerSlackWebhook:
-        """Create handler with test webhook URL."""
-        return HandlerSlackWebhook(
-            webhook_url=webhook_url,
-            max_retries=2,
-            retry_backoff=(0.01, 0.02),  # Fast retries for testing
-            timeout=1.0,
-        )
-
-    @pytest.fixture
-    def alert(self) -> ModelSlackAlert:
-        """Create test alert."""
-        return ModelSlackAlert(
-            severity=EnumAlertSeverity.ERROR,
-            message="Test error message",
-            title="Test Alert",
-            details={"key": "value"},
-        )
-
-    def test_handler_initialization_with_url(self, webhook_url: str) -> None:
-        """Test handler initializes with provided URL."""
-        handler = HandlerSlackWebhook(webhook_url=webhook_url)
-        assert handler._webhook_url == webhook_url
-        assert handler._bot_token == ""
-        assert handler._default_channel == ""
-        assert handler.uses_web_api is False
-
-    def test_handler_initialization_from_env(self) -> None:
-        """Test handler reads URL from environment."""
-        with patch.dict("os.environ", {"SLACK_WEBHOOK_URL": "https://test.slack.com"}):
-            handler = HandlerSlackWebhook()
-            assert handler._webhook_url == "https://test.slack.com"
-
-    def test_handler_initialization_no_url(self) -> None:
-        """Test handler with no URL configured."""
-        with patch.dict("os.environ", {}, clear=True):
-            handler = HandlerSlackWebhook(webhook_url=None)
-            assert handler._webhook_url == ""
+    """Tests for HandlerSlackWebhook initialization and not-configured behavior."""
 
     def test_handler_initialization_with_bot_token(self) -> None:
-        """Test handler initializes with bot token for Web API mode."""
+        """Test handler initializes with bot token."""
         handler = HandlerSlackWebhook(
             bot_token="xoxb-test-token",
             default_channel="C01234567",
         )
         assert handler._bot_token == "xoxb-test-token"
         assert handler._default_channel == "C01234567"
-        assert handler.uses_web_api is True
 
     def test_handler_initialization_bot_token_from_env(self) -> None:
         """Test handler reads bot token from environment."""
@@ -218,171 +170,28 @@ class TestHandlerSlackWebhook:
             handler = HandlerSlackWebhook()
             assert handler._bot_token == "xoxb-env-token"
             assert handler._default_channel == "C99999"
-            assert handler.uses_web_api is True
+
+    def test_handler_initialization_no_token(self) -> None:
+        """Test handler with no token configured."""
+        with patch.dict("os.environ", {}, clear=True):
+            handler = HandlerSlackWebhook()
+            assert handler._bot_token == ""
 
     @pytest.mark.asyncio
-    async def test_handle_success(
-        self, handler: HandlerSlackWebhook, alert: ModelSlackAlert
-    ) -> None:
-        """Test successful alert delivery."""
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.text = AsyncMock(return_value="ok")
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session = AsyncMock(spec=aiohttp.ClientSession)
-        mock_session.post = MagicMock(return_value=mock_response)
-        mock_session.close = AsyncMock()
-
-        with patch("aiohttp.ClientSession", return_value=mock_session):
-            result = await handler.handle(alert)
-
-        assert result.success is True
-        assert result.duration_ms > 0
-        assert result.correlation_id == alert.correlation_id
-        assert result.retry_count == 0
-        assert result.thread_ts is None  # Webhook mode doesn't return thread_ts
-
-    @pytest.mark.asyncio
-    async def test_handle_webhook_error_body(
-        self, handler: HandlerSlackWebhook, alert: ModelSlackAlert
-    ) -> None:
-        """Test webhook returns 200 with error text body (e.g. invalid_payload)."""
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.text = AsyncMock(return_value="invalid_payload")
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session = AsyncMock(spec=aiohttp.ClientSession)
-        mock_session.post = MagicMock(return_value=mock_response)
-        mock_session.close = AsyncMock()
-
-        with patch("aiohttp.ClientSession", return_value=mock_session):
-            result = await handler.handle(alert)
-
-        assert result.success is False
-        assert result.error_code == "SLACK_WEBHOOK_ERROR"
-        assert "invalid_payload" in (result.error or "")
-
-    @pytest.mark.asyncio
-    async def test_handle_not_configured(self, alert: ModelSlackAlert) -> None:
-        """Test handling when webhook URL is not configured."""
-        handler = HandlerSlackWebhook(webhook_url="")
+    async def test_handle_not_configured(self) -> None:
+        """Test handling when bot token is not configured."""
+        handler = HandlerSlackWebhook(bot_token="")
+        alert = ModelSlackAlert(message="Test")
         result = await handler.handle(alert)
 
         assert result.success is False
-        assert result.error == "SLACK_WEBHOOK_URL not configured"
+        assert result.error == "SLACK_BOT_TOKEN not configured"
         assert result.error_code == "SLACK_NOT_CONFIGURED"
 
-    @pytest.mark.asyncio
-    async def test_handle_rate_limited_with_retry(
-        self, handler: HandlerSlackWebhook, alert: ModelSlackAlert
-    ) -> None:
-        """Test retry on rate limit (429)."""
-        # First call returns 429, second returns 200
-        mock_response_429 = AsyncMock()
-        mock_response_429.status = 429
-        mock_response_429.headers = {}
-        mock_response_429.__aenter__ = AsyncMock(return_value=mock_response_429)
-        mock_response_429.__aexit__ = AsyncMock(return_value=None)
-
-        mock_response_200 = AsyncMock()
-        mock_response_200.status = 200
-        mock_response_200.text = AsyncMock(return_value="ok")
-        mock_response_200.__aenter__ = AsyncMock(return_value=mock_response_200)
-        mock_response_200.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session = AsyncMock(spec=aiohttp.ClientSession)
-        mock_session.post = MagicMock(
-            side_effect=[mock_response_429, mock_response_200]
-        )
-        mock_session.close = AsyncMock()
-
-        with patch("aiohttp.ClientSession", return_value=mock_session):
-            result = await handler.handle(alert)
-
-        assert result.success is True
-        assert result.retry_count == 1
-
-    @pytest.mark.asyncio
-    async def test_handle_rate_limited_exhausted(
-        self, handler: HandlerSlackWebhook, alert: ModelSlackAlert
-    ) -> None:
-        """Test failure when retries exhausted on rate limit."""
-        mock_response = AsyncMock()
-        mock_response.status = 429
-        mock_response.headers = {}
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session = AsyncMock(spec=aiohttp.ClientSession)
-        mock_session.post = MagicMock(return_value=mock_response)
-        mock_session.close = AsyncMock()
-
-        with patch("aiohttp.ClientSession", return_value=mock_session):
-            result = await handler.handle(alert)
-
-        assert result.success is False
-        assert result.error_code == "SLACK_RATE_LIMITED"
-        assert result.retry_count == 2  # max_retries=2
-
-    @pytest.mark.asyncio
-    async def test_handle_timeout(
-        self, handler: HandlerSlackWebhook, alert: ModelSlackAlert
-    ) -> None:
-        """Test timeout handling."""
-        mock_session = AsyncMock(spec=aiohttp.ClientSession)
-        mock_session.post = MagicMock(side_effect=TimeoutError())
-        mock_session.close = AsyncMock()
-
-        with patch("aiohttp.ClientSession", return_value=mock_session):
-            result = await handler.handle(alert)
-
-        assert result.success is False
-        assert result.error_code == "SLACK_TIMEOUT"
-        assert result.error == "Request timeout"
-
-    @pytest.mark.asyncio
-    async def test_handle_connection_error(
-        self, handler: HandlerSlackWebhook, alert: ModelSlackAlert
-    ) -> None:
-        """Test connection error handling."""
-        mock_session = AsyncMock(spec=aiohttp.ClientSession)
-        mock_session.post = MagicMock(
-            side_effect=aiohttp.ClientConnectorError(
-                connection_key=MagicMock(), os_error=OSError("Connection refused")
-            )
-        )
-        mock_session.close = AsyncMock()
-
-        with patch("aiohttp.ClientSession", return_value=mock_session):
-            result = await handler.handle(alert)
-
-        assert result.success is False
-        assert result.error_code == "SLACK_CONNECTION_ERROR"
-
-    @pytest.mark.asyncio
-    async def test_handle_http_error(
-        self, handler: HandlerSlackWebhook, alert: ModelSlackAlert
-    ) -> None:
-        """Test HTTP error handling."""
-        mock_response = AsyncMock()
-        mock_response.status = 500
-        mock_response.text = AsyncMock(return_value="Internal Server Error")
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session = AsyncMock(spec=aiohttp.ClientSession)
-        mock_session.post = MagicMock(return_value=mock_response)
-        mock_session.close = AsyncMock()
-
-        with patch("aiohttp.ClientSession", return_value=mock_session):
-            result = await handler.handle(alert)
-
-        assert result.success is False
-        assert result.error_code == "SLACK_HTTP_500"
+    def test_repr_shows_web_api(self) -> None:
+        """Test repr always shows web_api mode."""
+        handler = HandlerSlackWebhook(bot_token="xoxb-test")
+        assert "web_api" in repr(handler)
 
 
 class TestHandlerWebApiMode:
@@ -853,79 +662,13 @@ class TestHandlerWebApiMode:
         assert result.retry_count == 0
 
 
-class TestModeResolution:
-    """Tests for handler mode resolution (Web API vs webhook)."""
-
-    @pytest.mark.asyncio
-    async def test_bot_token_prefers_web_api(self) -> None:
-        """When bot_token is set, Web API is used even if webhook_url is also set."""
-        handler = HandlerSlackWebhook(
-            webhook_url="https://hooks.slack.com/test",
-            bot_token="xoxb-test",
-            default_channel="C01234567",
-            max_retries=0,
-            timeout=1.0,
-        )
-
-        alert = ModelSlackAlert(message="Test")
-
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={"ok": True, "ts": "123.456"})
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session = AsyncMock(spec=aiohttp.ClientSession)
-        mock_session.post = MagicMock(return_value=mock_response)
-        mock_session.close = AsyncMock()
-
-        with patch("aiohttp.ClientSession", return_value=mock_session):
-            result = await handler.handle(alert)
-
-        # Should use Web API (returns thread_ts)
-        assert result.thread_ts == "123.456"
-        # Should have called chat.postMessage URL, not webhook
-        call_args = mock_session.post.call_args
-        assert call_args[0][0] == _SLACK_WEB_API_URL
-
-    @pytest.mark.asyncio
-    async def test_no_bot_token_uses_webhook(self) -> None:
-        """Without bot_token, falls back to webhook mode."""
-        handler = HandlerSlackWebhook(
-            webhook_url="https://hooks.slack.com/test",
-            max_retries=0,
-            timeout=1.0,
-        )
-
-        alert = ModelSlackAlert(message="Test")
-
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.text = AsyncMock(return_value="ok")
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session = AsyncMock(spec=aiohttp.ClientSession)
-        mock_session.post = MagicMock(return_value=mock_response)
-        mock_session.close = AsyncMock()
-
-        with patch("aiohttp.ClientSession", return_value=mock_session):
-            result = await handler.handle(alert)
-
-        assert result.success is True
-        assert result.thread_ts is None
-        # Should have called webhook URL
-        call_args = mock_session.post.call_args
-        assert call_args[0][0] == "https://hooks.slack.com/test"
-
-
 class TestBlockKitFormatting:
     """Tests for Block Kit message formatting."""
 
     @pytest.fixture
     def handler(self) -> HandlerSlackWebhook:
         """Create handler for formatting tests."""
-        return HandlerSlackWebhook(webhook_url="https://test.slack.com")
+        return HandlerSlackWebhook(bot_token="xoxb-test")
 
     def test_format_critical_alert(self, handler: HandlerSlackWebhook) -> None:
         """Test formatting critical severity alert."""

@@ -34,7 +34,7 @@ The actual handler execution and routing is performed by:
     - Or orchestrator layer for workflow coordination
 
 Handlers receive their dependencies directly via constructor injection:
-    - HandlerSlackWebhook(webhook_url, http_session)
+    - HandlerSlackWebhook(bot_token, default_channel)
 
 Coroutine Safety:
     This node is async-safe. Handler coordination is performed by the
@@ -67,8 +67,8 @@ class NodeSlackAlerterEffect(NodeEffect):
 
     Dependency Injection:
         The HandlerSlackWebhook is instantiated by callers with its
-        dependencies (webhook_url from env, optional http_session).
-        NO instance variables for the handler.
+        dependencies (bot_token from env, optional http_session).
+        This node contains NO instance variables for the handler.
 
     Example:
         ```python
