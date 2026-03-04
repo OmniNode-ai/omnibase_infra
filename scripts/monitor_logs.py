@@ -159,6 +159,53 @@ IGNORE_PATTERN = re.compile(
 )
 
 # ---------------------------------------------------------------------------
+# Warning-pattern alerting (OMN-3607)
+# ---------------------------------------------------------------------------
+# Known recurring WARNING-level issues. Matching lines trigger a labelled Slack
+# alert with an independent cooldown (default 1800s / 30 min).
+
+WARNING_PATTERN = re.compile(
+    r"\[WARNING\].*("
+    r"Heartbeat received for non-active node"
+    r"|dispatch_handlers:.*nacking message for retry"
+    r"|DeadlockDetectedError"
+    r"|HandlerConsul.*ConnectionError"
+    r")"
+)
+
+WARNING_COOLDOWN_SECONDS = int(os.environ.get("MONITOR_WARNING_COOLDOWN", "1800"))
+
+# Backoff for warnings: 30m → 60m → cap at 60m
+_WARNING_BACKOFF_BASE = 1800  # 30 minutes
+_WARNING_BACKOFF_CAP = 3600  # 1 hour max
+
+_WARNING_ISSUE_LABELS: dict[str, str] = {
+    "non-active node": "stale-registration",
+    "dispatch_handlers": "kafka-nack",
+    "DeadlockDetectedError": "schema-deadlock",
+    "HandlerConsul": "consul-unavailable",
+}
+
+
+def _warning_issue_label(line: str) -> str:
+    """Return a human-readable label for the warning pattern that matched *line*.
+
+    Iterates over ``_WARNING_ISSUE_LABELS`` and returns the first label whose
+    fragment key is found in *line*.  Falls back to ``"unknown-warning"`` if no
+    fragment matches.
+    """
+    for fragment, label in _WARNING_ISSUE_LABELS.items():
+        if fragment in line:
+            return label
+    return "unknown-warning"
+
+
+def _warning_backoff_seconds(count: int) -> int:
+    """Exponential backoff for warnings: 30m, 60m, then capped at 60m."""
+    return int(min(_WARNING_BACKOFF_BASE * (2**count), _WARNING_BACKOFF_CAP))
+
+
+# ---------------------------------------------------------------------------
 # PostgreSQL error emitter (OMN-3407)
 # ---------------------------------------------------------------------------
 
@@ -798,6 +845,9 @@ class ContainerTailer(threading.Thread):
                     batch_timer = threading.Timer(2.0, flush_batch)
                     batch_timer.daemon = True
                     batch_timer.start()
+                elif WARNING_PATTERN.search(line) and not IGNORE_PATTERN.search(line):
+                    label = _warning_issue_label(line)
+                    self._maybe_warning_alert(label, list(self._context) + [line])
                 elif error_batch:
                     # Accumulate lines after the error trigger
                     error_batch.append(line)
@@ -820,6 +870,31 @@ class ContainerTailer(threading.Thread):
             return
         _cooldown_write(self.container, now, count + 1)
         post_slack(self.bot_token, self.channel_id, self.container, lines, self.dry_run)
+
+    def _maybe_warning_alert(self, label: str, lines: list[str]) -> None:
+        """Post a labelled Slack warning alert with independent cooldown.
+
+        Uses a composite cooldown key ``{container}:warn:{label}`` so that each
+        container+warning-type pair is rate-limited independently from error-level
+        alerts and from other warning labels.
+        """
+        cooldown_key = f"{self.container}:warn:{label}"
+        now = time.time()
+        last, count = _cooldown_read(cooldown_key)
+        wait = _warning_backoff_seconds(count)
+        if now - last < wait:
+            remaining = int(wait - (now - last))
+            print(
+                f"[monitor] Rate-limited warning {label} on {self.container} "
+                f"(cooldown {remaining}s, alert #{count})"
+            )
+            return
+        _cooldown_write(cooldown_key, now, count + 1)
+        # Include the warning label in the container identifier for Slack triage
+        container_label = f"{self.container} [{label}]"
+        post_slack(
+            self.bot_token, self.channel_id, container_label, lines, self.dry_run
+        )
 
 
 # ---------------------------------------------------------------------------
