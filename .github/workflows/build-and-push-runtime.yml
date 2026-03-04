@@ -44,11 +44,11 @@ jobs:
     name: Build and push runtime image
     runs-on: ubuntu-latest
     # Timeout breakdown (cold cache worst case):
-    #   Docker build:        ~14 min
+    #   Docker build:        ~30 min (protobuf upgrade + cold cache adds ~16 min vs baseline)
     #   ECR push:            ~5 min
     #   GHA cache export:    ~15 min
-    #   Total:               ~34 min — 45 min gives comfortable buffer
-    timeout-minutes: 45
+    #   Total:               ~50 min — 60 min gives comfortable buffer
+    timeout-minutes: 60
 
     outputs:
       image_digest: ${{ steps.resolve-digest.outputs.digest }}
