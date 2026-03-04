@@ -55,6 +55,9 @@ from omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_orchestrato
 from omnibase_infra.nodes.node_setup_preflight_effect.handlers.handler_preflight_check import (
     HandlerPreflightCheck,
 )
+from omnibase_infra.nodes.node_setup_preflight_effect.models.model_preflight_check_result import (
+    ModelPreflightCheckResult,
+)
 from omnibase_infra.nodes.node_setup_preflight_effect.models.model_preflight_effect_output import (
     ModelPreflightEffectOutput,
 )
@@ -272,8 +275,30 @@ class TestSetupOrchestratorE2E:
         async def _instant_poll(host: str, port: int, max_wait: float) -> bool:
             return True
 
+        def _mock_postgres_check() -> ModelPreflightCheckResult:
+            return ModelPreflightCheckResult(
+                check_key="postgres_password_set",
+                passed=True,
+                message="POSTGRES_PASSWORD is set (mocked)",
+                detail=None,
+            )
+
+        def _mock_omnibase_dir_check() -> ModelPreflightCheckResult:
+            return ModelPreflightCheckResult(
+                check_key="omnibase_dir",
+                passed=True,
+                message="omnibase dir ok (mocked)",
+                detail=None,
+            )
+
         with (
             patch.object(preflight_handler_mod, "_check_port_free", _mock_port_free),
+            patch.object(
+                preflight_handler_mod, "_check_postgres_password", _mock_postgres_check
+            ),
+            patch.object(
+                preflight_handler_mod, "_check_omnibase_dir", _mock_omnibase_dir_check
+            ),
             patch(
                 f"{_provision_mod}.asyncio.create_subprocess_exec",
                 side_effect=_fake_compose_up(returncode=0),
@@ -286,9 +311,9 @@ class TestSetupOrchestratorE2E:
         event_types = [e.event_type for e in output.events]
 
         # Full happy-path events must all be present
-        assert "setup.completed" in event_types, (
-            f"Expected setup.completed in {event_types}"
-        )
+        assert (
+            "setup.completed" in event_types
+        ), f"Expected setup.completed in {event_types}"
         assert "setup.cloud.unavailable" not in event_types
         assert "setup.preflight.completed" in event_types
         assert "setup.provision.completed" in event_types
@@ -300,12 +325,12 @@ class TestSetupOrchestratorE2E:
 
         # I4: Verify phase separation — preflight and validate use separate checks
         # Minimal topology has 3 LOCAL services: postgres (5436), redpanda (19092), valkey (16379)
-        assert len(preflight_calls) == 3, (
-            f"Expected 3 preflight FREE checks (one per service), got {preflight_calls}"
-        )
-        assert len(validate_calls) == 3, (
-            f"Expected 3 validate OPEN checks (one per service), got {validate_calls}"
-        )
+        assert (
+            len(preflight_calls) == 3
+        ), f"Expected 3 preflight FREE checks (one per service), got {preflight_calls}"
+        assert (
+            len(validate_calls) == 3
+        ), f"Expected 3 validate OPEN checks (one per service), got {validate_calls}"
 
         # The two call sets must be disjoint in semantics (both cover the same ports,
         # but via different functions — _check_port_free vs _check_tcp_health).
@@ -347,9 +372,9 @@ class TestSetupOrchestratorE2E:
         event_types = [e.event_type for e in output.events]
 
         # I8: Cloud gate fires, setup stops immediately
-        assert "setup.cloud.unavailable" in event_types, (
-            f"Expected setup.cloud.unavailable in {event_types}"
-        )
+        assert (
+            "setup.cloud.unavailable" in event_types
+        ), f"Expected setup.cloud.unavailable in {event_types}"
 
         # No docker subprocess must have been called (I8 hard stop)
         assert len(docker_calls) == 0, (
