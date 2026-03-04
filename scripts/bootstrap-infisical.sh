@@ -7,6 +7,9 @@
 #
 # Bootstrap Startup Chain (OMN-2287):
 #   Step 1:   PostgreSQL starts (POSTGRES_PASSWORD from .env)
+#   Step 1b:  Pending migrations applied (run-migrations.py, OMN-3528)
+#   Step 1c:  Cross-repo tables provisioned in omniintelligence DB (OMN-3531)
+#             Skipped if OMNIINTELLIGENCE_DB_URL is not set
 #   Step 2:   Valkey starts
 #   Step 3:   Infisical starts (depends_on: postgres + valkey healthy)
 #   Step 3.5: Keycloak starts (--profile auth) + provision-keycloak.py runs
@@ -176,6 +179,41 @@ if [[ "${DRY_RUN}" != "true" ]]; then
         sleep 2
     done
     log_info "PostgreSQL is healthy"
+fi
+
+# ============================================================================
+# Step 1b: Apply pending database migrations
+# ============================================================================
+log_step "1b" "Apply pending database migrations"
+
+if [[ "${DRY_RUN}" != "true" ]]; then
+    if uv run python "${SCRIPT_DIR}/run-migrations.py" --db-url "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@localhost:${POSTGRES_EXTERNAL_PORT:-5436}/${POSTGRES_DB:-omnibase_infra}"; then
+        log_info "Migrations applied."
+    else
+        log_error "Migration runner failed. Aborting bootstrap."
+        exit 1
+    fi
+else
+    log_info "[DRY-RUN] Would run: uv run python ${SCRIPT_DIR}/run-migrations.py --db-url postgresql://${POSTGRES_USER:-postgres}:***@localhost:${POSTGRES_EXTERNAL_PORT:-5436}/${POSTGRES_DB:-omnibase_infra}"
+fi
+
+# ============================================================================
+# Step 1c: Provision cross-repo tables into omniintelligence DB (OMN-3531)
+# ============================================================================
+if [ -n "${OMNIINTELLIGENCE_DB_URL:-}" ]; then
+    log_step "1c" "Provisioning cross-repo tables in omniintelligence DB"
+    if [[ "${DRY_RUN}" != "true" ]]; then
+        if uv run python "${SCRIPT_DIR}/provision-cross-repo-tables.py" \
+            --target-db "${OMNIINTELLIGENCE_DB_URL}"; then
+            log_info "Cross-repo tables provisioned."
+        else
+            log_warn "Cross-repo provisioning failed (omniintelligence DB may not be available yet — non-fatal)"
+        fi
+    else
+        log_info "[DRY-RUN] Would run: uv run python ${SCRIPT_DIR}/provision-cross-repo-tables.py --target-db \${OMNIINTELLIGENCE_DB_URL}"
+    fi
+else
+    log_info "Skipping cross-repo provisioning (OMNIINTELLIGENCE_DB_URL not set)"
 fi
 
 # ============================================================================

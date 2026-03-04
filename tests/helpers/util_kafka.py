@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Kafka testing utilities for integration tests.
+"""Shared Kafka test utilities for integration and unit tests.
 
-This module provides shared utilities for Kafka-based integration tests,
-including consumer readiness polling and topic management helpers.
+Covers consumer readiness polling and topic management helpers.
 
 Available Utilities:
     - wait_for_consumer_ready: Poll for Kafka consumer readiness with exponential backoff
@@ -350,7 +349,7 @@ def _is_likely_bare_ipv6(address: str, warn_ambiguous: bool = True) -> bool:
         False
         >>> _is_likely_bare_ipv6("localhost:9092")  # Only one colon
         False
-        >>> _is_likely_bare_ipv6("192.168.1.1:9092")  # IPv4 with port
+        >>> _is_likely_bare_ipv6("192.168.1.1:9092")  # IPv4 with port  # kafka-fallback-ok
         False
     """
     if not address or address.startswith("["):
@@ -418,8 +417,8 @@ def normalize_ipv6_bootstrap_server(bootstrap_server: str) -> str:
         '[::1]:29092'
         >>> normalize_ipv6_bootstrap_server("2001:db8::1")
         '[2001:db8::1]:29092'
-        >>> normalize_ipv6_bootstrap_server("192.168.1.1:9092")
-        '192.168.1.1:9092'
+        >>> normalize_ipv6_bootstrap_server("192.168.1.1:9092")  # kafka-fallback-ok
+        '192.168.1.1:9092'  # kafka-fallback-ok
     """
     if not bootstrap_server or not bootstrap_server.strip():
         return bootstrap_server

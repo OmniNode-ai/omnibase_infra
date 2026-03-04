@@ -250,6 +250,22 @@ repos:
         files: (contract.*\.yaml|\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-3554: Reject hardcoded Kafka broker address fallbacks
+      # Detects os.getenv("KAFKA_*", non-empty) and private-IP Kafka broker ports
+      - id: kafka-no-hardcoded-fallback
+        name: Reject hardcoded Kafka broker address fallbacks
+        entry: bash scripts/validation/check_kafka_no_hardcoded_fallback.sh
+        language: system
+        pass_filenames: false
+        types: [python]
+        stages: [pre-commit]
+      # OMN-3530: Ensure writer_postgres.py / handler_*_postgres.py changes include a migration
+      - id: onex-check-migration-required
+        name: Writer-Migration Coupling Check
+        language: system
+        entry: uv run python scripts/check_migration_required.py --pre-commit
+        pass_filenames: false
+        stages: [pre-commit]
 # Configuration
 default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit]

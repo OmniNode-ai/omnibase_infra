@@ -98,10 +98,13 @@ ENV PYTHONUNBUFFERED=1 \
     UV_PROJECT_ENVIRONMENT=/app/.venv
 
 # Install system dependencies required for building Python packages
-# Cache apt packages for faster rebuilds
+# Cache apt packages for faster rebuilds.
+# apt-get upgrade applies all available security patches to base image packages,
+# ensuring no CRITICAL/HIGH CVEs remain for packages with upstream fixes
+# (satisfies Trivy scan with ignore-unfixed: true).
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
+    apt-get update && apt-get upgrade -y --no-install-recommends && apt-get install -y --no-install-recommends \
     # Build essentials for compiling native extensions
     build-essential \
     # PostgreSQL client library for psycopg2/asyncpg
@@ -148,36 +151,43 @@ COPY src/ ./src/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev
 
-# Install omniintelligence as a composition-layer dependency.
-# This is NOT declared in pyproject.toml because it is a runtime plugin,
-# not a build-time dependency of omnibase_infra. Installing it here enables
+# Install ONEX plugin composition-layer dependencies.
+# These are NOT declared in pyproject.toml because they are runtime plugins,
+# not build-time dependencies of omnibase_infra. Installing them here enables
 # plugin auto-discovery by the runtime's handler loader.
 #
-# We freeze the venv's installed packages into a constraints file so that
-# pip cannot mutate any transitive dependency version already locked by
-# uv (e.g. python-dotenv). This ensures the runtime image is fully
-# reproducible.
-RUN uv pip freeze | grep -v '^\(-e\|@\)' > /tmp/constraints.txt
-
+# All ONEX shared packages (omnibase-core==0.22.0, omnibase-infra==0.13.0,
+# omnibase-spi==0.15.0) are already satisfied by the uv sync step above.
+# External deps of each plugin are resolved by uv against PyPI normally.
+#
 # Install omninode-claude and omninode-memory first; install omninode-intelligence LAST.
 # REASON: omninode-claude==0.4.0 hard-pins omninode-intelligence==0.8.0 as an exact dep.
-# --no-deps prevents that exact pin from downgrading our 0.9.0 install.
-# omnibase-core==0.22.0, omnibase-infra==0.13.0, omnibase-spi==0.15.0 already satisfied.
+# --no-deps prevents that exact pin from downgrading our 0.9.1 install.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps \
     omninode-claude==0.4.0
 
-# omninode-memory==0.6.1 declares omnibase-infra<0.14.0,>=0.13.0 — fully compatible.
+# omninode-memory==0.6.1 requires omnibase-core>=0.22.0,<0.23.0 — already satisfied.
+# Pin omnibase-core==0.22.0 explicitly to prevent uv from upgrading it.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --constraint /tmp/constraints.txt \
-    omninode-memory==0.6.1
+    uv pip install \
+    "omninode-memory==0.6.1" \
+    "omnibase-core==0.22.0"
 
 # Install omninode-intelligence LAST to ensure 0.9.1 is not downgraded by omninode-claude's
 # exact pin (==0.8.0). 0.9.1 adds type casts to fix PostgreSQL type inference (OMN-3301).
 # NOTE: package was renamed from omniintelligence → omninode-intelligence on PyPI at 0.7.0.
+# Pin omnibase-core==0.22.0 explicitly to prevent version drift.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --constraint /tmp/constraints.txt \
-    omninode-intelligence==0.9.1
+    uv pip install \
+    "omninode-intelligence==0.9.1" \
+    "omnibase-core==0.22.0"
+
+# Security: upgrade protobuf to clear CVE-2026-0994 (HIGH, DoS, fixed in >=5.29.6).
+# protobuf 4.25.8 (from transitive deps) is flagged by Trivy scan (ignore-unfixed: true).
+# Force upgrade here after all plugin installs to ensure the patched version is present.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install "protobuf>=5.29.6"
 
 # ============================================================================
 # Runtime Stage - Minimal production image
@@ -235,10 +245,12 @@ ENV RUNTIME_SOURCE_HASH=${RUNTIME_SOURCE_HASH} \
     COMPOSE_PROJECT=${COMPOSE_PROJECT}
 
 # Install minimal runtime dependencies only
-# No build tools needed - all Python packages are pre-compiled in builder stage
+# No build tools needed - all Python packages are pre-compiled in builder stage.
+# apt-get upgrade applies all available security patches to the runtime base image,
+# clearing CRITICAL/HIGH CVEs that have upstream fixes (Trivy ignore-unfixed: true).
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
+    apt-get update && apt-get upgrade -y --no-install-recommends && apt-get install -y --no-install-recommends \
     # PostgreSQL client library (runtime only, no -dev)
     libpq5 \
     # Curl for health checks

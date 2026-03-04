@@ -13,7 +13,7 @@ Test Categories:
     - Error Handling: Graceful failure handling
 
 Environment Variables:
-    KAFKA_BOOTSTRAP_SERVERS: Kafka broker address (e.g., "192.168.86.200:29092")
+    KAFKA_BOOTSTRAP_SERVERS: Kafka broker address (e.g., "localhost:19092")
 
 References:
     - Linear Ticket: OMN-1764
@@ -92,7 +92,9 @@ class SimpleContextValue:
 @pytest.fixture
 def kafka_bootstrap_servers() -> str:
     """Get Kafka bootstrap servers from environment."""
-    return os.getenv("KAFKA_BOOTSTRAP_SERVERS", "192.168.86.200:29092")
+    return os.getenv(
+        "KAFKA_BOOTSTRAP_SERVERS", "localhost:19092"
+    )  # kafka-fallback-ok — integration test default; M2 Ultra Kafka decommissioned OMN-3431
 
 
 @pytest.fixture

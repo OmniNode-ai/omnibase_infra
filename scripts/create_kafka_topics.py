@@ -16,11 +16,11 @@
 #
 #   # Create missing topics on broker
 #   uv run python scripts/create_kafka_topics.py \
-#       --bootstrap-servers 192.168.86.200:29092
+#       --bootstrap-servers localhost:19092
 #
 #   # Override defaults
 #   uv run python scripts/create_kafka_topics.py \
-#       --bootstrap-servers 192.168.86.200:29092 \
+#       --bootstrap-servers localhost:19092 \
 #       --partitions 3 \
 #       --replication-factor 1 \
 #       --contracts-root src/omnibase_infra/nodes/
@@ -87,11 +87,11 @@ Examples:
 
   # Create missing topics on broker
   uv run python scripts/create_kafka_topics.py \\
-      --bootstrap-servers 192.168.86.200:29092
+      --bootstrap-servers localhost:19092
 
   # Custom partitions and contracts root
   uv run python scripts/create_kafka_topics.py \\
-      --bootstrap-servers 192.168.86.200:29092 \\
+      --bootstrap-servers localhost:19092 \\
       --partitions 3 \\
       --contracts-root src/omnibase_infra/nodes/
 """,
@@ -101,7 +101,7 @@ Examples:
         metavar="HOST:PORT",
         default=None,
         help=(
-            "Kafka bootstrap servers (e.g. 192.168.86.200:29092). "
+            "Kafka bootstrap servers (e.g. localhost:19092). "
             "Required in non-dry-run mode. Optional in --dry-run."
         ),
     )

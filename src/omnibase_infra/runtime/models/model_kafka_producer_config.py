@@ -46,13 +46,18 @@ class ModelKafkaProducerConfig(BaseModel):
                 or KAFKA_ACKS contains an invalid acks value.
         """
         try:
+            # kafka-fallback-ok — these model-level defaults are overridden at runtime by env vars
+            bootstrap = os.getenv(
+                "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"
+            )  # kafka-fallback-ok
+            timeout_ms = os.getenv(
+                "KAFKA_REQUEST_TIMEOUT_MS", "10000"
+            )  # kafka-fallback-ok
+            acks_raw = os.getenv("KAFKA_ACKS", "all")  # kafka-fallback-ok
             return cls(
-                bootstrap_servers=os.getenv(
-                    "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"
-                ),
-                timeout_seconds=float(os.getenv("KAFKA_REQUEST_TIMEOUT_MS", "10000"))
-                / 1000.0,
-                acks=EnumKafkaAcks(os.getenv("KAFKA_ACKS", "all")),
+                bootstrap_servers=bootstrap,
+                timeout_seconds=float(timeout_ms) / 1000.0,
+                acks=EnumKafkaAcks(acks_raw),
             )
         except (ValueError, TypeError) as e:
             msg = f"Invalid Kafka producer configuration: {e}"

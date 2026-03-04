@@ -65,7 +65,7 @@ MESSAGE_DELIVERY_WAIT_SECONDS = 2.0
 @pytest.fixture
 def kafka_bootstrap_servers() -> str:
     """Get Kafka bootstrap servers from environment."""
-    return os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    return os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")  # kafka-fallback-ok
 
 
 @pytest.fixture

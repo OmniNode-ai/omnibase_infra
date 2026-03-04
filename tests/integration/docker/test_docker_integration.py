@@ -1076,7 +1076,7 @@ class TestDockerComposeProfiles:
                 "OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN": _pg_dsn,
                 # OMN-3299: Redpanda removed from local compose; KAFKA_BOOTSTRAP_SERVERS
                 # now uses :? fail-fast — must be set explicitly for config validation.
-                "KAFKA_BOOTSTRAP_SERVERS": "192.168.86.200:29092",
+                "KAFKA_BOOTSTRAP_SERVERS": "192.168.86.200:29092",  # kafka-fallback-ok — test fixture; M2 Ultra Kafka decommissioned OMN-3431
             }
         )
 

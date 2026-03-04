@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+# Ticket: OMN-3492
+name: "node_setup_preflight_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  EFFECT node that validates all prerequisites before platform provisioning. Checks Docker version, Compose version, Python version, POSTGRES_PASSWORD env var, Docker daemon status, omnibase directory, and local service port availability.
+
+input_model:
+  name: "ModelPreflightEffectInput"
+  module: "omnibase_infra.nodes.node_setup_preflight_effect.models.model_preflight_effect_input"
+  description: "Input envelope for preflight effect operations."
+output_model:
+  name: "ModelPreflightEffectOutput"
+  module: "omnibase_infra.nodes.node_setup_preflight_effect.models.model_preflight_effect_output"
+  description: "Aggregated result of all preflight checks."
+io_operations:
+  - name: "run_preflight"
+    description: "Run all 7 preflight checks and return pass/fail results."
+    input_fields: ["topology", "correlation_id", "timeout_seconds"]
+    output_fields: ["passed", "checks", "correlation_id", "duration_ms"]
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "run_preflight"
+      handler:
+        name: "HandlerPreflightCheck"
+        module: "omnibase_infra.nodes.node_setup_preflight_effect.handlers.handler_preflight_check"
+capabilities:
+  - "preflight.check"

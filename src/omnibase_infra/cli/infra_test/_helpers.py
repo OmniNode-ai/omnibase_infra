@@ -21,7 +21,9 @@ def get_broker() -> str:
     Returns:
         Kafka bootstrap server address.
     """
-    return os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:29092")
+    return os.getenv(
+        "KAFKA_BOOTSTRAP_SERVERS", "localhost:19092"
+    )  # kafka-fallback-ok — integration test default
 
 
 def get_consul_addr() -> str:

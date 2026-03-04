@@ -114,7 +114,9 @@ metadata:
 @pytest.fixture
 def kafka_bootstrap_servers() -> str:
     """Get Kafka bootstrap servers from environment."""
-    return os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:29092")
+    return os.getenv(
+        "KAFKA_BOOTSTRAP_SERVERS", "localhost:19092"
+    )  # kafka-fallback-ok — integration test default; 29092 is cloud bus port
 
 
 @pytest.fixture

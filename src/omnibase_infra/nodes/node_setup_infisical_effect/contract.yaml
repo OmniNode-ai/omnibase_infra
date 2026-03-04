@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+# Ticket: OMN-3494
+name: "node_setup_infisical_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  EFFECT node that bootstraps the Infisical secret store by running provision-infisical.py (identity setup) and seed-infisical.py (secret population) in sequence. Part of the setup orchestration workflow.
+
+input_model:
+  name: "ModelInfisicalSetupEffectInput"
+  module: "omnibase_infra.nodes.node_setup_infisical_effect.models.model_infisical_setup_effect_input"
+  description: "Input envelope for the Infisical setup effect node."
+output_model:
+  name: "ModelInfisicalSetupEffectOutput"
+  module: "omnibase_infra.nodes.node_setup_infisical_effect.models.model_infisical_setup_effect_output"
+  description: "Result of Infisical provisioning and seeding."
+io_operations:
+  - name: "run_full_setup"
+    description: "Run provision-infisical.py then seed-infisical.py to bootstrap Infisical."
+    input_fields: ["topology", "correlation_id", "infisical_addr", "skip_if_disabled"]
+    output_fields: ["success", "status", "infisical_addr", "error"]
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "run_full_setup"
+      handler:
+        name: "HandlerInfisicalFullSetup"
+        module: "omnibase_infra.nodes.node_setup_infisical_effect.handlers.handler_infisical_full_setup"
+capabilities:
+  - "setup.infisical.provision"
+  - "setup.infisical.seed"

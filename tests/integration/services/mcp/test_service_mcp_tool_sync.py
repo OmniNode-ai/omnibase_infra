@@ -11,8 +11,7 @@ Test Categories:
     - Error Handling Tests: Invalid events, graceful error handling
 
 Environment Variables:
-    KAFKA_BOOTSTRAP_SERVERS: Kafka broker address (e.g., "localhost:9092" or
-        "192.168.86.200:29092"). Required for tests to run.
+    KAFKA_BOOTSTRAP_SERVERS: Kafka broker address (e.g., "localhost:19092"). Required for tests to run.
 
 Note:
     Tests will skip gracefully if KAFKA_BOOTSTRAP_SERVERS is not set.
@@ -249,7 +248,7 @@ def kafka_bootstrap_servers() -> str:
     so this fixture will only be called when the env var is available.
     The fallback is defensive and ensures type safety.
     """
-    return os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    return os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")  # kafka-fallback-ok
 
 
 @pytest.fixture

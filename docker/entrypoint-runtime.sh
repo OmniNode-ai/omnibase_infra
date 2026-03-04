@@ -4,14 +4,14 @@
 #
 # ONEX Infrastructure Runtime Entrypoint
 #
-# This entrypoint stamps the schema fingerprint into db_metadata before
-# starting the runtime kernel. The fingerprint is a SHA-256 hash of the
-# live database schema (columns + constraints) for tables declared in
-# the schema manifest.  Without this stamp, the kernel's startup
-# assertion finds expected_schema_fingerprint = NULL and crash-loops.
+# This entrypoint runs the migration runner before starting the runtime kernel.
+# The runner applies any pending SQL migrations and restamps the schema
+# fingerprint into db_metadata (via restamp_fingerprint() inside run-migrations.py).
+# Without the fingerprint stamp, the kernel's startup assertion finds
+# expected_schema_fingerprint = NULL and crash-loops.
 #
-# Idempotent: re-stamping an already-stamped database safely overwrites
-# the existing fingerprint value via UPDATE.
+# Idempotent: already-applied migrations are skipped; re-stamping an
+# already-stamped database safely overwrites the existing fingerprint value.
 #
 # Environment:
 #   OMNIBASE_INFRA_DB_URL  (required) - PostgreSQL DSN for the infra database
@@ -43,15 +43,10 @@ echo "BUILD_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 echo "========================"
 
 if [ -n "${OMNIBASE_INFRA_DB_URL:-}" ]; then
-  echo "[entrypoint] Stamping schema fingerprint into db_metadata..."
-  if python -m omnibase_infra.runtime.util_schema_fingerprint stamp; then
-    echo "[entrypoint] Schema fingerprint stamped successfully."
-  else
-    echo "[entrypoint] WARNING: Schema fingerprint stamp failed (exit $?). Continuing startup."
-    echo "[entrypoint] The kernel will detect a missing fingerprint via its health check."
-  fi
-else
-  echo "[entrypoint] OMNIBASE_INFRA_DB_URL not set, skipping schema fingerprint stamp."
+  echo "Running migration runner..."
+  python /app/scripts/run-migrations.py --db-url "${OMNIBASE_INFRA_DB_URL}" || {
+    echo "WARNING: migration runner failed — continuing to start kernel"
+  }
 fi
 
 echo "[entrypoint] Starting runtime kernel..."

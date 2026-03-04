@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+# Ticket: OMN-3494
+name: "node_setup_validate_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  EFFECT node that validates TCP/HTTP health for all LOCAL-mode services in the deployment topology after provisioning is complete. Services with a health_check_path use HTTP GET; others use TCP connect.
+
+input_model:
+  name: "ModelSetupValidateEffectInput"
+  module: "omnibase_infra.nodes.node_setup_validate_effect.models.model_setup_validate_effect_input"
+  description: "Input envelope for the setup validate effect node."
+output_model:
+  name: "ModelSetupValidateEffectOutput"
+  module: "omnibase_infra.nodes.node_setup_validate_effect.models.model_setup_validate_effect_output"
+  description: "Aggregated health check results for all validated services."
+io_operations:
+  - name: "validate_services"
+    description: "Validate health of all LOCAL-mode services in the topology."
+    input_fields: ["topology", "correlation_id", "timeout_seconds"]
+    output_fields: ["all_healthy", "results", "correlation_id", "error"]
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "validate_services"
+      handler:
+        name: "HandlerServiceValidate"
+        module: "omnibase_infra.nodes.node_setup_validate_effect.handlers.handler_service_validate"
+capabilities:
+  - "setup.validate.tcp"
+  - "setup.validate.http"

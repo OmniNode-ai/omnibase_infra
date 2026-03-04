@@ -76,7 +76,7 @@ def clean_env() -> ModelRRHEnvironmentData:
         ),
         runtime_target=ModelRRHRuntimeTarget(
             environment="dev",
-            kafka_broker="192.168.86.200:29092",
+            kafka_broker="192.168.86.200:29092",  # kafka-fallback-ok — test fixture value
             kubernetes_context="minikube",
         ),
         toolchain=ModelRRHToolchainVersions(

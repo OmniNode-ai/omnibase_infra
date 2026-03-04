@@ -10,7 +10,6 @@ These tests require:
 Run with: RUN_HEAVY_TESTS=1 pytest tests/integration/correlation/test_correlation_propagation_heavy.py -v
 
 Test Categories
-===============
 
 HTTP Boundary Tests:
     Tests that verify correlation IDs propagate correctly through HTTP calls
@@ -472,7 +471,9 @@ class TestCorrelationKafka:
     @pytest.fixture
     def kafka_bootstrap_servers(self) -> str:
         """Get Kafka bootstrap servers from environment."""
-        return os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+        return os.getenv(
+            "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"
+        )  # kafka-fallback-ok
 
     @pytest.fixture
     async def kafka_event_bus(
@@ -538,7 +539,9 @@ class TestCorrelationKafka:
         from aiokafka.admin import AIOKafkaAdminClient, NewTopic
         from aiokafka.errors import TopicAlreadyExistsError
 
-        bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+        bootstrap_servers = os.getenv(
+            "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"
+        )  # kafka-fallback-ok
         topic_name = f"test.correlation.{uuid4().hex[:12]}"
 
         admin = AIOKafkaAdminClient(bootstrap_servers=bootstrap_servers)

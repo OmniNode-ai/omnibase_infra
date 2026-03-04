@@ -44,8 +44,10 @@ class TestModelReplayConfigBootstrapServersValidation:
 
     def test_valid_server_with_ip(self) -> None:
         """Test valid IP address bootstrap server passes validation."""
-        config = ModelReplayConfig(bootstrap_servers="192.168.1.100:29092")
-        assert config.bootstrap_servers == "192.168.1.100:29092"
+        config = ModelReplayConfig(
+            bootstrap_servers="192.168.1.100:29092"  # kafka-fallback-ok — testing IP validation logic
+        )
+        assert config.bootstrap_servers == "192.168.1.100:29092"  # kafka-fallback-ok
 
     def test_valid_server_with_whitespace_stripped(self) -> None:
         """Test whitespace around bootstrap servers is stripped."""

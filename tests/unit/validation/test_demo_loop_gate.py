@@ -405,7 +405,9 @@ class TestDashboardConfig:
         )
         with patch.dict(
             "os.environ",
-            {"KAFKA_BOOTSTRAP_SERVERS": "192.168.86.200:29092"},
+            {
+                "KAFKA_BOOTSTRAP_SERVERS": "192.168.86.200:29092"  # kafka-fallback-ok — test fixture value
+            },
         ):
             result = gate.assert_dashboard_config()
         assert result.status == EnumAssertionStatus.PASSED
