@@ -207,32 +207,30 @@ class TestContractValidation:
         assert "nodes" in wf["workflow_definition"]["execution_graph"]
 
     def test_workflow_has_required_nodes(self, contract_data: dict) -> None:
-        """Test that workflow has all 8 required execution graph nodes.
+        """Test that workflow has all required execution graph nodes.
 
         The registration orchestrator workflow requires these nodes in order:
         1. receive_introspection - Receive introspection or tick event
         2. read_projection - Read current registration state from projection (OMN-930)
         3. evaluate_timeout - Evaluate timeout using injected time (OMN-973)
         4. compute_intents - Compute registration intents via reducer
-        5. execute_consul_registration - Execute Consul registration
-        6. execute_postgres_registration - Execute PostgreSQL registration
-        7. aggregate_results - Aggregate registration results
-        8. publish_outcome - Publish registration outcome event
+        5. execute_postgres_registration - Execute PostgreSQL registration
+        6. aggregate_results - Aggregate registration results
+        7. publish_outcome - Publish registration outcome event
 
-        This test ensures all 8 nodes are present with exact matching.
+        Note: execute_consul_registration was removed in OMN-3540 (Consul removal).
         """
         nodes = contract_data["workflow_coordination"]["workflow_definition"][
             "execution_graph"
         ]["nodes"]
         node_ids = {n["node_id"] for n in nodes}
 
-        # All 8 required execution graph nodes per C1 requirements
+        # Required execution graph nodes after OMN-3540 Consul removal
         expected_nodes = {
             "receive_introspection",
             "read_projection",
             "evaluate_timeout",
             "compute_intents",
-            "execute_consul_registration",
             "execute_postgres_registration",
             "aggregate_results",
             "publish_outcome",

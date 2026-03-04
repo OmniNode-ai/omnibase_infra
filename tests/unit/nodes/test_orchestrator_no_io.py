@@ -392,9 +392,9 @@ class TestOrchestratorIsPureCoordinator:
         orchestrator = NodeRegistrationOrchestrator(mock_container)
 
         # Verify inheritance
-        assert isinstance(orchestrator, NodeOrchestrator), (
-            "Orchestrator must inherit from NodeOrchestrator for contract-driven workflow"
-        )
+        assert isinstance(
+            orchestrator, NodeOrchestrator
+        ), "Orchestrator must inherit from NodeOrchestrator for contract-driven workflow"
 
         # Find the orchestrator class definition using AST
         orchestrator_class: ast.ClassDef | None = None
@@ -406,9 +406,9 @@ class TestOrchestratorIsPureCoordinator:
                 orchestrator_class = node
                 break
 
-        assert orchestrator_class is not None, (
-            "Could not find NodeRegistrationOrchestrator class in AST"
-        )
+        assert (
+            orchestrator_class is not None
+        ), "Could not find NodeRegistrationOrchestrator class in AST"
 
         # Analyze class body using AST - count meaningful statements
         # Exclude docstrings (first Expr with Constant) from statement count
@@ -597,10 +597,10 @@ class TestContractIOOperationsAreEffectNodes:
         effect_node_ids = {n["node_id"] for n in effect_nodes}
 
         # Expected effect nodes for external system interaction
+        # Note: execute_consul_registration removed in OMN-3540 (Consul removal)
         expected_effect_operations = {
             "receive_introspection",  # Event consumption
             "read_projection",  # Projection read
-            "execute_consul_registration",  # Consul I/O
             "execute_postgres_registration",  # PostgreSQL I/O
             "publish_outcome",  # Event publishing
         }
@@ -648,9 +648,9 @@ class TestContractIOOperationsAreEffectNodes:
             "The orchestrator delegates all I/O to this effect node."
         )
 
-        assert effect_dep.get("type") == "node", (
-            f"effect_node dependency should be type 'node', got: {effect_dep.get('type')}"
-        )
+        assert (
+            effect_dep.get("type") == "node"
+        ), f"effect_node dependency should be type 'node', got: {effect_dep.get('type')}"
 
 
 # =============================================================================
@@ -698,9 +698,9 @@ class TestOrchestratorModuleStructure:
                                 if isinstance(elt, ast.Constant)
                             ]
 
-        assert all_value is not None, (
-            "Module should define __all__ for explicit exports"
-        )
+        assert (
+            all_value is not None
+        ), "Module should define __all__ for explicit exports"
         assert all_value == ["NodeRegistrationOrchestrator"], (
             f"Module should only export NodeRegistrationOrchestrator.\n"
             f"Found exports: {all_value}"
