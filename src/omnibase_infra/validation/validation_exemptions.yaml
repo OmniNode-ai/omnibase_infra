@@ -827,20 +827,6 @@ pattern_exemptions:
       - CLAUDE.md (Registry Naming Conventions)
     ticket: OMN-811
   # ==========================================================================
-  # Consul Intent Payload Exemptions (OMN-888)
-  # ==========================================================================
-  # service_name in ModelConsulIntentPayload is the Consul service name to register,
-  # NOT a reference to an internal entity. It is a Consul-specific configuration field.
-  - file_pattern: 'model_consul_intent_payload\.py'
-    violation_pattern: "Field 'service_name' might reference an entity"
-    reason: >
-      service_name is the Consul service name to register in service discovery (e.g., "node-effect-123"). This is Consul-specific configuration, not an entity reference. The field specifies how the node appears in Consul's service catalog.
-
-    documentation:
-      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
-      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
-    ticket: OMN-888
-  # ==========================================================================
   # Private Class Naming Exemptions (OMN-811)
   # ==========================================================================
   # Private helper classes (prefixed with _) follow PascalCase after the underscore.
@@ -1473,15 +1459,6 @@ pattern_exemptions:
     documentation:
       - asyncpg Pool Configuration (https://magicstack.github.io/asyncpg/current/api/index.html#connection-pools)
     ticket: OMN-1131
-  - file_pattern: 'handlers/service_discovery/handler_service_discovery_consul\.py'
-    method_pattern: "Function '__init__'"
-    violation_pattern: 'has \d+ parameters'
-    reason: >
-      Consul handler requires multiple configuration parameters: consul_client, token, scheme, host, port, dc, circuit_breaker_config. These are standard Consul connection parameters.
-
-    documentation:
-      - HashiCorp Consul API Configuration (https://developer.hashicorp.com/consul/api-docs)
-    ticket: OMN-1131
   - file_pattern: 'handlers/service_discovery/models/model_service_info\.py'
     violation_pattern: "Field 'service_name' might reference an entity"
     reason: >
@@ -1533,38 +1510,6 @@ pattern_exemptions:
 
     documentation:
       - docs/patterns/error_handling_patterns.md
-    ticket: OMN-1104
-  # ==========================================================================
-  # Consul Registration Payload Exemptions (OMN-1104)
-  # ==========================================================================
-  # service_id and service_name are Consul native formats (strings), not UUIDs
-  # or entity references. Consul service registry uses string identifiers.
-  - file_pattern: 'model_payload_consul_register\.py'
-    violation_pattern: "Field 'service_id' should use UUID"
-    reason: >
-      service_id is Consul's native string format for service identifiers. Consul does not use UUIDs for service identification - it uses human-readable string IDs.
-
-    documentation:
-      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
-      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
-    ticket: OMN-1104
-  - file_pattern: 'model_payload_consul_deregister\.py'
-    violation_pattern: "Field 'service_id' should use UUID"
-    reason: >
-      service_id is Consul's native string format for service identifiers. Consul does not use UUIDs for service identification - it uses human-readable string IDs. Mirrors model_payload_consul_register.py.
-
-    documentation:
-      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
-      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
-    ticket: OMN-2115
-  - file_pattern: 'model_payload_consul_register\.py'
-    violation_pattern: "Field 'service_name' might reference an entity"
-    reason: >
-      service_name is a display string for the Consul service catalog, not an entity reference. It's the human-readable name shown in Consul's UI.
-
-    documentation:
-      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
-      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
     ticket: OMN-1104
   # ==========================================================================
   # Snapshot Topic Naming Exemption (OMN-2115)

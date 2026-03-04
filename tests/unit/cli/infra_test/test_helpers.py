@@ -10,7 +10,6 @@ import pytest
 
 from omnibase_infra.cli.infra_test._helpers import (
     get_broker,
-    get_consul_addr,
     get_postgres_dsn,
 )
 
@@ -28,39 +27,6 @@ class TestGetBroker:
         """Returns value from KAFKA_BOOTSTRAP_SERVERS."""
         with patch.dict("os.environ", {"KAFKA_BOOTSTRAP_SERVERS": "broker:9092"}):
             assert get_broker() == "broker:9092"
-
-
-@pytest.mark.unit
-class TestGetConsulAddr:
-    """Test Consul address resolution."""
-
-    def test_default_value(self) -> None:
-        """Returns http://localhost:8500 when env vars are unset."""
-        with patch.dict("os.environ", {}, clear=True):
-            assert get_consul_addr() == "http://localhost:8500"
-
-    def test_custom_host_and_port(self) -> None:
-        """Respects CONSUL_HOST and CONSUL_PORT."""
-        env = {"CONSUL_HOST": "consul.local", "CONSUL_PORT": "28500"}
-        with patch.dict("os.environ", env, clear=True):
-            assert get_consul_addr() == "http://consul.local:28500"
-
-    def test_custom_scheme(self) -> None:
-        """Respects CONSUL_SCHEME for HTTPS."""
-        with patch.dict("os.environ", {"CONSUL_SCHEME": "https"}, clear=True):
-            assert get_consul_addr() == "https://localhost:8500"
-
-    def test_invalid_scheme_raises(self) -> None:
-        """Rejects non-http/https schemes."""
-        with patch.dict("os.environ", {"CONSUL_SCHEME": "ftp"}, clear=True):
-            with pytest.raises(ValueError, match="CONSUL_SCHEME must be"):
-                get_consul_addr()
-
-    def test_non_numeric_port_raises(self) -> None:
-        """Rejects non-numeric CONSUL_PORT."""
-        with patch.dict("os.environ", {"CONSUL_PORT": "abc"}, clear=True):
-            with pytest.raises(ValueError, match="CONSUL_PORT must be numeric"):
-                get_consul_addr()
 
 
 @pytest.mark.unit

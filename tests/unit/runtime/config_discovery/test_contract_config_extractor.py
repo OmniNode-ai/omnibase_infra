@@ -31,9 +31,6 @@ class TestResolveTransport:
     def test_resolve_kafka(self) -> None:
         assert _resolve_transport("kafka") == EnumInfraTransportType.KAFKA
 
-    def test_resolve_consul(self) -> None:
-        assert _resolve_transport("consul") == EnumInfraTransportType.CONSUL
-
     def test_resolve_infisical(self) -> None:
         assert _resolve_transport("infisical") == EnumInfraTransportType.INFISICAL
 
@@ -79,28 +76,6 @@ metadata:
         assert any(r.key == "POSTGRES_HOST" for r in reqs.requirements)
         assert contract in reqs.contract_paths
         assert len(reqs.errors) == 0
-
-    def test_extract_from_consul_contract(self, tmp_path: Path) -> None:
-        """Should extract CONSUL transport from consul handler contract."""
-        contract = tmp_path / "contract.yaml"
-        contract.write_text(
-            """
-name: "handler_consul"
-metadata:
-  transport_type: "consul"
-handler_routing:
-  routing_strategy: "operation_match"
-  handlers:
-    - handler_type: "consul"
-      handler:
-        name: "HandlerConsul"
-        module: "omnibase_infra.handlers.handler_consul"
-"""
-        )
-        reqs = self.extractor.extract_from_yaml(contract)
-
-        assert EnumInfraTransportType.CONSUL in reqs.transport_types
-        assert any(r.key == "CONSUL_HOST" for r in reqs.requirements)
 
     def test_extract_env_dependencies(self, tmp_path: Path) -> None:
         """Should extract environment-type dependencies."""
@@ -170,7 +145,6 @@ metadata:
         """Should recursively find contract.yaml files in directories."""
         # Create nested structure
         (tmp_path / "handlers" / "db").mkdir(parents=True)
-        (tmp_path / "handlers" / "consul").mkdir(parents=True)
 
         (tmp_path / "handlers" / "db" / "contract.yaml").write_text(
             """
@@ -179,19 +153,11 @@ metadata:
   transport_type: "database"
 """
         )
-        (tmp_path / "handlers" / "consul" / "contract.yaml").write_text(
-            """
-name: "handler_consul"
-metadata:
-  transport_type: "consul"
-"""
-        )
 
         reqs = self.extractor.extract_from_paths([tmp_path])
 
         assert EnumInfraTransportType.DATABASE in reqs.transport_types
-        assert EnumInfraTransportType.CONSUL in reqs.transport_types
-        assert len(reqs.contract_paths) == 2
+        assert len(reqs.contract_paths) == 1
 
     def test_extract_named_contract_variant(self, tmp_path: Path) -> None:
         """Should find contract_*.yaml files in addition to contract.yaml (OMN-2995).
@@ -266,14 +232,14 @@ dependencies:
             """
 name: "canonical"
 metadata:
-  transport_type: "consul"
+  transport_type: "database"
 """
         )
         reqs = self.extractor.extract_from_paths([tmp_path])
 
         # Only one file -- contract_paths must have exactly one entry.
         assert len(reqs.contract_paths) == 1
-        assert EnumInfraTransportType.CONSUL in reqs.transport_types
+        assert EnumInfraTransportType.DATABASE in reqs.transport_types
 
     def test_extract_from_nonexistent_path(self) -> None:
         """Should handle nonexistent paths gracefully."""
@@ -323,14 +289,14 @@ handler_routing:
         c1.write_text('name: "a"\nmetadata:\n  transport_type: "database"\n')
 
         c2 = tmp_path / "c2.yaml"
-        c2.write_text('name: "b"\nmetadata:\n  transport_type: "consul"\n')
+        c2.write_text('name: "b"\nmetadata:\n  transport_type: "kafka"\n')
 
         reqs1 = self.extractor.extract_from_yaml(c1)
         reqs2 = self.extractor.extract_from_yaml(c2)
         merged = reqs1.merge(reqs2)
 
         assert EnumInfraTransportType.DATABASE in merged.transport_types
-        assert EnumInfraTransportType.CONSUL in merged.transport_types
+        assert EnumInfraTransportType.KAFKA in merged.transport_types
         assert len(merged.contract_paths) == 2
 
 

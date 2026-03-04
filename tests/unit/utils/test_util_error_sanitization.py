@@ -491,29 +491,3 @@ class TestSanitizeUrl:
         """Non-URL strings should remain unchanged after the hostname-None fix."""
         assert sanitize_url("not-a-url") == "not-a-url"
         assert sanitize_url("plain-hostname:8080") == "plain-hostname:8080"
-
-
-class TestErrorClassSanitization:
-    """Tests verifying error classes sanitize paths correctly."""
-
-    def test_infra_consul_error_sanitizes_consul_key(self) -> None:
-        """InfraConsulError should sanitize consul_key in extra_context."""
-        from omnibase_infra.enums import EnumInfraTransportType
-        from omnibase_infra.errors import InfraConsulError, ModelInfraErrorContext
-
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.CONSUL,
-            operation="kv_get",
-            target_name="consul-primary",
-        )
-
-        error = InfraConsulError(
-            "Failed to read key",
-            context=context,
-            consul_key="config/database/connection",
-        )
-
-        # The error should have sanitized consul_key
-        error_str = str(error)
-        # Full path should not be in the string representation
-        assert "database/connection" not in error_str
