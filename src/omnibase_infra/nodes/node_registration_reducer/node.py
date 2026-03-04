@@ -90,10 +90,7 @@ class NodeRegistrationReducer(
             - state_name: pending
               description: "Registration initiated"
               entry_actions:
-                - emit_consul_intent
                 - emit_postgres_intent
-            - state_name: partial
-              description: "One backend confirmed"
             - state_name: complete
               description: "Registration successful"
             - state_name: failed

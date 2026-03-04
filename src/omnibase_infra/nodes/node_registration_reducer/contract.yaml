@@ -6,9 +6,9 @@
 #   reduce(state, event) -> ModelReducerOutput[state + intents]
 #
 # The FSM defines state transitions for the registration lifecycle:
-#   idle -> pending -> partial -> complete
-#                  \           \
-#                   -> failed <-
+#   idle -> pending -> complete
+#                  \
+#                   -> failed
 #
 # All state transition logic is driven by this contract.
 # =============================================================================
@@ -25,7 +25,7 @@ node_type: "REDUCER_GENERIC"
 #   - Incoming messages are routed via EnumMessageCategory (EVENT/COMMAND)
 #   - PROJECTION exists only in EnumNodeOutputType and is only valid for REDUCER nodes
 #   - See: docs/decisions/adr-enum-message-category-vs-node-output-type.md
-description: "Pure reducer for node registration workflow - processes introspection events and emits registration intents for Consul and PostgreSQL backends."
+description: "Pure reducer for node registration workflow - processes introspection events and emits registration intents for PostgreSQL backend."
 input_model:
   name: "ModelReducerInput"
   module: "omnibase_core.models.reducer.model_reducer_input"
@@ -44,14 +44,8 @@ output_model:
 #   | idle  | ----------------> | pending |
 #   +-------+                   +---------+
 #      ^                         |       |
-#      |       consul confirmed  |       | postgres confirmed
-#      |       (first)          v       v (first)
-#      |                  +---------+
-#      |                  | partial |
-#      |                  +---------+
-#      |                    |       |
-#      |   remaining        |       | error received
-#      |   confirmed        v       v
+#      |   postgres confirmed    |       | error received
+#      |                        v       v
 #      |              +---------+ +---------+
 #      +---reset------| complete| | failed  |---reset---+
 #                     +---------+ +---------+           |
@@ -70,23 +64,15 @@ state_machine:
       exit_actions: []
       required_data: []
     - state_name: "pending"
-      description: "Registration initiated - waiting for backend confirmations"
+      description: "Registration initiated - waiting for PostgreSQL confirmation"
       entry_actions:
-        - "emit_consul_intent"
         - "emit_postgres_intent"
       exit_actions: []
       required_data:
         - "node_id"
         - "correlation_id"
-    - state_name: "partial"
-      description: "One backend confirmed - waiting for remaining confirmation"
-      entry_actions: []
-      exit_actions: []
-      required_data:
-        - "node_id"
-        - "correlation_id"
     - state_name: "complete"
-      description: "Both backends confirmed - registration successful"
+      description: "PostgreSQL confirmed - registration successful"
       is_terminal: false # Can be reset for re-registration
       entry_actions: []
       exit_actions: []
@@ -111,20 +97,11 @@ state_machine:
         - expression: "node_type is_valid"
           required: true
       actions:
-        - action_name: "build_consul_intent"
-          action_type: "intent_emission"
         - action_name: "build_postgres_intent"
           action_type: "intent_emission"
-    # pending -> partial: On first confirmation
+    # pending -> complete: On PostgreSQL confirmation
     - from_state: "pending"
-      to_state: "partial"
-      trigger: "consul_confirmed"
-      description: "Consul registration confirmed"
-      actions:
-        - action_name: "mark_consul_confirmed"
-          action_type: "state_update"
-    - from_state: "pending"
-      to_state: "partial"
+      to_state: "complete"
       trigger: "postgres_confirmed"
       description: "PostgreSQL registration confirmed"
       actions:
@@ -135,29 +112,6 @@ state_machine:
       to_state: "failed"
       trigger: "error_received"
       description: "Registration failed from pending state"
-      actions:
-        - action_name: "record_failure"
-          action_type: "state_update"
-    # partial -> complete: On second confirmation
-    - from_state: "partial"
-      to_state: "complete"
-      trigger: "consul_confirmed"
-      description: "Consul confirmed after postgres - registration complete"
-      conditions:
-        - expression: "postgres_confirmed is_true"
-          required: true
-    - from_state: "partial"
-      to_state: "complete"
-      trigger: "postgres_confirmed"
-      description: "PostgreSQL confirmed after consul - registration complete"
-      conditions:
-        - expression: "consul_confirmed is_true"
-          required: true
-    # partial -> failed: On error
-    - from_state: "partial"
-      to_state: "failed"
-      trigger: "error_received"
-      description: "Registration failed from partial state"
       actions:
         - action_name: "record_failure"
           action_type: "state_update"
@@ -203,11 +157,6 @@ state_machine:
 intent_emission:
   enabled: true
   intents:
-    - intent_type: "consul.register"
-      target_pattern: "consul://service/{service_name}"
-      payload_model: "ModelPayloadConsulRegister"
-      payload_module: "omnibase_infra.nodes.reducers.models.model_payload_consul_register"
-      description: "Register node with Consul service discovery"
     - intent_type: "postgres.upsert_registration"
       target_pattern: "postgres://node_registrations/{node_id}"
       payload_model: "ModelPayloadPostgresUpsertRegistration"
