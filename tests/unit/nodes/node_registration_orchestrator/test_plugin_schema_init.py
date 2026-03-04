@@ -419,7 +419,13 @@ class TestSchemaInitErrorHandling:
                 await plugin._initialize_schema(config)  # type: ignore[attr-defined]
 
         warning_msgs = [r for r in caplog.records if r.levelno == logging.WARNING]
-        assert warning_msgs, "Expected at least one WARNING log for unexpected error"
+        assert any(
+            "schema" in r.message.lower() or "initialize" in r.message.lower()
+            for r in warning_msgs
+        ), (
+            "WARNING must reference schema initialization, not be a spurious log. "
+            f"Got: {[r.message for r in warning_msgs]}"
+        )
 
     @pytest.mark.unit
     async def test_unexpected_error_does_not_propagate(self) -> None:
@@ -543,9 +549,12 @@ class TestSchemaInitErrorHandling:
             f"Got records: {[(r.levelname, r.message) for r in caplog.records if r.levelno >= logging.ERROR]}"
         )
         warning_msgs = [r for r in caplog.records if r.levelno == logging.WARNING]
-        assert warning_msgs, (
-            "A WARNING must be emitted when the advisory lock call raises. "
-            "No WARNING records found."
+        assert any(
+            "schema" in r.message.lower() or "initialize" in r.message.lower()
+            for r in warning_msgs
+        ), (
+            "WARNING must reference schema initialization, not be a spurious log. "
+            f"Got: {[r.message for r in warning_msgs]}"
         )
 
 
