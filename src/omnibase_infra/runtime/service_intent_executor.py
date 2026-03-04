@@ -256,8 +256,8 @@ class IntentExecutor:
         """Execute multiple intents sequentially.
 
         Intents are executed in order. If an intent fails, earlier intents
-        that already executed (e.g., Consul register, PostgreSQL upsert)
-        are **not** rolled back. The exception propagates to the caller,
+        that already executed (e.g., PostgreSQL upsert) are **not** rolled
+        back. The exception propagates to the caller,
         which prevents Kafka offset commit so the message will be redelivered.
         Effect adapters must therefore be idempotent.
 

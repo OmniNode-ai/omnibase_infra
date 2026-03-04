@@ -33,7 +33,7 @@ class ModelShutdownBatchResult(BaseModel):
         ...     ModelFailedComponent,
         ... )
         >>> result = ModelShutdownBatchResult(
-        ...     succeeded_components=["ConsulAdapter", "VaultAdapter"],
+        ...     succeeded_components=["PostgresAdapter", "EventBusKafka"],
         ...     failed_components=[
         ...         ModelFailedComponent(
         ...             component_name="EventBusKafka",

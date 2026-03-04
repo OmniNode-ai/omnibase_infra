@@ -97,6 +97,7 @@ class ModelBootstrapHandlerDescriptor(ModelHandlerDescriptor):
         frozen=True,
         extra="forbid",
         strict=True,
+        from_attributes=True,
     )
 
     # Override handler_class to be required (no default, not optional)

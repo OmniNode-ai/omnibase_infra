@@ -24,7 +24,7 @@ class ModelBindingConfig(BaseModel):
     parameters, retry behavior, and optional external configuration references.
 
     Attributes:
-        handler_type: Handler type identifier (e.g., "vault", "db", "consul").
+        handler_type: Handler type identifier (e.g., "db", "http", "mcp").
             Used for handler discovery and routing.
         name: Optional display name for the handler. Defaults to handler_type
             if not specified.
@@ -66,7 +66,7 @@ class ModelBindingConfig(BaseModel):
         ...,
         min_length=1,
         max_length=64,
-        description="Handler type identifier (e.g., 'infisical', 'db', 'consul'). "
+        description="Handler type identifier (e.g., 'db', 'http', 'mcp'). "
         "Must be non-empty and match a registered handler implementation.",
     )
 

@@ -55,10 +55,10 @@ from omnibase_infra.enums import EnumConfirmationEventType
 
 
 class ModelRegistrationConfirmation(BaseModel):
-    """Confirmation event for dual registration operations.
+    """Confirmation event for registration operations.
 
-    This model represents confirmation events published by Effect layer nodes
-    (ConsulAdapter, PostgresAdapter) after executing registration intents.
+    This model represents confirmation events published by the PostgreSQL
+    Effect layer node (PostgresAdapter) after executing registration intents.
 
     Usage:
         This model is consumed by RegistrationReducer.reduce_confirmation()

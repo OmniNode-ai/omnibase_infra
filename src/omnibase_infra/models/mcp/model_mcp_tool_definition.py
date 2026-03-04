@@ -31,7 +31,7 @@ class ModelMCPToolDefinition(BaseModel):
         parameters: List of input parameters with type information.
         input_schema: JSON Schema for input validation.
         orchestrator_node_id: UUID of the ONEX orchestrator node.
-        orchestrator_service_id: Consul service ID for routing.
+        orchestrator_service_id: Service ID for routing.
         endpoint: HTTP endpoint for direct invocation (if available).
         timeout_seconds: Execution timeout for tool invocations.
         metadata: Additional metadata for routing and observability.
@@ -51,7 +51,7 @@ class ModelMCPToolDefinition(BaseModel):
         default=None, description="UUID of the source orchestrator node"
     )
     orchestrator_service_id: str | None = Field(
-        default=None, description="Consul service ID for routing"
+        default=None, description="Service ID for routing"
     )
     endpoint: str | None = Field(
         default=None, description="HTTP endpoint for direct invocation"

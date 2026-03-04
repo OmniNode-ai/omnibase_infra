@@ -63,7 +63,7 @@ from typing import Final
 #
 # Why these specific namespaces:
 # - omnibase_core.: Core framework components (may contain base handlers)
-# - omnibase_infra.: Infrastructure handlers (db, consul, vault, etc.)
+# - omnibase_infra.: Infrastructure handlers (db, http, mcp, etc.)
 #
 # Why NOT omnibase_spi.:
 # - SPI contains protocols (interfaces), not implementations

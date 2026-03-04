@@ -11,7 +11,7 @@ Performance Characteristics:
     following targets:
 
     - reduce() processing: <300ms per event (target)
-    - Intent building: <50ms per intent (includes Consul + PostgreSQL)
+    - Intent building: <50ms per intent (PostgreSQL)
     - Idempotency check: <1ms
 
     Performance is logged when thresholds are exceeded. These thresholds are
@@ -75,7 +75,7 @@ State Persistence Strategy:
         node_registrations:
             node_id            UUID PRIMARY KEY
             status             VARCHAR(20)  -- 'idle', 'pending', 'partial', 'complete', 'failed'
-            consul_confirmed   BOOLEAN
+            consul_confirmed   BOOLEAN      -- deprecated (OMN-3540), always False for new rows
             postgres_confirmed BOOLEAN
             last_processed_event_id  UUID
             failure_reason     VARCHAR(50)
@@ -373,7 +373,7 @@ PERF_THRESHOLD_REDUCE_MS: float = float(
 )
 
 # Target processing time for intent building (<50ms per intent)
-# Consul and PostgreSQL intent construction should be fast.
+# PostgreSQL intent construction should be fast.
 PERF_THRESHOLD_INTENT_BUILD_MS: float = float(
     os.getenv("ONEX_PERF_THRESHOLD_INTENT_BUILD_MS", "50.0")
 )
@@ -485,7 +485,7 @@ class RegistrationReducer:
     Follows ProtocolReducer pattern:
     - reduce(state, event) -> ModelReducerOutput
     - Pure function, no side effects
-    - Emits intents for Consul and PostgreSQL registration
+    - Emits intents for PostgreSQL registration
 
     This is a stateless class - all state is passed in and returned via
     ModelRegistrationState. The class exists to group related pure functions.
@@ -534,7 +534,7 @@ class RegistrationReducer:
         ... )
         >>> output = reducer.reduce(state, event)
         >>> print(output.result.status)  # "pending"
-        >>> print(len(output.intents))   # 2 (Consul + PostgreSQL)
+        >>> print(len(output.intents))   # 1 (PostgreSQL)
     """
 
     def reduce(
@@ -544,9 +544,9 @@ class RegistrationReducer:
     ) -> ModelReducerOutput[ModelRegistrationState]:
         """Pure reduce function: state + event -> new_state + intents.
 
-        Processes a node introspection event and emits registration intents
-        for both Consul and PostgreSQL backends. The returned output contains
-        the new state and any intents to be executed by the Effect layer.
+        Processes a node introspection event and emits a registration intent
+        for the PostgreSQL backend. The returned output contains the new state
+        and any intents to be executed by the Effect layer.
 
         This is PHASE 1 of the confirmation event flow:
             1. Node publishes introspection event -> Runtime routes here
@@ -874,8 +874,8 @@ class RegistrationReducer:
     ) -> ModelReducerOutput[ModelRegistrationState]:
         """Process confirmation event from Effect layer.
 
-        Handles confirmation events from Consul and PostgreSQL Effect nodes,
-        transitioning state through pending -> partial -> complete (or -> failed).
+        Handles confirmation events from the PostgreSQL Effect node,
+        transitioning state through pending -> complete (or -> failed).
 
         Args:
             state: Current registration state (immutable).
@@ -1068,11 +1068,11 @@ class RegistrationReducer:
 
             This validation prevents accidental loss of in-flight registration state.
             If a reset is attempted while registration is in progress (pending/partial),
-            the Consul or PostgreSQL confirmations could be lost, leaving the system
+            the PostgreSQL confirmation could be lost, leaving the system
             in an inconsistent state.
 
         Use Cases:
-            - Retry after registration failure (consul_failed, postgres_failed)
+            - Retry after registration failure (postgres_failed)
             - Re-register a node after deregistration
             - Manual recovery triggered by operator
 
@@ -1106,7 +1106,7 @@ class RegistrationReducer:
             >>> # Reset from failed state succeeds
             >>> failed_state = ModelRegistrationState(
             ...     status="failed",
-            ...     failure_reason="consul_failed"
+            ...     failure_reason="postgres_failed"
             ... )
             >>> output = reducer.reduce_reset(failed_state, uuid4())
             >>> output.result.status
@@ -1133,8 +1133,7 @@ class RegistrationReducer:
 
         # Validate state allows reset - only terminal states (failed, complete)
         # can be reset. Resetting from pending or partial would lose in-flight
-        # registration state, potentially causing inconsistency between Consul
-        # and PostgreSQL.
+        # registration state, potentially causing inconsistency in PostgreSQL.
         if not state.can_reset():
             # Not in a resettable state - transition to failed with clear error
             # This prevents accidental loss of in-flight registration state.

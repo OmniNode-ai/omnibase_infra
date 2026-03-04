@@ -42,7 +42,7 @@ class ModelPartialRetryRequest(BaseModel):
         metadata: Additional metadata for PostgreSQL registration.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     node_id: UUID = Field(
         ...,

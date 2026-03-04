@@ -408,11 +408,6 @@ io_operations:
       - error_summary
 # Dependencies (protocols this node requires)
 dependencies:
-  - name: "protocol_consul_client"
-    type: "protocol"
-    class_name: "ProtocolConsulClient"
-    module: "omnibase_infra.nodes.effects.protocol_consul_client"
-    description: "Consul service discovery operations"
   - name: "protocol_postgres_adapter"
     type: "protocol"
     class_name: "ProtocolPostgresAdapter"

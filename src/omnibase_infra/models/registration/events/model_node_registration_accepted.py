@@ -26,7 +26,7 @@ class ModelNodeRegistrationAccepted(BaseModel):
     complete the registration handshake.
 
     This event triggers the reducer to emit intents for persisting the
-    registration to Consul and PostgreSQL.
+    registration to PostgreSQL.
 
     Attributes:
         entity_id: The entity identifier (equals node_id for registration domain).

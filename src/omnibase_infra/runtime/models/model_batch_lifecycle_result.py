@@ -25,7 +25,7 @@ Example:
     >>> # Create batch result from individual results
     >>> results = [
     ...     ModelLifecycleResult.succeeded("kafka"),
-    ...     ModelLifecycleResult.succeeded("consul"),
+    ...     ModelLifecycleResult.succeeded("http"),
     ...     ModelLifecycleResult.failed("db", "Timeout"),
     ... ]
     >>> batch = ModelBatchLifecycleResult.from_results(results)

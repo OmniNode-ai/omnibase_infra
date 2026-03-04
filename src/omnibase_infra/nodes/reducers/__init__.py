@@ -9,7 +9,7 @@ Reducers are responsible for:
 - State aggregation from multiple sources
 - Event sourcing and state reconstruction
 - Multi-source data consolidation
-- Dual registration coordination (Consul + PostgreSQL)
+- PostgreSQL registration coordination
 
 Available Reducers:
 - NodeRegistrationReducer: Declarative FSM-driven reducer (ONEX pattern).

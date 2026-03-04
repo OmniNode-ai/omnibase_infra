@@ -60,6 +60,7 @@ class ModelContractDiscoveryResult(BaseModel):
         frozen=True,
         extra="forbid",
         strict=True,
+        from_attributes=True,
     )
 
     descriptors: list[ModelHandlerDescriptor] = Field(

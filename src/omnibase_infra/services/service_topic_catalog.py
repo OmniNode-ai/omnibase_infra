@@ -1,28 +1,20 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Topic Catalog Service.
+"""Topic Catalog Service (stub after OMN-3540).
 
-Reads the topic catalog from Consul KV with caching, timeout budget, and
-KV precedence rules (Phase 1.3).
+Consul KV was removed in OMN-3540. This service is now a stub that always
+returns empty results with a ``CONSUL_UNAVAILABLE`` warning. The internal
+helpers for KV parsing and enrichment are retained for reference but are
+no longer exercised at runtime.
 
-Design Principles:
+Original Design Principles (pre-OMN-3540):
     - Partial success: Returns data even if enrichment fails
     - Warnings array: Communicates backend failures without crashing
     - Version-based in-process cache: TTL keyed by catalog_version
-    - CAS increment with 3 retries + exponential backoff
-    - 5-second scan budget with partial results on timeout
-    - KV precedence: node arrays authoritative, reverse index is cache only
-
-KV Structure:
-    onex/catalog/version                                # monotonic version int
-    onex/nodes/{node_id}/event_bus/subscribe_topics     # [topic strings] authoritative
-    onex/nodes/{node_id}/event_bus/publish_topics       # [topic strings] authoritative
-    onex/nodes/{node_id}/event_bus/subscribe_entries    # [full entries] enrichment only
-    onex/nodes/{node_id}/event_bus/publish_entries      # [full entries] enrichment only
-    onex/topics/{topic}/subscribers                     # [node_ids] derived cache only
 
 Related Tickets:
     - OMN-2311: Topic Catalog: ServiceTopicCatalog + KV precedence + caching
+    - OMN-3540: Remove Consul entirely from omnibase_infra runtime
 
 .. versionadded:: 0.9.0
 """
@@ -95,11 +87,12 @@ class ModelTopicInfo:
 class ServiceTopicCatalog:
     """Catalog service stub for ONEX topic metadata.
 
-    Consul KV was removed in OMN-3540. This service always returns empty
-    results with a ``CONSUL_UNAVAILABLE`` warning.
+    Consul KV was removed in OMN-3540. All public methods return empty or
+    sentinel results immediately without performing any I/O.
 
-    Thread Safety:
-        All methods are async.
+    Coroutine Safety:
+        All public methods are async and coroutine-safe. They perform no
+        blocking I/O and hold no locks.
 
     Example:
         >>> service = ServiceTopicCatalog(container=container)
@@ -140,27 +133,18 @@ class ServiceTopicCatalog:
         include_inactive: bool = False,
         topic_pattern: str | None = None,
     ) -> ModelTopicCatalogResponse:
-        """Build (or return cached) topic catalog snapshot.
+        """Build topic catalog snapshot (stub -- always returns empty).
 
-        Steps:
-        1. Read ``onex/catalog/version`` for current version.
-        2. Return cached result immediately if version matches.
-        3. Consul KV recursive get ``onex/nodes/`` prefix.
-        4. Cross-reference: collect publisher/subscriber node_ids per topic.
-        5. Optionally enrich with ``subscribe_entries``/``publish_entries``.
-        6. Apply ``TopicResolver.resolve()`` for ``topic_name``.
-        7. Filter by ``topic_pattern`` (fnmatch) if provided.
-        8. Filter by ``is_active`` if ``include_inactive=False``.
-        9. Build ``ModelTopicCatalogEntry`` per topic.
-        10. Return ``ModelTopicCatalogResponse`` with warnings.
+        Consul KV was removed in OMN-3540. This method returns an empty
+        response with a ``CONSUL_UNAVAILABLE`` warning immediately.
 
         Args:
             correlation_id: Correlation ID for tracing.
-            include_inactive: Include topics with no publishers/subscribers.
-            topic_pattern: Optional fnmatch glob to filter topic suffixes.
+            include_inactive: Ignored (retained for API compatibility).
+            topic_pattern: Ignored (retained for API compatibility).
 
         Returns:
-            ModelTopicCatalogResponse with topics and any partial-failure warnings.
+            ModelTopicCatalogResponse with no topics and a ``CONSUL_UNAVAILABLE`` warning.
         """
         # Consul removed (OMN-3540): always return empty with CONSUL_UNAVAILABLE.
         warnings: list[str] = [CONSUL_UNAVAILABLE]
@@ -171,11 +155,10 @@ class ServiceTopicCatalog:
         )
 
     async def get_catalog_version(self, correlation_id: UUID) -> int:
-        """Read the current catalog version from Consul KV.
+        """Read the current catalog version (stub -- always returns -1).
 
         Returns:
-            Current catalog version (>= 0) or -1 when the key is absent or
-            the value is corrupt.
+            -1 always (Consul KV removed in OMN-3540).
         """
         # Consul removed (OMN-3540): always return -1.
         return -1

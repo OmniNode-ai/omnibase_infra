@@ -181,17 +181,24 @@ class HandlerPartialRetry:
             # While static typing prevents this in normal usage, the Protocol pattern
             # allows runtime duck typing that bypasses compile-time checks.
             duration_ms = (time.perf_counter() - start_time) * 1000
+
+            # Sanitize the backend value to avoid exposing unsanitized input
+            # in error payloads. Truncate to prevent log injection or memory issues.
+            if isinstance(target_backend, EnumBackendType):
+                sanitized_backend = target_backend.value
+            else:
+                raw = str(target_backend)
+                sanitized_backend = raw[:64] if len(raw) > 64 else raw
+
             error_msg = (
-                f"Unknown target backend: {target_backend}. Expected 'postgres'."
+                f"Unknown target backend: {sanitized_backend!r}. Expected 'postgres'."
             )
             return ModelBackendResult(
                 success=False,
                 error=error_msg,
                 error_code="INVALID_TARGET_BACKEND",
                 duration_ms=duration_ms,
-                backend_id=target_backend.value
-                if isinstance(target_backend, EnumBackendType)
-                else str(target_backend),
+                backend_id=sanitized_backend,
                 correlation_id=correlation_id,
             )
 

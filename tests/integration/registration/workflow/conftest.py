@@ -553,14 +553,14 @@ def tracked_reducer(
 
 @pytest.fixture
 def registry_effect(
-    consul_client: StubConsulClient,
+    consul_client: StubConsulClient,  # kept for backward compat with test signatures
     postgres_adapter: StubPostgresAdapter,
     idempotency_store: InMemoryEffectIdempotencyStore,
 ) -> NodeRegistryEffect:
     """Create NodeRegistryEffect with test double backends.
 
     Args:
-        consul_client: Test double Consul client.
+        consul_client: Unused after OMN-3540 consul removal (kept for fixture compat).
         postgres_adapter: Test double PostgreSQL adapter.
         idempotency_store: In-memory idempotency store.
 
@@ -568,7 +568,6 @@ def registry_effect(
         NodeRegistryEffect configured with test doubles.
     """
     return NodeRegistryEffect(
-        consul_client=consul_client,
         postgres_adapter=postgres_adapter,
         idempotency_store=idempotency_store,
     )
@@ -1015,14 +1014,14 @@ def mock_postgres_effect() -> MockPostgresEffect:
 
 @pytest.fixture
 def registry_effect_with_mocks(
-    mock_consul_effect: MockConsulEffect,
+    mock_consul_effect: MockConsulEffect,  # consul removed in OMN-3540
     mock_postgres_effect: MockPostgresEffect,
     idempotency_store: InMemoryEffectIdempotencyStore,
 ) -> NodeRegistryEffect:
     """Create NodeRegistryEffect with mock backends for call tracking.
 
     Args:
-        mock_consul_effect: Mock Consul effect.
+        mock_consul_effect: Unused after OMN-3540 consul removal.
         mock_postgres_effect: Mock PostgreSQL effect.
         idempotency_store: Idempotency store.
 
@@ -1030,7 +1029,6 @@ def registry_effect_with_mocks(
         NodeRegistryEffect configured with mocks.
     """
     return NodeRegistryEffect(
-        consul_client=mock_consul_effect,  # type: ignore[arg-type]
         postgres_adapter=mock_postgres_effect,  # type: ignore[arg-type]
         idempotency_store=idempotency_store,
     )

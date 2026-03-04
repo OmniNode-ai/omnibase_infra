@@ -68,7 +68,7 @@ class ModelLifecycleResult(BaseModel):
             otherwise. Use ``has_error`` to check if an error exists.
 
     Example:
-        >>> result = ModelLifecycleResult.succeeded("consul")
+        >>> result = ModelLifecycleResult.succeeded("db")
         >>> result.success
         True
         >>> result.has_error

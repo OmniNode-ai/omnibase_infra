@@ -144,6 +144,7 @@ class ModelReducerExecutionResult(BaseModel):
         frozen=True,
         extra="forbid",
         strict=True,
+        from_attributes=True,
     )
 
     state: ModelReducerState = Field(

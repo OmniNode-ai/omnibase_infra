@@ -283,12 +283,19 @@ class TestExtensionTypeIntentRouting:
         the intent_type is a Literal fixed at definition time. This test verifies the routing
         table lookup behavior when a known intent_type is not configured in the table.
         """
-        # Create a Postgres intent with known typed payload
+        # Create a Postgres intent with known typed payload and a valid record stub
         from uuid import uuid4 as _uuid4
+
+        from pydantic import BaseModel as _BaseModel
+
+        class _StubRecord(_BaseModel):
+            """Minimal record stub for routing test (record content is irrelevant)."""
+
+            node_id: str = "test-node"
 
         payload = ModelPayloadPostgresUpsertRegistration(
             correlation_id=_uuid4(),
-            record=None,  # type: ignore[arg-type]
+            record=_StubRecord(),
         )
         intent = ModelIntent(
             intent_type="extension",

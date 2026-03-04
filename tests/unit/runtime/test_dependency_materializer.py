@@ -128,10 +128,10 @@ def tmp_contract_protocol_only(tmp_path: Path) -> Path:
         "name": "protocol_only_node",
         "dependencies": [
             {
-                "name": "protocol_consul_client",
+                "name": "protocol_postgres_adapter",
                 "type": "protocol",
-                "class_name": "ProtocolConsulClient",
-                "module": "omnibase_infra.nodes.effects.protocol_consul_client",
+                "class_name": "ProtocolPostgresAdapter",
+                "module": "omnibase_infra.nodes.effects.protocol_postgres_adapter",
             },
         ],
     }

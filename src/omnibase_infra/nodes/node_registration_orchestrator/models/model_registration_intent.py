@@ -42,10 +42,6 @@ Related:
 
 from __future__ import annotations
 
-from typing import Annotated
-
-from pydantic import Field
-
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_postgres_intent_payload import (
     ModelPostgresIntentPayload,
 )
@@ -70,13 +66,11 @@ IntentPayload = ModelPostgresIntentPayload
 #   4. Run validate_union_registry_sync() to verify
 # =============================================================================
 
-# Discriminated union of all intent types using Annotated pattern
-# This enables type narrowing based on the `kind` field
+# Single intent type after Consul removal (OMN-3540).
+# When multiple intent types are re-introduced, use:
+#   Annotated[UnionType, Field(discriminator="kind")]
 # SYNC: Must include all types registered in RegistryIntent
-ModelRegistrationIntent = Annotated[
-    ModelPostgresUpsertIntent,
-    Field(discriminator="kind"),
-]
+ModelRegistrationIntent = ModelPostgresUpsertIntent
 
 # Explicit list of intent model classes in the union
 # Used by validate_union_registry_sync() for verification

@@ -25,8 +25,8 @@ Intent Format Compatibility (OMN-1258):
     Orchestrator layer.
 
     The RegistrationReducer emits intents with typed payloads:
-        - intent_type is set to the payload's specific routing key
-          (e.g., "postgres.upsert_registration")
+        - intent_type is set to "postgres.upsert_registration"
+          (the sole registration intent after Consul removal in OMN-3540)
 
     The Orchestrator/Runtime layer is responsible for:
         1. Consuming ModelIntent objects from reducer output

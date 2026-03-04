@@ -18,7 +18,7 @@ Core Registries
 - **RegistryProtocolBinding**: SINGLE SOURCE OF TRUTH for protocol handler registration
     - Maps handler types to handler implementations
     - Enables protocol-based dependency injection
-    - Supports HTTP, database, Kafka, Vault, Consul, Valkey/Redis, gRPC handlers
+    - Supports HTTP, database, Kafka, Valkey/Redis, gRPC handlers
 
 - **RegistryEventBusBinding**: Registry for event bus implementations
     - Maps event bus kinds to event bus implementations

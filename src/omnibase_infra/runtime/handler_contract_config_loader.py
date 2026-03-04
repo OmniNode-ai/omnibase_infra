@@ -94,11 +94,11 @@ def load_handler_contract_config(
 
     Example:
         >>> contract = load_handler_contract_config(
-        ...     "contracts/handlers/consul/handler_contract.yaml",
-        ...     "proto.consul",
+        ...     "contracts/handlers/db/handler_contract.yaml",
+        ...     "proto.db",
         ... )
         >>> contract["name"]
-        'handler-consul'
+        'handler-db-postgres'
     """
     if contract_path is None:
         raise ProtocolConfigurationError(
@@ -404,7 +404,7 @@ def extract_handler_config(
     Supports Two Contract Formats:
 
     Basic Contract Structure (contracts/handlers/*/handler_contract.yaml):
-        - name: Handler name (e.g., "handler-consul") [REQUIRED]
+        - name: Handler name (e.g., "handler-db-postgres") [REQUIRED]
         - handler_class: Fully qualified class path [REQUIRED]
         - handler_type: Handler kind (effect, compute, etc.) [REQUIRED*]
         - tags: List of discovery tags
@@ -439,7 +439,7 @@ def extract_handler_config(
 
     Args:
         contract: Parsed contract dict from load_handler_contract_config().
-        handler_type: Handler type identifier (e.g., "consul", "db") for
+        handler_type: Handler type identifier (e.g., "db", "http") for
             logging and context.
         require_basic_fields: If True (default), validates required fields are
             present and raises ProtocolConfigurationError if missing. Set to

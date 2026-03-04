@@ -166,15 +166,16 @@ class TestIntentEmissionOnIntrospectionEvent:
         # Act
         output = reducer.reduce(initial_state, event)
 
-        # Assert - should have at least 1 intent
-        assert len(output.intents) >= 1, (
-            f"Expected at least 1 intent (postgres), got {len(output.intents)}"
+        # Assert - should have exactly 1 intent (postgres only, consul removed OMN-3540)
+        assert len(output.intents) == 1, (
+            f"Expected exactly 1 intent (postgres), got {len(output.intents)}"
         )
 
-        # Verify postgres intent type via payload.intent_type (two-layer architecture)
-        # Outer intent_type is always "extension", routing key is in payload
-        intent_types = {intent.payload.intent_type for intent in output.intents}
-        assert "postgres.upsert_registration" in intent_types
+        # Verify the single intent is the postgres upsert registration intent
+        postgres_intent = output.intents[0]
+        assert postgres_intent.payload.intent_type == "postgres.upsert_registration", (
+            f"Expected postgres.upsert_registration intent, got {postgres_intent.payload.intent_type}"
+        )
 
     def test_postgres_intent_payload_structure(
         self,
@@ -238,10 +239,16 @@ class TestIntentEmissionOnIntrospectionEvent:
         # Act
         output = reducer.reduce(initial_state, event)
 
-        # Verify targets via payload.intent_type
-        for intent in output.intents:
-            if intent.payload.intent_type == "postgres.upsert_registration":
-                assert intent.target == f"postgres://node_registrations/{node_id}"
+        # Verify postgres intent exists before checking target
+        postgres_intents = [
+            i
+            for i in output.intents
+            if i.payload.intent_type == "postgres.upsert_registration"
+        ]
+        assert len(postgres_intents) == 1, (
+            f"Expected exactly 1 postgres intent, got {len(postgres_intents)}"
+        )
+        assert postgres_intents[0].target == f"postgres://node_registrations/{node_id}"
 
 
 # =============================================================================
@@ -338,7 +345,9 @@ class TestFSMIdleToPendingTransition:
         # Verify validation passed (state is pending, not failed)
         assert output.result.status == "pending"
         assert output.result.failure_reason is None
-        assert len(output.intents) == 2  # Intents emitted
+        assert (
+            len(output.intents) == 1
+        )  # Intents emitted (postgres only, consul removed)
 
 
 # =============================================================================
@@ -373,12 +382,14 @@ class TestFSMPendingToCompleteWorkflow:
         assert pending_state.status == "pending"
         assert len(output.intents) >= 1
 
-        # Step 2: pending -> partial (postgres confirmed)
+        # Step 2: pending -> complete (postgres confirmed; partial state removed OMN-3540)
         postgres_event_id = uuid_gen.next()
-        partial_state = pending_state.with_postgres_confirmed(postgres_event_id)
+        complete_state = pending_state.with_postgres_confirmed(postgres_event_id)
 
-        assert partial_state.status in ("partial", "complete")
-        assert partial_state.postgres_confirmed is True
+        assert complete_state.status == "complete", (
+            f"Expected 'complete' after postgres confirmation, got '{complete_state.status}'"
+        )
+        assert complete_state.postgres_confirmed is True
 
     def test_workflow_preserves_node_id_throughout(
         self,
@@ -523,7 +534,7 @@ class TestFSMResetFromFailed:
         pending_state = output.result
         complete_state = pending_state.with_postgres_confirmed(uuid_gen.next())
 
-        assert complete_state.status in ("partial", "complete")
+        assert complete_state.status == "complete"
         assert complete_state.can_reset() is True
 
         # Reset via reducer method
@@ -571,23 +582,28 @@ class TestFSMResetFromFailed:
     ) -> None:
         """Test that reset from partial state transitions to failed.
 
-        Partial state indicates in-flight registration that would be lost.
+        Partial state is deprecated (OMN-3540 removed Consul, eliminating the
+        multi-backend partial success path), but can exist in legacy DB rows.
+        Directly construct a partial state to verify the reducer rejects reset.
         """
-        # Get to partial state
-        event = create_introspection_event(node_id=uuid_gen.next())
-        output = reducer.reduce(initial_state, event)
-        pending_state = output.result
-        partial_state = pending_state.with_postgres_confirmed(uuid_gen.next())
+        from omnibase_infra.enums import EnumRegistrationStatus
 
-        assert partial_state.status in ("partial", "complete")
-        # Only partial (not complete) cannot reset
-        if partial_state.status != "partial":
-            pytest.skip(
-                "State transitioned to complete; partial reset test not applicable"
-            )
+        # Directly construct a partial state (legacy scenario: postgres confirmed
+        # but consul not yet confirmed, before consul was removed)
+        node_id = uuid_gen.next()
+        partial_state = ModelRegistrationState(
+            status=EnumRegistrationStatus.PARTIAL,
+            node_id=node_id,
+            consul_confirmed=False,
+            postgres_confirmed=True,
+            last_processed_event_id=uuid_gen.next(),
+            failure_reason=None,
+        )
+
+        assert partial_state.status == "partial"
         assert partial_state.can_reset() is False
 
-        # Attempt reset
+        # Attempt reset -- should fail because partial is an in-flight state
         reset_event_id = uuid_gen.next()
         reset_output = reducer.reduce_reset(partial_state, reset_event_id)
 
@@ -635,7 +651,7 @@ class TestIdempotencyDuplicateEventRejection:
         pending_state = output1.result
 
         assert pending_state.status == "pending"
-        assert len(output1.intents) == 2
+        assert len(output1.intents) == 1  # postgres only, consul removed
 
         # Second processing with same event
         output2 = reducer.reduce(pending_state, event)
@@ -698,7 +714,7 @@ class TestIdempotencyDuplicateEventRejection:
 
         output1 = reducer.reduce(initial_state, event1)
 
-        assert len(output1.intents) == 2
+        assert len(output1.intents) == 1  # postgres only, consul removed
 
         # Use a fresh idle state for the second event
         # (simulating a different node registration)
@@ -713,7 +729,7 @@ class TestIdempotencyDuplicateEventRejection:
         output2 = reducer.reduce(fresh_idle_state, event2)
 
         # Should process normally
-        assert len(output2.intents) == 2
+        assert len(output2.intents) == 1  # postgres only, consul removed
         assert output2.result.status == "pending"
 
 
@@ -883,7 +899,7 @@ class TestEndToEndWithMockedEffects:
         # Complete workflow
         complete = output2.result.with_postgres_confirmed(uuid_gen.next())
 
-        assert complete.status in ("partial", "complete")
+        assert complete.status == "complete"
 
 
 # =============================================================================
@@ -968,7 +984,7 @@ class TestNodeTypeValidation:
         output = reducer.reduce(initial_state, event)
 
         assert output.result.status == "pending"
-        assert len(output.intents) == 2
+        assert len(output.intents) == 1  # postgres only, consul removed
 
     def test_pydantic_enforces_node_type_validation(
         self,

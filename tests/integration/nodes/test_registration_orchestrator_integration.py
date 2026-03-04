@@ -221,32 +221,31 @@ class TestWorkflowGraphIntegration:
     """
 
     def test_execution_graph_has_all_nodes(self, contract_data: dict) -> None:
-        """Test that execution graph has all 8 required nodes.
+        """Test that execution graph has all 7 required nodes.
 
         The registration orchestrator workflow requires these nodes in order:
         1. receive_introspection - Receive introspection, tick, or ack events
         2. read_projection - Read current registration state from projection (OMN-930)
         3. evaluate_timeout - Evaluate timeout using injected time (OMN-973)
         4. compute_intents - Compute registration intents via reducer
-        5. execute_consul_registration - Execute Consul registration
-        6. execute_postgres_registration - Execute PostgreSQL registration
-        7. aggregate_results - Aggregate registration results
-        8. publish_outcome - Publish registration outcome event
+        5. execute_postgres_registration - Execute PostgreSQL registration
+        6. aggregate_results - Aggregate registration results
+        7. publish_outcome - Publish registration outcome event
 
-        This test ensures all 8 nodes are present with exact matching.
+        Consul registration was removed in OMN-3540.
+        This test ensures all 7 nodes are present with exact matching.
         """
         nodes = contract_data["workflow_coordination"]["workflow_definition"][
             "execution_graph"
         ]["nodes"]
         node_ids = {n["node_id"] for n in nodes}
 
-        # All 8 required execution graph nodes per C1 requirements
+        # All 7 required execution graph nodes (consul removed in OMN-3540)
         expected_nodes = {
             "receive_introspection",
             "read_projection",
             "evaluate_timeout",
             "compute_intents",
-            "execute_consul_registration",
             "execute_postgres_registration",
             "aggregate_results",
             "publish_outcome",
@@ -1564,6 +1563,12 @@ class TestWorkflowExecutionWithMocks:
 
         # Aggregate results (simulating what the orchestrator would do)
         postgres_results = [r for r in results if r.intent_kind == "postgres"]
+
+        # Guard against vacuous success: postgres result must exist
+        assert len(postgres_results) >= 1, (
+            "Expected at least 1 postgres result, got 0 — "
+            "all() on empty list would vacuously return True"
+        )
 
         postgres_applied = all(r.success for r in postgres_results)
 

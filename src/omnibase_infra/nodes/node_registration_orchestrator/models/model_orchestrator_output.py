@@ -53,6 +53,7 @@ class ModelOrchestratorOutput(BaseModel):
         frozen=True,
         extra="forbid",
         strict=True,
+        from_attributes=True,
     )
 
     correlation_id: UUID = Field(

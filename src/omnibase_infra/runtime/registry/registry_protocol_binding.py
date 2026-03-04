@@ -24,8 +24,9 @@ Handler Categories (by protocol type):
 - HTTP handlers: REST API integrations
 - Database handlers: PostgreSQL, Valkey connections
 - Message broker handlers: Kafka message processing
-- Service discovery handlers: Consul integration
-- Secret management handlers: Vault integration
+- Graph handlers: Memgraph/Neo4j operations
+- Intent handlers: Intent storage and query
+- MCP handlers: Model Context Protocol AI agent integration
 
 Example Usage:
     ```python

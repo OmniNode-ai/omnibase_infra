@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Pytest configuration and fixtures for registration E2E integration tests.  # ai-slop-ok: pre-existing
+"""Pytest configuration and fixtures for registration E2E integration tests.
 
-This module provides fixtures for end-to-end testing of the registration
-orchestrator against real infrastructure (Kafka, PostgreSQL).
+Fixtures for end-to-end testing of the registration orchestrator against
+real infrastructure (Kafka, PostgreSQL).
 
 Infrastructure Requirements:
     Tests require ALL infrastructure services to be available:

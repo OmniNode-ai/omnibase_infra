@@ -141,6 +141,7 @@ class ModelHandlerDescriptor(BaseModel):
         frozen=True,
         extra="forbid",
         strict=True,
+        from_attributes=True,
     )
 
     handler_id: str = Field(
