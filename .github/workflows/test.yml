@@ -450,19 +450,28 @@ jobs:
   # topic definition files. Pre-existing violations are suppressed via baseline.
   arch-invariants:
     name: Arch Invariants (OMN-3343)
-    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V2
     runs-on: >-
       ${{
         (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
          (github.event_name == 'push' ||
           github.event_name == 'workflow_dispatch' ||
-          github.event_name == 'schedule'))
+          github.event_name == 'schedule' ||
+          contains(vars.SELF_HOSTED_ALWAYS_JOBS || '', ',arch-invariants,')))
         && fromJSON('["self-hosted","omnibase-ci"]')
         || fromJSON('["ubuntu-latest"]')
       }}
-    timeout-minutes: 5
+    timeout-minutes: 15
 
     steps:
+      - name: Runner sanity check
+        if: runner.name != 'GitHub Actions'
+        run: |
+          echo "Runner: ${{ runner.name }}"
+          uv --version
+          python3 --version
+          test -d "$HOME/.cache/uv" && echo "uv cache: present" || echo "::warning::uv cache directory not found"
+
       - name: Checkout code
         uses: actions/checkout@v4
 
