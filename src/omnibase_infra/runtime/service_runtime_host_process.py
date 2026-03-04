@@ -1573,9 +1573,7 @@ class RuntimeHostProcess:
         # Step 1.6: Drain in-flight parallel tasks (OMN-476)
         # If parallel execution is enabled, wait for dispatched tasks to finish.
         if self._in_flight_tasks:
-            remaining_drain = max(
-                0.0, drain_deadline - loop.time()
-            )
+            remaining_drain = max(0.0, drain_deadline - loop.time())
             await self.drain_in_flight_tasks(timeout=remaining_drain)
 
         logger.info(
@@ -3125,9 +3123,7 @@ class RuntimeHostProcess:
             self._in_flight_tasks.add(task)
             task.add_done_callback(self._in_flight_tasks.discard)
 
-    async def _process_message_sequential(
-        self, message: ModelEventMessage
-    ) -> None:
+    async def _process_message_sequential(self, message: ModelEventMessage) -> None:
         """Process a single message sequentially (MVP path).
 
         Args:
@@ -3145,9 +3141,7 @@ class RuntimeHostProcess:
             async with self._pending_lock:
                 self._pending_message_count -= 1
 
-    async def _process_message_with_semaphore(
-        self, message: ModelEventMessage
-    ) -> None:
+    async def _process_message_with_semaphore(self, message: ModelEventMessage) -> None:
         """Process a single message with semaphore-based concurrency control (OMN-476).
 
         The semaphore is acquired by the caller (_on_message) before this method
@@ -3240,7 +3234,9 @@ class RuntimeHostProcess:
             return 0
 
         tasks_count = len(self._in_flight_tasks)
-        effective_timeout = timeout if timeout is not None else self._drain_timeout_seconds
+        effective_timeout = (
+            timeout if timeout is not None else self._drain_timeout_seconds
+        )
 
         logger.info(
             "Draining in-flight parallel tasks",
