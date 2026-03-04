@@ -311,9 +311,9 @@ class TestSetupOrchestratorE2E:
         event_types = [e.event_type for e in output.events]
 
         # Full happy-path events must all be present
-        assert (
-            "setup.completed" in event_types
-        ), f"Expected setup.completed in {event_types}"
+        assert "setup.completed" in event_types, (
+            f"Expected setup.completed in {event_types}"
+        )
         assert "setup.cloud.unavailable" not in event_types
         assert "setup.preflight.completed" in event_types
         assert "setup.provision.completed" in event_types
@@ -325,12 +325,12 @@ class TestSetupOrchestratorE2E:
 
         # I4: Verify phase separation — preflight and validate use separate checks
         # Minimal topology has 3 LOCAL services: postgres (5436), redpanda (19092), valkey (16379)
-        assert (
-            len(preflight_calls) == 3
-        ), f"Expected 3 preflight FREE checks (one per service), got {preflight_calls}"
-        assert (
-            len(validate_calls) == 3
-        ), f"Expected 3 validate OPEN checks (one per service), got {validate_calls}"
+        assert len(preflight_calls) == 3, (
+            f"Expected 3 preflight FREE checks (one per service), got {preflight_calls}"
+        )
+        assert len(validate_calls) == 3, (
+            f"Expected 3 validate OPEN checks (one per service), got {validate_calls}"
+        )
 
         # The two call sets must be disjoint in semantics (both cover the same ports,
         # but via different functions — _check_port_free vs _check_tcp_health).
@@ -372,9 +372,9 @@ class TestSetupOrchestratorE2E:
         event_types = [e.event_type for e in output.events]
 
         # I8: Cloud gate fires, setup stops immediately
-        assert (
-            "setup.cloud.unavailable" in event_types
-        ), f"Expected setup.cloud.unavailable in {event_types}"
+        assert "setup.cloud.unavailable" in event_types, (
+            f"Expected setup.cloud.unavailable in {event_types}"
+        )
 
         # No docker subprocess must have been called (I8 hard stop)
         assert len(docker_calls) == 0, (
