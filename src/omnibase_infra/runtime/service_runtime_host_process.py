@@ -243,7 +243,6 @@ DEFAULT_BATCH_FLUSH_INTERVAL_MS: float = float(
     os.environ.get("ONEX_BATCH_FLUSH_INTERVAL_MS", "100")
 )
 
-
 def _parse_contract_event_payload(
     msg: ModelEventMessage,
 ) -> tuple[dict[str, object], UUID] | None:
@@ -3346,9 +3345,7 @@ class RuntimeHostProcess:
             return 0
 
         tasks_count = len(self._in_flight_tasks)
-        effective_timeout = (
-            timeout if timeout is not None else self._drain_timeout_seconds
-        )
+        effective_timeout = timeout if timeout is not None else self._drain_timeout_seconds
 
         logger.info(
             "Draining in-flight parallel tasks",
