@@ -371,6 +371,76 @@ jobs:
           uv run python scripts/validation/lint_topic_names.py \
             --scan-contracts src/omnibase_infra/nodes
 
+  # Schema handshake gate -- validates producer→consumer Pydantic round-trip
+  # across every registered Kafka boundary pair (OMN-3411).
+  # Uses --changed-only in CI: only checks pairs whose models were touched by the PR.
+  # Requires sibling repos omniintelligence + omnimemory to be checked out.
+  schema-handshake:
+    name: Kafka Schema Handshake (OMN-3411)
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout omniintelligence (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: OmniNode-ai/omniintelligence
+          path: ../omniintelligence
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout omnimemory (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: OmniNode-ai/omnimemory
+          path: ../omnimemory
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Load cached uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-handshake-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/uv.lock') }}-${{ env.CACHE_VERSION }}
+          restore-keys: |
+            uv-handshake-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
+
+      - name: Install omnibase_infra dev dependencies
+        run: uv sync
+
+      - name: Install sibling repos as editable (boundary pair deps)
+        run: uv pip install -e ../omniintelligence -e ../omnimemory
+
+      - name: Run schema handshake validation (changed-only)
+        run: |
+          echo "================================================================"
+          echo "Kafka Schema Handshake Gate (OMN-3411)"
+          echo "Mode: --changed-only (only pairs whose models changed in this PR)"
+          echo "================================================================"
+          uv run python scripts/validate-kafka-schema-handshake.py --changed-only
+
   # Arch invariants: block raw topic literals in production code (OMN-3343)
   # Scans src/**/*.py for onex.(evt|cmd).* string literals outside canonical
   # topic definition files. Pre-existing violations are suppressed via baseline.
@@ -425,7 +495,7 @@ jobs:
   # Split strategy: 9265 tests / 10 = ~927 tests per split (~3-4 min each)
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/10)
-    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, arch-invariants]
+    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, arch-invariants, schema-handshake]
     # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
     runs-on: >-
       ${{
@@ -532,7 +602,7 @@ jobs:
         && fromJSON('["self-hosted","omnibase-ci"]')
         || fromJSON('["ubuntu-latest"]')
       }}
-    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, arch-invariants, migration-integration, migration-required-check]
+    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, arch-invariants, schema-handshake, migration-integration, migration-required-check]
     if: always()
 
     steps:
@@ -547,6 +617,7 @@ jobs:
           topicenumdrift="${{ needs.topic-enum-drift.result }}"
           topicnaminglint="${{ needs.topic-naming-lint.result }}"
           archinvariants="${{ needs.arch-invariants.result }}"
+          schemahandshake="${{ needs.schema-handshake.result }}"
           migrationintegration="${{ needs.migration-integration.result }}"
           migrationrequiredcheck="${{ needs.migration-required-check.result }}"
 
@@ -559,6 +630,7 @@ jobs:
              [[ "$topicenumdrift" == "success" ]] && \
              [[ "$topicnaminglint" == "success" ]] && \
              [[ "$archinvariants" == "success" ]] && \
+             [[ "$schemahandshake" == "success" ]] && \
              [[ "$migrationintegration" == "success" ]] && \
              [[ "$migrationrequiredcheck" == "success" ]]; then
             echo "All checks passed successfully"
@@ -571,6 +643,7 @@ jobs:
             echo "Topic Enum Drift Check: Passed"
             echo "Topic Naming Lint: Passed"
             echo "Arch Invariants: Passed"
+            echo "Kafka Schema Handshake: Passed"
             echo "Migration Integration: Passed"
             echo "Writer-Migration Coupling Check: Passed"
             exit 0
@@ -585,6 +658,7 @@ jobs:
             echo "Topic Enum Drift Check: $topicenumdrift"
             echo "Topic Naming Lint: $topicnaminglint"
             echo "Arch Invariants: $archinvariants"
+            echo "Kafka Schema Handshake: $schemahandshake"
             echo "Migration Integration: $migrationintegration"
             echo "Writer-Migration Coupling Check: $migrationrequiredcheck"
             exit 1
