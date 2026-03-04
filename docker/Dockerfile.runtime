@@ -183,6 +183,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "omninode-intelligence==0.9.1" \
     "omnibase-core==0.22.0"
 
+# Security: upgrade protobuf to clear CVE-2026-0994 (HIGH, DoS, fixed in >=5.29.6).
+# protobuf 4.25.8 (from transitive deps) is flagged by Trivy scan (ignore-unfixed: true).
+# Force upgrade here after all plugin installs to ensure the patched version is present.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install "protobuf>=5.29.6"
+
 # ============================================================================
 # Runtime Stage - Minimal production image
 # ============================================================================
