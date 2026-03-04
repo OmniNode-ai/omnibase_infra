@@ -124,7 +124,7 @@ class HandlerPool:
             instance = self._factory()
             # Call initialize() if handler supports it
             if hasattr(instance, "initialize") and callable(instance.initialize):
-                await instance.initialize()
+                await instance.initialize()  # type: ignore[call-arg]
             self._all_instances.append(instance)
             self._pool.put_nowait(instance)
             logger.debug(
@@ -319,7 +319,7 @@ class HandlerPool:
             if hasattr(new_instance, "initialize") and callable(
                 new_instance.initialize
             ):
-                await new_instance.initialize()
+                await new_instance.initialize()  # type: ignore[call-arg]
             self._all_instances.append(new_instance)
             self._pool.put_nowait(new_instance)
         except Exception:

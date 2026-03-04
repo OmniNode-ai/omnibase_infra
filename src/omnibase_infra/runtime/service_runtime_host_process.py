@@ -2461,8 +2461,8 @@ class RuntimeHostProcess:
 
                         def factory() -> ProtocolContainerAware:
                             if accepts and deps is not None:
-                                return cls(container=ctr, dependencies=deps)  # type: ignore[call-arg]
-                            return cls(container=ctr)  # type: ignore[call-arg]
+                                return cls(container=ctr, dependencies=deps)  # type: ignore[call-arg,arg-type]
+                            return cls(container=ctr)  # type: ignore[call-arg,arg-type]
 
                         return factory
 
