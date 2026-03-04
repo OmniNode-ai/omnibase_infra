@@ -77,12 +77,12 @@ class TestStubPostgresAdapterProtocolCompliance:
     def test_upsert_method_exists(self) -> None:
         """Verify upsert method exists and is async."""
         stub = StubPostgresAdapter()
-        assert hasattr(
-            stub, "upsert"
-        ), "StubPostgresAdapter missing required method: upsert"
-        assert asyncio.iscoroutinefunction(
-            stub.upsert
-        ), "upsert must be an async method"
+        assert hasattr(stub, "upsert"), (
+            "StubPostgresAdapter missing required method: upsert"
+        )
+        assert asyncio.iscoroutinefunction(stub.upsert), (
+            "upsert must be an async method"
+        )
 
     def test_upsert_signature_matches_protocol(self) -> None:
         """Verify upsert method signature matches protocol.
@@ -126,9 +126,9 @@ class TestStubPostgresAdapterProtocolCompliance:
         # The node_type should be annotated as EnumNodeKind
         # Note: get_type_hints resolves forward references
         assert "node_type" in hints, "node_type parameter must have type annotation"
-        assert (
-            hints["node_type"] is EnumNodeKind
-        ), f"node_type must be annotated as EnumNodeKind, got {hints['node_type']}"
+        assert hints["node_type"] is EnumNodeKind, (
+            f"node_type must be annotated as EnumNodeKind, got {hints['node_type']}"
+        )
 
     @pytest.mark.asyncio
     async def test_upsert_returns_model_backend_result(self) -> None:
@@ -141,9 +141,9 @@ class TestStubPostgresAdapterProtocolCompliance:
             endpoints={"health": "http://localhost:8080/health"},
             metadata={"environment": "test"},
         )
-        assert isinstance(
-            result, ModelBackendResult
-        ), f"upsert must return ModelBackendResult, got {type(result)}"
+        assert isinstance(result, ModelBackendResult), (
+            f"upsert must return ModelBackendResult, got {type(result)}"
+        )
 
     @pytest.mark.asyncio
     async def test_upsert_accepts_all_node_kinds(self) -> None:
@@ -167,9 +167,9 @@ class TestStubPostgresAdapterProtocolCompliance:
                 endpoints={},
                 metadata={},
             )
-            assert (
-                result.success is True
-            ), f"upsert should succeed for node_type={node_kind}"
+            assert result.success is True, (
+                f"upsert should succeed for node_type={node_kind}"
+            )
 
     @pytest.mark.asyncio
     async def test_success_result_has_correct_fields(self) -> None:
