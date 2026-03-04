@@ -134,10 +134,9 @@ BOUNDARY_PAIRS: list[BoundaryPair] = [
     # Producer: omniintelligence (ModelIntentClassifiedEvent)
     # Consumer: omnimemory (ModelIntentClassifiedEvent)
     #
-    # Status: XFAIL — OMN-3248 open
-    # The producer emits `intent_class: EnumIntentClass`; the consumer requires
-    # `intent_category: str`.  These are different field names for the same
-    # concept.  Remove xfail_reason once OMN-3248 is merged.
+    # Fixed: OMN-3248 / omnimemory #108 — consumer model now accepts both
+    # `intent_class` (EnumIntentClass) and `intent_category` (str) via a
+    # model_validator, so the boundary round-trip passes clean.
     # -------------------------------------------------------------------------
     BoundaryPair(
         producer_cls=OmniIntelligenceIntentClassifiedEvent,
@@ -152,11 +151,6 @@ BOUNDARY_PAIRS: list[BoundaryPair] = [
             "emitted_at": _EMITTED_AT,
         },
         topic="onex.evt.intent.classified.v1",
-        xfail_reason=(
-            "OMN-3248 open: producer emits intent_class (EnumIntentClass) "
-            "but consumer requires intent_category (str). "
-            "Remove this xfail_reason once OMN-3248 is merged."
-        ),
     ),
 ]
 
