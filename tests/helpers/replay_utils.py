@@ -155,12 +155,6 @@ def compare_outputs(
             f"Node ID mismatch: {output1.result.node_id} != {output2.result.node_id}"
         )
 
-    if output1.result.consul_confirmed != output2.result.consul_confirmed:
-        differences.append(
-            f"Consul confirmed mismatch: "
-            f"{output1.result.consul_confirmed} != {output2.result.consul_confirmed}"
-        )
-
     if output1.result.postgres_confirmed != output2.result.postgres_confirmed:
         differences.append(
             f"Postgres confirmed mismatch: "

@@ -15,7 +15,7 @@ Exports:
     EnumAnyTypeViolation: Any type violation categories for strong typing validation
     EnumAuthDecision: Authorization decision outcomes (ALLOW, DENY, SOFT_DENY)
     EnumAuthSource: Authorization source classification (PLAN_APPROVAL, TICKET_PIPELINE, etc.)
-    EnumBackendType: Infrastructure backend types (CONSUL, POSTGRES)
+    EnumBackendType: Infrastructure backend types (POSTGRES)
     EnumCheckSeverity: Validation check severity (REQUIRED, RECOMMENDED, INFORMATIONAL)
     EnumChainViolationType: Chain violation types for correlation/causation validation
     EnumCircuitState: Circuit breaker states (CLOSED, OPEN, HALF_OPEN)

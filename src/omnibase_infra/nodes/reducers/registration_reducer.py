@@ -36,7 +36,7 @@ Circuit Breaker Considerations:
        always produces the same output. There's no "retry" semantic.
 
     4. **Effect Layer Responsibility**: Circuit breakers should be implemented
-       in the Effect layer nodes (ConsulAdapter, PostgresAdapter) that actually
+       in the Effect layer nodes (PostgresAdapter) that actually
        perform the external I/O operations.
 
     See CLAUDE.md "Dispatcher Resilience Pattern" section for the general
@@ -175,7 +175,6 @@ State Persistence Strategy:
 Intent Emission:
     The reducer emits ModelIntent objects (reducer-layer intents) that wrap
     the typed infrastructure intents:
-    - consul.register: Consul service registration
     - postgres.upsert_registration: PostgreSQL record upsert
 
     The payload contains the serialized typed intent for Effect layer execution.
@@ -189,9 +188,8 @@ Confirmation Event Flow:
         +----------------+     +-----------+     +------------------+
         | Node emits     | --> | Reducer   | --> | Intents emitted  |
         | Introspection  |     | processes |     | to Kafka         |
-        | Event          |     | event     |     | (consul.register,|
-        +----------------+     +-----------+     | postgres.upsert) |
-                                                 +------------------+
+        | Event          |     | event     |     | (postgres.upsert)|
+        +----------------+     +-----------+     +------------------+
                                                           |
                                                           v
                                              +------------------------+
@@ -202,15 +200,12 @@ Confirmation Event Flow:
     2. EFFECT LAYER EXECUTION:
 
         +-------------------+     +------------------+     +------------------+
-        | ConsulAdapter     | --> | Execute intent   | --> | Publish          |
-        | (Effect Node)     |     | (register svc)   |     | confirmation     |
+        | PostgresAdapter   | --> | Execute intent   | --> | Publish          |
+        | (Effect Node)     |     | (upsert record)  |     | confirmation     |
         +-------------------+     +------------------+     | event to Kafka   |
                                                           +------------------+
                                                                    |
-        +-------------------+     +------------------+             |
-        | PostgresAdapter   | --> | Execute intent   | ------------+
-        | (Effect Node)     |     | (upsert record)  |             |
-        +-------------------+     +------------------+             v
+                                                                   v
                                                           +------------------+
                                                           | Confirmation     |
                                                           | events on Kafka  |
@@ -233,16 +228,6 @@ Confirmation Event Flow:
 
     4. CONFIRMATION EVENT TYPES:
 
-        - consul.registered: Confirmation from ConsulAdapter that service
-          was successfully registered in Consul. Published to:
-          onex.registration.events (or onex.<domain>.events)
-
-          Payload includes:
-            - correlation_id: Links back to original introspection event
-            - service_id: The registered Consul service ID
-            - success: bool indicating registration outcome
-            - error: Optional error message if failed
-
         - postgres.registration_upserted: Confirmation from PostgresAdapter
           that registration record was successfully upserted. Published to:
           onex.registration.events
@@ -259,28 +244,20 @@ Confirmation Event Flow:
         | idle  | ----------------> | pending |
         +-------+                   +---------+
            ^                         |       |
-           |       consul confirmed  |       | postgres confirmed
-           |       (first)          v       v (first)
-           |                  +---------+
-           |                  | partial |
-           |                  +---------+
-           |                    |       |
-           |   remaining        |       | error received
-           |   confirmed        v       v
-           |              +---------+ +---------+
-           +---reset------| complete| | failed  |---reset---+
-                          +---------+ +---------+           |
-                                                            v
-                                                      +-------+
-                                                      | idle  |
-                                                      +-------+
+           |    postgres confirmed   |       | error received
+           |                        v       v
+           |                  +---------+ +---------+
+           +---reset----------| complete| | failed  |---reset---+
+                              +---------+ +---------+           |
+                                                                v
+                                                          +-------+
+                                                          | idle  |
+                                                          +-------+
 
         Transitions:
         - idle -> pending: On introspection event (emits intents)
-        - pending -> partial: First confirmation received (consul OR postgres)
+        - pending -> complete: Postgres confirmation received
         - pending -> failed: Error confirmation received
-        - partial -> complete: Second confirmation received (both confirmed)
-        - partial -> failed: Error confirmation for remaining backend
         - any -> failed: Validation or backend error
         - failed -> idle: Reset event (allows retry after failure)
         - complete -> idle: Reset event (allows re-registration)
@@ -296,13 +273,12 @@ Confirmation Event Flow:
             3. Failure path: maps event_type to failure_reason, transitions
                to failed state via state.with_failure()
             4. Success path: transitions state based on confirmation type:
-               - consul.registered -> state.with_consul_confirmed()
                - postgres.registration_upserted -> state.with_postgres_confirmed()
             5. State progression: pending -> partial -> complete (or -> failed)
             6. Confirmations never emit new intents
 
         The confirmation event model (ModelRegistrationConfirmation) includes:
-            - event_type: "consul.registered" | "postgres.registration_upserted"
+            - event_type: "postgres.registration_upserted"
             - correlation_id: UUID linking to original introspection
             - node_id: UUID of the registered node
             - success: bool
@@ -527,12 +503,12 @@ class RegistrationReducer:
     Complete Event Cycle:
         1. Node publishes introspection event to Kafka
         2. Runtime routes introspection to this reducer via reduce()
-        3. Reducer emits intents (consul.register, postgres.upsert_registration)
+        3. Reducer emits intents (postgres.upsert_registration)
         4. Runtime publishes intents to Kafka intent topics
-        5. Effect layer nodes (ConsulAdapter, PostgresAdapter) consume intents
+        5. Effect layer nodes (PostgresAdapter) consume intents
         6. Effect nodes execute I/O and publish confirmation events to Kafka
         7. Runtime routes confirmation events back to this reducer
-        8. Reducer updates state: pending -> partial -> complete
+        8. Reducer updates state: pending -> complete
 
     Topic Subscriptions:
         The reducer node subscribes to:
@@ -675,10 +651,10 @@ class RegistrationReducer:
         #
         # After this method returns:
         #   - Runtime publishes intents to Kafka (onex.registration.intents)
-        #   - Effect nodes (ConsulAdapter, PostgresAdapter) consume intents
+        #   - Effect nodes (PostgresAdapter) consume intents
         #   - Effect nodes execute I/O and publish confirmation events
         #   - Runtime routes confirmation events to reduce_confirmation()
-        #   - reduce_confirmation() transitions: pending -> partial -> complete
+        #   - reduce_confirmation() transitions: pending -> complete
         # =====================================================================
 
         new_state = state.with_pending_registration(event.node_id, event_id)
@@ -884,9 +860,9 @@ class RegistrationReducer:
     # =========================================================================
     # CONFIRMATION EVENT HANDLING (PHASE 2 of the event flow)
     #
-    # Processes confirmation events from Effect layer (ConsulAdapter,
-    # PostgresAdapter) and transitions registration state through
-    # pending -> partial -> complete (or -> failed).
+    # Processes confirmation events from Effect layer (PostgresAdapter)
+    # and transitions registration state through
+    # pending -> complete (or -> failed).
     #
     # See module docstring section 6 for detailed implementation notes.
     # =========================================================================

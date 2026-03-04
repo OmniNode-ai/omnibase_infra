@@ -7,7 +7,6 @@ This module exports models used by infrastructure reducers (pure function patter
 Available Models:
     - ModelRegistrationState: Immutable state for pure reducer pattern
     - ModelRegistrationConfirmation: Confirmation event from Effect layer (Phase 2)
-    - ModelPayloadConsulRegister: Payload for Consul registration intents
     - ModelPayloadLedgerAppend: Payload for audit ledger append intents
     - ModelPayloadPostgresUpsertRegistration: Payload for PostgreSQL upsert intents
     - ModelPayloadPostgresUpdateRegistration: Payload for PostgreSQL UPDATE intents

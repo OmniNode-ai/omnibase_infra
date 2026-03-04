@@ -37,7 +37,7 @@ from omnibase_infra.models.handlers import (
 # =============================================================================
 
 # Valid handler_class values for testing
-VALID_HANDLER_CLASS = "omnibase_infra.handlers.handler_consul.HandlerConsul"
+VALID_HANDLER_CLASS = "omnibase_infra.handlers.handler_kafka.HandlerKafka"
 VALID_HANDLER_CLASS_SHORT = "myapp.handlers.MyHandler"
 
 # Invalid handler_class values for testing
@@ -84,9 +84,9 @@ class TestBootstrapHandlerDescriptorRequiredHandlerClass:
         # Verify the error mentions handler_class field
         errors = exc_info.value.errors()
         handler_class_errors = [e for e in errors if "handler_class" in str(e["loc"])]
-        assert len(handler_class_errors) > 0, (
-            "Expected validation error for missing handler_class"
-        )
+        assert (
+            len(handler_class_errors) > 0
+        ), "Expected validation error for missing handler_class"
 
     def test_handler_class_required_fails_when_none(self) -> None:
         """Explicitly passing handler_class=None should raise ValidationError."""
@@ -148,7 +148,7 @@ class TestBootstrapHandlerDescriptorPatternValidation:
     def test_valid_handler_class_patterns(self) -> None:
         """Various valid handler_class patterns should be accepted."""
         valid_patterns = [
-            "omnibase_infra.handlers.handler_consul.HandlerConsul",
+            "omnibase_infra.handlers.handler_kafka.HandlerKafka",
             "myapp.handlers.MyHandler",
             "a.b.C",
             "module_name.SubModule.ClassName",
@@ -275,8 +275,8 @@ class TestBootstrapHandlerDescriptorToBase:
     def test_to_base_descriptor_copies_all_fields(self) -> None:
         """to_base_descriptor() should copy all field values correctly."""
         bootstrap_desc = ModelBootstrapHandlerDescriptor(
-            handler_id="proto.consul",
-            name="Consul Handler",
+            handler_id="proto.kafka",
+            name="Kafka Handler",
             version="2.1.3",
             handler_kind="effect",
             input_model="omnibase_infra.models.types.JsonDict",
@@ -434,9 +434,9 @@ class TestBootstrapHandlerDescriptorIntegration:
         result = await source.discover_handlers()
 
         for descriptor in result.descriptors:
-            assert descriptor.handler_class is not None, (
-                f"Handler {descriptor.handler_id} missing handler_class"
-            )
+            assert (
+                descriptor.handler_class is not None
+            ), f"Handler {descriptor.handler_id} missing handler_class"
             assert len(descriptor.handler_class) > 0
 
 

@@ -717,8 +717,8 @@ class TestMixinAsyncCircuitBreakerFromConfig:
         }
         with patch.dict(os.environ, env_vars, clear=True):
             config = ModelCircuitBreakerConfig.from_env(
-                service_name="consul.dev",
-                transport_type=EnumInfraTransportType.CONSUL,
+                service_name="http.dev",
+                transport_type=EnumInfraTransportType.HTTP,
                 prefix="TEST_CB",
             )
             service = CircuitBreakerConfigServiceStub(config)
@@ -726,8 +726,8 @@ class TestMixinAsyncCircuitBreakerFromConfig:
             # Verify values from environment were applied
             assert service.circuit_breaker_threshold == 3
             assert service.circuit_breaker_reset_timeout == 30.0
-            assert service.service_name == "consul.dev"
-            assert service._cb_transport_type == EnumInfraTransportType.CONSUL
+            assert service.service_name == "http.dev"
+            assert service._cb_transport_type == EnumInfraTransportType.HTTP
 
     async def test_init_from_config_all_transport_types(self) -> None:
         """Test initialization from config with all transport types."""
@@ -737,7 +737,6 @@ class TestMixinAsyncCircuitBreakerFromConfig:
             EnumInfraTransportType.HTTP,
             EnumInfraTransportType.DATABASE,
             EnumInfraTransportType.KAFKA,
-            EnumInfraTransportType.CONSUL,
             EnumInfraTransportType.VALKEY,
             EnumInfraTransportType.GRPC,
             EnumInfraTransportType.RUNTIME,

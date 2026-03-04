@@ -45,9 +45,9 @@ class TestBootstrapSequence:
         extractor = ContractConfigExtractor()
         reqs = extractor.extract_from_paths([NODES_DIR])
 
-        assert len(reqs.transport_types) > 0, (
-            "Should find at least one transport type in repo contracts"
-        )
+        assert (
+            len(reqs.transport_types) > 0
+        ), "Should find at least one transport type in repo contracts"
         assert len(reqs.requirements) > 0, "Should find at least one config requirement"
 
         # Step 2: Build transport specs
@@ -72,13 +72,6 @@ class TestBootstrapSequence:
 
         assert EnumInfraTransportType.DATABASE in reqs.transport_types
 
-    def test_real_contracts_have_consul_transport(self) -> None:
-        """Real contracts should declare CONSUL transport type."""
-        extractor = ContractConfigExtractor()
-        reqs = extractor.extract_from_paths([NODES_DIR])
-
-        assert EnumInfraTransportType.CONSUL in reqs.transport_types
-
     def test_real_contracts_have_env_dependencies(self) -> None:
         """Real contracts should have environment dependencies."""
         extractor = ContractConfigExtractor()
@@ -88,9 +81,9 @@ class TestBootstrapSequence:
             r for r in reqs.requirements if r.source_field.startswith("dependencies[")
         ]
         # The slack alerter has env dependencies
-        assert len(env_deps) > 0, (
-            "Should find at least one environment dependency in repo contracts"
-        )
+        assert (
+            len(env_deps) > 0
+        ), "Should find at least one environment dependency in repo contracts"
 
     def test_no_extraction_errors_on_real_contracts(self) -> None:
         """Should have no parse errors on valid repo contracts."""
@@ -100,6 +93,6 @@ class TestBootstrapSequence:
         # Filter out "unknown transport" errors (some contracts may use
         # transport types not in our mapping yet)
         parse_errors = [e for e in reqs.errors if "Failed to parse" in e]
-        assert len(parse_errors) == 0, (
-            f"Should not have YAML parse errors: {parse_errors}"
-        )
+        assert (
+            len(parse_errors) == 0
+        ), f"Should not have YAML parse errors: {parse_errors}"

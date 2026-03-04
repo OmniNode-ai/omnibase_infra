@@ -513,11 +513,6 @@ class TestPluginFingerprintPropagation:
             ),
             patch.object(
                 PluginRegistration,
-                "_initialize_consul_handler",
-                new_callable=AsyncMock,
-            ),
-            patch.object(
-                PluginRegistration,
                 "_initialize_snapshot_publisher",
                 new_callable=AsyncMock,
             ),
@@ -576,11 +571,6 @@ class TestPluginFingerprintPropagation:
             patch.object(
                 PluginRegistration,
                 "_initialize_schema",
-                new_callable=AsyncMock,
-            ),
-            patch.object(
-                PluginRegistration,
-                "_initialize_consul_handler",
                 new_callable=AsyncMock,
             ),
             patch.object(

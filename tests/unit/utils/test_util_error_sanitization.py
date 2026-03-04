@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from omnibase_infra.utils import (
     SENSITIVE_PATTERNS,
-    sanitize_consul_key,
     sanitize_error_message,
     sanitize_secret_path,
     sanitize_url,
@@ -316,51 +315,6 @@ class TestSanitizeSecretPath:
         assert "production" not in result
         assert "postgres" not in result
         assert "password" not in result
-
-
-class TestSanitizeConsulKey:
-    """Tests for sanitize_consul_key function."""
-
-    def test_none_returns_none(self) -> None:
-        """None input should return None."""
-        assert sanitize_consul_key(None) is None
-
-    def test_empty_string_returns_empty(self) -> None:
-        """Empty string should return empty string."""
-        assert sanitize_consul_key("") == ""
-
-    def test_single_segment_unchanged(self) -> None:
-        """Single segment keys should be unchanged."""
-        assert sanitize_consul_key("config") == "config"
-        assert sanitize_consul_key("services") == "services"
-
-    def test_multi_segment_key_sanitized(self) -> None:
-        """Multi-segment keys should be sanitized."""
-        result = sanitize_consul_key("config/database/connection")
-        assert result == "config/***/***"
-        assert "database" not in result
-        assert "connection" not in result
-
-    def test_two_segment_key_sanitized(self) -> None:
-        """Two-segment keys should be sanitized."""
-        result = sanitize_consul_key("config/myapp")
-        assert result == "config/***/***"
-        assert "myapp" not in result
-
-    def test_service_keys_sanitized(self) -> None:
-        """Service registry keys should be sanitized."""
-        result = sanitize_consul_key("services/api-gateway/endpoints")
-        assert result == "services/***/***"
-        assert "api-gateway" not in result
-        assert "endpoints" not in result
-
-    def test_preserves_prefix_only(self) -> None:
-        """Only the first segment should be visible in sanitized key."""
-        result = sanitize_consul_key("config/production/api/internal/database/primary")
-        assert result.startswith("config/")
-        assert "production" not in result
-        assert "internal" not in result
-        assert "primary" not in result
 
 
 class TestSanitizeUrl:

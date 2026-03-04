@@ -7,8 +7,8 @@ These tests verify the FULL registration flow:
 2. Orchestrator consumes the event from Kafka
 3. Handler processes and triggers reducer
 4. Reducer generates intents
-5. Effects execute intents (Consul + PostgreSQL registration)
-6. Verify BOTH Consul AND PostgreSQL have the registration
+5. Effects execute intents (PostgreSQL registration)
+6. Verify PostgreSQL has the registration
 
 Unlike the component tests in test_two_way_registration_e2e.py, these tests
 validate the actual message consumption and processing pipeline.
@@ -25,7 +25,6 @@ Architecture Notes:
 
 Infrastructure Requirements (configured via environment variables):
     - Kafka: KAFKA_BOOTSTRAP_SERVERS (e.g., localhost:29092)
-    - Consul: CONSUL_HTTP_ADDR (e.g., localhost:8500)
     - PostgreSQL: POSTGRES_HOST, POSTGRES_PORT (e.g., localhost:5432)
 
 Related Tickets:
@@ -424,7 +423,6 @@ class OrchestratorPipeline:
                     logger.info(
                         "  [EFFECT] SUCCESS\n"
                         "    Node ID: %s\n"
-                        "    Consul registration: Completed\n"
                         "    PostgreSQL registration: Completed",
                         event.node_id,
                     )
@@ -554,9 +552,6 @@ class OrchestratorPipeline:
             extra={
                 "node_id": str(event.node_id),
                 "status": response.status,
-                "consul_success": response.consul_result.success
-                if response.consul_result
-                else None,
                 "postgres_success": response.postgres_result.success
                 if response.postgres_result
                 else None,
@@ -620,13 +615,11 @@ class OrchestratorTestContext:
 
     Attributes:
         pipeline: The orchestrator pipeline for processing events.
-        mock_consul_client: Mock Consul client injected into the pipeline.
         mock_postgres_adapter: Mock PostgreSQL adapter injected into the pipeline.
         unsubscribe: Async function to unsubscribe from Kafka topic.
     """
 
     pipeline: OrchestratorPipeline
-    mock_consul_client: AsyncMock
     mock_postgres_adapter: AsyncMock
     unsubscribe: Callable[[], Awaitable[None]] | None = None
 
@@ -1198,9 +1191,9 @@ class TestFullOrchestratorFlow:
 
         # Verify processing completed
         assert unique_node_id in pipeline.processed_events
-        assert len(pipeline.processing_errors) == 0, (
-            f"Pipeline had errors: {pipeline.processing_errors}"
-        )
+        assert (
+            len(pipeline.processing_errors) == 0
+        ), f"Pipeline had errors: {pipeline.processing_errors}"
 
         # Verify effect was called (mocks were invoked)
         mock_consul_client.register_service.assert_called()
@@ -1269,9 +1262,9 @@ class TestFullOrchestratorFlow:
 
         # Verify all events processed
         for node_id in node_ids:
-            assert node_id in pipeline.processed_events, (
-                f"Event for node {node_id} was not processed"
-            )
+            assert (
+                node_id in pipeline.processed_events
+            ), f"Event for node {node_id} was not processed"
 
     async def test_malformed_message_handled_gracefully(
         self,
@@ -1347,9 +1340,9 @@ class TestFullOrchestratorFlow:
             elapsed += poll_interval
 
         # Valid event should still be processed
-        assert unique_node_id in pipeline.processed_events, (
-            "Valid event should be processed after malformed message"
-        )
+        assert (
+            unique_node_id in pipeline.processed_events
+        ), "Valid event should be processed after malformed message"
 
 
 # =============================================================================
@@ -1477,14 +1470,14 @@ class TestFullPipelineWithRealInfrastructure:
             if intent.intent_type
         }
         assert "consul.register" in intent_types, "Should include Consul intent"
-        assert "postgres.upsert_registration" in intent_types, (
-            "Should include PostgreSQL intent"
-        )
+        assert (
+            "postgres.upsert_registration" in intent_types
+        ), "Should include PostgreSQL intent"
 
         # Verify new state
-        assert output.result.status == "pending", (
-            f"Expected pending status, got {output.result.status}"
-        )
+        assert (
+            output.result.status == "pending"
+        ), f"Expected pending status, got {output.result.status}"
 
     async def test_effect_executes_dual_registration(
         self,

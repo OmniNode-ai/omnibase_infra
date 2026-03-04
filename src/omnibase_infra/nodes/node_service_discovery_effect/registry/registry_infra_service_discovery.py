@@ -86,13 +86,10 @@ class RegistryInfraServiceDiscovery:
             RegistryInfraServiceDiscovery.register(container)
 
             # Explicit handler registration
-            consul_handler = HandlerServiceDiscoveryConsul(
-                container=container,
-                consul_host="localhost",
-            )
+            handler = SomeDiscoveryHandler(container=container)
             RegistryInfraServiceDiscovery.register_with_handler(
                 container,
-                handler=consul_handler,
+                handler=handler,
             )
     """
 
@@ -148,7 +145,7 @@ class RegistryInfraServiceDiscovery:
 
         Example:
             >>> container = ModelONEXContainer()
-            >>> handler = HandlerServiceDiscoveryConsul(config)
+            >>> handler = SomeDiscoveryHandler(config)
             >>> await RegistryInfraServiceDiscovery.register_with_handler(
             ...     container,
             ...     handler=handler,

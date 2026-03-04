@@ -28,11 +28,6 @@ Skip Conditions by Handler:
         - Skips if Vault server is unreachable (health check fails)
         - Two-phase skip: first checks env vars, then checks reachability
 
-    **Consul (HandlerConsul)**:
-        - Skips if CONSUL_HOST not set
-        - Skips if Consul server is unreachable (TCP connection fails)
-        - Uses socket-based reachability check at module import time
-
     **HTTP (HttpRestHandler)**:
         - No skip conditions - uses pytest-httpserver for local mock testing
         - Always runs regardless of external infrastructure
@@ -43,7 +38,6 @@ Example CI/CD Behavior::
     $ pytest tests/integration/handlers/ -v
     tests/.../test_db_handler_integration.py::TestHandlerDbConnection::test_db_describe SKIPPED
     tests/.../test_vault_handler_integration.py::TestHandlerVaultConnection::test_vault_describe SKIPPED
-    tests/.../test_consul_handler_integration.py::TestHandlerConsulConnection::test_consul_describe SKIPPED
     tests/.../test_http_handler_integration.py::TestHttpRestHandlerIntegration::test_simple_get_request PASSED
 
     # With infrastructure access (using OMNIBASE_INFRA_DB_URL or fallback vars):
@@ -85,15 +79,6 @@ Error Types for Missing/Invalid Configuration:
     - Missing VAULT_TOKEN: RuntimeHostError with message "Missing 'token' in config"
     - Invalid VAULT_TOKEN: InfraAuthenticationError when Vault rejects the token
 
-Consul Handlers
-===============
-
-Environment Variables (required):
-    CONSUL_HOST: Consul hostname (required)
-Environment Variables (optional):
-    CONSUL_PORT: Consul port (default: 8500)
-    CONSUL_SCHEME: HTTP scheme (default: http)
-    CONSUL_TOKEN: ACL token for authentication
 """
 
 from __future__ import annotations
@@ -115,7 +100,6 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from omnibase_core.types import JsonType
     from omnibase_infra.handlers import (
-        HandlerConsul,
         HandlerDb,
         HandlerGraph,
         HandlerQdrant,
@@ -128,7 +112,6 @@ if TYPE_CHECKING:
 # =============================================================================
 # The ONEX development infrastructure server hosts shared services:
 # - PostgreSQL (port 5436)
-# - Consul (port 28500)
 # - Vault (port 8200)
 # - Kafka/Redpanda (port 29092)
 #
@@ -144,7 +127,6 @@ if TYPE_CHECKING:
 # Environment Variable Overrides:
 #   - Set REMOTE_INFRA_HOST to override the infrastructure server IP
 #   - Set POSTGRES_HOST=localhost for local PostgreSQL
-#   - Set CONSUL_HOST=localhost for local Consul
 #   - Set VAULT_ADDR=http://localhost:8200 for local Vault
 #   - Leave unset to skip infrastructure-dependent tests in CI
 #
@@ -587,170 +569,6 @@ async def vault_handler(
     except Exception as e:
         logger.warning(
             "Cleanup failed for HandlerVault shutdown: %s",
-            e,
-            exc_info=True,
-        )
-
-
-# =============================================================================
-# Consul Environment Configuration
-# =============================================================================
-
-# Read Consul configuration from environment (set via docker-compose or .env)
-CONSUL_HOST = os.getenv("CONSUL_HOST")
-CONSUL_PORT = _safe_int_env("CONSUL_PORT", 8500)
-CONSUL_SCHEME = os.getenv("CONSUL_SCHEME", "http")
-CONSUL_TOKEN = os.getenv("CONSUL_TOKEN")
-
-
-def _check_consul_reachable() -> bool:
-    """Check if Consul server is reachable.
-
-    Makes a TCP connection to verify connectivity.
-
-    Returns:
-        bool: True if Consul is reachable, False otherwise.
-    """
-    if CONSUL_HOST is None:
-        return False
-
-    import socket
-
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(5.0)
-            result = sock.connect_ex((CONSUL_HOST, CONSUL_PORT))
-            return result == 0
-    except (OSError, TimeoutError):
-        return False
-
-
-# Check Consul reachability at module import time
-CONSUL_AVAILABLE = _check_consul_reachable()
-
-
-# =============================================================================
-# Consul Handler Fixtures
-# =============================================================================
-
-
-@pytest.fixture(scope="session")
-def consul_available() -> bool:
-    """Session-scoped fixture indicating Consul availability.
-
-    This fixture enables graceful skip behavior for CI/CD environments
-    where Consul infrastructure may not be available. The check is
-    performed at module import time using a TCP socket connection.
-
-    Skip Conditions:
-        - Returns False if CONSUL_HOST environment variable not set
-        - Returns False if TCP connection to CONSUL_HOST:CONSUL_PORT fails
-        - Uses 5-second timeout for connection attempts
-
-    Returns:
-        bool: True if Consul is available for testing.
-
-    CI/CD Behavior:
-        In CI environments without Consul access, this returns False,
-        causing tests to be skipped gracefully without failures.
-
-    Example:
-        >>> @pytest.mark.skipif(not consul_available(), reason="Consul unavailable")
-        >>> async def test_consul_kv_put(consul_handler):
-        ...     # This test skips in CI without Consul
-        ...     pass
-    """
-    return CONSUL_AVAILABLE
-
-
-@pytest.fixture
-def consul_config() -> dict[str, JsonType]:
-    """Provide Consul configuration for HandlerConsul.
-
-    Returns:
-        Configuration dict for HandlerConsul.initialize()
-    """
-    config: dict[str, JsonType] = {
-        "host": CONSUL_HOST,
-        "port": CONSUL_PORT,
-        "scheme": CONSUL_SCHEME,
-        "timeout_seconds": 30.0,
-        "max_concurrent_operations": 5,
-        "circuit_breaker_enabled": True,
-        "circuit_breaker_failure_threshold": 3,
-        "circuit_breaker_reset_timeout_seconds": 30.0,
-    }
-
-    # Add token if provided
-    if CONSUL_TOKEN:
-        config["token"] = CONSUL_TOKEN
-
-    return config
-
-
-@pytest.fixture
-def unique_kv_key() -> str:
-    """Generate unique KV key for test isolation.
-
-    Returns:
-        Unique key path prefixed with test namespace.
-    """
-    return f"integration-test/consul/{uuid.uuid4().hex[:12]}"
-
-
-@pytest.fixture
-def unique_service_name() -> str:
-    """Generate unique service name for test isolation.
-
-    Returns:
-        Unique service name for registration tests.
-    """
-    return f"integration-test-svc-{uuid.uuid4().hex[:8]}"
-
-
-@pytest.fixture
-async def initialized_consul_handler(
-    consul_config: dict[str, JsonType],
-    mock_container: MagicMock,
-) -> AsyncGenerator[HandlerConsul, None]:
-    """Provide an initialized HandlerConsul instance with automatic cleanup.
-
-    Creates a HandlerConsul, initializes it with the test configuration,
-    yields it for the test, then ensures proper cleanup via shutdown().
-
-    Cleanup Behavior:
-        - Calls handler.shutdown() after test completion
-        - Closes HTTP client connections to Consul
-        - Idempotent: safe to call shutdown() multiple times
-        - Ignores cleanup errors to prevent test pollution
-
-    Note:
-        This fixture does NOT clean up KV keys or registered services.
-        Use unique_kv_key and unique_service_name fixtures for test data
-        that needs cleanup, and handle cleanup in individual tests or
-        use dedicated cleanup fixtures.
-
-    Args:
-        consul_config: Consul configuration fixture.
-        mock_container: ONEX container mock for dependency injection.
-
-    Yields:
-        Initialized HandlerConsul ready for Consul operations.
-    """
-    from omnibase_infra.handlers import HandlerConsul
-
-    handler = HandlerConsul(mock_container)
-    await handler.initialize(consul_config)
-
-    yield handler
-
-    # Cleanup: ensure handler is properly shut down
-    # Idempotent: safe even if test already called shutdown()
-    try:
-        await handler.shutdown()
-    except Exception as e:
-        logger.warning(
-            "Cleanup failed for HandlerConsul shutdown: %s",
             e,
             exc_info=True,
         )
