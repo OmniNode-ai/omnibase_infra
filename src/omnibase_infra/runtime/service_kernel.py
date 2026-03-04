@@ -1793,7 +1793,31 @@ async def bootstrap() -> int:
             correlation_id,
         )
 
-        # Stop plugin consumers first (unsubscribe callbacks from start_consumers)
+        # Stop runtime FIRST so introspection tasks flush their final events
+        # while the event bus is still active. Moving this before consumer
+        # unsubscribe fixes the ~29 introspection errors per shutdown cycle
+        # (OMN-3593).
+        try:
+            runtime_stop_start_time = time.time()
+            await asyncio.wait_for(runtime.stop(), timeout=grace_period)
+            runtime_stop_duration = time.time() - runtime_stop_start_time
+            logger.debug(
+                "Runtime stopped in %.3fs (correlation_id=%s)",
+                runtime_stop_duration,
+                correlation_id,
+                extra={
+                    "duration_seconds": runtime_stop_duration,
+                },
+            )
+        except TimeoutError:
+            logger.warning(
+                "Graceful shutdown timed out after %s seconds, forcing stop (correlation_id=%s)",
+                grace_period,
+                correlation_id,
+            )
+        runtime = None  # Mark as stopped to prevent double-stop in finally
+
+        # Stop plugin consumers (unsubscribe callbacks from start_consumers)
         for unsub_callback in plugin_unsubscribe_callbacks:
             try:
                 await unsub_callback()
@@ -1870,27 +1894,6 @@ async def bootstrap() -> int:
                     },
                 )
             health_server = None
-
-        # Stop runtime with timeout
-        try:
-            runtime_stop_start_time = time.time()
-            await asyncio.wait_for(runtime.stop(), timeout=grace_period)
-            runtime_stop_duration = time.time() - runtime_stop_start_time
-            logger.debug(
-                "Runtime stopped in %.3fs (correlation_id=%s)",
-                runtime_stop_duration,
-                correlation_id,
-                extra={
-                    "duration_seconds": runtime_stop_duration,
-                },
-            )
-        except TimeoutError:
-            logger.warning(
-                "Graceful shutdown timed out after %s seconds, forcing stop (correlation_id=%s)",
-                grace_period,
-                correlation_id,
-            )
-        runtime = None  # Mark as stopped to prevent double-stop in finally
 
         # Shutdown plugins in LIFO order (Last In, First Out)
         # This ensures plugins activated later are shut down before plugins they
