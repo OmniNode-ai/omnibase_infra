@@ -121,14 +121,14 @@ class ProtocolContainerAware(ProtocolHandlerBase, Protocol):
         ```python
         from omnibase_core.container import ModelONEXContainer
 
-        class HandlerConsul:
+        class HandlerHttp:
             def __init__(self, container: ModelONEXContainer) -> None:
                 self._container = container
-                self._consul_url = container.config.get("consul_url")
+                self._base_url = container.config.get("base_url")
 
             @property
             def handler_type(self) -> str:
-                return "consul"
+                return "http"
 
             async def initialize(self, config):
                 # Use container for shared resources

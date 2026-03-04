@@ -1322,7 +1322,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 - ``health_check()``: Async method for connectivity verification.
                   While part of the ProtocolHandler protocol, this method is not
                   validated because existing handler implementations (HandlerHttp,
-                  HandlerDb, HandlerVault, HandlerConsul) do not implement it.
+                  HandlerDb, HandlerVault) do not implement it.
                   Future handler implementations SHOULD include health_check().
 
         Validation Approach:

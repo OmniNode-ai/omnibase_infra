@@ -181,7 +181,7 @@ class ModelHandlerDescriptor(BaseModel):
         default=None,
         min_length=3,
         pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)+$",
-        description="Fully qualified Python class path for dynamic handler import (e.g., 'omnibase_infra.handlers.handler_consul.HandlerConsul')",
+        description="Fully qualified Python class path for dynamic handler import (e.g., 'omnibase_infra.handlers.handler_db_postgres.HandlerDbPostgres')",
     )
     contract_path: str | None = Field(
         default=None,

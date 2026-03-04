@@ -17,12 +17,12 @@ Contract File Structure:
     Handler contracts follow this schema (see contracts/handlers/*/handler_contract.yaml):
 
     ```yaml
-    name: handler-consul
-    handler_class: omnibase_infra.handlers.handler_consul.HandlerConsul
+    name: handler-db-postgres
+    handler_class: omnibase_infra.handlers.handler_db_postgres.HandlerDbPostgres
     handler_type: effect
     tags:
-      - consul
-      - service-discovery
+      - postgres
+      - database
     security:
       trusted_namespace: omnibase_infra.handlers
       audit_logging: true

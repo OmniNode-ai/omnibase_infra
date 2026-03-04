@@ -28,7 +28,6 @@ Event Topics (Platform Reserved):
 See Also:
     - baseline_subscriptions: Baseline topic assembly for runtime wiring
     - HandlerContractSource: Filesystem-based discovery
-    - RegistryContractSource: Consul KV-based discovery
     - ProtocolContractSource: Protocol definition
 
 Error Codes:

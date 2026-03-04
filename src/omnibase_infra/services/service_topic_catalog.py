@@ -537,7 +537,7 @@ class ServiceTopicCatalog:
         )
 
     # ------------------------------------------------------------------
-    # Low-level Consul KV helpers (delegate to HandlerConsul internals)
+    # Low-level KV helpers (no-ops after OMN-3540 Consul removal)
     # ------------------------------------------------------------------
 
     async def _kv_get_raw(self, key: str, correlation_id: UUID) -> str | None:

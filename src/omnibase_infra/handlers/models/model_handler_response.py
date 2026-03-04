@@ -9,10 +9,9 @@ infrastructure handlers.
 Usage Pattern:
     Each handler defines its own payload model and uses ModelHandlerResponse[PayloadType]:
 
-    - HandlerConsul: ModelHandlerResponse[ModelConsulHandlerPayload]
+    - HandlerDbPostgres: ModelHandlerResponse[ModelDbQueryPayload]
     - HandlerDb: ModelHandlerResponse[ModelDbQueryPayload]
-    - HandlerVault: ModelHandlerResponse[ModelVaultHandlerPayload]
-    - HttpRestHandler: ModelHandlerResponse[ModelHttpHandlerPayload]
+    - HandlerHttp: ModelHandlerResponse[ModelHttpHandlerPayload]
 
 This replaces raw dict[str, JsonType] responses with strongly-typed models,
 ensuring consistent access patterns (response.status, response.payload, etc.)
