@@ -23,7 +23,7 @@ Security:
     See CLAUDE.md "Error Sanitization Guidelines" for complete rules.
 
 Related:
-    - ModelRegistryResponse: Uses this model for consul_result and postgres_result
+    - ModelRegistryResponse: Uses this model for postgres_result
     - NodeRegistryEffect: Effect node that produces these results
     - OMN-954: Partial failure scenario testing
 """

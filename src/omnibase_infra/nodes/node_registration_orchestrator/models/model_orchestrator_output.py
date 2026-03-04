@@ -32,7 +32,7 @@ class ModelOrchestratorOutput(BaseModel):
 
     Attributes:
         correlation_id: Correlation ID for distributed tracing.
-        status: Overall workflow status - success, partial, or failed.
+        status: Overall workflow status - success or failed.
         postgres_applied: Whether PostgreSQL registration succeeded.
         postgres_error: Error message from PostgreSQL registration if any.
         intent_results: Immutable tuple of results for each executed intent.
@@ -59,7 +59,7 @@ class ModelOrchestratorOutput(BaseModel):
         ...,
         description="Correlation ID for distributed tracing",
     )
-    status: Literal["success", "partial", "failed"] = Field(
+    status: Literal["success", "failed"] = Field(
         ...,
         description="Overall workflow status",
     )
