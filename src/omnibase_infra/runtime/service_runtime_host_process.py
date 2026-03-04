@@ -168,7 +168,12 @@ from omnibase_infra.runtime.handler_identity import (
 from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 from omnibase_infra.runtime.kafka_contract_source import KafkaContractSource
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
-from omnibase_infra.topics import TopicResolutionError, TopicResolver
+from omnibase_infra.topics import (
+    SUFFIX_CONTRACT_DEREGISTERED,
+    SUFFIX_CONTRACT_REGISTERED,
+    TopicResolutionError,
+    TopicResolver,
+)
 
 # Expose wire_default_handlers as wire_handlers for test patching compatibility
 # Tests patch "omnibase_infra.runtime.service_runtime_host_process.wire_handlers"

@@ -1,9 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Shutdown Configuration Model.
-
-The Pydantic model for shutdown configuration.
-"""
+"""Shutdown configuration for ONEX runtime graceful shutdown."""
 
 from __future__ import annotations
 
