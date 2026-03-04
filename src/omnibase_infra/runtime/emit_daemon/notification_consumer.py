@@ -1,48 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Notification Consumer - Routes notification events to Slack.
-
-The NotificationConsumer class that subscribes to
-notification topics from Kafka and routes events to the Slack alerter.
-
-Architecture:
-    ```
-    +-----------------+     Kafka     +----------------------+     Slack
-    | Event Publisher  | ------------> | NotificationConsumer | ------------> Web API
-    | (omniclaude3)    |   Topics:     | (this file)          |   via
-    +-----------------+   blocked/    +----------------------+   HandlerSlackWebhook
-                          completed
-    ```
-
-The consumer transforms notification events into Slack alerts:
-- notification.blocked -> WARNING severity with ticket context
-- notification.completed -> INFO severity with completion summary
-
-Example Usage:
-    ```python
-    from omnibase_infra.runtime.emit_daemon import NotificationConsumer
-
-    # Create consumer with Kafka event bus
-    consumer = NotificationConsumer(
-        event_bus=kafka_event_bus,
-        bot_token=os.getenv("SLACK_BOT_TOKEN"),
-        default_channel=os.getenv("SLACK_CHANNEL_ID"),
-    )
-
-    # Start consuming (blocks until stopped)
-    await consumer.start()
-
-    # Or run as background task
-    task = asyncio.create_task(consumer.start())
-    # ... later ...
-    await consumer.stop()
-    ```
-
-Related Tickets:
-    - OMN-1831: Implement event-driven Slack notifications via runtime
-
-.. versionadded:: 0.4.1
-"""
+"""Notification Consumer — routes Kafka notification events to Slack (OMN-1831)."""
 
 from __future__ import annotations
 
