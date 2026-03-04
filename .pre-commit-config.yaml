@@ -88,6 +88,13 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      - id: onex-validate-migration-sequence
+        name: ONEX Migration Sequence Duplicate Check
+        entry: uv run python scripts/validation/validate_migration_sequence.py
+        language: system
+        pass_filenames: false
+        always_run: false
+        stages: [pre-commit]
       # Reject any staged .env file at any path depth (OMN-2476)
       # Uses (^|/)\.env([._-].+)?$ to block root/.env, config/.env, .env.production, .env.staging,
       # .env_local, .env_production, .env-secret, etc. (dot-separated, underscore-separated, and
