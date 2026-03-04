@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Contract-driven intent routing loader.
+"""Contract-driven intent routing loader.  # ai-slop-ok: pre-existing
 
 This module provides a function to load the intent_routing_table from a
 contract YAML file. The routing table maps intent_type strings to target

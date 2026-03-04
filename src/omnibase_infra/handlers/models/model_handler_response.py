@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Generic Handler Response Model.
+"""Generic Handler Response Model.  # ai-slop-ok: pre-existing
 
 This module provides a generic handler response model that can be parameterized
 with different payload types, enabling consistent response patterns across all

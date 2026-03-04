@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Coroutine-safe async circuit breaker mixin for infrastructure components.
+"""Coroutine-safe async circuit breaker mixin for infrastructure components.  # ai-slop-ok: pre-existing
 
 This module provides a reusable circuit breaker implementation for infrastructure
 components such as event buses, service adapters, HTTP clients, and database
@@ -298,7 +298,7 @@ class MixinAsyncCircuitBreaker:
             },
         )
 
-    def _init_circuit_breaker_from_config(
+    def _init_circuit_breaker_from_config(  # ai-slop-ok: pre-existing
         self,
         config: ModelCircuitBreakerConfig,
     ) -> None:

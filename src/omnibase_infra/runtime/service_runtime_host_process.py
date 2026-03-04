@@ -89,6 +89,10 @@ from omnibase_infra.models.runtime.model_resolved_dependencies import (
 from omnibase_infra.runtime.contract_dependency_resolver import (
     ContractDependencyResolver,
 )
+from omnibase_infra.runtime.contract_registration_event_router import (
+    TOPIC_SUFFIX_CONTRACT_DEREGISTERED,
+    TOPIC_SUFFIX_CONTRACT_REGISTERED,
+)
 from omnibase_infra.runtime.dependency_materializer import DependencyMaterializer
 from omnibase_infra.runtime.envelope_validator import (
     normalize_correlation_id,
@@ -4162,11 +4166,11 @@ class RuntimeHostProcess:
         topic_resolver = TopicResolver()
         try:
             registration_topic = topic_resolver.resolve(
-                "onex.evt.platform.contract-registered.v1",
+                TOPIC_SUFFIX_CONTRACT_REGISTERED,
                 correlation_id=wiring_correlation_id,
             )
             deregistration_topic = topic_resolver.resolve(
-                "onex.evt.platform.contract-deregistered.v1",
+                TOPIC_SUFFIX_CONTRACT_DEREGISTERED,
                 correlation_id=wiring_correlation_id,
             )
         except TopicResolutionError as e:

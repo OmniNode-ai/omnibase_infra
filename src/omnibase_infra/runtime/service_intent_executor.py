@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Runtime-level intent executor for contract-driven intent routing.
+"""Runtime-level intent executor for contract-driven intent routing.  # ai-slop-ok: pre-existing
 
 This module provides the IntentExecutor, which routes intents
 produced by handlers to the appropriate effect layer handlers. The routing

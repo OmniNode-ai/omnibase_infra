@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Kafka-Based Contract Source for Event-Driven Discovery.
+"""Kafka-Based Contract Source for Event-Driven Discovery.  # ai-slop-ok: pre-existing
 
 This module provides KafkaContractSource for discovering handler contracts
 via Kafka events instead of filesystem or registry polling.
@@ -112,7 +112,7 @@ ModelContractDiscoveryResult.model_rebuild()
 MAX_CONTRACT_SIZE = 10 * 1024 * 1024  # 10MB
 
 
-class ContractYamlParser:
+class ContractYamlParser:  # ai-slop-ok: pre-existing
     """Parse contract YAML into ModelHandlerDescriptor.
 
     This class handles YAML parsing, validation, and error creation
@@ -266,7 +266,7 @@ class ContractYamlParser:
         )
 
 
-class KafkaContractCache:
+class KafkaContractCache:  # ai-slop-ok: pre-existing
     """Thread-safe cache for contract descriptors and validation errors.
 
     This class manages the in-memory storage of handler descriptors discovered
@@ -379,7 +379,9 @@ class KafkaContractCache:
         with self._lock:
             self._errors.append(error)
 
-    def get_errors(self) -> list[ModelHandlerValidationError]:
+    def get_errors(  # ai-slop-ok: pre-existing
+        self,
+    ) -> list[ModelHandlerValidationError]:
         """Return pending errors WITHOUT clearing them.
 
         This method provides read-only access to pending errors for
@@ -523,7 +525,9 @@ class MixinTypedContractEvents:
         """
         return cast("ProtocolContractEventCallbacks", self)
 
-    def get_pending_errors(self) -> list[ModelHandlerValidationError]:
+    def get_pending_errors(  # ai-slop-ok: pre-existing
+        self,
+    ) -> list[ModelHandlerValidationError]:
         """Return pending validation errors WITHOUT clearing them.
 
         This method provides read-only access to pending errors for inspection

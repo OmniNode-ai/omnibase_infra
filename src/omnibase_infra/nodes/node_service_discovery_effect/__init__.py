@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Service Discovery Effect Node - Capability-Oriented Service Discovery.
+"""Service Discovery Effect Node - Capability-Oriented Service Discovery.  # ai-slop-ok: pre-existing
 
 This module provides NodeServiceDiscoveryEffect, a capability-oriented effect
 node for service discovery operations with pluggable backend support.

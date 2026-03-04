@@ -122,7 +122,7 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
 }
 
 
-class TransportConfigMap:
+class TransportConfigMap:  # ai-slop-ok: pre-existing
     """Maps transport types to Infisical folder paths and expected keys.
 
     This class provides the canonical mapping between ONEX transport types

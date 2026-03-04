@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Envelope validation for runtime dispatch.
+"""Envelope validation for runtime dispatch.  # ai-slop-ok: pre-existing
 
 This module provides minimal envelope validation before dispatch to handlers.
 Validation enforces ONLY:

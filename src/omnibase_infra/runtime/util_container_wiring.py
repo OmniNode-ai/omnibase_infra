@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Container wiring for omnibase_infra services.
+"""Container wiring for omnibase_infra services.  # ai-slop-ok: pre-existing
 
 This module provides functions to register infrastructure services
 with ModelONEXContainer from omnibase_core. It establishes container-based

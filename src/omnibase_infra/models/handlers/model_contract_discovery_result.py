@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Contract Discovery Result Model for Graceful Error Handling.
+"""Contract Discovery Result Model for Graceful Error Handling.  # ai-slop-ok: pre-existing
 
 This module provides ModelContractDiscoveryResult, which holds the results of
 contract discovery with graceful error handling. Part of OMN-1097

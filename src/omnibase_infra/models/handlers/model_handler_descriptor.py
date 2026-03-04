@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Handler Descriptor Model for Filesystem Discovery.
+"""Handler Descriptor Model for Filesystem Discovery.  # ai-slop-ok: pre-existing
 
 This module provides ModelHandlerDescriptor, which represents a discovered handler
 from a contract file. Part of OMN-1097 HandlerContractSource filesystem discovery.

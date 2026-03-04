@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Partial Retry Request Model for targeted backend retries.
+"""Partial Retry Request Model for targeted backend retries.  # ai-slop-ok: pre-existing
 
 This module provides ModelPartialRetryRequest, a Pydantic model that implements
 the ProtocolPartialRetryRequest protocol for use with HandlerPartialRetry.

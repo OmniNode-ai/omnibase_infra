@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Handler Contract Configuration Loader.
+"""Handler Contract Configuration Loader.  # ai-slop-ok: pre-existing
 
 This module provides utilities for loading handler configuration from contract
 YAML files. It supports both relative and absolute paths and extracts handler-

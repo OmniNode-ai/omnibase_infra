@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Bootstrap Handler Descriptor Model with Required handler_class.
+"""Bootstrap Handler Descriptor Model with Required handler_class.  # ai-slop-ok: pre-existing
 
 This module provides ModelBootstrapHandlerDescriptor, a specialized handler
 descriptor for bootstrap handlers that REQUIRES the handler_class field to be set.

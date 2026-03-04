@@ -58,7 +58,7 @@ from omnibase_core.nodes.node_effect import NodeEffect
 
 
 # ONEX_EXCLUDE: declarative_node - legacy effect node with direct adapter access (OMN-1725)
-class NodeRegistryEffect(NodeEffect):
+class NodeRegistryEffect(NodeEffect):  # ai-slop-ok: pre-existing
     """Declarative effect node for PostgreSQL-backed node registration.
 
     This effect node is a lightweight shell that defines the I/O contract

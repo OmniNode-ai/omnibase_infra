@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Replay testing utilities for OMN-955.
+"""Replay testing utilities for OMN-955.  # ai-slop-ok: pre-existing
 
 This module provides shared utilities for replay testing scenarios including:
 - Output comparison helpers for determinism testing

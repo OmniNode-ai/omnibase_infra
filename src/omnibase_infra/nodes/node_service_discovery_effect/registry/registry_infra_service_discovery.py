@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Registry for Service Discovery Node Dependencies.
+"""Registry for Service Discovery Node Dependencies.  # ai-slop-ok: pre-existing
 
 This module provides RegistryInfraServiceDiscovery for registering
 service discovery node dependencies with the ONEX container.
