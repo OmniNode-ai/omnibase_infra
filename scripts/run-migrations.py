@@ -195,7 +195,14 @@ async def apply_migration(
     # transaction block (which Postgres creates when you send multiple statements
     # via the simple-query protocol). Execute each statement individually so that
     # every statement runs in its own autocommit context.
-    if "CONCURRENTLY" in sql.upper():
+    #
+    # Check for CONCURRENTLY only in non-comment lines to avoid false positives
+    # on migration files that mention CONCURRENTLY only in comments.
+    non_comment_lines = [
+        line for line in sql.splitlines() if not line.strip().startswith("--")
+    ]
+    has_concurrent_index = "CONCURRENTLY" in "\n".join(non_comment_lines).upper()
+    if has_concurrent_index:
         for stmt in split_sql_statements(sql):
             await conn.execute(stmt)
     else:
