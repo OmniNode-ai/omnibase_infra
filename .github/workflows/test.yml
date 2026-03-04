@@ -532,7 +532,7 @@ jobs:
         && fromJSON('["self-hosted","omnibase-ci"]')
         || fromJSON('["ubuntu-latest"]')
       }}
-    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, arch-invariants, migration-integration]
+    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, arch-invariants, migration-integration, migration-required-check]
     if: always()
 
     steps:
@@ -548,6 +548,7 @@ jobs:
           topicnaminglint="${{ needs.topic-naming-lint.result }}"
           archinvariants="${{ needs.arch-invariants.result }}"
           migrationintegration="${{ needs.migration-integration.result }}"
+          migrationrequiredcheck="${{ needs.migration-required-check.result }}"
 
           if [[ "$gate" == "success" ]] && \
              [[ "$lint" == "success" ]] && \
@@ -558,7 +559,8 @@ jobs:
              [[ "$topicenumdrift" == "success" ]] && \
              [[ "$topicnaminglint" == "success" ]] && \
              [[ "$archinvariants" == "success" ]] && \
-             [[ "$migrationintegration" == "success" ]]; then
+             [[ "$migrationintegration" == "success" ]] && \
+             [[ "$migrationrequiredcheck" == "success" ]]; then
             echo "All checks passed successfully"
             echo "CI Tests Gate (10 splits): Passed"
             echo "Code Quality: Passed"
@@ -570,6 +572,7 @@ jobs:
             echo "Topic Naming Lint: Passed"
             echo "Arch Invariants: Passed"
             echo "Migration Integration: Passed"
+            echo "Writer-Migration Coupling Check: Passed"
             exit 0
           else
             echo "Checks failed"
@@ -583,6 +586,7 @@ jobs:
             echo "Topic Naming Lint: $topicnaminglint"
             echo "Arch Invariants: $archinvariants"
             echo "Migration Integration: $migrationintegration"
+            echo "Writer-Migration Coupling Check: $migrationrequiredcheck"
             exit 1
           fi
 
@@ -660,6 +664,26 @@ jobs:
           echo "================================================================"
           uv run pytest tests/integration/event_bus/test_kafka_boundary_compat.py \
             -v --tb=short
+
+  # Writer-migration coupling check -- ensures any PR touching writer_postgres.py
+  # or handler_*_postgres.py includes a migration file or explicit bypass comment (OMN-3530)
+  migration-required-check:
+    name: Writer-Migration Coupling Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Check writer-migration coupling
+        run: uv run python scripts/check_migration_required.py --ci
 
   # Migration integration test -- spins up real Postgres, applies all migrations,
   # and asserts every manifest table exists (OMN-3529)
