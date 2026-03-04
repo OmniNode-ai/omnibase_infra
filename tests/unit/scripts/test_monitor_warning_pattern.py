@@ -90,9 +90,9 @@ class TestWarningPatternMatches:
             "2026-03-04 12:34:56 [INFO] handler_node_heartbeat: "
             "Heartbeat received for non-active node abc-123"
         )
-        assert not m.WARNING_PATTERN.search(
-            line
-        ), f"Should NOT match INFO-level: {line}"
+        assert not m.WARNING_PATTERN.search(line), (
+            f"Should NOT match INFO-level: {line}"
+        )
 
     @pytest.mark.unit
     def test_no_match_on_error_level(self) -> None:
@@ -102,18 +102,18 @@ class TestWarningPatternMatches:
             "2026-03-04 12:34:56 [ERROR] handler_node_heartbeat: "
             "Heartbeat received for non-active node abc-123"
         )
-        assert not m.WARNING_PATTERN.search(
-            line
-        ), f"Should NOT match ERROR-level: {line}"
+        assert not m.WARNING_PATTERN.search(line), (
+            f"Should NOT match ERROR-level: {line}"
+        )
 
     @pytest.mark.unit
     def test_no_match_on_unrelated_warning(self) -> None:
         """A [WARNING] line that doesn't match any known pattern must NOT match."""
         m = _import()
         line = "2026-03-04 12:34:56 [WARNING] Some unrelated warning message"
-        assert not m.WARNING_PATTERN.search(
-            line
-        ), f"Should NOT match unrelated warning: {line}"
+        assert not m.WARNING_PATTERN.search(line), (
+            f"Should NOT match unrelated warning: {line}"
+        )
 
 
 # ---------------------------------------------------------------------------
