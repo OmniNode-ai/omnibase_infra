@@ -30,7 +30,6 @@ flowchart TB
         CI[compute_intents]
 
         subgraph Parallel["Registration Execution"]
-            ECR[execute_consul_registration]
             EPR[execute_postgres_registration]
         end
 
@@ -50,7 +49,6 @@ flowchart TB
     end
 
     subgraph External["External Services"]
-        Consul[(Consul)]
         PG[(PostgreSQL)]
     end
 
@@ -61,13 +59,10 @@ flowchart TB
     RI --> RP
     RP --> ET
     ET --> CI
-    CI --> ECR
     CI --> EPR
-    ECR --> AR
     EPR --> AR
     AR --> PO
 
-    ECR -.-> Consul
     EPR -.-> PG
 
     PO --> NRR
@@ -84,12 +79,11 @@ flowchart TB
 
 ```mermaid
 flowchart TD
-    subgraph ExecutionGraph["Execution Graph (8 Nodes)"]
+    subgraph ExecutionGraph["Execution Graph (7 Nodes)"]
         N1["<b>receive_introspection</b><br/><i>type: effect</i><br/>Receive introspection or tick event"]
         N2["<b>read_projection</b><br/><i>type: effect</i><br/>Read registration state from projection"]
         N3["<b>evaluate_timeout</b><br/><i>type: compute</i><br/>Evaluate timeout with injected time"]
         N4["<b>compute_intents</b><br/><i>type: reducer</i><br/>Compute registration intents"]
-        N5["<b>execute_consul_registration</b><br/><i>type: effect</i><br/>Execute Consul registration intent"]
         N6["<b>execute_postgres_registration</b><br/><i>type: effect</i><br/>Execute PostgreSQL registration intent"]
         N7["<b>aggregate_results</b><br/><i>type: compute</i><br/>Aggregate registration results"]
         N8["<b>publish_outcome</b><br/><i>type: effect</i><br/>Publish registration outcome event"]
@@ -98,9 +92,7 @@ flowchart TD
     N1 --> N2
     N2 --> N3
     N3 --> N4
-    N4 --> N5
     N4 --> N6
-    N5 --> N7
     N6 --> N7
     N7 --> N8
 
@@ -108,7 +100,6 @@ flowchart TD
     style N2 fill:#e1f5fe
     style N3 fill:#fff3e0
     style N4 fill:#f3e5f5
-    style N5 fill:#e1f5fe
     style N6 fill:#e1f5fe
     style N7 fill:#fff3e0
     style N8 fill:#e1f5fe
@@ -174,7 +165,6 @@ flowchart LR
     end
 
     subgraph Intents["Generated Intents"]
-        CI["ModelConsulRegistrationIntent<br/><i>kind: 'consul'</i><br/><i>operation: 'register'</i>"]
         PI["ModelPostgresUpsertIntent<br/><i>kind: 'postgres'</i><br/><i>operation: 'upsert'</i>"]
     end
 
@@ -188,7 +178,6 @@ flowchart LR
     VAL --> DUP
     DUP --> GEN
 
-    GEN --> CI
     GEN --> PI
 ```
 
@@ -197,44 +186,35 @@ flowchart LR
 ```mermaid
 flowchart TB
     subgraph Intents["Registration Intents"]
-        CI[ConsulRegistrationIntent]
         PI[PostgresUpsertIntent]
     end
 
     subgraph Effect["ProtocolEffect.execute_intent()"]
-        CE[Execute Consul]
         PE[Execute Postgres]
     end
 
     subgraph Results["Intent Execution Results"]
-        CR["ModelIntentExecutionResult<br/>intent_kind: 'consul'<br/>success: bool<br/>execution_time_ms: float"]
         PR["ModelIntentExecutionResult<br/>intent_kind: 'postgres'<br/>success: bool<br/>execution_time_ms: float"]
     end
 
     subgraph Aggregation["Result Aggregation"]
-        AGG{All Success?}
-        SUCCESS["status: 'success'<br/>consul_applied: true<br/>postgres_applied: true"]
-        PARTIAL["status: 'partial'<br/>one applied, one failed"]
-        FAILED["status: 'failed'<br/>consul_applied: false<br/>postgres_applied: false"]
+        AGG{Success?}
+        SUCCESS["status: 'success'<br/>postgres_applied: true"]
+        FAILED["status: 'failed'<br/>postgres_applied: false"]
     end
 
     subgraph Output["Orchestrator Output"]
         OUT[ModelOrchestratorOutput]
     end
 
-    CI --> CE
     PI --> PE
-    CE --> CR
     PE --> PR
-    CR --> AGG
     PR --> AGG
 
-    AGG -->|Both succeed| SUCCESS
-    AGG -->|One succeeds| PARTIAL
-    AGG -->|Both fail| FAILED
+    AGG -->|Succeeds| SUCCESS
+    AGG -->|Fails| FAILED
 
     SUCCESS --> OUT
-    PARTIAL --> OUT
     FAILED --> OUT
 ```
 
@@ -347,11 +327,8 @@ stateDiagram-v2
     ComputingIntents --> ExecutingRegistrations: Intents ready
 
     state ExecutingRegistrations {
-        [*] --> ConsulRegistration
         [*] --> PostgresRegistration
-        ConsulRegistration --> ConsulDone
         PostgresRegistration --> PostgresDone
-        ConsulDone --> [*]
         PostgresDone --> [*]
     }
 
@@ -360,11 +337,9 @@ stateDiagram-v2
     state AggregatingResults {
         [*] --> CollectResults
         CollectResults --> DetermineStatus
-        DetermineStatus --> StatusSuccess: All passed
-        DetermineStatus --> StatusPartial: Some passed
-        DetermineStatus --> StatusFailed: None passed
+        DetermineStatus --> StatusSuccess: Passed
+        DetermineStatus --> StatusFailed: Failed
         StatusSuccess --> [*]
-        StatusPartial --> [*]
         StatusFailed --> [*]
     }
 
@@ -393,24 +368,13 @@ stateDiagram-v2
 | Field | Type | Description |
 |-------|------|-------------|
 | `correlation_id` | `UUID` | Correlation ID for tracing |
-| `status` | `Literal["success", "partial", "failed"]` | Overall workflow status |
-| `consul_applied` | `bool` | Whether Consul registration succeeded |
+| `status` | `Literal["success", "failed"]` | Overall workflow status |
 | `postgres_applied` | `bool` | Whether PostgreSQL registration succeeded |
-| `consul_error` | `str \| None` | Consul error message if any |
 | `postgres_error` | `str \| None` | PostgreSQL error message if any |
 | `intent_results` | `list[ModelIntentExecutionResult]` | Results of each intent execution |
 | `total_execution_time_ms` | `float` | Total workflow execution time |
 
 ### Intent Models
-
-#### `ModelConsulRegistrationIntent`
-```python
-kind: Literal["consul"]  # Discriminator
-operation: str           # "register", "deregister"
-node_id: UUID
-correlation_id: UUID
-payload: ModelConsulIntentPayload
-```
 
 #### `ModelPostgresUpsertIntent`
 ```python

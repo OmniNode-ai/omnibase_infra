@@ -21,7 +21,7 @@ class EnumRegistryResponseStatus(str, Enum):
     """
 
     SUCCESS = "success"
-    PARTIAL = "partial"
+    PARTIAL = "partial"  # Deprecated: no longer reachable after OMN-3540 consul removal
     FAILED = "failed"
 
 

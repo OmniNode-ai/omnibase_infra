@@ -84,7 +84,6 @@ PAYLOAD_REQUIRED_OPERATIONS: frozenset[str] = frozenset(
         "kafka.produce",
         # Consul operations
         "consul.kv_put",
-        "consul.register",
     }
 )
 

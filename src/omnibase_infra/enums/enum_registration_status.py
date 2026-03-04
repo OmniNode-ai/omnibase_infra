@@ -12,20 +12,19 @@ from enum import Enum
 class EnumRegistrationStatus(str, Enum):
     """Registration workflow status.
 
-    Tracks the overall status of a registration operation that may involve
-    multiple backends (e.g., Consul and PostgreSQL).
+    Tracks the overall status of a registration operation.
 
     Attributes:
         IDLE: Registration not started
-        PENDING: Registration in progress, awaiting backend confirmations
-        PARTIAL: Some backends confirmed, others pending or failed
+        PENDING: Registration in progress, awaiting backend confirmation
+        PARTIAL: Deprecated — previously used for multi-backend partial success
         COMPLETE: All backends confirmed successfully
-        FAILED: Registration failed across all backends
+        FAILED: Registration failed
     """
 
     IDLE = "idle"
     PENDING = "pending"
-    PARTIAL = "partial"
+    PARTIAL = "partial"  # Deprecated: no longer reachable after OMN-3540 consul removal
     COMPLETE = "complete"
     FAILED = "failed"
 
