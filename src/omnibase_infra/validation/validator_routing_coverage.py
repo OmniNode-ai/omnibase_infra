@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Routing Coverage Validator for ONEX Message Types.
 
-This module provides validation functionality to ensure all message types
+Validation functionality to ensure all message types
 (Events, Commands, Intents, Projections) defined in the codebase are properly
 registered in the routing configuration. It supports startup fail-fast validation
 and CI gate integration.

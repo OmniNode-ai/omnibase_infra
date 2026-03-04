@@ -129,7 +129,7 @@ def _validate_policies(
 ) -> list[ModelHandlerValidationError]:
     """Core validation logic for handler security policy against environment.
 
-    This function implements all validation rules. It is used by both the
+    All validation rules. It is used by both the
     RegistrationSecurityValidator class and the convenience function.
 
     Args:

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Handler Contract Source for Filesystem Discovery.
 
-This module provides HandlerContractSource, which discovers handler contracts
+HandlerContractSource, which discovers handler contracts
 from the filesystem by recursively scanning configured paths for
 handler_contract.yaml files, parsing them, and transforming them into
 ModelHandlerDescriptor instances wrapped in ModelContractDiscoveryResult.
@@ -275,7 +275,7 @@ def _create_version_parse_error(
 class HandlerContractSource(ProtocolContractSource):
     """Handler source that discovers contracts from the filesystem.
 
-    This class implements ProtocolContractSource by recursively scanning
+    ProtocolContractSource by recursively scanning
     configured paths for handler_contract.yaml files, parsing them with
     YAML and validating against ModelHandlerContract from omnibase_core.
 

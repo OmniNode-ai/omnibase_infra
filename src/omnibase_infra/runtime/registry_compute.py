@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Compute Registry - SINGLE SOURCE OF TRUTH for compute plugin registration.
 
-This module provides the RegistryCompute class for registering and resolving
+The RegistryCompute class for registering and resolving
 deterministic compute plugins in the ONEX infrastructure layer.
 
 Compute plugins:
@@ -925,7 +925,7 @@ class RegistryCompute:
     def _get_semver_parser(cls) -> Callable[[str], tuple[int, int, int, str]]:
         """Get or create the semver parser with configured cache size.
 
-        This method implements lazy initialization of the LRU-cached semver parser.
+        Lazy initialization of the LRU-cached semver parser.
         The cache size is determined by SEMVER_CACHE_SIZE at initialization time.
 
         Thread Safety:
@@ -1043,7 +1043,7 @@ class RegistryCompute:
     def _parse_semver(cls, version: str) -> tuple[int, int, int, str]:
         """Parse semantic version string into comparable tuple with INTEGER components.
 
-        This method implements SEMANTIC VERSION SORTING, not lexicographic sorting.
+        SEMANTIC VERSION SORTING, not lexicographic sorting.
         This is critical for correct "latest version" selection.
 
         Why This Matters:

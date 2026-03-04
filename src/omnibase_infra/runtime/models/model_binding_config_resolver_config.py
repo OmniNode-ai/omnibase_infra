@@ -5,7 +5,7 @@
 .. versionadded:: 0.8.0
     Initial implementation for OMN-765.
 
-This module provides the Pydantic configuration model for the BindingConfigResolver,
+The Pydantic configuration model for the BindingConfigResolver,
 which resolves handler-specific configuration from multiple sources (file, env, vault).
 
 Example:

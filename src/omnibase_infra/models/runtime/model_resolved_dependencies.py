@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Model for resolved protocol dependencies.
 
-This module provides ModelResolvedDependencies, a container for protocol
+ModelResolvedDependencies, a container for protocol
 instances resolved from the container service_registry at node creation time.
 
 Part of OMN-1732: Runtime dependency injection for zero-code nodes.

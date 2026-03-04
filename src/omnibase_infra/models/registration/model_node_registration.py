@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Registration Model.
 
-This module provides ModelNodeRegistration for persisted node registrations
+ModelNodeRegistration for persisted node registrations
 in the ONEX 2-way registration pattern.
 """
 

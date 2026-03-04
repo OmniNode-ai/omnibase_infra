@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Retry State Model for handler operations.
 
-This module provides a Pydantic model for encapsulating retry state during
+A Pydantic model for encapsulating retry state during
 handler operation execution with exponential backoff.
 """
 

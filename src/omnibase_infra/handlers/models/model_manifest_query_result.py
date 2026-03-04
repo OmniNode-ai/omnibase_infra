@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Manifest Query Result Model.
 
-This module provides the Pydantic model for the manifest.query operation
+The Pydantic model for the manifest.query operation
 result, containing the list of matching manifests or metadata.
 """
 

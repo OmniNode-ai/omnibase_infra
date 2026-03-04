@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Shared constants for binding expression parsing and validation.
 
-This module contains guardrail constants and patterns used by both:
+Guardrail constants and patterns used by both:
 - :mod:`omnibase_infra.runtime.binding_resolver` (runtime resolution)
 - :mod:`omnibase_infra.runtime.contract_loaders.operation_bindings_loader` (load-time validation)
 

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Idempotency Guard Configuration Model.
 
-This module provides the Pydantic configuration model for the idempotency
+The Pydantic configuration model for the idempotency
 guard, which controls how idempotency checking is applied to message handlers.
 """
 

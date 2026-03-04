@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Event Bus Configuration Model.
 
-This module provides the Pydantic model for event bus configuration.
+The Pydantic model for event bus configuration.
 """
 
 from __future__ import annotations

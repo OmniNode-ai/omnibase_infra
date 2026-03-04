@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Plugin discovery entry model.
 
-This module provides the ModelPluginDiscoveryEntry dataclass and the
+The ModelPluginDiscoveryEntry dataclass and the
 PluginDiscoveryStatus Literal type for structured diagnostics of
 individual plugin entry-point discovery outcomes.
 

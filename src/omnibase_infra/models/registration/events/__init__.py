@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Registration decision events for C1 Registration Orchestrator.
 
-This module provides event models emitted by the Registration Orchestrator
+Event models emitted by the Registration Orchestrator
 during the ONEX 2-way registration workflow. These events represent
 orchestrator decisions and are consumed by the Registration Reducer.
 

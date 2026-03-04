@@ -89,7 +89,7 @@ class NodeContractPersistenceEffect(NodeEffect):
     Dependency Injection:
         Backend adapters (PostgreSQL) are resolved via container.
         Handlers receive their dependencies directly via constructor injection.
-        This node contains NO instance variables for backend clients.
+        NO instance variables for backend clients.
 
     Example:
         ```python

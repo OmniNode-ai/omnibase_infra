@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Storage Result Model for Registration Storage Operations.
 
-This module provides ModelStorageResult, representing the result of a
+ModelStorageResult, representing the result of a
 query operation against registration storage.
 
 Architecture:

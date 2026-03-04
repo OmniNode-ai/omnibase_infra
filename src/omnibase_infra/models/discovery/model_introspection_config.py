@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Configuration model for node introspection initialization.
 
-This module provides the configuration model used to initialize the
+The configuration model used to initialize the
 MixinNodeIntrospection mixin. Grouping parameters into a configuration
 model follows ONEX patterns for reducing function parameter count.
 

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Coroutine-safe consumption counter mixin for wiring health monitoring.
 
-This module provides a mixin that tracks successful message consumption per-topic
+A mixin that tracks successful message consumption per-topic
 for use in wiring health comparisons. It counts only configured topics and only
 counts successful processing (not DLQ-routed messages).
 

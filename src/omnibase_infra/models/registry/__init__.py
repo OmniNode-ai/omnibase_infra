@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Registry Models Module.
 
-This module provides Pydantic models for message type registry functionality
+Pydantic models for message type registry functionality
 in the ONEX runtime dispatch infrastructure.
 
 Models:

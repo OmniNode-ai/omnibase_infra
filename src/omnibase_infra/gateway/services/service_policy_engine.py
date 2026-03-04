@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Policy Engine Service for Runtime Gateway.
 
-This module provides a policy engine for evaluating message filtering rules
+A policy engine for evaluating message filtering rules
 in the ONEX runtime gateway. The engine supports:
 
 - Topic allowlist checking with wildcard patterns

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Liveness Expired Event Model.
 
-This module provides the event model emitted when an active node fails to
+The event model emitted when an active node fails to
 send heartbeats within the configured liveness deadline.
 
 Related Tickets:

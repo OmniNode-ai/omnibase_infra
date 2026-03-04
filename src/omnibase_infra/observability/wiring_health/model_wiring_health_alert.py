@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Wiring health alert payload model for Slack webhook integration.
 
-This module provides the data model for wiring health alerts that are
+The data model for wiring health alerts that are
 emitted when topics exceed the mismatch threshold. The alert payload
 is designed to be consumed by a Slack webhook handler (OMN-1905).
 

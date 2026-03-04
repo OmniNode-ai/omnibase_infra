@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Event bus subcontract wiring for contract-driven Kafka subscriptions.
 
-This module provides the bridge between contract-declared topics (from the
+The bridge between contract-declared topics (from the
 `event_bus` subcontract) and actual Kafka subscriptions. The runtime owns
 all Kafka plumbing - nodes/handlers never create consumers or producers directly.
 

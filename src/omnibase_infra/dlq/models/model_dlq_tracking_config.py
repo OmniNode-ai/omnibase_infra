@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """DLQ Tracking Configuration Model.
 
-This module provides the Pydantic configuration model for the PostgreSQL-based
+The Pydantic configuration model for the PostgreSQL-based
 DLQ replay tracking service, including connection pooling and table settings.
 
 Security Note:

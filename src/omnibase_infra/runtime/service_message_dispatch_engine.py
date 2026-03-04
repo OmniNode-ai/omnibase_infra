@@ -2067,7 +2067,7 @@ class MessageDispatchEngine:
                    but has a None or falsy value.
 
         Fail-Fast Behavior:
-            This method implements fail-fast semantics. If an operation cannot be
+            Fail-fast semantics. If an operation cannot be
             extracted, it raises ``BindingResolutionError`` immediately rather than
             returning a fallback value. This ensures:
 

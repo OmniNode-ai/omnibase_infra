@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Projector Plugin Loader for Contract-Based Discovery.
 
-This module provides ProjectorPluginLoader, which discovers and loads projectors
+ProjectorPluginLoader, which discovers and loads projectors
 from YAML contract definitions. It implements ProtocolProjectorLoader and supports
 two operation modes:
 - Strict mode (default): Raises on first error encountered
@@ -80,7 +80,7 @@ from omnibase_infra.runtime.projector_shell import ProjectorShell
 class ProjectorShellPlaceholder:
     """Placeholder projector shell used when no database pool is provided.
 
-    This class provides a stub implementation that holds contract metadata
+    A stub implementation that holds contract metadata
     but cannot actually project events. It is used by the loader for
     discovery-only scenarios where database access is not needed.
 
@@ -192,12 +192,12 @@ class ProjectorShellPlaceholder:
 class ProjectorPluginLoader:
     """Projector loader that discovers contracts from the filesystem.
 
-    This class implements the projector loader protocol by recursively scanning
+    The projector loader protocol by recursively scanning
     configured paths for projector contract files, parsing them with YAML and
     validating against ModelProjectorContract from omnibase_core.
 
     Protocol Compliance:
-        This class implements the ProtocolProjectorLoader interface with
+        The ProtocolProjectorLoader interface with
         all required methods: load_from_contract(), load_from_directory(),
         and discover_and_load().
 

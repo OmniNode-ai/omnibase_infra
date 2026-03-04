@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Filesystem Handler Configuration Model.
 
-This module provides the Pydantic model for HandlerFileSystem initialization
+The Pydantic model for HandlerFileSystem initialization
 configuration, replacing the untyped dict[str, object] pattern.
 
 Security:

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Retry Error Classification Model.
 
-This module provides a Pydantic model for encapsulating the result of error
+A Pydantic model for encapsulating the result of error
 classification during retry handling in infrastructure handlers.
 
 The model determines:

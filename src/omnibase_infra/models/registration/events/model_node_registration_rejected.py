@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Registration Rejected Event Model.
 
-This module provides ModelNodeRegistrationRejected for the ONEX 2-way
+ModelNodeRegistrationRejected for the ONEX 2-way
 registration pattern. Emitted by the Registration Orchestrator when it
 rejects a node's registration request.
 

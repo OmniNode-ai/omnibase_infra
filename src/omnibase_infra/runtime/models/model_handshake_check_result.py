@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Handshake check result model.
 
-This module provides the ModelHandshakeCheckResult for representing the outcome
+The ModelHandshakeCheckResult for representing the outcome
 of a single plugin handshake validation check during kernel bootstrap.
 
 Related:

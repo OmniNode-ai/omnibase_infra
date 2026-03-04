@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Immutable state model for contract registry reducer.
 
-This module provides ModelContractRegistryState, an immutable state model for the
+ModelContractRegistryState, an immutable state model for the
 contract registry projection reducer. The state follows the pure reducer pattern
 where state is passed in and returned from reduce(), with no internal mutation.
 

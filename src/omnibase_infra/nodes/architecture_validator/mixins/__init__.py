@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Mixins for architecture validator rules.
 
-This module provides reusable mixins for architecture validation rules,
+Reusable mixins for architecture validation rules,
 enabling code reuse across multiple rule implementations.
 
 Available Mixins:

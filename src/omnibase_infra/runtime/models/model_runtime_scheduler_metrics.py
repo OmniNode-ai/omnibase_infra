@@ -3,7 +3,7 @@
 """
 Runtime Scheduler Metrics Model.
 
-This module provides the Pydantic model for tracking runtime scheduler performance
+The Pydantic model for tracking runtime scheduler performance
 and operational metrics. Used for monitoring tick emission reliability, timing
 performance, and scheduler health.
 

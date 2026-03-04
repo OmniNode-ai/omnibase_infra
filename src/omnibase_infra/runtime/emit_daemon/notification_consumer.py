@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Notification Consumer - Routes notification events to Slack.
 
-This module provides the NotificationConsumer class that subscribes to
+The NotificationConsumer class that subscribes to
 notification topics from Kafka and routes events to the Slack alerter.
 
 Architecture:

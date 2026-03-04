@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """Registry for Intent Storage Node Dependencies.
 
-This module provides RegistryInfraIntentStorage, which registers
+RegistryInfraIntentStorage, which registers
 dependencies for the NodeIntentStorageEffect node.
 
 Architecture:

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Environment variable parsing utilities for ONEX infrastructure.
 
-This module provides type-safe environment variable parsing functions with:
+Type-safe environment variable parsing functions with:
     - Comprehensive error handling using ONEX error patterns
     - Range validation with configurable min/max values
     - Transport-aware error context for debugging

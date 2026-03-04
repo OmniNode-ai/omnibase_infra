@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """ONEX Infrastructure Observability Layer.
 
-This module provides observability infrastructure for ONEX including:
+Observability infrastructure for ONEX including:
 - Structured logging sinks with buffering
 - Prometheus metrics collection sinks with cardinality enforcement
 - Observability hooks for pipeline instrumentation

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Factory for creating observability sinks.
 
-This module provides a factory for creating observability infrastructure components
+A factory for creating observability infrastructure components
 including metrics sinks, logging sinks, and observability hooks. The factory
 supports configuration-based creation and optional singleton behavior for
 resource-efficient sink management.

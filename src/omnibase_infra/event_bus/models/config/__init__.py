@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Configuration models for event bus implementations.
 
-This module provides Pydantic configuration models for event bus implementations,
+Pydantic configuration models for event bus implementations,
 supporting environment variable overrides and YAML-based configuration loading.
 
 Exports:

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Shared testing utilities for omnibase_infra.
 
-This module provides utility functions commonly needed across test files,
+Utility functions commonly needed across test files,
 such as environment detection and test configuration helpers.
 """
 

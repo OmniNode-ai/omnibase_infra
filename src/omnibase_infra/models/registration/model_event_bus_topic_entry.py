@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Event Bus Topic Entry Model.
 
-This module provides the model for a single topic entry in the event bus
+The model for a single topic entry in the event bus
 configuration, containing the environment-qualified topic string and
 optional tooling metadata.
 

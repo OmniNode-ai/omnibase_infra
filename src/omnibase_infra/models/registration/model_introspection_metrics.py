@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Introspection performance metrics model.
 
-This module provides ModelIntrospectionMetrics for capturing timing and
+ModelIntrospectionMetrics for capturing timing and
 performance information during node introspection operations.
 
 .. versionadded:: 0.6.0
@@ -147,7 +147,7 @@ class ModelIntrospectionMetrics(BaseModel):
     def to_dict(self) -> dict[str, object]:
         """Convert metrics to dictionary for logging/serialization.
 
-        This method provides a dictionary output for JSON serialization
+        A dictionary output for JSON serialization
         and logging purposes. Uses ``object`` as the value type to avoid
         union complexity while maintaining type safety.
 

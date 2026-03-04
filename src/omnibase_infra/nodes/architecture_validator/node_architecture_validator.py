@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Declarative COMPUTE_GENERIC node for architecture validation.
 
-This module implements NodeArchitectureValidatorCompute, a declarative compute node
+NodeArchitectureValidatorCompute, a declarative compute node
 that validates nodes and handlers against architecture rules. All validation logic
 is delegated to HandlerArchitectureValidation via the contract-driven handler pattern.
 

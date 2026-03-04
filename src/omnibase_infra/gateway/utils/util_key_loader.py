@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Ed25519 Key Loading Utilities.
 
-This module provides utility functions for loading Ed25519 keys from PEM files.
+Utility functions for loading Ed25519 keys from PEM files.
 These utilities support the gateway's envelope signing and verification operations.
 
 Security Considerations:

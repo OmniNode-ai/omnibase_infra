@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Upsert Result Model for Registration Storage Operations.
 
-This module provides ModelUpsertResult, representing the result of an
+ModelUpsertResult, representing the result of an
 insert or update operation against registration storage.
 
 Architecture:

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """DLQ Constants and Shared Validation Patterns.
 
-This module provides shared constants for the DLQ subsystem, ensuring
+Shared constants for the DLQ subsystem, ensuring
 consistent validation patterns across models and services.
 
 Defense-in-Depth Note:

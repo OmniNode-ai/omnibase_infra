@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Pydantic model for policy evaluation result.
 
-This module provides the ModelPolicyResult Pydantic BaseModel for returning
+The ModelPolicyResult Pydantic BaseModel for returning
 structured results from policy evaluation methods.
 
 Design Notes:

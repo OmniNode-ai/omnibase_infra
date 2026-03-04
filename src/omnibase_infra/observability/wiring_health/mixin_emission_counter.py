@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Coroutine-safe emission counter mixin for EventBus wiring health monitoring.
 
-This module provides a mixin that tracks message emissions per-topic for use
+A mixin that tracks message emissions per-topic for use
 in wiring health comparisons. It counts only configured topics to avoid
 unbounded memory growth from tracking all possible topics.
 

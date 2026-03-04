@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Delete Result Model for Registration Storage Operations.
 
-This module provides ModelDeleteResult, representing the result of a
+ModelDeleteResult, representing the result of a
 delete operation against registration storage.
 
 Architecture:

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Failed Plugin Load Model for Observability Logging.
 
-This module provides ModelFailedPluginLoad which tracks plugin loading failures
+ModelFailedPluginLoad which tracks plugin loading failures
 for observability purposes.
 
 See Also:

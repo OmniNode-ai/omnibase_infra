@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Plugin Load Summary Model for Observability Logging.
 
-This module provides ModelPluginLoadSummary which tracks the results of batch
+ModelPluginLoadSummary which tracks the results of batch
 plugin loading operations for observability purposes.
 
 The summary captures:

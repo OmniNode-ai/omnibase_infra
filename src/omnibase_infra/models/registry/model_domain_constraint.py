@@ -157,7 +157,7 @@ class ModelDomainConstraint(BaseModel):
         """
         Validate if consumption is allowed and return detailed error if not.
 
-        This method provides detailed validation with error messages suitable
+        Detailed validation with error messages suitable
         for fail-fast behavior at startup time.
 
         Args:

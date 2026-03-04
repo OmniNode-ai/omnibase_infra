@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """Base model for ledger events.
 
-This module provides the common envelope fields shared by all ledger events.
+The common envelope fields shared by all ledger events.
 All ledger event types inherit from ModelLedgerEventBase.
 
 Design Decisions:

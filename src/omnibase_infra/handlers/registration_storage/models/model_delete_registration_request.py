@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Delete Registration Request Model.
 
-This module provides ModelDeleteRegistrationRequest, representing a request
+ModelDeleteRegistrationRequest, representing a request
 to delete an existing registration record.
 
 Architecture:

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Protocol for consumption count sources.
 
-This module provides the Protocol definition for consumption count sources.
+The Protocol definition for consumption count sources.
 Used by WiringHealthChecker for dependency injection.
 
 See Also:

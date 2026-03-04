@@ -3,7 +3,7 @@
 
 """Strongly-typed DSN parse result model.
 
-This module provides a Pydantic model for representing parsed PostgreSQL
+A Pydantic model for representing parsed PostgreSQL
 Data Source Name (DSN) connection strings with full type safety and
 validation.
 

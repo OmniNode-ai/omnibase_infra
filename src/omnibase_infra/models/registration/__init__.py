@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Registration models for ONEX 2-way registration pattern.
 
-This module provides models for the ONEX 2-way registration workflow,
+Models for the ONEX 2-way registration workflow,
 including introspection events, heartbeats, and orchestrator decision events.
 
 Submodules:

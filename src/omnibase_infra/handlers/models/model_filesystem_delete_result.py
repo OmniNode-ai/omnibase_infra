@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Filesystem Delete File Result Model.
 
-This module provides the Pydantic model for the filesystem.delete_file operation
+The Pydantic model for the filesystem.delete_file operation
 result, replacing untyped dict[str, object] patterns.
 """
 

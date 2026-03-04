@@ -54,7 +54,7 @@ from omnibase_infra.nodes.reducers.models import ModelPayloadLedgerAppend
 class RegistryInfraLedgerWrite:
     """Registry providing access to all ledger write effect node components.
 
-    This class provides a centralized access point for all components of the
+    A centralized access point for all components of the
     node_ledger_write_effect node. Use this registry for dependency injection
     and container registration.
 

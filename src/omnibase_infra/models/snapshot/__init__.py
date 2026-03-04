@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Generic Snapshot Models for Point-in-Time State Capture.
 
-This module provides infrastructure primitives for managing point-in-time
+Infrastructure primitives for managing point-in-time
 snapshots of entity state. Snapshots support:
 
 - Subject-based grouping (ModelSubjectRef)

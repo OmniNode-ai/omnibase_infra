@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Error Models Module.
 
-This module provides Pydantic models for error context and metadata
+Pydantic models for error context and metadata
 in the ONEX infrastructure layer.
 
 Models:

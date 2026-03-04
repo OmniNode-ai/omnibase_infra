@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Manifest Query Payload Model.
 
-This module provides the Pydantic model for the manifest.query operation
+The Pydantic model for the manifest.query operation
 payload, supporting flexible filtering by correlation ID, node ID, and
 time ranges.
 """

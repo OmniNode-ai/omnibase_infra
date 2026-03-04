@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """PostgreSQL Writer for LLM cost aggregation.
 
-This module provides a PostgreSQL writer for persisting LLM cost aggregation
+A PostgreSQL writer for persisting LLM cost aggregation
 data consumed from Kafka. It handles upsert semantics for the
 ``llm_cost_aggregates`` table and insert-only semantics for ``llm_call_metrics``.
 

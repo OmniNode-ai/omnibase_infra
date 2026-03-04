@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Unified loader for runtime contract configuration.
 
-This module provides the RuntimeContractConfigLoader class that scans
+The RuntimeContractConfigLoader class that scans
 directories for contract.yaml files at startup and loads all subcontracts
 (handler_routing, operation_bindings) into a consolidated configuration.
 

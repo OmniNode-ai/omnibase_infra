@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Gateway Configuration Model.
 
-This module provides the Pydantic model for gateway configuration, including
+The Pydantic model for gateway configuration, including
 realm routing, runtime identification, and Ed25519 signing keypair paths.
 
 The gateway is responsible for:

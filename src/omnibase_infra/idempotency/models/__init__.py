@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """ONEX Infrastructure Idempotency Models.
 
-This module provides Pydantic models for the idempotency system,
+Pydantic models for the idempotency system,
 including records, check results, configuration, and metrics models.
 
 Exports:

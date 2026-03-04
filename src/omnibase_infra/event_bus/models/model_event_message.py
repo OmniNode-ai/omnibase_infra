@@ -1,6 +1,6 @@
 """Event message model for ONEX event bus.
 
-This module provides ModelEventMessage, a Pydantic model implementing
+ModelEventMessage, a Pydantic model implementing
 ProtocolEventMessage from omnibase_spi for use with event bus implementations.
 """
 

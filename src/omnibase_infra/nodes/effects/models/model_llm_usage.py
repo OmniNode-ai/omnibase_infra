@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """LLM token-usage model for Effect layer cost and usage tracking.
 
-This module provides ModelLlmUsage, a lightweight value object that captures
+ModelLlmUsage, a lightweight value object that captures
 token counts and optional cost metadata returned by LLM provider APIs.
 
 Architecture:

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """AST-based Execution Shape Validator for ONEX 4-Node Architecture.
 
-This module provides static analysis validation for ONEX handlers to ensure
+Static analysis validation for ONEX handlers to ensure
 compliance with execution shape constraints. It uses Python AST to detect
 forbidden patterns in handler code without runtime execution.
 

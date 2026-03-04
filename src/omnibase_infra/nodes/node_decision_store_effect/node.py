@@ -59,7 +59,7 @@ class NodeDecisionStoreEffect(NodeEffect):
     (Stage 1: upsert + Stage 2: conflict detection) and write_conflict
     intents to the idempotent conflict-pair insert handler.
 
-    This class contains NO custom routing logic — all behavior is
+    NO custom routing logic — all behavior is
     defined in contract.yaml.
 
     Args:

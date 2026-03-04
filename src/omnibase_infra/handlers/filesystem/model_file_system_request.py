@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """FileSystem Request Model for FileSystem Handler Operations.
 
-This module provides ModelFileSystemRequest, representing the input to the
+ModelFileSystemRequest, representing the input to the
 FileSystem effect handler for filesystem operations.
 
 Architecture:

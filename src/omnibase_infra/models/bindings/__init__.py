@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Operation bindings models for declarative handler parameter mapping.
 
-This module provides models for binding expressions used in declarative
+Models for binding expressions used in declarative
 handler parameter resolution from contract.yaml.
 
 .. versionadded:: 0.2.6

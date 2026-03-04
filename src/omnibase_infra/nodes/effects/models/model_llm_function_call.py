@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """LLM function call model for tool-calling interactions.
 
-This module provides ModelLlmFunctionCall, representing a concrete
+ModelLlmFunctionCall, representing a concrete
 function invocation returned by the model.
 
 Related:

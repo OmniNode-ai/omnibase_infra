@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Query Metadata Model for Service Discovery Operations.
 
-This module provides ModelQueryMetadata, representing metadata about
+ModelQueryMetadata, representing metadata about
 query execution in service discovery operations.
 
 Architecture:

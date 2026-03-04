@@ -5,7 +5,7 @@
 .. versionadded:: 0.8.0
     Initial implementation for OMN-765.
 
-This module provides the retry policy model used by binding configurations.
+The retry policy model used by binding configurations.
 """
 
 from __future__ import annotations

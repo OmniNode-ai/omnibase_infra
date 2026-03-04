@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Protocol Registration Configuration Model.
 
-This module provides the Pydantic model for individual protocol registration
+The Pydantic model for individual protocol registration
 configuration within contract-driven runtime setup.
 """
 

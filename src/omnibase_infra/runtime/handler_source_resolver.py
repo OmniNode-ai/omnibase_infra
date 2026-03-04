@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Handler Source Resolver for Multi-Source Handler Discovery.
 
-This module provides the HandlerSourceResolver class, which resolves handlers
+The HandlerSourceResolver class, which resolves handlers
 from multiple sources (bootstrap, contract, Kafka events) based on the configured mode.
 
 Part of OMN-1095: Handler Source Mode Hybrid Resolution.

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Mixin for AST-based node archetype detection.
 
-This module provides the MixinNodeArchetypeDetection mixin which extracts handler
+The MixinNodeArchetypeDetection mixin which extracts handler
 detection logic from ExecutionShapeValidator. It detects ONEX node archetypes
 (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR) from Python AST structures.
 

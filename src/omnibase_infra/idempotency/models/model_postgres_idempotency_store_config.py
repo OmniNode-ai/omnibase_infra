@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """PostgreSQL Idempotency Store Configuration Model.
 
-This module provides the Pydantic configuration model for the PostgreSQL-based
+The Pydantic configuration model for the PostgreSQL-based
 idempotency store, including connection pooling, TTL, and cleanup settings.
 
 Security Note:

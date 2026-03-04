@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Contract dependency resolver for ONEX nodes.
 
-This module provides ContractDependencyResolver, which reads protocol
+ContractDependencyResolver, which reads protocol
 dependencies from a node's contract.yaml and resolves them from the
 container's service_registry.
 

@@ -3,7 +3,7 @@
 """
 Dispatcher Registry for Message Dispatch Engine.
 
-This module provides the RegistryDispatcher class and ProtocolMessageDispatcher protocol
+The RegistryDispatcher class and ProtocolMessageDispatcher protocol
 for managing dispatcher registrations in the dispatch engine. Dispatchers are the execution
 units that process messages after routing.
 
@@ -512,7 +512,7 @@ class RegistryDispatcher:
         """
         Validate that a dispatcher meets the ProtocolMessageDispatcher requirements.
 
-        This method provides comprehensive validation using duck typing patterns.
+        Comprehensive validation using duck typing patterns.
         It validates:
 
         - Property values have correct types (e.g., dispatcher_id is a non-empty str)

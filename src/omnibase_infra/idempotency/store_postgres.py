@@ -8,7 +8,7 @@
 # preventing SQL injection even if config validation is somehow bypassed.
 """PostgreSQL-based Idempotency Store Implementation.
 
-This module provides a PostgreSQL-based implementation of the
+A PostgreSQL-based implementation of the
 ProtocolIdempotencyStore protocol for tracking processed messages
 and preventing duplicate processing in distributed systems.
 
@@ -206,7 +206,7 @@ class StoreIdempotencyPostgres(ProtocolIdempotencyStore):
     def _validate_table_name(self, table_name: str) -> None:
         """Validate table name for SQL injection prevention (defense-in-depth).
 
-        This method provides runtime validation of the table name pattern,
+        Runtime validation of the table name pattern,
         complementing the Pydantic field validation in the config model.
         Together they form a defense-in-depth approach to prevent SQL injection.
 

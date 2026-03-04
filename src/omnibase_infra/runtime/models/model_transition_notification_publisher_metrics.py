@@ -3,7 +3,7 @@
 """
 Transition Notification Publisher Metrics Model.
 
-This module provides the Pydantic model for tracking transition notification
+The Pydantic model for tracking transition notification
 publisher performance and operational metrics. Used for monitoring notification
 delivery reliability, timing performance, and publisher health.
 

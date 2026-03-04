@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Dead Letter Queue mixin for Kafka event bus.
 
-This module provides DLQ functionality that can be mixed into EventBusKafka
+DLQ functionality that can be mixed into EventBusKafka
 to handle failed message processing. It supports metrics tracking, callback
 hooks for custom alerting, and proper error sanitization.
 
@@ -511,7 +511,7 @@ class MixinKafkaDlq:
     ) -> None:
         """Publish raw Kafka message to DLQ when deserialization fails.
 
-        This method handles cases where message conversion fails before we have
+        Cases where message conversion fails before we have
         a ModelEventMessage. It extracts raw data directly from the Kafka
         ConsumerRecord for DLQ payload construction.
 

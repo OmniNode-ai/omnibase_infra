@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Policy Registry - SINGLE SOURCE OF TRUTH for policy plugin registration.
 
-This module provides the RegistryPolicy class for registering and resolving
+The RegistryPolicy class for registering and resolving
 pure decision policy plugins in the ONEX infrastructure layer.
 
 The registry is responsible for:
@@ -458,7 +458,7 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
     ) -> str:
         """Normalize policy type to string value and validate against EnumPolicyType.
 
-        This method provides centralized policy type validation logic used by all
+        Centralized policy type validation logic used by all
         registration and query methods. It accepts both EnumPolicyType enum values
         and string literals, normalizing them to their string representation while
         ensuring they match valid EnumPolicyType values.

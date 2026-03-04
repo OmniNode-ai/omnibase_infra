@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Gateway services for runtime envelope processing.
 
-This module provides services for the runtime gateway, including:
+Services for the runtime gateway, including:
 
 - ServiceEnvelopeSigner: Service for signing outbound envelopes with Ed25519
 - ServiceEnvelopeValidator: Service for validating inbound envelope signatures and realm

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Unified Node Introspection Event Model.
 
-This module provides ModelNodeIntrospectionEvent for node introspection broadcasts
+ModelNodeIntrospectionEvent for node introspection broadcasts
 in the ONEX registration and discovery patterns.
 """
 

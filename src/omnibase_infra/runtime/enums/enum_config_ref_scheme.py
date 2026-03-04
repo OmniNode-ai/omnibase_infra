@@ -5,7 +5,7 @@
 .. versionadded:: 0.8.0
     Initial implementation for OMN-765.
 
-This module provides the EnumConfigRefScheme enum for identifying
+The EnumConfigRefScheme enum for identifying
 configuration source types in config references.
 """
 

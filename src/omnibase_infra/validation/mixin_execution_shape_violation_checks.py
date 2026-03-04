@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Mixin for execution shape violation checking.
 
-This module provides the MixinExecutionShapeViolationChecks mixin which extracts
+The MixinExecutionShapeViolationChecks mixin which extracts
 violation detection logic from ExecutionShapeValidator. It validates ONEX handlers
 against execution shape rules (return types, publish calls, system time access).
 

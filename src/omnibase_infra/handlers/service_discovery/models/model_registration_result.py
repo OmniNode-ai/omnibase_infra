@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Handler Registration Result Model for Service Discovery Operations.
 
-This module provides ModelHandlerRegistrationResult, representing the result
+ModelHandlerRegistrationResult, representing the result
 of service registration operations from service discovery handlers.
 
 Architecture:

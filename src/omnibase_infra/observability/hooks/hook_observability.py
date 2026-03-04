@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Pipeline hook for cross-cutting observability concerns.
 
-This module provides the HookObservability class, a pipeline hook that enables
+The HookObservability class, a pipeline hook that enables
 cross-cutting observability instrumentation for infrastructure components.
 The hook tracks operation timing, emits metrics, and maintains execution context
 across async boundaries.
@@ -64,7 +64,7 @@ This class is thread-safe with the following guarantees:
 
 Singleton Support
 -----------------
-This module provides optional singleton support via get_global_hook() and
+Optional singleton support via get_global_hook() and
 configure_global_hook(). The singleton pattern is useful when:
 
 - Multiple components need to share the same observability infrastructure

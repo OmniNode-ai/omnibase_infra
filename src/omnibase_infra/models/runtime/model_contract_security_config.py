@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Contract Security Configuration Model.
 
-This module provides ModelContractSecurityConfig, a Pydantic model for
+ModelContractSecurityConfig, a Pydantic model for
 security configuration in handler contracts.
 
 .. versionadded:: 0.7.0

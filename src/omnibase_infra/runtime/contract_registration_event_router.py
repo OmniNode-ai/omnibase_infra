@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Contract registration event router for kernel event processing.
 
-This module provides an event router for routing contract registration events
+An event router for routing contract registration events
 in the ONEX kernel. Follows the same pattern as IntrospectionEventRouter.
 
 The router:

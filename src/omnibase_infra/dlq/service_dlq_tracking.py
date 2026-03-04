@@ -9,7 +9,7 @@
 # preventing SQL injection even if config validation is somehow bypassed.
 """DLQ Replay Tracking Service.
 
-This module provides a PostgreSQL-based service for tracking DLQ replay
+A PostgreSQL-based service for tracking DLQ replay
 operations, enabling persistent history of replay attempts.
 
 The service uses asyncpg for async database operations and provides
@@ -75,7 +75,7 @@ logger = logging.getLogger(__name__)
 class ServiceDlqTracking(MixinAsyncCircuitBreaker):
     """PostgreSQL-based service for tracking DLQ replay operations.
 
-    This service provides persistent storage for DLQ replay history,
+    Persistent storage for DLQ replay history,
     enabling operators to track which messages have been replayed,
     when, and with what outcome.
 
@@ -186,7 +186,7 @@ class ServiceDlqTracking(MixinAsyncCircuitBreaker):
     def _validate_storage_table(self, storage_table: str) -> None:
         """Validate storage table name for SQL injection prevention (defense-in-depth).
 
-        This method provides runtime validation of the storage table pattern,
+        Runtime validation of the storage table pattern,
         complementing the Pydantic field validation in the config model.
         Together they form a defense-in-depth approach to prevent SQL injection.
 

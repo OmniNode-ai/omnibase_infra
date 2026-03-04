@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Pydantic model for policy evaluation context.
 
-This module provides the ModelPolicyContext Pydantic BaseModel for passing
+The ModelPolicyContext Pydantic BaseModel for passing
 structured context to policy evaluation methods.
 
 Design Notes:

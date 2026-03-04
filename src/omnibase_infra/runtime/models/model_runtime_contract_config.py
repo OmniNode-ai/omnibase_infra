@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Runtime contract configuration model for consolidated contract loading.
 
-This module provides the ModelRuntimeContractConfig class for representing
+The ModelRuntimeContractConfig class for representing
 the consolidated result of loading all contract.yaml files at startup.
 
 Part of OMN-1519: Runtime contract config loader.

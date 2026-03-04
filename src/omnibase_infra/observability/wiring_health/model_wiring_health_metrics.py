@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Wiring health metrics model for emission/consumption comparison.
 
-This module provides the data model for aggregate wiring health status,
+The data model for aggregate wiring health status,
 including per-topic health and overall system status.
 
 Design Rationale:

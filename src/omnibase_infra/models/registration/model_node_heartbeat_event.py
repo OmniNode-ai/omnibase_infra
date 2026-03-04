@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Heartbeat Event Model.
 
-This module provides ModelNodeHeartbeatEvent for periodic node heartbeat broadcasts
+ModelNodeHeartbeatEvent for periodic node heartbeat broadcasts
 in the ONEX 2-way registration pattern.
 """
 

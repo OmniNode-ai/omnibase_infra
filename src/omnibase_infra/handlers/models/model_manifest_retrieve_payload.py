@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Manifest Retrieve Payload Model.
 
-This module provides the Pydantic model for the manifest.retrieve operation
+The Pydantic model for the manifest.retrieve operation
 payload, specifying which manifest to retrieve by ID.
 """
 

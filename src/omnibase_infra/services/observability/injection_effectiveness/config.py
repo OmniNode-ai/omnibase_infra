@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Configuration for injection effectiveness observability consumer.
 
-This module provides Pydantic Settings configuration for the injection
+Pydantic Settings configuration for the injection
 effectiveness Kafka consumer service. Configuration is loaded from environment
 variables with the ``OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_`` prefix.
 

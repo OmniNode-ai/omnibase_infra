@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Registry for Architecture Validator node.
 
-This module contains the infrastructure registry for the
+The infrastructure registry for the
 Architecture Validator node, following the naming convention:
     RegistryInfraArchitectureValidator
 

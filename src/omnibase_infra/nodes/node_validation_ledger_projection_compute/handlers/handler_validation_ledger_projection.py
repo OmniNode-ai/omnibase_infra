@@ -47,7 +47,7 @@ HANDLER_ID_VALIDATION_LEDGER_PROJECTION: str = "validation-ledger-projection-han
 class HandlerValidationLedgerProjection:
     """Handler that projects validation events into ledger entry fields.
 
-    This handler implements the compute logic for the validation ledger
+    The compute logic for the validation ledger
     projection node, extracting metadata from raw Kafka messages and
     producing dictionaries matching ModelValidationLedgerEntry fields.
 

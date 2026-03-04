@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Transition Notification Outbox Metrics Model.
 
-This module provides a strongly-typed Pydantic model for outbox metrics,
+A strongly-typed Pydantic model for outbox metrics,
 replacing the untyped dict return from get_metrics().
 """
 

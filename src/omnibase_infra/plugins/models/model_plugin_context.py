@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Pydantic model for plugin execution context.
 
-This module provides the ModelPluginContext Pydantic BaseModel that replaces
+The ModelPluginContext Pydantic BaseModel that replaces
 the former PluginContext TypedDict definition.
 
 Design Notes:

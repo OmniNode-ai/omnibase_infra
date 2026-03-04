@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """PostgreSQL Writer for Injection Effectiveness Observability.
 
-This module provides a PostgreSQL writer for persisting injection effectiveness
+A PostgreSQL writer for persisting injection effectiveness
 events consumed from Kafka. It handles batch upserts with idempotency
 guarantees and circuit breaker resilience.
 

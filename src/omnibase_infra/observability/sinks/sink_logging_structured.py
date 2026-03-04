@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Structured logging sink implementation using structlog.
 
-This module provides a structured logging sink that implements the
+A structured logging sink that implements the
 ProtocolHotPathLoggingSink protocol. It buffers log entries in memory
 and flushes them to structlog with JSON formatting.
 

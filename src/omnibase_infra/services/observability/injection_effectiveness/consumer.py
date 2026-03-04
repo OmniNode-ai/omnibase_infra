@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Async Kafka Consumer for Injection Effectiveness Observability.
 
-This module provides an async Kafka consumer for injection effectiveness events.
+An async Kafka consumer for injection effectiveness events.
 Events are consumed from multiple topics, validated using Pydantic models,
 and persisted to PostgreSQL via the WriterInjectionEffectivenessPostgres.
 

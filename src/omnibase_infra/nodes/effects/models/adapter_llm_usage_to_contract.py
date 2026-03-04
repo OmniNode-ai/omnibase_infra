@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Adapter bridging ModelLlmUsage to SPI LLM cost tracking contracts.
 
-This module provides pure functions that translate between the infra-layer
+Pure functions that translate between the infra-layer
 ``ModelLlmUsage`` value object and the SPI measurement contracts:
 
 - ``ContractLlmCallMetrics``

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Envelope validation service for runtime gateway.
 
-This module provides a service for validating inbound envelope signatures and
+A service for validating inbound envelope signatures and
 enforcing realm boundaries. It uses Ed25519 signature verification and Blake3
 hashing from omnibase_core crypto utilities.
 

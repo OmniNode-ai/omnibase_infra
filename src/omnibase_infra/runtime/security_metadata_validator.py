@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Security Metadata Validator for OMN-1137.
 
-This module provides the SecurityMetadataValidator class that validates
+The SecurityMetadataValidator class that validates
 handler security metadata before loading. The validator enforces rules
 about which handler types must have or must not have security metadata.
 

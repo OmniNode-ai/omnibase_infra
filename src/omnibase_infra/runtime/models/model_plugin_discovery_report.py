@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Plugin discovery report model.
 
-This module provides the ModelPluginDiscoveryReport dataclass for
+The ModelPluginDiscoveryReport dataclass for
 structured reporting of plugin discovery outcomes across an entire
 entry-point group.
 

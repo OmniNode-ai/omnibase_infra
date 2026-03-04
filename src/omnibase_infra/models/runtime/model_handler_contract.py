@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Handler Contract Model for Contract-Driven Discovery.
 
-This module provides ModelHandlerContract, a Pydantic model that represents the
+ModelHandlerContract, a Pydantic model that represents the
 schema for handler contract YAML files. It replaces manual field extraction in
 HandlerPluginLoader with automatic validation and type coercion.
 

@@ -115,7 +115,7 @@ _POSTGRES_TYPE_MAP: dict[str, str] = {
 class ProjectorSchemaValidator:
     """Validates projection table schemas.
 
-    This class implements ProtocolProjectorSchemaValidator from omnibase_infra.protocols.
+    ProtocolProjectorSchemaValidator from omnibase_infra.protocols.
     Protocol compliance is verified via duck typing (@runtime_checkable).
 
     NOTE: Auto-migration is disallowed in core runtime.

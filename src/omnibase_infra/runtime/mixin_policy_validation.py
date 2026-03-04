@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Policy Validation Mixin.
 
-This module provides validation functionality for policy registration,
+Validation functionality for policy registration,
 extracted from RegistryPolicy to reduce class method count.
 
 The mixin provides:
@@ -420,7 +420,7 @@ class MixinPolicyValidation:
     ) -> str:
         """Normalize policy type to string value and validate against EnumPolicyType.
 
-        This method provides centralized policy type validation logic used by all
+        Centralized policy type validation logic used by all
         registration and query methods. It accepts both EnumPolicyType enum values
         and string literals, normalizing them to their string representation while
         ensuring they match valid EnumPolicyType values.

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Testing utilities for ONEX event bus.
 
-This module provides test adapters and helpers for event bus testing:
+Test adapters and helpers for event bus testing:
 - AdapterProtocolEventPublisherInmemory: Test adapter implementing ProtocolEventPublisher
 - decode_inmemory_event: Helper function to decode event bus messages
 

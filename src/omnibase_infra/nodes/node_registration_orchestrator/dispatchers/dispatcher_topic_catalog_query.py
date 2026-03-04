@@ -4,7 +4,7 @@
 # TRY400 disabled: logger.error is intentional to avoid leaking sensitive data in stack traces
 """Dispatcher adapter for HandlerTopicCatalogQuery.
 
-This module provides a ``ProtocolMessageDispatcher`` adapter that wraps
+A ``ProtocolMessageDispatcher`` adapter that wraps
 ``HandlerTopicCatalogQuery`` for integration with ``MessageDispatchEngine``.
 
 The adapter:

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Dead Letter Queue configuration model for event bus message handling.
 
-This module provides the configuration model for DLQ behavior in event bus
+The configuration model for DLQ behavior in event bus
 consumers. The DLQ routes messages that fail processing to a dead letter
 topic for later analysis, retry, or manual intervention.
 

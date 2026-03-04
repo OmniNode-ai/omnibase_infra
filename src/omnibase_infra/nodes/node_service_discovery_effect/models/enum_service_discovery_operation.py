@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Service Discovery Operation Enum.
 
-This module provides EnumServiceDiscoveryOperation, representing the type
+EnumServiceDiscoveryOperation, representing the type
 of service discovery operation performed (register, deregister).
 
 Architecture:

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Registration Ack Received Event Model.
 
-This module provides ModelNodeRegistrationAckReceived for the ONEX 2-way
+ModelNodeRegistrationAckReceived for the ONEX 2-way
 registration pattern. Emitted by the Registration Orchestrator when it
 receives acknowledgment from the node within the ack_deadline.
 

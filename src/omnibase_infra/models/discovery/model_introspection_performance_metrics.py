@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Performance metrics model for node introspection operations.
 
-This module provides a Pydantic model for capturing performance metrics from
+A Pydantic model for capturing performance metrics from
 introspection operations. It mirrors the dataclass IntrospectionPerformanceMetrics
 from MixinNodeIntrospection but provides Pydantic serialization for event payloads.
 

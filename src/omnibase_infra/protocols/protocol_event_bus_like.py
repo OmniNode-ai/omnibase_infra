@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Event Bus Protocol for Introspection.
 
-This module provides the minimal protocol interface for event bus compatibility
+The minimal protocol interface for event bus compatibility
 with infrastructure components like ServiceTimeoutEmitter and MixinNodeIntrospection.
 
 Thread Safety:

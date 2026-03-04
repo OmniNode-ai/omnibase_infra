@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """PostgreSQL ledger sink for injection effectiveness events.
 
-This module provides a ledger sink that writes injection effectiveness
+A ledger sink that writes injection effectiveness
 session events to the event_ledger table for audit trail and replay.
 Each session gets a single ledger entry summarising the injection outcome.
 

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Capabilities Model.
 
-This module provides ModelNodeCapabilities for strongly-typed node capabilities
+ModelNodeCapabilities for strongly-typed node capabilities
 in the ONEX 2-way registration pattern.
 
 Note:

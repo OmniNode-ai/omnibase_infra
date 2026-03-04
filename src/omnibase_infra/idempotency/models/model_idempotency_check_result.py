@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Idempotency Check Result Model.
 
-This module provides the Pydantic model for the result of an idempotency
+The Pydantic model for the result of an idempotency
 check operation, indicating whether a message is a duplicate and providing
 details about the original processing if applicable.
 """

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """PostgreSQL Registration Storage Handler.
 
-This module provides a PostgreSQL-backed implementation of the registration
+A PostgreSQL-backed implementation of the registration
 storage handler protocol, wrapping existing PostgreSQL functionality with
 circuit breaker resilience.
 

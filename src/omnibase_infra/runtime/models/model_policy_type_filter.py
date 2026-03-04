@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Model for policy type filter values in runtime module.
 
-This module provides a strongly-typed Pydantic model for policy type
+A strongly-typed Pydantic model for policy type
 filter values, replacing `str | EnumPolicyType | None` union types
 to comply with ONEX standards.
 """

@@ -5,7 +5,7 @@
 .. versionadded:: 0.8.0
     Initial implementation for OMN-765.
 
-This module provides the ModelConfigCacheEntry for internal cache entries
+The ModelConfigCacheEntry for internal cache entries
 in the BindingConfigResolver.
 """
 

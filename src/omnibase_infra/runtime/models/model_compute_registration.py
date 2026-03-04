@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Compute Registration Model.
 
-This module provides the Pydantic model for compute plugin registration parameters,
+The Pydantic model for compute plugin registration parameters,
 used to register compute plugins with the RegistryCompute.
 """
 

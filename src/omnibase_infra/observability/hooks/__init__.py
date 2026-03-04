@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Pipeline hooks for cross-cutting observability concerns.
 
-This module provides hooks that can be integrated into infrastructure pipelines
+Hooks that can be integrated into infrastructure pipelines
 to enable observability instrumentation without modifying the core business logic.
 
 Key Components:

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Discovery Query Model for Service Discovery Operations.
 
-This module provides ModelDiscoveryQuery, representing query parameters
+ModelDiscoveryQuery, representing query parameters
 for service discovery operations in the NodeServiceDiscoveryEffect node.
 
 Architecture:

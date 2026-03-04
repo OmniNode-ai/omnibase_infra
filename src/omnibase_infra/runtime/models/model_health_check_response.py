@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Health Check Response Model.
 
-This module provides the Pydantic model for HTTP health check endpoint responses.
+The Pydantic model for HTTP health check endpoint responses.
 The model serializes to JSON for Docker/Kubernetes health probes.
 
 Design Pattern:

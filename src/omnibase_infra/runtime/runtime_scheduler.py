@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """RuntimeScheduler - Core service for emitting RuntimeTick events.
 
-This module implements the RuntimeScheduler service that emits RuntimeTick events
+The RuntimeScheduler service that emits RuntimeTick events
 at configured intervals. The scheduler is the single source of truth for "now"
 across all orchestrators in the ONEX infrastructure.
 

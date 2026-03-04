@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Graph Handler Response Model.
 
-This module provides the Pydantic model for Graph handler response envelopes
+The Pydantic model for Graph handler response envelopes
 used by the HandlerGraph.
 
 This model provides type consistency with ModelDbQueryResponse and

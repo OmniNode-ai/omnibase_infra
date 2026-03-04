@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Manifest Metadata Model.
 
-This module provides the lightweight metadata model for manifest queries
+The lightweight metadata model for manifest queries
 when full manifest data is not needed.
 """
 

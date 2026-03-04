@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Publisher metrics model for test adapters.
 
-This module provides the metrics model used by AdapterProtocolEventPublisherInmemory
+The metrics model used by AdapterProtocolEventPublisherInmemory
 to track publishing statistics for observability and testing assertions.
 """
 

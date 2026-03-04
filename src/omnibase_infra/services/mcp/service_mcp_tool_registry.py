@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """MCP Tool Registry - Event-loop safe in-memory cache of MCP tool definitions.
 
-This service provides a thread-safe registry for MCP tool definitions, supporting:
+A thread-safe registry for MCP tool definitions, supporting:
 - Event-driven updates from Kafka (hot reload)
 - Idempotent operations with version tracking
 - Concurrent access within a single event loop

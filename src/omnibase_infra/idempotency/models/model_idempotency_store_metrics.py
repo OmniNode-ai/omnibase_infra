@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Metrics model for idempotency store observability.
 
-This module provides a Pydantic model for tracking operational metrics
+A Pydantic model for tracking operational metrics
 of the idempotency store, enabling monitoring of:
 - Duplicate detection rate (duplicates / total checks)
 - Store error rate (failed checks / total checks)

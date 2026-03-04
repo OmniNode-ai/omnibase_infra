@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """FileSystem Handler Models.
 
-This module provides models for the FileSystem effect handler, which performs
+Models for the FileSystem effect handler, which performs
 filesystem operations including read, write, list, delete, and directory
 management.
 

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Base class for deterministic compute plugins.
 
-This module provides PluginComputeBase, an abstract base class for implementing
+PluginComputeBase, an abstract base class for implementing
 deterministic compute plugins that integrate with ONEX Compute nodes. It provides
 validation hooks and enforces the deterministic computation contract.
 

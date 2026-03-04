@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """HTTP Handler Response Model.
 
-This module provides the Pydantic model for HTTP handler response envelopes
+The Pydantic model for HTTP handler response envelopes
 used by the HttpRestHandler.
 
 This model provides type consistency with ModelDbQueryResponse,

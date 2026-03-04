@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Logging Configuration Model.
 
-This module provides the Pydantic model for logging configuration.
+The Pydantic model for logging configuration.
 """
 
 from __future__ import annotations

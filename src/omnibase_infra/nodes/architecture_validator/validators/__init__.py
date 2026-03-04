@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Validators for Architecture Validator node.
 
-This module provides validator implementations for ONEX architecture rules.
+Validator implementations for ONEX architecture rules.
 Each validator enforces a specific architectural constraint to ensure proper
 separation of concerns in the ONEX 4-node architecture.
 

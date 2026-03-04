@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """PostgreSQL DSN validation utility.
 
-This module provides robust DSN validation using urllib.parse instead of regex.
+Robust DSN validation using urllib.parse instead of regex.
 It handles edge cases like IPv6 addresses, URL-encoded passwords, query parameters,
 and validates DSN structure comprehensively.
 
@@ -209,7 +209,7 @@ def parse_and_validate_dsn(
 ) -> ModelParsedDSN:
     """Parse and validate PostgreSQL DSN format using urllib.parse.
 
-    This function provides comprehensive DSN validation that handles edge cases
+    Comprehensive DSN validation that handles edge cases
     like IPv6 addresses, URL-encoded passwords, and query parameters. It uses
     urllib.parse for robust parsing instead of fragile regex patterns.
 

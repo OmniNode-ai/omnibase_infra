@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Service Info Model for Service Discovery Results.
 
-This module provides ModelServiceInfo, representing information about
+ModelServiceInfo, representing information about
 a discovered service instance from service discovery queries.
 
 Architecture:

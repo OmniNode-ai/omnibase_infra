@@ -4,7 +4,7 @@
 
 Collects git state, runtime targets, and toolchain versions.
 All behavior is defined in contract.yaml and delegated to handlers.
-This node contains no custom logic.
+No custom logic.
 """
 
 from __future__ import annotations

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Metrics constants for ONEX observability.
 
-This module provides shared constants for metrics sinks and handlers.
+Shared constants for metrics sinks and handlers.
 Constants are defined here to avoid circular imports and to provide a
 single source of truth for default values.
 

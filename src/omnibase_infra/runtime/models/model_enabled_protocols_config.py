@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Enabled Protocols Configuration Model.
 
-This module provides the Pydantic model for enabled protocol configuration.
+The Pydantic model for enabled protocol configuration.
 """
 
 from __future__ import annotations
