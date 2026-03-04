@@ -13,6 +13,8 @@ FAILED=0
 
 # R1: os.getenv("KAFKA_*", non-empty) pattern
 MATCHES=$(grep -rn --include="*.py" \
+    --exclude-dir=".venv" \
+    --exclude-dir="node_modules" \
     -E "os\.getenv\([[:space:]]*[\"']KAFKA_[^\"']+[\"'][[:space:]]*,[[:space:]]*[\"'][^\"']+[\"']" \
     . 2>/dev/null | \
     grep -v "# kafka-fallback-ok" | \
@@ -31,6 +33,8 @@ fi
 
 # R2: Private-IP Kafka broker addresses (Kafka-specific ports only)
 IP_MATCHES=$(grep -rn --include="*.py" \
+    --exclude-dir=".venv" \
+    --exclude-dir="node_modules" \
     -E "192\.168\.[0-9]+\.[0-9]+:(9092|19092|29092|29093)" \
     . 2>/dev/null | \
     grep -v "# kafka-fallback-ok" | \

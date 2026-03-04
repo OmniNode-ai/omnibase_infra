@@ -259,6 +259,13 @@ repos:
         pass_filenames: false
         types: [python]
         stages: [pre-commit]
+      # OMN-3530: Ensure writer_postgres.py / handler_*_postgres.py changes include a migration
+      - id: onex-check-migration-required
+        name: Writer-Migration Coupling Check
+        language: system
+        entry: uv run python scripts/check_migration_required.py --pre-commit
+        pass_filenames: false
+        stages: [pre-commit]
 # Configuration
 default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit]
