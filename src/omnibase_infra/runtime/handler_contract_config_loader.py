@@ -473,18 +473,18 @@ def extract_handler_config(
     Example:
         >>> # Basic contract
         >>> contract = {
-        ...     "name": "handler-consul",
-        ...     "handler_class": "omnibase_infra.handlers.handler_consul.HandlerConsul",
+        ...     "name": "handler-db-postgres",
+        ...     "handler_class": "omnibase_infra.handlers.handler_db_postgres.HandlerDbPostgres",
         ...     "handler_type": "effect",
-        ...     "tags": ["consul", "service-discovery"],
+        ...     "tags": ["postgres", "database"],
         ...     "security": {
         ...         "trusted_namespace": "omnibase_infra.handlers",
         ...         "audit_logging": True,
         ...     },
         ... }
-        >>> config = extract_handler_config(contract, "consul")
+        >>> config = extract_handler_config(contract, "postgres")
         >>> config["name"]
-        'handler-consul'
+        'handler-db-postgres'
         >>> config["audit_logging"]
         True
 

@@ -497,7 +497,7 @@ class RegistrationReducer:
            emits registration intents for Effect layer execution.
 
         2. reduce_confirmation(state, confirmation_event) -> Processes confirmation
-           events from Effect layer, updates state to partial/complete/failed.
+           events from Effect layer, updates state to complete/failed.
            (See module docstring section 6 for implementation details.)
 
     Complete Event Cycle:

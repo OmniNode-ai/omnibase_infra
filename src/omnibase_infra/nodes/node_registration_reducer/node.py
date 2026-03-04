@@ -16,7 +16,7 @@ FSM Pattern:
     1. Receive introspection event (trigger: introspection_received)
     2. FSM transitions idle -> pending (emits registration intents)
     3. Receive confirmation events (triggers: postgres_confirmed)
-    4. FSM transitions pending -> partial -> complete
+    4. FSM transitions pending -> complete
     5. On errors, FSM transitions to failed
     6. Reset events allow retry (failed/complete -> idle)
 
