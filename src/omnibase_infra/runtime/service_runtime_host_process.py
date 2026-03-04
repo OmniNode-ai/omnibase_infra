@@ -107,7 +107,10 @@ from omnibase_infra.runtime.models import (
 from omnibase_infra.runtime.models.model_materialized_resources import (
     ModelMaterializedResources,
 )
-from omnibase_infra.runtime.protocol_lifecycle_executor import ProtocolLifecycleExecutor
+from omnibase_infra.runtime.protocol_lifecycle_executor import (
+    DEFAULT_HANDLER_SHUTDOWN_TIMEOUT,
+    ProtocolLifecycleExecutor,
+)
 from omnibase_infra.runtime.runtime_contract_config_loader import (
     RuntimeContractConfigLoader,
 )
@@ -887,9 +890,19 @@ class RuntimeHostProcess:
             max_concurrent_value
         )
 
+        # Per-handler shutdown timeout (OMN-882)
+        # Prevents a single slow handler from blocking entire shutdown sequence
+        _handler_shutdown_raw = config.get("handler_shutdown_timeout_seconds")
+        handler_shutdown_value: float = DEFAULT_HANDLER_SHUTDOWN_TIMEOUT
+        if isinstance(_handler_shutdown_raw, int | float):
+            handler_shutdown_value = float(_handler_shutdown_raw)
+
+        self._handler_shutdown_timeout_seconds: float = handler_shutdown_value
+
         # Handler executor for lifecycle operations (shutdown, health check)
         self._lifecycle_executor = ProtocolLifecycleExecutor(
-            health_check_timeout_seconds=self._health_check_timeout_seconds
+            health_check_timeout_seconds=self._health_check_timeout_seconds,
+            handler_shutdown_timeout_seconds=self._handler_shutdown_timeout_seconds,
         )
 
         # Store full config for handler initialization

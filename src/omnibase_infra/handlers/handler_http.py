@@ -18,6 +18,7 @@ Note:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from uuid import UUID, uuid4
@@ -74,6 +75,9 @@ _DEFAULT_MAX_RESPONSE_SIZE: int = parse_env_int(
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"http.get", "http.post"})
 # Streaming chunk size for responses without Content-Length header
 _STREAMING_CHUNK_SIZE: int = 8192  # 8 KB chunks
+
+# Per-handler client close timeout (OMN-882)
+_CLIENT_CLOSE_TIMEOUT_SECONDS: float = 5.0
 
 # Handler ID for ModelHandlerOutput
 HANDLER_ID_HTTP: str = "http-handler"
@@ -296,10 +300,24 @@ class HandlerHttpRest(MixinEnvelopeExtraction):
             ) from e
 
     async def shutdown(self) -> None:
-        """Close HTTP client and release resources."""
+        """Close HTTP client and release resources.
+
+        The client close is wrapped with a timeout to prevent unbounded shutdown
+        waits if the underlying connection pool has hung connections.
+        """
         if self._client is not None:
-            await self._client.aclose()
-            self._client = None
+            try:
+                await asyncio.wait_for(
+                    self._client.aclose(),
+                    timeout=_CLIENT_CLOSE_TIMEOUT_SECONDS,
+                )
+            except TimeoutError:
+                logger.warning(
+                    "HTTP client close timed out",
+                    extra={"timeout_seconds": _CLIENT_CLOSE_TIMEOUT_SECONDS},
+                )
+            finally:
+                self._client = None
         self._initialized = False
         logger.info("HandlerHttpRest shutdown complete")
 

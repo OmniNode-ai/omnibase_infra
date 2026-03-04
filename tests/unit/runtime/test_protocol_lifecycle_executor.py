@@ -213,6 +213,30 @@ class MockHandlerWithFailingShutdown:
         raise RuntimeError("Shutdown failed")
 
 
+class MockHandlerWithSlowShutdown:
+    """Mock handler with slow shutdown for timeout testing."""
+
+    def __init__(
+        self,
+        handler_type: str = "slow_shutdown",
+        delay_seconds: float = 10.0,
+    ) -> None:
+        """Initialize mock handler.
+
+        Args:
+            handler_type: The type identifier for this handler.
+            delay_seconds: How long shutdown should take.
+        """
+        self.handler_type = handler_type
+        self.delay_seconds = delay_seconds
+        self.shutdown_called = False
+
+    async def shutdown(self) -> None:
+        """Simulate slow shutdown."""
+        self.shutdown_called = True
+        await asyncio.sleep(self.delay_seconds)
+
+
 # =============================================================================
 # Test Fixtures
 # =============================================================================
@@ -758,6 +782,141 @@ class TestProtocolLifecycleExecutorShutdownByPriority:
 
 
 # =============================================================================
+# TestProtocolLifecycleExecutorShutdownTimeout (OMN-882)
+# =============================================================================
+
+
+class TestProtocolLifecycleExecutorShutdownTimeout:
+    """Test per-handler shutdown timeout behavior (OMN-882)."""
+
+    def test_default_handler_shutdown_timeout(self) -> None:
+        """Test that ProtocolLifecycleExecutor initializes with default handler shutdown timeout."""
+        executor = ProtocolLifecycleExecutor()
+
+        assert executor.handler_shutdown_timeout_seconds == 10.0
+
+    def test_custom_handler_shutdown_timeout(self) -> None:
+        """Test that ProtocolLifecycleExecutor accepts custom handler shutdown timeout."""
+        executor = ProtocolLifecycleExecutor(handler_shutdown_timeout_seconds=15.0)
+
+        assert executor.handler_shutdown_timeout_seconds == 15.0
+
+    def test_handler_shutdown_timeout_clamped_below_minimum(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that handler shutdown timeout below minimum is clamped."""
+        with caplog.at_level(logging.WARNING):
+            executor = ProtocolLifecycleExecutor(
+                handler_shutdown_timeout_seconds=0.1,
+            )
+
+        assert executor.handler_shutdown_timeout_seconds == 1.0
+        assert any(
+            "handler_shutdown_timeout_seconds out of valid range" in r.message
+            for r in caplog.records
+        )
+
+    def test_handler_shutdown_timeout_clamped_above_maximum(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that handler shutdown timeout above maximum is clamped."""
+        with caplog.at_level(logging.WARNING):
+            executor = ProtocolLifecycleExecutor(
+                handler_shutdown_timeout_seconds=500.0,
+            )
+
+        assert executor.handler_shutdown_timeout_seconds == 300.0
+        assert any(
+            "handler_shutdown_timeout_seconds out of valid range" in r.message
+            for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_shutdown_handler_times_out_slow_handler(self) -> None:
+        """Test that slow handler shutdown is terminated by per-handler timeout."""
+        executor = ProtocolLifecycleExecutor(handler_shutdown_timeout_seconds=0.5)
+        handler = MockHandlerWithSlowShutdown(handler_type="slow", delay_seconds=10.0)
+
+        start = time.monotonic()
+        result = await executor.shutdown_handler("slow", handler)  # type: ignore[arg-type]
+        elapsed = time.monotonic() - start
+
+        assert result.handler_type == "slow"
+        assert result.success is False
+        assert "timed out" in result.error_message.lower()
+        # Should complete near the timeout, not the full delay
+        assert elapsed < 2.0, f"Expected timeout around 0.5s, took {elapsed}s"
+
+    @pytest.mark.asyncio
+    async def test_shutdown_handler_with_override_timeout(self) -> None:
+        """Test that per-call timeout override works."""
+        executor = ProtocolLifecycleExecutor(handler_shutdown_timeout_seconds=30.0)
+        handler = MockHandlerWithSlowShutdown(handler_type="slow", delay_seconds=10.0)
+
+        start = time.monotonic()
+        # Override with very short timeout
+        result = await executor.shutdown_handler(
+            "slow",
+            handler,
+            timeout_seconds=0.5,  # type: ignore[arg-type]
+        )
+        elapsed = time.monotonic() - start
+
+        assert result.success is False
+        assert "timed out" in result.error_message.lower()
+        assert elapsed < 2.0
+
+    @pytest.mark.asyncio
+    async def test_shutdown_handler_succeeds_within_timeout(self) -> None:
+        """Test that handler completing within timeout succeeds normally."""
+        executor = ProtocolLifecycleExecutor(handler_shutdown_timeout_seconds=5.0)
+        handler = MockHandlerWithSlowShutdown(handler_type="quick", delay_seconds=0.01)
+
+        result = await executor.shutdown_handler("quick", handler)  # type: ignore[arg-type]
+
+        assert result.handler_type == "quick"
+        assert result.success is True
+        assert handler.shutdown_called is True
+
+    @pytest.mark.asyncio
+    async def test_shutdown_by_priority_with_timeout_slow_handler(self) -> None:
+        """Test that slow handler in priority group doesn't block other groups."""
+        executor = ProtocolLifecycleExecutor(handler_shutdown_timeout_seconds=0.5)
+
+        # Slow handler at high priority
+        slow_handler = MockHandlerWithSlowShutdown(
+            handler_type="slow", delay_seconds=10.0
+        )
+
+        # Normal handler at low priority
+        normal_handler = MockHandler(handler_type="normal")
+
+        handlers: dict[str, ProtocolHandler] = {
+            "slow": slow_handler,  # type: ignore[dict-item]
+            "normal": normal_handler,  # type: ignore[dict-item]
+        }
+
+        start = time.monotonic()
+        result = await executor.shutdown_handlers_by_priority(handlers)
+        elapsed = time.monotonic() - start
+
+        # Both handlers should be attempted
+        assert normal_handler.shutdown_called is True
+        assert slow_handler.shutdown_called is True
+
+        # Slow handler should have timed out
+        assert result.has_failures
+        assert any(
+            "timed out" in f.error_message.lower() for f in result.failed_handlers
+        )
+
+        # Total time should be bounded by timeouts, not handler delays
+        assert elapsed < 3.0, f"Expected bounded shutdown, took {elapsed}s"
+
+
+# =============================================================================
 # Additional Edge Case Tests
 # =============================================================================
 
@@ -861,6 +1020,7 @@ __all__: list[str] = [
     "TestProtocolLifecycleExecutorInit",
     "TestProtocolLifecycleExecutorShutdownPriority",
     "TestProtocolLifecycleExecutorShutdown",
+    "TestProtocolLifecycleExecutorShutdownTimeout",
     "TestProtocolLifecycleExecutorHealthCheck",
     "TestProtocolLifecycleExecutorShutdownByPriority",
     "TestProtocolLifecycleExecutorEdgeCases",
@@ -871,6 +1031,7 @@ __all__: list[str] = [
     "MockHandlerWithoutShutdown",
     "MockHandlerWithoutHealthCheck",
     "MockHandlerWithSlowHealthCheck",
+    "MockHandlerWithSlowShutdown",
     "MockHandlerWithFailingHealthCheck",
     "MockHandlerWithFailingShutdown",
 ]

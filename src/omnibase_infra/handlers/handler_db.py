@@ -70,6 +70,7 @@ Note:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from uuid import UUID, uuid4
 
@@ -125,6 +126,11 @@ _DEFAULT_TIMEOUT_SECONDS: float = parse_env_float(
     service_name="db_handler",
 )
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"db.query", "db.execute"})
+
+# Per-handler pool close timeout (OMN-882)
+# asyncpg pool.close() can take 30s timeout x pool_size connections worst case.
+# This timeout prevents unbounded shutdown waits.
+_POOL_CLOSE_TIMEOUT_SECONDS: float = 5.0
 
 # Error message prefixes for PostgreSQL errors
 # Used by _map_postgres_error to build descriptive error messages
@@ -396,7 +402,14 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             ) from e
 
     async def shutdown(self) -> None:
-        """Close database connection pool and release resources."""
+        """Close database connection pool and release resources.
+
+        The pool close is wrapped with a timeout to prevent unbounded shutdown
+        waits. asyncpg pool.close() can take up to 30s per connection x pool_size
+        in the worst case (e.g., 150s for 5 connections). The timeout ensures
+        predictable shutdown behavior. If the pool close times out, the pool
+        reference is still cleared to allow garbage collection.
+        """
         # Reset circuit breaker state
         if self._circuit_breaker_initialized:
             async with self._circuit_breaker_lock:
@@ -404,8 +417,22 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             self._circuit_breaker_initialized = False
 
         if self._pool is not None:
-            await self._pool.close()
-            self._pool = None
+            try:
+                await asyncio.wait_for(
+                    self._pool.close(), timeout=_POOL_CLOSE_TIMEOUT_SECONDS
+                )
+            except TimeoutError:
+                logger.warning(
+                    "Database pool close timed out, terminating connections",
+                    extra={
+                        "timeout_seconds": _POOL_CLOSE_TIMEOUT_SECONDS,
+                        "pool_size": self._pool_size,
+                    },
+                )
+                # Terminate remaining connections forcefully
+                self._pool.terminate()
+            finally:
+                self._pool = None
         self._initialized = False
         logger.info("HandlerDb shutdown complete")
 
