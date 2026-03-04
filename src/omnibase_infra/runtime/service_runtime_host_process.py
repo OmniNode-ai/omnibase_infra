@@ -7,8 +7,8 @@ Implements RuntimeHostProcess — responsible for:
 - Registering handlers via the wiring module
 - Subscribing to event bus topics and routing envelopes to handlers
 - Handling errors by producing success=False response envelopes
-- Processing envelopes sequentially (no parallelism in MVP)
-- Basic shutdown (no graceful drain in MVP)
+- Processing envelopes with configurable parallelism (OMN-476)
+- Graceful shutdown with in-flight message drain (OMN-756)
 
 The RuntimeHostProcess is the central coordinator for infrastructure runtime,
 bridging event-driven message routing with protocol handlers.
@@ -216,6 +216,14 @@ DEFAULT_DRAIN_TIMEOUT_SECONDS: float = parse_env_float(
     max_value=MAX_DRAIN_TIMEOUT_SECONDS,
     transport_type=EnumInfraTransportType.RUNTIME,
     service_name="runtime_host_process",
+)
+
+# Parallel handler execution bounds (OMN-476)
+# Controls max concurrent envelope processing tasks
+MIN_MAX_CONCURRENT_HANDLERS = 1
+MAX_MAX_CONCURRENT_HANDLERS = 256
+DEFAULT_MAX_CONCURRENT_HANDLERS: int = int(
+    os.environ.get("ONEX_MAX_CONCURRENT_HANDLERS", "1")
 )
 
 
@@ -822,6 +830,54 @@ class RuntimeHostProcess:
 
         self._drain_timeout_seconds: float = drain_timeout_value
 
+        # Parallel handler execution configuration (OMN-476)
+        # Controls max number of envelopes processed concurrently.
+        # Default: 1 (sequential, backwards compatible with MVP behavior).
+        _max_concurrent_raw = config.get("max_concurrent_handlers")
+        max_concurrent_value: int = DEFAULT_MAX_CONCURRENT_HANDLERS
+        if isinstance(_max_concurrent_raw, int):
+            max_concurrent_value = _max_concurrent_raw
+        elif isinstance(_max_concurrent_raw, str):
+            try:
+                max_concurrent_value = int(_max_concurrent_raw)
+            except ValueError:
+                logger.warning(
+                    "Invalid max_concurrent_handlers string value, using default",
+                    extra={
+                        "invalid_value": _max_concurrent_raw,
+                        "default_value": DEFAULT_MAX_CONCURRENT_HANDLERS,
+                    },
+                )
+                max_concurrent_value = DEFAULT_MAX_CONCURRENT_HANDLERS
+
+        # Clamp to valid range
+        if (
+            max_concurrent_value < MIN_MAX_CONCURRENT_HANDLERS
+            or max_concurrent_value > MAX_MAX_CONCURRENT_HANDLERS
+        ):
+            logger.warning(
+                "max_concurrent_handlers out of valid range, clamping",
+                extra={
+                    "original_value": max_concurrent_value,
+                    "min_value": MIN_MAX_CONCURRENT_HANDLERS,
+                    "max_value": MAX_MAX_CONCURRENT_HANDLERS,
+                    "clamped_value": max(
+                        MIN_MAX_CONCURRENT_HANDLERS,
+                        min(max_concurrent_value, MAX_MAX_CONCURRENT_HANDLERS),
+                    ),
+                },
+            )
+            max_concurrent_value = max(
+                MIN_MAX_CONCURRENT_HANDLERS,
+                min(max_concurrent_value, MAX_MAX_CONCURRENT_HANDLERS),
+            )
+
+        self._max_concurrent_handlers: int = max_concurrent_value
+        # Semaphore for backpressure: limits concurrent envelope processing (OMN-476)
+        self._handler_semaphore: asyncio.Semaphore = asyncio.Semaphore(
+            max_concurrent_value
+        )
+
         # Handler executor for lifecycle operations (shutdown, health check)
         self._lifecycle_executor = ProtocolLifecycleExecutor(
             health_check_timeout_seconds=self._health_check_timeout_seconds
@@ -877,6 +933,10 @@ class RuntimeHostProcess:
         # Tracks protocol_types currently being materialized to prevent
         # duplicate instantiation and orphaned handler instances.
         self._materializing_handlers: set[str] = set()
+
+        # In-flight envelope processing tasks for parallel execution (OMN-476)
+        # Tracked for graceful shutdown drain and error isolation.
+        self._in_flight_tasks: set[asyncio.Task[None]] = set()
 
         # Idempotency guard for duplicate message detection (OMN-945)
         # None = disabled, otherwise points to configured store
@@ -1004,6 +1064,25 @@ class RuntimeHostProcess:
             Boolean indicating whether the process is running.
         """
         return self._is_running
+
+    @property
+    def max_concurrent_handlers(self) -> int:
+        """Return the maximum concurrent handler execution limit (OMN-476).
+
+        Returns:
+            The configured concurrency limit for parallel envelope processing.
+            1 means sequential processing (MVP backwards compatibility).
+        """
+        return self._max_concurrent_handlers
+
+    @property
+    def in_flight_task_count(self) -> int:
+        """Return the number of currently in-flight parallel tasks (OMN-476).
+
+        Returns:
+            Number of asyncio tasks currently processing envelopes.
+        """
+        return len(self._in_flight_tasks)
 
     @property
     def input_topic(self) -> str:
@@ -1490,6 +1569,14 @@ class RuntimeHostProcess:
 
         # Clear drain state after drain period completes
         self._is_draining = False
+
+        # Step 1.6: Drain in-flight parallel tasks (OMN-476)
+        # If parallel execution is enabled, wait for dispatched tasks to finish.
+        if self._in_flight_tasks:
+            remaining_drain = max(
+                0.0, drain_deadline - loop.time()
+            )
+            await self.drain_in_flight_tasks(timeout=remaining_drain)
 
         logger.info(
             "Drain period completed",
@@ -3000,58 +3087,191 @@ class RuntimeHostProcess:
         """Handle incoming message from event bus subscription.
 
         This is the callback invoked by the event bus when a message arrives
-        on the input topic. It deserializes the envelope and routes it.
+        on the input topic. It deserializes the envelope and dispatches it
+        for processing.
+
+        Concurrency behavior (OMN-476):
+            When max_concurrent_handlers > 1, envelope processing is dispatched
+            as an asyncio task, allowing multiple envelopes to be processed in
+            parallel up to the configured concurrency limit. A semaphore provides
+            backpressure: when the limit is reached, this method blocks until a
+            slot becomes available.
+
+            When max_concurrent_handlers == 1 (the default), processing is
+            sequential and fully backwards compatible with the MVP behavior.
+
+        Error isolation (OMN-476):
+            Each envelope is processed in its own task with independent error
+            handling. A failure in one handler does not affect other in-flight
+            handlers. Correlation IDs are tracked per-envelope for tracing.
 
         The method tracks pending messages for graceful shutdown support (OMN-756).
-        The pending message count is incremented at the start of processing and
-        decremented when processing completes (success or failure).
 
         Args:
             message: The event message containing the envelope payload.
         """
-        # Increment pending message count (OMN-756: graceful shutdown tracking)
+        if self._max_concurrent_handlers <= 1:
+            # Sequential path: backwards compatible with MVP (OMN-249)
+            await self._process_message_sequential(message)
+        else:
+            # Parallel path: dispatch as task with semaphore backpressure (OMN-476)
+            # Acquire semaphore BEFORE creating the task to apply backpressure
+            # at the ingestion point, not inside the task.
+            await self._handler_semaphore.acquire()
+            task = asyncio.create_task(
+                self._process_message_with_semaphore(message),
+                name=f"envelope-{message.offset}-{message.topic}",
+            )
+            self._in_flight_tasks.add(task)
+            task.add_done_callback(self._in_flight_tasks.discard)
+
+    async def _process_message_sequential(
+        self, message: ModelEventMessage
+    ) -> None:
+        """Process a single message sequentially (MVP path).
+
+        Args:
+            message: The event message containing the envelope payload.
+        """
         async with self._pending_lock:
             self._pending_message_count += 1
 
         try:
-            # Deserialize envelope from message value
             envelope = json.loads(message.value.decode("utf-8"))
             await self._handle_envelope(envelope)
         except json.JSONDecodeError as e:
-            # Create infrastructure error context for tracing
-            correlation_id = uuid4()
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="decode_envelope",
-                target_name=message.topic,
-                correlation_id=correlation_id,
-            )
-            # Chain the error with infrastructure context
-            infra_error = RuntimeHostError(
-                f"Failed to decode JSON envelope from message: {e}",
-                context=context,
-            )
-            infra_error.__cause__ = e  # Proper error chaining
-
-            logger.exception(
-                "Failed to decode envelope from message",
-                extra={
-                    "error": str(e),
-                    "topic": message.topic,
-                    "offset": message.offset,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            # Publish error response for malformed messages
-            error_response = self._create_error_response(
-                error=f"Invalid JSON in message: {e}",
-                correlation_id=correlation_id,
-            )
-            await self._publish_envelope_safe(error_response, self._output_topic)
+            await self._handle_decode_error(e, message)
         finally:
-            # Decrement pending message count (OMN-756: graceful shutdown tracking)
             async with self._pending_lock:
                 self._pending_message_count -= 1
+
+    async def _process_message_with_semaphore(
+        self, message: ModelEventMessage
+    ) -> None:
+        """Process a single message with semaphore-based concurrency control (OMN-476).
+
+        The semaphore is acquired by the caller (_on_message) before this method
+        is invoked as a task. This method is responsible for releasing the
+        semaphore when processing completes, regardless of success or failure.
+
+        Error isolation: exceptions are caught and logged here, never propagated
+        to the task runner. This ensures one handler failure does not cancel or
+        affect other in-flight tasks.
+
+        Args:
+            message: The event message containing the envelope payload.
+        """
+        async with self._pending_lock:
+            self._pending_message_count += 1
+
+        try:
+            envelope = json.loads(message.value.decode("utf-8"))
+            await self._handle_envelope(envelope)
+        except json.JSONDecodeError as e:
+            await self._handle_decode_error(e, message)
+        except Exception:
+            # Catch-all for error isolation: log but never propagate.
+            # _handle_envelope already has its own exception handling, so this
+            # only catches truly unexpected errors (e.g., memory errors).
+            logger.exception(
+                "Unexpected error in parallel envelope processing",
+                extra={
+                    "topic": message.topic,
+                    "offset": message.offset,
+                },
+            )
+        finally:
+            self._handler_semaphore.release()
+            async with self._pending_lock:
+                self._pending_message_count -= 1
+
+    async def _handle_decode_error(
+        self, error: json.JSONDecodeError, message: ModelEventMessage
+    ) -> None:
+        """Handle JSON decode errors for malformed envelope messages.
+
+        Extracted to avoid duplication between sequential and parallel paths.
+
+        Args:
+            error: The JSON decode error.
+            message: The original event message.
+        """
+        correlation_id = uuid4()
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="decode_envelope",
+            target_name=message.topic,
+            correlation_id=correlation_id,
+        )
+        infra_error = RuntimeHostError(
+            f"Failed to decode JSON envelope from message: {error}",
+            context=context,
+        )
+        infra_error.__cause__ = error
+
+        logger.exception(
+            "Failed to decode envelope from message",
+            extra={
+                "error": str(error),
+                "topic": message.topic,
+                "offset": message.offset,
+                "correlation_id": str(correlation_id),
+            },
+        )
+        error_response = self._create_error_response(
+            error=f"Invalid JSON in message: {error}",
+            correlation_id=correlation_id,
+        )
+        await self._publish_envelope_safe(error_response, self._output_topic)
+
+    async def drain_in_flight_tasks(self, timeout: float | None = None) -> int:
+        """Wait for all in-flight parallel tasks to complete.
+
+        This method is used during graceful shutdown to ensure all dispatched
+        envelope processing tasks finish before the runtime stops.
+
+        Args:
+            timeout: Maximum seconds to wait. If None, uses drain_timeout_seconds.
+
+        Returns:
+            Number of tasks that were still in-flight when drain started.
+        """
+        if not self._in_flight_tasks:
+            return 0
+
+        tasks_count = len(self._in_flight_tasks)
+        effective_timeout = timeout if timeout is not None else self._drain_timeout_seconds
+
+        logger.info(
+            "Draining in-flight parallel tasks",
+            extra={
+                "in_flight_count": tasks_count,
+                "timeout_seconds": effective_timeout,
+            },
+        )
+
+        # Wait for all tasks with timeout
+        done, pending = await asyncio.wait(
+            self._in_flight_tasks,
+            timeout=effective_timeout,
+        )
+
+        if pending:
+            logger.warning(
+                "Some in-flight tasks did not complete within drain timeout",
+                extra={
+                    "completed": len(done),
+                    "timed_out": len(pending),
+                    "timeout_seconds": effective_timeout,
+                },
+            )
+            # Cancel remaining tasks
+            for task in pending:
+                task.cancel()
+            # Wait briefly for cancellation to propagate
+            await asyncio.gather(*pending, return_exceptions=True)
+
+        return tasks_count
 
     async def _handle_envelope(self, envelope: dict[str, object]) -> None:
         """Route envelope to appropriate handler.
@@ -3670,6 +3890,8 @@ class RuntimeHostProcess:
             "is_running": self._is_running,
             "is_draining": self._is_draining,
             "pending_message_count": self._pending_message_count,
+            "max_concurrent_handlers": self._max_concurrent_handlers,
+            "in_flight_tasks": len(self._in_flight_tasks),
             "event_bus": event_bus_health,
             "event_bus_healthy": event_bus_healthy,
             "failed_handlers": self._failed_handlers,
