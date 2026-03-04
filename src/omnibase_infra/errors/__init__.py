@@ -108,6 +108,7 @@ from omnibase_infra.errors.error_architecture_violation import (
     ArchitectureViolationError,
 )
 from omnibase_infra.errors.error_binding_resolution import BindingResolutionError
+from omnibase_infra.errors.error_catalog import ErrorResolution, get_resolution
 from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
 from omnibase_infra.errors.error_compute_registry import ComputeRegistryError
 from omnibase_infra.errors.error_container_wiring import (
@@ -179,6 +180,8 @@ __all__: list[str] = [
     "DbOwnershipMismatchError",
     "DbOwnershipMissingError",
     "EnvelopeValidationError",
+    # Error catalog (OMN-518)
+    "ErrorResolution",
     "EventBusRegistryError",
     # Event registry fingerprint errors
     "EventRegistryFingerprintMismatchError",
@@ -219,4 +222,6 @@ __all__: list[str] = [
     "ServiceRegistryUnavailableError",
     "ServiceResolutionError",
     "UnknownHandlerTypeError",
+    # Error catalog lookup (OMN-518)
+    "get_resolution",
 ]
