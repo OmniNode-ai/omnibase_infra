@@ -588,9 +588,9 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):  # ai-slop-ok: pre-exist
         # if not explicitly provided (strips "handler-" prefix)
         protocol_type = contract.protocol_type
         # Should never be None after model_validator, but assert for type safety
-        assert (
-            protocol_type is not None
-        ), "protocol_type should be set by model_validator"
+        assert protocol_type is not None, (
+            "protocol_type should be set by model_validator"
+        )
 
         # Import and validate handler class
         handler_class = self._import_handler_class(

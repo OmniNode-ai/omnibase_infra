@@ -450,9 +450,9 @@ async def real_kafka_event_bus() -> AsyncGenerator[EventBusKafka, None]:
 
 
 @pytest.fixture
-async def ensure_test_topic() -> (
-    AsyncGenerator[Callable[[str, int], Coroutine[object, object, str]], None]
-):
+async def ensure_test_topic() -> AsyncGenerator[
+    Callable[[str, int], Coroutine[object, object, str]], None
+]:
     """Create test topics via Kafka admin API before tests and cleanup after.
 
     This fixture handles explicit topic creation for Redpanda/Kafka brokers
@@ -538,9 +538,9 @@ async def real_projector(postgres_pool: asyncpg.Pool) -> ProjectorShell:
     projector = await loader.load_from_contract(contract_path)
 
     # Type narrowing - loader with pool returns ProjectorShell, not placeholder
-    assert isinstance(
-        projector, ProjectorShell
-    ), "Expected ProjectorShell instance when pool is provided"
+    assert isinstance(projector, ProjectorShell), (
+        "Expected ProjectorShell instance when pool is provided"
+    )
     return projector
 
 
