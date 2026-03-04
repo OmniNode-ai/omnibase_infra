@@ -425,6 +425,65 @@ class TestSchemaInitErrorHandling:
         # Pool should NOT have been touched (early return before pool access)
         pool.acquire.assert_not_called()
 
+    @pytest.mark.unit
+    async def test_advisory_lock_failure_does_not_propagate(self) -> None:
+        """Advisory lock failure (on_call=1) does not propagate out of _initialize_schema (R2).
+
+        If pg_advisory_xact_lock raises (e.g., lock wait timeout, connection drop,
+        role permission error), the exception falls into the generic except branch
+        and must be swallowed. A refactor that accidentally re-raised on advisory
+        lock failure would be caught by this test.
+        """
+        conn = _make_conn_mock_raising(
+            on_call=1, error=RuntimeError("lock wait timeout")
+        )
+        pool = _make_pool_mock(conn)
+        plugin = _make_plugin_with_pool(pool)
+        config = _make_config()
+
+        with (
+            patch("pathlib.Path.exists", return_value=True),
+            patch("pathlib.Path.read_text", return_value="-- schema"),
+        ):
+            # Must NOT raise — advisory lock failure must be swallowed (R2)
+            await plugin._initialize_schema(config)  # type: ignore[attr-defined]
+
+    @pytest.mark.unit
+    async def test_advisory_lock_failure_logged_as_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Advisory lock failure (on_call=1) is logged as WARNING, not ERROR (R2).
+
+        Covers the untested branch: when pg_advisory_xact_lock itself raises,
+        the code falls into the generic except handler and emits WARNING.
+        No ERROR or exception must propagate to the caller.
+        """
+        conn = _make_conn_mock_raising(
+            on_call=1, error=RuntimeError("lock wait timeout")
+        )
+        pool = _make_pool_mock(conn)
+        plugin = _make_plugin_with_pool(pool)
+        config = _make_config()
+
+        plugin_logger = _PLUGIN_MOD
+
+        with (
+            patch("pathlib.Path.exists", return_value=True),
+            patch("pathlib.Path.read_text", return_value="-- schema"),
+        ):
+            with caplog.at_level(logging.WARNING, logger=plugin_logger):
+                await plugin._initialize_schema(config)  # type: ignore[attr-defined]
+
+        assert not any(r.levelno >= logging.ERROR for r in caplog.records), (
+            "No ERROR should propagate — advisory lock failure must be swallowed. "
+            f"Got records: {[(r.levelname, r.message) for r in caplog.records if r.levelno >= logging.ERROR]}"
+        )
+        warning_msgs = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert warning_msgs, (
+            "A WARNING must be emitted when the advisory lock call raises. "
+            "No WARNING records found."
+        )
+
 
 # =============================================================================
 # TestSchemaInitSuccessPath
