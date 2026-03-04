@@ -207,7 +207,7 @@ class TestReducerWithOutOfOrderEvents:
         # Each event should still produce valid output
         for output in outputs:
             assert output.result.status == "pending"
-            assert len(output.intents) == 2
+            assert len(output.intents) == 1  # PostgreSQL only (OMN-3540)
 
     def test_out_of_order_affects_sequential_state_chain(
         self,
@@ -309,7 +309,7 @@ class TestSequenceNumberViolations:
             entry = EventSequenceEntry(
                 event=event,
                 expected_status="pending",
-                expected_intent_count=2,
+                expected_intent_count=1,  # PostgreSQL only (OMN-3540)
                 sequence_number=seq,
             )
             event_sequence_log.entries.append(entry)
@@ -408,7 +408,7 @@ class TestEventRedeliveryOrdering:
             intent_counts.append(len(output.intents))
 
         # All should produce intents
-        assert all(count == 2 for count in intent_counts)
+        assert all(count == 1 for count in intent_counts)  # PostgreSQL only (OMN-3540)
 
 
 # =============================================================================

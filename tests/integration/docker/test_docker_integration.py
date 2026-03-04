@@ -1008,14 +1008,14 @@ class TestDockerComposeProfiles:
             f"Found profiles: {sorted(profiles)}"
         )
 
-    def test_consul_profile_defined(
+    def test_consul_profile_removed(
         self,
         compose_file_path: Path,
     ) -> None:
-        """Verify consul profile is defined in docker-compose."""
+        """Verify consul profile was removed from docker-compose (OMN-3540)."""
         profiles = extract_profiles_from_compose(compose_file_path)
-        assert "consul" in profiles, (
-            f"docker-compose should define 'consul' profile. "
+        assert "consul" not in profiles, (
+            f"docker-compose should NOT define 'consul' profile after OMN-3540. "
             f"Found profiles: {sorted(profiles)}"
         )
 

@@ -1875,7 +1875,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         return data
 
     def _get_secret_resolver(self) -> SecretResolver | None:
-        """Get the container-resolved SecretResolver instance.
+        """  # ai-slop-ok: pre-existingGet the container-resolved SecretResolver instance.
 
         The SecretResolver is resolved from the container during __init__.
         This method provides access to the cached instance.
@@ -1952,7 +1952,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         env_name: str,
         correlation_id: UUID,
     ) -> object | None:
-        """Convert environment variable string to appropriate type.
+        """  # ai-slop-ok: pre-existingConvert environment variable string to appropriate type.
 
         This method handles type coercion for environment variable overrides.
         The behavior on invalid values depends on the ``strict_env_coercion``

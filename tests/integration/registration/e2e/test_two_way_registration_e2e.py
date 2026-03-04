@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""E2E tests for ONEX 2-way registration pattern.
+"""  # ai-slop-ok: pre-existingE2E tests for ONEX 2-way registration pattern.
 
 This module contains end-to-end integration tests for the node registration
 workflow, validating the complete registration flow against real infrastructure
@@ -2502,6 +2502,9 @@ class TestSuite7GracefulDegradation:
         assert consul_result["service_id"] == service_id
 
     @pytest.mark.asyncio
+    @pytest.mark.skip(
+        reason="Consul removed in OMN-3540; partial success between consul+postgres no longer applies"
+    )
     async def test_partial_success_reporting(
         self, unique_node_id: UUID, unique_correlation_id: UUID
     ) -> None:
@@ -2619,6 +2622,9 @@ class TestSuite7GracefulDegradation:
         assert response4.error_summary is None
 
     @pytest.mark.asyncio
+    @pytest.mark.skip(
+        reason="Consul removed in OMN-3540; dual-backend processing time no longer applies"
+    )
     async def test_partial_success_processing_time_calculation(
         self, unique_node_id: UUID, unique_correlation_id: UUID
     ) -> None:

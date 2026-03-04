@@ -373,9 +373,9 @@ class TestWorkflowSequenceExecution:
         # All effect timestamps should be after reducer timestamp
         reducer_time = mock_reducer.call_timestamps[0]
         for effect_time in mock_effect.call_timestamps:
-            assert effect_time >= reducer_time, (
-                f"Effect called before reducer: {effect_time} < {reducer_time}"
-            )
+            assert (
+                effect_time >= reducer_time
+            ), f"Effect called before reducer: {effect_time} < {reducer_time}"
 
     @pytest.mark.asyncio
     async def test_effects_receive_reducer_intents(
@@ -395,9 +395,9 @@ class TestWorkflowSequenceExecution:
         # Verify intents match
         assert len(mock_effect.executed_intents) == len(intents)
         for i, executed in enumerate(mock_effect.executed_intents):
-            assert executed == intents[i], (
-                f"Intent mismatch at index {i}: {executed} != {intents[i]}"
-            )
+            assert (
+                executed == intents[i]
+            ), f"Intent mismatch at index {i}: {executed} != {intents[i]}"
 
     @pytest.mark.asyncio
     async def test_effect_order_follows_intent_order(
@@ -421,53 +421,31 @@ class TestWorkflowSequenceExecution:
         assert actual_kinds == expected_kinds
 
     @pytest.mark.asyncio
-    async def test_parallel_effects_execution(
+    async def test_single_effect_execution(
         self,
         mock_reducer: MockReducerImpl,
         mock_effect: MockEffectImpl,
         introspection_event: ModelNodeIntrospectionEvent,
         correlation_id: UUID,
     ) -> None:
-        """Test parallel effect execution (simulating parallel coordination)."""
-        # Add delay to make parallelism observable
-        mock_effect.execution_delay_ms = 50
-
+        """Test single effect execution (PostgreSQL only after Consul removal, OMN-3540)."""
         initial_state = ModelReducerState.initial()
         _, intents = await mock_reducer.reduce(initial_state, introspection_event)
 
-        # Execute sequentially first to measure baseline
-        sequential_start = time.perf_counter()
+        # With Consul removed, there should be exactly 1 intent (PostgreSQL)
+        assert (
+            len(intents) == 1
+        ), f"Expected 1 intent (PostgreSQL only), got {len(intents)}"
+
+        # Execute the single intent
+        results = []
         for intent in intents:
-            await mock_effect.execute_intent(intent, correlation_id)
-        sequential_elapsed = (time.perf_counter() - sequential_start) * 1000
-
-        # Reset for parallel execution
-        mock_effect.executed_intents.clear()
-
-        # Execute in parallel
-        start_time = time.perf_counter()
-        tasks = [
-            mock_effect.execute_intent(intent, correlation_id) for intent in intents
-        ]
-        results = await asyncio.gather(*tasks)
-        parallel_elapsed = (time.perf_counter() - start_time) * 1000
+            result = await mock_effect.execute_intent(intent, correlation_id)
+            results.append(result)
 
         # Verify all completed
-        assert len(results) == len(intents)
+        assert len(results) == 1
         assert all(r.success for r in results)
-
-        # CI-friendly timing assertion: Use relative comparison instead of absolute
-        # threshold to avoid flakiness across different CI environments.
-        # Parallel execution should be meaningfully faster than sequential execution.
-        # We use a generous 0.9x multiplier to account for CI variance while still
-        # proving parallelism provides a speedup.
-        #
-        # Local benchmark: parallel ~50ms vs sequential ~100ms (2x speedup)
-        # CI allowance: parallel can be up to 90% of sequential and still pass
-        assert parallel_elapsed < sequential_elapsed * 0.9, (
-            f"Parallel execution ({parallel_elapsed:.1f}ms) should be faster than "
-            f"sequential ({sequential_elapsed:.1f}ms) * 0.9 = {sequential_elapsed * 0.9:.1f}ms"
-        )
 
 
 # =============================================================================

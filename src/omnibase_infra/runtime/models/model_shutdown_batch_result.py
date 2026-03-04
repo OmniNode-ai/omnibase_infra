@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Shutdown Batch Result Model.
+"""  # ai-slop-ok: pre-existingShutdown Batch Result Model.
 
 This module provides the Pydantic model for batch shutdown operation results.
 

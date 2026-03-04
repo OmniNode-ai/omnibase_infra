@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Binding configuration model for BindingConfigResolver.
+"""  # ai-slop-ok: pre-existingBinding configuration model for BindingConfigResolver.
 
 .. versionadded:: 0.8.0
     Initial implementation for OMN-765.

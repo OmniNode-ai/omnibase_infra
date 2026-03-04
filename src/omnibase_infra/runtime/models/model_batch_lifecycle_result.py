@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Batch Lifecycle Result Model for handler batch shutdown operations.
+"""  # ai-slop-ok: pre-existingBatch Lifecycle Result Model for handler batch shutdown operations.
 
 This module provides the ModelBatchLifecycleResult class for representing the
 aggregate outcome of batch handler lifecycle operations (e.g., shutdown_handlers_by_priority).

@@ -1193,9 +1193,9 @@ class TestFullOrchestratorFlow:
 
         # Verify processing completed
         assert unique_node_id in pipeline.processed_events
-        assert len(pipeline.processing_errors) == 0, (
-            f"Pipeline had errors: {pipeline.processing_errors}"
-        )
+        assert (
+            len(pipeline.processing_errors) == 0
+        ), f"Pipeline had errors: {pipeline.processing_errors}"
 
         # Verify effect was called (mocks were invoked)
         mock_consul_client.register_service.assert_called()
@@ -1264,9 +1264,9 @@ class TestFullOrchestratorFlow:
 
         # Verify all events processed
         for node_id in node_ids:
-            assert node_id in pipeline.processed_events, (
-                f"Event for node {node_id} was not processed"
-            )
+            assert (
+                node_id in pipeline.processed_events
+            ), f"Event for node {node_id} was not processed"
 
     async def test_malformed_message_handled_gracefully(
         self,
@@ -1342,9 +1342,9 @@ class TestFullOrchestratorFlow:
             elapsed += poll_interval
 
         # Valid event should still be processed
-        assert unique_node_id in pipeline.processed_events, (
-            "Valid event should be processed after malformed message"
-        )
+        assert (
+            unique_node_id in pipeline.processed_events
+        ), "Valid event should be processed after malformed message"
 
 
 # =============================================================================
@@ -1463,41 +1463,38 @@ class TestFullPipelineWithRealInfrastructure:
         state = ModelRegistrationState()
         output = reducer.reduce(state, event)
 
-        # Verify intents generated (extension format)
-        assert len(output.intents) == 2, "Should generate Consul and PostgreSQL intents"
+        # Verify intents generated (PostgreSQL only, OMN-3540)
+        assert len(output.intents) == 1, "Should generate PostgreSQL intent"
 
         intent_types = {
             intent.payload.intent_type
             for intent in output.intents
             if intent.intent_type
         }
-        assert "consul.register" in intent_types, "Should include Consul intent"
-        assert "postgres.upsert_registration" in intent_types, (
-            "Should include PostgreSQL intent"
-        )
+        assert (
+            "postgres.upsert_registration" in intent_types
+        ), "Should include PostgreSQL intent"
 
         # Verify new state
-        assert output.result.status == "pending", (
-            f"Expected pending status, got {output.result.status}"
-        )
+        assert (
+            output.result.status == "pending"
+        ), f"Expected pending status, got {output.result.status}"
 
-    async def test_effect_executes_dual_registration(
+    async def test_effect_executes_postgres_registration(
         self,
-        mock_consul_client: AsyncMock,
         mock_postgres_adapter: AsyncMock,
         unique_node_id: UUID,
         unique_correlation_id: UUID,
     ) -> None:
-        """Test that effect node executes both Consul and PostgreSQL registration.
+        """Test that effect node executes PostgreSQL registration.
 
-        Verifies both backend operations are called with correct parameters.
+        Verifies PostgreSQL backend operation is called with correct parameters.
+        Consul removed in OMN-3540.
         """
         from omnibase_infra.nodes.effects import NodeRegistryEffect
         from omnibase_infra.nodes.effects.models import ModelRegistryRequest
 
-        effect = NodeRegistryEffect(
-            consul_client=mock_consul_client, postgres_adapter=mock_postgres_adapter
-        )
+        effect = NodeRegistryEffect(postgres_adapter=mock_postgres_adapter)
 
         request = ModelRegistryRequest(
             node_id=unique_node_id,
@@ -1512,13 +1509,11 @@ class TestFullPipelineWithRealInfrastructure:
 
         response = await effect.register_node(request)
 
-        # Verify both backends called
-        assert mock_consul_client.register_service.called
+        # Verify PostgreSQL backend called (Consul removed in OMN-3540)
         assert mock_postgres_adapter.upsert.called
 
         # Verify response
         assert response.status == "success"
-        assert response.consul_result.success
         assert response.postgres_result.success
 
 

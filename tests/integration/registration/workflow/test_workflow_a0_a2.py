@@ -68,8 +68,8 @@ if TYPE_CHECKING:
 # Test Constants
 # =============================================================================
 
-# Expected number of intents emitted by reducer (Consul + PostgreSQL)
-EXPECTED_INTENT_COUNT = 2
+# Expected number of intents emitted by reducer (PostgreSQL only, OMN-3540)
+EXPECTED_INTENT_COUNT = 1
 
 # =============================================================================
 # A0 - Purity Gate Tests
@@ -118,9 +118,9 @@ class TestA0PurityGate:
 
         # Assert precondition: no calls before reduce()
         assert consul_client.call_count == 0, "Consul should have 0 calls initially"
-        assert postgres_adapter.call_count == 0, (
-            "Postgres should have 0 calls initially"
-        )
+        assert (
+            postgres_adapter.call_count == 0
+        ), "Postgres should have 0 calls initially"
 
         # Act - call reducer (should NOT perform I/O)
         output = registration_reducer.reduce(initial_state, event)
@@ -137,7 +137,7 @@ class TestA0PurityGate:
 
         # Assert: Reducer did emit intents for Effect layer
         assert len(output.intents) == EXPECTED_INTENT_COUNT, (
-            f"Reducer should emit {EXPECTED_INTENT_COUNT} intents (Consul + PostgreSQL), "
+            f"Reducer should emit {EXPECTED_INTENT_COUNT} intents (PostgreSQL only, OMN-3540), "
             f"got {len(output.intents)}"
         )
 
@@ -147,12 +147,9 @@ class TestA0PurityGate:
             for intent in output.intents
             if intent.intent_type
         }
-        assert "consul.register" in intent_types, (
-            "Missing consul.register extension intent"
-        )
-        assert "postgres.upsert_registration" in intent_types, (
-            "Missing postgres.upsert_registration extension intent"
-        )
+        assert (
+            "postgres.upsert_registration" in intent_types
+        ), "Missing postgres.upsert_registration extension intent"
 
     async def test_a0_purity_gate_effect_performs_io(
         self,
@@ -189,29 +186,26 @@ class TestA0PurityGate:
         )
 
         # Assert precondition: no calls before effect execution
-        assert consul_client.call_count == 0, "Consul should have 0 calls initially"
-        assert postgres_adapter.call_count == 0, (
-            "Postgres should have 0 calls initially"
-        )
+        assert (
+            postgres_adapter.call_count == 0
+        ), "Postgres should have 0 calls initially"
 
         # Act - execute effect (SHOULD perform I/O)
         response = await tracked_effect.register_node(request)
 
         # Assert: Effect DID perform I/O (this is correct behavior for Effects)
-        assert consul_client.call_count > 0, (
-            "Effect should call Consul - this is where I/O belongs"
-        )
-        assert postgres_adapter.call_count > 0, (
-            "Effect should call PostgreSQL - this is where I/O belongs"
-        )
+        # Note: Consul removed in OMN-3540, only PostgreSQL I/O expected
+        assert (
+            postgres_adapter.call_count > 0
+        ), "Effect should call PostgreSQL - this is where I/O belongs"
 
         # Verify response indicates success
         assert response.is_complete_success(), f"Effect registration failed: {response}"
 
         # Verify call order tracking works
-        assert tracked_effect.register_node_call_count == 1, (
-            "Effect register_node should be tracked"
-        )
+        assert (
+            tracked_effect.register_node_call_count == 1
+        ), "Effect register_node should be tracked"
         effect_calls = call_tracker.get_effect_calls()
         assert len(effect_calls) == 1, "Effect call should be tracked in call_tracker"
 
@@ -243,7 +237,6 @@ class TestA0PurityGate:
 
         # Verify reducer was tracked and performed no I/O
         assert tracked_reducer.reduce_call_count == 1, "Reducer should be called once"
-        assert consul_client.call_count == 0, "Reducer must not call Consul"
         assert postgres_adapter.call_count == 0, "Reducer must not call PostgreSQL"
 
         # Act - Phase 2: Effect executes registration (with I/O)
@@ -263,8 +256,7 @@ class TestA0PurityGate:
         )
         await tracked_effect.register_node(request)
 
-        # Assert: Effect performed I/O after reducer
-        assert consul_client.call_count > 0, "Effect should call Consul"
+        # Assert: Effect performed I/O after reducer (PostgreSQL only, OMN-3540)
         assert postgres_adapter.call_count > 0, "Effect should call PostgreSQL"
 
         # Verify call order: reducer THEN effect
@@ -391,14 +383,14 @@ class TestA1IntrospectionPublish:
                 node_ids.append(event_data["node_id"])
 
         # All node_ids should be the same
-        assert len(set(node_ids)) == 1, (
-            f"Node ID should be stable but got different values: {node_ids}"
-        )
+        assert (
+            len(set(node_ids)) == 1
+        ), f"Node ID should be stable but got different values: {node_ids}"
 
         # And should match the expected ID
-        assert node_ids[0] == str(fixed_node_id), (
-            f"Node ID mismatch: expected {fixed_node_id}, got {node_ids[0]}"
-        )
+        assert node_ids[0] == str(
+            fixed_node_id
+        ), f"Node ID mismatch: expected {fixed_node_id}, got {node_ids[0]}"
 
     async def test_a1_introspection_event_valid_node_types(
         self,
@@ -436,9 +428,9 @@ class TestA1IntrospectionPublish:
             # Extract payload from ModelEventEnvelope if present
             if "payload" in event_data:
                 event_data = event_data["payload"]
-            assert event_data["node_type"] == node_type.value, (
-                f"node_type mismatch: expected {node_type.value}, got {event_data['node_type']}"
-            )
+            assert (
+                event_data["node_type"] == node_type.value
+            ), f"node_type mismatch: expected {node_type.value}, got {event_data['node_type']}"
 
     async def test_a1_introspection_event_endpoints_and_metadata(
         self,
@@ -528,9 +520,9 @@ class TestA2TwoWayIntrospectionLoop:
 
         # Verify request content
         request_data = json.loads(history[0].value.decode("utf-8"))
-        assert request_data["correlation_id"] == str(correlation_id), (
-            "Correlation ID should be preserved in published request"
-        )
+        assert request_data["correlation_id"] == str(
+            correlation_id
+        ), "Correlation ID should be preserved in published request"
 
     async def test_a2_node_responds_to_introspection_request(
         self,
@@ -582,9 +574,9 @@ class TestA2TwoWayIntrospectionLoop:
         # Extract payload from ModelEventEnvelope if present
         if "payload" in response_data:
             response_data = response_data["payload"]
-        assert "correlation_id" in response_data, (
-            "Response must include correlation_id for request tracing"
-        )
+        assert (
+            "correlation_id" in response_data
+        ), "Response must include correlation_id for request tracing"
         assert "node_id" in response_data, "Response must include node_id"
 
     async def test_a2_correlation_id_preserved_in_loop(
@@ -651,9 +643,9 @@ class TestA2TwoWayIntrospectionLoop:
             f"Correlation ID mismatch: request={request_correlations[0]}, "
             f"response={response_correlations[0]}"
         )
-        assert request_correlations[0] == str(correlation_id), (
-            f"Correlation ID should match original: {correlation_id}"
-        )
+        assert request_correlations[0] == str(
+            correlation_id
+        ), f"Correlation ID should match original: {correlation_id}"
 
     async def test_a2_multiple_nodes_respond_with_unique_correlation(
         self,
@@ -696,9 +688,9 @@ class TestA2TwoWayIntrospectionLoop:
                 data = data["payload"]
             node_ids.add(data["node_id"])
 
-        assert len(node_ids) == 3, (
-            f"Each node should have unique node_id. Got {len(node_ids)} unique IDs."
-        )
+        assert (
+            len(node_ids) == 3
+        ), f"Each node should have unique node_id. Got {len(node_ids)} unique IDs."
 
 
 # =============================================================================
@@ -781,12 +773,11 @@ class TestWorkflowIntegration:
         initial_state = ModelRegistrationState()
         output = tracked_reducer.reduce(initial_state, introspection_event)
 
-        # Verify reducer purity
-        assert consul_client.call_count == 0, "Reducer must not call Consul"
+        # Verify reducer purity (PostgreSQL only, OMN-3540)
         assert postgres_adapter.call_count == 0, "Reducer must not call Postgres"
-        assert len(output.intents) == EXPECTED_INTENT_COUNT, (
-            f"Reducer should emit {EXPECTED_INTENT_COUNT} intents"
-        )
+        assert (
+            len(output.intents) == EXPECTED_INTENT_COUNT
+        ), f"Reducer should emit {EXPECTED_INTENT_COUNT} intents"
 
         # Step 3: Effect executes registration (A0 - I/O separation)
         # Note: introspection_event.node_type is a Literal string (e.g., "effect"),
@@ -805,21 +796,21 @@ class TestWorkflowIntegration:
         )
         response = await tracked_effect.register_node(request)
 
-        # Verify effect performed I/O
-        assert consul_client.call_count > 0, "Effect should call Consul"
+        # Verify effect performed I/O (PostgreSQL only, OMN-3540)
         assert postgres_adapter.call_count > 0, "Effect should call Postgres"
         assert response.is_complete_success(), "Registration should succeed"
 
         # Step 4: Verify workflow order (A2 - correlation)
         call_order = call_tracker.get_call_order()
-        assert call_order == ["reducer", "effect"], (
-            f"Workflow order should be [reducer, effect], got {call_order}"
-        )
+        assert call_order == [
+            "reducer",
+            "effect",
+        ], f"Workflow order should be [reducer, effect], got {call_order}"
 
         # Verify correlation ID was preserved (would be in effect's request)
-        assert request.correlation_id == correlation_id, (
-            "Correlation ID must be preserved throughout workflow"
-        )
+        assert (
+            request.correlation_id == correlation_id
+        ), "Correlation ID must be preserved throughout workflow"
 
 
 # =============================================================================

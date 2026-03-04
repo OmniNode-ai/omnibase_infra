@@ -144,23 +144,23 @@ class TestContractIntegration:
         assert model_class.__name__ == class_name
 
         # Verify it's a Pydantic model via duck typing (check for model_fields attribute)
-        assert hasattr(model_class, "model_fields"), (
-            f"{class_name} must be a Pydantic model with 'model_fields'"
-        )
+        assert hasattr(
+            model_class, "model_fields"
+        ), f"{class_name} must be a Pydantic model with 'model_fields'"
 
         # Verify required fields are present
         required_fields = {"introspection_event", "correlation_id"}
         actual_fields = set(model_class.model_fields.keys())
         missing_fields = required_fields - actual_fields
-        assert not missing_fields, (
-            f"{class_name} missing required fields: {missing_fields}"
-        )
+        assert (
+            not missing_fields
+        ), f"{class_name} missing required fields: {missing_fields}"
 
         # Verify model is subclass of BaseModel via duck typing
         # (has model_validate method which is BaseModel behavior)
-        assert hasattr(model_class, "model_validate"), (
-            f"{class_name} must have 'model_validate' method (Pydantic BaseModel)"
-        )
+        assert hasattr(
+            model_class, "model_validate"
+        ), f"{class_name} must have 'model_validate' method (Pydantic BaseModel)"
 
     def test_output_model_importable(self, contract_data: dict) -> None:
         """Test that output model specified in contract is importable and valid.
@@ -185,9 +185,9 @@ class TestContractIntegration:
         assert model_class.__name__ == class_name
 
         # Verify it's a Pydantic model via duck typing (check for model_fields attribute)
-        assert hasattr(model_class, "model_fields"), (
-            f"{class_name} must be a Pydantic model with 'model_fields'"
-        )
+        assert hasattr(
+            model_class, "model_fields"
+        ), f"{class_name} must be a Pydantic model with 'model_fields'"
 
         # Verify required fields are present for orchestrator output
         required_fields = {
@@ -198,14 +198,14 @@ class TestContractIntegration:
         }
         actual_fields = set(model_class.model_fields.keys())
         missing_fields = required_fields - actual_fields
-        assert not missing_fields, (
-            f"{class_name} missing required fields: {missing_fields}"
-        )
+        assert (
+            not missing_fields
+        ), f"{class_name} missing required fields: {missing_fields}"
 
         # Verify model is subclass of BaseModel via duck typing
-        assert hasattr(model_class, "model_validate"), (
-            f"{class_name} must have 'model_validate' method (Pydantic BaseModel)"
-        )
+        assert hasattr(
+            model_class, "model_validate"
+        ), f"{class_name} must have 'model_validate' method (Pydantic BaseModel)"
 
 
 # =============================================================================
@@ -271,9 +271,9 @@ class TestWorkflowGraphIntegration:
         for node in nodes:
             deps = node.get("depends_on", [])
             for dep in deps:
-                assert dep in node_ids, (
-                    f"Node {node['node_id']} depends on non-existent node: {dep}"
-                )
+                assert (
+                    dep in node_ids
+                ), f"Node {node['node_id']} depends on non-existent node: {dep}"
 
     def test_execution_graph_has_no_cycles(self, contract_data: dict) -> None:
         """Test that execution graph has no circular dependencies."""
@@ -322,26 +322,25 @@ class TestWorkflowGraphIntegration:
 
         for node in nodes:
             node_type = node.get("node_type", "").lower()
-            assert node_type in valid_types, (
-                f"Invalid node_type '{node_type}' for node {node['node_id']}"
-            )
+            assert (
+                node_type in valid_types
+            ), f"Invalid node_type '{node_type}' for node {node['node_id']}"
 
-    def test_consul_and_postgres_steps_are_effects(self, contract_data: dict) -> None:
-        """Test that registration steps are effect nodes."""
+    def test_postgres_step_is_effect(self, contract_data: dict) -> None:
+        """Test that PostgreSQL registration step is an effect node."""
         nodes = contract_data["workflow_coordination"]["workflow_definition"][
             "execution_graph"
         ]["nodes"]
 
-        # Find the registration nodes
+        # Find the postgres registration node
         for node in nodes:
-            if "consul" in node["node_id"].lower():
-                assert node["node_type"].lower() == "effect_generic", (
-                    "Consul registration should be effect_generic type"
-                )
             if "postgres" in node["node_id"].lower():
-                assert node["node_type"].lower() == "effect_generic", (
-                    "Postgres registration should be effect_generic type"
-                )
+                assert (
+                    node["node_type"].lower() == "effect_generic"
+                ), "Postgres registration should be effect_generic type"
+                break
+        else:
+            pytest.fail("execute_postgres_registration node not found")
 
     def test_compute_intents_is_reducer(self, contract_data: dict) -> None:
         """Test that compute_intents step is a reducer node."""
@@ -351,52 +350,51 @@ class TestWorkflowGraphIntegration:
 
         for node in nodes:
             if node["node_id"] == "compute_intents":
-                assert node["node_type"].lower() == "reducer_generic", (
-                    "compute_intents should be reducer_generic type"
-                )
+                assert (
+                    node["node_type"].lower() == "reducer_generic"
+                ), "compute_intents should be reducer_generic type"
                 break
         else:
             pytest.fail("compute_intents node not found")
 
-    def test_execution_graph_node_count_is_exactly_8(self, contract_data: dict) -> None:
-        """Test that execution graph has exactly 8 nodes (not more, not fewer).
+    def test_execution_graph_node_count_is_exactly_7(self, contract_data: dict) -> None:
+        """Test that execution graph has exactly 7 nodes (not more, not fewer).
 
         This is a strict count check that will fail if:
-        - Any of the 8 required nodes is missing
+        - Any of the 7 required nodes is missing
         - Any unexpected nodes are added
 
-        The 8 nodes are:
+        The 7 nodes are (Consul removed in OMN-3540):
         1. receive_introspection
         2. read_projection
         3. evaluate_timeout
         4. compute_intents
-        5. execute_consul_registration
-        6. execute_postgres_registration
-        7. aggregate_results
-        8. publish_outcome
+        5. execute_postgres_registration
+        6. aggregate_results
+        7. publish_outcome
         """
         nodes = contract_data["workflow_coordination"]["workflow_definition"][
             "execution_graph"
         ]["nodes"]
 
-        assert len(nodes) == 8, (
-            f"Execution graph must have exactly 8 nodes, found {len(nodes)}. "
+        assert len(nodes) == 7, (
+            f"Execution graph must have exactly 7 nodes, found {len(nodes)}. "
             f"Node IDs found: {[n['node_id'] for n in nodes]}"
         )
 
-    def test_all_8_nodes_have_correct_properties(self, contract_data: dict) -> None:
-        """Test that all 8 execution graph nodes have correct types and dependencies.
+    def test_all_7_nodes_have_correct_properties(self, contract_data: dict) -> None:
+        """Test that all 7 execution graph nodes have correct types and dependencies.
 
-        This test validates each of the 8 nodes in the registration orchestrator workflow:
+        This test validates each of the 7 nodes in the registration orchestrator workflow
+        (Consul removed in OMN-3540):
 
         1. receive_introspection (effect) - Entry point, no dependencies
         2. read_projection (effect) - Reads state, depends on receive_introspection
         3. evaluate_timeout (compute) - Evaluates timeout, depends on read_projection
         4. compute_intents (reducer) - Generates intents, depends on evaluate_timeout
-        5. execute_consul_registration (effect) - Consul registration, depends on compute_intents
-        6. execute_postgres_registration (effect) - PostgreSQL registration, depends on compute_intents
-        7. aggregate_results (compute) - Aggregates results, depends on both registrations
-        8. publish_outcome (effect) - Publishes result event, depends on aggregate_results
+        5. execute_postgres_registration (effect) - PostgreSQL registration, depends on compute_intents
+        6. aggregate_results (compute) - Aggregates results, depends on postgres registration
+        7. publish_outcome (effect) - Publishes result event, depends on aggregate_results
 
         Each node is validated for:
         - Correct node_type (effect, compute, or reducer)
@@ -410,7 +408,7 @@ class TestWorkflowGraphIntegration:
         # Build lookup for easier validation
         node_map = {n["node_id"]: n for n in nodes}
 
-        # Expected properties for all 8 nodes
+        # Expected properties for all 7 nodes (Consul removed in OMN-3540)
         # Format: node_id -> (node_type, depends_on)
         expected_node_properties = {
             # Node 1: Entry point - receives introspection, tick, or ack events
@@ -437,28 +435,21 @@ class TestWorkflowGraphIntegration:
                 "depends_on": ["evaluate_timeout"],
                 "description": "Compute registration intents from introspection event",
             },
-            # Node 5: Execute Consul registration
-            "execute_consul_registration": {
-                "node_type": "effect_generic",
-                "depends_on": ["compute_intents"],
-                "description": "Execute Consul registration intent",
-            },
-            # Node 6: Execute PostgreSQL registration
+            # Node 5: Execute PostgreSQL registration
             "execute_postgres_registration": {
                 "node_type": "effect_generic",
                 "depends_on": ["compute_intents"],
                 "description": "Execute PostgreSQL registration intent",
             },
-            # Node 7: Aggregate registration results
+            # Node 6: Aggregate registration results
             "aggregate_results": {
                 "node_type": "compute_generic",
                 "depends_on": [
-                    "execute_consul_registration",
                     "execute_postgres_registration",
                 ],
                 "description": "Aggregate registration results",
             },
-            # Node 8: Publish outcome event
+            # Node 7: Publish outcome event
             "publish_outcome": {
                 "node_type": "effect_generic",
                 "depends_on": ["aggregate_results"],
@@ -466,9 +457,9 @@ class TestWorkflowGraphIntegration:
             },
         }
 
-        # Validate we have exactly 8 nodes
-        assert len(expected_node_properties) == 8, "Test expects exactly 8 nodes"
-        assert len(node_map) == 8, f"Contract has {len(node_map)} nodes, expected 8"
+        # Validate we have exactly 7 nodes
+        assert len(expected_node_properties) == 7, "Test expects exactly 7 nodes"
+        assert len(node_map) == 7, f"Contract has {len(node_map)} nodes, expected 7"
 
         # Validate each node's properties
         for node_id, expected in expected_node_properties.items():
@@ -528,27 +519,17 @@ class TestCoordinationRulesIntegration:
         assert "timeout_ms" in rules
         assert rules["timeout_ms"] > 0
 
-    def test_parallel_execution_mode(self, contract_data: dict) -> None:
-        """Test that execution mode is parallel for concurrent registration.
+    def test_sequential_execution_mode(self, contract_data: dict) -> None:
+        """Test that execution mode is sequential (PostgreSQL only, OMN-3540).
 
-        The Registration Orchestrator uses parallel execution to run Consul
-        and Postgres registrations concurrently. Both steps depend only on
-        compute_intents, so they form a single wave and execute in parallel.
-
-        Benefits:
-        - Reduced latency for successful registrations
-        - Independent error handling (one failure doesn't block the other)
-
-        Note: execution_mode is consolidated in coordination_rules
-        along with all other coordination settings.
+        With Consul removed, the Registration Orchestrator uses sequential
+        execution for the single PostgreSQL registration backend.
         """
         rules = contract_data["workflow_coordination"]["workflow_definition"][
             "coordination_rules"
         ]
 
-        assert rules["execution_mode"] == "parallel"
-        assert rules["parallel_execution_allowed"] is True
-        assert rules["max_parallel_branches"] == 2
+        assert rules["execution_mode"] == "sequential"
 
     def test_checkpoint_enabled(self, contract_data: dict) -> None:
         """Test that checkpointing is enabled for recovery."""
@@ -597,26 +578,26 @@ class TestErrorHandlingIntegration:
             assert field in retry_policy, f"Missing retry policy field: {field}"
 
         # Validate specific values match contract
-        assert retry_policy["max_retries"] == 3, (
-            f"max_retries should be 3, got {retry_policy['max_retries']}"
-        )
-        assert retry_policy["initial_delay_ms"] == 100, (
-            f"initial_delay_ms should be 100, got {retry_policy['initial_delay_ms']}"
-        )
-        assert retry_policy["max_delay_ms"] == 5000, (
-            f"max_delay_ms should be 5000, got {retry_policy['max_delay_ms']}"
-        )
-        assert retry_policy["exponential_base"] == 2, (
-            f"exponential_base should be 2, got {retry_policy['exponential_base']}"
-        )
+        assert (
+            retry_policy["max_retries"] == 3
+        ), f"max_retries should be 3, got {retry_policy['max_retries']}"
+        assert (
+            retry_policy["initial_delay_ms"] == 100
+        ), f"initial_delay_ms should be 100, got {retry_policy['initial_delay_ms']}"
+        assert (
+            retry_policy["max_delay_ms"] == 5000
+        ), f"max_delay_ms should be 5000, got {retry_policy['max_delay_ms']}"
+        assert (
+            retry_policy["exponential_base"] == 2
+        ), f"exponential_base should be 2, got {retry_policy['exponential_base']}"
 
         # Validate retry_on is a list with expected length
-        assert isinstance(retry_policy["retry_on"], list), (
-            f"retry_on should be a list, got {type(retry_policy['retry_on']).__name__}"
-        )
-        assert len(retry_policy["retry_on"]) == 3, (
-            f"retry_on should have 3 entries, got {len(retry_policy['retry_on'])}"
-        )
+        assert isinstance(
+            retry_policy["retry_on"], list
+        ), f"retry_on should be a list, got {type(retry_policy['retry_on']).__name__}"
+        assert (
+            len(retry_policy["retry_on"]) == 3
+        ), f"retry_on should have 3 entries, got {len(retry_policy['retry_on'])}"
 
     def test_circuit_breaker_configured(self, contract_data: dict) -> None:
         """Test circuit breaker is properly configured with expected values.
@@ -631,23 +612,23 @@ class TestErrorHandlingIntegration:
         circuit_breaker = contract_data["error_handling"]["circuit_breaker"]
 
         # Validate enabled flag
-        assert circuit_breaker.get("enabled", False) is True, (
-            "Circuit breaker must be enabled"
-        )
+        assert (
+            circuit_breaker.get("enabled", False) is True
+        ), "Circuit breaker must be enabled"
 
         # Validate failure threshold with specific value
-        assert "failure_threshold" in circuit_breaker, (
-            "Circuit breaker missing 'failure_threshold' field"
-        )
+        assert (
+            "failure_threshold" in circuit_breaker
+        ), "Circuit breaker missing 'failure_threshold' field"
         assert circuit_breaker["failure_threshold"] == 5, (
             f"Circuit breaker failure_threshold should be 5, "
             f"got {circuit_breaker['failure_threshold']}"
         )
 
         # Validate reset timeout with specific value
-        assert "reset_timeout_ms" in circuit_breaker, (
-            "Circuit breaker missing 'reset_timeout_ms' field"
-        )
+        assert (
+            "reset_timeout_ms" in circuit_breaker
+        ), "Circuit breaker missing 'reset_timeout_ms' field"
         assert circuit_breaker["reset_timeout_ms"] == 60000, (
             f"Circuit breaker reset_timeout_ms should be 60000, "
             f"got {circuit_breaker['reset_timeout_ms']}"
@@ -689,24 +670,24 @@ class TestErrorHandlingIntegration:
             assert "name" in error_type, f"Error type missing 'name': {error_type}"
             assert error_type["name"], "Error type 'name' cannot be empty"
 
-            assert "description" in error_type, (
-                f"Error type '{error_type['name']}' missing 'description'"
-            )
-            assert error_type["description"], (
-                f"Error type '{error_type['name']}' has empty 'description'"
-            )
+            assert (
+                "description" in error_type
+            ), f"Error type '{error_type['name']}' missing 'description'"
+            assert error_type[
+                "description"
+            ], f"Error type '{error_type['name']}' has empty 'description'"
 
-            assert "recoverable" in error_type, (
-                f"Error type '{error_type['name']}' missing 'recoverable'"
-            )
+            assert (
+                "recoverable" in error_type
+            ), f"Error type '{error_type['name']}' missing 'recoverable'"
             assert isinstance(error_type["recoverable"], bool), (
                 f"Error type '{error_type['name']}' 'recoverable' must be boolean, "
                 f"got {type(error_type['recoverable']).__name__}"
             )
 
-            assert "retry_strategy" in error_type, (
-                f"Error type '{error_type['name']}' missing 'retry_strategy'"
-            )
+            assert (
+                "retry_strategy" in error_type
+            ), f"Error type '{error_type['name']}' missing 'retry_strategy'"
 
         # Validate specific error configurations match contract
         assert error_map["ReducerError"]["recoverable"] is True
@@ -736,9 +717,9 @@ class TestErrorHandlingIntegration:
         expected_retryable = {"EffectExecutionError", "ConnectionError", "TimeoutError"}
         actual_retryable = set(retry_on)
 
-        assert len(retry_on) == 3, (
-            f"Expected exactly 3 retryable errors, found {len(retry_on)}: {retry_on}"
-        )
+        assert (
+            len(retry_on) == 3
+        ), f"Expected exactly 3 retryable errors, found {len(retry_on)}: {retry_on}"
 
         assert expected_retryable == actual_retryable, (
             f"Retryable errors mismatch.\n"
@@ -775,17 +756,17 @@ class TestEventIntegration:
                 f"ONEX topic must have 5 dot-separated segments, "
                 f"got {len(segments)}: {topic}"
             )
-            assert segments[0] == "onex", (
-                f"ONEX topic must start with 'onex', got: {topic}"
-            )
+            assert (
+                segments[0] == "onex"
+            ), f"ONEX topic must start with 'onex', got: {topic}"
             assert segments[1] in (
                 "evt",
                 "cmd",
                 "intent",
             ), f"ONEX topic segment 2 must be evt/cmd/intent, got: {topic}"
-            assert segments[4].startswith("v"), (
-                f"ONEX topic must end with version segment (v<N>), got: {topic}"
-            )
+            assert segments[4].startswith(
+                "v"
+            ), f"ONEX topic must end with version segment (v<N>), got: {topic}"
 
     def test_published_events_have_topics(self, contract_data: dict) -> None:
         """Test that published events have topic patterns."""
@@ -805,9 +786,9 @@ class TestEventIntegration:
 
             # All subscribed intents should have routing
             for intent in intent_config["subscribed_intents"]:
-                assert intent in intent_config["intent_routing_table"], (
-                    f"Missing routing for intent: {intent}"
-                )
+                assert (
+                    intent in intent_config["intent_routing_table"]
+                ), f"Missing routing for intent: {intent}"
 
 
 # =============================================================================
@@ -866,17 +847,17 @@ class TestNodeIntegration:
         orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
 
         # Verify type via duck typing (check for class name match)
-        assert orchestrator.__class__.__name__ == "NodeRegistrationOrchestrator", (
-            "Instantiated object must be NodeRegistrationOrchestrator"
-        )
+        assert (
+            orchestrator.__class__.__name__ == "NodeRegistrationOrchestrator"
+        ), "Instantiated object must be NodeRegistrationOrchestrator"
 
         # Verify container reference is stored
-        assert hasattr(orchestrator, "container"), (
-            "Orchestrator must have 'container' attribute"
-        )
-        assert orchestrator.container is simple_mock_container, (
-            "Container reference must match provided container"
-        )
+        assert hasattr(
+            orchestrator, "container"
+        ), "Orchestrator must have 'container' attribute"
+        assert (
+            orchestrator.container is simple_mock_container
+        ), "Container reference must match provided container"
 
     def test_node_inherits_base_class(self, simple_mock_container: MagicMock) -> None:
         """Test that node inherits from NodeOrchestrator base class.
@@ -897,23 +878,23 @@ class TestNodeIntegration:
         ]
 
         for method_name in required_methods:
-            assert hasattr(orchestrator, method_name), (
-                f"Orchestrator must have '{method_name}' method from NodeOrchestrator"
-            )
-            assert callable(getattr(orchestrator, method_name)), (
-                f"'{method_name}' must be callable"
-            )
+            assert hasattr(
+                orchestrator, method_name
+            ), f"Orchestrator must have '{method_name}' method from NodeOrchestrator"
+            assert callable(
+                getattr(orchestrator, method_name)
+            ), f"'{method_name}' must be callable"
 
         # Verify it has container attribute (set by NodeOrchestrator.__init__)
-        assert hasattr(orchestrator, "container"), (
-            "Orchestrator must have 'container' attribute from base class"
-        )
+        assert hasattr(
+            orchestrator, "container"
+        ), "Orchestrator must have 'container' attribute from base class"
 
         # Verify class hierarchy by checking MRO contains expected base class name
         mro_names = [cls.__name__ for cls in orchestrator.__class__.__mro__]
-        assert "NodeOrchestrator" in mro_names, (
-            f"NodeOrchestrator must be in MRO, found: {mro_names}"
-        )
+        assert (
+            "NodeOrchestrator" in mro_names
+        ), f"NodeOrchestrator must be in MRO, found: {mro_names}"
 
     def test_node_is_declarative(self, simple_mock_container: MagicMock) -> None:
         """Test that node has no custom imperative methods."""
@@ -929,9 +910,9 @@ class TestNodeIntegration:
         ]
 
         for method in imperative_methods:
-            assert not hasattr(orchestrator, method), (
-                f"Found imperative method: {method}"
-            )
+            assert not hasattr(
+                orchestrator, method
+            ), f"Found imperative method: {method}"
 
 
 # =============================================================================
@@ -984,12 +965,12 @@ class TestDependencyStructure:
 
         for dep in deps:
             assert "name" in dep, f"Dependency missing 'name' field: {dep}"
-            assert "type" in dep, (
-                f"Dependency '{dep.get('name', 'unknown')}' missing 'type' field"
-            )
-            assert "description" in dep, (
-                f"Dependency '{dep.get('name', 'unknown')}' missing 'description' field"
-            )
+            assert (
+                "type" in dep
+            ), f"Dependency '{dep.get('name', 'unknown')}' missing 'type' field"
+            assert (
+                "description" in dep
+            ), f"Dependency '{dep.get('name', 'unknown')}' missing 'description' field"
 
     def test_dependency_types_valid(self, contract_data: dict) -> None:
         """Test that dependency types are valid ONEX types."""
@@ -1141,11 +1122,9 @@ class TestWorkflowExecutionWithMocks:
         - Has 'reduce' attribute (method presence)
         - 'reduce' is callable (method behavior)
 
-        Returns a list of intents for Consul and PostgreSQL registration.
+        Returns a list of intents for PostgreSQL registration (Consul removed in OMN-3540).
         """
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
-            ModelConsulIntentPayload,
-            ModelConsulRegistrationIntent,
             ModelPostgresIntentPayload,
             ModelPostgresUpsertIntent,
             ModelReducerState,
@@ -1172,16 +1151,8 @@ class TestWorkflowExecutionWithMocks:
                 self.received_events.append(event)
                 self.received_states.append(state)
 
-                # Generate test intents with typed payloads
+                # Generate test intents with typed payloads (PostgreSQL only, OMN-3540)
                 intents: list[ModelRegistrationIntent] = [
-                    ModelConsulRegistrationIntent(
-                        operation="register",
-                        node_id=self._node_id,
-                        correlation_id=self._correlation_id,
-                        payload=ModelConsulIntentPayload(
-                            service_name=f"onex-{event.node_type}",
-                        ),
-                    ),
                     ModelPostgresUpsertIntent(
                         operation="upsert",
                         node_id=self._node_id,
@@ -1227,13 +1198,12 @@ class TestWorkflowExecutionWithMocks:
         Returns successful execution results for all intents.
         """
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
-            ModelConsulRegistrationIntent,
             ModelIntentExecutionResult,
             ModelPostgresUpsertIntent,
         )
 
-        # Define the concrete union type for executed intents
-        ConcreteIntent = ModelConsulRegistrationIntent | ModelPostgresUpsertIntent
+        # Define the concrete type for executed intents (Consul removed in OMN-3540)
+        ConcreteIntent = ModelPostgresUpsertIntent
 
         class MockEffect:
             """Mock effect for testing workflow execution."""
@@ -1385,16 +1355,14 @@ class TestWorkflowExecutionWithMocks:
         assert mock_reducer.call_count == 1
         assert mock_reducer.received_events[0] == introspection_event
 
-        # Verify intents generated
-        assert len(intents) == 2
-        assert intents[0].kind == "consul"
-        assert intents[0].operation == "register"
-        assert intents[1].kind == "postgres"
-        assert intents[1].operation == "upsert"
+        # Verify intents generated (PostgreSQL only, Consul removed in OMN-3540)
+        assert len(intents) == 1
+        assert intents[0].kind == "postgres"
+        assert intents[0].operation == "upsert"
 
         # Verify state updated
         assert new_state.processed_node_ids == frozenset({introspection_event.node_id})
-        assert new_state.pending_registrations == 2
+        assert new_state.pending_registrations == 1
 
     @pytest.mark.asyncio
     async def test_effect_executes_intents_successfully(
@@ -1405,15 +1373,20 @@ class TestWorkflowExecutionWithMocks:
     ) -> None:
         """Test that effect executes intents and returns success results."""
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
-            ModelConsulIntentPayload,
-            ModelConsulRegistrationIntent,
+            ModelPostgresIntentPayload,
+            ModelPostgresUpsertIntent,
         )
 
-        intent = ModelConsulRegistrationIntent(
-            operation="register",
+        intent = ModelPostgresUpsertIntent(
+            operation="upsert",
             node_id=node_id,
             correlation_id=correlation_id,
-            payload=ModelConsulIntentPayload(service_name="test-node"),
+            payload=ModelPostgresIntentPayload(
+                node_id=node_id,
+                node_type=EnumNodeKind.EFFECT,
+                correlation_id=correlation_id,
+                timestamp="2025-01-15T12:00:00+00:00",
+            ),
         )
 
         result = await mock_effect.execute_intent(intent, correlation_id)
@@ -1422,7 +1395,7 @@ class TestWorkflowExecutionWithMocks:
         assert mock_effect.executed_intents[0] == intent
         assert mock_effect.received_correlation_ids[0] == correlation_id
         assert result.success is True
-        assert result.intent_kind == "consul"
+        assert result.intent_kind == "postgres"
         assert result.error is None
         assert result.execution_time_ms >= 0
 
@@ -1435,17 +1408,22 @@ class TestWorkflowExecutionWithMocks:
     ) -> None:
         """Test that effect returns failure result when configured to fail."""
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
-            ModelConsulIntentPayload,
-            ModelConsulRegistrationIntent,
+            ModelPostgresIntentPayload,
+            ModelPostgresUpsertIntent,
         )
 
         mock_effect.should_fail = True
 
-        intent = ModelConsulRegistrationIntent(
-            operation="register",
+        intent = ModelPostgresUpsertIntent(
+            operation="upsert",
             node_id=node_id,
             correlation_id=correlation_id,
-            payload=ModelConsulIntentPayload(service_name="test-node"),
+            payload=ModelPostgresIntentPayload(
+                node_id=node_id,
+                node_type=EnumNodeKind.EFFECT,
+                correlation_id=correlation_id,
+                timestamp="2025-01-15T12:00:00+00:00",
+            ),
         )
 
         result = await mock_effect.execute_intent(intent, correlation_id)
@@ -1525,13 +1503,12 @@ class TestWorkflowExecutionWithMocks:
             result = await mock_effect.execute_intent(intent, correlation_id)
             results.append(result)
 
-        # Verify all intents were executed
-        assert mock_effect.call_count == 2
-        assert len(mock_effect.executed_intents) == 2
+        # Verify all intents were executed (PostgreSQL only, OMN-3540)
+        assert mock_effect.call_count == 1
+        assert len(mock_effect.executed_intents) == 1
 
         # Verify intents match
         assert mock_effect.executed_intents[0] == intents[0]
-        assert mock_effect.executed_intents[1] == intents[1]
 
         # Verify all results are successful
         assert all(r.success for r in results)
@@ -1589,7 +1566,7 @@ class TestWorkflowExecutionWithMocks:
         assert output.status == "success"
         assert output.postgres_applied is True
         assert output.correlation_id == correlation_id
-        assert len(output.intent_results) == 2
+        assert len(output.intent_results) == 1
         assert output.total_execution_time_ms >= 0
 
     @pytest.mark.asyncio
@@ -1663,11 +1640,11 @@ class TestWorkflowExecutionWithMocks:
             initial_state, introspection_event
         )
 
-        assert len(intents_first) == 2
+        assert len(intents_first) == 1
         assert introspection_event.node_id in state_after_first.processed_node_ids
 
-        # State should track processed node
-        assert state_after_first.pending_registrations == 2
+        # State should track processed node (PostgreSQL only, OMN-3540)
+        assert state_after_first.pending_registrations == 1
 
     @pytest.mark.asyncio
     async def test_workflow_sequence_reducer_before_effect(
@@ -1710,10 +1687,9 @@ class TestWorkflowExecutionWithMocks:
         for intent in intents:
             await mock_effect.execute_intent(intent, correlation_id)
 
-        # Verify order
+        # Verify order (PostgreSQL only, OMN-3540)
         assert call_order[0] == "reducer"
         assert call_order[1].startswith("effect:")
-        assert call_order[2].startswith("effect:")
 
     def test_orchestrator_instantiation_with_mocks(
         self,
@@ -1728,9 +1704,7 @@ class TestWorkflowExecutionWithMocks:
         # Verify type via duck typing (check class name, not isinstance)
         assert (
             orchestrator_with_mocks.__class__.__name__ == "NodeRegistrationOrchestrator"
-        ), (
-            f"Expected NodeRegistrationOrchestrator, got {orchestrator_with_mocks.__class__.__name__}"
-        )
+        ), f"Expected NodeRegistrationOrchestrator, got {orchestrator_with_mocks.__class__.__name__}"
 
         # Verify orchestrator has required methods from NodeOrchestrator base
         required_methods = [
@@ -1739,17 +1713,17 @@ class TestWorkflowExecutionWithMocks:
             "get_node_type",
         ]
         for method_name in required_methods:
-            assert hasattr(orchestrator_with_mocks, method_name), (
-                f"Orchestrator must have '{method_name}' method"
-            )
-            assert callable(getattr(orchestrator_with_mocks, method_name)), (
-                f"'{method_name}' must be callable"
-            )
+            assert hasattr(
+                orchestrator_with_mocks, method_name
+            ), f"Orchestrator must have '{method_name}' method"
+            assert callable(
+                getattr(orchestrator_with_mocks, method_name)
+            ), f"'{method_name}' must be callable"
 
         # Verify container is properly injected
-        assert hasattr(orchestrator_with_mocks, "container"), (
-            "Orchestrator must have 'container' attribute"
-        )
+        assert hasattr(
+            orchestrator_with_mocks, "container"
+        ), "Orchestrator must have 'container' attribute"
 
     def test_mock_container_provides_dependencies(
         self,
@@ -1763,15 +1737,15 @@ class TestWorkflowExecutionWithMocks:
         and correct method signatures, rather than using isinstance checks.
         """
         # Verify mocks are accessible via container
-        assert hasattr(simple_mock_container, "_test_reducer"), (
-            "Container must have '_test_reducer' attribute"
-        )
-        assert hasattr(simple_mock_container, "_test_effect"), (
-            "Container must have '_test_effect' attribute"
-        )
-        assert hasattr(simple_mock_container, "_test_emitter"), (
-            "Container must have '_test_emitter' attribute"
-        )
+        assert hasattr(
+            simple_mock_container, "_test_reducer"
+        ), "Container must have '_test_reducer' attribute"
+        assert hasattr(
+            simple_mock_container, "_test_effect"
+        ), "Container must have '_test_effect' attribute"
+        assert hasattr(
+            simple_mock_container, "_test_emitter"
+        ), "Container must have '_test_emitter' attribute"
 
         # Use shared conformance helpers for protocol verification
         assert_reducer_protocol_interface(simple_mock_container._test_reducer)
@@ -1787,59 +1761,41 @@ class TestParallelExecutionStructure:
     """Integration tests for parallel execution of Consul and Postgres registrations.
 
     These tests verify that the workflow graph is correctly structured for
-    parallel execution of the registration steps:
+    sequential execution of the PostgreSQL registration step (Consul removed
+    in OMN-3540):
 
-    1. Both execute_consul_registration and execute_postgres_registration
-       depend only on compute_intents (not on each other)
-    2. This allows them to run in parallel as a single wave
-    3. aggregate_results depends on both, ensuring it waits for both to complete
+    1. execute_postgres_registration depends on compute_intents
+    2. aggregate_results depends on execute_postgres_registration
+    3. Execution mode is sequential (single backend)
 
-    Wave Structure (with parallel execution enabled):
+    Wave Structure:
         Wave 1: receive_introspection
         Wave 2: read_projection
         Wave 3: evaluate_timeout
         Wave 4: compute_intents
-        Wave 5: execute_consul_registration, execute_postgres_registration (PARALLEL)
+        Wave 5: execute_postgres_registration
         Wave 6: aggregate_results
         Wave 7: publish_outcome
     """
 
-    def test_consul_and_postgres_share_same_dependency(
-        self, contract_data: dict
-    ) -> None:
-        """Test that Consul and Postgres steps both depend only on compute_intents.
-
-        This is the key structural requirement for parallel execution - both
-        registration steps have the same single dependency, so they can run
-        concurrently in the same wave.
-        """
+    def test_postgres_depends_on_compute_intents(self, contract_data: dict) -> None:
+        """Test that PostgreSQL registration step depends only on compute_intents."""
         nodes = contract_data["workflow_coordination"]["workflow_definition"][
             "execution_graph"
         ]["nodes"]
 
         node_map = {n["node_id"]: n for n in nodes}
-
-        consul_node = node_map["execute_consul_registration"]
         postgres_node = node_map["execute_postgres_registration"]
 
-        # Both should depend only on compute_intents
-        assert consul_node.get("depends_on") == ["compute_intents"], (
-            f"execute_consul_registration should depend only on compute_intents, "
-            f"got {consul_node.get('depends_on')}"
-        )
         assert postgres_node.get("depends_on") == ["compute_intents"], (
             f"execute_postgres_registration should depend only on compute_intents, "
             f"got {postgres_node.get('depends_on')}"
         )
 
-    def test_aggregate_results_waits_for_both_registrations(
+    def test_aggregate_results_waits_for_postgres_registration(
         self, contract_data: dict
     ) -> None:
-        """Test that aggregate_results depends on both registration steps.
-
-        This ensures that result aggregation only occurs after both Consul
-        and Postgres registrations complete (successfully or with errors).
-        """
+        """Test that aggregate_results depends on the postgres registration step."""
         nodes = contract_data["workflow_coordination"]["workflow_definition"][
             "execution_graph"
         ]["nodes"]
@@ -1847,68 +1803,27 @@ class TestParallelExecutionStructure:
         node_map = {n["node_id"]: n for n in nodes}
         aggregate_node = node_map["aggregate_results"]
 
-        expected_deps = {"execute_consul_registration", "execute_postgres_registration"}
+        expected_deps = {"execute_postgres_registration"}
         actual_deps = set(aggregate_node.get("depends_on", []))
 
         assert actual_deps == expected_deps, (
-            f"aggregate_results should depend on both registration steps, "
+            f"aggregate_results should depend on execute_postgres_registration, "
             f"got {actual_deps}, expected {expected_deps}"
         )
 
-    def test_no_dependency_between_registration_steps(
+    def test_sequential_execution_in_coordination_rules(
         self, contract_data: dict
     ) -> None:
-        """Test that there is no dependency between Consul and Postgres steps.
+        """Test that sequential execution is configured in coordination rules.
 
-        The registration steps should be independent to enable parallel execution.
-        Neither should depend on the other.
-        """
-        nodes = contract_data["workflow_coordination"]["workflow_definition"][
-            "execution_graph"
-        ]["nodes"]
-
-        node_map = {n["node_id"]: n for n in nodes}
-
-        consul_deps = set(node_map["execute_consul_registration"].get("depends_on", []))
-        postgres_deps = set(
-            node_map["execute_postgres_registration"].get("depends_on", [])
-        )
-
-        # Consul should not depend on Postgres
-        assert "execute_postgres_registration" not in consul_deps, (
-            "execute_consul_registration should not depend on execute_postgres_registration"
-        )
-
-        # Postgres should not depend on Consul
-        assert "execute_consul_registration" not in postgres_deps, (
-            "execute_postgres_registration should not depend on execute_consul_registration"
-        )
-
-    def test_parallel_execution_enabled_in_coordination_rules(
-        self, contract_data: dict
-    ) -> None:
-        """Test that parallel execution is properly enabled in coordination rules.
-
-        Verifies all three parallel execution settings are correctly configured:
-        - execution_mode: parallel
-        - parallel_execution_allowed: true
-        - max_parallel_branches: 2 (for Consul and Postgres)
+        With only PostgreSQL as a backend (Consul removed in OMN-3540),
+        execution mode is sequential.
         """
         rules = contract_data["workflow_coordination"]["workflow_definition"][
             "coordination_rules"
         ]
 
-        # Execution mode must be parallel
-        assert rules["execution_mode"] == "parallel", (
-            f"execution_mode should be 'parallel', got {rules['execution_mode']}"
-        )
-
-        # Parallel execution must be allowed
-        assert rules["parallel_execution_allowed"] is True, (
-            "parallel_execution_allowed should be True"
-        )
-
-        # Max parallel branches should be at least 2 (for Consul and Postgres)
-        assert rules["max_parallel_branches"] >= 2, (
-            f"max_parallel_branches should be at least 2, got {rules['max_parallel_branches']}"
-        )
+        # Execution mode is sequential (single backend)
+        assert (
+            rules["execution_mode"] == "sequential"
+        ), f"execution_mode should be 'sequential', got {rules['execution_mode']}"

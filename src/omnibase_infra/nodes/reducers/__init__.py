@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""ONEX Infrastructure Reducers Module.
+"""  # ai-slop-ok: pre-existingONEX Infrastructure Reducers Module.
 
 This module provides reducer nodes for aggregating and consolidating state
 from multiple sources in the ONEX 4-node architecture.

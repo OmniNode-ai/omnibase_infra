@@ -494,9 +494,9 @@ class TestChaosReplayPerformance:
         expected_threshold = (
             (event_count / 1000) * REPLAY_1000_EVENTS_THRESHOLD_SECONDS * 1.5
         )
-        assert elapsed < expected_threshold, (
-            f"Chaos replay took {elapsed:.2f}s, expected < {expected_threshold:.2f}s"
-        )
+        assert (
+            elapsed < expected_threshold
+        ), f"Chaos replay took {elapsed:.2f}s, expected < {expected_threshold:.2f}s"
 
         events_per_second = event_count / elapsed
         print(
@@ -590,10 +590,6 @@ class TestMemoryUsagePerformance:
         - Reports peak memory and growth from baseline
     """
 
-    @pytest.mark.xfail(
-        reason="omnibase_core 0.7.0 adds intent_type mismatch warnings that increase memory usage beyond 10MB tolerance. See OMN-1361.",
-        strict=True,
-    )
     async def test_memory_usage_10k_events(
         self,
         reducer: RegistrationReducer,
@@ -755,15 +751,6 @@ class TestReplayThroughput:
         - Uses PerformanceStats for comprehensive analysis
     """
 
-    @pytest.mark.xfail(
-        reason=(
-            "Performance test with absolute P95/median threshold (< 2.0) is inherently "
-            "flaky in CI environments due to variable CPU/memory resources. "
-            "omnibase_core 0.7.0 intent_type mismatch warnings add logging overhead "
-            "that causes timing variability. See OMN-1361."
-        ),
-        strict=True,
-    )
     async def test_sustained_replay_throughput(
         self,
         reducer: RegistrationReducer,

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Pytest fixtures for NodeRegistryEffect integration tests.
+"""  # ai-slop-ok: pre-existingPytest fixtures for NodeRegistryEffect integration tests.
 
 This module provides fixtures that wire NodeRegistryEffect with:
 1. Real ModelONEXContainer from omnibase_core

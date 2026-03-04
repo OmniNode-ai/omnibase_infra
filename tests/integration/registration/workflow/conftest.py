@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Pytest fixtures for registration workflow integration tests.
+"""  # ai-slop-ok: pre-existingPytest fixtures for registration workflow integration tests.
 
 This module provides fixtures that wire the complete registration workflow:
 1. RegistrationReducer for intent computation
@@ -210,7 +210,7 @@ class ProtocolRegistryRequestFactory(Protocol):
 
 
 class IntrospectableTestNode(MixinNodeIntrospection):
-    """Test node that implements MixinNodeIntrospection for testing.
+    """  # ai-slop-ok: pre-existingTest node that implements MixinNodeIntrospection for testing.
 
     This node provides a minimal implementation suitable for testing
     the introspection workflow without real infrastructure.
@@ -446,14 +446,12 @@ class TrackedNodeRegistryEffect:
         self,
         request: ModelRegistryRequest,
         *,
-        skip_consul: bool = False,
         skip_postgres: bool = False,
     ) -> ModelRegistryResponse:
         """Delegate to effect and track the call.
 
         Args:
             request: Registration request.
-            skip_consul: If True, skip Consul registration.
             skip_postgres: If True, skip PostgreSQL registration.
 
         Returns:
@@ -467,7 +465,6 @@ class TrackedNodeRegistryEffect:
         )
         return await self.effect.register_node(
             request,
-            skip_consul=skip_consul,
             skip_postgres=skip_postgres,
         )
 

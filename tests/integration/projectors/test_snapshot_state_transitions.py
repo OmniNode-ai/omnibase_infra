@@ -156,8 +156,8 @@ class TestSnapshotStateTransitions:
         # Assert - handler should emit registration initiated + accepted events
         assert len(output.events) == 2
 
-        # Assert - handler emits 2 intents for effect layer execution
-        assert len(output.intents) == 2
+        # Assert - handler emits 1 intent for effect layer execution (PostgreSQL only, OMN-3540)
+        assert len(output.intents) == 1
 
         # Find the postgres upsert intent by checking payload intent_type
         postgres_intents = [
@@ -177,17 +177,7 @@ class TestSnapshotStateTransitions:
         assert record_data["current_state"] == "awaiting_ack"
         assert record_data["entity_id"] == node_id
 
-        # Find the consul register intent
-        consul_intents = [
-            i
-            for i in output.intents
-            if getattr(i.payload, "intent_type", None) == "consul.register"
-        ]
-        assert len(consul_intents) == 1
-        consul_intent = consul_intents[0]
-
-        # Verify consul intent targets the correct service
-        assert consul_intent.target == "consul://service/onex-effect"
+        # Consul intent removed in OMN-3540 - only PostgreSQL intent expected
 
     @pytest.mark.asyncio
     async def test_ack_publishes_snapshot(self) -> None:

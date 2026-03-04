@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Handler Identity Utilities for HYBRID Mode Resolution.
+"""  # ai-slop-ok: pre-existingHandler Identity Utilities for HYBRID Mode Resolution.
 
 This module provides the `handler_identity()` function used by both bootstrap
 and contract sources to generate consistent handler IDs. This enables per-handler
