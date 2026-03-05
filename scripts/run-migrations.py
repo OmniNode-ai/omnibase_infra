@@ -261,22 +261,25 @@ async def run(db_url: str, dry_run: bool, target: int | None) -> int:
         await conn.close()
 
 
-def restamp_fingerprint() -> None:
-    """Call check_schema_fingerprint.py stamp after successful apply."""
+def restamp_fingerprint(db_url: str) -> None:
+    """Call util_schema_fingerprint stamp after successful apply."""
     import subprocess
 
-    stamp_script = REPO_ROOT / "scripts" / "check_schema_fingerprint.py"
-    if stamp_script.exists():
-        result = subprocess.run(
-            [sys.executable, str(stamp_script), "stamp"],
-            capture_output=True,
-            text=True,
-            check=False,
+    result = subprocess.run(
+        [sys.executable, "-m", "omnibase_infra.runtime.util_schema_fingerprint", "stamp"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "OMNIBASE_INFRA_DB_URL": db_url},
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip()
+        print(
+            f"  warning: fingerprint restamp failed (exit {result.returncode}): "
+            f"{detail}"
         )
-        if result.returncode != 0:
-            print(f"  warning: fingerprint restamp failed: {result.stderr.strip()}")
-        else:
-            print("  fingerprint restamped.")
+    else:
+        print("  fingerprint restamped.")
 
 
 def main() -> None:
@@ -305,7 +308,7 @@ def main() -> None:
     count = asyncio.run(run(args.db_url, args.dry_run, args.target))
 
     if count > 0 and not args.dry_run:
-        restamp_fingerprint()
+        restamp_fingerprint(args.db_url)
 
 
 if __name__ == "__main__":
