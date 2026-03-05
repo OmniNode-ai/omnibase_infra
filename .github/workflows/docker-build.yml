@@ -265,11 +265,11 @@ jobs:
 
   # Image size analysis
   # Monitors runtime image size to prevent bloat and ensure efficient deployments.
-  # Size threshold rationale: 500MB is a reasonable limit for a Python runtime image
-  # that includes dependencies. Images exceeding this threshold may indicate:
-  # - Unnecessary dependencies included
-  # - Build artifacts not cleaned up
-  # - Base image bloat that should be investigated
+  # Size threshold rationale: 7500MB (7.5GB) is the current realistic threshold.
+  # The image includes PyTorch + CUDA dependencies (~8.7GB baseline).
+  # Expected size after torch optimization: ~6.7GB.
+  # Target: <5GB after further layer optimization.
+  # Warning-only for initial rollout — does not block builds.
   image-analysis:
     name: Image Size Analysis
     runs-on: ubuntu-latest
@@ -289,9 +289,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Image size threshold: 500MB
-      # This threshold was chosen based on typical Python runtime images with
-      # production dependencies. Exceeding this may indicate optimization opportunities.
+      # Image size threshold: 7500MB (7.5GB) — warning-only, see job comment for rationale
       - name: Analyze image size
         run: |
           docker pull ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
@@ -302,12 +300,13 @@ jobs:
           echo "# Image Size Analysis" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- Runtime Image: ${SIZE_MB}MB" >> $GITHUB_STEP_SUMMARY
-          # Threshold: 500MB - see job comment for rationale
-          if [ ${SIZE_MB} -gt 500 ]; then
-            echo "- Warning: Image larger than 500MB threshold - consider optimization" >> $GITHUB_STEP_SUMMARY
+          if [ ${SIZE_MB} -gt 7500 ]; then
+            echo "::warning::Image size ${SIZE_MB}MB exceeds 7500MB threshold — investigate optimization"
+            echo "- **Warning**: Image size ${SIZE_MB}MB exceeds 7500MB threshold" >> $GITHUB_STEP_SUMMARY
           else
-            echo "- Image size is acceptable (under 500MB threshold)" >> $GITHUB_STEP_SUMMARY
+            echo "- Image size ${SIZE_MB}MB is within 7500MB threshold" >> $GITHUB_STEP_SUMMARY
           fi
+          echo "- Target: <5GB after further layer optimization" >> $GITHUB_STEP_SUMMARY
 
   # Build summary
   build-summary:
