@@ -1238,6 +1238,15 @@ pattern_exemptions:
     documentation:
       - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
     ticket: OMN-1132
+  - file_pattern: 'handler_pool\.py'
+    class_pattern: "Class name 'HandlerPool'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      HandlerPool manages pools of ONEX handler instances per handler type for parallel execution without contention (OMN-477). The "Handler" refers to ONEX handler protocol instances, consistent with HandlerPluginLoader.
+
+    documentation:
+      - CLAUDE.md (Handler System)
+    ticket: OMN-477
   - file_pattern: 'model_loaded_handler\.py'
     class_pattern: "Class name 'ModelLoadedHandler'"
     violation_pattern: "contains anti-pattern 'Handler'"

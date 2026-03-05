@@ -171,6 +171,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "omninode-memory==0.6.1" \
     "omninode-intelligence==0.9.1"
 
+# Install CPU-only PyTorch (~2GB savings over CUDA wheels).
+# K8s runtime has no GPU; inference offloads to LLM servers via HTTP.
+# --no-deps prevents torch from pulling its own transitive deps (already
+# satisfied by omnibase_infra's uv sync above) and keeps the install
+# consistent with the plugin-pin pattern enforced by check_dockerfile_pins.py.
+# --index-url ensures only CPU-only wheels are considered.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --no-deps "torch>=2.6.0,<3.0.0" --index-url https://download.pytorch.org/whl/cpu
+
 # Install external (non-ONEX) deps required by the plugins above.
 # Most are already satisfied by omnibase_infra's own transitive deps.
 # Only plugin-specific additions are listed here.
