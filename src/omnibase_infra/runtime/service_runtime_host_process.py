@@ -8,6 +8,7 @@ Implements RuntimeHostProcess — responsible for:
 - Subscribing to event bus topics and routing envelopes to handlers
 - Handling errors by producing success=False response envelopes
 - Processing envelopes with configurable parallelism (OMN-476)
+- Handler pooling per handler type for contention-free parallelism (OMN-477)
 - Graceful shutdown with in-flight message drain (OMN-756)
 
 The RuntimeHostProcess is the central coordinator for infrastructure runtime,
@@ -166,6 +167,12 @@ from omnibase_infra.runtime.handler_identity import (
     handler_identity,
 )
 from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+from omnibase_infra.runtime.handler_pool import (
+    DEFAULT_POOL_SIZE,
+    MAX_POOL_SIZE,
+    MIN_POOL_SIZE,
+    HandlerPool,
+)
 from omnibase_infra.runtime.kafka_contract_source import KafkaContractSource
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
 from omnibase_infra.topics import (
@@ -242,6 +249,12 @@ DEFAULT_BATCH_RESPONSE_SIZE: int = int(os.environ.get("ONEX_BATCH_RESPONSE_SIZE"
 DEFAULT_BATCH_FLUSH_INTERVAL_MS: float = float(
     os.environ.get("ONEX_BATCH_FLUSH_INTERVAL_MS", "100")
 )
+
+# Handler pool size bounds (OMN-477)
+# Controls number of handler instances per handler type.
+# When > 1 and max_concurrent_handlers > 1, handler instances are pooled
+# to eliminate contention between parallel envelope processing tasks.
+DEFAULT_HANDLER_POOL_SIZE: int = int(os.environ.get("ONEX_HANDLER_POOL_SIZE", "1"))
 
 
 def _parse_contract_event_payload(
@@ -904,6 +917,43 @@ class RuntimeHostProcess:
 
         self._handler_shutdown_timeout_seconds: float = handler_shutdown_value
 
+        # Handler pool size configuration (OMN-477)
+        # When > 1, creates a pool of handler instances per handler type
+        # to eliminate contention under parallel execution.
+        _pool_size_raw = config.get("handler_pool_size")
+        pool_size_value: int = DEFAULT_HANDLER_POOL_SIZE
+        if isinstance(_pool_size_raw, int):
+            pool_size_value = _pool_size_raw
+        elif isinstance(_pool_size_raw, str):
+            try:
+                pool_size_value = int(_pool_size_raw)
+            except ValueError:
+                logger.warning(
+                    "Invalid handler_pool_size string value, using default",
+                    extra={
+                        "invalid_value": _pool_size_raw,
+                        "default_value": DEFAULT_HANDLER_POOL_SIZE,
+                    },
+                )
+                pool_size_value = DEFAULT_HANDLER_POOL_SIZE
+
+        # Clamp to valid range
+        if pool_size_value < MIN_POOL_SIZE or pool_size_value > MAX_POOL_SIZE:
+            logger.warning(
+                "handler_pool_size out of valid range, clamping",
+                extra={
+                    "original_value": pool_size_value,
+                    "min_value": MIN_POOL_SIZE,
+                    "max_value": MAX_POOL_SIZE,
+                    "clamped_value": max(
+                        MIN_POOL_SIZE, min(pool_size_value, MAX_POOL_SIZE)
+                    ),
+                },
+            )
+            pool_size_value = max(MIN_POOL_SIZE, min(pool_size_value, MAX_POOL_SIZE))
+
+        self._handler_pool_size: int = pool_size_value
+
         # Handler executor for lifecycle operations (shutdown, health check)
         self._lifecycle_executor = ProtocolLifecycleExecutor(
             health_check_timeout_seconds=self._health_check_timeout_seconds,
@@ -922,6 +972,12 @@ class RuntimeHostProcess:
         # Handler registry (handler_type -> handler instance)
         # This will be populated from the singleton registry during start()
         self._handlers: dict[str, ProtocolContainerAware] = {}
+
+        # Handler pools (handler_type -> HandlerPool) for pooled execution (OMN-477)
+        # When handler_pool_size > 1, each handler type gets a pool of instances.
+        # The pool is used for checkout/checkin during envelope processing.
+        # When pool_size == 1 (default), pools are not created and _handlers is used directly.
+        self._handler_pools: dict[str, HandlerPool] = {}
 
         # Track failed handler instantiations (handler_type -> error message)
         # Used by health_check() to report degraded state
@@ -1154,6 +1210,25 @@ class RuntimeHostProcess:
             1 means sequential processing (MVP backwards compatibility).
         """
         return self._max_concurrent_handlers
+
+    @property
+    def handler_pool_size(self) -> int:
+        """Return the configured handler pool size (OMN-477).
+
+        Returns:
+            The number of handler instances per handler type.
+            1 means single instance (no pooling, backwards compatible).
+        """
+        return self._handler_pool_size
+
+    @property
+    def handler_pools(self) -> dict[str, HandlerPool]:
+        """Return the handler pools dict (OMN-477).
+
+        Returns:
+            Mapping of handler_type to HandlerPool. Empty when pooling is disabled.
+        """
+        return self._handler_pools
 
     @property
     def in_flight_task_count(self) -> int:
@@ -1697,6 +1772,30 @@ class RuntimeHostProcess:
         # event bus is still available for publishing).
         if self._batch_publisher is not None:
             await self._batch_publisher.stop()
+
+        # Step 1.8: Shutdown handler pools (OMN-477)
+        # Must happen before individual handler shutdown since pools manage
+        # their own instances with independent lifecycle.
+        if self._handler_pools:
+            logger.info(
+                "Shutting down handler pools",
+                extra={
+                    "pool_count": len(self._handler_pools),
+                    "pool_types": list(self._handler_pools.keys()),
+                },
+            )
+            for pool_type, pool in self._handler_pools.items():
+                try:
+                    await pool.shutdown()
+                except Exception as e:
+                    logger.warning(
+                        "Error shutting down handler pool",
+                        extra={
+                            "handler_type": pool_type,
+                            "error": str(e),
+                        },
+                    )
+            self._handler_pools.clear()
 
         # Step 2: Shutdown all handlers by priority (release resources like DB/Kafka connections)
         # Delegates to ProtocolLifecycleExecutor which handles:
@@ -2337,11 +2436,62 @@ class RuntimeHostProcess:
                 # Store the handler instance for routing
                 self._handlers[handler_type] = handler_instance
 
+                # Create handler pool if pooling is enabled (OMN-477)
+                # When pool_size > 1 AND parallel execution is enabled,
+                # create a pool of handler instances for this type.
+                # The first instance (already created above) is placed into
+                # _handlers for backwards compatibility; the pool manages
+                # additional instances for concurrent checkout.
+                if self._handler_pool_size > 1 and self._max_concurrent_handlers > 1:
+                    # Capture variables for the factory closure
+                    _cls = handler_cls
+                    _container = container
+                    _resolved = resolved_dependencies
+                    _accepts_deps = (
+                        resolved_dependencies is not None
+                        and self._accepts_dependencies_param(handler_cls)
+                    )
+
+                    def _make_factory(
+                        cls: type[ProtocolContainerAware],
+                        ctr: object,
+                        deps: object | None,
+                        accepts: bool,
+                    ) -> Callable[[], ProtocolContainerAware]:
+                        """Create a closure-safe factory for pool instances."""
+
+                        def factory() -> ProtocolContainerAware:
+                            if accepts and deps is not None:
+                                return cls(container=ctr, dependencies=deps)  # type: ignore[call-arg,arg-type]
+                            return cls(container=ctr)  # type: ignore[call-arg,arg-type]
+
+                        return factory
+
+                    pool = HandlerPool(
+                        handler_type=handler_type,
+                        factory=_make_factory(
+                            _cls, _container, _resolved, _accepts_deps
+                        ),
+                        pool_size=self._handler_pool_size,
+                    )
+                    await pool.initialize()
+                    self._handler_pools[handler_type] = pool
+
+                    logger.info(
+                        "Handler pool created",
+                        extra={
+                            "handler_type": handler_type,
+                            "pool_size": self._handler_pool_size,
+                            "handler_class": handler_cls.__name__,
+                        },
+                    )
+
                 logger.debug(
                     "Handler instantiated and initialized",
                     extra={
                         "handler_type": handler_type,
                         "handler_class": handler_cls.__name__,
+                        "pooled": handler_type in self._handler_pools,
                     },
                 )
 
@@ -3520,74 +3670,77 @@ class RuntimeHostProcess:
             )
             return
 
-        # Execute handler
+        # Execute handler — use pool checkout if pooling is enabled (OMN-477)
+        pool = self._handler_pools.get(str(handler_type))
+        if pool is not None:
+            await self._execute_handler_pooled(
+                pool, envelope, handler_type, operation, correlation_id
+            )
+        else:
+            await self._execute_handler_single(
+                handler, envelope, handler_type, operation, correlation_id
+            )
+
+    async def _execute_handler_single(
+        self,
+        handler: ProtocolContainerAware,
+        envelope: dict[str, object],
+        handler_type: object,
+        operation: str,
+        correlation_id: UUID,
+    ) -> None:
+        """Execute a handler directly (non-pooled path).
+
+        This is the original handler execution logic, extracted for clarity
+        when handler pooling (OMN-477) is not active for this handler type.
+
+        Args:
+            handler: The handler instance to execute.
+            envelope: The validated envelope dict.
+            handler_type: The handler type identifier.
+            operation: The operation string from the envelope.
+            correlation_id: The correlation ID for tracing.
+        """
         try:
-            # Handler expected to have async execute(envelope) method
-            # NOTE: MVP adapters use legacy execute(envelope: dict) signature.
-            # TODO(OMN-40): Migrate handlers to new protocol signature execute(request, operation_config)
-            response = await handler.execute(envelope)  # type: ignore[call-arg]  # NOTE: legacy signature
-
-            # Ensure response has correlation_id and publish
-            # Handle both dict and BaseModel responses from handlers.
-            # Success responses route through batch publisher when enabled (OMN-478).
-            if isinstance(response, dict):
-                response = dict(response)  # Copy to avoid mutating handler state
-                if "correlation_id" not in response:
-                    response["correlation_id"] = correlation_id
-                await self._publish_response(response, self._output_topic)
-            elif isinstance(response, BaseModel):
-                # BaseModel responses: convert to dict for batch compatibility
-                response_dict = response.model_dump(mode="json")
-                if "correlation_id" not in response_dict and correlation_id is not None:
-                    response_dict["correlation_id"] = str(correlation_id)
-                await self._publish_response(response_dict, self._output_topic)
-            else:
-                # Fallback: convert to dict
-                await self._publish_response(
-                    {"response": response, "correlation_id": correlation_id},
-                    self._output_topic,
-                )
-
-            logger.debug(
-                "Handler executed successfully",
-                extra={
-                    "handler_type": handler_type,
-                    "correlation_id": str(correlation_id),
-                    "operation": operation,
-                },
+            response = await handler.execute(envelope)  # type: ignore[call-arg]
+            await self._publish_handler_response(
+                response, handler_type, operation, correlation_id
             )
-
         except Exception as e:
-            # Create infrastructure error context for handler execution failure
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="handler_execution",
-                target_name=str(handler_type),
-                correlation_id=correlation_id,
+            await self._handle_execution_error(
+                e, handler_type, operation, correlation_id
             )
-            # Chain the error with infrastructure context
-            infra_error = RuntimeHostError(
-                f"Handler execution failed for {handler_type}: {e}",
-                context=context,
-            )
-            infra_error.__cause__ = e  # Proper error chaining
 
-            # Handler execution failed - produce failure envelope
-            error_response = self._create_error_response(
-                error=str(e),
-                correlation_id=correlation_id,
-            )
-            await self._publish_envelope_safe(error_response, self._output_topic)
+    async def _execute_handler_pooled(
+        self,
+        pool: HandlerPool,
+        envelope: dict[str, object],
+        handler_type: object,
+        operation: str,
+        correlation_id: UUID,
+    ) -> None:
+        """Execute a handler via pool checkout (OMN-477).
 
-            logger.exception(
-                "Handler execution failed",
-                extra={
-                    "handler_type": handler_type,
-                    "correlation_id": str(correlation_id),
-                    "operation": operation,
-                    "error": str(e),
-                    "infra_error": str(infra_error),
-                },
+        Checks out a handler instance from the pool, executes the envelope,
+        and returns the instance when done.  If the instance is unhealthy
+        after execution, the pool automatically recycles it.
+
+        Args:
+            pool: The handler pool to checkout from.
+            envelope: The validated envelope dict.
+            handler_type: The handler type identifier.
+            operation: The operation string from the envelope.
+            correlation_id: The correlation ID for tracing.
+        """
+        try:
+            async with pool.checkout() as handler:
+                response = await handler.execute(envelope)  # type: ignore[call-arg]
+                await self._publish_handler_response(
+                    response, handler_type, operation, correlation_id
+                )
+        except Exception as e:
+            await self._handle_execution_error(
+                e, handler_type, operation, correlation_id
             )
 
     async def _publish_response(self, envelope: dict[str, object], topic: str) -> None:
@@ -3612,6 +3765,96 @@ class RuntimeHostProcess:
             await self._batch_publisher.enqueue(json_safe_envelope)
         else:
             await self._publish_envelope_safe(envelope, topic)
+
+    async def _publish_handler_response(
+        self,
+        response: object,
+        handler_type: object,
+        operation: str,
+        correlation_id: UUID,
+    ) -> None:
+        """Publish handler response to the output topic.
+
+        Handles dict, BaseModel, and fallback response types.
+        Extracted to avoid duplication between single and pooled paths (OMN-477).
+
+        Args:
+            response: The handler's return value.
+            handler_type: The handler type identifier.
+            operation: The operation string.
+            correlation_id: The correlation ID.
+        """
+        if isinstance(response, dict):
+            response = dict(response)
+            if "correlation_id" not in response:
+                response["correlation_id"] = correlation_id
+            await self._publish_envelope_safe(response, self._output_topic)
+        elif isinstance(response, BaseModel):
+            await self._publish_model_safe(
+                response, self._output_topic, correlation_id=correlation_id
+            )
+        else:
+            await self._publish_envelope_safe(
+                {"response": response, "correlation_id": correlation_id},
+                self._output_topic,
+            )
+
+        logger.debug(
+            "Handler executed successfully",
+            extra={
+                "handler_type": handler_type,
+                "correlation_id": str(correlation_id),
+                "operation": operation,
+            },
+        )
+
+    async def _handle_execution_error(
+        self,
+        error: Exception,
+        handler_type: object,
+        operation: str,
+        correlation_id: UUID,
+    ) -> None:
+        """Handle handler execution errors.
+
+        Creates infrastructure error context, publishes failure envelope,
+        and logs the error.  Extracted to avoid duplication between single
+        and pooled paths (OMN-477).
+
+        Args:
+            error: The exception from handler execution.
+            handler_type: The handler type identifier.
+            operation: The operation string.
+            correlation_id: The correlation ID.
+        """
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="handler_execution",
+            target_name=str(handler_type),
+            correlation_id=correlation_id,
+        )
+        infra_error = RuntimeHostError(
+            f"Handler execution failed for {handler_type}: {error}",
+            context=context,
+        )
+        infra_error.__cause__ = error
+
+        error_response = self._create_error_response(
+            error=str(error),
+            correlation_id=correlation_id,
+        )
+        await self._publish_envelope_safe(error_response, self._output_topic)
+
+        logger.exception(
+            "Handler execution failed",
+            extra={
+                "handler_type": handler_type,
+                "correlation_id": str(correlation_id),
+                "operation": operation,
+                "error": str(error),
+                "infra_error": str(infra_error),
+            },
+        )
 
     def _create_error_response(
         self,
@@ -4018,6 +4261,12 @@ class RuntimeHostProcess:
             and not no_handlers_registered
         )
 
+        # Collect handler pool metrics (OMN-477)
+        pool_metrics: dict[str, object] = {}
+        if self._handler_pools:
+            for pool_type, pool in self._handler_pools.items():
+                pool_metrics[pool_type] = await pool.health_check()
+
         return {
             "healthy": healthy,
             "degraded": degraded,
@@ -4025,6 +4274,7 @@ class RuntimeHostProcess:
             "is_draining": self._is_draining,
             "pending_message_count": self._pending_message_count,
             "max_concurrent_handlers": self._max_concurrent_handlers,
+            "handler_pool_size": self._handler_pool_size,
             "in_flight_tasks": len(self._in_flight_tasks),
             "batch_response_enabled": self._batch_publisher is not None,
             "batch_response_pending": (
@@ -4037,6 +4287,7 @@ class RuntimeHostProcess:
             "failed_handlers": self._failed_handlers,
             "registered_handlers": list(self._handlers.keys()),
             "handlers": handler_health_results,
+            "handler_pools": pool_metrics,
             "no_handlers_registered": no_handlers_registered,
         }
 
