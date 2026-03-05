@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Filesystem Write File Payload Model.
 
-This module provides the Pydantic model for the filesystem.write_file operation
+The Pydantic model for the filesystem.write_file operation
 payload, replacing untyped dict[str, object] patterns.
 """
 

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """HTTP POST Payload Model.
 
-This module provides the Pydantic model for http.post operation results.
+The Pydantic model for http.post operation results.
 Uses the registry pattern for dynamic type resolution.
 
 Related:

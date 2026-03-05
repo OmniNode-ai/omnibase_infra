@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 class IntentTypeExtractor:
     """Extracts intent types from contract models.
 
-    This class handles extraction of intent types from various contract
+    Extraction of intent types from various contract
     structures. Different node types expose intent information in different
     locations:
     - Effect nodes: event_type.primary_events

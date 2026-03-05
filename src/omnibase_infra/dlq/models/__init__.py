@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """ONEX Infrastructure DLQ Models.
 
-This module provides Pydantic models for the DLQ replay tracking system,
+Pydantic models for the DLQ replay tracking system,
 including configuration and replay record models.
 
 Exports:

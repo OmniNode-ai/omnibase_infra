@@ -62,7 +62,7 @@ class NodeValidationOrchestrator(NodeOrchestrator):
     """Declarative orchestrator for the validation pipeline.
 
     All behavior is defined in contract.yaml and delegated to handlers.
-    This node contains no custom logic.
+    No custom logic.
 
     Coordinates the validation pipeline: receives pattern candidates, builds
     validation plans, dispatches to executor and adjudicator, publishes results.

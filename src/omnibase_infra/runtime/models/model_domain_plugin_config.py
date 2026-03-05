@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Domain plugin configuration model.
 
-This module provides the ModelDomainPluginConfig dataclass for passing
+The ModelDomainPluginConfig dataclass for passing
 configuration to domain plugins during lifecycle hooks.
 
 Design Pattern:

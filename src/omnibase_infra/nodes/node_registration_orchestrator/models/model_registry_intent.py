@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Registry-based intent model for dynamic type resolution.
 
-This module provides:
+Exports:
 - ModelRegistryIntent: Base model for all registration intents
 - RegistryIntent: Decorator-based registry for intent type discovery
 

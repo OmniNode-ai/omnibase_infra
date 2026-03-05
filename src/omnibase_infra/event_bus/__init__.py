@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Event bus implementations for omnibase_infra.
 
-This module provides event bus implementations for the ONEX infrastructure.
+Event bus implementations for the ONEX infrastructure.
 Two implementations are supported:
 - EventBusInmemory: For unit testing and local development without external dependencies
 - EventBusKafka: For production use with Kafka/Redpanda (see event_bus_kafka.py)

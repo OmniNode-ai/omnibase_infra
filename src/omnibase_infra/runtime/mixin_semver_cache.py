@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Semver Cache Mixin.
 
-This module provides semantic version parsing and caching functionality,
+Semantic version parsing and caching functionality,
 extracted from RegistryPolicy to reduce class method count.
 
 The mixin provides:
@@ -167,7 +167,7 @@ class MixinSemverCache:
     def _get_semver_parser(cls) -> Callable[[str], ModelSemVer]:
         """Get or create the semver parser with configured cache size.
 
-        This method implements lazy initialization of the LRU-cached semver parser.
+        Lazy initialization of the LRU-cached semver parser.
         The cache size is determined by SEMVER_CACHE_SIZE at initialization time.
 
         Thread Safety:
@@ -292,7 +292,7 @@ class MixinSemverCache:
     def _parse_semver(cls, version: str) -> ModelSemVer:
         """Parse semantic version string into ModelSemVer for comparison.
 
-        This method implements SEMANTIC VERSION SORTING, not lexicographic sorting.
+        SEMANTIC VERSION SORTING, not lexicographic sorting.
         This is critical for correct "latest version" selection.
 
         Why This Matters (PR #36 feedback):

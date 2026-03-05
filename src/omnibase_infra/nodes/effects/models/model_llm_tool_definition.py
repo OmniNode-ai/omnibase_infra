@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """LLM tool definition model for request payloads.
 
-This module provides ModelLlmToolDefinition, which wraps a function
+ModelLlmToolDefinition, which wraps a function
 definition with a type discriminator following the OpenAI tool-calling format.
 
 Related:

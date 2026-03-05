@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Manifest Store Payload Model.
 
-This module provides the Pydantic model for the manifest.store operation
+The Pydantic model for the manifest.store operation
 payload, containing the serialized ModelExecutionManifest to persist.
 """
 

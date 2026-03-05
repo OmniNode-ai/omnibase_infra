@@ -38,7 +38,7 @@ class NodeGmailArchiveCleanupEffect(NodeEffect):
     messages were deleted or errors occurred.
 
     All routing and execution logic is driven by contract.yaml.
-    This class contains NO custom routing code.
+    NO custom routing code.
 
     Partition Key:
         ``"gmail-archive-cleanup"`` — all cleanup events land in the same

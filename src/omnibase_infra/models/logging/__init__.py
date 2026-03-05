@@ -3,7 +3,7 @@
 """
 Structured Logging Models.
 
-This module provides Pydantic models for structured logging in ONEX
+Pydantic models for structured logging in ONEX
 infrastructure components.
 
 Models:

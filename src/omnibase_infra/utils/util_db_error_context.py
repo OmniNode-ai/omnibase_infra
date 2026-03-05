@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Database operation error handling context manager.
 
-This module provides an async context manager for consistent error handling
+An async context manager for consistent error handling
 in database operations using asyncpg. It transforms low-level asyncpg exceptions
 into ONEX infrastructure errors with proper context propagation.
 

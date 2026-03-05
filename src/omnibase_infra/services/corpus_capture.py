@@ -220,7 +220,7 @@ class CorpusCapture:
     """
     Engine for capturing production executions into a corpus.
 
-    This service provides:
+    Exports:
     - Configurable filtering (handler whitelist, time window, sample rate)
     - Deduplication strategies (input hash, full manifest hash)
     - Lifecycle management (create, start, pause, resume, close)
@@ -510,7 +510,7 @@ class CorpusCapture:
         """
         Async capture with configurable timeout.
 
-        This method provides bounded latency for production use. If the capture
+        Bounded latency for production use. If the capture
         operation exceeds the timeout, it returns a SKIPPED_TIMEOUT result
         rather than blocking the caller.
 

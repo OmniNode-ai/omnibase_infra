@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Registration Initiated Event Model.
 
-This module provides ModelNodeRegistrationInitiated for the ONEX 2-way
+ModelNodeRegistrationInitiated for the ONEX 2-way
 registration pattern. Emitted by the Registration Orchestrator when it
 receives a NodeIntrospected event to represent the start of a registration
 attempt.

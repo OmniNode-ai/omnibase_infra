@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Model for optional UUID values in runtime module.
 
-This module provides a strongly-typed Pydantic model for optional UUID
+A strongly-typed Pydantic model for optional UUID
 values, replacing `UUID | None` union types to comply with ONEX standards.
 
 Design Note - Code Duplication:

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Structured Logging Handler - EFFECT handler for structured logging with buffer/flush.
 
-This handler implements the ONEX EFFECT handler pattern for structured logging.
+The ONEX EFFECT handler pattern for structured logging.
 It manages the lifecycle of a SinkLoggingStructured instance, providing:
 - Contract-driven lifecycle management (initialize, shutdown)
 - Periodic background flush with configurable interval
@@ -125,7 +125,7 @@ SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
 class HandlerLoggingStructured(MixinEnvelopeExtraction):
     """Structured logging EFFECT handler with buffer/flush management.
 
-    This handler manages the lifecycle of a SinkLoggingStructured instance,
+    The lifecycle of a SinkLoggingStructured instance,
     providing contract-driven initialization, periodic background flush,
     and graceful shutdown with final flush.
 

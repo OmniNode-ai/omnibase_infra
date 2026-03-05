@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Optimistic locking retry helper for concurrent data operations.
 
-This module provides utilities for retrying operations that may fail due to
+Utilities for retrying operations that may fail due to
 optimistic locking conflicts. Optimistic locking is a concurrency control
 strategy where conflicts are detected at write time rather than using locks.
 
@@ -138,7 +138,7 @@ async def retry_on_optimistic_conflict(
 ) -> T:
     """Execute async function with retry on optimistic locking conflict.
 
-    This function implements exponential backoff retry logic for operations
+    Exponential backoff retry logic for operations
     that may fail due to optimistic locking conflicts. Unlike transient error
     retries, this does NOT integrate with circuit breakers since conflicts
     indicate contention, not service degradation.

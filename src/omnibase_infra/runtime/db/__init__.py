@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Database runtime module for omnibase_infra.
 
-This module provides the PostgresRepositoryRuntime and associated models for
+The PostgresRepositoryRuntime and associated models for
 database operations with safety constraints and deterministic query behavior.
 
 Components:

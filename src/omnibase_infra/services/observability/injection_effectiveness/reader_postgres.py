@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """PostgreSQL Reader for Injection Effectiveness Observability.
 
-This module provides a PostgreSQL reader for querying injection effectiveness
+A PostgreSQL reader for querying injection effectiveness
 data stored by WriterInjectionEffectivenessPostgres. Supports session lookup,
 flexible filtering with pagination, latency breakdowns, and pattern hit rates.
 

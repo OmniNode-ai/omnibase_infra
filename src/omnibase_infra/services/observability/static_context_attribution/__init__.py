@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """Static context token cost attribution service.
 
-This module provides infrastructure for measuring token costs per static
+Infrastructure for measuring token costs per static
 context section (CLAUDE.md, memory files, etc.) and attributing utilization
 to specific sections based on edit-distance anchoring.
 

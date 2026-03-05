@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Shared Pydantic field validator utilities.
 
-This module provides reusable validation functions that can be called from
+Reusable validation functions that can be called from
 Pydantic field validators. These utilities consolidate duplicate validation
 logic that was previously scattered across multiple model files.
 

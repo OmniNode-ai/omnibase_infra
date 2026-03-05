@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Plugin Load Context Model for Summary Logging.
 
-This module provides ModelPluginLoadContext which groups the parameters needed
+ModelPluginLoadContext which groups the parameters needed
 for logging a plugin load summary.
 
 See Also:

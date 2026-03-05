@@ -3,7 +3,7 @@
 """
 Dispatch Context Model for Time Injection Control.
 
-This module provides the dispatch context model that enforces ONEX architecture
+The dispatch context model that enforces ONEX architecture
 rules for time injection. In ONEX:
 
 - **Reducers** and **Compute** nodes (pure/deterministic) must NEVER receive `now`
@@ -207,7 +207,7 @@ class ModelDispatchContext(BaseModel):
     def validate_for_node_kind(self) -> Literal[True]:
         """Validate that the context is appropriate for its node kind.
 
-        This method provides explicit validation that can be called
+        Explicit validation that can be called
         at dispatch time to ensure time injection rules are enforced.
 
         For REDUCER and COMPUTE nodes, this validates that `now` is None.

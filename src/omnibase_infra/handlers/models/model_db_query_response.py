@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Database Query Response Model.
 
-This module provides the Pydantic model for database query response envelopes
+The Pydantic model for database query response envelopes
 used by the HandlerDb.
 """
 

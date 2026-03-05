@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Discovery Result Model.
 
-This module provides the ModelDiscoveryResult class representing the outcome
+The ModelDiscoveryResult class representing the outcome
 of a service discovery query.
 """
 

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Session storage and event consumer services.
 
-This module provides infrastructure for persisting Claude Code session
+Infrastructure for persisting Claude Code session
 snapshots and consuming session events from Kafka.
 
 Moved from omniclaude as part of OMN-1526 architectural cleanup.

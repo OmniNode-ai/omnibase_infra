@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """PostgreSQL Snapshot Store for Production Persistence.
 
-This module provides a PostgreSQL implementation of ProtocolSnapshotStore
+A PostgreSQL implementation of ProtocolSnapshotStore
 for production snapshot persistence. The store uses asyncpg for async
 database operations and supports:
 

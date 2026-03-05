@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """LLM embedding request model for the embedding effect node.
 
-This module provides ModelLlmEmbeddingRequest, the input model for the LLM
+ModelLlmEmbeddingRequest, the input model for the LLM
 embedding effect node. Supports batch embedding generation via OpenAI-compatible
 and Ollama endpoints.
 

@@ -11,7 +11,7 @@ Kafka Consumer Group ID Constraints:
     - Valid characters: alphanumeric, period (.), underscore (_), hyphen (-)
     - Cannot be empty
 
-This module provides:
+Exports:
     - normalize_kafka_identifier: Normalize strings for use as Kafka consumer group IDs
     - compute_consumer_group_id: Compute canonical consumer group ID from node identity
 """

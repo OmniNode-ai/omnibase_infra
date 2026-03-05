@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """ONEX Infrastructure DLQ (Dead Letter Queue) System.
 
-This module provides DLQ replay tracking capabilities for message
+DLQ replay tracking capabilities for message
 processing in distributed systems. It enables persistent tracking
 of replay attempts through PostgreSQL.
 

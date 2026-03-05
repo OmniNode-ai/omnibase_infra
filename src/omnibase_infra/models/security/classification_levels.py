@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Shared classification security level mapping.
 
-This module provides a single source of truth for data classification
+A single source of truth for data classification
 security level mappings. Both registration-time validation and
 invocation-time enforcement use this shared mapping to ensure
 consistent security decisions.
@@ -67,7 +67,7 @@ CLASSIFICATION_SECURITY_LEVELS: dict[EnumDataClassification, int] = {
 def get_security_level(classification: EnumDataClassification) -> int:
     """Get numeric security level for a data classification.
 
-    This function provides consistent security level lookups for both
+    Consistent security level lookups for both
     registration-time validation and invocation-time enforcement.
 
     Args:

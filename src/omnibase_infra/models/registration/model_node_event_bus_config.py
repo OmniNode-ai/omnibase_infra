@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Event Bus Configuration Model.
 
-This module provides the model for a node's resolved event bus configuration,
+The model for a node's resolved event bus configuration,
 containing lists of topics the node subscribes to and publishes to.
 
 Key Design Decisions:

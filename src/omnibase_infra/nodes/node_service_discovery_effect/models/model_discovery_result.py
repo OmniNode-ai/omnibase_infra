@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Discovery Result Model for Service Discovery Operations.
 
-This module provides ModelDiscoveryResult, representing the result
+ModelDiscoveryResult, representing the result
 of service discovery queries from the NodeServiceDiscoveryEffect node.
 
 Architecture:

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Event Registry - Event type to Kafka topic mapping.
 
-This module provides a generic event registry that maps semantic event types
+A generic event registry that maps semantic event types
 to Kafka topics and handles metadata injection.
 
 The registry is the central configuration point for:

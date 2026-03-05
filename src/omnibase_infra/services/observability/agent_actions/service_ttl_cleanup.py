@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """TTL Cleanup Service for Observability Tables.
 
-This module provides an async service that periodically deletes rows older
+An async service that periodically deletes rows older
 than the configured retention period from observability tables. It uses
 batched DELETEs to avoid lock contention and circuit breaker resilience
 for database operations.

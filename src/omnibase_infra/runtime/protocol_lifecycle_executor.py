@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Protocol lifecycle executor for ONEX Infrastructure.
 
-This module provides the ProtocolLifecycleExecutor class for managing protocol
+The ProtocolLifecycleExecutor class for managing protocol
 handler lifecycle operations including shutdown, health checks, and priority
 ordering.
 
@@ -65,7 +65,7 @@ class ProtocolLifecycleExecutor:
     Reusable utility for managing protocol lifecycles. Used by
     RuntimeHostProcess and can be used by future node implementations.
 
-    This class provides:
+    Exports:
     - Priority-based shutdown ordering (higher priority handlers shutdown first)
     - Health check execution with configurable timeouts
     - Parallel shutdown within priority groups for performance

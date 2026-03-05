@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Service Discovery Health Check Result Model.
 
-This module provides the Pydantic model for health check results from
+The Pydantic model for health check results from
 service discovery backends, using strongly-typed model instances
 for all fields including backend-specific details.
 

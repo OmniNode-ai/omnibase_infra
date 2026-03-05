@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Observability services for agent telemetry and monitoring.
 
-This module provides infrastructure for collecting, processing, and persisting
+Infrastructure for collecting, processing, and persisting
 agent observability data including actions, routing decisions, and performance
 metrics.
 

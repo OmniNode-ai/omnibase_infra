@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Wiring health checker for computing emission/consumption comparisons.
 
-This module provides the checker that computes wiring health metrics by
+The checker that computes wiring health metrics by
 comparing emission counts (from EventBusKafka) with consumption counts
 (from EventBusSubcontractWiring). It exposes metrics for Prometheus and
 can emit alerts when thresholds are exceeded.

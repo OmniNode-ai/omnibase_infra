@@ -4,7 +4,7 @@
 # S104 disabled: Binding to 0.0.0.0 is intentional for Docker/K8s health checks
 """HTTP Health Service for ONEX Runtime.
 
-This module provides a minimal HTTP service for exposing health check endpoints.
+A minimal HTTP service for exposing health check endpoints.
 It is designed to run alongside the ONEX runtime kernel to satisfy Docker/K8s
 health check requirements.
 
@@ -89,7 +89,7 @@ DEFAULT_HTTP_HOST = "0.0.0.0"
 def _get_port_from_env(default: int) -> int:
     """Safely parse ONEX_HTTP_PORT from environment with fallback to default.
 
-    This function handles invalid environment variable values gracefully by
+    Invalid environment variable values gracefully by
     logging a warning and returning the default value, rather than raising
     an exception. This prevents import-time crashes and allows the application
     to start even with misconfigured environment variables.

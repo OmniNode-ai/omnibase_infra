@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Qdrant Vector Store Handler - implements ProtocolVectorStoreHandler.
 
-This handler provides vector store operations for the Qdrant vector database
+Vector store operations for the Qdrant vector database
 using the qdrant-client library with circuit breaker pattern for fault tolerance.
 
 Supported Operations:
@@ -17,7 +17,7 @@ Supported Operations:
     - describe: Return handler capabilities and metadata
 
 Protocol Implementation:
-    This handler implements ProtocolVectorStoreHandler from omnibase_spi.protocols.storage.
+    ProtocolVectorStoreHandler from omnibase_spi.protocols.storage.
     All methods use typed models from omnibase_core.models.vector for type safety.
 
 Circuit Breaker Pattern:
@@ -104,7 +104,7 @@ _FILTER_OP_MAP: dict[EnumVectorFilterOperator, str] = {
 class HandlerQdrant(MixinAsyncCircuitBreaker, ProtocolVectorStoreHandler):
     """Qdrant vector store handler implementing ProtocolVectorStoreHandler.
 
-    This handler provides vector storage, similarity search, and index management
+    Vector storage, similarity search, and index management
     operations for the Qdrant vector database.
 
     Security Policy:

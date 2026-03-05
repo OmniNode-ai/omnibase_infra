@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Observability handlers for ONEX infrastructure.
 
-This module provides handler implementations for the ONEX observability stack.
+Handler implementations for the ONEX observability stack.
 Handlers are responsible for managing the lifecycle of observability sinks
 and providing contract-driven operation execution.
 

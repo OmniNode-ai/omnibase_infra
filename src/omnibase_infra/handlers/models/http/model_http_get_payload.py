@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """HTTP GET Payload Model.
 
-This module provides the Pydantic model for http.get operation results.
+The Pydantic model for http.get operation results.
 Uses the registry pattern for dynamic type resolution.
 
 Related:

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """LLM embedding response model with dimension uniformity validator.
 
-This module provides ModelLlmEmbeddingResponse, the output model for the
+ModelLlmEmbeddingResponse, the output model for the
 LLM embedding effect node. It enforces that all returned embeddings have
 the same vector dimensionality.
 

@@ -3,7 +3,7 @@
 """
 Tracing Context Model for Dispatch Operations.
 
-This module provides the ModelTracingContext model that groups distributed tracing
+The ModelTracingContext model that groups distributed tracing
 fields (correlation_id, trace_id, span_id) into a single sub-model. This reduces
 the number of optional fields in parent models like ModelDispatchResult.
 

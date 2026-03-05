@@ -33,7 +33,7 @@ class NodeGmailIntentPollerEffect(NodeEffect):
     ``onex.evt.omnibase_infra.gmail-intent-received.v1``.
 
     All routing and execution logic is driven by contract.yaml.
-    This class contains NO custom routing code.
+    NO custom routing code.
 
     Partition Key:
         ``message_id`` — ensures all events for the same message land

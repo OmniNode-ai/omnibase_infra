@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Protocol for emission count sources.
 
-This module provides the Protocol definition for emission count sources.
+The Protocol definition for emission count sources.
 Used by WiringHealthChecker for dependency injection.
 
 See Also:

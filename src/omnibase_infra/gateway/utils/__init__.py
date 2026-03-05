@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Gateway Utilities Module.
 
-This module provides utility functions for gateway operations, including
+Utility functions for gateway operations, including
 key loading for envelope signing and validation.
 
 Exports:

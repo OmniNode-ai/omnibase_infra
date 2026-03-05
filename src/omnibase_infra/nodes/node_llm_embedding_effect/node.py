@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """LLM Embedding Effect Node - Declarative shell.
 
-This node provides embedding generation operations via pluggable handlers
+Embedding generation operations via pluggable handlers
 (OpenAI-compatible, Ollama). All behavior is defined in contract.yaml.
 
 Supported Operations:

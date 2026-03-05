@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Event Bus Binding Registry - Registry for event bus implementations.
 
-This module provides the RegistryEventBusBinding class for registering and
+The RegistryEventBusBinding class for registering and
 resolving event bus implementations in the omnibase_infra layer.
 
 Event Bus Categories:

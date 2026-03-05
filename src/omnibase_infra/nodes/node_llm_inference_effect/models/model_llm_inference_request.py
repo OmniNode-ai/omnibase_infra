@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """LLM inference request model for the LLM Inference Effect node.
 
-This module provides ModelLlmInferenceRequest, the input model for the
+ModelLlmInferenceRequest, the input model for the
 LLM inference effect node. It captures all parameters needed to make an
 inference call to an OpenAI-compatible LLM endpoint.
 

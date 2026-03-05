@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """HTTP Handler Payload Model.
 
-This module provides the discriminated union type for HTTP operation payloads
+The discriminated union type for HTTP operation payloads
 and the wrapper model that contains them.
 """
 

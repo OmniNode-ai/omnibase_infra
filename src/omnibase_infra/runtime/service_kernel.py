@@ -1514,8 +1514,13 @@ async def bootstrap() -> int:
         shutdown_event = asyncio.Event()
         loop = asyncio.get_running_loop()
 
+        # Track which signal triggered shutdown for diagnostics (OMN-3591)
+        shutdown_reason: str = "unknown"
+
         def handle_shutdown(sig: signal.Signals) -> None:
             """Handle shutdown signal with correlation tracking."""
+            nonlocal shutdown_reason
+            shutdown_reason = f"signal:{sig.name}"
             logger.info(
                 "Received %s, initiating graceful shutdown... (correlation_id=%s)",
                 sig.name,
@@ -1544,7 +1549,9 @@ async def bootstrap() -> int:
                 Uses call_soon_threadsafe to safely communicate with the event
                 loop from the signal handler thread.
                 """
+                nonlocal shutdown_reason
                 sig = signal.Signals(signum)
+                shutdown_reason = f"signal:{sig.name}"
                 logger.info(
                     "Received %s, initiating graceful shutdown... (correlation_id=%s)",
                     sig.name,
@@ -1749,9 +1756,13 @@ async def bootstrap() -> int:
         # Plugin summary for banner
         plugin_names = [p.plugin_id for p in activated_plugins]
 
+        # Runtime profile for operator disambiguation (OMN-3591)
+        runtime_profile = os.getenv("RUNTIME_PROFILE", "default")
+
         banner_lines = [
             "=" * 60,
             f"ONEX Runtime Kernel v{KERNEL_VERSION}",
+            f"Profile: {runtime_profile} (PID {os.getpid()})",
             f"Environment: {environment}",
             f"Contracts: {contracts_dir}",
             f"Event Bus: {event_bus_type} (group: {config.consumer_group})",
@@ -1782,13 +1793,38 @@ async def bootstrap() -> int:
             },
         )
 
+        # Flush log handlers so Docker log driver captures all startup messages
+        # before the process blocks on shutdown_event.wait(). Without this,
+        # buffered log output may not appear in `docker logs` until the process
+        # exits, making it look like the kernel never entered the run loop
+        # (OMN-3591).
+        for handler in logging.root.handlers:
+            handler.flush()
+
+        # Explicit run-loop entry log (OMN-3591)
+        # This message confirms the kernel reached the blocking wait and did
+        # not exit prematurely during bootstrap. If this message is absent
+        # from container logs, the kernel exited before entering the run loop.
+        logger.info(
+            "RUN_LOOP_ENTERED: Kernel idle, waiting for shutdown signal "
+            "(profile=%s, pid=%d, correlation_id=%s)",
+            runtime_profile,
+            os.getpid(),
+            correlation_id,
+        )
+        # Flush again to guarantee the run-loop-entered message is visible
+        for handler in logging.root.handlers:
+            handler.flush()
+
         # Wait for shutdown signal
         await shutdown_event.wait()
 
         grace_period = config.shutdown.grace_period_seconds
         shutdown_start_time = time.time()
         logger.info(
-            "Shutdown signal received, stopping runtime (timeout=%ss, correlation_id=%s)",
+            "RUN_LOOP_EXITED: Shutdown signal received (reason=%s, timeout=%ss, "
+            "correlation_id=%s)",
+            shutdown_reason,
             grace_period,
             correlation_id,
         )

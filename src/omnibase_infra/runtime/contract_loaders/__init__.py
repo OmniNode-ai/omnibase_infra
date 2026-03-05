@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Contract loaders for declarative ONEX configuration.
 
-This module provides utilities for loading contract-driven configuration
+Utilities for loading contract-driven configuration
 from contract.yaml files. These loaders support the ONEX declarative
 pattern where behavior is defined in YAML rather than Python code.
 

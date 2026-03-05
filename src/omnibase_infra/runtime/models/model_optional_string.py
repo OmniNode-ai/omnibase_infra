@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Model for optional string values in runtime module.
 
-This module provides a strongly-typed Pydantic model for optional string
+A strongly-typed Pydantic model for optional string
 values, replacing `str | None` union types to comply with ONEX standards.
 """
 

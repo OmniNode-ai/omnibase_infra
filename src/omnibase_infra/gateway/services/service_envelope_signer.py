@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Envelope Signer Service.
 
-This module provides a service for signing outbound envelopes with Ed25519 signatures.
+A service for signing outbound envelopes with Ed25519 signatures.
 The signer uses Blake3 for hashing and Ed25519 for cryptographic signatures, ensuring
 message integrity and authenticity.
 

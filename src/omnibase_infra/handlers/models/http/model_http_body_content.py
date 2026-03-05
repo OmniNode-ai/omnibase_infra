@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """HTTP Body Content Model.
 
-This module provides a model to encapsulate HTTP request body content,
+A model to encapsulate HTTP request body content,
 grouping the raw body and optional pre-serialized bytes together.
 """
 

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Storage Health Check Details Model.
 
-This module provides the Pydantic model for backend-specific diagnostic
+The Pydantic model for backend-specific diagnostic
 information in health check results, replacing untyped dict[str, object]
 with strongly-typed fields.
 

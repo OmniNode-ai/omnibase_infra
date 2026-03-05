@@ -56,7 +56,7 @@ HANDLER_ID_LEDGER_PROJECTION: str = "ledger-projection-handler"
 class HandlerLedgerProjection:
     """Handler that transforms platform events to ledger append intents.
 
-    This handler implements the compute logic for the ledger projection node,
+    The compute logic for the ledger projection node,
     extracting metadata from ModelEventMessage and producing ModelIntent with
     ModelPayloadLedgerAppend payloads.
 
@@ -167,7 +167,7 @@ class HandlerLedgerProjection:
     ) -> ModelHandlerOutput[ModelIntent]:
         """Execute ledger projection from envelope (ProtocolHandler interface).
 
-        This method provides the standard handler interface for contract-driven
+        The standard handler interface for contract-driven
         invocation. It extracts the ModelEventMessage from the envelope and
         delegates to the project() method.
 

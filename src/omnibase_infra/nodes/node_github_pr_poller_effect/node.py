@@ -31,7 +31,7 @@ class NodeGitHubPRPollerEffect(NodeEffect):
     per open PR to ``onex.evt.github.pr-status.v1``.
 
     All routing and execution logic is driven by contract.yaml.
-    This class contains NO custom routing code.
+    NO custom routing code.
 
     Partition Key:
         ``{repo}:{pr_number}`` — ensures all events for the same PR land

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """TypedDict for node capability structures discovered via reflection.
 
-This module provides a strongly-typed structure for representing node
+A strongly-typed structure for representing node
 capabilities discovered during introspection. Using TypedDict instead of
 generic dict types enables static type checking and IDE support while
 maintaining runtime dict compatibility.

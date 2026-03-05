@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """Ledger event models for runtime traceability.
 
-This module provides Pydantic models for ledger events emitted by runtime
+Pydantic models for ledger events emitted by runtime
 components (PostgresRepositoryRuntime, etc.) for observability and replay.
 
 Models:

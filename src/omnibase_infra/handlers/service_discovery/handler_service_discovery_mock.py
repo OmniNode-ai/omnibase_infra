@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Mock Service Discovery Handler.
 
-This module provides an in-memory mock implementation of the service discovery
+An in-memory mock implementation of the service discovery
 handler protocol for testing purposes.
 
 Thread Safety:

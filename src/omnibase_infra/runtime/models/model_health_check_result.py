@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Health Check Result Model.
 
-This module provides the Pydantic model for component health check operation results.
+The Pydantic model for component health check operation results.
 
 Design Pattern:
     ModelHealthCheckResult replaces tuple[str, Any] returns from

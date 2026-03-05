@@ -7,7 +7,7 @@ derived from projections and NEVER replace the event log. The event log
 remains the absolute source of truth.
 
 Architecture Overview:
-    This service implements F2 (Snapshot Publishing) of the ONEX registration
+    F2 (Snapshot Publishing) of the ONEX registration
     projection pipeline:
 
     1. Projectors (F1) persist projections to PostgreSQL via ProjectorRegistration
@@ -519,7 +519,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
 
         NOTE: This is a READ OPTIMIZATION. The event log remains source of truth.
 
-        This method implements ProtocolSnapshotPublisher.publish_snapshot using
+        ProtocolSnapshotPublisher.publish_snapshot using
         ModelRegistrationProjection as the input type. For publishing pre-built
         ModelRegistrationSnapshot objects, use _publish_snapshot_model.
 

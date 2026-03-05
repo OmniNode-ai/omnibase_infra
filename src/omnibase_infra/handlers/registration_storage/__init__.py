@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Registration Storage Handlers Module.
 
-This module provides pluggable handler implementations for registration
+Pluggable handler implementations for registration
 storage operations, supporting the capability-oriented node architecture.
 
 Handlers:

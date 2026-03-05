@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Event bus adapters implementing protocol interfaces.
 
-This module provides adapters that bridge event bus implementations to protocol
+Adapters that bridge event bus implementations to protocol
 interfaces defined in omnibase_spi.
 
 Available Adapters:

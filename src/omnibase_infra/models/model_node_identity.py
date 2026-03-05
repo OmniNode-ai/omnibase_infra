@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Identity Model for ONEX Infrastructure.
 
-This module provides a typed Pydantic model for uniquely identifying ONEX nodes
+A typed Pydantic model for uniquely identifying ONEX nodes
 within the infrastructure. The identity encapsulates the environment, service,
 node name, and version - the four dimensions required to uniquely identify
 a node instance.

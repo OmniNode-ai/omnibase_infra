@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Configuration model for TransitionNotificationOutbox.
 
-This module provides a Pydantic model for configuring the TransitionNotificationOutbox,
+A Pydantic model for configuring the TransitionNotificationOutbox,
 which implements the outbox pattern for guaranteed notification delivery of state
 transition events.
 

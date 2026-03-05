@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Registry for Registration Storage Node Dependencies.
 
-This module provides RegistryInfraRegistrationStorage, which registers
+RegistryInfraRegistrationStorage, which registers
 dependencies for the NodeRegistrationStorageEffect node.
 
 Architecture:

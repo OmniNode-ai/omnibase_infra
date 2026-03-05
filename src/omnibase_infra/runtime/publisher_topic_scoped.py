@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Topic-scoped publisher that validates against contract-declared publish topics.
 
-This module implements a publisher that enforces topic-level access control
+A publisher that enforces topic-level access control
 based on the contract's `event_bus.publish_topics` section. Handlers can only
 publish to topics explicitly declared in their contract, preventing unauthorized
 event emission and maintaining clean architectural boundaries.

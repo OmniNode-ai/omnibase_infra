@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """ONEX Infrastructure Decorators.
 
-This module provides decorators for ONEX infrastructure patterns.
+Decorators for ONEX infrastructure patterns.
 
 Decorators
 ----------

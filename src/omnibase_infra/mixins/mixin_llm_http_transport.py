@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """LLM HTTP Transport Mixin for infrastructure components.
 
-This module provides a reusable mixin class that encapsulates HTTP transport
+A reusable mixin class that encapsulates HTTP transport
 logic for communicating with LLM providers (OpenAI-compatible APIs, vLLM,
 local inference servers, etc.).
 

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """In-Memory Effect Idempotency Store with LRU Eviction and TTL.
 
-This module provides a bounded in-memory implementation of
+A bounded in-memory implementation of
 ProtocolEffectIdempotencyStore for tracking completed backends during
 dual-backend Effect operations.
 

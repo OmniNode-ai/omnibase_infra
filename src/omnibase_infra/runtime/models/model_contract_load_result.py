@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Contract load result model for tracking individual contract loading.
 
-This module provides the ModelContractLoadResult class for representing
+The ModelContractLoadResult class for representing
 the outcome of loading a single contract.yaml file, including any subcontracts
 (handler_routing, operation_bindings) that were loaded from it.
 

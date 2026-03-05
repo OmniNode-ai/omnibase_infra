@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """In-Memory Idempotency Store.
 
-This module provides an in-memory implementation of ProtocolIdempotencyStore
+An in-memory implementation of ProtocolIdempotencyStore
 for testing purposes. It uses a dict with asyncio.Lock for coroutine-safe
 operations.
 

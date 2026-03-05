@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Configuration reference parsing model.
 
-This module provides the ModelConfigRef model for parsing and validating
+The ModelConfigRef model for parsing and validating
 configuration references that point to external configuration sources.
 Handler configs can reference external configuration via the `config_ref` field.
 

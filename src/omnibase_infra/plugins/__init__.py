@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Compute plugin infrastructure for deterministic business logic.
 
-This module provides the foundation for in-process, deterministic computation
+The foundation for in-process, deterministic computation
 that complements external effect handlers.
 
 Components:

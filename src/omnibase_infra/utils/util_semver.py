@@ -4,7 +4,7 @@
 
 Provides reusable semver pattern and validators for ONEX models.
 
-This module provides two validation approaches:
+Two validation approaches:
     - validate_semver: Strict validation requiring full MAJOR.MINOR.PATCH format
     - validate_version_lenient: Lenient validation accepting partial versions (1, 1.0, 1.0.0)
 

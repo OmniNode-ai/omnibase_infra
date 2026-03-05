@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """ONEX Infrastructure Nodes Module.
 
-This module provides node implementations for the ONEX 4-node architecture:
+Node implementations for the ONEX 4-node architecture:
 - EFFECT_GENERIC: External I/O operations (Kafka, Consul, Vault, PostgreSQL adapters)
 - COMPUTE_GENERIC: Pure data transformations (compute plugins)
 - REDUCER_GENERIC: State aggregation from multiple sources

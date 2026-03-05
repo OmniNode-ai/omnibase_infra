@@ -193,7 +193,7 @@ class MCPAuthMiddleware:
 class TransportMCPStreamableHttp:
     """Streamable HTTP transport for MCP server.
 
-    This class provides a wrapper around the MCP SDK's streamable HTTP
+    A wrapper around the MCP SDK's streamable HTTP
     transport, integrating it with ONEX's tool registry.
 
     The transport creates an ASGI application that can be:

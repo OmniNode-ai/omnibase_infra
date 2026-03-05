@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Envelope extraction mixin for infrastructure handlers.
 
-This module provides a reusable mixin for extracting correlation_id and envelope_id
+A reusable mixin for extracting correlation_id and envelope_id
 from request envelopes. These IDs are essential for distributed tracing and
 causality tracking across infrastructure components.
 

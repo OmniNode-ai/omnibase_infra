@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Registry Request Model for Registry Effect Operations.
 
-This module provides ModelRegistryRequest, representing the input to the
+ModelRegistryRequest, representing the input to the
 NodeRegistryEffect node for dual-backend registration operations.
 
 Architecture:

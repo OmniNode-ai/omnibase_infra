@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Registration Ack Timeout Event Model.
 
-This module provides the event model emitted when a node fails to acknowledge
+The event model emitted when a node fails to acknowledge
 its registration within the configured deadline.
 
 Related Tickets:

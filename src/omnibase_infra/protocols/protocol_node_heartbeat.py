@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Heartbeat Handler Protocol.
 
-This module provides the protocol interface for node heartbeat handling,
+The protocol interface for node heartbeat handling,
 enabling protocol-based dependency injection for HandlerNodeHeartbeat in
 the DI container.
 

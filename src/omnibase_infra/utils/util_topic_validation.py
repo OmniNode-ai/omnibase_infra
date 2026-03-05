@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Kafka topic name validation utility.
 
-This module provides a standalone topic name validation function extracted
+A standalone topic name validation function extracted
 from ``KafkaEventBus._validate_topic_name()``. Having the logic as a
 top-level utility makes it reusable by event publishers, contract validators,
 configuration validators, and CLI tooling without requiring a ``KafkaEventBus``

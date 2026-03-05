@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Duplicate Response Model.
 
-This module provides the Pydantic model for duplicate message detection responses.
+The Pydantic model for duplicate message detection responses.
 """
 
 from __future__ import annotations

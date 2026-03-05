@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Atomic file write utilities.
 
-This module provides primitives for atomic file writes using the temp-file-rename
+Primitives for atomic file writes using the temp-file-rename
 pattern. Atomic writes ensure that file contents are either completely written
 or not written at all - there is no intermediate state where the file contains
 partial data.
@@ -28,7 +28,7 @@ Windows Notes:
     - This module uses os.replace() for cross-platform atomic rename
 
 Durability Note:
-    This module provides atomicity (all-or-nothing) but not durability guarantees.
+    Atomicity (all-or-nothing) but not durability guarantees.
     For systems requiring crash-recovery durability, consider adding fsync() after
     write and before rename. This comes at a performance cost.
 
@@ -75,7 +75,7 @@ def write_atomic_bytes(
 ) -> int:
     """Write bytes to a file atomically using temp-file-rename pattern.
 
-    This function provides atomic file writes by:
+    Atomic file writes by:
     1. Creating a temporary file in the same directory as the target
     2. Writing all data to the temporary file
     3. Atomically renaming the temporary file to the target path

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Gateway Module.
 
-This module provides gateway functionality for envelope signing, realm enforcement,
+Gateway functionality for envelope signing, realm enforcement,
 and policy-based message filtering. The gateway acts as the security boundary for
 the runtime, ensuring all messages are properly signed, validated, and filtered
 before processing.

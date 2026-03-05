@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Mock Registration Storage Handler.
 
-This module provides an in-memory mock implementation of the registration
+An in-memory mock implementation of the registration
 storage handler protocol for testing purposes.
 
 Thread Safety:

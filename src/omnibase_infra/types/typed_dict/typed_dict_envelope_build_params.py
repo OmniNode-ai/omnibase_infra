@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """TypedDict definition for envelope build parameters.
 
-This module provides a TypedDict that represents the parameters passed to the
+A TypedDict that represents the parameters passed to the
 _build_envelope method in AdapterProtocolEventPublisherInmemory, replacing the
 loose dict[str, object] typing with proper type safety.
 

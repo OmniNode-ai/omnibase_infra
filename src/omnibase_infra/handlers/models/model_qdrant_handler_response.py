@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Qdrant Handler Response Model.
 
-This module provides the Pydantic model for Qdrant handler response envelopes
+The Pydantic model for Qdrant handler response envelopes
 used by the HandlerQdrant.
 
 This model provides type consistency with ModelDbQueryResponse and

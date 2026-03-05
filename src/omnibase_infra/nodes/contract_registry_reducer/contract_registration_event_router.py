@@ -4,7 +4,7 @@
 
 Routes Kafka messages to ContractRegistryReducer and executes resulting intents.
 
-This module provides an extracted event router for routing contract lifecycle
+An extracted event router for routing contract lifecycle
 events (registration, deregistration, heartbeat) to the ContractRegistryReducer.
 The router also runs an internal tick timer for periodic staleness computation.
 

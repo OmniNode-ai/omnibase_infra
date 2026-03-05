@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Introspection Protocol.
 
-This module provides the protocol interface for node introspection,
+The protocol interface for node introspection,
 enabling typed dependency injection for auto-introspection on node startup.
 
 The protocol is designed to work with existing infrastructure:

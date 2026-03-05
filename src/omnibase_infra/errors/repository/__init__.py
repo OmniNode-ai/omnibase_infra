@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Repository Error Classes Module.
 
-This module provides error classes specific to repository operations,
+Error classes specific to repository operations,
 enabling typed exception handling for the PostgresRepositoryRuntime.
 
 Error Hierarchy:

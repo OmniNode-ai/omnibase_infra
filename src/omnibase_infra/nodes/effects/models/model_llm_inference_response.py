@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """LLM inference response model with text XOR tool_calls invariant.
 
-This module provides ModelLlmInferenceResponse, the output model for the
+ModelLlmInferenceResponse, the output model for the
 LLM inference effect node. It enforces a critical invariant: responses
 contain either generated text or tool calls, never both.
 

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """LocalHandler Import Validator for ONEX Production Code Policy.
 
-This module provides validation to detect forbidden LocalHandler imports
+Validation to detect forbidden LocalHandler imports
 in production code. LocalHandler is a test-only handler that must NEVER
 be imported in src/omnibase_infra/.
 

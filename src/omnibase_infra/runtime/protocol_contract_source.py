@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Contract Source Protocol Definition.
 
-This module provides the ProtocolContractSource protocol for handler sources
+The ProtocolContractSource protocol for handler sources
 that need graceful error handling with validation error collection.
 
 Part of OMN-1097: HandlerContractSource + Filesystem Discovery.

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Contract Registry Configuration Model.
 
-This module provides the Pydantic model for contract registry event processing
+The Pydantic model for contract registry event processing
 configuration, controlling the staleness tick timer behavior.
 
 Related:

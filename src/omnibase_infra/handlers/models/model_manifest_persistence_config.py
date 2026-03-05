@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Manifest Persistence Handler Configuration Model.
 
-This module provides the Pydantic model for HandlerManifestPersistence initialization
+The Pydantic model for HandlerManifestPersistence initialization
 configuration, defining storage path and optional settings.
 """
 

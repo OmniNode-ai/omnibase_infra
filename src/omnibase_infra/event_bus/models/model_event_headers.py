@@ -1,6 +1,6 @@
 """Event headers model for ONEX event bus messages.
 
-This module provides ModelEventHeaders, a Pydantic model implementing
+ModelEventHeaders, a Pydantic model implementing
 ProtocolEventHeaders from omnibase_spi for use with event bus implementations.
 """
 

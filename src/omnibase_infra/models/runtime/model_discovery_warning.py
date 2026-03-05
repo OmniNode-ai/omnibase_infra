@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Discovery Warning Model for Handler Discovery Operations.
 
-This module provides the ModelDiscoveryWarning model for tracking non-fatal
+The ModelDiscoveryWarning model for tracking non-fatal
 warnings encountered during handler discovery operations.
 
 See Also:

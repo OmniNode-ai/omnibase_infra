@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """ONEX Infrastructure Idempotency System.
 
-This module provides idempotency checking and deduplication capabilities
+Idempotency checking and deduplication capabilities
 for message processing in distributed systems.
 
 Components:

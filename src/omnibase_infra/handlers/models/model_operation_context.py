@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Operation Context Model for handler tracking.
 
-This module provides a Pydantic model for encapsulating operation context
+A Pydantic model for encapsulating operation context
 during handler execution, enabling consistent tracking and tracing.
 """
 

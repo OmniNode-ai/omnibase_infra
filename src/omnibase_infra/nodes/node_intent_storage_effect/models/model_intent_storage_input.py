@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """Intent Storage Input Model for Intent Storage Operations.
 
-This module provides ModelIntentStorageInput, representing the input
+ModelIntentStorageInput, representing the input
 for storing a classified intent in the graph database.
 
 Architecture:

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Configuration model for introspection background tasks.
 
-This module provides the configuration model used to control background
+The configuration model used to control background
 task behavior in MixinNodeIntrospection. Grouping parameters into a
 configuration model follows ONEX patterns for reducing function parameter
 count and union type patterns.

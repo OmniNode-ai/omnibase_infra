@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Pydantic model for plugin output data.
 
-This module provides the ModelPluginOutputData Pydantic BaseModel that replaces
+The ModelPluginOutputData Pydantic BaseModel that replaces
 the former PluginOutputData TypedDict definition.
 
 Design Notes:

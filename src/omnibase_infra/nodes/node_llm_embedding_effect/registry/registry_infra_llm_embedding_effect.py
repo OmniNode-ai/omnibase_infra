@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Registry for LLM Embedding Effect Node Dependencies.
 
-This module provides RegistryInfraLlmEmbeddingEffect for registering
+RegistryInfraLlmEmbeddingEffect for registering
 embedding handler dependencies with the ONEX container.
 
 Architecture:

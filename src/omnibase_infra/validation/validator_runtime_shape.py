@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Runtime Shape Validator for ONEX Handler Output Validation.
 
-This module provides runtime validation of handler outputs against the
+Runtime validation of handler outputs against the
 ONEX 4-node architecture execution shape constraints. It ensures that
 handlers only produce message types that are allowed for their handler type.
 
