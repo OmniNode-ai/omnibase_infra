@@ -65,7 +65,7 @@ CONSUL_HOST=localhost
 CONSUL_PORT=28500
 
 # Kafka/Redpanda - local Docker container
-KAFKA_BOOTSTRAP_SERVERS=localhost:29092
+KAFKA_BOOTSTRAP_SERVERS=localhost:19092
 
 # Runtime container
 RUNTIME_HOST=localhost

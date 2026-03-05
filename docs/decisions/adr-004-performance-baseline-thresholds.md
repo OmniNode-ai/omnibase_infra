@@ -30,7 +30,7 @@ We established empirically-calibrated performance thresholds with documented rat
 ### 1. Target Infrastructure
 
 All thresholds are calibrated for remote services at remote infrastructure server:
-- **Redpanda (Kafka)**: Port 29092 (external) / 9092 (Docker internal)
+- **Redpanda (Kafka)**: Port 19092 (external) / 9092 (Docker internal)
 - **PostgreSQL**: Port 5436
 - **Consul**: Port 28500
 

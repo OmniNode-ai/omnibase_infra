@@ -109,7 +109,7 @@ def _build_introspection_payload(
     "--broker",
     default=None,
     envvar="KAFKA_BOOTSTRAP_SERVERS",
-    help="Kafka bootstrap server (defaults to localhost:29092).",
+    help="Kafka bootstrap server (defaults to localhost:19092).",
 )
 def introspect(
     node_id: str | None,

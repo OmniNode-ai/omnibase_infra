@@ -169,7 +169,7 @@ External Request
 Core infrastructure services required by all deployments:
 
 - **PostgreSQL** (port 5436): Primary data store for projections and state
-- **Redpanda** (port 29092): Kafka-compatible event streaming
+- **Redpanda** (port 19092): Kafka-compatible event streaming
 - **Valkey** (port 16379): Redis-compatible cache and pub/sub
 - **Topic Manager**: Automatic Kafka topic creation on startup
 

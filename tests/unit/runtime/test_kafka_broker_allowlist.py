@@ -43,8 +43,8 @@ class TestValidateKafkaBrokerAllowlist:
     def test_rejects_127_0_0_1(self) -> None:
         """127.0.0.1:* loopback is always rejected."""
         with pytest.raises(ProtocolConfigurationError) as exc_info:
-            validate_kafka_broker_allowlist("127.0.0.1:29092")
-        assert "127.0.0.1:29092" in str(exc_info.value)
+            validate_kafka_broker_allowlist("127.0.0.1:19092")
+        assert "127.0.0.1:19092" in str(exc_info.value)
 
     def test_rejects_0_0_0_0(self) -> None:
         """0.0.0.0:* wildcard bind address is always rejected."""
@@ -67,13 +67,13 @@ class TestValidateKafkaBrokerAllowlist:
         """Remote IP address passes without error."""
         # Should not raise
         validate_kafka_broker_allowlist(
-            "192.168.86.200:29092"  # kafka-fallback-ok — testing allowlist validation logic
+            "192.168.86.200:19092"  # kafka-fallback-ok — testing allowlist validation logic
         )
 
     def test_accepts_multi_broker_all_valid(self) -> None:
         """Comma-separated list of valid brokers all pass."""
         validate_kafka_broker_allowlist(
-            "192.168.86.200:29092,192.168.86.201:29092"  # kafka-fallback-ok — testing allowlist validation logic
+            "192.168.86.200:19092,192.168.86.201:19092"  # kafka-fallback-ok — testing allowlist validation logic
         )
 
     def test_accepts_hostname_not_on_denylist(self) -> None:

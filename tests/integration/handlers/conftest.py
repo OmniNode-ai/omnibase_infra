@@ -113,7 +113,7 @@ if TYPE_CHECKING:
 # The ONEX development infrastructure server hosts shared services:
 # - PostgreSQL (port 5436)
 # - Vault (port 8200)
-# - Kafka/Redpanda (port 29092)
+# - Kafka/Redpanda (port 19092)
 #
 # This server provides a shared development environment for integration testing
 # against real infrastructure components. The default IP is configured in

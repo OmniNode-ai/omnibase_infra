@@ -97,7 +97,7 @@ import os
 #   - PostgreSQL (port 5436)
 #   - Consul (port 28500)
 #   - Vault (port 8200)
-#   - Kafka/Redpanda (port 29092)
+#   - Kafka/Redpanda (port 19092)
 #
 # This server provides a shared development environment for integration testing
 # against real infrastructure components. For CI/CD environments without access
@@ -138,7 +138,7 @@ DEFAULT_CONSUL_PORT: int = 28500
 DEFAULT_VAULT_PORT: int = 8200
 """Vault HTTP API port on the infrastructure server."""
 
-DEFAULT_KAFKA_PORT: int = 29092
+DEFAULT_KAFKA_PORT: int = 19092
 """Kafka/Redpanda external port on the infrastructure server."""
 
 
@@ -206,7 +206,7 @@ def get_kafka_bootstrap_servers() -> str | None:
     Tests should explicitly require KAFKA_BOOTSTRAP_SERVERS to be set.
 
     Returns:
-        Kafka bootstrap servers (e.g., 'localhost:29092') if configured,
+        Kafka bootstrap servers (e.g., 'localhost:19092') if configured,
         None otherwise.
     """
     return os.getenv("KAFKA_BOOTSTRAP_SERVERS")
@@ -239,6 +239,6 @@ def build_default_kafka_servers() -> str:
 
     Example:
         >>> build_default_kafka_servers()
-        'localhost:29092'
+        'localhost:19092'
     """
     return f"{REMOTE_INFRA_HOST}:{DEFAULT_KAFKA_PORT}"
