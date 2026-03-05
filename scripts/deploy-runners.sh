@@ -11,7 +11,7 @@
 #   2. Base64-encode token for safe SSH passing
 #   3. Rsync runner artifacts to 192.168.86.201:~/.omnibase/runners/
 #   4. Deploy via SSH: docker compose up -d --build --force-recreate --remove-orphans
-#   5. Install docker prune cron idempotently (tee, never append)
+#   5. Install docker prune cron idempotently (build cache + untagged images, tee)
 #   6. Install runner health monitor cron (Slack alerts on state transitions)
 #   7. Poll GitHub API until all 10 runners online (max 5 min, 15s interval)
 #   8. Retry once with fresh token if poll times out
@@ -190,11 +190,15 @@ deploy_runners() {
 install_prune_cron() {
     log "Installing docker prune cron on ${RUNNER_HOST} (idempotent tee, not append)..."
 
-    # Prunes BUILD CACHE ONLY when disk usage >/var/lib/docker exceeds 70%.
-    # Does NOT prune images — images are versioned and pinned.
-    # Runs weekly at 03:00 Sunday.
+    # Two weekly prune jobs (Sunday):
+    #   03:00 — Build cache prune, only when disk > 70%, retain 14 days (336h)
+    #   04:00 — Untagged image prune, retain 14 days (336h)
+    # Weekly (not twice-weekly) to avoid cache thrash from Docker builds.
     local cron_content
-    cron_content='0 3 * * 0 root USAGE=$(df --output=pcent /var/lib/docker | tail -1 | tr -d '"'"' %'"'"'); [ "${USAGE:-0}" -ge 70 ] && docker builder prune -f --filter '"'"'until=336h'"'"''
+    cron_content='# Build cache prune (Sunday 03:00) — only when disk > 70%, retain 14 days
+0 3 * * 0 root USAGE=$(df --output=pcent /var/lib/docker | tail -1 | tr -d '"'"' %'"'"'); [ "${USAGE:-0}" -ge 70 ] && docker builder prune -f --filter '"'"'until=336h'"'"'
+# Untagged image prune (Sunday 04:00) — retain 14 days
+0 4 * * 0 root docker image prune -f --filter '"'"'until=336h'"'"''
 
     run_ssh "echo '${cron_content}' | sudo tee /etc/cron.d/docker-prune > /dev/null && echo '[deploy-runners] Prune cron installed (idempotent).'"
 }
