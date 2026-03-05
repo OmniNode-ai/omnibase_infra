@@ -221,8 +221,8 @@ class TestDockerBuild:
     ) -> None:
         """Verify built image has reasonable size.
 
-        Multi-stage builds should produce images under 1GB.
-        A well-optimized Python runtime image should be under 500MB.
+        The image includes PyTorch + CUDA dependencies (~8.7GB baseline).
+        Hard limit: 7.5GB (7680MB). Target after optimization: <5GB.
         """
         if not docker_available:
             pytest.skip("Docker daemon not available")
@@ -248,17 +248,13 @@ class TestDockerBuild:
         size_bytes = int(result.stdout.strip())
         size_mb = size_bytes / (1024 * 1024)
 
-        # Image should be under 1GB (reasonable for Python + dependencies)
-        assert size_mb < 1024, f"Image size {size_mb:.0f}MB exceeds 1GB limit"
+        # Hard limit: 7.5GB — matches CI workflow threshold (OMN-3720)
+        assert size_mb < 7680, f"Image size {size_mb:.0f}MB exceeds 7.5GB limit"
 
-        # Emit advisory warning for large images (does not fail test).
-        # NOTE: This uses warnings.warn() to emit a runtime warning, NOT pytest.warns().
-        # The intent is to surface optimization opportunities without failing the test,
-        # as images between 500MB-1GB are acceptable but could potentially be smaller.
-        # To capture this warning in test output, run pytest with -W default::UserWarning.
-        if size_mb > 500:
+        # Emit advisory warning for images above optimization target.
+        if size_mb > 5120:
             warnings.warn(
-                f"Image size {size_mb:.0f}MB exceeds 500MB - consider optimization",
+                f"Image size {size_mb:.0f}MB exceeds 5GB optimization target",
                 UserWarning,
                 stacklevel=2,
             )
