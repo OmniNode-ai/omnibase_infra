@@ -152,6 +152,12 @@ jobs:
             ${{ steps.build.outputs.imageid }} \
             python -c "from omnibase_infra.runtime.kernel import bootstrap, main, load_runtime_config; print('Import successful')"
 
+      - name: Verify torch is CPU-only
+        if: github.ref != 'refs/heads/main'
+        run: |
+          docker run --rm ${{ steps.build.outputs.imageid }} \
+            python -c "import torch; assert torch.version.cuda is None, f'Expected CPU-only torch but got CUDA {torch.version.cuda}'; print(f'torch {torch.__version__} CPU-only: OK')"
+
       - name: Generate build summary
         if: always()
         run: |
