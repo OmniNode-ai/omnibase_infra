@@ -450,14 +450,13 @@ jobs:
   # topic definition files. Pre-existing violations are suppressed via baseline.
   arch-invariants:
     name: Arch Invariants (OMN-3343)
-    # OMNINODE_SELF_HOSTED_RUNS_ON_V2
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
     runs-on: >-
       ${{
         (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
          (github.event_name == 'push' ||
           github.event_name == 'workflow_dispatch' ||
-          github.event_name == 'schedule' ||
-          contains(vars.SELF_HOSTED_ALWAYS_JOBS || '', ',arch-invariants,')))
+          github.event_name == 'schedule'))
         && fromJSON('["self-hosted","omnibase-ci"]')
         || fromJSON('["ubuntu-latest"]')
       }}
