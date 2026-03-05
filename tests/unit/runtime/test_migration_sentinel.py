@@ -9,7 +9,6 @@ Validates:
 
 from __future__ import annotations
 
-import os
 import re
 import stat
 from pathlib import Path
@@ -37,14 +36,10 @@ class TestMigrationSentinelSQL:
     """Validate the migration SQL file."""
 
     def test_migration_file_exists(self) -> None:
-        assert MIGRATION_FILE.exists(), (
-            f"Migration file not found: {MIGRATION_FILE}"
-        )
+        assert MIGRATION_FILE.exists(), f"Migration file not found: {MIGRATION_FILE}"
 
     def test_rollback_file_exists(self) -> None:
-        assert ROLLBACK_FILE.exists(), (
-            f"Rollback file not found: {ROLLBACK_FILE}"
-        )
+        assert ROLLBACK_FILE.exists(), f"Rollback file not found: {ROLLBACK_FILE}"
 
     def test_migration_is_idempotent(self) -> None:
         """Migration must use IF NOT EXISTS for column additions."""
@@ -83,10 +78,8 @@ class TestHealthcheckScript:
         )
 
     def test_healthcheck_script_is_executable(self) -> None:
-        mode = os.stat(HEALTHCHECK_SCRIPT).st_mode
-        assert mode & stat.S_IXUSR, (
-            "Healthcheck script must be executable (chmod +x)"
-        )
+        mode = HEALTHCHECK_SCRIPT.stat().st_mode
+        assert mode & stat.S_IXUSR, "Healthcheck script must be executable (chmod +x)"
 
     def test_healthcheck_queries_migrations_complete(self) -> None:
         """Script must query the migrations_complete column."""
