@@ -178,7 +178,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # omninode-intelligence) may pull a different torch version and replace
 # the CPU wheel with a CUDA one.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
+    uv pip install "torch==2.6.0" --no-deps --index-url https://download.pytorch.org/whl/cpu
 
 # Install external (non-ONEX) deps required by the plugins above.
 # Most are already satisfied by omnibase_infra's own transitive deps.
