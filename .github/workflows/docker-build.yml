@@ -31,6 +31,10 @@ on:
         default: 'true'
         type: boolean
 
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 env:
   UV_VERSION: "0.6.14"
   PYTHON_VERSION: "3.12"
@@ -63,16 +67,22 @@ jobs:
   docker-build:
     name: Build Runtime Image
     needs: dockerfile-pin-check
-    runs-on: ubuntu-latest
+    # OMNINODE_SELF_HOSTED_DOCKER_V1 — always self-hosted when enabled; kill-switch fallback to ubuntu-latest
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true')
+        && fromJSON('["self-hosted","omnibase-ci"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
     permissions:
       contents: read
       packages: write
     # Timeout breakdown (main branch worst case):
     #   Docker build (cold cache): ~14 min
     #   GHCR push (main only):     ~5 min
-    #   GHA cache export (mode=max): ~15-17 min
-    #   Total on main:             ~34-36 min
-    # PRs skip GHCR push so fit in ~32 min. 45 min gives a comfortable buffer.
+    #   Total on main:             ~19 min
+    # Self-hosted runners use local Docker cache (no GHA cache export overhead).
+    # 45 min gives a comfortable buffer for cold-cache builds.
     timeout-minutes: 45
 
     outputs:
@@ -86,11 +96,20 @@ jobs:
         id: repo
         run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
-      # Set up Docker Buildx for BuildKit features (cache mounts, secrets)
+      # Set up Docker Buildx with native docker driver (self-hosted runners
+      # have persistent local cache, so GHA cache export is unnecessary)
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
-          platforms: linux/amd64
+          driver: docker
+
+      - name: Verify Buildx driver
+        run: |
+          DRIVER=$(docker buildx inspect --bootstrap 2>/dev/null | grep -oP 'Driver:\s+\K\S+' || echo "unknown")
+          echo "Buildx driver: ${DRIVER}"
+          if [[ "${DRIVER}" != "docker" ]]; then
+            echo "::warning::Expected Buildx driver 'docker', got '${DRIVER}'"
+          fi
 
       # Authenticate for registry access (pulls and pushes)
       - name: Log in to Container Registry
@@ -132,8 +151,6 @@ jobs:
           load: ${{ github.ref != 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
           secrets: |
             github_token=${{ secrets.GITHUB_TOKEN }}
           build-args: |
@@ -166,7 +183,13 @@ jobs:
   # Run Docker integration tests
   docker-integration-tests:
     name: Docker Integration Tests
-    runs-on: ubuntu-latest
+    # OMNINODE_SELF_HOSTED_DOCKER_V1 — always self-hosted when enabled; kill-switch fallback to ubuntu-latest
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true')
+        && fromJSON('["self-hosted","omnibase-ci"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
     needs: docker-build
     timeout-minutes: 30
     if: github.event.inputs.run_full_tests != 'false'
@@ -177,6 +200,16 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
+
+      - name: Verify Buildx driver
+        run: |
+          DRIVER=$(docker buildx inspect --bootstrap 2>/dev/null | grep -oP 'Driver:\s+\K\S+' || echo "unknown")
+          echo "Buildx driver: ${DRIVER}"
+          if [[ "${DRIVER}" != "docker" ]]; then
+            echo "::warning::Expected Buildx driver 'docker', got '${DRIVER}'"
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v6
