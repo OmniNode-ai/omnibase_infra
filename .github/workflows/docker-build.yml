@@ -92,6 +92,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      # Pre-flight: verify Docker daemon is accessible (catches socket permission issues early)
+      - name: Verify Docker socket access
+        run: |
+          if ! docker info > /dev/null 2>&1; then
+            echo "::error::Docker daemon is not accessible. On self-hosted runners, ensure the runner user is in the docker group and /var/run/docker.sock is bind-mounted."
+            ls -la /var/run/docker.sock 2>/dev/null || echo "Socket not found"
+            echo "Current user: $(whoami) (uid=$(id -u), groups=$(id -Gn))"
+            exit 1
+          fi
+          echo "Docker daemon accessible"
+
       - name: Set lowercase repository owner
         id: repo
         run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
@@ -197,6 +208,16 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+
+      - name: Verify Docker socket access
+        run: |
+          if ! docker info > /dev/null 2>&1; then
+            echo "::error::Docker daemon is not accessible. On self-hosted runners, ensure the runner user is in the docker group and /var/run/docker.sock is bind-mounted."
+            ls -la /var/run/docker.sock 2>/dev/null || echo "Socket not found"
+            echo "Current user: $(whoami) (uid=$(id -u), groups=$(id -Gn))"
+            exit 1
+          fi
+          echo "Docker daemon accessible"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
