@@ -49,6 +49,8 @@
 OMNIBASE_INFRA_DB_URL=postgresql://role_omnibase_infra:__REPLACE_WITH_SECURE_PASSWORD__@your-postgres-host:5432/omnibase_infra
 OMNICLAUDE_DB_URL=postgresql://role_omniclaude:__REPLACE_WITH_SECURE_PASSWORD__@your-postgres-host:5432/omniclaude
 OMNIDASH_ANALYTICS_DB_URL=postgresql://role_omnidash:__REPLACE_WITH_SECURE_PASSWORD__@your-postgres-host:5432/omnidash_analytics
+# Path to omnidash checkout — used by bootstrap-infisical.sh Step 1d to run read-model migrations (OMN-3748)
+OMNIDASH_DIR=/path/to/omnidash
 OMNIINTELLIGENCE_DB_URL=postgresql://role_omniintelligence:__REPLACE_WITH_SECURE_PASSWORD__@your-postgres-host:5432/omniintelligence
 OMNIMEMORY_DB_URL=postgresql://role_omnimemory:__REPLACE_WITH_SECURE_PASSWORD__@your-postgres-host:5432/omnimemory
 OMNINODE_CLOUD_DB_URL=postgresql://role_omninode_cloud:__REPLACE_WITH_SECURE_PASSWORD__@your-postgres-host:5432/omninode_cloud
