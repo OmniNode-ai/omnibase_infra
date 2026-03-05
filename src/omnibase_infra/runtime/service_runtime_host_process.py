@@ -86,6 +86,7 @@ from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.runtime.model_resolved_dependencies import (
     ModelResolvedDependencies,
 )
+from omnibase_infra.runtime.batch_response_publisher import BatchResponsePublisher
 from omnibase_infra.runtime.contract_dependency_resolver import (
     ContractDependencyResolver,
 )
@@ -224,6 +225,14 @@ MIN_MAX_CONCURRENT_HANDLERS = 1
 MAX_MAX_CONCURRENT_HANDLERS = 256
 DEFAULT_MAX_CONCURRENT_HANDLERS: int = int(
     os.environ.get("ONEX_MAX_CONCURRENT_HANDLERS", "1")
+)
+
+# Batch response publishing defaults (OMN-478)
+# Controls batching of response envelopes for improved throughput.
+# When enabled, responses are buffered and flushed by size or timeout.
+DEFAULT_BATCH_RESPONSE_SIZE: int = int(os.environ.get("ONEX_BATCH_RESPONSE_SIZE", "10"))
+DEFAULT_BATCH_FLUSH_INTERVAL_MS: float = float(
+    os.environ.get("ONEX_BATCH_FLUSH_INTERVAL_MS", "100")
 )
 
 
@@ -996,6 +1005,58 @@ class RuntimeHostProcess:
         self._dependency_materializer: DependencyMaterializer | None = None
         self._materialized_resources: ModelMaterializedResources | None = None
 
+        # Batch response publisher (OMN-478)
+        # When enabled, responses are buffered and flushed by size or timeout
+        # instead of being published individually. Reduces event bus overhead
+        # and improves throughput for parallel handler execution.
+        self._batch_publisher: BatchResponsePublisher | None = None
+        _batch_enabled_raw = config.get("batch_response_enabled")
+        batch_enabled = False
+        if isinstance(_batch_enabled_raw, bool):
+            batch_enabled = _batch_enabled_raw
+        elif isinstance(_batch_enabled_raw, str):
+            batch_enabled = _batch_enabled_raw.lower() in ("true", "1", "yes")
+
+        if batch_enabled:
+            _batch_size_raw = config.get("batch_response_size")
+            batch_size = DEFAULT_BATCH_RESPONSE_SIZE
+            if isinstance(_batch_size_raw, int):
+                batch_size = _batch_size_raw
+            elif isinstance(_batch_size_raw, str):
+                try:
+                    batch_size = int(_batch_size_raw)
+                except ValueError:
+                    logger.warning(
+                        "Invalid batch_response_size string, using default",
+                        extra={
+                            "invalid_value": _batch_size_raw,
+                            "default_value": DEFAULT_BATCH_RESPONSE_SIZE,
+                        },
+                    )
+
+            _flush_interval_raw = config.get("batch_flush_interval_ms")
+            flush_interval_ms = DEFAULT_BATCH_FLUSH_INTERVAL_MS
+            if isinstance(_flush_interval_raw, (int, float)):
+                flush_interval_ms = float(_flush_interval_raw)
+            elif isinstance(_flush_interval_raw, str):
+                try:
+                    flush_interval_ms = float(_flush_interval_raw)
+                except ValueError:
+                    logger.warning(
+                        "Invalid batch_flush_interval_ms string, using default",
+                        extra={
+                            "invalid_value": _flush_interval_raw,
+                            "default_value": DEFAULT_BATCH_FLUSH_INTERVAL_MS,
+                        },
+                    )
+
+            self._batch_publisher = BatchResponsePublisher(
+                publish_fn=self._publish_envelope_safe,
+                topic=self._output_topic,
+                batch_size=batch_size,
+                flush_interval_ms=flush_interval_ms,
+            )
+
         logger.debug(
             "RuntimeHostProcess initialized",
             extra={
@@ -1010,6 +1071,7 @@ class RuntimeHostProcess:
                 "contract_path_count": len(self._contract_paths),
                 "has_introspection_service": self._introspection_service is not None,
                 "introspection_enabled": self._introspection_config.enabled,
+                "batch_response_enabled": self._batch_publisher is not None,
             },
         )
 
@@ -1083,6 +1145,25 @@ class RuntimeHostProcess:
             Number of asyncio tasks currently processing envelopes.
         """
         return len(self._in_flight_tasks)
+
+    @property
+    def batch_publisher(self) -> BatchResponsePublisher | None:
+        """Return the batch response publisher if enabled (OMN-478).
+
+        Returns:
+            The BatchResponsePublisher instance if batch publishing is enabled,
+            None otherwise.
+        """
+        return self._batch_publisher
+
+    @property
+    def batch_response_enabled(self) -> bool:
+        """Return whether batch response publishing is enabled (OMN-478).
+
+        Returns:
+            True if batch publishing is configured and active.
+        """
+        return self._batch_publisher is not None
 
     @property
     def input_topic(self) -> str:
@@ -1440,6 +1521,11 @@ class RuntimeHostProcess:
                 purpose=EnumConsumerGroupPurpose.CONSUME,
             )
 
+        # Step 5.5: Start batch response publisher (OMN-478)
+        # Must start after event bus is ready and before marking runtime as running.
+        if self._batch_publisher is not None:
+            await self._batch_publisher.start()
+
         self._is_running = True
 
         # Step 6: Publish introspection event with jitter (OMN-1930)
@@ -1585,6 +1671,14 @@ class RuntimeHostProcess:
                 "metric.forced_shutdown": self._pending_message_count > 0,
             },
         )
+
+        # Step 1.7: Stop batch response publisher (OMN-478)
+        # Flushes any remaining buffered responses before handler shutdown.
+        # Must happen after drain period (so all in-flight handlers have
+        # enqueued their responses) but before handler shutdown (so the
+        # event bus is still available for publishing).
+        if self._batch_publisher is not None:
+            await self._batch_publisher.stop()
 
         # Step 2: Shutdown all handlers by priority (release resources like DB/Kafka connections)
         # Delegates to ProtocolLifecycleExecutor which handles:
@@ -3416,19 +3510,22 @@ class RuntimeHostProcess:
             response = await handler.execute(envelope)  # type: ignore[call-arg]  # NOTE: legacy signature
 
             # Ensure response has correlation_id and publish
-            # Handle both dict and BaseModel responses from handlers
+            # Handle both dict and BaseModel responses from handlers.
+            # Success responses route through batch publisher when enabled (OMN-478).
             if isinstance(response, dict):
                 response = dict(response)  # Copy to avoid mutating handler state
                 if "correlation_id" not in response:
                     response["correlation_id"] = correlation_id
-                await self._publish_envelope_safe(response, self._output_topic)
+                await self._publish_response(response, self._output_topic)
             elif isinstance(response, BaseModel):
-                await self._publish_model_safe(
-                    response, self._output_topic, correlation_id=correlation_id
-                )
+                # BaseModel responses: convert to dict for batch compatibility
+                response_dict = response.model_dump(mode="json")
+                if "correlation_id" not in response_dict and correlation_id is not None:
+                    response_dict["correlation_id"] = str(correlation_id)
+                await self._publish_response(response_dict, self._output_topic)
             else:
                 # Fallback: convert to dict
-                await self._publish_envelope_safe(
+                await self._publish_response(
                     {"response": response, "correlation_id": correlation_id},
                     self._output_topic,
                 )
@@ -3474,6 +3571,29 @@ class RuntimeHostProcess:
                     "infra_error": str(infra_error),
                 },
             )
+
+    async def _publish_response(self, envelope: dict[str, object], topic: str) -> None:
+        """Publish a response envelope, optionally through the batch publisher (OMN-478).
+
+        When batch publishing is enabled and running, responses are enqueued
+        into the batch publisher's buffer for deferred batch publishing.
+        When disabled or not running, responses are published immediately
+        via _publish_envelope_safe.
+
+        Error responses and system responses bypass the batch publisher
+        and are always published immediately to maintain low latency for
+        error reporting.
+
+        Args:
+            envelope: The response envelope to publish.
+            topic: Target topic to publish to.
+        """
+        if self._batch_publisher is not None and self._batch_publisher.is_running:
+            # Serialize envelope before enqueuing to match _publish_envelope_safe behavior
+            json_safe_envelope = self._serialize_envelope(envelope)
+            await self._batch_publisher.enqueue(json_safe_envelope)
+        else:
+            await self._publish_envelope_safe(envelope, topic)
 
     def _create_error_response(
         self,
@@ -3888,6 +4008,12 @@ class RuntimeHostProcess:
             "pending_message_count": self._pending_message_count,
             "max_concurrent_handlers": self._max_concurrent_handlers,
             "in_flight_tasks": len(self._in_flight_tasks),
+            "batch_response_enabled": self._batch_publisher is not None,
+            "batch_response_pending": (
+                self._batch_publisher.pending_count
+                if self._batch_publisher is not None
+                else 0
+            ),
             "event_bus": event_bus_health,
             "event_bus_healthy": event_bus_healthy,
             "failed_handlers": self._failed_handlers,
