@@ -439,10 +439,10 @@ services:
       - omnibase-infra-network
     healthcheck:
       test: ["CMD-SHELL", "sh /check_migrations_complete.sh"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
-      retries: 60
-      start_period: 5s
+      retries: 30
+      start_period: 10s
     logging: *logging-defaults
     restart: unless-stopped
     deploy:
