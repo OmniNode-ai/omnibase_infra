@@ -17,6 +17,46 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
+# Docker socket GID fix (runs as root, before dropping to runner)
+# ---------------------------------------------------------------------------
+# When /var/run/docker.sock is bind-mounted from the host, its GID may not
+# match the container's 'docker' group GID. This block detects the socket's
+# GID and adjusts the container's docker group to match, giving the runner
+# user access to the Docker daemon.
+
+_fix_docker_socket_gid() {
+    local socket="/var/run/docker.sock"
+    if [[ ! -S "${socket}" ]]; then
+        echo "[entrypoint] No Docker socket at ${socket} — skipping GID fix"
+        return 0
+    fi
+
+    local host_gid
+    host_gid=$(stat -c '%g' "${socket}" 2>/dev/null || echo "")
+    if [[ -z "${host_gid}" ]]; then
+        echo "[entrypoint] Could not determine Docker socket GID — skipping"
+        return 0
+    fi
+
+    local container_gid
+    container_gid=$(getent group docker | cut -d: -f3 2>/dev/null || echo "")
+
+    if [[ "${host_gid}" == "${container_gid}" ]]; then
+        echo "[entrypoint] Docker socket GID (${host_gid}) matches container docker group"
+        return 0
+    fi
+
+    echo "[entrypoint] Docker socket GID mismatch: socket=${host_gid}, container docker group=${container_gid}"
+    echo "[entrypoint] Adjusting container docker group GID to ${host_gid}"
+    groupmod -g "${host_gid}" docker
+    echo "[entrypoint] Docker group GID updated to ${host_gid}"
+}
+
+if [[ "$(id -u)" -eq 0 ]]; then
+    _fix_docker_socket_gid
+fi
+
+# ---------------------------------------------------------------------------
 # Required environment variables
 # ---------------------------------------------------------------------------
 : "${RUNNER_TOKEN:?RUNNER_TOKEN must be set}"
@@ -104,6 +144,20 @@ _is_registration_error() {
 }
 
 # ---------------------------------------------------------------------------
+# Privilege de-escalation helper
+# ---------------------------------------------------------------------------
+# If running as root (default after Dockerfile change), use gosu to run
+# commands as the 'runner' user. If already running as runner, execute directly.
+
+_as_runner() {
+    if [[ "$(id -u)" -eq 0 ]]; then
+        gosu runner "$@"
+    else
+        "$@"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
 
@@ -111,7 +165,7 @@ _register() {
     echo "[entrypoint] Registering runner: ${RUNNER_NAME} @ ${GITHUB_ORG_URL}"
     echo "[entrypoint] Labels: ${RUNNER_LABELS} | Group: ${RUNNER_GROUP}"
 
-    "${RUNNER_HOME}/config.sh" \
+    _as_runner "${RUNNER_HOME}/config.sh" \
         --url "${GITHUB_ORG_URL}" \
         --token "${RUNNER_TOKEN}" \
         --name "${RUNNER_NAME}" \
@@ -124,7 +178,7 @@ _register() {
 
 _deregister() {
     echo "[entrypoint] Attempting graceful de-registration..."
-    "${RUNNER_HOME}/config.sh" remove --token "${RUNNER_TOKEN}" 2>/dev/null || true
+    _as_runner "${RUNNER_HOME}/config.sh" remove --token "${RUNNER_TOKEN}" 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
@@ -147,7 +201,7 @@ attempt=0
 while true; do
     echo "[entrypoint] Starting runner (attempt $((attempt + 1)))"
     set +e
-    "${RUNNER_HOME}/run.sh" 2>&1 | tee "${LOG_FILE}"
+    _as_runner "${RUNNER_HOME}/run.sh" 2>&1 | tee "${LOG_FILE}"
     exit_code=${PIPESTATUS[0]}
     set -e
 
