@@ -12,9 +12,10 @@
 #   3. Rsync runner artifacts to 192.168.86.201:~/.omnibase/runners/
 #   4. Deploy via SSH: docker compose up -d --build --force-recreate --remove-orphans
 #   5. Install docker prune cron idempotently (tee, never append)
-#   6. Poll GitHub API until all 5 runners online (max 5 min, 15s interval)
-#   7. Retry once with fresh token if poll times out
-#   8. Print stale runner report (offline runners with no host container)
+#   6. Install runner health monitor cron (Slack alerts on state transitions)
+#   7. Poll GitHub API until all 10 runners online (max 5 min, 15s interval)
+#   8. Retry once with fresh token if poll times out
+#   9. Print stale runner report (offline runners with no host container)
 #
 # Requirements:
 #   - gh CLI authenticated with org admin scope
@@ -34,7 +35,7 @@ RUNNER_HOST_DIR="${HOME}/.omnibase/runners"
 RUNNER_ORG="OmniNode-ai"
 RUNNER_GROUP="omnibase-ci"
 RUNNER_NAME_PREFIX="omninode-runner"
-RUNNER_COUNT=5
+RUNNER_COUNT=10
 COMPOSE_FILE="docker/docker-compose.runners.yml"
 POLL_MAX_SECONDS=300
 POLL_INTERVAL_SECONDS=15
@@ -45,6 +46,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SYNC_PATHS=(
     "docker/runners/Dockerfile"
     "docker/runners/entrypoint.sh"
+    "docker/runners/runner-monitor.sh"
     "docker/docker-compose.runners.yml"
 )
 
@@ -137,10 +139,11 @@ rsync_artifacts() {
         return 0
     fi
 
-    # Sync Dockerfile and entrypoint into docker/runners/
+    # Sync Dockerfile, entrypoint, and monitor into docker/runners/
     rsync -av --checksum \
         "${REPO_ROOT}/docker/runners/Dockerfile" \
         "${REPO_ROOT}/docker/runners/entrypoint.sh" \
+        "${REPO_ROOT}/docker/runners/runner-monitor.sh" \
         "${RUNNER_HOST}:${RUNNER_HOST_DIR}/docker/runners/"
 
     # Sync compose file into docker/
@@ -197,7 +200,61 @@ install_prune_cron() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 6: Poll GitHub API until all 5 runners are online and validated
+# Step 6: Install runner health monitor cron
+# ---------------------------------------------------------------------------
+# Deploys the runner-monitor.sh script with a cron that runs every 3 minutes.
+# Fires Slack alerts on state transitions (healthy→unhealthy, recovery).
+# Requires SLACK_BOT_TOKEN and SLACK_CHANNEL_ID in ~/.omnibase/.env.
+
+install_monitor_cron() {
+    log "Installing runner health monitor on ${RUNNER_HOST}..."
+
+    # Source local .env to get Slack credentials
+    local slack_bot_token=""
+    local slack_channel_id=""
+    if [[ -f "${HOME}/.omnibase/.env" ]]; then
+        # shellcheck disable=SC1091
+        set -a && source "${HOME}/.omnibase/.env" && set +a
+        slack_bot_token="${SLACK_BOT_TOKEN:-}"
+        slack_channel_id="${SLACK_CHANNEL_ID:-}"
+    fi
+
+    if [[ -z "${slack_bot_token}" ]] || [[ -z "${slack_channel_id}" ]]; then
+        warn "SLACK_BOT_TOKEN or SLACK_CHANNEL_ID not set in ~/.omnibase/.env"
+        warn "Skipping monitor cron install. Monitor script is deployed but cron won't work without credentials."
+        return 0
+    fi
+
+    # Make monitor executable on remote
+    run_ssh "chmod +x ${RUNNER_HOST_DIR}/docker/runners/runner-monitor.sh"
+
+    # Deploy Slack credentials to a separate env file (not in compose or main .env)
+    if "${DRY_RUN}"; then
+        log "[DRY RUN] Would write .monitor-env with Slack credentials"
+    else
+        # Write credentials via SSH to avoid them appearing in rsync'd files
+        ssh "${RUNNER_HOST}" "cat > ${RUNNER_HOST_DIR}/.monitor-env" <<ENVEOF
+SLACK_BOT_TOKEN=${slack_bot_token}
+SLACK_CHANNEL_ID=${slack_channel_id}
+ENVEOF
+        ssh "${RUNNER_HOST}" "chmod 600 ${RUNNER_HOST_DIR}/.monitor-env"
+    fi
+
+    # Install cron idempotently: replace any existing runner-monitor line
+    local monitor_script="${RUNNER_HOST_DIR}/docker/runners/runner-monitor.sh"
+    local monitor_env="${RUNNER_HOST_DIR}/.monitor-env"
+    local cron_line="*/3 * * * * set -a && source ${monitor_env} && set +a && ${monitor_script} >> /tmp/runner-monitor.log 2>&1"
+
+    run_ssh "
+        EXISTING=\$(crontab -l 2>/dev/null || true)
+        echo \"\${EXISTING}\" | grep -v 'runner-monitor' | { cat; echo '${cron_line}'; } | crontab -
+    "
+
+    log "Runner health monitor cron installed (every 3 minutes)."
+}
+
+# ---------------------------------------------------------------------------
+# Step 7: Poll GitHub API until all 10 runners are online and validated
 # ---------------------------------------------------------------------------
 
 poll_runners_online() {
@@ -238,7 +295,7 @@ poll_runners_online() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 7: Retry once with fresh token if poll fails
+# Step 8: Retry once with fresh token if poll fails
 # ---------------------------------------------------------------------------
 
 deploy_with_retry() {
@@ -255,6 +312,7 @@ deploy_with_retry() {
         rsync_artifacts
         deploy_runners "${token_b64}"
         install_prune_cron
+        install_monitor_cron
 
         if poll_runners_online; then
             log "Deploy succeeded on attempt ${attempt}."
@@ -271,7 +329,7 @@ deploy_with_retry() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 8: Stale runner report
+# Step 9: Stale runner report
 # ---------------------------------------------------------------------------
 # Reports offline GitHub runners with no matching container on the host.
 # ACTION IS MANUAL — do NOT auto-delete runners.
