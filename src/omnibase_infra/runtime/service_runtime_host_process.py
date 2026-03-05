@@ -256,6 +256,7 @@ DEFAULT_BATCH_FLUSH_INTERVAL_MS: float = float(
 # to eliminate contention between parallel envelope processing tasks.
 DEFAULT_HANDLER_POOL_SIZE: int = int(os.environ.get("ONEX_HANDLER_POOL_SIZE", "1"))
 
+
 def _parse_contract_event_payload(
     msg: ModelEventMessage,
 ) -> tuple[dict[str, object], UUID] | None:
