@@ -29,27 +29,27 @@ class TestParseBootstrapServers:
 
     def test_ip_with_port(self) -> None:
         """Test parsing IP address with port."""
-        host, port = parse_bootstrap_servers("localhost:29092")
+        host, port = parse_bootstrap_servers("localhost:19092")
         assert host == "localhost"
-        assert port == "29092"
+        assert port == "19092"
 
     def test_hostname_without_port(self) -> None:
         """Test parsing hostname without port returns default."""
         host, port = parse_bootstrap_servers("kafka-broker")
         assert host == "kafka-broker"
-        assert port == "29092"  # Default port
+        assert port == "19092"  # Default port
 
     def test_empty_string(self) -> None:
         """Test parsing empty string returns not-set marker."""
         host, port = parse_bootstrap_servers("")
         assert host == "<not set>"
-        assert port == "29092"
+        assert port == "19092"
 
     def test_whitespace_only(self) -> None:
         """Test parsing whitespace-only string returns not-set marker."""
         host, port = parse_bootstrap_servers("   ")
         assert host == "<not set>"
-        assert port == "29092"
+        assert port == "19092"
 
     def test_ipv6_with_brackets(self) -> None:
         """Test parsing IPv6 address with brackets."""
@@ -61,13 +61,13 @@ class TestParseBootstrapServers:
         """Test parsing IPv6 address without port after bracket."""
         host, port = parse_bootstrap_servers("[::1]")
         assert host == "[::1]"
-        assert port == "29092"  # Default port
+        assert port == "19092"  # Default port
 
     def test_host_with_empty_port(self) -> None:
         """Test parsing host with trailing colon but no port."""
         host, port = parse_bootstrap_servers("localhost:")
         assert host == "localhost"
-        assert port == "29092"  # Default port for empty port section
+        assert port == "19092"  # Default port for empty port section
 
     # =========================================================================
     # Bare IPv6 Address Tests
@@ -77,25 +77,25 @@ class TestParseBootstrapServers:
         """Test parsing bare IPv6 localhost without brackets."""
         host, port = parse_bootstrap_servers("::1")
         assert host == "::1"
-        assert port == "29092"  # Default port for bare IPv6
+        assert port == "19092"  # Default port for bare IPv6
 
     def test_bare_ipv6_full_address(self) -> None:
         """Test parsing bare IPv6 full address without brackets."""
         host, port = parse_bootstrap_servers("2001:db8::1")
         assert host == "2001:db8::1"
-        assert port == "29092"  # Default port for bare IPv6
+        assert port == "19092"  # Default port for bare IPv6
 
     def test_bare_ipv6_with_all_segments(self) -> None:
         """Test parsing bare IPv6 with all segments specified."""
         host, port = parse_bootstrap_servers("2001:0db8:85a3:0000:0000:8a2e:0370:7334")
         assert host == "2001:0db8:85a3:0000:0000:8a2e:0370:7334"
-        assert port == "29092"  # Default port for bare IPv6
+        assert port == "19092"  # Default port for bare IPv6
 
     def test_bare_ipv6_mapped_ipv4(self) -> None:
         """Test parsing IPv4-mapped IPv6 address."""
         host, port = parse_bootstrap_servers("::ffff:192.168.1.1")
         assert host == "::ffff:192.168.1.1"
-        assert port == "29092"  # Default port for bare IPv6
+        assert port == "19092"  # Default port for bare IPv6
 
     def test_bare_ipv6_ambiguous_with_port_like_suffix(self) -> None:
         """Test bare IPv6 with port-like suffix is treated as full address.
@@ -109,7 +109,7 @@ class TestParseBootstrapServers:
         """
         host, port = parse_bootstrap_servers("::1:9092")
         assert host == "::1:9092"  # Entire string is the host
-        assert port == "29092"  # Default port since it's bare IPv6
+        assert port == "19092"  # Default port since it's bare IPv6
 
 
 class TestValidateBootstrapServers:
@@ -126,17 +126,17 @@ class TestValidateBootstrapServers:
 
     def test_valid_ip_format(self) -> None:
         """Test validation passes for IP:port format."""
-        result = validate_bootstrap_servers("localhost:29092")
+        result = validate_bootstrap_servers("localhost:19092")
         assert result.is_valid is True
         assert result.host == "localhost"
-        assert result.port == "29092"
+        assert result.port == "19092"
 
     def test_valid_hostname_without_port(self) -> None:
         """Test validation passes for hostname without port (uses default)."""
         result = validate_bootstrap_servers("kafka-broker")
         assert result.is_valid is True
         assert result.host == "kafka-broker"
-        assert result.port == "29092"  # Default port
+        assert result.port == "19092"  # Default port
 
     def test_none_input(self) -> None:
         """Test validation fails for None input."""
@@ -215,7 +215,7 @@ class TestValidateBootstrapServers:
         result = validate_bootstrap_servers("[2001:db8::1]")
         assert result.is_valid is True
         assert result.host == "[2001:db8::1]"
-        assert result.port == "29092"  # Default
+        assert result.port == "19092"  # Default
 
     # =========================================================================
     # Bare IPv6 Address Validation Tests
@@ -226,7 +226,7 @@ class TestValidateBootstrapServers:
         result = validate_bootstrap_servers("::1")
         assert result.is_valid is True
         assert result.host == "::1"
-        assert result.port == "29092"  # Default port for bare IPv6
+        assert result.port == "19092"  # Default port for bare IPv6
         assert result.error_message is None
 
     def test_bare_ipv6_full_address_valid(self) -> None:
@@ -234,14 +234,14 @@ class TestValidateBootstrapServers:
         result = validate_bootstrap_servers("2001:db8::1")
         assert result.is_valid is True
         assert result.host == "2001:db8::1"
-        assert result.port == "29092"  # Default port for bare IPv6
+        assert result.port == "19092"  # Default port for bare IPv6
 
     def test_bare_ipv6_mapped_ipv4_valid(self) -> None:
         """Test validation passes for IPv4-mapped IPv6 address."""
         result = validate_bootstrap_servers("::ffff:192.168.1.1")
         assert result.is_valid is True
         assert result.host == "::ffff:192.168.1.1"
-        assert result.port == "29092"  # Default port for bare IPv6
+        assert result.port == "19092"  # Default port for bare IPv6
 
     def test_bare_ipv6_ambiguous_port_like_suffix_valid(self) -> None:
         """Test validation passes for bare IPv6 with port-like suffix.
@@ -253,7 +253,7 @@ class TestValidateBootstrapServers:
         result = validate_bootstrap_servers("::1:9092")
         assert result.is_valid is True
         assert result.host == "::1:9092"  # Entire string is the host
-        assert result.port == "29092"  # Default port since it's bare IPv6
+        assert result.port == "19092"  # Default port since it's bare IPv6
         assert result.error_message is None
 
     def test_skip_reason_contains_example(self) -> None:
@@ -261,7 +261,7 @@ class TestValidateBootstrapServers:
         result = validate_bootstrap_servers("")
         assert result.skip_reason is not None
         assert "export KAFKA_BOOTSTRAP_SERVERS" in result.skip_reason
-        assert "29092" in result.skip_reason
+        assert "19092" in result.skip_reason
 
     # =========================================================================
     # Comma-Separated Server List Tests
@@ -371,7 +371,7 @@ class TestKafkaConfigValidationResultBool:
         result = KafkaConfigValidationResult(
             is_valid=False,
             host="<not set>",
-            port="29092",
+            port="19092",
             error_message="Not configured",
             skip_reason="Skip reason",
         )

@@ -16,8 +16,8 @@ collection runs.
 ``pytest_unconfigure`` restores the original values (or removes the variables
 if they were not previously set) after the test session ends.
 
-This prevents integration tests from accidentally hitting the cloud bus
-(``localhost:29092``) or triggering ``validate_kafka_broker_allowlist``
+This prevents integration tests from accidentally hitting a non-local broker
+or triggering ``validate_kafka_broker_allowlist``
 failures when KAFKA_BROKER_ALLOWLIST is unset.
 
 Event Loop Scope (pytest-asyncio 0.25+)
@@ -109,7 +109,7 @@ pytestmark = [
 # KAFKA_BOOTSTRAP_SERVERS and KAFKA_BROKER_ALLOWLIST are set to the local
 # Docker Redpanda bus for all integration tests in this directory.
 #
-# This prevents accidental hits against the cloud bus (localhost:29092) or
+# This prevents accidental hits against a non-local broker or
 # validate_kafka_broker_allowlist failures when KAFKA_BROKER_ALLOWLIST is unset.
 #
 # The previous values (if any) are stored on the config object and restored

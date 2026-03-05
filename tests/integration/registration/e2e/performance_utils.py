@@ -62,7 +62,7 @@ class PerformanceThresholds:
     =============================
 
     **Target Infrastructure**: Remote services (configured via environment variables)
-        - Redpanda (Kafka): KAFKA_BOOTSTRAP_SERVERS (default port 29092)
+        - Redpanda (Kafka): KAFKA_BOOTSTRAP_SERVERS (default port 19092)
         - PostgreSQL: POSTGRES_HOST (default port 5436)
         - Consul: CONSUL_HOST (default port 28500)
 

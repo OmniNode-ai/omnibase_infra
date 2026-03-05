@@ -4,8 +4,7 @@
 # This compose file provides the complete ONEX platform: infrastructure services
 # (PostgreSQL, Valkey, Redpanda) and runtime services (kernel, effects, workers).
 # OMN-3431: Local Docker Redpanda replaces the remote M2 Ultra broker (always-on).
-# Broker addresses are hardcoded as literals (not interpolated from host env) so
-# running bus-cloud on the host cannot contaminate container routing.
+# Broker addresses are hardcoded as literals (not interpolated from host env).
 #
 #
 # Usage:
@@ -48,7 +47,6 @@
 # Redpanda / Kafka:
 #   OMN-3431: Local Docker Redpanda is the default event bus (always-on, no profile needed).
 #   Containers use redpanda:9092 (Docker-internal). Host scripts use localhost:19092.
-#   Cloud bus (localhost:29092, launchd tunnel) is a separate bus for interactive dev sessions.
 #   Invariant: NO Docker service inherits KAFKA_BOOTSTRAP_SERVERS from the host environment.
 #              All broker addresses are hardcoded literals in compose.
 #
@@ -56,7 +54,7 @@
 #   Infrastructure:
 #     - PostgreSQL: 5436 (internal 5432)
 #     - Valkey: 16379 (internal 6379)
-#     - Redpanda: 19092 (internal 9092) [always-on; 29092 reserved for cloud bus tunnel]
+#     - Redpanda: 19092 (internal 9092) [always-on]
 #     - Infisical: 8880 (internal 8080) [secrets profile]
 #     - Keycloak: 28080 (internal 8080) [auth profile]
 #   Runtime:
@@ -131,12 +129,10 @@ x-runtime-env: &runtime-env
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:?OMNIBASE_INFRA_DB_URL must be set in ~/.omnibase/.env}
-  # Hardcoded literals: never inherit from host shell env (bus-cloud contamination prevention)
   # OMN-3431: Local Docker Redpanda — containers use Docker-internal redpanda:9092
   KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
   # Allowlist lets service_kernel.py's denylist accept Docker-internal redpanda: hostname
   KAFKA_BROKER_ALLOWLIST: "redpanda:"
-  # Always local for containers — never inherit BUS_ID=cloud from a bus-cloud shell
   BUS_ID: "local"
   ONEX_CONTRACTS_DIR: /app/contracts
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
@@ -232,7 +228,6 @@ services:
   # ==========================================================================
   # OMN-3431: Local Docker Redpanda replaces the remote M2 Ultra broker.
   # Containers: redpanda:9092 (Docker-internal). Host: localhost:19092 (external).
-  # Cloud bus (localhost:29092, launchd tunnel) is a separate bus for dev sessions.
   # Invariant: NO Docker service inherits KAFKA_BOOTSTRAP_SERVERS from the host env.
   #            All broker addresses are hardcoded literals in compose.
   # Memory: REDPANDA_MEMORY defaults to 8G. Override via env for constrained hosts.
@@ -547,7 +542,6 @@ services:
         condition: service_healthy
     command: ["python", "-m", "omnibase_infra.services.observability.agent_actions.consumer"]
     environment:
-      # Hardcoded literal: never inherit from host shell env (bus-cloud contamination prevention)
       # OMN-3431: Local Docker Redpanda
       OMNIBASE_INFRA_AGENT_ACTIONS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       # NOTE: Uses dedicated OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN rather than
@@ -601,7 +595,6 @@ services:
         condition: service_healthy
     command: ["python", "-m", "omnibase_infra.services.observability.skill_lifecycle.consumer"]
     environment:
-      # Hardcoded literal: never inherit from host shell env (bus-cloud contamination prevention)
       # OMN-3431: Local Docker Redpanda
       OMNIBASE_INFRA_SKILL_LIFECYCLE_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN: ${OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN:?OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN must be set in ~/.omnibase/.env}

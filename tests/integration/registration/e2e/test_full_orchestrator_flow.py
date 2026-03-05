@@ -24,7 +24,7 @@ Architecture Notes:
     This validates the REAL message flow, not just handler logic.
 
 Infrastructure Requirements (configured via environment variables):
-    - Kafka: KAFKA_BOOTSTRAP_SERVERS (e.g., localhost:29092)
+    - Kafka: KAFKA_BOOTSTRAP_SERVERS (e.g., localhost:19092)
     - PostgreSQL: POSTGRES_HOST, POSTGRES_PORT (e.g., localhost:5432)
 
 Related Tickets:
@@ -761,7 +761,7 @@ async def validate_test_topic_exists(real_kafka_event_bus: EventBusKafka) -> str
         pytest.fail(
             "KAFKA_BOOTSTRAP_SERVERS environment variable not set.\n"
             "Set it to your Kafka/Redpanda cluster address, e.g.:\n"
-            "  export KAFKA_BOOTSTRAP_SERVERS=localhost:29092"
+            "  export KAFKA_BOOTSTRAP_SERVERS=localhost:19092"
         )
 
     admin_client: AIOKafkaAdminClient | None = None

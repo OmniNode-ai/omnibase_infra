@@ -255,12 +255,12 @@ class TestModelKafkaProducerConfig:
         with patch.dict(
             "os.environ",
             {
-                "KAFKA_BOOTSTRAP_SERVERS": "broker:29092",
+                "KAFKA_BOOTSTRAP_SERVERS": "broker:19092",
                 "KAFKA_REQUEST_TIMEOUT_MS": "5000",
             },
         ):
             config = ModelKafkaProducerConfig.from_env()
-            assert config.bootstrap_servers == "broker:29092"
+            assert config.bootstrap_servers == "broker:19092"
             assert config.timeout_seconds == 5.0
 
     def test_from_env_invalid_timeout(self) -> None:

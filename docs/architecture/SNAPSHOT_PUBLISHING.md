@@ -605,7 +605,7 @@ except InfraConnectionError:
 
 **Programmatic Config Source**: `src/omnibase_infra/models/projection/model_snapshot_topic_config.py` (`ModelSnapshotTopicConfig`)
 
-**Infrastructure**: Redpanda (Kafka-compatible) running on `192.168.86.200:29092`
+**Infrastructure**: Redpanda (Kafka-compatible) running on `localhost:19092`
 
 ### Key Format and Compaction Behavior
 
@@ -621,7 +621,7 @@ This means compaction retains exactly one record per node. The key format is def
 
 ```bash
 rpk topic create onex.snapshot.platform.registration-snapshots.v1 \
-  --brokers 192.168.86.200:29092 \
+  --brokers localhost:19092 \
   --partitions 12 \
   --replicas 3 \
   --topic-config cleanup.policy=compact \
@@ -636,7 +636,7 @@ rpk topic create onex.snapshot.platform.registration-snapshots.v1 \
 
 ```bash
 rpk topic create onex.snapshot.platform.registration-snapshots.v1 \
-  --brokers 192.168.86.200:29092 \
+  --brokers localhost:19092 \
   --partitions 12 \
   --replicas 1 \
   --topic-config cleanup.policy=compact \
@@ -662,15 +662,15 @@ Single-node Redpanda cannot honor `replication_factor > 1` or `min.insync.replic
 
 ```bash
 # Check that the topic exists
-rpk topic list --brokers 192.168.86.200:29092
+rpk topic list --brokers localhost:19092
 
 # Describe topic configuration (full)
 rpk topic describe onex.snapshot.platform.registration-snapshots.v1 \
-  --brokers 192.168.86.200:29092
+  --brokers localhost:19092
 
 # Describe topic configuration only
 rpk topic describe onex.snapshot.platform.registration-snapshots.v1 \
-  --brokers 192.168.86.200:29092 \
+  --brokers localhost:19092 \
   -c
 ```
 
@@ -681,27 +681,27 @@ Verify that `cleanup.policy=compact`, `min.compaction.lag.ms=60000`, `max.compac
 ```bash
 # Read all current snapshots
 rpk topic consume onex.snapshot.platform.registration-snapshots.v1 \
-  --brokers 192.168.86.200:29092 \
+  --brokers localhost:19092 \
   --offset start \
   --format '%k\t%v\n'
 
 # Read a limited number of messages
 rpk topic consume onex.snapshot.platform.registration-snapshots.v1 \
-  --brokers 192.168.86.200:29092 \
+  --brokers localhost:19092 \
   --offset start \
   --num 10 \
   --format '%k\t%v\n'
 
 # Read messages with full metadata (partition, offset, timestamp)
 rpk topic consume onex.snapshot.platform.registration-snapshots.v1 \
-  --brokers 192.168.86.200:29092 \
+  --brokers localhost:19092 \
   --offset start \
   --num 10 \
   --format 'partition:%p offset:%o timestamp:%d{ms} key:%k value:%v\n'
 
 # Read from a specific partition
 rpk topic consume onex.snapshot.platform.registration-snapshots.v1 \
-  --brokers 192.168.86.200:29092 \
+  --brokers localhost:19092 \
   --partitions 0 \
   --offset start \
   --num 10
@@ -713,13 +713,13 @@ Tombstones appear as a key with an empty value.
 
 ```bash
 # List all consumer groups
-rpk group list --brokers 192.168.86.200:29092
+rpk group list --brokers localhost:19092
 
 # Describe a specific consumer group
-rpk group describe <group-id> --brokers 192.168.86.200:29092
+rpk group describe <group-id> --brokers localhost:19092
 
 # Example: check lag for the snapshot reader group
-rpk group describe snapshot-reader --brokers 192.168.86.200:29092
+rpk group describe snapshot-reader --brokers localhost:19092
 ```
 
 Output columns: `CURRENT-OFFSET` (last committed), `LOG-END-OFFSET` (latest), `LAG` (difference). A lag of 0 means the consumer is fully caught up.
@@ -753,13 +753,13 @@ SNAPSHOT_MIN_INSYNC_REPLICAS=1
 ```bash
 # Adjust compaction lag on existing topic
 rpk topic alter-config onex.snapshot.platform.registration-snapshots.v1 \
-  --brokers 192.168.86.200:29092 \
+  --brokers localhost:19092 \
   --set min.compaction.lag.ms=120000 \
   --set max.compaction.lag.ms=600000
 
 # Increase partition count (can never be decreased)
 rpk topic add-partitions onex.snapshot.platform.registration-snapshots.v1 \
-  --brokers 192.168.86.200:29092 \
+  --brokers localhost:19092 \
   --num 24
 ```
 
@@ -767,7 +767,7 @@ rpk topic add-partitions onex.snapshot.platform.registration-snapshots.v1 \
 
 ```bash
 rpk topic delete onex.snapshot.platform.registration-snapshots.v1 \
-  --brokers 192.168.86.200:29092
+  --brokers localhost:19092
 ```
 
 Snapshots can always be rebuilt from projections, so deleting the snapshot topic does not cause data loss.
