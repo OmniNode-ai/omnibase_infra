@@ -2,13 +2,9 @@
 # Copyright (c) 2025 OmniNode Team
 """Protocol lifecycle executor for ONEX Infrastructure.
 
-The ProtocolLifecycleExecutor class for managing protocol
-handler lifecycle operations including shutdown, health checks, and priority
-ordering.
-
-The ProtocolLifecycleExecutor is a reusable utility extracted from
-RuntimeHostProcess to enable lifecycle management in other contexts (e.g., test
-fixtures, standalone management, future node implementations).
+Reusable utility extracted from RuntimeHostProcess to manage protocol handler
+lifecycle operations (shutdown, health checks, priority ordering) in multiple
+contexts: runtime host, test fixtures, standalone management.
 
 Example Usage:
     ```python
@@ -58,6 +54,11 @@ MIN_HEALTH_CHECK_TIMEOUT = 1.0
 MAX_HEALTH_CHECK_TIMEOUT = 60.0
 DEFAULT_HEALTH_CHECK_TIMEOUT = 5.0
 
+# Handler shutdown timeout bounds (per OMN-882)
+MIN_HANDLER_SHUTDOWN_TIMEOUT = 1.0
+MAX_HANDLER_SHUTDOWN_TIMEOUT = 300.0
+DEFAULT_HANDLER_SHUTDOWN_TIMEOUT = 10.0
+
 
 class ProtocolLifecycleExecutor:
     """Executes protocol lifecycle operations (shutdown, health check, priority).
@@ -65,10 +66,9 @@ class ProtocolLifecycleExecutor:
     Reusable utility for managing protocol lifecycles. Used by
     RuntimeHostProcess and can be used by future node implementations.
 
-    Exports:
-    - Priority-based shutdown ordering (higher priority handlers shutdown first)
-    - Health check execution with configurable timeouts
-    - Parallel shutdown within priority groups for performance
+    Capabilities: priority-based shutdown ordering (higher priority first),
+    health check execution with configurable timeouts, parallel shutdown
+    within priority groups.
 
     Thread Safety:
         This class is thread-safe for concurrent method calls.
@@ -106,6 +106,7 @@ class ProtocolLifecycleExecutor:
 
     Attributes:
         health_check_timeout_seconds: Default timeout for health checks (1-60 seconds).
+        handler_shutdown_timeout_seconds: Per-handler shutdown timeout (1-300 seconds).
 
     Example:
         ```python
@@ -129,7 +130,9 @@ class ProtocolLifecycleExecutor:
     """
 
     def __init__(
-        self, health_check_timeout_seconds: float = DEFAULT_HEALTH_CHECK_TIMEOUT
+        self,
+        health_check_timeout_seconds: float = DEFAULT_HEALTH_CHECK_TIMEOUT,
+        handler_shutdown_timeout_seconds: float = DEFAULT_HANDLER_SHUTDOWN_TIMEOUT,
     ) -> None:
         """Initialize the protocol lifecycle executor.
 
@@ -137,8 +140,14 @@ class ProtocolLifecycleExecutor:
             health_check_timeout_seconds: Default timeout for health checks.
                 Valid range: 1-60 seconds per ModelLifecycleSubcontract.
                 Values outside this range are clamped with a warning.
+            handler_shutdown_timeout_seconds: Per-handler shutdown timeout.
+                Valid range: 1-300 seconds. Each individual handler's shutdown()
+                call is wrapped with asyncio.wait_for() using this timeout.
+                Prevents a single slow handler (e.g., asyncpg pool close) from
+                blocking the entire shutdown sequence.
+                Values outside this range are clamped with a warning.
         """
-        # Validate and clamp timeout to valid bounds
+        # Validate and clamp health check timeout to valid bounds
         if (
             health_check_timeout_seconds < MIN_HEALTH_CHECK_TIMEOUT
             or health_check_timeout_seconds > MAX_HEALTH_CHECK_TIMEOUT
@@ -160,7 +169,33 @@ class ProtocolLifecycleExecutor:
                 min(health_check_timeout_seconds, MAX_HEALTH_CHECK_TIMEOUT),
             )
 
+        # Validate and clamp handler shutdown timeout to valid bounds
+        if (
+            handler_shutdown_timeout_seconds < MIN_HANDLER_SHUTDOWN_TIMEOUT
+            or handler_shutdown_timeout_seconds > MAX_HANDLER_SHUTDOWN_TIMEOUT
+        ):
+            logger.warning(
+                "handler_shutdown_timeout_seconds out of valid range, clamping",
+                extra={
+                    "original_value": handler_shutdown_timeout_seconds,
+                    "min_value": MIN_HANDLER_SHUTDOWN_TIMEOUT,
+                    "max_value": MAX_HANDLER_SHUTDOWN_TIMEOUT,
+                    "clamped_value": max(
+                        MIN_HANDLER_SHUTDOWN_TIMEOUT,
+                        min(
+                            handler_shutdown_timeout_seconds,
+                            MAX_HANDLER_SHUTDOWN_TIMEOUT,
+                        ),
+                    ),
+                },
+            )
+            handler_shutdown_timeout_seconds = max(
+                MIN_HANDLER_SHUTDOWN_TIMEOUT,
+                min(handler_shutdown_timeout_seconds, MAX_HANDLER_SHUTDOWN_TIMEOUT),
+            )
+
         self._health_check_timeout_seconds: float = health_check_timeout_seconds
+        self._handler_shutdown_timeout_seconds: float = handler_shutdown_timeout_seconds
 
     @property
     def health_check_timeout_seconds(self) -> float:
@@ -170,6 +205,15 @@ class ProtocolLifecycleExecutor:
             The timeout in seconds for health checks.
         """
         return self._health_check_timeout_seconds
+
+    @property
+    def handler_shutdown_timeout_seconds(self) -> float:
+        """Return the configured per-handler shutdown timeout.
+
+        Returns:
+            The timeout in seconds for individual handler shutdowns.
+        """
+        return self._handler_shutdown_timeout_seconds
 
     @staticmethod
     def get_shutdown_priority(handler: ProtocolContainerAware) -> int:
@@ -226,26 +270,42 @@ class ProtocolLifecycleExecutor:
         self,
         handler_type: str,
         handler: ProtocolContainerAware,
+        timeout_seconds: float = -1.0,
     ) -> ModelLifecycleResult:
-        """Shutdown a single handler with error handling.
+        """Shutdown a single handler with per-handler timeout and error handling.
 
-        This method performs individual handler shutdown with comprehensive error
-        handling to ensure all handlers get a chance to cleanup even if one fails.
+        This method performs individual handler shutdown wrapped with
+        asyncio.wait_for() to enforce a per-handler timeout. This prevents a
+        single slow handler (e.g., asyncpg pool close with 30s per-connection
+        timeout x 5 connections = 150s worst case) from blocking the entire
+        shutdown sequence.
 
         Args:
             handler_type: The handler type identifier.
             handler: The handler instance to shutdown.
+            timeout_seconds: Override timeout for this specific shutdown. If
+                negative (default: -1.0), uses the configured
+                handler_shutdown_timeout_seconds.
 
         Returns:
             ModelLifecycleResult with handler_type, success status, and optional
-            error_message if the shutdown failed.
+            error_message if the shutdown failed or timed out.
         """
+        effective_timeout = (
+            timeout_seconds
+            if timeout_seconds > 0
+            else self._handler_shutdown_timeout_seconds
+        )
+
         try:
             if hasattr(handler, "shutdown"):
-                await handler.shutdown()
+                await asyncio.wait_for(handler.shutdown(), timeout=effective_timeout)
                 logger.debug(
                     "Handler shutdown completed",
-                    extra={"handler_type": handler_type},
+                    extra={
+                        "handler_type": handler_type,
+                        "timeout_seconds": effective_timeout,
+                    },
                 )
                 return ModelLifecycleResult.succeeded(handler_type)
             else:
@@ -255,6 +315,19 @@ class ProtocolLifecycleExecutor:
                     extra={"handler_type": handler_type},
                 )
                 return ModelLifecycleResult.succeeded(handler_type)
+        except TimeoutError:
+            # Handler shutdown exceeded the per-handler timeout
+            logger.warning(
+                "Handler shutdown timed out",
+                extra={
+                    "handler_type": handler_type,
+                    "timeout_seconds": effective_timeout,
+                },
+            )
+            return ModelLifecycleResult.failed(
+                handler_type,
+                f"Shutdown timed out after {effective_timeout}s",
+            )
         except Exception as e:
             # Log exception but return failure status instead of raising
             # This ensures all handlers get a chance to cleanup even if one fails
@@ -428,8 +501,11 @@ class ProtocolLifecycleExecutor:
 
 
 __all__: list[str] = [
+    "DEFAULT_HANDLER_SHUTDOWN_TIMEOUT",
     "DEFAULT_HEALTH_CHECK_TIMEOUT",
+    "MAX_HANDLER_SHUTDOWN_TIMEOUT",
     "MAX_HEALTH_CHECK_TIMEOUT",
+    "MIN_HANDLER_SHUTDOWN_TIMEOUT",
     "MIN_HEALTH_CHECK_TIMEOUT",
     "ProtocolLifecycleExecutor",
 ]
