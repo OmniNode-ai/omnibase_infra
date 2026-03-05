@@ -151,6 +151,11 @@ COPY src/ ./src/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev
 
+# Pre-install torch CPU-only (~200MB) to prevent CUDA torch (~2.5GB) from being
+# pulled by adaptive-classifier. Must come BEFORE plugin installs.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+
 # Install ONEX plugin composition-layer dependencies.
 # These are NOT declared in pyproject.toml because they are runtime plugins,
 # not build-time dependencies of omnibase_infra. Installing them here enables
@@ -194,6 +199,20 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Force upgrade here after all plugin installs to ensure the patched version is present.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install "protobuf>=5.29.6"
+
+# Verify torch is CPU-only (torch.version.cuda must be None, no nvidia packages)
+RUN python -c "\
+import torch, pkgutil; \
+assert torch.version.cuda is None, f'Expected CPU torch, got CUDA {torch.version.cuda}'; \
+nvidia_pkgs = [m.name for m in pkgutil.iter_modules() if 'nvidia' in m.name]; \
+assert not nvidia_pkgs, f'Unexpected NVIDIA packages: {nvidia_pkgs}'; \
+print(f'torch {torch.__version__} (CPU-only) verified, no NVIDIA packages')"
+
+# Cleanup: remove __pycache__ and .pyc files from venv
+# Note: does NOT touch /root/.cache/uv (that's a cache mount, not persisted in layer)
+RUN find /app/.venv -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true && \
+    find /app/.venv -name "*.pyc" -delete 2>/dev/null || true && \
+    find /app/.venv -name "*.pyo" -delete 2>/dev/null || true
 
 # ============================================================================
 # Runtime Stage - Minimal production image

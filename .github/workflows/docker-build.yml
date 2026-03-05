@@ -302,11 +302,12 @@ jobs:
           echo "# Image Size Analysis" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- Runtime Image: ${SIZE_MB}MB" >> $GITHUB_STEP_SUMMARY
-          # Threshold: 500MB - see job comment for rationale
-          if [ ${SIZE_MB} -gt 500 ]; then
-            echo "- Warning: Image larger than 500MB threshold - consider optimization" >> $GITHUB_STEP_SUMMARY
+          # Threshold: 7000MB - temporary ceiling while adaptive-classifier ships CUDA torch.
+          # Expected ~5-6GB after CPU-only torch pre-install. Revisit when classifier externalized.
+          if [ ${SIZE_MB} -gt 7000 ]; then
+            echo "- Warning: Image larger than 7000MB threshold - consider optimization" >> $GITHUB_STEP_SUMMARY
           else
-            echo "- Image size is acceptable (under 500MB threshold)" >> $GITHUB_STEP_SUMMARY
+            echo "- Image size is acceptable (under 7000MB threshold)" >> $GITHUB_STEP_SUMMARY
           fi
 
   # Build summary
