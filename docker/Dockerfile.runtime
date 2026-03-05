@@ -156,32 +156,38 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # not build-time dependencies of omnibase_infra. Installing them here enables
 # plugin auto-discovery by the runtime's handler loader.
 #
-# All ONEX shared packages (omnibase-core==0.22.0, omnibase-infra==0.13.0,
-# omnibase-spi==0.15.0) are already satisfied by the uv sync step above.
-# External deps of each plugin are resolved by uv against PyPI normally.
+# CRITICAL: All plugins are installed with --no-deps to prevent them from
+# downgrading omnibase-core, omnibase-infra, or omnibase-spi. The correct
+# versions of these ONEX packages are already installed by `uv sync` above
+# (core>=0.23.0, infra==0.15.0, spi>=0.15.0). Plugin PyPI metadata declares
+# upper bounds against older versions (e.g. core<0.23.0) which would cause
+# version conflicts and CrashLoopBackOff (see version_compatibility.py).
 #
-# Install omninode-claude and omninode-memory first; install omninode-intelligence LAST.
-# REASON: omninode-claude==0.4.0 hard-pins omninode-intelligence==0.8.0 as an exact dep.
-# --no-deps prevents that exact pin from downgrading our 0.9.1 install.
+# After --no-deps plugin install, external (non-ONEX) deps are installed
+# in a separate step so plugins have their required third-party libraries.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps \
-    omninode-claude==0.4.0
-
-# omninode-memory==0.6.1 requires omnibase-core>=0.22.0,<0.23.0 — already satisfied.
-# Pin omnibase-core==0.22.0 explicitly to prevent uv from upgrading it.
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install \
+    "omninode-claude==0.4.0" \
     "omninode-memory==0.6.1" \
-    "omnibase-core==0.22.0"
+    "omninode-intelligence==0.9.1"
 
-# Install omninode-intelligence LAST to ensure 0.9.1 is not downgraded by omninode-claude's
-# exact pin (==0.8.0). 0.9.1 adds type casts to fix PostgreSQL type inference (OMN-3301).
-# NOTE: package was renamed from omniintelligence → omninode-intelligence on PyPI at 0.7.0.
-# Pin omnibase-core==0.22.0 explicitly to prevent version drift.
+# Install external (non-ONEX) deps required by the plugins above.
+# Most are already satisfied by omnibase_infra's own transitive deps.
+# Only plugin-specific additions are listed here.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install \
-    "omninode-intelligence==0.9.1" \
-    "omnibase-core==0.22.0"
+    "tiktoken>=0.5.0" \
+    "adaptive-classifier>=0.1.2" \
+    "confluent-kafka>=2.12.0,<3.0.0" \
+    "tenacity>=8.2.0" \
+    "watchdog>=6.0.0" \
+    "pinecone-client>=4.1.0,<7.0.0" \
+    "supabase>=2.9.0,<3.0.0" \
+    "qdrant-client>=1.7.0,<1.17.0" \
+    "asyncio-mqtt>=0.16.0,<1.0.0" \
+    "alembic>=1.13.0,<2.0.0" \
+    "psycopg2-binary>=2.9.10,<3.0.0" \
+    "mcp>=1.8.0,<2.0.0"
 
 # Security: upgrade protobuf to clear CVE-2026-0994 (HIGH, DoS, fixed in >=5.29.6).
 # protobuf 4.25.8 (from transitive deps) is flagged by Trivy scan (ignore-unfixed: true).
