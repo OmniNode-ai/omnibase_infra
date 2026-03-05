@@ -463,14 +463,6 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: Runner sanity check
-        if: runner.name != 'GitHub Actions'
-        run: |
-          echo "Runner: ${{ runner.name }}"
-          uv --version
-          python3 --version
-          test -d "$HOME/.cache/uv" && echo "uv cache: present" || echo "::warning::uv cache directory not found"
-
       - name: Checkout code
         uses: actions/checkout@v4
 
