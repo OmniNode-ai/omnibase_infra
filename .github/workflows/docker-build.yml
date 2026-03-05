@@ -325,9 +325,9 @@ jobs:
 
   # Image size analysis
   # Monitors runtime image size to prevent bloat and ensure efficient deployments.
-  # Size threshold rationale: 16000MB (16GB) is the current realistic threshold.
-  # The uncompressed image includes PyTorch + CUDA dependencies (~15GB).
-  # The compressed/pushed image is much smaller (~5-6GB).
+  # Size threshold rationale: 7000MB (7GB) after CPU-only torch pre-install.
+  # The uncompressed image no longer includes CUDA dependencies (~2.5GB savings).
+  # The compressed/pushed image is much smaller (~2-3GB).
   # Target: <8GB uncompressed after further layer optimization.
   # Warning-only for initial rollout — does not block builds.
   image-analysis:
@@ -349,7 +349,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Image size threshold: 16000MB (16GB) — warning-only, see job comment for rationale
+      # Image size threshold: 7000MB (7GB) — warning-only, see job comment for rationale
       - name: Analyze image size
         run: |
           docker pull ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
@@ -360,11 +360,13 @@ jobs:
           echo "# Image Size Analysis" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- Runtime Image: ${SIZE_MB}MB" >> $GITHUB_STEP_SUMMARY
-          if [ ${SIZE_MB} -gt 16000 ]; then
-            echo "::warning::Image size ${SIZE_MB}MB exceeds 16000MB threshold — investigate optimization"
-            echo "- **Warning**: Image size ${SIZE_MB}MB exceeds 16000MB threshold" >> $GITHUB_STEP_SUMMARY
+          # Threshold: 7000MB - temporary ceiling while adaptive-classifier ships CUDA torch.
+          # Expected ~5-6GB after CPU-only torch pre-install. Revisit when classifier externalized.
+          if [ ${SIZE_MB} -gt 7000 ]; then
+            echo "::warning::Image size ${SIZE_MB}MB exceeds 7000MB threshold — investigate optimization"
+            echo "- **Warning**: Image size ${SIZE_MB}MB exceeds 7000MB threshold" >> $GITHUB_STEP_SUMMARY
           else
-            echo "- Image size ${SIZE_MB}MB is within 16000MB threshold" >> $GITHUB_STEP_SUMMARY
+            echo "- Image size ${SIZE_MB}MB is within 7000MB threshold" >> $GITHUB_STEP_SUMMARY
           fi
           echo "- Target: <8GB uncompressed after further layer optimization" >> $GITHUB_STEP_SUMMARY
 
