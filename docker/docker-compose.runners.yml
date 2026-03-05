@@ -53,6 +53,8 @@ x-runner-base: &runner-base
     RUNNER_GROUP: omnibase-ci
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
+  group_add:
+    - "984"  # Match host Docker socket GID for DinD access
   healthcheck:
     test: ["CMD-SHELL", "pgrep -f Runner.Listener > /dev/null"]
     interval: 30s
