@@ -196,7 +196,7 @@ jobs:
           cat ops/digests/build-manifest.json
 
       - name: Upload digest mapping artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-manifest-${{ github.sha }}
           path: ops/digests/build-manifest.json
