@@ -12,7 +12,7 @@
 #   3. Rsync runner artifacts to 192.168.86.201:~/.omnibase/runners/
 #   4. Deploy via SSH: docker compose up -d --build --force-recreate --remove-orphans
 #   5. Install docker prune cron idempotently (tee, never append)
-#   6. Poll GitHub API until all 5 runners online (max 5 min, 15s interval)
+#   6. Poll GitHub API until all 10 runners online (max 5 min, 15s interval)
 #   7. Retry once with fresh token if poll times out
 #   8. Print stale runner report (offline runners with no host container)
 #
@@ -34,7 +34,7 @@ RUNNER_HOST_DIR="${HOME}/.omnibase/runners"
 RUNNER_ORG="OmniNode-ai"
 RUNNER_GROUP="omnibase-ci"
 RUNNER_NAME_PREFIX="omninode-runner"
-RUNNER_COUNT=5
+RUNNER_COUNT=10
 COMPOSE_FILE="docker/docker-compose.runners.yml"
 POLL_MAX_SECONDS=300
 POLL_INTERVAL_SECONDS=15
@@ -197,7 +197,7 @@ install_prune_cron() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 6: Poll GitHub API until all 5 runners are online and validated
+# Step 6: Poll GitHub API until all 10 runners are online and validated
 # ---------------------------------------------------------------------------
 
 poll_runners_online() {
