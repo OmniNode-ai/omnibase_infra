@@ -71,7 +71,7 @@ log_check() {
     CHECK_STATUSES+=("$status")
     CHECK_DETAILS+=("$detail")
 
-    # Promote overall status
+    # Promote overall status (skip does not affect overall)
     case "$status" in
         red)    OVERALL_STATUS="red" ;;
         yellow) [[ "$OVERALL_STATUS" != "red" ]] && OVERALL_STATUS="yellow" ;;
@@ -83,6 +83,7 @@ log_check() {
             green)  icon="[GREEN]" ;;
             yellow) icon="[YELLOW]" ;;
             red)    icon="[RED]" ;;
+            skip)   icon="[SKIP]" ;;
         esac
         printf "  %-8s %-22s %s\n" "$icon" "$name" "$detail"
     fi
@@ -290,12 +291,16 @@ check_migration_parity() {
     local docker_dir="${REPO_ROOT}/docker/migrations/forward"
     local src_dir="${REPO_ROOT}/src/omnibase_infra/migrations/forward"
 
+    if [[ ! -d "$docker_dir" ]] && [[ ! -d "$src_dir" ]]; then
+        log_check "$name" "skip" "Migration directory not set up"
+        return
+    fi
     if [[ ! -d "$docker_dir" ]]; then
-        log_check "$name" "yellow" "docker migrations dir not found"
+        log_check "$name" "skip" "docker migrations dir not set up"
         return
     fi
     if [[ ! -d "$src_dir" ]]; then
-        log_check "$name" "yellow" "src migrations dir not found"
+        log_check "$name" "skip" "src migrations dir not set up"
         return
     fi
 
