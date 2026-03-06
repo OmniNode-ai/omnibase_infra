@@ -35,7 +35,7 @@ fi
 IP_MATCHES=$(grep -rn --include="*.py" \
     --exclude-dir=".venv" \
     --exclude-dir="node_modules" \
-    -E "192\.168\.[0-9]+\.[0-9]+:(9092|19092|29092|29093)" \
+    -E "192\.168\.[0-9]+\.[0-9]+:(9092|19092|29092|29093)" \ # cloud-bus-ok OMN-3777
     . 2>/dev/null | \
     grep -v "# kafka-fallback-ok" | \
     grep -v "# noqa" | \
