@@ -521,7 +521,7 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | Variable                     | Default                            | Description                            |
 |------------------------------|------------------------------------|----------------------------------------|
 | **Kafka/Redpanda**           |                                    |                                        |
-| `KAFKA_BOOTSTRAP_SERVERS`    | `localhost:9092`                   | Kafka/Redpanda broker addresses        |
+| `KAFKA_BOOTSTRAP_SERVERS`    | `localhost:19092`                  | Kafka/Redpanda broker addresses (host); containers use `redpanda:9092` |
 | **PostgreSQL**               |                                    |                                        |
 | `POSTGRES_HOST`              | `localhost`                        | PostgreSQL hostname (legacy fallback)  |
 | `POSTGRES_PORT`              | `5432`                             | PostgreSQL port (legacy fallback)      |
