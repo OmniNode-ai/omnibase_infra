@@ -33,6 +33,7 @@ Example:
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -176,7 +177,7 @@ class WriterSkillLifecyclePostgres(MixinAsyncCircuitBreaker):
                             e["correlation_id"],
                             e.get("args_count"),
                             e.get("session_id"),
-                            e["emitted_at"],
+                            datetime.fromisoformat(e["emitted_at"]),
                         )
                         for e in events
                     ],
@@ -301,7 +302,7 @@ class WriterSkillLifecyclePostgres(MixinAsyncCircuitBreaker):
                             e.get("error_type"),
                             e.get("started_emit_failed", False),
                             e.get("session_id"),
-                            e["emitted_at"],
+                            datetime.fromisoformat(e["emitted_at"]),
                         )
                         for e in events
                     ],
