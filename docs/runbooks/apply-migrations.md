@@ -233,3 +233,63 @@ ON CONFLICT DO NOTHING;
 Or re-run `run-migrations.py` — it uses `ON CONFLICT DO NOTHING` so re-applying is safe
 for already-applied migrations that have tracking rows. For migrations without tracking rows,
 wrap in a transaction and check for idempotency before re-applying.
+
+## Omnidash Read-Model Migrations (OMN-3748)
+
+Omnidash maintains its own `omnidash_analytics` read-model database with SQL migrations
+in `omnidash/migrations/`. These are wired into the bootstrap pipeline as **Step 1d**.
+
+### Bootstrap (advisory -- warn and continue)
+
+During `bootstrap-infisical.sh`, Step 1d runs the omnidash migration runner if both
+`OMNIDASH_DIR` and `OMNIDASH_ANALYTICS_DB_URL` are set. Failures are non-fatal:
+
+```bash
+# Step 1d runs automatically during bootstrap when env vars are set:
+OMNIDASH_DIR=/path/to/omnidash
+OMNIDASH_ANALYTICS_DB_URL=postgresql://postgres:<password>@localhost:5436/omnidash_analytics
+```
+
+If the omnidash database is not yet provisioned or the checkout is not available, the
+bootstrap logs a warning and continues. The read-model may be stale until migrations
+are applied manually.
+
+### Manual run
+
+```bash
+source ~/.omnibase/.env
+cd "${OMNIDASH_DIR}"
+npx tsx scripts/run-migrations.ts
+```
+
+### Deploy-time enforcement (future -- fail closed)
+
+When omnidash moves to containerized deployment, the init container MUST run migrations
+and **fail closed** -- the pod should not start if the schema is not up to date.
+
+The enforcement boundary:
+
+| Context | Behavior | Rationale |
+|---------|----------|-----------|
+| `bootstrap-infisical.sh` (Step 1d) | Warn and continue | Local dev may not have omnidash DB |
+| Container init (future) | Fail closed | Production must have correct schema |
+
+Implementation notes for the init container:
+
+1. Run `npx tsx scripts/run-migrations.ts` as an init container
+2. Exit non-zero on any migration failure (the runner already does this)
+3. The main omnidash container depends on the init container succeeding
+4. No `|| true` or similar suppression -- failures must block pod startup
+
+### Parity check
+
+After applying migrations, verify parity between the migrations directory and the
+`schema_migrations` tracking table:
+
+```bash
+cd "${OMNIDASH_DIR}"
+npx tsx scripts/check-migration-parity.ts
+```
+
+This tool (added in OMN-3747) ensures no migrations are missing from either the
+filesystem or the database.
