@@ -115,11 +115,7 @@ async def consume_all(app: object) -> None:
             connections_max_idle_ms=10000,
         )
         await consumer.start()
-        logger.info(
-            "TUI consumer started. Topics: %s. Servers: %s",
-            _ALL_TOPICS,
-            bootstrap_servers,
-        )
+        logger.info("TUI consumer started. Topics: %s.", _ALL_TOPICS)
         async for msg in consumer:
             topic = msg.topic
             try:
@@ -137,8 +133,8 @@ async def consume_all(app: object) -> None:
             else:
                 logger.debug("Ignoring unknown topic: %s", topic)
 
-    except KafkaError as exc:
-        logger.warning("Kafka unavailable or connection failed: %s", exc)
+    except KafkaError:
+        logger.warning("Kafka unavailable or connection failed.")
     except Exception as exc:
         logger.exception("Consumer error: %s", exc)
     finally:

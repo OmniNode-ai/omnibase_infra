@@ -225,7 +225,7 @@ from omnibase_infra.projectors import SnapshotPublisherRegistration
 from omnibase_infra.models.projection import ModelSnapshotTopicConfig
 
 # Create producer and config
-producer = AIOKafkaProducer(bootstrap_servers="localhost:9092")
+producer = AIOKafkaProducer(bootstrap_servers="localhost:19092")
 config = ModelSnapshotTopicConfig.default()
 
 # Initialize publisher
@@ -263,7 +263,7 @@ import json
 
 consumer = AIOKafkaConsumer(
     "onex.registration.snapshots",
-    bootstrap_servers="localhost:9092",
+    bootstrap_servers="localhost:19092",
     auto_offset_reset="earliest",
     group_id="snapshot-reader",
 )
@@ -558,11 +558,11 @@ Track compaction metrics to ensure snapshots are being cleaned up:
 
 ```bash
 # Kafka CLI to check compaction lag
-kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
+kafka-consumer-groups.sh --bootstrap-server localhost:19092 \
     --describe --group snapshot-reader
 
 # Monitor topic size (should stabilize after compaction)
-kafka-log-dirs.sh --bootstrap-server localhost:9092 \
+kafka-log-dirs.sh --bootstrap-server localhost:19092 \
     --describe --topic-list onex.registration.snapshots
 ```
 

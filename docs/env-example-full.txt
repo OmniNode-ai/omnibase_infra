@@ -72,7 +72,7 @@ OMNINODE_CLOUD_DB_URL=postgresql://role_omninode_cloud:__REPLACE_WITH_SECURE_PAS
 #   KAFKA_BOOTSTRAP_SERVERS=omninode-bridge-redpanda:9092
 # For local scripts/direct access: Use IP address with external port
 #   KAFKA_BOOTSTRAP_SERVERS=<your-server-ip>:19092
-KAFKA_BOOTSTRAP_SERVERS=your-kafka-host:9092
+KAFKA_BOOTSTRAP_SERVERS=your-kafka-host:19092
 
 # Kafka advanced settings (optional - defaults shown)
 #
