@@ -2,8 +2,8 @@
 # Copyright (c) 2025 OmniNode Team
 """Central configuration for test infrastructure endpoints.
 
-This module provides a single source of truth for infrastructure server
-configuration used in integration tests. It enables:
+Single source of truth for infrastructure server configuration
+used in integration tests. It enables:
 
 1. **Environment Variable Override**: All infrastructure endpoints can be
    overridden via environment variables for different deployment scenarios.

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Performance timing utilities for E2E registration tests.
 
-This module provides utilities for measuring and asserting performance thresholds
+Utilities for measuring and asserting performance thresholds
 in the ONEX 2-way registration pattern E2E tests (OMN-892).
 
 Performance Thresholds (calibrated for remote infrastructure):

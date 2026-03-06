@@ -29,6 +29,7 @@ Example:
     >>> count = await writer.write_started(started_events)
     >>> count = await writer.write_completed(completed_events)
 """
+# no-migration: serialization-only change (string->datetime), no schema change.
 
 from __future__ import annotations
 
@@ -50,6 +51,27 @@ from omnibase_infra.errors import (
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_emitted_at(value: object) -> datetime:
+    """Parse an ISO-format timestamp string into a datetime.
+
+    Args:
+        value: Expected to be an ISO-8601 string from the event payload.
+
+    Returns:
+        Parsed datetime instance.
+
+    Raises:
+        ValueError: If the value is not a valid ISO-format timestamp.
+    """
+    if not isinstance(value, str):
+        msg = f"emitted_at must be a str, got {type(value).__name__}"
+        raise ValueError(msg)
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        raise ValueError(f"emitted_at is not valid ISO-8601: {value!r}") from None
 
 
 class WriterSkillLifecyclePostgres(MixinAsyncCircuitBreaker):
@@ -177,7 +199,7 @@ class WriterSkillLifecyclePostgres(MixinAsyncCircuitBreaker):
                             e["correlation_id"],
                             e.get("args_count"),
                             e.get("session_id"),
-                            datetime.fromisoformat(e["emitted_at"]),
+                            _parse_emitted_at(e["emitted_at"]),
                         )
                         for e in events
                     ],
@@ -302,7 +324,7 @@ class WriterSkillLifecyclePostgres(MixinAsyncCircuitBreaker):
                             e.get("error_type"),
                             e.get("started_emit_failed", False),
                             e.get("session_id"),
-                            datetime.fromisoformat(e["emitted_at"]),
+                            _parse_emitted_at(e["emitted_at"]),
                         )
                         for e in events
                     ],
