@@ -403,6 +403,53 @@ services:
       - "com.omninode.layer=infrastructure"
       - "com.omninode.ticket=OMN-3361"
   # ==========================================================================
+  # Migration Gate - Boot-Order Sentinel (Runtime Profile) [OMN-3737]
+  # ==========================================================================
+  # Lightweight healthcheck-only service that gates runtime service startup
+  # on all forward migrations being applied. The healthcheck queries
+  # db_metadata.migrations_complete (set by migration 037). Runtime services
+  # depend on this gate via service_healthy condition.
+  #
+  # Why: omniintelligence's validate_handshake auto-stamps a schema fingerprint
+  # on first boot. If tables like idempotency_records don't exist yet, the
+  # fingerprint is wrong and all subsequent boots fail (Audit Gap #7).
+  migration-gate:
+    image: postgres:16-alpine
+    container_name: omnibase-infra-migration-gate
+    profiles: ["runtime", "full"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: omnibase_infra
+    # Stay alive so healthcheck can run; no actual workload.
+    entrypoint: ["sh", "-c", "while true; do sleep 3600; done"]
+    volumes:
+      - ../scripts/check_migrations_complete.sh:/check_migrations_complete.sh:ro
+    networks:
+      - omnibase-infra-network
+    healthcheck:
+      test: ["CMD-SHELL", "sh /check_migrations_complete.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    logging: *logging-defaults
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 32M
+    labels:
+      - "com.omninode.service=migration-gate"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.ticket=OMN-3737"
+  # ==========================================================================
   # ONEX Runtime - Main Kernel (Runtime Profile)
   # ==========================================================================
   # Primary runtime service that handles the kernel bootstrap process.
@@ -411,7 +458,7 @@ services:
     container_name: omninode-runtime
     profiles: ["runtime", "full"]
     depends_on:
-      postgres:
+      migration-gate:
         condition: service_healthy
       redpanda:
         condition: service_healthy
@@ -536,7 +583,7 @@ services:
     container_name: omninode-agent-actions-consumer
     profiles: ["runtime", "full"]
     depends_on:
-      postgres:
+      migration-gate:
         condition: service_healthy
       redpanda:
         condition: service_healthy
@@ -589,7 +636,7 @@ services:
     container_name: omninode-skill-lifecycle-consumer
     profiles: ["runtime", "full"]
     depends_on:
-      postgres:
+      migration-gate:
         condition: service_healthy
       redpanda:
         condition: service_healthy
@@ -636,7 +683,7 @@ services:
     container_name: omnibase-intelligence-api
     profiles: ["runtime", "full"]
     depends_on:
-      postgres:
+      migration-gate:
         condition: service_healthy
       redpanda:
         condition: service_healthy

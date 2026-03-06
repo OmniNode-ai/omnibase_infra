@@ -10,6 +10,8 @@
 #   Step 1b:  Pending migrations applied (run-migrations.py, OMN-3528)
 #   Step 1c:  Cross-repo tables provisioned in omniintelligence DB (OMN-3531)
 #             Skipped if OMNIINTELLIGENCE_DB_URL is not set
+#   Step 1d:  Omnidash read-model migrations (OMN-3748)
+#             Non-fatal — skipped if OMNIDASH_DIR or OMNIDASH_ANALYTICS_DB_URL not set
 #   Step 2:   Valkey starts
 #   Step 3:   Infisical starts (depends_on: postgres + valkey healthy)
 #   Step 3.5: Keycloak starts (--profile auth) + provision-keycloak.py runs
@@ -214,6 +216,31 @@ if [ -n "${OMNIINTELLIGENCE_DB_URL:-}" ]; then
     fi
 else
     log_info "Skipping cross-repo provisioning (OMNIINTELLIGENCE_DB_URL not set)"
+fi
+
+# ============================================================================
+# Step 1d: Apply omnidash read-model migrations (OMN-3748)
+# ============================================================================
+# Non-fatal: local dev may not have the omnidash_analytics DB or omnidash
+# checkout available yet. Bootstrap is advisory; deploy-time init is
+# authoritative (see docs/runbooks/apply-migrations.md).
+if [ -n "${OMNIDASH_ANALYTICS_DB_URL:-}" ] && [ -n "${OMNIDASH_DIR:-}" ]; then
+    log_step "1d" "Apply omnidash read-model migrations"
+    if [[ "${DRY_RUN}" != "true" ]]; then
+        if [ -d "${OMNIDASH_DIR}" ] && [ -f "${OMNIDASH_DIR}/scripts/run-migrations.ts" ]; then
+            if (cd "${OMNIDASH_DIR}" && npx tsx scripts/run-migrations.ts); then
+                log_info "Omnidash read-model migrations applied."
+            else
+                log_warn "Omnidash migration runner failed — continuing (read-model may be stale)"
+            fi
+        else
+            log_warn "OMNIDASH_DIR=${OMNIDASH_DIR} does not contain scripts/run-migrations.ts — skipping"
+        fi
+    else
+        log_info "[DRY-RUN] Would run: cd ${OMNIDASH_DIR} && npx tsx scripts/run-migrations.ts"
+    fi
+else
+    log_info "Skipping omnidash migrations (OMNIDASH_ANALYTICS_DB_URL or OMNIDASH_DIR not set)"
 fi
 
 # ============================================================================
