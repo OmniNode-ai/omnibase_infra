@@ -18,22 +18,12 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 _PLUGIN_MOD = "omnibase_infra.nodes.node_registration_orchestrator.plugin"
-
-# Real schema file (guaranteed to exist — used as base for mocking path)
-_REAL_SCHEMA_FILE = (
-    Path(__file__).parent.parent.parent.parent.parent.parent
-    / "src"
-    / "omnibase_infra"
-    / "schemas"
-    / "schema_registration_projection.sql"
-)
 
 
 # =============================================================================
