@@ -38,7 +38,13 @@ from omnibase_infra.event_bus.event_bus_inmemory import (
     ModelEventHeaders,
     ModelEventMessage,
 )
+from omnibase_infra.event_bus.model_topic_validation_result import (
+    ModelTopicValidationResult,
+)
 from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
+from omnibase_infra.event_bus.service_topic_startup_validator import (
+    TopicStartupValidator,
+)
 from omnibase_infra.event_bus.topic_constants import (
     DLQ_CATEGORY_SUFFIXES,
     DLQ_COMMAND_TOPIC_SUFFIX,
@@ -68,7 +74,9 @@ __all__: list[str] = [
     "ModelEventHeaders",
     "ModelEventMessage",
     # Topic Management
+    "ModelTopicValidationResult",
     "TopicProvisioner",
+    "TopicStartupValidator",
     # Topic Functions
     "build_dlq_topic",
     "derive_dlq_topic_for_event_type",
