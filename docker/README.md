@@ -943,7 +943,7 @@ The `test_runtime_e2e.py` tests will skip automatically if the runtime container
 │                                                                    │
 └────────────────────────────────────────────────────────────────────┘
         │                   │                   │
-   Host:5433           Host:29092          Host:8500
+   Host:5433           Host:19092          Host:8500
    (postgres)          (kafka)             (consul)
 ```
 
@@ -953,7 +953,7 @@ The `test_runtime_e2e.py` tests will skip automatically if the runtime container
 |-----------------------|-------------------|--------------------------------|
 | `POSTGRES_PASSWORD`   | `test-password`   | PostgreSQL password            |
 | `POSTGRES_PORT`       | `5433`            | Host port for PostgreSQL       |
-| `KAFKA_PORT`          | `29092`           | Host port for Kafka external   |
+| `KAFKA_PORT`          | `19092`           | Host port for Kafka external   |
 | `CONSUL_PORT`         | `8500`            | Host port for Consul           |
 | `RUNTIME_PORT`        | `8085`            | Host port for runtime health   |
 | `ONEX_LOG_LEVEL`      | `DEBUG`           | Runtime log level              |
@@ -968,7 +968,7 @@ POSTGRES_HOST = "localhost"
 POSTGRES_PORT = 5433  # Maps to container 5432
 
 # Kafka (external listener)
-KAFKA_BOOTSTRAP_SERVERS = "localhost:29092"
+KAFKA_BOOTSTRAP_SERVERS = "localhost:19092"
 
 # Consul
 CONSUL_HOST = "localhost"

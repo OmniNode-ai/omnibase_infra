@@ -2,8 +2,8 @@
 # Copyright (c) 2025 OmniNode Team
 """Central configuration for test infrastructure endpoints.
 
-This module provides a single source of truth for infrastructure server
-configuration used in integration tests. It enables:
+Single source of truth for infrastructure server configuration
+used in integration tests. It enables:
 
 1. **Environment Variable Override**: All infrastructure endpoints can be
    overridden via environment variables for different deployment scenarios.
@@ -15,7 +15,6 @@ configuration used in integration tests. It enables:
    server and its purpose.
 
 Development Infrastructure Server
-=================================
 
 The default values point to the ONEX development/staging infrastructure
 server, which hosts shared services for integration testing:
@@ -30,7 +29,6 @@ against real infrastructure components. It is NOT accessible from public CI/CD
 runners (e.g., GitHub Actions) without VPN access.
 
 Environment Variable Overrides
-==============================
 
 For local development or alternative infrastructure, set these environment
 variables to override the defaults:
@@ -46,7 +44,6 @@ variables to override the defaults:
         KAFKA_BOOTSTRAP_SERVERS: Kafka bootstrap servers
 
 CI/CD Graceful Skip Behavior
-============================
 
 When infrastructure is unavailable (e.g., CI/CD without VPN):
 
@@ -62,7 +59,6 @@ Example Output in CI::
     test_consul_health_check SKIPPED (Consul not available - cannot connect)
 
 Usage in Tests
-==============
 
 Import the configuration constants from this module:
 
@@ -79,7 +75,6 @@ For environment-aware configuration with fallbacks:
     >>> host = get_postgres_host()  # Returns POSTGRES_HOST or REMOTE_INFRA_HOST
 
 Related Files
-=============
 
     - tests/integration/handlers/conftest.py: Uses these constants for fixtures
     - tests/integration/handlers/README.md: Documents infrastructure setup
