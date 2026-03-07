@@ -174,6 +174,43 @@ PROFILE_SEAM_TICKET = ModelRRHProfile(
 )
 
 # ------------------------------------------------------------------
+# tier-a-contract-gate — Tier A contract linting gate for PR queue pipeline
+# ------------------------------------------------------------------
+
+PROFILE_TIER_A_CONTRACT_GATE = ModelRRHProfile(
+    name="tier-a-contract-gate",
+    description=(
+        "Tier A contract linting gate for the PR queue pipeline.  "
+        "Focuses on contract validity, toolchain presence, and "
+        "disallowed-field checks.  Repo cleanliness and branch match "
+        "are FAIL-severity.  Conditional rules (Kafka, K8s) remain off "
+        "unless activated by contract governance."
+    ),
+    rules=(
+        # Repo checks — strict for merge gate
+        _rule("RRH-1001", severity=_F),
+        _rule("RRH-1002", severity=_F),
+        # Environment checks
+        _rule("RRH-1101", severity=_F),
+        _rule("RRH-1102", severity=_W),
+        # Kafka checks (conditional)
+        _rule("RRH-1201", enabled=False, severity=_F),
+        # Kubernetes checks (conditional)
+        _rule("RRH-1301", enabled=False, severity=_F),
+        # Toolchain checks — all FAIL for merge gate
+        _rule("RRH-1401", severity=_F),
+        _rule("RRH-1402", severity=_F),
+        _rule("RRH-1403", enabled=False, severity=_F),
+        _rule("RRH-1404", severity=_F),
+        # Cross-checks — strict
+        _rule("RRH-1501", severity=_F),
+        _rule("RRH-1601", severity=_F),
+        # Repo-boundary
+        _rule("RRH-1701", enabled=False, severity=_F),
+    ),
+)
+
+# ------------------------------------------------------------------
 # Profile registry
 # ------------------------------------------------------------------
 
@@ -182,6 +219,7 @@ PROFILES: dict[str, ModelRRHProfile] = {
     "ticket-pipeline": PROFILE_TICKET_PIPELINE,
     "ci-repair": PROFILE_CI_REPAIR,
     "seam-ticket": PROFILE_SEAM_TICKET,
+    "tier-a-contract-gate": PROFILE_TIER_A_CONTRACT_GATE,
 }
 
 
@@ -211,6 +249,7 @@ __all__: list[str] = [
     "PROFILE_DEFAULT",
     "PROFILE_SEAM_TICKET",
     "PROFILE_TICKET_PIPELINE",
+    "PROFILE_TIER_A_CONTRACT_GATE",
     "PROFILES",
     "get_profile",
 ]

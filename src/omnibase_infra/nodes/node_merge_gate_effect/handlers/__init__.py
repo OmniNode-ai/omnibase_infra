@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""Handlers for NodeMergeGateEffect."""
+
+from __future__ import annotations
+
+from omnibase_infra.nodes.node_merge_gate_effect.handlers.handler_upsert_merge_gate import (
+    HandlerUpsertMergeGate,
+)
+
+__all__: list[str] = ["HandlerUpsertMergeGate"]

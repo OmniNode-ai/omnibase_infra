@@ -48,10 +48,11 @@ handler_routing:
 # RRH-1701: Repo-boundary no cross-repo imports
 
 # --- Profiles ---
-# default.yaml:          baseline rules (excludes conditional rules)
-# ticket-pipeline.yaml:  standard pipeline rules
-# ci-repair.yaml:        relaxed for CI repair (dirty allowed)
-# seam-ticket.yaml:      all rules active (cross-repo seam tickets)
+# default.yaml:              baseline rules (excludes conditional rules)
+# ticket-pipeline.yaml:      standard pipeline rules
+# ci-repair.yaml:            relaxed for CI repair (dirty allowed)
+# seam-ticket.yaml:          all rules active (cross-repo seam tickets)
+# tier-a-contract-gate.yaml: Tier A contract linting gate for PR queue pipeline
 capabilities:
   - name: "rrh.validate"
     description: "Validate environment data against RRH rules and profiles"
