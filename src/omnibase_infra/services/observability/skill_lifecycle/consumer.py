@@ -620,6 +620,13 @@ class SkillLifecycleConsumer:
     def _build_health_response(self) -> tuple[dict[str, object], int]:
         """Build health check response dict and HTTP status code.
 
+        Idle-aware health (OMN-3784): When the consumer is running and polling
+        Kafka but has never received events (last_successful_write_at is None),
+        it is considered idle — not unhealthy.  Write staleness only applies
+        after the first successful write, because only then does a stale write
+        indicate an actual problem.  Poll staleness always applies since a
+        failure to poll indicates a broken Kafka connection.
+
         Returns:
             Tuple of (response_dict, http_status_code).
         """
@@ -627,29 +634,41 @@ class SkillLifecycleConsumer:
         last_write = self.metrics.last_successful_write_at
         last_poll = self.metrics.last_poll_at
 
-        write_age = (now - last_write).total_seconds() if last_write else float("inf")
-        poll_age = (now - last_poll).total_seconds() if last_poll else float("inf")
+        write_age = (now - last_write).total_seconds() if last_write else None
+        poll_age = (now - last_poll).total_seconds() if last_poll else None
+
+        # Determine if consumer is idle (running but never received events)
+        idle = self._running and last_write is None
 
         if not self._running:
             status = EnumHealthStatus.UNHEALTHY
         elif (
-            write_age > self.config.health_check_staleness_seconds
+            poll_age is None
             or poll_age > self.config.health_check_poll_staleness_seconds
         ):
+            # No polls at all, or polls are stale — Kafka connection problem
+            status = EnumHealthStatus.DEGRADED
+        elif (
+            write_age is not None
+            and write_age > self.config.health_check_staleness_seconds
+        ):
+            # Has written before but writes are stale — downstream problem
             status = EnumHealthStatus.DEGRADED
         else:
+            # Either idle (no writes ever, but polling OK) or actively healthy
             status = EnumHealthStatus.HEALTHY
 
         http_code = 200 if status == EnumHealthStatus.HEALTHY else 503
         response: dict[str, object] = {
             "status": str(status),
             "running": self._running,
+            "idle": idle,
             "last_successful_write_at": (
                 last_write.isoformat() if last_write else None
             ),
             "last_poll_at": last_poll.isoformat() if last_poll else None,
-            "write_age_seconds": write_age if write_age != float("inf") else None,
-            "poll_age_seconds": poll_age if poll_age != float("inf") else None,
+            "write_age_seconds": write_age,
+            "poll_age_seconds": poll_age,
         }
         if self._writer:
             response["circuit_breaker"] = self._writer.get_circuit_breaker_state()

@@ -279,7 +279,12 @@ class TestParseMessage:
 
 
 class TestHealthResponse:
-    """Test _build_health_response health status logic."""
+    """Test _build_health_response health status logic.
+
+    OMN-3784: Idle-aware health check — consumer reports HEALTHY when idle
+    (connected to Kafka, polling, but no events received yet), and only
+    reports DEGRADED for actual failures.
+    """
 
     @pytest.mark.unit
     def test_healthy_when_running_and_recent_writes(self) -> None:
@@ -294,6 +299,25 @@ class TestHealthResponse:
 
         assert response["status"] == str(EnumHealthStatus.HEALTHY)
         assert status_code == 200
+        assert response["idle"] is False
+
+    @pytest.mark.unit
+    def test_healthy_when_idle_no_events(self) -> None:
+        """Returns HEALTHY (200) when consumer is idle — polling but no events received.
+
+        OMN-3784: This is the core fix. Previously returned DEGRADED (503) because
+        last_successful_write_at was None, conflating idle with unhealthy.
+        """
+        consumer = _make_consumer()
+        consumer._running = True
+        consumer.metrics.last_successful_write_at = None  # No events ever received
+        consumer.metrics.last_poll_at = datetime.now(UTC)  # Polling works fine
+
+        response, status_code = consumer._build_health_response()
+
+        assert response["status"] == str(EnumHealthStatus.HEALTHY)
+        assert status_code == 200
+        assert response["idle"] is True
 
     @pytest.mark.unit
     def test_degraded_when_stale_writes(self) -> None:
@@ -337,6 +361,19 @@ class TestHealthResponse:
         assert status_code == 503
 
     @pytest.mark.unit
+    def test_degraded_when_no_polls_at_all(self) -> None:
+        """Returns DEGRADED when consumer has never polled (Kafka not connected)."""
+        consumer = _make_consumer()
+        consumer._running = True
+        consumer.metrics.last_poll_at = None
+        consumer.metrics.last_successful_write_at = None
+
+        response, status_code = consumer._build_health_response()
+
+        assert response["status"] == str(EnumHealthStatus.DEGRADED)
+        assert status_code == 503
+
+    @pytest.mark.unit
     def test_response_includes_running_field(self) -> None:
         """Health response includes 'running' field."""
         consumer = _make_consumer()
@@ -349,3 +386,29 @@ class TestHealthResponse:
 
         assert "running" in response
         assert response["running"] is True
+
+    @pytest.mark.unit
+    def test_response_includes_idle_field(self) -> None:
+        """Health response includes 'idle' field (OMN-3784)."""
+        consumer = _make_consumer()
+        consumer._running = True
+        consumer.metrics.last_successful_write_at = None
+        consumer.metrics.last_poll_at = datetime.now(UTC)
+
+        response, _ = consumer._build_health_response()
+
+        assert "idle" in response
+        assert response["idle"] is True
+
+    @pytest.mark.unit
+    def test_not_idle_after_first_write(self) -> None:
+        """Consumer is not idle once it has processed at least one event."""
+        consumer = _make_consumer()
+        consumer._running = True
+        now = datetime.now(UTC)
+        consumer.metrics.last_successful_write_at = now
+        consumer.metrics.last_poll_at = now
+
+        response, _ = consumer._build_health_response()
+
+        assert response["idle"] is False
