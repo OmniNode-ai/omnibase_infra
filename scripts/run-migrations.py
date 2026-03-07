@@ -266,7 +266,12 @@ def restamp_fingerprint(db_url: str) -> None:
     import subprocess
 
     result = subprocess.run(
-        [sys.executable, "-m", "omnibase_infra.runtime.util_schema_fingerprint", "stamp"],
+        [
+            sys.executable,
+            "-m",
+            "omnibase_infra.runtime.util_schema_fingerprint",
+            "stamp",
+        ],
         capture_output=True,
         text=True,
         check=False,
