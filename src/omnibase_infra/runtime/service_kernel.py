@@ -861,6 +861,40 @@ async def bootstrap() -> int:
                     exc_info=True,
                 )
 
+        # 3.6. Validate platform topics exist (best-effort by default)
+        if use_kafka:
+            try:
+                from omnibase_infra.event_bus.service_topic_startup_validator import (
+                    TopicStartupValidator,
+                )
+
+                validator = TopicStartupValidator(
+                    bootstrap_servers=kafka_bootstrap_servers,
+                )
+                validation_result = await validator.validate(
+                    correlation_id=correlation_id,
+                )
+                if not validation_result.is_valid:
+                    if os.environ.get("STARTUP_VALIDATION_STRICT") == "1":
+                        raise RuntimeError(
+                            f"Missing topics: {validation_result.missing_topics}"
+                        )
+                    logger.warning(
+                        "Topic validation: %d missing (non-blocking) "
+                        "(correlation_id=%s)",
+                        len(validation_result.missing_topics),
+                        correlation_id,
+                    )
+            except RuntimeError:
+                raise
+            except Exception:
+                logger.warning(
+                    "Topic validation failed (best-effort, non-blocking) "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+
         # 4. Create and wire container for dependency injection
         container_start_time = time.time()
         container = ModelONEXContainer()
