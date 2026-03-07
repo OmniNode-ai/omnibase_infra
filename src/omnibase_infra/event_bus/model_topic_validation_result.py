@@ -15,6 +15,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.event_bus.enum_topic_validation_status import (
+    EnumTopicValidationStatus,
+)
+
 
 class ModelTopicValidationResult(BaseModel):
     """Result of startup topic existence validation.
@@ -25,10 +29,6 @@ class ModelTopicValidationResult(BaseModel):
         missing_topics: Topics not found on the broker.
         is_valid: True when no topics are missing (or validation was skipped/unavailable).
         status: Overall validation outcome.
-            - ``success``: All required topics present.
-            - ``degraded``: Some required topics missing (non-fatal).
-            - ``unavailable``: Broker unreachable.
-            - ``skipped``: aiokafka not installed.
     """
 
     model_config = ConfigDict(
@@ -40,7 +40,9 @@ class ModelTopicValidationResult(BaseModel):
     present_topics: tuple[str, ...] = Field(default_factory=tuple)
     missing_topics: tuple[str, ...] = Field(default_factory=tuple)
     is_valid: bool = Field(default=True)
-    status: str = Field(default="success")
+    status: EnumTopicValidationStatus = Field(
+        default=EnumTopicValidationStatus.SUCCESS,
+    )
 
 
 __all__: list[str] = [

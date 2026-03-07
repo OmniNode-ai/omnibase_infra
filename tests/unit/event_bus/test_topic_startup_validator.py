@@ -232,7 +232,11 @@ async def test_aiokafka_not_importable(
             if key.startswith("aiokafka"):
                 saved_modules[key] = sys.modules.pop(key)
 
-        original_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
+        original_import = (
+            __builtins__["__import__"]
+            if isinstance(__builtins__, dict)
+            else __builtins__.__import__
+        )
 
         def mock_import(name, *args, **kwargs):
             if name == "aiokafka.admin" or name.startswith("aiokafka"):

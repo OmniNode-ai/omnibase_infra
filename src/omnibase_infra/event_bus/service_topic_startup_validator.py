@@ -23,6 +23,9 @@ import logging
 import os
 from uuid import UUID, uuid4
 
+from omnibase_infra.event_bus.enum_topic_validation_status import (
+    EnumTopicValidationStatus,
+)
 from omnibase_infra.event_bus.model_topic_validation_result import (
     ModelTopicValidationResult,
 )
@@ -100,7 +103,7 @@ class TopicStartupValidator:
             return ModelTopicValidationResult(
                 required_topics=required,
                 is_valid=True,
-                status="skipped",
+                status=EnumTopicValidationStatus.SKIPPED,
             )
 
         # Guard: broker unreachable
@@ -125,7 +128,7 @@ class TopicStartupValidator:
             return ModelTopicValidationResult(
                 required_topics=required,
                 is_valid=True,
-                status="unavailable",
+                status=EnumTopicValidationStatus.UNAVAILABLE,
             )
 
         finally:
@@ -151,7 +154,7 @@ class TopicStartupValidator:
                 present_topics=present,
                 missing_topics=missing,
                 is_valid=False,
-                status="degraded",
+                status=EnumTopicValidationStatus.DEGRADED,
             )
 
         return ModelTopicValidationResult(
@@ -159,7 +162,7 @@ class TopicStartupValidator:
             present_topics=present,
             missing_topics=(),
             is_valid=True,
-            status="success",
+            status=EnumTopicValidationStatus.SUCCESS,
         )
 
 

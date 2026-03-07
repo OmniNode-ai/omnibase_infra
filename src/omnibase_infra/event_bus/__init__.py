@@ -33,6 +33,9 @@ Topic Constants:
 
 from __future__ import annotations
 
+from omnibase_infra.event_bus.enum_topic_validation_status import (
+    EnumTopicValidationStatus,
+)
 from omnibase_infra.event_bus.event_bus_inmemory import (
     EventBusInmemory,
     ModelEventHeaders,
@@ -69,6 +72,8 @@ __all__: list[str] = [
     "DLQ_TOPIC_PATTERN",
     # Topic Constants
     "DLQ_TOPIC_VERSION",
+    # Enums
+    "EnumTopicValidationStatus",
     # Event Bus
     "EventBusInmemory",
     "ModelEventHeaders",
