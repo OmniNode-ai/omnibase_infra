@@ -210,7 +210,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install "protobuf>=5.29.6"
 
 # Verify torch is CPU-only (torch.version.cuda must be None, no nvidia packages)
-RUN python -c "\
+RUN /app/.venv/bin/python -c "\
 import torch, pkgutil; \
 assert torch.version.cuda is None, f'Expected CPU torch, got CUDA {torch.version.cuda}'; \
 nvidia_pkgs = [m.name for m in pkgutil.iter_modules() if 'nvidia' in m.name]; \
