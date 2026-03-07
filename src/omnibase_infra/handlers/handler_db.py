@@ -59,8 +59,9 @@ For multi-statement operations requiring atomicity, use the ``db.transaction``
 operation (planned for Beta release).
 
 Note:
-    Environment variable configuration (ONEX_DB_POOL_SIZE, ONEX_DB_TIMEOUT) is parsed
-    at module import time, not at handler instantiation. This means:
+    Environment variable configuration (ONEX_DB_POOL_SIZE, ONEX_DB_TIMEOUT,
+    ONEX_DB_CIRCUIT_THRESHOLD, ONEX_DB_CIRCUIT_RESET_TIMEOUT) is parsed at module
+    import time, not at handler instantiation. This means:
 
     - Changes to environment variables require application restart to take effect
     - Tests should use ``unittest.mock.patch.dict(os.environ, ...)`` before importing,
@@ -125,6 +126,23 @@ _DEFAULT_TIMEOUT_SECONDS: float = parse_env_float(
     transport_type=EnumInfraTransportType.DATABASE,
     service_name="db_handler",
 )
+_DEFAULT_CIRCUIT_THRESHOLD: int = parse_env_int(
+    "ONEX_DB_CIRCUIT_THRESHOLD",
+    5,
+    min_value=1,
+    max_value=100,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="db_handler",
+)
+_DEFAULT_CIRCUIT_RESET_TIMEOUT: float = parse_env_float(
+    "ONEX_DB_CIRCUIT_RESET_TIMEOUT",
+    30.0,
+    min_value=1.0,
+    max_value=3600.0,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="db_handler",
+)
+
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"db.query", "db.execute"})
 
 # Per-handler pool close timeout (OMN-882)
@@ -342,8 +360,8 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
             # Initialize circuit breaker after pool creation succeeds
             self._init_circuit_breaker(
-                threshold=5,
-                reset_timeout=30.0,
+                threshold=_DEFAULT_CIRCUIT_THRESHOLD,
+                reset_timeout=_DEFAULT_CIRCUIT_RESET_TIMEOUT,
                 service_name="db_handler",
                 transport_type=EnumInfraTransportType.DATABASE,
             )
