@@ -126,9 +126,9 @@ class TestCircuitBreakerEnvConfig:
         """Test that initialize() passes module-level constants to _init_circuit_breaker."""
         from omnibase_infra.enums import EnumInfraTransportType
         from omnibase_infra.handlers.handler_db import (
-            HandlerDb,
             _DEFAULT_CIRCUIT_RESET_TIMEOUT,
             _DEFAULT_CIRCUIT_THRESHOLD,
+            HandlerDb,
         )
 
         handler = HandlerDb(mock_container)
