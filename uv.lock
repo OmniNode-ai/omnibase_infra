@@ -1900,7 +1900,7 @@ dependencies = [
     { name = "omnibase-core" },
     { name = "omnibase-spi" },
     { name = "opentelemetry-api" },
-    { name = "opentelemetry-exporter-otlp" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-instrumentation" },
     { name = "opentelemetry-instrumentation-aiohttp-client" },
     { name = "opentelemetry-instrumentation-asyncpg" },
@@ -1969,8 +1969,8 @@ requires-dist = [
     { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=50eeed8d8a8ff779114c60f08c99155d7f3ba35a" },
     { name = "omnibase-spi", specifier = ">=0.15.0,<0.16.0" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
-    { name = "opentelemetry-exporter-otlp", specifier = ">=1.27.0,<2.0.0" },
-    { name = "opentelemetry-instrumentation", specifier = ">=0.48b0,<0.49" },
+    { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },
+    { name = "opentelemetry-instrumentation", specifier = ">=0.48b0,<0.62" },
     { name = "opentelemetry-instrumentation-aiohttp-client", specifier = ">=0.48b0,<0.49" },
     { name = "opentelemetry-instrumentation-asyncpg", specifier = ">=0.48b0,<0.49" },
     { name = "opentelemetry-instrumentation-fastapi", specifier = ">=0.48b0,<0.49" },
@@ -1990,8 +1990,8 @@ requires-dist = [
     { name = "sqlparse", specifier = ">=0.4.4,<0.6.0" },
     { name = "structlog", specifier = ">=23.2.0,<24.0.0" },
     { name = "tenacity", specifier = ">=9.0.0,<10.0.0" },
-    { name = "textual", specifier = ">=0.89.0,<8.0.0" },
-    { name = "uvicorn", specifier = ">=0.32.0,<0.33.0" },
+    { name = "textual", specifier = ">=0.89.0,<9.0.0" },
+    { name = "uvicorn", specifier = ">=0.32.0,<0.42.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -2009,9 +2009,9 @@ dev = [
     { name = "pytest-split", specifier = ">=0.10.0,<0.11.0" },
     { name = "pytest-timeout", specifier = ">=2.3.0,<3.0.0" },
     { name = "pytest-xdist", specifier = ">=3.5.0,<4.0.0" },
-    { name = "ruff", specifier = ">=0.14.7,<0.15.0" },
+    { name = "ruff", specifier = ">=0.14.7,<0.16.0" },
     { name = "testcontainers", specifier = ">=4.9.0,<5.0.0" },
-    { name = "types-aiofiles", specifier = ">=23.2.0.20240403,<24.0.0" },
+    { name = "types-aiofiles", specifier = ">=23.2.0.20240403,<26.0.0" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20250822,<7.0.0" },
     { name = "types-requests", specifier = ">=2.32.0.20250914,<3.0.0" },
 ]
@@ -2044,19 +2044,6 @@ wheels = [
 ]
 
 [[package]]
-name = "opentelemetry-exporter-otlp"
-version = "1.27.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "opentelemetry-exporter-otlp-proto-grpc" },
-    { name = "opentelemetry-exporter-otlp-proto-http" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/fc/d3/8156cc14e8f4573a3572ee7f30badc7aabd02961a09acc72ab5f2c789ef1/opentelemetry_exporter_otlp-1.27.0.tar.gz", hash = "sha256:4a599459e623868cc95d933c301199c2367e530f089750e115599fccd67cb2a1", size = 6166, upload-time = "2024-08-28T21:35:33.746Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/59/6d/95e1fc2c8d945a734db32e87a5aa7a804f847c1657a21351df9338bd1c9c/opentelemetry_exporter_otlp-1.27.0-py3-none-any.whl", hash = "sha256:7688791cbdd951d71eb6445951d1cfbb7b6b2d7ee5948fac805d404802931145", size = 7001, upload-time = "2024-08-28T21:35:04.02Z" },
-]
-
-[[package]]
 name = "opentelemetry-exporter-otlp-proto-common"
 version = "1.27.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2066,24 +2053,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/cd/2e/7eaf4ba595fb5213cf639c9158dfb64aacb2e4c7d74bfa664af89fa111f4/opentelemetry_exporter_otlp_proto_common-1.27.0.tar.gz", hash = "sha256:159d27cf49f359e3798c4c3eb8da6ef4020e292571bd8c5604a2a573231dd5c8", size = 17860, upload-time = "2024-08-28T21:35:34.896Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/41/27/4610ab3d9bb3cde4309b6505f98b3aabca04a26aa480aa18cede23149837/opentelemetry_exporter_otlp_proto_common-1.27.0-py3-none-any.whl", hash = "sha256:675db7fffcb60946f3a5c43e17d1168a3307a94a930ecf8d2ea1f286f3d4f79a", size = 17848, upload-time = "2024-08-28T21:35:05.412Z" },
-]
-
-[[package]]
-name = "opentelemetry-exporter-otlp-proto-grpc"
-version = "1.27.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "deprecated" },
-    { name = "googleapis-common-protos" },
-    { name = "grpcio" },
-    { name = "opentelemetry-api" },
-    { name = "opentelemetry-exporter-otlp-proto-common" },
-    { name = "opentelemetry-proto" },
-    { name = "opentelemetry-sdk" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/a1/d0/c1e375b292df26e0ffebf194e82cd197e4c26cc298582bda626ce3ce74c5/opentelemetry_exporter_otlp_proto_grpc-1.27.0.tar.gz", hash = "sha256:af6f72f76bcf425dfb5ad11c1a6d6eca2863b91e63575f89bb7b4b55099d968f", size = 26244, upload-time = "2024-08-28T21:35:36.314Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8d/80/32217460c2c64c0568cea38410124ff680a9b65f6732867bbf857c4d8626/opentelemetry_exporter_otlp_proto_grpc-1.27.0-py3-none-any.whl", hash = "sha256:56b5bbd5d61aab05e300d9d62a6b3c134827bbd28d0b12f2649c2da368006c9e", size = 18541, upload-time = "2024-08-28T21:35:06.493Z" },
 ]
 
 [[package]]

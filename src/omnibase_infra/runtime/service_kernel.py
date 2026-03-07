@@ -2228,6 +2228,12 @@ def main() -> None:
     """
     configure_logging()
     logger.info("ONEX Kernel v%s initializing...", KERNEL_VERSION)
+
+    # OMN-3811: Opt-in OTEL tracing — silently skips if no endpoint configured
+    from omnibase_infra.runtime.tracing import configure_tracing
+
+    configure_tracing()
+
     exit_code = asyncio.run(bootstrap())
     sys.exit(exit_code)
 
