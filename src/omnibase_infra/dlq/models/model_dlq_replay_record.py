@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """DLQ Replay Record Model.
 
-This module provides the Pydantic model for DLQ replay records,
+The Pydantic model for DLQ replay records,
 representing the state of a message replay operation stored in PostgreSQL.
 
 Related:

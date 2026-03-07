@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """LLM Embedding Effect Node - Vector embedding generation.
 
-This module provides NodeLlmEmbeddingEffect, an effect node for generating
+NodeLlmEmbeddingEffect, an effect node for generating
 vector embeddings via pluggable handler backends.
 
 Supported Operations:

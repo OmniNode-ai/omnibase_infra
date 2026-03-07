@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Projector Plugin Loader Configuration Model.
 
-This module provides the Pydantic model for projector plugin loader configuration.
+The Pydantic model for projector plugin loader configuration.
 All fields are strongly typed to eliminate Any usage and enable proper validation.
 
 Example:

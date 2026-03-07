@@ -8,7 +8,7 @@ orchestrators to reliably detect state transitions via the Observer pattern,
 maintaining loose coupling between reducers and workflow coordinators.
 
 Architecture Overview:
-    This service implements post-commit notification publishing in the ONEX
+    Post-commit notification publishing in the ONEX
     state machine architecture:
 
     1. Reducers commit state transitions to projections

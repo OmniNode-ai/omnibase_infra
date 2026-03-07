@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# no-migration: docstring-only AI-slop cleanup
 """PostgreSQL Registration Storage Handler.
 
-This module provides a PostgreSQL-backed implementation of the registration
+A PostgreSQL-backed implementation of the registration
 storage handler protocol, wrapping existing PostgreSQL functionality with
 circuit breaker resilience.
 

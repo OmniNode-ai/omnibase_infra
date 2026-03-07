@@ -2039,7 +2039,7 @@ class HandlerGraph(
         """Build standardized ModelGraphHandlerResponse wrapped in ModelHandlerOutput.
 
         This helper method ensures consistent response formatting across all
-        graph operations, matching the pattern used by HandlerDb and HandlerConsul.
+        graph operations, matching the pattern used by HandlerDb and HandlerHttp.
 
         Args:
             typed_payload: Strongly-typed payload (query or execute).

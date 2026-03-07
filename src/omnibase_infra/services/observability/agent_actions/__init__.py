@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Agent actions observability consumer and writer.
 
-This module provides infrastructure for consuming agent action events from
+Infrastructure for consuming agent action events from
 Kafka and persisting them to PostgreSQL for observability and analytics.
 
 Moved from omniclaude as part of OMN-1743 layer-correction cleanup.

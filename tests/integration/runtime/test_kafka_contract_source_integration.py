@@ -16,7 +16,7 @@ Test Categories:
     - Concurrent Consumer Tests: Multiple KafkaContractSource instances
 
 Environment Variables:
-    KAFKA_BOOTSTRAP_SERVERS: Kafka broker address (e.g., "localhost:29092")
+    KAFKA_BOOTSTRAP_SERVERS: Kafka broker address (e.g., "localhost:19092")
 
 Related:
     - OMN-1654: KafkaContractSource (cache + discovery)
@@ -116,7 +116,7 @@ def kafka_bootstrap_servers() -> str:
     """Get Kafka bootstrap servers from environment."""
     return os.getenv(
         "KAFKA_BOOTSTRAP_SERVERS", "localhost:19092"
-    )  # kafka-fallback-ok — integration test default; 29092 is cloud bus port
+    )  # kafka-fallback-ok — integration test default; local Docker bus
 
 
 @pytest.fixture

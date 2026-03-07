@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Registration Record Model for Storage Operations.
 
-This module provides ModelRegistrationRecord, representing a complete node
+ModelRegistrationRecord, representing a complete node
 registration record for storage in backend systems (e.g., PostgreSQL).
 
 Architecture:

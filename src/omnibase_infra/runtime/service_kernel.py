@@ -861,6 +861,40 @@ async def bootstrap() -> int:
                     exc_info=True,
                 )
 
+        # 3.6. Validate platform topics exist (best-effort by default)
+        if use_kafka:
+            try:
+                from omnibase_infra.event_bus.service_topic_startup_validator import (
+                    TopicStartupValidator,
+                )
+
+                validator = TopicStartupValidator(
+                    bootstrap_servers=kafka_bootstrap_servers,
+                )
+                validation_result = await validator.validate(
+                    correlation_id=correlation_id,
+                )
+                if not validation_result.is_valid:
+                    if os.environ.get("STARTUP_VALIDATION_STRICT") == "1":
+                        raise RuntimeError(
+                            f"Missing topics: {validation_result.missing_topics}"
+                        )
+                    logger.warning(
+                        "Topic validation: %d missing (non-blocking) "
+                        "(correlation_id=%s)",
+                        len(validation_result.missing_topics),
+                        correlation_id,
+                    )
+            except RuntimeError:
+                raise
+            except Exception:
+                logger.warning(
+                    "Topic validation failed (best-effort, non-blocking) "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+
         # 4. Create and wire container for dependency injection
         container_start_time = time.time()
         container = ModelONEXContainer()
@@ -1514,8 +1548,13 @@ async def bootstrap() -> int:
         shutdown_event = asyncio.Event()
         loop = asyncio.get_running_loop()
 
+        # Track which signal triggered shutdown for diagnostics (OMN-3591)
+        shutdown_reason: str = "unknown"
+
         def handle_shutdown(sig: signal.Signals) -> None:
             """Handle shutdown signal with correlation tracking."""
+            nonlocal shutdown_reason
+            shutdown_reason = f"signal:{sig.name}"
             logger.info(
                 "Received %s, initiating graceful shutdown... (correlation_id=%s)",
                 sig.name,
@@ -1544,7 +1583,9 @@ async def bootstrap() -> int:
                 Uses call_soon_threadsafe to safely communicate with the event
                 loop from the signal handler thread.
                 """
+                nonlocal shutdown_reason
                 sig = signal.Signals(signum)
+                shutdown_reason = f"signal:{sig.name}"
                 logger.info(
                     "Received %s, initiating graceful shutdown... (correlation_id=%s)",
                     sig.name,
@@ -1749,9 +1790,13 @@ async def bootstrap() -> int:
         # Plugin summary for banner
         plugin_names = [p.plugin_id for p in activated_plugins]
 
+        # Runtime profile for operator disambiguation (OMN-3591)
+        runtime_profile = os.getenv("RUNTIME_PROFILE", "default")
+
         banner_lines = [
             "=" * 60,
             f"ONEX Runtime Kernel v{KERNEL_VERSION}",
+            f"Profile: {runtime_profile} (PID {os.getpid()})",
             f"Environment: {environment}",
             f"Contracts: {contracts_dir}",
             f"Event Bus: {event_bus_type} (group: {config.consumer_group})",
@@ -1782,18 +1827,67 @@ async def bootstrap() -> int:
             },
         )
 
+        # Flush log handlers so Docker log driver captures all startup messages
+        # before the process blocks on shutdown_event.wait(). Without this,
+        # buffered log output may not appear in `docker logs` until the process
+        # exits, making it look like the kernel never entered the run loop
+        # (OMN-3591).
+        for handler in logging.root.handlers:
+            handler.flush()
+
+        # Explicit run-loop entry log (OMN-3591)
+        # This message confirms the kernel reached the blocking wait and did
+        # not exit prematurely during bootstrap. If this message is absent
+        # from container logs, the kernel exited before entering the run loop.
+        logger.info(
+            "RUN_LOOP_ENTERED: Kernel idle, waiting for shutdown signal "
+            "(profile=%s, pid=%d, correlation_id=%s)",
+            runtime_profile,
+            os.getpid(),
+            correlation_id,
+        )
+        # Flush again to guarantee the run-loop-entered message is visible
+        for handler in logging.root.handlers:
+            handler.flush()
+
         # Wait for shutdown signal
         await shutdown_event.wait()
 
         grace_period = config.shutdown.grace_period_seconds
         shutdown_start_time = time.time()
         logger.info(
-            "Shutdown signal received, stopping runtime (timeout=%ss, correlation_id=%s)",
+            "RUN_LOOP_EXITED: Shutdown signal received (reason=%s, timeout=%ss, "
+            "correlation_id=%s)",
+            shutdown_reason,
             grace_period,
             correlation_id,
         )
 
-        # Stop plugin consumers first (unsubscribe callbacks from start_consumers)
+        # Stop runtime FIRST so introspection tasks flush their final events
+        # while the event bus is still active. Moving this before consumer
+        # unsubscribe fixes the ~29 introspection errors per shutdown cycle
+        # (OMN-3593).
+        try:
+            runtime_stop_start_time = time.time()
+            await asyncio.wait_for(runtime.stop(), timeout=grace_period)
+            runtime_stop_duration = time.time() - runtime_stop_start_time
+            logger.debug(
+                "Runtime stopped in %.3fs (correlation_id=%s)",
+                runtime_stop_duration,
+                correlation_id,
+                extra={
+                    "duration_seconds": runtime_stop_duration,
+                },
+            )
+        except TimeoutError:
+            logger.warning(
+                "Graceful shutdown timed out after %s seconds, forcing stop (correlation_id=%s)",
+                grace_period,
+                correlation_id,
+            )
+        runtime = None  # Mark as stopped to prevent double-stop in finally
+
+        # Stop plugin consumers (unsubscribe callbacks from start_consumers)
         for unsub_callback in plugin_unsubscribe_callbacks:
             try:
                 await unsub_callback()
@@ -1870,27 +1964,6 @@ async def bootstrap() -> int:
                     },
                 )
             health_server = None
-
-        # Stop runtime with timeout
-        try:
-            runtime_stop_start_time = time.time()
-            await asyncio.wait_for(runtime.stop(), timeout=grace_period)
-            runtime_stop_duration = time.time() - runtime_stop_start_time
-            logger.debug(
-                "Runtime stopped in %.3fs (correlation_id=%s)",
-                runtime_stop_duration,
-                correlation_id,
-                extra={
-                    "duration_seconds": runtime_stop_duration,
-                },
-            )
-        except TimeoutError:
-            logger.warning(
-                "Graceful shutdown timed out after %s seconds, forcing stop (correlation_id=%s)",
-                grace_period,
-                correlation_id,
-            )
-        runtime = None  # Mark as stopped to prevent double-stop in finally
 
         # Shutdown plugins in LIFO order (Last In, First Out)
         # This ensures plugins activated later are shut down before plugins they

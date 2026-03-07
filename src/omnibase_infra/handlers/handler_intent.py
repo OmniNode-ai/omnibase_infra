@@ -52,7 +52,7 @@ _SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
 class HandlerIntent(MixinEnvelopeExtraction):  # DEMO ONLY
     """Intent handler wrapping HandlerGraph for intent-specific operations.
 
-    This handler provides a simplified interface for storing and querying
+    A simplified interface for storing and querying
     intents in the graph database. It wraps HandlerGraph and translates
     intent-specific operations to graph operations.
 

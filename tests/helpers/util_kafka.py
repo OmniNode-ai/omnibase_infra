@@ -27,7 +27,7 @@ Configuration Validation:
 IPv6 Address Support:
     Both bracketed and bare IPv6 addresses are supported:
     - Bracketed with port: "[::1]:9092" or "[2001:db8::1]:9092"
-    - Bare without port: "::1" or "2001:db8::1" (uses default port 29092)
+    - Bare without port: "::1" or "2001:db8::1" (uses default port 19092)
 
     Bare IPv6 addresses with apparent port suffixes (e.g., "::1:9092") are treated
     as the full IPv6 address with default port, since the format is ambiguous.
@@ -198,14 +198,14 @@ KAFKA_ERROR_REMEDIATION_HINTS: dict[int, str] = {
 # These can be overridden via environment variables in test fixtures.
 # =============================================================================
 
-_KAFKA_DEFAULT_PORT_FALLBACK = 29092
+_KAFKA_DEFAULT_PORT_FALLBACK = 19092
 """Fallback port when KAFKA_DEFAULT_PORT env var is not set or invalid."""
 
 
 def _get_kafka_default_port() -> int:
     """Get the default Kafka port from environment or fallback.
 
-    Reads from KAFKA_DEFAULT_PORT environment variable. Falls back to 29092
+    Reads from KAFKA_DEFAULT_PORT environment variable. Falls back to 19092
     (the standard external Redpanda port) if not set or invalid.
 
     Returns:
@@ -222,12 +222,12 @@ def _get_kafka_default_port() -> int:
 KAFKA_DEFAULT_PORT = _get_kafka_default_port()
 """Default Kafka/Redpanda port for external connections (outside Docker network).
 
-The default port 29092 is the external advertised port for Redpanda/Kafka
+The default port 19092 is the external advertised port for Redpanda/Kafka
 when running in Docker. Internal Docker connections typically use port 9092.
 
 This value is determined by:
 1. KAFKA_DEFAULT_PORT environment variable (if set and valid)
-2. Fallback to 29092 (standard Redpanda external port)
+2. Fallback to 19092 (standard Redpanda external port)
 
 This value is used when:
 - Bootstrap servers string has no explicit port
@@ -372,7 +372,7 @@ def _is_likely_bare_ipv6(address: str, warn_ambiguous: bool = True) -> bool:
         if last_colon_idx > 0:
             last_segment: str = address[last_colon_idx + 1 :]
             # Check if last segment looks like a port number (4-5 decimal digits)
-            # Common ports: 9092 (Kafka), 29092 (Redpanda external), etc.
+            # Common ports: 9092 (Kafka), 19092 (Redpanda external), etc.
             if last_segment.isdigit() and len(last_segment) >= 4:
                 port_value: int = int(last_segment)
                 if 1024 <= port_value <= 65535:
@@ -414,9 +414,9 @@ def normalize_ipv6_bootstrap_server(bootstrap_server: str) -> str:
         >>> normalize_ipv6_bootstrap_server("[::1]:9092")
         '[::1]:9092'
         >>> normalize_ipv6_bootstrap_server("::1")
-        '[::1]:29092'
+        '[::1]:19092'
         >>> normalize_ipv6_bootstrap_server("2001:db8::1")
-        '[2001:db8::1]:29092'
+        '[2001:db8::1]:19092'
         >>> normalize_ipv6_bootstrap_server("192.168.1.1:9092")  # kafka-fallback-ok
         '192.168.1.1:9092'  # kafka-fallback-ok
     """
@@ -530,7 +530,7 @@ class KafkaConfigValidationResult:
     Attributes:
         is_valid: True if the configuration is valid and usable.
         host: Parsed host (or "<not set>" if invalid).
-        port: Parsed port (or "29092" default if not specified).
+        port: Parsed port (or "19092" default if not specified).
         error_message: Human-readable error message if invalid, None if valid.
         skip_reason: Pytest skip reason if tests should be skipped, None if valid.
     """
@@ -673,7 +673,7 @@ def validate_bootstrap_servers(
         >>> result = validate_bootstrap_servers("::1")
         >>> assert result.is_valid
         >>> assert result.host == "::1"
-        >>> assert result.port == "29092"  # Default port for bare IPv6
+        >>> assert result.port == "19092"  # Default port for bare IPv6
     """
     # Use string conversion of default port for consistent return type
     default_port: str = str(KAFKA_DEFAULT_PORT)
@@ -789,13 +789,13 @@ def parse_bootstrap_servers(bootstrap_servers: str) -> tuple[str, str]:
     """Parse KAFKA_BOOTSTRAP_SERVERS into (host, port) tuple for error messages.
 
     Handles various formats safely:
-    - Empty/whitespace-only: Returns ("<not set>", "29092")
+    - Empty/whitespace-only: Returns ("<not set>", "19092")
     - "hostname:port": Returns ("hostname", "port")
-    - "hostname" (no port): Returns ("hostname", "29092")
+    - "hostname" (no port): Returns ("hostname", "19092")
     - "[::1]:9092" (bracketed IPv6 with port): Returns ("[::1]", "9092")
-    - "::1" (bare IPv6 without port): Returns ("::1", "29092")
-    - "2001:db8::1" (bare IPv6 without port): Returns ("2001:db8::1", "29092")
-    - "::ffff:192.168.1.1" (IPv4-mapped IPv6): Returns ("::ffff:192.168.1.1", "29092")
+    - "::1" (bare IPv6 without port): Returns ("::1", "19092")
+    - "2001:db8::1" (bare IPv6 without port): Returns ("2001:db8::1", "19092")
+    - "::ffff:192.168.1.1" (IPv4-mapped IPv6): Returns ("::ffff:192.168.1.1", "19092")
 
     IPv6 Address Handling:
         Bare IPv6 addresses (without brackets) are treated as the full host with
@@ -823,9 +823,9 @@ def parse_bootstrap_servers(bootstrap_servers: str) -> tuple[str, str]:
         >>> parse_bootstrap_servers("[::1]:9092")
         ('[::1]', '9092')
         >>> parse_bootstrap_servers("::1")
-        ('::1', '29092')
+        ('::1', '19092')
         >>> parse_bootstrap_servers("2001:db8::1")
-        ('2001:db8::1', '29092')
+        ('2001:db8::1', '19092')
     """
     # Use string conversion of default port for consistent return type
     default_port: str = str(KAFKA_DEFAULT_PORT)

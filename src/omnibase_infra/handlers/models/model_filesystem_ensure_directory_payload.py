@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Filesystem Ensure Directory Payload Model.
 
-This module provides the Pydantic model for the filesystem.ensure_directory operation
+The Pydantic model for the filesystem.ensure_directory operation
 payload, replacing untyped dict[str, object] patterns.
 """
 

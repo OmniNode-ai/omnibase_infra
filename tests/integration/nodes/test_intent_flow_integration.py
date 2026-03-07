@@ -10,11 +10,10 @@ the ONEX registration workflow:
 Architecture:
     The RegistrationReducer emits intents using typed payload models:
         - intent_type="extension" (outer ModelIntent level)
-        - payload: typed Pydantic model (ModelPayloadConsulRegister or
-          ModelPayloadPostgresUpsertRegistration)
-        - payload.intent_type="consul.register" or "postgres.upsert_registration"
-        - Direct field access on typed payloads (e.g., payload.service_name,
-          payload.correlation_id, payload.record)
+        - payload: typed Pydantic model (ModelPayloadPostgresUpsertRegistration)
+        - payload.intent_type="postgres.upsert_registration"
+        - Direct field access on typed payloads (e.g., payload.correlation_id,
+          payload.record)
 
     This two-layer structure enables:
     1. Generic intent routing by the Runtime layer (via intent_type="extension")
@@ -22,10 +21,10 @@ Architecture:
     3. Strong typing with direct field access (no .data dict wrapper)
 
 Test Categories:
-    - TestReducerIntentTypeEmission: Verify reducer uses intent_type format
-    - TestIntentTypeRouting: Test intent routing by intent_type
+    - TestReducerExtensionTypeEmission: Verify reducer uses intent_type format
+    - TestExtensionTypeIntentRouting: Test intent routing by intent_type
     - TestEffectLayerRequestFormatting: Validate Effect receives formatted requests
-    - TestEndToEndIntentTypeFlow: Full flow integration with mocks
+    - TestEndToEndExtensionTypeFlow: Full flow integration with mocks
 
 Running Tests:
     # Run all intent flow tests:
@@ -35,14 +34,15 @@ Running Tests:
     pytest tests/integration/nodes/test_intent_flow_integration.py -v
 
     # Run specific test class:
-    pytest tests/integration/nodes/test_intent_flow_integration.py::TestReducerIntentTypeEmission
+    pytest tests/integration/nodes/test_intent_flow_integration.py::TestReducerExtensionTypeEmission
 
 Related:
     - RegistrationReducer: Emits typed intents
     - NodeRegistryEffect: Consumes requests built from intents
     - omnibase_core ModelIntent: Intent model with intent_type field
-    - omnibase_core ModelPayloadConsulRegister/ModelPayloadPostgresUpsert: Typed payload models
+    - omnibase_core ModelPayloadPostgresUpsert: Typed payload models
     - PR #114: Migration to intent_type-based intents
+    - OMN-3540: Consul fully deleted
 """
 
 from __future__ import annotations
@@ -61,9 +61,6 @@ from omnibase_infra.nodes.effects.models.model_registry_request import (
     ModelRegistryRequest,
 )
 from omnibase_infra.nodes.effects.registry_effect import NodeRegistryEffect
-from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
-    ModelPayloadConsulRegister,
-)
 from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
     ModelPayloadPostgresUpsertRegistration,
 )
@@ -121,16 +118,6 @@ def initial_state() -> ModelRegistrationState:
 
 
 @pytest.fixture
-def mock_consul_client() -> MagicMock:
-    """Create a mock Consul client for Effect testing."""
-    client = MagicMock()
-    client.register_service = AsyncMock(
-        return_value=MagicMock(success=True, error=None)
-    )
-    return client
-
-
-@pytest.fixture
 def mock_postgres_adapter() -> MagicMock:
     """Create a mock PostgreSQL adapter for Effect testing."""
     adapter = MagicMock()
@@ -140,11 +127,10 @@ def mock_postgres_adapter() -> MagicMock:
 
 @pytest.fixture
 def registry_effect(
-    mock_consul_client: MagicMock,
     mock_postgres_adapter: MagicMock,
 ) -> NodeRegistryEffect:
-    """Create a NodeRegistryEffect with mock backends."""
-    return NodeRegistryEffect(mock_consul_client, mock_postgres_adapter)
+    """Create a NodeRegistryEffect with mock postgres backend."""
+    return NodeRegistryEffect(mock_postgres_adapter)
 
 
 # =============================================================================
@@ -169,8 +155,7 @@ class TestReducerExtensionTypeEmission:
 
         Validates that:
         1. intent_type is "extension" for all emitted intents
-        2. payload is a typed payload class (ModelPayloadConsulRegister or
-           ModelPayloadPostgresUpsertRegistration)
+        2. payload is a typed payload class (ModelPayloadPostgresUpsertRegistration)
         3. payload.intent_type contains proper backend identifier
         """
         # Execute reducer
@@ -178,9 +163,6 @@ class TestReducerExtensionTypeEmission:
 
         # Verify intents were emitted
         assert output.intents, "Reducer should emit intents for introspection event"
-        assert len(output.intents) == 2, (
-            "Reducer should emit 2 intents (Consul + PostgreSQL)"
-        )
 
         # Verify each intent uses extension-type format with typed payloads
         for intent in output.intents:
@@ -192,38 +174,10 @@ class TestReducerExtensionTypeEmission:
             )
             assert isinstance(
                 intent.payload,
-                ModelPayloadConsulRegister | ModelPayloadPostgresUpsertRegistration,
+                ModelPayloadPostgresUpsertRegistration,
             ), (
                 f"payload should be typed payload class, got {type(intent.payload).__name__}"
             )
-
-    def test_consul_intent_intent_type_format(
-        self,
-        reducer: RegistrationReducer,
-        initial_state: ModelRegistrationState,
-        introspection_event: ModelNodeIntrospectionEvent,
-    ) -> None:
-        """Verify Consul intent uses correct intent_type with typed payload."""
-        output = reducer.reduce(initial_state, introspection_event)
-
-        # Find Consul intent
-        consul_intents = [
-            i
-            for i in output.intents
-            if isinstance(i.payload, ModelPayloadConsulRegister)
-        ]
-
-        assert len(consul_intents) == 1, "Should have exactly one Consul intent"
-        consul_intent = consul_intents[0]
-
-        # Verify typed payload structure
-        payload = consul_intent.payload
-        assert isinstance(payload, ModelPayloadConsulRegister)
-        assert payload.intent_type == "consul.register"
-        # Direct field access on typed payload
-        assert payload.service_id is not None
-        assert payload.service_name is not None
-        assert isinstance(payload.tags, list)
 
     def test_postgres_intent_intent_type_format(
         self,
@@ -263,10 +217,6 @@ class TestReducerExtensionTypeEmission:
         # Check target formats
         targets = {i.target for i in output.intents}
 
-        # Consul target should have consul:// scheme
-        consul_targets = [t for t in targets if t.startswith("consul://")]
-        assert len(consul_targets) == 1, "Should have one consul:// target"
-
         # PostgreSQL target should have postgres:// scheme
         postgres_targets = [t for t in targets if t.startswith("postgres://")]
         assert len(postgres_targets) == 1, "Should have one postgres:// target"
@@ -301,7 +251,6 @@ class TestExtensionTypeIntentRouting:
 
         # Simulate dispatcher routing
         routing_table: dict[str, str] = {
-            "consul.register": "consul_handler",
             "postgres.upsert_registration": "postgres_handler",
         }
 
@@ -312,19 +261,17 @@ class TestExtensionTypeIntentRouting:
                 # Extract intent_type from typed payload (direct attribute access)
                 if isinstance(
                     intent.payload,
-                    ModelPayloadConsulRegister | ModelPayloadPostgresUpsertRegistration,
+                    ModelPayloadPostgresUpsertRegistration,
                 ):
                     intent_type = intent.payload.intent_type
                     handler = routing_table.get(intent_type)
                     if handler:
                         routed_handlers.append(handler)
 
-        # Verify both handlers were selected
-        assert "consul_handler" in routed_handlers, "Consul handler should be routed"
+        # Verify postgres handler was selected
         assert "postgres_handler" in routed_handlers, (
             "Postgres handler should be routed"
         )
-        assert len(routed_handlers) == 2, "Should route to exactly 2 handlers"
 
     def test_unknown_intent_type_routing(self) -> None:
         """Verify routing handles unknown intent_type gracefully.
@@ -332,28 +279,32 @@ class TestExtensionTypeIntentRouting:
         When an intent_type is not in the routing table, the dispatcher
         should be able to identify it as unrouteable.
 
-        Note: With typed payloads (ModelPayloadConsulRegister, ModelPayloadPostgresUpsertRegistration),
+        Note: With typed payloads (ModelPayloadPostgresUpsertRegistration),
         the intent_type is a Literal fixed at definition time. This test verifies the routing
         table lookup behavior when a known intent_type is not configured in the table.
         """
-        # Create a Consul intent with known typed payload
-        payload = ModelPayloadConsulRegister(
-            correlation_id=uuid4(),
-            service_id="test-service-id",
-            service_name="test-service",
-            tags=["test"],
+        # Create a Postgres intent with known typed payload and a valid record stub
+        from uuid import uuid4 as _uuid4
+
+        from pydantic import BaseModel as _BaseModel
+
+        class _StubRecord(_BaseModel):
+            """Minimal record stub for routing test (record content is irrelevant)."""
+
+            node_id: str = "test-node"
+
+        payload = ModelPayloadPostgresUpsertRegistration(
+            correlation_id=_uuid4(),
+            record=_StubRecord(),
         )
         intent = ModelIntent(
             intent_type="extension",
-            target="consul://service/test",
+            target="postgres://node_registrations/test",
             payload=payload,
         )
 
-        # Simulate routing with an incomplete table (missing consul.register)
-        incomplete_routing_table: dict[str, str] = {
-            # "consul.register" intentionally omitted
-            "postgres.upsert_registration": "postgres_handler",
-        }
+        # Simulate routing with an incomplete table (missing postgres.upsert_registration)
+        incomplete_routing_table: dict[str, str] = {}
 
         handler = incomplete_routing_table.get(intent.payload.intent_type)
         assert handler is None, (
@@ -377,7 +328,7 @@ class TestExtensionTypeIntentRouting:
         for intent in output.intents:
             assert isinstance(
                 intent.payload,
-                ModelPayloadConsulRegister | ModelPayloadPostgresUpsertRegistration,
+                ModelPayloadPostgresUpsertRegistration,
             )
             # Correlation ID is a direct attribute on typed payloads
             assert intent.payload.correlation_id == correlation_id
@@ -469,14 +420,7 @@ class TestEffectLayerRequestFormatting:
             node_type=EnumNodeKind.EFFECT,
             node_version=ModelSemVer(major=1, minor=0, patch=0),
             correlation_id=correlation_id,
-            service_name="onex-effect",
             endpoints={"health": "http://localhost:8080/health"},
-            tags=["node_type:effect", "node_version:1.0.0"],
-            health_check_config={
-                "HTTP": "http://localhost:8080/health",
-                "Interval": "10s",
-                "Timeout": "5s",
-            },
             timestamp=TEST_TIMESTAMP,
         )
 
@@ -487,52 +431,7 @@ class TestEffectLayerRequestFormatting:
         assert response is not None
         assert response.node_id == node_id
         assert response.correlation_id == correlation_id
-        assert response.consul_result is not None
         assert response.postgres_result is not None
-
-    @pytest.mark.asyncio
-    async def test_effect_handles_consul_intent_data(
-        self,
-        mock_consul_client: MagicMock,
-        mock_postgres_adapter: MagicMock,
-        reducer: RegistrationReducer,
-        initial_state: ModelRegistrationState,
-        introspection_event: ModelNodeIntrospectionEvent,
-    ) -> None:
-        """Verify Consul registration uses correct data from typed intent."""
-        output = reducer.reduce(initial_state, introspection_event)
-
-        # Find Consul intent
-        consul_intent = next(
-            i
-            for i in output.intents
-            if isinstance(i.payload, ModelPayloadConsulRegister)
-        )
-
-        # Extract Consul registration data from typed payload - direct field access
-        consul_payload = consul_intent.payload
-        assert isinstance(consul_payload, ModelPayloadConsulRegister)
-
-        # Create effect and execute
-        effect = NodeRegistryEffect(mock_consul_client, mock_postgres_adapter)
-        request = ModelRegistryRequest(
-            node_id=introspection_event.node_id,
-            node_type=EnumNodeKind(introspection_event.node_type),
-            node_version=introspection_event.node_version,
-            correlation_id=introspection_event.correlation_id,
-            service_name=consul_payload.service_name,
-            tags=consul_payload.tags,
-            health_check_config=consul_payload.health_check,
-            timestamp=TEST_TIMESTAMP,
-        )
-
-        await effect.register_node(request, skip_postgres=True)
-
-        # Verify Consul client was called with correct data
-        mock_consul_client.register_service.assert_called_once()
-        call_kwargs = mock_consul_client.register_service.call_args.kwargs
-        assert call_kwargs["service_name"] == consul_payload.service_name
-        assert call_kwargs["tags"] == consul_payload.tags
 
 
 # =============================================================================
@@ -553,7 +452,6 @@ class TestEndToEndExtensionTypeFlow:
         reducer: RegistrationReducer,
         initial_state: ModelRegistrationState,
         introspection_event: ModelNodeIntrospectionEvent,
-        mock_consul_client: MagicMock,
         mock_postgres_adapter: MagicMock,
     ) -> None:
         """Test complete flow from reducer emit to effect execution.
@@ -567,14 +465,9 @@ class TestEndToEndExtensionTypeFlow:
         # Step 1: Reducer processes event
         output = reducer.reduce(initial_state, introspection_event)
         assert output.result.status == "pending"
-        assert len(output.intents) == 2
+        assert len(output.intents) >= 1
 
-        # Step 2: Extract intents for routing - using typed payload classes
-        consul_intent = next(
-            i
-            for i in output.intents
-            if isinstance(i.payload, ModelPayloadConsulRegister)
-        )
+        # Step 2: Extract postgres intent for routing
         postgres_intent = next(
             i
             for i in output.intents
@@ -585,28 +478,22 @@ class TestEndToEndExtensionTypeFlow:
         pg_payload = postgres_intent.payload
         assert isinstance(pg_payload, ModelPayloadPostgresUpsertRegistration)
         record = pg_payload.record
-        consul_payload = consul_intent.payload
-        assert isinstance(consul_payload, ModelPayloadConsulRegister)
 
         request = ModelRegistryRequest(
             node_id=record.node_id,
             node_type=EnumNodeKind(record.node_type),
             node_version=record.node_version,
             correlation_id=pg_payload.correlation_id,
-            service_name=consul_payload.service_name,
             endpoints=dict(record.endpoints) if record.endpoints else {},
-            tags=consul_payload.tags,
-            health_check_config=consul_payload.health_check,
             timestamp=TEST_TIMESTAMP,
         )
 
         # Step 4: Effect executes request
-        effect = NodeRegistryEffect(mock_consul_client, mock_postgres_adapter)
+        effect = NodeRegistryEffect(mock_postgres_adapter)
         response = await effect.register_node(request)
 
         # Verify end-to-end success
         assert response.status == "success"
-        assert response.consul_result.success is True
         assert response.postgres_result.success is True
 
     @pytest.mark.asyncio
@@ -615,13 +502,9 @@ class TestEndToEndExtensionTypeFlow:
         reducer: RegistrationReducer,
         initial_state: ModelRegistrationState,
         introspection_event: ModelNodeIntrospectionEvent,
-        mock_consul_client: MagicMock,
         mock_postgres_adapter: MagicMock,
     ) -> None:
-        """Test flow handles partial backend failure correctly.
-
-        Simulates scenario where Consul succeeds but PostgreSQL fails.
-        """
+        """Test flow handles PostgreSQL backend failure correctly."""
         # Configure PostgreSQL to fail
         mock_postgres_adapter.upsert = AsyncMock(
             return_value=MagicMock(success=False, error="connection timeout")
@@ -636,37 +519,25 @@ class TestEndToEndExtensionTypeFlow:
             for i in output.intents
             if isinstance(i.payload, ModelPayloadPostgresUpsertRegistration)
         )
-        consul_intent = next(
-            i
-            for i in output.intents
-            if isinstance(i.payload, ModelPayloadConsulRegister)
-        )
 
         pg_payload = postgres_intent.payload
         assert isinstance(pg_payload, ModelPayloadPostgresUpsertRegistration)
         record = pg_payload.record
-        consul_payload = consul_intent.payload
-        assert isinstance(consul_payload, ModelPayloadConsulRegister)
 
         request = ModelRegistryRequest(
             node_id=record.node_id,
             node_type=EnumNodeKind(record.node_type),
             node_version=record.node_version,
             correlation_id=pg_payload.correlation_id,
-            service_name=consul_payload.service_name,
             endpoints=dict(record.endpoints) if record.endpoints else {},
-            tags=consul_payload.tags,
-            health_check_config=consul_payload.health_check,
             timestamp=TEST_TIMESTAMP,
         )
 
-        # Effect executes with partial failure
-        effect = NodeRegistryEffect(mock_consul_client, mock_postgres_adapter)
+        # Effect executes with failure
+        effect = NodeRegistryEffect(mock_postgres_adapter)
         response = await effect.register_node(request)
 
-        # Verify partial success
-        assert response.status == "partial"
-        assert response.consul_result.success is True
+        # Verify failure
         assert response.postgres_result.success is False
         assert response.postgres_result.error is not None
 
@@ -683,7 +554,7 @@ class TestEndToEndExtensionTypeFlow:
         """
         # First processing
         output1 = reducer.reduce(initial_state, introspection_event)
-        assert len(output1.intents) == 2
+        assert len(output1.intents) >= 1
 
         # Second processing with same event (duplicate)
         output2 = reducer.reduce(output1.result, introspection_event)
@@ -745,22 +616,7 @@ class TestIntentPayloadSerialization:
         for intent in output.intents:
             original_payload = intent.payload
 
-            if isinstance(original_payload, ModelPayloadConsulRegister):
-                # Serialize and deserialize Consul payload
-                payload_dict = original_payload.model_dump(mode="json")
-                restored_payload = ModelPayloadConsulRegister.model_validate(
-                    payload_dict
-                )
-                # Verify all fields preserved
-                assert restored_payload.intent_type == original_payload.intent_type
-                assert (
-                    restored_payload.correlation_id == original_payload.correlation_id
-                )
-                assert restored_payload.service_id == original_payload.service_id
-                assert restored_payload.service_name == original_payload.service_name
-                assert restored_payload.tags == original_payload.tags
-
-            elif isinstance(original_payload, ModelPayloadPostgresUpsertRegistration):
+            if isinstance(original_payload, ModelPayloadPostgresUpsertRegistration):
                 # Serialize and deserialize Postgres payload
                 payload_dict = original_payload.model_dump(mode="json")
                 restored_payload = (

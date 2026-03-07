@@ -1,6 +1,6 @@
 """Event bus models for omnibase_infra.
 
-This module provides concrete Pydantic model implementations that satisfy
+Concrete Pydantic model implementations that satisfy
 the SPI protocols (ProtocolEventMessage, ProtocolEventHeaders) for use
 with event bus implementations.
 

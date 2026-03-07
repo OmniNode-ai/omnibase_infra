@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Idempotency Store Health Check Result Model.
 
-This module provides the Pydantic model for health check results from
+The Pydantic model for health check results from
 idempotency stores, replacing untyped dict[str, object] returns with
 strongly-typed model instances.
 

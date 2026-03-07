@@ -10,7 +10,6 @@ The plugin handles:
     - PostgreSQL pool creation for registration projections
     - Projector discovery and loading from contracts
     - Schema initialization for registration projection table
-    - Consul handler initialization (optional)
     - Handler wiring (HandlerNodeIntrospected, HandlerRuntimeTick, etc.)
     - Dispatcher creation and introspection event consumer startup
 
@@ -23,8 +22,6 @@ Design Pattern:
 Configuration:
     The plugin activates based on environment variables:
     - OMNIBASE_INFRA_DB_URL: Required for plugin activation (PostgreSQL DSN)
-    - CONSUL_HOST: Optional, enables Consul dual-registration
-    - CONSUL_PORT: Optional (default: 8500)
 
 Example Usage:
     ```python
@@ -73,7 +70,6 @@ if TYPE_CHECKING:
 
     import asyncpg
 
-    from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.projectors.snapshot_publisher_registration import (
         SnapshotPublisherRegistration,
     )
@@ -186,7 +182,6 @@ class PluginRegistration:
     Resources Created:
         - PostgreSQL connection pool (asyncpg.Pool)
         - ProjectorShell for registration projections
-        - HandlerConsul for dual-registration (optional)
         - Introspection event consumer
 
     Thread Safety:
@@ -197,7 +192,6 @@ class PluginRegistration:
     Attributes:
         _pool: PostgreSQL connection pool (created in initialize())
         _projector: ProjectorShell for projections (created in initialize())
-        _consul_handler: HandlerConsul for dual-registration (optional)
         _wiring: EventBusSubcontractWiring for dispatch engine consumers
     """
 
@@ -205,7 +199,6 @@ class PluginRegistration:
         """Initialize the plugin with empty state."""
         self._pool: asyncpg.Pool | None = None
         self._projector: ProjectorShell | None = None
-        self._consul_handler: HandlerConsul | None = None
         self._snapshot_publisher: SnapshotPublisherRegistration | None = None
         self._wiring: EventBusSubcontractWiring | None = None
         self._shutdown_in_progress: bool = False
@@ -230,11 +223,6 @@ class PluginRegistration:
     def projector(self) -> ProjectorShell | None:
         """Return the projector (for external access)."""
         return self._projector
-
-    @property
-    def consul_handler(self) -> HandlerConsul | None:
-        """Return the Consul handler (for external access)."""
-        return self._consul_handler
 
     @property
     def snapshot_publisher(self) -> SnapshotPublisherRegistration | None:
@@ -273,7 +261,6 @@ class PluginRegistration:
         - PostgreSQL connection pool
         - ProjectorShell from contract discovery
         - Registration projection schema
-        - HandlerConsul (if CONSUL_HOST is set)
 
         Args:
             config: Plugin configuration with container and correlation_id.
@@ -350,12 +337,7 @@ class PluginRegistration:
             await self._initialize_schema(config)
             resources_created.append("registration_schema")
 
-            # 4. Initialize Consul handler (optional)
-            await self._initialize_consul_handler(config)
-            if self._consul_handler is not None:
-                resources_created.append("consul_handler")
-
-            # 5. Initialize SnapshotPublisher (optional, requires Kafka)
+            # 4. Initialize SnapshotPublisher (optional, requires Kafka)
             await self._initialize_snapshot_publisher(config)
             if self._snapshot_publisher is not None:
                 resources_created.append("snapshot_publisher")
@@ -697,65 +679,6 @@ class PluginRegistration:
                     extra={"error_type": type(schema_error).__name__},
                 )
 
-    async def _initialize_consul_handler(self, config: ModelDomainPluginConfig) -> None:
-        """Initialize Consul handler if configured."""
-        correlation_id = config.correlation_id
-
-        consul_host = os.getenv("CONSUL_HOST")
-        if not consul_host:
-            logger.debug(
-                "CONSUL_HOST not set, Consul registration disabled (correlation_id=%s)",
-                correlation_id,
-            )
-            return
-
-        _MIN_PORT = 1
-        _MAX_PORT = 65535
-        try:
-            consul_port = int(os.getenv("CONSUL_PORT", "8500"))
-            if not (_MIN_PORT <= consul_port <= _MAX_PORT):
-                logger.warning(
-                    "CONSUL_PORT=%d out of range (%d-%d), falling back to 8500 "
-                    "(correlation_id=%s)",
-                    consul_port,
-                    _MIN_PORT,
-                    _MAX_PORT,
-                    correlation_id,
-                )
-                consul_port = 8500
-        except (ValueError, TypeError):
-            logger.warning(
-                "Invalid CONSUL_PORT value %r, falling back to 8500 "
-                "(correlation_id=%s)",
-                os.getenv("CONSUL_PORT"),
-                correlation_id,
-            )
-            consul_port = 8500
-
-        try:
-            # Deferred import: Only load HandlerConsul when Consul is configured
-            from omnibase_infra.handlers import HandlerConsul
-
-            self._consul_handler = HandlerConsul(config.container)
-            await self._consul_handler.initialize(
-                {"host": consul_host, "port": consul_port}
-            )
-            logger.info(
-                "HandlerConsul initialized for dual registration (correlation_id=%s)",
-                correlation_id,
-                extra={"consul_host": consul_host, "consul_port": consul_port},
-            )
-        except Exception as consul_error:
-            # Log warning but continue without Consul (PostgreSQL is source of truth)
-            logger.warning(
-                "Failed to initialize HandlerConsul, proceeding without Consul: %s "
-                "(correlation_id=%s)",
-                sanitize_error_message(consul_error),
-                correlation_id,
-                extra={"error_type": type(consul_error).__name__},
-            )
-            self._consul_handler = None
-
     async def _initialize_snapshot_publisher(
         self, config: ModelDomainPluginConfig
     ) -> None:
@@ -862,7 +785,6 @@ class PluginRegistration:
             self._pool = None
 
         self._projector = None
-        self._consul_handler = None
 
     async def wire_handlers(
         self,
@@ -900,7 +822,6 @@ class PluginRegistration:
                 config.container,
                 self._pool,
                 projector=self._projector,
-                consul_handler=self._consul_handler,
                 snapshot_publisher=self._snapshot_publisher,
                 event_bus=config.event_bus,
                 correlation_id=correlation_id,
@@ -1255,7 +1176,7 @@ class PluginRegistration:
         Reads the intent_routing_table from the contract and registers
         appropriate effect adapters with the IntentExecutor. Effect adapters
         are created only for intent types where the required infrastructure
-        resources (projector, consul_handler) are available.
+        resources (projector, pool) are available.
 
         When a config with a service_registry is available, effect adapters
         are also registered in the DI container for discoverability and
@@ -1293,8 +1214,6 @@ class PluginRegistration:
         _protocol_resources = {
             "postgres.upsert_registration": self._projector is not None,
             "postgres.update_registration": self._pool is not None,
-            "consul.register": self._consul_handler is not None,
-            "consul.deregister": self._consul_handler is not None,
         }
         wirable_intent_types: set[str] = set()
         for it in routing_table:
@@ -1354,95 +1273,6 @@ class PluginRegistration:
                     correlation_id,
                 )
 
-            elif intent_type == "consul.register" and self._consul_handler is not None:
-                from omnibase_infra.runtime.intent_effects import (
-                    IntentEffectConsulRegister,
-                )
-
-                # Resolve ServiceTopicCatalog for CAS version increment + change notification.
-                # Optional: if not available, catalog change events are silently skipped.
-                _catalog_svc: ServiceTopicCatalog | None = None
-                try:
-                    from omnibase_infra.services.service_topic_catalog import (
-                        ServiceTopicCatalog,
-                    )
-
-                    if config.container.service_registry is not None:  # type: ignore[union-attr]
-                        _catalog_svc = (
-                            await config.container.service_registry.resolve_service(  # type: ignore[union-attr]
-                                ServiceTopicCatalog
-                            )
-                        )
-                except Exception as exc:  # intentional: optional service resolution must not crash startup
-                    # ServiceTopicCatalog is explicitly optional: any exception
-                    # during resolution (ContainerWiringError, ImportError,
-                    # KeyError, LookupError, AttributeError, or any other
-                    # unexpected error) must be silently swallowed so that the
-                    # catalog notification feature degrades gracefully rather
-                    # than crashing the entire plugin initialization.
-                    logger.debug(
-                        "ServiceTopicCatalog not registered; catalog change "
-                        "events will not be emitted (correlation_id=%s): %s(%s)",
-                        correlation_id,
-                        type(exc).__name__,
-                        exc,
-                    )
-
-                _event_bus_for_catalog = (
-                    # NOTE: suppressed mypy errors below (arg-type, union-attr):
-                    # `config` is typed as `ModelDomainPluginConfig | None` so mypy
-                    # emits union-attr on `config.event_bus`.  In practice config is
-                    # provably non-None here: `config.container.service_registry` was
-                    # already dereferenced above, which would have raised AttributeError
-                    # if config were None.  The arg-type suppression covers the event-bus
-                    # protocol type not matching the concrete parameter type expected by
-                    # IntentEffectConsulRegister.
-                    config.event_bus  # type: ignore[arg-type, union-attr]
-                    if _catalog_svc is not None
-                    else None
-                )
-                consul_effect = IntentEffectConsulRegister(
-                    consul_handler=self._consul_handler,
-                    catalog_service=_catalog_svc,
-                    event_bus=_event_bus_for_catalog,
-                )
-                intent_executor.register_handler(intent_type, consul_effect)
-                await self._register_effect_in_container(
-                    config, IntentEffectConsulRegister, consul_effect, correlation_id
-                )
-                registered_count += 1
-                logger.debug(
-                    "Registered IntentEffectConsulRegister for intent_type=%s "
-                    "(correlation_id=%s)",
-                    intent_type,
-                    correlation_id,
-                )
-
-            elif (
-                intent_type == "consul.deregister" and self._consul_handler is not None
-            ):
-                from omnibase_infra.runtime.intent_effects import (
-                    IntentEffectConsulDeregister,
-                )
-
-                deregister_effect = IntentEffectConsulDeregister(
-                    consul_handler=self._consul_handler,
-                )
-                intent_executor.register_handler(intent_type, deregister_effect)
-                await self._register_effect_in_container(
-                    config,
-                    IntentEffectConsulDeregister,
-                    deregister_effect,
-                    correlation_id,
-                )
-                registered_count += 1
-                logger.debug(
-                    "Registered IntentEffectConsulDeregister for intent_type=%s "
-                    "(correlation_id=%s)",
-                    intent_type,
-                    correlation_id,
-                )
-
         # Startup validation: warn about intent_types declared in the routing
         # table that have no registered handler.  These will cause RuntimeHostError
         # at runtime when DispatchResultApplier calls IntentExecutor.execute().
@@ -1455,7 +1285,7 @@ class PluginRegistration:
                 "Intent routing table declares %d intent type(s) with no "
                 "registered effect handler: %s. Intents of these types will "
                 "raise RuntimeHostError at runtime. Check that the required "
-                "infrastructure (projector, pool, consul_handler) is available. "
+                "infrastructure (projector, pool) is available. "
                 "(correlation_id=%s)",
                 len(unwired_intents),
                 unwired_intents,
@@ -1614,7 +1444,6 @@ class PluginRegistration:
             self._pool = None
 
         self._projector = None
-        self._consul_handler = None
         self._wiring = None
 
         duration = time.time() - start_time
@@ -1642,8 +1471,6 @@ class PluginRegistration:
             return "disabled"
 
         parts = ["PostgreSQL"]
-        if self._consul_handler is not None:
-            parts.append("Consul")
         if self._snapshot_publisher is not None:
             parts.append("Snapshots")
         return f"enabled ({' + '.join(parts)})"

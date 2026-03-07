@@ -1,40 +1,30 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Topic Catalog Service.
+"""Topic Catalog Service (stub after OMN-3540).
 
-Reads the topic catalog from Consul KV with caching, timeout budget, and
-KV precedence rules (Phase 1.3).
+Consul KV was removed in OMN-3540. This service is now a stub that always
+returns empty results with a ``CONSUL_UNAVAILABLE`` warning. The internal
+helpers for KV parsing and enrichment are retained for reference but are
+no longer exercised at runtime.
 
-Design Principles:
+Original Design Principles (pre-OMN-3540):
     - Partial success: Returns data even if enrichment fails
     - Warnings array: Communicates backend failures without crashing
     - Version-based in-process cache: TTL keyed by catalog_version
-    - CAS increment with 3 retries + exponential backoff
-    - 5-second scan budget with partial results on timeout
-    - KV precedence: node arrays authoritative, reverse index is cache only
-
-KV Structure:
-    onex/catalog/version                                # monotonic version int
-    onex/nodes/{node_id}/event_bus/subscribe_topics     # [topic strings] authoritative
-    onex/nodes/{node_id}/event_bus/publish_topics       # [topic strings] authoritative
-    onex/nodes/{node_id}/event_bus/subscribe_entries    # [full entries] enrichment only
-    onex/nodes/{node_id}/event_bus/publish_entries      # [full entries] enrichment only
-    onex/topics/{topic}/subscribers                     # [node_ids] derived cache only
 
 Related Tickets:
     - OMN-2311: Topic Catalog: ServiceTopicCatalog + KV precedence + caching
+    - OMN-3540: Remove Consul entirely from omnibase_infra runtime
 
 .. versionadded:: 0.9.0
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from datetime import UTC, datetime
 from fnmatch import fnmatch
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 from omnibase_core.container import ModelONEXContainer
@@ -53,9 +43,6 @@ from omnibase_infra.models.catalog.model_topic_catalog_response import (
     ModelTopicCatalogResponse,
 )
 from omnibase_infra.topics.topic_resolver import TopicResolutionError, TopicResolver
-
-if TYPE_CHECKING:
-    from omnibase_infra.handlers.handler_consul import HandlerConsul
 
 logger = logging.getLogger(__name__)
 
@@ -98,30 +85,17 @@ class ModelTopicInfo:
 
 
 class ServiceTopicCatalog:
-    """Catalog service that reads ONEX topic metadata from Consul KV.
+    """Catalog service stub for ONEX topic metadata.
 
-    Combines per-node ``subscribe_topics``/``publish_topics`` arrays
-    (authoritative) with optional ``subscribe_entries``/``publish_entries``
-    enrichment data to produce a unified ``ModelTopicCatalogResponse``.
+    Consul KV was removed in OMN-3540. All public methods return empty or
+    sentinel results immediately without performing any I/O.
 
-    Cache Behaviour:
-        Results are cached in-process by ``catalog_version``. When the version
-        key in Consul is unchanged the cached response is returned immediately.
-        When ``catalog_version == -1`` (version key absent/corrupt) caching is
-        disabled and every call performs a full rebuild.
-
-    Timeout Budget:
-        A 5-second hard budget applies to the Consul KV recursive scan. If the
-        budget is exceeded a partial response is returned with a
-        ``CONSUL_SCAN_TIMEOUT`` warning in ``ModelTopicCatalogResponse.warnings``.
-
-    Thread Safety:
-        All methods are async. The in-process cache is a plain dict and relies
-        on Python's GIL for protection under asyncio (single-threaded event loop).
-        External callers that use threads must handle their own synchronisation.
+    Coroutine Safety:
+        All public methods are async and coroutine-safe. They perform no
+        blocking I/O and hold no locks.
 
     Example:
-        >>> service = ServiceTopicCatalog(container=container, consul_handler=handler)
+        >>> service = ServiceTopicCatalog(container=container)
         >>> response = await service.build_catalog(
         ...     correlation_id=uuid4(),
         ... )
@@ -131,33 +105,23 @@ class ServiceTopicCatalog:
     def __init__(
         self,
         container: ModelONEXContainer,
-        consul_handler: HandlerConsul | None = None,
         topic_resolver: TopicResolver | None = None,
     ) -> None:
         """Initialise the topic catalog service.
 
         Args:
             container: ONEX container for dependency injection.
-            consul_handler: Optional Consul handler. When absent all catalog
-                methods return empty results with a ``CONSUL_UNAVAILABLE``
-                warning.
             topic_resolver: Optional resolver for mapping topic suffixes to
                 Kafka topic names. Defaults to a plain ``TopicResolver()``
                 (pass-through).
         """
         self._container = container
-        self._consul_handler = consul_handler
         self._topic_resolver = topic_resolver or TopicResolver()
 
         # in-process cache: catalog_version (int) -> ModelTopicCatalogResponse
         self._cache: dict[int, ModelTopicCatalogResponse] = {}
 
-        logger.info(
-            "ServiceTopicCatalog initialised",
-            extra={
-                "has_consul_handler": consul_handler is not None,
-            },
-        )
+        logger.info("ServiceTopicCatalog initialised")
 
     # ------------------------------------------------------------------
     # Public API
@@ -169,186 +133,43 @@ class ServiceTopicCatalog:
         include_inactive: bool = False,
         topic_pattern: str | None = None,
     ) -> ModelTopicCatalogResponse:
-        """Build (or return cached) topic catalog snapshot.
+        """Build topic catalog snapshot (stub -- always returns empty).
 
-        Steps:
-        1. Read ``onex/catalog/version`` for current version.
-        2. Return cached result immediately if version matches.
-        3. Consul KV recursive get ``onex/nodes/`` prefix.
-        4. Cross-reference: collect publisher/subscriber node_ids per topic.
-        5. Optionally enrich with ``subscribe_entries``/``publish_entries``.
-        6. Apply ``TopicResolver.resolve()`` for ``topic_name``.
-        7. Filter by ``topic_pattern`` (fnmatch) if provided.
-        8. Filter by ``is_active`` if ``include_inactive=False``.
-        9. Build ``ModelTopicCatalogEntry`` per topic.
-        10. Return ``ModelTopicCatalogResponse`` with warnings.
+        Consul KV was removed in OMN-3540. This method returns an empty
+        response with a ``CONSUL_UNAVAILABLE`` warning immediately.
 
         Args:
             correlation_id: Correlation ID for tracing.
-            include_inactive: Include topics with no publishers/subscribers.
-            topic_pattern: Optional fnmatch glob to filter topic suffixes.
+            include_inactive: Ignored (retained for API compatibility).
+            topic_pattern: Ignored (retained for API compatibility).
 
         Returns:
-            ModelTopicCatalogResponse with topics and any partial-failure warnings.
+            ModelTopicCatalogResponse with no topics and a ``CONSUL_UNAVAILABLE`` warning.
         """
-        warnings: list[str] = []
-
-        if self._consul_handler is None:
-            warnings.append(CONSUL_UNAVAILABLE)
-            return self._empty_response(
-                correlation_id=correlation_id,
-                catalog_version=0,
-                warnings=warnings,
-            )
-
-        # Step 1: get current catalog version
-        catalog_version = await self.get_catalog_version(correlation_id)
-
-        # Emit version_unknown warning when catalog version is indeterminate.
-        # Note: when catalog_version == -1 AND _kv_get_recurse later returns
-        # None, both VERSION_UNKNOWN and CONSUL_UNAVAILABLE will be emitted
-        # together in the same response — this is intentional, as each warning
-        # describes a distinct failure condition. Similarly, VERSION_UNKNOWN and
-        # CONSUL_SCAN_TIMEOUT can coexist when the version key is absent/corrupt
-        # and the subsequent KV scan times out.
-        if catalog_version == -1:
-            warnings.append(VERSION_UNKNOWN)
-
-        # Step 2: cache hit?
-        if catalog_version != -1 and catalog_version in self._cache:
-            cached = self._cache[catalog_version]
-            # Re-apply caller-specific filters and return a fresh response
-            return self._filter_response(
-                cached,
-                correlation_id=correlation_id,
-                include_inactive=include_inactive,
-                topic_pattern=topic_pattern,
-            )
-
-        # Steps 3-9: full rebuild with timeout budget
-        # Only the network I/O (KV fetch) is wrapped in the timeout; processing
-        # of whatever was fetched always runs so partial results are preserved.
-        raw_kv_items: list[dict[str, object]] = []
-        try:
-            fetched = await asyncio.wait_for(
-                self._kv_get_recurse(_KV_NODES_PREFIX, correlation_id),
-                timeout=_SCAN_BUDGET_SECONDS,
-            )
-            if fetched is not None:
-                raw_kv_items = fetched
-            else:
-                warnings.append(CONSUL_UNAVAILABLE)
-        except TimeoutError:
-            logger.warning(
-                "Consul KV scan exceeded %ss budget, returning partial results",
-                _SCAN_BUDGET_SECONDS,
-                extra={"correlation_id": str(correlation_id)},
-            )
-            warnings.append(CONSUL_SCAN_TIMEOUT)
-
-        topics, scan_warnings, node_count = self._process_raw_kv_items(
-            raw_kv_items, correlation_id
-        )
-        warnings.extend(scan_warnings)
-
-        # Step 6: build entries
-        entries: list[ModelTopicCatalogEntry] = []
-        for topic_suffix, info in topics.items():
-            resolved_name = self._safe_resolve(topic_suffix, correlation_id, warnings)
-            entry = ModelTopicCatalogEntry(
-                topic_suffix=topic_suffix,
-                topic_name=resolved_name,
-                description=info.description,
-                partitions=info.partitions,
-                publisher_count=len(info.publishers),
-                subscriber_count=len(info.subscribers),
-                tags=tuple(sorted(info.tags)),
-            )
-            entries.append(entry)
-
-        full_response = ModelTopicCatalogResponse(
+        # Consul removed (OMN-3540): always return empty with CONSUL_UNAVAILABLE.
+        warnings: list[str] = [CONSUL_UNAVAILABLE]
+        return self._empty_response(
             correlation_id=correlation_id,
-            topics=tuple(sorted(entries, key=lambda e: e.topic_suffix)),
-            catalog_version=max(catalog_version, 0),
-            node_count=node_count,
-            generated_at=datetime.now(UTC),
-            warnings=tuple(warnings),
-        )
-
-        # Cache result (skip cache when version unknown)
-        if catalog_version != -1:
-            self._cache[catalog_version] = full_response
-            # Evict any older cached versions to avoid unbounded growth
-            stale = [v for v in list(self._cache) if v < catalog_version]
-            for v in stale:
-                del self._cache[v]
-
-        return self._filter_response(
-            full_response,
-            correlation_id=correlation_id,
-            include_inactive=include_inactive,
-            topic_pattern=topic_pattern,
+            catalog_version=0,
+            warnings=warnings,
         )
 
     async def get_catalog_version(self, correlation_id: UUID) -> int:
-        """Read the current catalog version from Consul KV.
+        """Read the current catalog version (stub -- always returns -1).
 
         Returns:
-            Current catalog version (>= 0) or -1 when the key is absent or
-            the value is corrupt.
+            -1 always (Consul KV removed in OMN-3540).
         """
-        if self._consul_handler is None:
-            return -1
-
-        raw = await self._kv_get_raw(_KV_CATALOG_VERSION, correlation_id)
-        if raw is None:
-            return -1
-
-        try:
-            version = int(raw.strip())
-            return max(version, 0)
-        except (ValueError, AttributeError):
-            logger.warning(
-                "Consul catalog version key has invalid value: %r",
-                raw,
-                extra={"correlation_id": str(correlation_id)},
-            )
-            return -1
+        # Consul removed (OMN-3540): always return -1.
+        return -1
 
     async def increment_version(self, correlation_id: UUID) -> int:
-        """Atomically increment the catalog version using CAS.
-
-        Uses Consul's check-and-set (CAS) to guarantee atomicity. On CAS
-        failure retries up to ``_CAS_MAX_RETRIES`` times with exponential
-        backoff (100 ms / 200 ms / 400 ms).
+        """Atomically increment the catalog version.
 
         Returns:
-            New catalog version on success, -1 if all retries are exhausted.
+            -1 always (Consul removed in OMN-3540).
         """
-        if self._consul_handler is None:
-            return -1
-
-        for attempt in range(_CAS_MAX_RETRIES):
-            new_version = await self._try_cas_increment(correlation_id)
-            if new_version != -1:
-                return new_version
-
-            if attempt < _CAS_MAX_RETRIES - 1:
-                delay = _CAS_RETRY_DELAYS[attempt]
-                logger.debug(
-                    "CAS increment failed (attempt %d/%d), retrying in %.3fs",
-                    attempt + 1,
-                    _CAS_MAX_RETRIES,
-                    delay,
-                    extra={"correlation_id": str(correlation_id)},
-                )
-                await asyncio.sleep(delay)
-
-        logger.warning(
-            "CAS increment exhausted %d retries, returning -1",
-            _CAS_MAX_RETRIES,
-            extra={"correlation_id": str(correlation_id)},
-        )
+        # Consul removed (OMN-3540): always return -1.
         return -1
 
     # ------------------------------------------------------------------
@@ -699,39 +520,12 @@ class ServiceTopicCatalog:
         )
 
     # ------------------------------------------------------------------
-    # Low-level Consul KV helpers (delegate to HandlerConsul internals)
+    # Low-level KV helpers (no-ops after OMN-3540 Consul removal)
     # ------------------------------------------------------------------
 
     async def _kv_get_raw(self, key: str, correlation_id: UUID) -> str | None:
-        """Get raw string value from Consul KV via HandlerConsul's mixin method.
-
-        Delegates to ``MixinConsulTopicIndex.kv_get_raw`` which is already defined
-        on ``HandlerConsul``. Any exception from the handler is caught and logged
-        at ``DEBUG`` level so that a single KV failure does not abort a broader
-        operation.
-
-        Args:
-            key: Fully-qualified Consul KV key path
-                (e.g. ``"onex/catalog/version"``).
-            correlation_id: Correlation ID included in the log record for
-                distributed tracing.
-
-        Returns:
-            Decoded string value of the key, or ``None`` when the key is absent,
-            the handler is unavailable, or any exception is raised.
-        """
-        if self._consul_handler is None:
-            return None
-        try:
-            # HandlerConsul inherits kv_get_raw from MixinConsulTopicIndex
-            return await self._consul_handler.kv_get_raw(key, correlation_id)
-        except Exception:
-            logger.debug(
-                "KV get failed for key %r",
-                key,
-                extra={"correlation_id": str(correlation_id)},
-            )
-            return None
+        """Consul KV get — no-op after OMN-3540 Consul removal."""
+        return None
 
     async def _kv_put_raw_with_cas(
         self,
@@ -740,165 +534,27 @@ class ServiceTopicCatalog:
         cas: int,
         correlation_id: UUID,
     ) -> bool:
-        """Put value to Consul KV with a check-and-set (CAS) guard.
-
-        Delegates to ``HandlerConsul.kv_put_raw_with_cas``, which routes through
-        the handler's retry machinery and circuit breaker. Any exception from the
-        handler is caught and logged at ``DEBUG`` level; the caller receives
-        ``False`` and should treat this identically to a CAS conflict.
-
-        Args:
-            key: Fully-qualified Consul KV key path to write
-                (e.g. ``"onex/catalog/version"``).
-            value: String value to store. The caller is responsible for encoding
-                (e.g. converting an integer to its decimal string representation).
-            cas: Consul ``ModifyIndex`` obtained from a prior
-                ``_kv_get_with_modify_index`` call. Pass ``0`` to create a key
-                only when it does not yet exist.
-            correlation_id: Correlation ID included in the log record for
-                distributed tracing.
-
-        Returns:
-            ``True`` when the write was accepted (CAS index matched the current
-            ``ModifyIndex`` in Consul). ``False`` when the CAS check failed
-            (another writer modified the key first), the handler is unavailable,
-            or any exception is raised.
-        """
-        if self._consul_handler is None:
-            return False
-        try:
-            return await self._consul_handler.kv_put_raw_with_cas(
-                key, value, cas, correlation_id
-            )
-        except Exception:
-            logger.debug(
-                "CAS put failed for key %r",
-                key,
-                extra={"correlation_id": str(correlation_id)},
-            )
-            return False
+        """Consul KV CAS put — no-op after OMN-3540 Consul removal."""
+        return False
 
     async def _kv_get_with_modify_index(
         self,
         key: str,
         correlation_id: UUID,
     ) -> tuple[str | None, int]:
-        """Get value and ModifyIndex for a KV key (required for CAS writes).
-
-        Delegates to ``HandlerConsul.kv_get_with_modify_index``, which routes
-        through the handler's retry machinery and circuit breaker. Any exception
-        from the handler is caught and logged at ``DEBUG`` level; the caller
-        receives ``(None, 0)`` and should treat this as a key-absent condition.
-
-        Args:
-            key: Fully-qualified Consul KV key path
-                (e.g. ``"onex/catalog/version"``).
-            correlation_id: Correlation ID included in the log record for
-                distributed tracing.
-
-        Returns:
-            Two-element tuple ``(value, modify_index)`` where ``value`` is the
-            decoded string value of the key (or ``None`` when absent) and
-            ``modify_index`` is the Consul ``ModifyIndex`` at the time of the
-            read. A ``modify_index`` of ``0`` signals that the key does not exist
-            yet; passing ``cas=0`` to a subsequent CAS write creates the key only
-            if it is still absent.
-        """
-        if self._consul_handler is None:
-            return None, 0
-        try:
-            return await self._consul_handler.kv_get_with_modify_index(
-                key, correlation_id
-            )
-        except Exception:
-            logger.debug(
-                "KV get with modify index failed for key %r",
-                key,
-                extra={"correlation_id": str(correlation_id)},
-            )
-            return None, 0
+        """Consul KV get with ModifyIndex — no-op after OMN-3540 Consul removal."""
+        return None, 0
 
     async def _kv_get_recurse(
         self,
         prefix: str,
         correlation_id: UUID,
     ) -> list[dict[str, object]] | None:
-        """Perform a recursive Consul KV get for all keys under a prefix.
-
-        Delegates to ``HandlerConsul.kv_get_recurse``, which routes through the
-        handler's retry machinery and circuit breaker. Any exception from the
-        handler is caught and logged at ``DEBUG`` level.
-
-        Args:
-            prefix: Consul KV key prefix to scan recursively
-                (e.g. ``"onex/nodes/"``). All keys that begin with this string
-                are returned.
-            correlation_id: Correlation ID included in the log record for
-                distributed tracing.
-
-        Returns:
-            List of dicts, each containing at least ``"key"`` (``str``),
-            ``"value"`` (``str | None``), and ``"modify_index"`` (``int``) fields,
-            representing every KV entry under the prefix. Returns ``None`` when
-            the handler is unavailable, the prefix does not exist, or any
-            exception is raised.
-        """
-        if self._consul_handler is None:
-            return None
-        try:
-            return await self._consul_handler.kv_get_recurse(prefix, correlation_id)
-        except Exception:
-            logger.debug(
-                "KV recurse get failed for prefix %r",
-                prefix,
-                extra={"correlation_id": str(correlation_id)},
-            )
-            return None
+        """Consul KV recursive get — no-op after OMN-3540 Consul removal."""
+        return None
 
     async def _try_cas_increment(self, correlation_id: UUID) -> int:
-        """Attempt a single check-and-set increment of the catalog version key.
-
-        Reads the current value and ``ModifyIndex`` of ``onex/catalog/version``
-        via ``_kv_get_with_modify_index``, computes ``new_version = current + 1``
-        (defaulting to ``1`` when the key is absent or its value is not a valid
-        integer), then writes ``new_version`` back using ``_kv_put_raw_with_cas``.
-
-        If the CAS write fails (another writer incremented the key between the
-        read and write), the method returns ``-1`` immediately. The caller
-        (``increment_version``) is responsible for retrying.
-
-        Args:
-            correlation_id: Correlation ID forwarded to all underlying KV helpers
-                for distributed tracing.
-
-        Returns:
-            The newly written version integer (>= 1) when the CAS write succeeds.
-            ``-1`` when the CAS check fails (concurrent modification) or any
-            underlying KV helper returns an error sentinel.
-        """
-        current_str, modify_index = await self._kv_get_with_modify_index(
-            _KV_CATALOG_VERSION, correlation_id
-        )
-
-        # Parse current value
-        if current_str is None:
-            new_version = 1
-        else:
-            try:
-                new_version = int(current_str.strip()) + 1
-            except (ValueError, AttributeError):
-                new_version = 1
-
-        success = await self._kv_put_raw_with_cas(
-            _KV_CATALOG_VERSION,
-            str(new_version),
-            modify_index,
-            correlation_id,
-        )
-
-        if success:
-            return new_version
-
+        """CAS increment — no-op after OMN-3540 Consul removal."""
         return -1
 
 

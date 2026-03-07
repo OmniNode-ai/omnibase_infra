@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Intent execution summary model for batch execution results.
 
-This module provides the ModelIntentExecutionSummary model that aggregates
+The ModelIntentExecutionSummary model that aggregates
 execution results from intent batch processing in the IntentExecutionRouter.
 
 Related:

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Bootstrap Handler Descriptor Model with Required handler_class.
+"""Bootstrap Handler Descriptor Model with Required handler_class.  # ai-slop-ok: pre-existing
 
 This module provides ModelBootstrapHandlerDescriptor, a specialized handler
 descriptor for bootstrap handlers that REQUIRES the handler_class field to be set.
@@ -44,7 +44,7 @@ class ModelBootstrapHandlerDescriptor(ModelHandlerDescriptor):
     All other fields maintain the same constraints as the parent class.
 
     Attributes:
-        handler_id: Unique identifier for the handler (e.g., "proto.consul").
+        handler_id: Unique identifier for the handler (e.g., "proto.db_postgres").
         name: Human-readable name for the handler.
         version: Semantic version (ModelSemVer). Accepts string, dict, or ModelSemVer.
         handler_kind: Handler kind (compute, effect, reducer, orchestrator).
@@ -58,24 +58,24 @@ class ModelBootstrapHandlerDescriptor(ModelHandlerDescriptor):
         Create a bootstrap handler descriptor:
 
         >>> descriptor = ModelBootstrapHandlerDescriptor(
-        ...     handler_id="proto.consul",
-        ...     name="Consul Handler",
+        ...     handler_id="proto.db_postgres",
+        ...     name="Postgres Handler",
         ...     version="1.0.0",
         ...     handler_kind="effect",
         ...     input_model="omnibase_infra.models.types.JsonDict",
         ...     output_model="omnibase_core.models.dispatch.ModelHandlerOutput",
-        ...     handler_class="omnibase_infra.handlers.handler_consul.HandlerConsul",
+        ...     handler_class="omnibase_infra.handlers.handler_db_postgres.HandlerDbPostgres",
         ... )
         >>> descriptor.handler_class
-        'omnibase_infra.handlers.handler_consul.HandlerConsul'
+        'omnibase_infra.handlers.handler_db_postgres.HandlerDbPostgres'
 
         Missing handler_class raises ValidationError:
 
         >>> from pydantic import ValidationError
         >>> try:
         ...     ModelBootstrapHandlerDescriptor(
-        ...         handler_id="proto.consul",
-        ...         name="Consul Handler",
+        ...         handler_id="proto.db_postgres",
+        ...         name="Postgres Handler",
         ...         version="1.0.0",
         ...         handler_kind="effect",
         ...         input_model="omnibase_infra.models.types.JsonDict",
@@ -97,6 +97,7 @@ class ModelBootstrapHandlerDescriptor(ModelHandlerDescriptor):
         frozen=True,
         extra="forbid",
         strict=True,
+        from_attributes=True,
     )
 
     # Override handler_class to be required (no default, not optional)
@@ -109,7 +110,7 @@ class ModelBootstrapHandlerDescriptor(ModelHandlerDescriptor):
             "REQUIRED: Fully qualified Python class path for dynamic handler import. "
             "Bootstrap handlers must always specify this field since they have no "
             "contract file to derive the class from. "
-            "Example: 'omnibase_infra.handlers.handler_consul.HandlerConsul'"
+            "Example: 'omnibase_infra.handlers.handler_db_postgres.HandlerDbPostgres'"
         ),
     )
 
@@ -144,13 +145,13 @@ class ModelBootstrapHandlerDescriptor(ModelHandlerDescriptor):
 
         Example:
             >>> bootstrap_desc = ModelBootstrapHandlerDescriptor(
-            ...     handler_id="proto.consul",
-            ...     name="Consul Handler",
+            ...     handler_id="proto.db_postgres",
+            ...     name="Postgres Handler",
             ...     version="1.0.0",
             ...     handler_kind="effect",
             ...     input_model="omnibase_infra.models.types.JsonDict",
             ...     output_model="omnibase_core.models.dispatch.ModelHandlerOutput",
-            ...     handler_class="omnibase_infra.handlers.handler_consul.HandlerConsul",
+            ...     handler_class="omnibase_infra.handlers.handler_db_postgres.HandlerDbPostgres",
             ... )
             >>> base_desc = bootstrap_desc.to_base_descriptor()
             >>> isinstance(base_desc, ModelHandlerDescriptor)

@@ -153,7 +153,7 @@ class TestLoadIntentRoutingTable:
 
         result = load_intent_routing_table(contract_path)
 
-        # Should have at least the three declared intent types
-        assert "consul.register" in result
+        # Should have at least the two declared intent types (consul.register
+        # was removed in OMN-3540)
         assert "postgres.upsert_registration" in result
-        assert len(result) >= 2
+        assert len(result) >= 1

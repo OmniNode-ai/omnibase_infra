@@ -2,8 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Registry Discovery Service.
 
-Combines ProjectionReaderRegistration and HandlerServiceDiscoveryConsul
-to provide a unified discovery interface for the Registry API.
+Provides a unified discovery interface for the Registry API.
 
 Design Principles:
     - Partial success: Returns data even if one backend fails
@@ -34,9 +33,6 @@ from omnibase_core.container import ModelONEXContainer
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.nodes.node_registry_api_effect import load_registry_api_config
-from omnibase_infra.nodes.node_service_discovery_effect.models.enum_health_status import (
-    EnumHealthStatus,
-)
 from omnibase_infra.services.registry_api.models import (
     ModelCapabilityWidgetMapping,
     ModelContractRef,
@@ -55,7 +51,6 @@ from omnibase_infra.services.registry_api.models import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_infra.handlers.service_discovery import HandlerServiceDiscoveryConsul
     from omnibase_infra.models.projection import ModelRegistrationProjection
     from omnibase_infra.projectors import (
         ProjectionReaderContract,
@@ -121,7 +116,6 @@ class ServiceRegistryDiscovery:
         >>> service = ServiceRegistryDiscovery(
         ...     container=container,
         ...     projection_reader=reader,
-        ...     consul_handler=handler,
         ... )
         >>> response = await service.get_discovery()
         >>> if response.warnings:
@@ -129,7 +123,6 @@ class ServiceRegistryDiscovery:
 
     Attributes:
         projection_reader: Reader for node registration projections.
-        consul_handler: Handler for Consul service discovery.
         widget_mapping_path: Path to widget mapping YAML configuration.
     """
 
@@ -137,7 +130,6 @@ class ServiceRegistryDiscovery:
         self,
         container: ModelONEXContainer,
         projection_reader: ProjectionReaderRegistration | None = None,
-        consul_handler: HandlerServiceDiscoveryConsul | None = None,
         contract_reader: ProjectionReaderContract | None = None,
         widget_mapping_path: Path | None = None,
     ) -> None:
@@ -148,8 +140,6 @@ class ServiceRegistryDiscovery:
                 ONEX DI pattern compliance.
             projection_reader: Optional projection reader for node registrations.
                 If not provided, node queries will return empty results with warnings.
-            consul_handler: Optional Consul handler for live instances.
-                If not provided, instance queries will return empty results with warnings.
             contract_reader: Optional projection reader for contract registry.
                 If not provided, contract/topic queries will return empty results with warnings.
             widget_mapping_path: Path to widget mapping YAML file.
@@ -164,13 +154,6 @@ class ServiceRegistryDiscovery:
         # via the projection_reader parameter instead.
         self._projection_reader = projection_reader
 
-        # Resolve consul_handler: direct param > None
-        # NOTE: Container-based resolution removed in omnibase_core ^0.9.0.
-        # The new ServiceRegistry uses async interface-based resolution which
-        # doesn't fit the sync __init__ pattern. Use explicit dependency injection
-        # via the consul_handler parameter instead.
-        self._consul_handler = consul_handler
-
         # Contract reader for contract registry queries
         self._contract_reader = contract_reader
 
@@ -182,7 +165,6 @@ class ServiceRegistryDiscovery:
             "ServiceRegistryDiscovery initialized",
             extra={
                 "has_projection_reader": self._projection_reader is not None,
-                "has_consul_handler": self._consul_handler is not None,
                 "has_contract_reader": self._contract_reader is not None,
                 "widget_mapping_path": str(self._widget_mapping_path),
             },
@@ -192,16 +174,6 @@ class ServiceRegistryDiscovery:
     def has_projection_reader(self) -> bool:
         """Check if projection reader is configured."""
         return self._projection_reader is not None
-
-    @property
-    def has_consul_handler(self) -> bool:
-        """Check if Consul handler is configured."""
-        return self._consul_handler is not None
-
-    @property
-    def consul_handler(self) -> HandlerServiceDiscoveryConsul | None:
-        """Get the Consul handler for lifecycle management."""
-        return self._consul_handler
 
     @property
     def has_contract_reader(self) -> bool:
@@ -477,119 +449,15 @@ class ServiceRegistryDiscovery:
         warnings: list[ModelWarning] = []
         instances: list[ModelRegistryInstanceView] = []
 
-        if self._consul_handler is None:
-            warnings.append(
-                ModelWarning(
-                    source="consul",
-                    message="Consul handler not configured",
-                    code="NO_CONSUL_HANDLER",
-                    timestamp=datetime.now(UTC),
-                )
+        # Consul removed (OMN-3540): instance discovery is not available.
+        warnings.append(
+            ModelWarning(
+                source="consul",
+                message="Service discovery not available (Consul removed)",
+                code="NO_CONSUL_HANDLER",
+                timestamp=datetime.now(UTC),
             )
-            return instances, warnings
-
-        try:
-            # Determine which services to query
-            service_names_to_query: list[str] = []
-
-            if service_name:
-                # Single service specified
-                service_names_to_query = [service_name]
-            else:
-                # Get all service names from Consul catalog
-                try:
-                    all_services = await self._consul_handler.list_all_services(
-                        correlation_id=correlation_id,
-                    )
-                    service_names_to_query = list(all_services.keys())
-                except Exception as e:
-                    logger.warning(
-                        "Failed to list all services, falling back to empty discovery",
-                        extra={
-                            "error": str(e),
-                            "correlation_id": str(correlation_id),
-                        },
-                    )
-                    warnings.append(
-                        ModelWarning(
-                            source="consul",
-                            message=f"Failed to list all services: {type(e).__name__}",
-                            code="CONSUL_CATALOG_FAILED",
-                            timestamp=datetime.now(UTC),
-                        )
-                    )
-                    return instances, warnings
-
-            # Query each service for its instances
-            for svc_name in service_names_to_query:
-                try:
-                    service_instances = (
-                        await self._consul_handler.get_all_service_instances(
-                            service_name=svc_name,
-                            include_unhealthy=include_unhealthy,
-                            correlation_id=correlation_id,
-                        )
-                    )
-
-                    for svc in service_instances:
-                        # Map EnumHealthStatus to API health_status string
-                        health_status: str
-                        if svc.health_status == EnumHealthStatus.HEALTHY:
-                            health_status = "passing"
-                        elif svc.health_status == EnumHealthStatus.UNHEALTHY:
-                            health_status = "critical"
-                        else:
-                            health_status = "unknown"
-
-                        instances.append(
-                            ModelRegistryInstanceView(
-                                node_id=svc.service_id,
-                                service_name=svc.service_name,
-                                service_id=svc.service_id,
-                                instance_id=svc.service_id,
-                                address=svc.address or "unknown",
-                                port=svc.port or 0,
-                                health_status=health_status,  # type: ignore[arg-type]
-                                health_output=svc.health_output,
-                                last_check_at=svc.last_check_at or svc.registered_at,
-                                tags=list(svc.tags),
-                                meta=svc.metadata,
-                            )
-                        )
-
-                except Exception as e:
-                    # Log but continue with other services (partial success)
-                    logger.warning(
-                        "Failed to query service instances",
-                        extra={
-                            "service_name": svc_name,
-                            "error": str(e),
-                            "correlation_id": str(correlation_id),
-                        },
-                    )
-                    warnings.append(
-                        ModelWarning(
-                            source="consul",
-                            message=f"Failed to query service '{svc_name}': {type(e).__name__}",
-                            code="CONSUL_SERVICE_QUERY_FAILED",
-                            timestamp=datetime.now(UTC),
-                        )
-                    )
-
-        except Exception as e:
-            logger.exception(
-                "Failed to discover services",
-                extra={"correlation_id": str(correlation_id)},
-            )
-            warnings.append(
-                ModelWarning(
-                    source="consul",
-                    message=f"Failed to discover services: {type(e).__name__}",
-                    code="CONSUL_QUERY_FAILED",
-                    timestamp=datetime.now(UTC),
-                )
-            )
-
+        )
         return instances, warnings
 
     async def get_discovery(
@@ -808,31 +676,6 @@ class ServiceRegistryDiscovery:
                 }
             except Exception as e:
                 components["postgres"] = {
-                    "healthy": False,
-                    "message": f"Error: {type(e).__name__}",
-                }
-                overall_healthy = False
-
-        # Check Consul handler
-        if self._consul_handler is None:
-            components["consul"] = {
-                "healthy": False,
-                "message": "Not configured",
-            }
-            overall_healthy = False
-        else:
-            try:
-                result = await self._consul_handler.health_check(
-                    correlation_id=correlation_id,
-                )
-                components["consul"] = {
-                    "healthy": result.healthy,
-                    "message": result.reason,
-                }
-                if not result.healthy:
-                    overall_healthy = False
-            except Exception as e:
-                components["consul"] = {
                     "healthy": False,
                     "message": f"Error: {type(e).__name__}",
                 }

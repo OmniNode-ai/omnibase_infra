@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """Demo Loop Assertion Gate -- validates the canonical event loop end-to-end.
 
-This module provides a single hard gate that proves the demo loop is wired
+A single hard gate that proves the demo loop is wired
 correctly before opening the dashboard. It checks six assertions that together
 guarantee the complete pipeline (canonical events -> projection -> dashboard)
 is operational.

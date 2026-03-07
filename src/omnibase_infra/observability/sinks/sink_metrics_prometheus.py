@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Prometheus metrics sink implementation for ONEX observability.
 
-This module provides a thread-safe Prometheus metrics sink that implements
+A thread-safe Prometheus metrics sink that implements
 the ProtocolHotPathMetricsSink protocol. It enforces cardinality policies
 to prevent high-cardinality label explosions that can overwhelm metrics backends.
 
@@ -87,7 +87,7 @@ from omnibase_infra.observability.constants_metrics import (
 class SinkMetricsPrometheus:
     """Thread-safe Prometheus metrics sink with cardinality policy enforcement.
 
-    This class implements ProtocolHotPathMetricsSink for Prometheus metric collection
+    ProtocolHotPathMetricsSink for Prometheus metric collection
     while enforcing cardinality policies to prevent metric explosion. All metrics
     are created lazily on first access and cached for subsequent calls.
 

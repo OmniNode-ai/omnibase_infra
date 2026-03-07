@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Backend Result Model for Registry Effect Operations.
+"""Backend Result Model for Registry Effect Operations.  # ai-slop-ok: pre-existing
 
 This module provides ModelBackendResult, representing the result of an individual
-backend operation (Consul or PostgreSQL) within the dual-registration workflow.
+backend operation (PostgreSQL) within the registration workflow.
 
 Architecture:
     ModelBackendResult captures the outcome of a single backend operation:
@@ -23,7 +23,7 @@ Security:
     See CLAUDE.md "Error Sanitization Guidelines" for complete rules.
 
 Related:
-    - ModelRegistryResponse: Uses this model for consul_result and postgres_result
+    - ModelRegistryResponse: Uses this model for postgres_result
     - NodeRegistryEffect: Effect node that produces these results
     - OMN-954: Partial failure scenario testing
 """
@@ -50,9 +50,9 @@ _logger = logging.getLogger(__name__)
 class ModelBackendResult(BaseModel):
     """Result of an individual backend operation.
 
-    Captures the outcome of a single backend operation (Consul or PostgreSQL)
-    within the dual-registration workflow. Used to enable partial failure
-    detection and targeted retry strategies.
+    Captures the outcome of a single backend operation (PostgreSQL) within
+    the registration workflow. Used to enable partial failure detection and
+    targeted retry strategies.
 
     Immutability:
         This model uses frozen=True to ensure backend results are immutable
@@ -93,7 +93,7 @@ class ModelBackendResult(BaseModel):
         >>> result = ModelBackendResult(
         ...     success=True,
         ...     duration_ms=45.2,
-        ...     backend_id="consul",
+        ...     backend_id="postgres",
         ... )
         >>> result.success
         True
@@ -111,17 +111,6 @@ class ModelBackendResult(BaseModel):
         False
         >>> result.error_code  # Enum serializes to string
         'POSTGRES_CONNECTION_ERROR'
-
-    Example (failure case with Consul string code):
-        >>> result = ModelBackendResult(
-        ...     success=False,
-        ...     error="Service registration failed",
-        ...     error_code="CONSUL_CONNECTION_ERROR",
-        ...     duration_ms=1500.0,
-        ...     backend_id="consul",
-        ... )
-        >>> result.error_code
-        'CONSUL_CONNECTION_ERROR'
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)

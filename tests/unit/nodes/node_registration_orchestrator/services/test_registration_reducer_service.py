@@ -64,9 +64,6 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_de
 from omnibase_infra.nodes.node_registration_orchestrator.services import (
     RegistrationReducerService,
 )
-from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
-    ModelPayloadConsulRegister,
-)
 from omnibase_infra.nodes.reducers.models.model_payload_postgres_update_registration import (
     ModelPayloadPostgresUpdateRegistration,
     ModelRegistrationAckUpdate,
@@ -160,7 +157,7 @@ class TestDecideIntrospectionNewAndRetriable:
 
     def test_new_node_emits_registration(self) -> None:
         """projection=None (new node) -> action='emit', 2 events, postgres upsert intent."""
-        service = RegistrationReducerService(consul_enabled=False)
+        service = RegistrationReducerService()
         event = make_introspection_event()
         correlation_id = uuid4()
 
@@ -187,7 +184,7 @@ class TestDecideIntrospectionNewAndRetriable:
 
     def test_liveness_expired_emits_registration(self) -> None:
         """projection with state=LIVENESS_EXPIRED -> action='emit'."""
-        service = RegistrationReducerService(consul_enabled=False)
+        service = RegistrationReducerService()
         event = make_introspection_event()
         projection = make_projection(EnumRegistrationState.LIVENESS_EXPIRED)
 
@@ -203,7 +200,7 @@ class TestDecideIntrospectionNewAndRetriable:
 
     def test_rejected_emits_registration(self) -> None:
         """projection with state=REJECTED -> action='emit'."""
-        service = RegistrationReducerService(consul_enabled=False)
+        service = RegistrationReducerService()
         event = make_introspection_event()
         projection = make_projection(EnumRegistrationState.REJECTED)
 
@@ -219,7 +216,7 @@ class TestDecideIntrospectionNewAndRetriable:
 
     def test_ack_timed_out_emits_registration(self) -> None:
         """projection with state=ACK_TIMED_OUT -> action='emit'."""
-        service = RegistrationReducerService(consul_enabled=False)
+        service = RegistrationReducerService()
         event = make_introspection_event()
         projection = make_projection(EnumRegistrationState.ACK_TIMED_OUT)
 
@@ -323,7 +320,6 @@ class TestDecideIntrospectionEventFields:
         ack_timeout = 45.0
         service = RegistrationReducerService(
             ack_timeout_seconds=ack_timeout,
-            consul_enabled=False,
         )
         event = make_introspection_event()
 
@@ -345,7 +341,7 @@ class TestDecideIntrospectionEventFields:
 
     def test_initial_state_is_awaiting_ack(self) -> None:
         """Verify projection record in postgres intent has current_state='awaiting_ack'."""
-        service = RegistrationReducerService(consul_enabled=False)
+        service = RegistrationReducerService()
         event = make_introspection_event()
 
         decision = service.decide_introspection(
@@ -365,54 +361,6 @@ class TestDecideIntrospectionEventFields:
         assert len(postgres_intents) == 1
         record = postgres_intents[0].payload.record.model_dump()
         assert record["current_state"] == EnumRegistrationState.AWAITING_ACK.value
-
-
-class TestDecideIntrospectionConsulToggle:
-    """Tests for reducer-driven decide_introspection: consul intent toggle."""
-
-    def test_consul_intent_when_enabled(self) -> None:
-        """consul_enabled=True -> 2 intents (postgres + consul)."""
-        service = RegistrationReducerService(consul_enabled=True)
-        event = make_introspection_event()
-
-        decision = service.decide_introspection(
-            projection=None,
-            event=event,
-            correlation_id=uuid4(),
-            now=TEST_NOW,
-        )
-
-        assert decision.action == "emit"
-        assert len(decision.intents) == 2
-
-        consul_intents = [
-            i
-            for i in decision.intents
-            if isinstance(i.payload, ModelPayloadConsulRegister)
-        ]
-        assert len(consul_intents) == 1
-
-    def test_no_consul_intent_when_disabled(self) -> None:
-        """consul_enabled=False -> 1 intent (postgres only)."""
-        service = RegistrationReducerService(consul_enabled=False)
-        event = make_introspection_event()
-
-        decision = service.decide_introspection(
-            projection=None,
-            event=event,
-            correlation_id=uuid4(),
-            now=TEST_NOW,
-        )
-
-        assert decision.action == "emit"
-        assert len(decision.intents) == 1
-
-        consul_intents = [
-            i
-            for i in decision.intents
-            if isinstance(i.payload, ModelPayloadConsulRegister)
-        ]
-        assert len(consul_intents) == 0
 
 
 # ---------------------------------------------------------------------------

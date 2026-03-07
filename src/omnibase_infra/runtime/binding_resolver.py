@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Binding expression parser and resolver for operation bindings.
 
-This module provides:
+Exports:
 
 - **BindingExpressionParser**: Parses ${source.path} expressions with guardrails
 - **BindingExpressionParseError**: Typed error with error codes for parse failures

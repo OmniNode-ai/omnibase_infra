@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Reusable retry execution mixin for infrastructure handlers.
+"""Reusable retry execution mixin for infrastructure handlers.  # ai-slop-ok: pre-existing
 
 This module provides a mixin class that encapsulates retry logic with
 exponential backoff, circuit breaker integration, and standardized
-error handling for infrastructure handlers like Consul and Vault.
+error handling for infrastructure handlers like Postgres and Vault.
 
 Features:
     - Exponential backoff with configurable parameters
@@ -17,11 +17,11 @@ Usage:
     ```python
     from omnibase_infra.mixins import MixinRetryExecution, MixinAsyncCircuitBreaker
 
-    class HandlerConsul(MixinAsyncCircuitBreaker, MixinRetryExecution):
+    class HandlerPostgres(MixinAsyncCircuitBreaker, MixinRetryExecution):
         async def _my_operation(self, ...):
             result = await self._execute_with_retry(
-                operation="consul.kv_get",
-                func=lambda: self._client.kv.get(key),
+                operation="postgres.upsert",
+                func=lambda: self._client.upsert(record),
                 correlation_id=correlation_id,
                 retry_config=self._config.retry,
                 timeout_seconds=self._config.timeout_seconds,
@@ -29,10 +29,10 @@ Usage:
     ```
 
 Design Rationale:
-    This mixin extracts common retry patterns from HandlerConsul and HandlerVault
+    This mixin extracts common retry patterns from HandlerPostgres and HandlerVault
     to reduce code duplication and cyclomatic complexity. The error classification
     methods are designed to be overridden by subclasses for handler-specific
-    exception types (e.g., consul.ACLPermissionDenied, hvac.exceptions.Forbidden).
+    exception types (e.g., asyncpg.PostgresError, hvac.exceptions.Forbidden).
 
 See Also:
     - docs/patterns/error_recovery_patterns.md for retry pattern documentation
@@ -98,14 +98,14 @@ class MixinRetryExecution(ABC):
 
     Example:
         ```python
-        class HandlerConsul(MixinAsyncCircuitBreaker, MixinRetryExecution):
+        class HandlerPostgres(MixinAsyncCircuitBreaker, MixinRetryExecution):
             def _classify_error(self, error: Exception, operation: str) -> ModelRetryErrorClassification:
-                if isinstance(error, consul.ACLPermissionDenied):
+                if isinstance(error, asyncpg.InvalidAuthorizationSpecificationError):
                     return ModelRetryErrorClassification(
                         category=EnumRetryErrorCategory.AUTHENTICATION,
                         should_retry=False,
                         record_circuit_failure=True,
-                        error_message="Consul ACL permission denied",
+                        error_message="Postgres authentication failed",
                     )
                 # ... more error types
         ```
@@ -146,7 +146,7 @@ class MixinRetryExecution(ABC):
         """Return the target name for error context.
 
         Returns:
-            The target name string (e.g., "consul_handler", "vault_handler").
+            The target name string (e.g., "postgres_handler", "vault_handler").
         """
         ...
 

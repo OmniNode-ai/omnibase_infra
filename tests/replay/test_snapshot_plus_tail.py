@@ -445,7 +445,7 @@ class TestTailEventApplication:
         # First application
         output1 = reducer.reduce(state, event)
         state_after_first = output1.result
-        assert len(output1.intents) == 2  # Intents emitted
+        assert len(output1.intents) == 1  # PostgreSQL only (OMN-3540)
 
         # Duplicate application
         output2 = reducer.reduce(state_after_first, event)

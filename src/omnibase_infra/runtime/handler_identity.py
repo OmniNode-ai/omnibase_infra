@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Handler Identity Utilities for HYBRID Mode Resolution.
+"""# ai-slop-ok: pre-existingHandler Identity Utilities for HYBRID Mode Resolution.
 
 This module provides the `handler_identity()` function used by both bootstrap
 and contract sources to generate consistent handler IDs. This enables per-handler
@@ -18,8 +18,8 @@ The Solution:
 
 Example:
     >>> from omnibase_infra.runtime.handler_identity import handler_identity
-    >>> handler_identity("consul")
-    'proto.consul'
+    >>> handler_identity("db")
+    'proto.db'
     >>> handler_identity("http")
     'proto.http'
 
@@ -56,14 +56,14 @@ def handler_identity(protocol_type: str) -> str:
     with the same protocol_type.
 
     Args:
-        protocol_type: The protocol type (e.g., "consul", "http", "db", "vault", "mcp").
+        protocol_type: The protocol type (e.g., "db", "http", "mcp", "graph", "intent").
 
     Returns:
-        Stable handler identity string (e.g., "proto.consul", "proto.http").
+        Stable handler identity string (e.g., "proto.db", "proto.http").
 
     Example:
-        >>> handler_identity("consul")
-        'proto.consul'
+        >>> handler_identity("db")
+        'proto.db'
         >>> handler_identity("http")
         'proto.http'
 

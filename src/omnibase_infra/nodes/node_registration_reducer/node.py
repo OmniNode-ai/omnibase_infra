@@ -15,8 +15,8 @@ All state transition logic is 100% driven by contract.yaml, not Python code.
 FSM Pattern:
     1. Receive introspection event (trigger: introspection_received)
     2. FSM transitions idle -> pending (emits registration intents)
-    3. Receive confirmation events (triggers: consul_confirmed, postgres_confirmed)
-    4. FSM transitions pending -> partial -> complete
+    3. Receive confirmation events (triggers: postgres_confirmed)
+    4. FSM transitions pending -> complete
     5. On errors, FSM transitions to failed
     6. Reset events allow retry (failed/complete -> idle)
 
@@ -90,10 +90,7 @@ class NodeRegistrationReducer(
             - state_name: pending
               description: "Registration initiated"
               entry_actions:
-                - emit_consul_intent
                 - emit_postgres_intent
-            - state_name: partial
-              description: "One backend confirmed"
             - state_name: complete
               description: "Registration successful"
             - state_name: failed

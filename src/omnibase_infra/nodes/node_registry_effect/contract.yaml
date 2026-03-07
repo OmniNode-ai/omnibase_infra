@@ -116,18 +116,6 @@ output_model:
 handler_routing:
   routing_strategy: "payload_type_match"
   handlers:
-    # Register Node - Consul Backend
-    # Registers service with Consul for service discovery.
-    # Uses health check endpoint for automated liveness monitoring.
-    - operation: "register_node"
-      handler:
-        name: "HandlerConsulRegister"
-        module: "omnibase_infra.nodes.node_registry_effect.handlers.handler_consul_register"
-      backend: "consul"
-      description: "Register node with Consul service discovery"
-      output_fields:
-        - consul_registered
-        - consul_service_id
     # Register Node - PostgreSQL Backend
     # Persists registration record to PostgreSQL for durability.
     # Uses upsert semantics for idempotent re-registration.
@@ -140,16 +128,6 @@ handler_routing:
       output_fields:
         - postgres_registered
         - registration_id
-    # Deregister Node - Consul Backend
-    # Removes service from Consul to stop routing traffic.
-    - operation: "deregister_node"
-      handler:
-        name: "HandlerConsulDeregister"
-        module: "omnibase_infra.nodes.node_registry_effect.handlers.handler_consul_deregister"
-      backend: "consul"
-      description: "Deregister node from Consul service discovery"
-      output_fields:
-        - consul_deregistered
     # Deregister Node - PostgreSQL Backend
     # Marks registration record as inactive in PostgreSQL.
     - operation: "deregister_node"
@@ -430,11 +408,6 @@ io_operations:
       - error_summary
 # Dependencies (protocols this node requires)
 dependencies:
-  - name: "protocol_consul_client"
-    type: "protocol"
-    class_name: "ProtocolConsulClient"
-    module: "omnibase_infra.nodes.effects.protocol_consul_client"
-    description: "Consul service discovery operations"
   - name: "protocol_postgres_adapter"
     type: "protocol"
     class_name: "ProtocolPostgresAdapter"

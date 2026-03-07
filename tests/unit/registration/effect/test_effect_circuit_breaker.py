@@ -114,7 +114,7 @@ class MockConsulEffect(MixinAsyncCircuitBreaker):
             threshold=failure_threshold,
             reset_timeout=reset_timeout,
             service_name="consul.test",
-            transport_type=EnumInfraTransportType.CONSUL,
+            transport_type=EnumInfraTransportType.HTTP,
         )
 
     async def register_service(
@@ -153,7 +153,7 @@ class MockConsulEffect(MixinAsyncCircuitBreaker):
 
             # Raise appropriate infrastructure error
             context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
+                transport_type=EnumInfraTransportType.HTTP,
                 operation="register_service",
                 target_name="consul.test",
                 correlation_id=correlation_id,
@@ -815,9 +815,7 @@ class TestEffectCircuitBreakerErrorContext:
             await consul_effect.register_service("failing")
 
         error = exc_info.value
-        assert (
-            error.model.context.get("transport_type") == EnumInfraTransportType.CONSUL
-        )
+        assert error.model.context.get("transport_type") == EnumInfraTransportType.HTTP
         assert error.model.context.get("operation") == "register_service"
         assert error.model.context.get("target_name") == "consul.test"
 

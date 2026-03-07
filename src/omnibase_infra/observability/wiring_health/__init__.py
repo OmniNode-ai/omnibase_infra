@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Wiring health monitoring for ONEX event bus.
 
-This module provides infrastructure for detecting silent partial wiring failures
+Infrastructure for detecting silent partial wiring failures
 by comparing message emission counts to consumption counts on critical feedback
 loop topics.
 

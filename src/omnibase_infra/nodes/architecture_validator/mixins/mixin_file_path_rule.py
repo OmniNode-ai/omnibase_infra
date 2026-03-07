@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Mixin for file-path-based architecture rules.
 
-This module provides a mixin that extracts file paths from validation targets
+A mixin that extracts file paths from validation targets
 using explicit isinstance checks. Rules that validate file paths can inherit
 from this mixin to avoid duplicating the path extraction logic.
 

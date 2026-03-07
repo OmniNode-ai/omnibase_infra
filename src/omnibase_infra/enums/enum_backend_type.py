@@ -16,11 +16,9 @@ class EnumBackendType(str, Enum):
     and service discovery operations.
 
     Attributes:
-        CONSUL: HashiCorp Consul for service discovery and health checking
         POSTGRES: PostgreSQL database for persistent registration storage
     """
 
-    CONSUL = "consul"
     POSTGRES = "postgres"
 
 

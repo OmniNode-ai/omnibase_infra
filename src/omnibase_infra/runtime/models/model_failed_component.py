@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Failed Component Model.
 
-This module provides the Pydantic model for representing a component that
+The Pydantic model for representing a component that
 failed during shutdown operations.
 """
 

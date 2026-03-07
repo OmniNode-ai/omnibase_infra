@@ -6,7 +6,7 @@ This test suite validates that the RegistrationReducer meets its documented
 performance thresholds:
 
     - reduce() processing: <300ms per event (target)
-    - Intent building: <50ms per intent (includes Consul + PostgreSQL)
+    - Intent building: <50ms per intent (PostgreSQL only)
     - Idempotency check: <1ms
 
 These tests use safety margins (typically 50% of threshold) to account for:
@@ -171,7 +171,7 @@ class TestReducerPerformance:
 
         # Verify the operation completed successfully
         assert output.result.status == "pending"
-        assert len(output.intents) == 2  # Consul + PostgreSQL
+        assert len(output.intents) == 1  # PostgreSQL only
 
         # Use 50% of threshold as safety margin for CI variance
         max_allowed_ms = PERF_THRESHOLD_REDUCE_MS * SAFETY_MARGIN
@@ -272,38 +272,6 @@ class TestReducerPerformance:
         assert max_elapsed_ms < PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS * 2, (
             f"Max idempotency key generation took {max_elapsed_ms:.4f}ms, "
             f"exceeds 2x threshold of {PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS * 2}ms"
-        )
-
-    def test_consul_intent_building_fast(
-        self,
-        reducer: RegistrationReducer,
-        sample_event: ModelNodeIntrospectionEvent,
-    ) -> None:
-        """Consul intent building should complete under 50ms threshold.
-
-        Tests the _build_consul_intent() method which constructs the
-        Consul registration intent with service metadata.
-        """
-        correlation_id = uuid4()
-        elapsed_times: list[float] = []
-
-        for _ in range(TIMING_ITERATIONS):
-            start = time.perf_counter()
-            intent = reducer._build_consul_intent(sample_event, correlation_id)
-            elapsed_ms = (time.perf_counter() - start) * 1000
-            elapsed_times.append(elapsed_ms)
-
-            # Verify intent is valid
-            assert intent is not None
-            assert intent.intent_type
-
-        avg_elapsed_ms = sum(elapsed_times) / len(elapsed_times)
-
-        # Use 50% safety margin
-        max_allowed_ms = PERF_THRESHOLD_INTENT_BUILD_MS * SAFETY_MARGIN
-        assert avg_elapsed_ms < max_allowed_ms, (
-            f"Average Consul intent building took {avg_elapsed_ms:.2f}ms, "
-            f"exceeds {SAFETY_MARGIN * 100:.0f}% of {PERF_THRESHOLD_INTENT_BUILD_MS}ms threshold"
         )
 
     def test_postgres_intent_building_fast(
@@ -522,11 +490,11 @@ class TestThresholdConstants:
         since reduce includes validation, idempotency check, and intent building.
         """
         # Reduce threshold should accommodate at least:
-        # - 2 intent builds (Consul + PostgreSQL)
+        # - 1 intent build (PostgreSQL only)
         # - 1 idempotency check
         # - validation overhead
         component_sum = (
-            2 * PERF_THRESHOLD_INTENT_BUILD_MS + PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS
+            1 * PERF_THRESHOLD_INTENT_BUILD_MS + PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS
         )
 
         assert component_sum < PERF_THRESHOLD_REDUCE_MS, (

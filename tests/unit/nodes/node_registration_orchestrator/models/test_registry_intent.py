@@ -3,7 +3,7 @@
 """Tests for RegistryIntent and ModelRegistryIntent.
 
 This module validates the registry pattern for registration intents,
-serving as the template for other payload registry tests (HTTP, Vault, Consul).
+serving as the template for other payload registry tests (HTTP, Vault).
 
 The RegistryIntent provides a decorator-based registration mechanism that
 enables dynamic type resolution during Pydantic validation without requiring
@@ -16,7 +16,7 @@ explicit union type definitions. This pattern:
 Test Categories:
     1. Registry Registration Tests - decorator and method behavior
     2. Base Model Tests - common fields and configuration
-    3. Concrete Model Inheritance Tests - Consul and Postgres intents
+    3. Concrete Model Inheritance Tests - Postgres intents
     4. Serialization/Deserialization Tests - JSON round-trip validation
     5. Integration Tests - ModelReducerExecutionResult interop
 
@@ -41,8 +41,6 @@ from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.nodes.node_registration_orchestrator.models import (
-    ModelConsulIntentPayload,
-    ModelConsulRegistrationIntent,
     ModelPostgresIntentPayload,
     ModelPostgresUpsertIntent,
     ModelReducerExecutionResult,
@@ -58,29 +56,6 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_registrati
 # ============================================================================
 # Test Fixtures
 # ============================================================================
-
-
-@pytest.fixture
-def sample_consul_payload() -> ModelConsulIntentPayload:
-    """Create a sample Consul intent payload for testing."""
-    return ModelConsulIntentPayload(
-        service_name="test-service",
-        tags=("production", "v1"),
-        meta=(("env", "test"), ("region", "us-west")),
-    )
-
-
-@pytest.fixture
-def sample_consul_intent(
-    sample_consul_payload: ModelConsulIntentPayload,
-) -> ModelConsulRegistrationIntent:
-    """Create a sample Consul registration intent for testing."""
-    return ModelConsulRegistrationIntent(
-        operation="register",
-        node_id=uuid4(),
-        correlation_id=uuid4(),
-        payload=sample_consul_payload,
-    )
 
 
 @pytest.fixture
@@ -128,11 +103,6 @@ class TestRegistryIntent:
     validation without explicit union type definitions.
     """
 
-    def test_get_type_returns_correct_class_for_consul(self) -> None:
-        """Registry returns correct class for consul kind."""
-        intent_cls = RegistryIntent.get_type("consul")
-        assert intent_cls is ModelConsulRegistrationIntent
-
     def test_get_type_returns_correct_class_for_postgres(self) -> None:
         """Registry returns correct class for postgres kind."""
         intent_cls = RegistryIntent.get_type("postgres")
@@ -154,17 +124,15 @@ class TestRegistryIntent:
             RegistryIntent.get_type("nonexistent")
 
         error_msg = str(exc_info.value)
-        # Should mention at least consul and postgres
-        assert "consul" in error_msg or "postgres" in error_msg
+        # Should mention at least postgres
+        assert "postgres" in error_msg
 
     def test_get_all_types_returns_dict_of_registered_types(self) -> None:
         """get_all_types returns dict mapping kind strings to classes."""
         all_types = RegistryIntent.get_all_types()
 
         assert isinstance(all_types, dict)
-        assert "consul" in all_types
         assert "postgres" in all_types
-        assert all_types["consul"] is ModelConsulRegistrationIntent
         assert all_types["postgres"] is ModelPostgresUpsertIntent
 
     def test_get_all_types_returns_copy_not_reference(self) -> None:
@@ -178,10 +146,6 @@ class TestRegistryIntent:
         # Registry should be unchanged
         assert len(RegistryIntent.get_all_types()) == original_count
 
-    def test_is_registered_returns_true_for_consul(self) -> None:
-        """is_registered returns True for registered consul kind."""
-        assert RegistryIntent.is_registered("consul") is True
-
     def test_is_registered_returns_true_for_postgres(self) -> None:
         """is_registered returns True for registered postgres kind."""
         assert RegistryIntent.is_registered("postgres") is True
@@ -189,6 +153,7 @@ class TestRegistryIntent:
     def test_is_registered_returns_false_for_unknown_kind(self) -> None:
         """is_registered returns False for unknown kinds."""
         assert RegistryIntent.is_registered("unknown") is False
+        assert RegistryIntent.is_registered("consul") is False
         assert RegistryIntent.is_registered("vault") is False
         assert RegistryIntent.is_registered("http") is False
 
@@ -279,7 +244,6 @@ class TestRegistryIntent:
 
             # Registry should be empty after clear
             assert len(RegistryIntent.get_all_types()) == 0
-            assert RegistryIntent.is_registered("consul") is False
             assert RegistryIntent.is_registered("postgres") is False
 
         finally:
@@ -416,42 +380,20 @@ class TestConcreteIntentModels:
     and are properly registered in the RegistryIntent.
     """
 
-    def test_consul_intent_inherits_from_base(self) -> None:
-        """ModelConsulRegistrationIntent inherits from ModelRegistryIntent."""
-        assert issubclass(ModelConsulRegistrationIntent, ModelRegistryIntent)
-
     def test_postgres_intent_inherits_from_base(self) -> None:
         """ModelPostgresUpsertIntent inherits from ModelRegistryIntent."""
         assert issubclass(ModelPostgresUpsertIntent, ModelRegistryIntent)
-
-    def test_consul_intent_is_registered_in_registry(self) -> None:
-        """ModelConsulRegistrationIntent is registered with kind='consul'."""
-        assert RegistryIntent.is_registered("consul")
-        assert RegistryIntent.get_type("consul") is ModelConsulRegistrationIntent
 
     def test_postgres_intent_is_registered_in_registry(self) -> None:
         """ModelPostgresUpsertIntent is registered with kind='postgres'."""
         assert RegistryIntent.is_registered("postgres")
         assert RegistryIntent.get_type("postgres") is ModelPostgresUpsertIntent
 
-    def test_consul_intent_kind_field_is_literal_consul(
-        self, sample_consul_intent: ModelConsulRegistrationIntent
-    ) -> None:
-        """Consul intent kind field is always 'consul'."""
-        assert sample_consul_intent.kind == "consul"
-
     def test_postgres_intent_kind_field_is_literal_postgres(
         self, sample_postgres_intent: ModelPostgresUpsertIntent
     ) -> None:
         """Postgres intent kind field is always 'postgres'."""
         assert sample_postgres_intent.kind == "postgres"
-
-    def test_consul_intent_has_payload_field(
-        self, sample_consul_intent: ModelConsulRegistrationIntent
-    ) -> None:
-        """Consul intent has a payload field of type ModelConsulIntentPayload."""
-        assert hasattr(sample_consul_intent, "payload")
-        assert isinstance(sample_consul_intent.payload, ModelConsulIntentPayload)
 
     def test_postgres_intent_has_payload_field(
         self, sample_postgres_intent: ModelPostgresUpsertIntent
@@ -460,30 +402,12 @@ class TestConcreteIntentModels:
         assert hasattr(sample_postgres_intent, "payload")
         assert isinstance(sample_postgres_intent.payload, ModelPostgresIntentPayload)
 
-    def test_consul_intent_is_frozen(
-        self, sample_consul_intent: ModelConsulRegistrationIntent
-    ) -> None:
-        """Consul intent model is frozen and cannot be modified."""
-        with pytest.raises(ValidationError):
-            sample_consul_intent.operation = "modified"  # type: ignore[misc]
-
     def test_postgres_intent_is_frozen(
         self, sample_postgres_intent: ModelPostgresUpsertIntent
     ) -> None:
         """Postgres intent model is frozen and cannot be modified."""
         with pytest.raises(ValidationError):
             sample_postgres_intent.operation = "modified"  # type: ignore[misc]
-
-    def test_consul_intent_forbids_extra_fields(self) -> None:
-        """Consul intent raises ValidationError for extra fields."""
-        with pytest.raises(ValidationError):
-            ModelConsulRegistrationIntent(
-                operation="register",
-                node_id=uuid4(),
-                correlation_id=uuid4(),
-                payload=ModelConsulIntentPayload(service_name="test"),
-                extra_field="not_allowed",  # type: ignore[call-arg]
-            )
 
     def test_postgres_intent_forbids_extra_fields(self) -> None:
         """Postgres intent raises ValidationError for extra fields."""
@@ -515,19 +439,6 @@ class TestIntentSerialization:
     and deserialized back, with the kind field enabling type discrimination.
     """
 
-    def test_consul_intent_serializes_to_dict(
-        self, sample_consul_intent: ModelConsulRegistrationIntent
-    ) -> None:
-        """Consul intent can be serialized to dict."""
-        data = sample_consul_intent.model_dump()
-
-        assert isinstance(data, dict)
-        assert data["kind"] == "consul"
-        assert data["operation"] == "register"
-        assert "node_id" in data
-        assert "correlation_id" in data
-        assert "payload" in data
-
     def test_postgres_intent_serializes_to_dict(
         self, sample_postgres_intent: ModelPostgresUpsertIntent
     ) -> None:
@@ -541,15 +452,6 @@ class TestIntentSerialization:
         assert "correlation_id" in data
         assert "payload" in data
 
-    def test_consul_intent_serializes_to_json(
-        self, sample_consul_intent: ModelConsulRegistrationIntent
-    ) -> None:
-        """Consul intent can be serialized to JSON string."""
-        json_str = sample_consul_intent.model_dump_json()
-
-        assert isinstance(json_str, str)
-        assert '"kind":"consul"' in json_str or '"kind": "consul"' in json_str
-
     def test_postgres_intent_serializes_to_json(
         self, sample_postgres_intent: ModelPostgresUpsertIntent
     ) -> None:
@@ -558,18 +460,6 @@ class TestIntentSerialization:
 
         assert isinstance(json_str, str)
         assert '"kind":"postgres"' in json_str or '"kind": "postgres"' in json_str
-
-    def test_consul_intent_deserializes_from_dict(
-        self, sample_consul_intent: ModelConsulRegistrationIntent
-    ) -> None:
-        """Consul intent can be deserialized from dict."""
-        data = sample_consul_intent.model_dump()
-        restored = ModelConsulRegistrationIntent.model_validate(data)
-
-        assert restored.kind == "consul"
-        assert restored.operation == sample_consul_intent.operation
-        assert restored.node_id == sample_consul_intent.node_id
-        assert restored.correlation_id == sample_consul_intent.correlation_id
 
     def test_postgres_intent_deserializes_from_dict(
         self, sample_postgres_intent: ModelPostgresUpsertIntent
@@ -582,20 +472,6 @@ class TestIntentSerialization:
         assert restored.operation == sample_postgres_intent.operation
         assert restored.node_id == sample_postgres_intent.node_id
         assert restored.correlation_id == sample_postgres_intent.correlation_id
-
-    def test_consul_intent_round_trip_preserves_data(
-        self, sample_consul_intent: ModelConsulRegistrationIntent
-    ) -> None:
-        """Consul intent dict round-trip preserves all data.
-
-        Note: Uses model_dump/model_validate instead of JSON serialization
-        because the payload.meta field contains tuple of tuples which JSON
-        cannot round-trip (tuples become arrays, arrays deserialize as lists).
-        """
-        data = sample_consul_intent.model_dump()
-        restored = ModelConsulRegistrationIntent.model_validate(data)
-
-        assert restored == sample_consul_intent
 
     def test_postgres_intent_round_trip_preserves_data(
         self, sample_postgres_intent: ModelPostgresUpsertIntent
@@ -617,14 +493,6 @@ class TestIntentSerialization:
         This demonstrates the discriminated union pattern where the kind
         field is used to select the appropriate model class.
         """
-        consul_data = {
-            "kind": "consul",
-            "operation": "register",
-            "node_id": uuid4(),
-            "correlation_id": uuid4(),
-            "payload": {"service_name": "test-service"},
-        }
-
         postgres_data = {
             "kind": "postgres",
             "operation": "upsert",
@@ -639,31 +507,33 @@ class TestIntentSerialization:
         }
 
         # Use registry to get correct class based on kind
-        consul_cls = RegistryIntent.get_type(consul_data["kind"])
         postgres_cls = RegistryIntent.get_type(postgres_data["kind"])
 
-        consul_intent = consul_cls.model_validate(consul_data)
         postgres_intent = postgres_cls.model_validate(postgres_data)
 
-        assert isinstance(consul_intent, ModelConsulRegistrationIntent)
         assert isinstance(postgres_intent, ModelPostgresUpsertIntent)
 
     def test_deserialization_with_wrong_kind_fails(self) -> None:
         """Deserializing with wrong kind field fails validation.
 
-        ModelConsulRegistrationIntent expects kind='consul' as a Literal.
+        ModelPostgresUpsertIntent expects kind='postgres' as a Literal.
         Providing a different value should fail validation.
         """
         data = {
-            "kind": "wrong_kind",  # Not 'consul'
-            "operation": "register",
+            "kind": "wrong_kind",  # Not 'postgres'
+            "operation": "upsert",
             "node_id": str(uuid4()),
             "correlation_id": str(uuid4()),
-            "payload": {"service_name": "test"},
+            "payload": {
+                "node_id": str(uuid4()),
+                "node_type": "effect",
+                "correlation_id": str(uuid4()),
+                "timestamp": "2025-01-01T00:00:00Z",
+            },
         }
 
         with pytest.raises(ValidationError):
-            ModelConsulRegistrationIntent.model_validate(data)
+            ModelPostgresUpsertIntent.model_validate(data)
 
 
 # ============================================================================
@@ -679,20 +549,6 @@ class TestReducerExecutionResultIntegration:
     types dynamically from the RegistryIntent during deserialization.
     """
 
-    def test_result_accepts_consul_intent(
-        self,
-        initial_state: ModelReducerState,
-        sample_consul_intent: ModelConsulRegistrationIntent,
-    ) -> None:
-        """ModelReducerExecutionResult accepts Consul intent in intents tuple."""
-        result = ModelReducerExecutionResult(
-            state=initial_state,
-            intents=(sample_consul_intent,),
-        )
-
-        assert len(result.intents) == 1
-        assert isinstance(result.intents[0], ModelConsulRegistrationIntent)
-
     def test_result_accepts_postgres_intent(
         self,
         initial_state: ModelReducerState,
@@ -707,51 +563,20 @@ class TestReducerExecutionResultIntegration:
         assert len(result.intents) == 1
         assert isinstance(result.intents[0], ModelPostgresUpsertIntent)
 
-    def test_result_accepts_mixed_intent_types(
+    def test_result_accepts_multiple_postgres_intents(
         self,
         initial_state: ModelReducerState,
-        sample_consul_intent: ModelConsulRegistrationIntent,
         sample_postgres_intent: ModelPostgresUpsertIntent,
     ) -> None:
-        """ModelReducerExecutionResult accepts multiple intent types."""
+        """ModelReducerExecutionResult accepts multiple intents."""
         result = ModelReducerExecutionResult(
             state=initial_state,
-            intents=(sample_consul_intent, sample_postgres_intent),
+            intents=(sample_postgres_intent, sample_postgres_intent),
         )
 
         assert len(result.intents) == 2
-        assert isinstance(result.intents[0], ModelConsulRegistrationIntent)
+        assert isinstance(result.intents[0], ModelPostgresUpsertIntent)
         assert isinstance(result.intents[1], ModelPostgresUpsertIntent)
-
-    def test_result_deserializes_consul_intent_from_dict(
-        self,
-        initial_state: ModelReducerState,
-    ) -> None:
-        """ModelReducerExecutionResult deserializes Consul intent from dict.
-
-        The validate_intents validator uses RegistryIntent to resolve the
-        correct intent class based on the kind field.
-
-        Note: Uses UUID objects (not strings) because intent models have
-        strict=True config, which requires proper types without coercion.
-        """
-        consul_dict = {
-            "kind": "consul",
-            "operation": "register",
-            "node_id": uuid4(),
-            "correlation_id": uuid4(),
-            "payload": {"service_name": "test-service"},
-        }
-
-        result = ModelReducerExecutionResult(
-            state=initial_state,
-            intents=[consul_dict],  # List of dicts
-        )
-
-        assert len(result.intents) == 1
-        assert isinstance(result.intents[0], ModelConsulRegistrationIntent)
-        assert result.intents[0].kind == "consul"
-        assert result.intents[0].payload.service_name == "test-service"
 
     def test_result_deserializes_postgres_intent_from_dict(
         self,
@@ -786,45 +611,6 @@ class TestReducerExecutionResultIntegration:
         assert len(result.intents) == 1
         assert isinstance(result.intents[0], ModelPostgresUpsertIntent)
         assert result.intents[0].kind == "postgres"
-
-    def test_result_deserializes_mixed_intents_from_dicts(
-        self,
-        initial_state: ModelReducerState,
-    ) -> None:
-        """ModelReducerExecutionResult deserializes mixed intent types from dicts.
-
-        Note: Uses UUID objects (not strings) because intent models have
-        strict=True config, which requires proper types without coercion.
-        """
-        consul_dict = {
-            "kind": "consul",
-            "operation": "register",
-            "node_id": uuid4(),
-            "correlation_id": uuid4(),
-            "payload": {"service_name": "service-a"},
-        }
-
-        postgres_dict = {
-            "kind": "postgres",
-            "operation": "upsert",
-            "node_id": uuid4(),
-            "correlation_id": uuid4(),
-            "payload": {
-                "node_id": uuid4(),
-                "node_type": EnumNodeKind.COMPUTE,
-                "correlation_id": uuid4(),
-                "timestamp": "2025-01-02T00:00:00Z",
-            },
-        }
-
-        result = ModelReducerExecutionResult(
-            state=initial_state,
-            intents=[consul_dict, postgres_dict],
-        )
-
-        assert len(result.intents) == 2
-        assert isinstance(result.intents[0], ModelConsulRegistrationIntent)
-        assert isinstance(result.intents[1], ModelPostgresUpsertIntent)
 
     def test_result_rejects_dict_missing_kind_field(
         self,
@@ -887,7 +673,6 @@ class TestReducerExecutionResultIntegration:
     def test_result_round_trip_preserves_intent_types(
         self,
         initial_state: ModelReducerState,
-        sample_consul_intent: ModelConsulRegistrationIntent,
         sample_postgres_intent: ModelPostgresUpsertIntent,
     ) -> None:
         """Round-trip serialization preserves correct intent types.
@@ -898,7 +683,7 @@ class TestReducerExecutionResultIntegration:
         """
         original = ModelReducerExecutionResult(
             state=initial_state,
-            intents=(sample_consul_intent, sample_postgres_intent),
+            intents=(sample_postgres_intent,),
         )
 
         # Serialize to dict (serialize_as_any required for polymorphic intents)
@@ -907,14 +692,12 @@ class TestReducerExecutionResultIntegration:
         # Deserialize back
         restored = ModelReducerExecutionResult.model_validate(data)
 
-        assert len(restored.intents) == 2
-        assert isinstance(restored.intents[0], ModelConsulRegistrationIntent)
-        assert isinstance(restored.intents[1], ModelPostgresUpsertIntent)
+        assert len(restored.intents) == 1
+        assert isinstance(restored.intents[0], ModelPostgresUpsertIntent)
 
     def test_result_json_round_trip_preserves_intent_types(
         self,
         initial_state: ModelReducerState,
-        sample_consul_intent: ModelConsulRegistrationIntent,
         sample_postgres_intent: ModelPostgresUpsertIntent,
     ) -> None:
         """JSON round-trip serialization preserves correct intent types.
@@ -927,7 +710,7 @@ class TestReducerExecutionResultIntegration:
         """
         original = ModelReducerExecutionResult(
             state=initial_state,
-            intents=(sample_consul_intent, sample_postgres_intent),
+            intents=(sample_postgres_intent,),
         )
 
         # Serialize to dict (serialize_as_any required for polymorphic intents)
@@ -939,23 +722,22 @@ class TestReducerExecutionResultIntegration:
         # Deserialize back
         restored = ModelReducerExecutionResult.model_validate(data)
 
-        assert len(restored.intents) == 2
-        assert isinstance(restored.intents[0], ModelConsulRegistrationIntent)
-        assert isinstance(restored.intents[1], ModelPostgresUpsertIntent)
+        assert len(restored.intents) == 1
+        assert isinstance(restored.intents[0], ModelPostgresUpsertIntent)
 
     def test_result_with_intents_factory_accepts_model_instances(
         self,
         initial_state: ModelReducerState,
-        sample_consul_intent: ModelConsulRegistrationIntent,
+        sample_postgres_intent: ModelPostgresUpsertIntent,
     ) -> None:
         """with_intents factory accepts model instances directly."""
         result = ModelReducerExecutionResult.with_intents(
             state=initial_state,
-            intents=[sample_consul_intent],
+            intents=[sample_postgres_intent],
         )
 
         assert len(result.intents) == 1
-        assert result.intents[0] is sample_consul_intent
+        assert result.intents[0] is sample_postgres_intent
 
 
 # ============================================================================
@@ -986,18 +768,6 @@ class TestIntentThreadSafety:
         # Should return equivalent copies
         assert types1 == types2
 
-    def test_consul_intent_is_hashable(
-        self, sample_consul_intent: ModelConsulRegistrationIntent
-    ) -> None:
-        """Frozen Consul intent is hashable for use in sets/dicts."""
-        # Should not raise TypeError
-        hash_value = hash(sample_consul_intent)
-        assert isinstance(hash_value, int)
-
-        # Can be used in a set
-        intent_set = {sample_consul_intent}
-        assert len(intent_set) == 1
-
     def test_postgres_intent_is_not_hashable_due_to_nested_models(
         self, sample_postgres_intent: ModelPostgresUpsertIntent
     ) -> None:
@@ -1014,35 +784,40 @@ class TestIntentThreadSafety:
         with pytest.raises(TypeError, match="unhashable type"):
             hash(sample_postgres_intent)
 
-    def test_identical_intents_have_same_hash(self) -> None:
-        """Identical intents should have the same hash value."""
+    def test_identical_postgres_intents_are_equal(self) -> None:
+        """Identical postgres intents should be equal."""
         node_id = uuid4()
         correlation_id = uuid4()
+        payload_node_id = uuid4()
+        payload_correlation_id = uuid4()
 
-        intent1 = ModelConsulRegistrationIntent(
-            operation="register",
+        intent1 = ModelPostgresUpsertIntent(
+            operation="upsert",
             node_id=node_id,
             correlation_id=correlation_id,
-            payload=ModelConsulIntentPayload(service_name="test"),
+            payload=ModelPostgresIntentPayload(
+                node_id=payload_node_id,
+                node_type=EnumNodeKind.EFFECT,
+                node_version=ModelSemVer.parse("1.0.0"),
+                correlation_id=payload_correlation_id,
+                timestamp="2025-01-01T00:00:00Z",
+            ),
         )
 
-        intent2 = ModelConsulRegistrationIntent(
-            operation="register",
+        intent2 = ModelPostgresUpsertIntent(
+            operation="upsert",
             node_id=node_id,
             correlation_id=correlation_id,
-            payload=ModelConsulIntentPayload(service_name="test"),
+            payload=ModelPostgresIntentPayload(
+                node_id=payload_node_id,
+                node_type=EnumNodeKind.EFFECT,
+                node_version=ModelSemVer.parse("1.0.0"),
+                correlation_id=payload_correlation_id,
+                timestamp="2025-01-01T00:00:00Z",
+            ),
         )
 
-        assert hash(intent1) == hash(intent2)
         assert intent1 == intent2
-
-    def test_intents_can_be_used_as_dict_keys(
-        self, sample_consul_intent: ModelConsulRegistrationIntent
-    ) -> None:
-        """Frozen intents can be used as dictionary keys."""
-        intent_dict = {sample_consul_intent: "value"}
-
-        assert intent_dict[sample_consul_intent] == "value"
 
 
 # ============================================================================
@@ -1077,16 +852,6 @@ class TestIntentEdgeCases:
 
         assert result.intents == ()
 
-    def test_consul_intent_operation_must_be_non_empty(self) -> None:
-        """Consul intent operation field must have min_length=1."""
-        with pytest.raises(ValidationError):
-            ModelConsulRegistrationIntent(
-                operation="",  # Empty string should fail
-                node_id=uuid4(),
-                correlation_id=uuid4(),
-                payload=ModelConsulIntentPayload(service_name="test"),
-            )
-
     def test_postgres_intent_operation_must_be_non_empty(self) -> None:
         """Postgres intent operation field must have min_length=1."""
         with pytest.raises(ValidationError):
@@ -1112,20 +877,21 @@ class TestIntentEdgeCases:
         correlation_id_str = "87654321-4321-8765-4321-876543218765"
 
         with pytest.raises(ValidationError) as exc_info:
-            ModelConsulRegistrationIntent(
-                operation="register",
+            ModelPostgresUpsertIntent(
+                operation="upsert",
                 node_id=node_id_str,  # type: ignore[arg-type]
                 correlation_id=correlation_id_str,  # type: ignore[arg-type]
-                payload=ModelConsulIntentPayload(service_name="test"),
+                payload=ModelPostgresIntentPayload(
+                    node_id=uuid4(),
+                    node_type=EnumNodeKind.EFFECT,
+                    node_version=ModelSemVer.parse("1.0.0"),
+                    correlation_id=uuid4(),
+                    timestamp="2025-01-01T00:00:00Z",
+                ),
             )
 
         error_msg = str(exc_info.value)
         assert "uuid" in error_msg.lower() or "UUID" in error_msg
-
-    def test_consul_payload_service_name_must_be_non_empty(self) -> None:
-        """Consul payload service_name must have min_length=1."""
-        with pytest.raises(ValidationError):
-            ModelConsulIntentPayload(service_name="")
 
     def test_large_intents_tuple_is_accepted(
         self, initial_state: ModelReducerState
@@ -1133,11 +899,17 @@ class TestIntentEdgeCases:
         """Result can contain many intents."""
         # Create 100 intents
         intents = tuple(
-            ModelConsulRegistrationIntent(
-                operation="register",
+            ModelPostgresUpsertIntent(
+                operation="upsert",
                 node_id=uuid4(),
                 correlation_id=uuid4(),
-                payload=ModelConsulIntentPayload(service_name=f"service-{i}"),
+                payload=ModelPostgresIntentPayload(
+                    node_id=uuid4(),
+                    node_type=EnumNodeKind.EFFECT,
+                    node_version=ModelSemVer.parse("1.0.0"),
+                    correlation_id=uuid4(),
+                    timestamp="2025-01-01T00:00:00Z",
+                ),
             )
             for i in range(100)
         )
@@ -1193,8 +965,7 @@ class TestUnionRegistrySync:
         types = get_union_intent_types()
 
         assert isinstance(types, tuple)
-        assert len(types) >= 2  # At least consul and postgres
-        assert ModelConsulRegistrationIntent in types
+        assert len(types) >= 1  # At least postgres
         assert ModelPostgresUpsertIntent in types
 
     def test_union_types_match_registry_count(self) -> None:

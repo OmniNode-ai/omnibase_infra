@@ -2,18 +2,16 @@
 # Copyright (c) 2025 OmniNode Team
 """Pytest configuration and fixtures for registration E2E integration tests.
 
-This module provides fixtures for end-to-end testing of the registration
-orchestrator against real infrastructure (Kafka, Consul, PostgreSQL).
+Fixtures for end-to-end testing of the registration orchestrator against
+real infrastructure (Kafka, PostgreSQL).
 
 Infrastructure Requirements:
     Tests require ALL infrastructure services to be available:
     - PostgreSQL: OMNIBASE_INFRA_DB_URL (database: omnibase_infra)
-    - Consul: CONSUL_HOST:28500
     - Kafka/Redpanda: KAFKA_BOOTSTRAP_SERVERS
 
     Environment variables required:
     - OMNIBASE_INFRA_DB_URL (preferred) or POSTGRES_HOST, POSTGRES_PASSWORD (for PostgreSQL)
-    - CONSUL_HOST (for Consul)
     - KAFKA_BOOTSTRAP_SERVERS (for Kafka)
 
 CI/CD Graceful Skip Behavior:
@@ -37,8 +35,6 @@ Fixture Dependency Graph:
         -> introspectable_test_node
     ensure_test_topic
         -> ensure_test_topic_exists (UUID-suffixed topic with cleanup)
-    real_consul_handler
-        -> cleanup_consul_services
 
 Related Tickets:
     - OMN-892: E2E Registration Tests
@@ -49,12 +45,10 @@ from __future__ import annotations
 
 import logging
 import os
-import socket
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
-from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -68,7 +62,6 @@ from omnibase_infra.enums import EnumIntrospectionReason
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.utils import sanitize_error_message
 from tests.conftest import check_service_registry_available
-from tests.infrastructure_config import DEFAULT_CONSUL_PORT
 
 # Load environment configuration with layered priority:
 # 1. .env in project root (base configuration - credentials, shared settings)
@@ -111,7 +104,6 @@ if TYPE_CHECKING:
     import asyncpg
 
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
-    from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.nodes.node_registration_orchestrator import (
         NodeRegistrationOrchestrator,
     )
@@ -213,34 +205,11 @@ POSTGRES_AVAILABLE = _postgres_config.is_configured
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
 KAFKA_AVAILABLE = bool(KAFKA_BOOTSTRAP_SERVERS)
 
-# Consul availability
-CONSUL_HOST = os.getenv("CONSUL_HOST")
-CONSUL_PORT = int(os.getenv("CONSUL_PORT", str(DEFAULT_CONSUL_PORT)))
-
-
-def _check_consul_reachable() -> bool:
-    """Check if Consul server is reachable via TCP."""
-    if not CONSUL_HOST:
-        return False
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(5.0)
-            result = sock.connect_ex((CONSUL_HOST, CONSUL_PORT))
-            return result == 0
-    except (OSError, TimeoutError):
-        return False
-
-
-CONSUL_AVAILABLE = _check_consul_reachable()
-
 SERVICE_REGISTRY_AVAILABLE = check_service_registry_available()
 
 # Combined availability check
 ALL_INFRA_AVAILABLE = (
-    KAFKA_AVAILABLE
-    and CONSUL_AVAILABLE
-    and POSTGRES_AVAILABLE
-    and SERVICE_REGISTRY_AVAILABLE
+    KAFKA_AVAILABLE and POSTGRES_AVAILABLE and SERVICE_REGISTRY_AVAILABLE
 )
 
 
@@ -257,7 +226,6 @@ pytestmark = [
         reason=(
             "Full infrastructure required for E2E tests. "
             f"Kafka: {'available' if KAFKA_AVAILABLE else 'MISSING (set KAFKA_BOOTSTRAP_SERVERS)'}. "
-            f"Consul: {'available' if CONSUL_AVAILABLE else 'MISSING (set CONSUL_HOST or unreachable)'}. "
             f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST and POSTGRES_PASSWORD)'}. "
             f"ServiceRegistry: {'available' if SERVICE_REGISTRY_AVAILABLE else 'MISSING (omnibase_core circular import issue)'}."
         ),
@@ -537,92 +505,6 @@ async def ensure_test_topic_exists(
             await publish_to_topic(ensure_test_topic_exists, event)
     """
     return await ensure_test_topic("test.e2e.introspection", partitions=3)
-
-
-# =============================================================================
-# Consul Handler Fixtures
-# =============================================================================
-
-
-@pytest.fixture
-def mock_container() -> MagicMock:
-    """Create mock ONEX container for handler tests."""
-    return MagicMock(spec=ModelONEXContainer)
-
-
-@pytest.fixture
-async def real_consul_handler(
-    mock_container: MagicMock,
-) -> AsyncGenerator[HandlerConsul, None]:
-    """Connected HandlerConsul with cleanup.
-
-    This fixture creates a HandlerConsul connected to the real Consul
-    server on the infrastructure server.
-
-    Args:
-        mock_container: ONEX container mock for dependency injection.
-
-    Yields:
-        HandlerConsul: Initialized handler ready for operations.
-
-    Note:
-        The handler is shut down after each test.
-    """
-    from omnibase_infra.handlers import HandlerConsul
-
-    if not CONSUL_AVAILABLE:
-        pytest.skip("Consul not available (CONSUL_HOST not set or unreachable)")
-
-    handler = HandlerConsul(mock_container)
-    await handler.initialize(
-        {
-            "host": CONSUL_HOST,
-            "port": CONSUL_PORT,
-            "scheme": "http",
-            "timeout_seconds": 30.0,
-            "max_concurrent_operations": 5,
-            "circuit_breaker_enabled": True,
-            "circuit_breaker_failure_threshold": 3,
-            "circuit_breaker_reset_timeout_seconds": 30.0,
-        }
-    )
-
-    yield handler
-
-    await handler.shutdown()
-
-
-@pytest.fixture
-async def cleanup_consul_services(
-    real_consul_handler: HandlerConsul,
-) -> AsyncGenerator[list[str], None]:
-    """Track and cleanup test services from Consul.
-
-    Yields a list where tests can append service IDs they register.
-    After the test, all listed services are deregistered.
-
-    Yields:
-        List to append service IDs for cleanup.
-    """
-    services_to_cleanup: list[str] = []
-
-    yield services_to_cleanup
-
-    # Cleanup: deregister all tracked services
-    for service_id in services_to_cleanup:
-        try:
-            envelope = {
-                "operation": "consul.deregister_service",
-                "payload": {"service_id": service_id},
-            }
-            await real_consul_handler.execute(envelope)
-        except Exception as e:
-            # Note: exc_info omitted to prevent potential info leakage
-            logger.warning(
-                "Cleanup failed for Consul service %s: %s",
-                service_id,
-                sanitize_error_message(e),
-            )
 
 
 # =============================================================================
@@ -1225,7 +1107,6 @@ def configure_e2e_logging() -> None:
 __all__ = [
     # Availability flags
     "ALL_INFRA_AVAILABLE",
-    "CONSUL_AVAILABLE",
     "KAFKA_AVAILABLE",
     "POSTGRES_AVAILABLE",
     "SERVICE_REGISTRY_AVAILABLE",
@@ -1244,9 +1125,6 @@ __all__ = [
     # Topic fixtures
     "ensure_test_topic",
     "ensure_test_topic_exists",
-    # Consul fixtures
-    "real_consul_handler",
-    "cleanup_consul_services",
     # Projector fixtures
     "real_projector",
     # Timeout fixtures

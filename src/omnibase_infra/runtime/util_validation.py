@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Contract validation for ONEX runtime configuration.
 
-This module provides contract-level validation for runtime configuration.
+Contract-level validation for runtime configuration.
 It validates configuration dictionaries against the runtime config contract
 schema before Pydantic model validation occurs.
 

@@ -20,12 +20,6 @@ class TestInferFromIntentTypes:
         result = rules.infer_from_intent_types(["postgres.upsert", "postgres.query"])
         assert result == ["postgres.storage"]
 
-    def test_consul_intent_pattern(self) -> None:
-        """consul.* intents should infer consul.registration tag."""
-        rules = CapabilityInferenceRules()
-        result = rules.infer_from_intent_types(["consul.register", "consul.deregister"])
-        assert result == ["consul.registration"]
-
     def test_kafka_intent_pattern(self) -> None:
         """kafka.* intents should infer kafka.messaging tag."""
         rules = CapabilityInferenceRules()
@@ -47,8 +41,8 @@ class TestInferFromIntentTypes:
     def test_multiple_patterns(self) -> None:
         """Multiple intent patterns should return multiple tags."""
         rules = CapabilityInferenceRules()
-        result = rules.infer_from_intent_types(["postgres.upsert", "consul.register"])
-        assert result == ["consul.registration", "postgres.storage"]  # sorted
+        result = rules.infer_from_intent_types(["postgres.upsert", "kafka.produce"])
+        assert result == ["kafka.messaging", "postgres.storage"]  # sorted
 
     def test_all_patterns_combined(self) -> None:
         """All intent patterns combined should return all tags sorted."""
@@ -56,14 +50,12 @@ class TestInferFromIntentTypes:
         result = rules.infer_from_intent_types(
             [
                 "postgres.upsert",
-                "consul.register",
                 "kafka.produce",
                 "valkey.get",
                 "http.post",
             ]
         )
         expected = [
-            "consul.registration",
             "http.transport",
             "kafka.messaging",
             "postgres.storage",
@@ -102,11 +94,11 @@ class TestInferFromIntentTypes:
             [
                 "postgres.upsert",
                 "unknown.intent",
-                "consul.register",
+                "kafka.produce",
                 "another.unknown",
             ]
         )
-        assert result == ["consul.registration", "postgres.storage"]
+        assert result == ["kafka.messaging", "postgres.storage"]
 
     def test_case_sensitive_patterns(self) -> None:
         """Intent patterns should be case-sensitive (startswith match)."""
@@ -410,8 +402,8 @@ class TestInferAll:
     def test_partial_inputs_intent_only(self) -> None:
         """Partial inputs with only intent_types should work correctly."""
         rules = CapabilityInferenceRules()
-        result = rules.infer_all(intent_types=["consul.register"])
-        assert result == ["consul.registration"]
+        result = rules.infer_all(intent_types=["kafka.produce"])
+        assert result == ["kafka.messaging"]
 
     def test_partial_inputs_protocols_only(self) -> None:
         """Partial inputs with only protocols should work correctly."""
@@ -429,7 +421,7 @@ class TestInferAll:
         """Same input should always produce same output (deterministic)."""
         rules = CapabilityInferenceRules()
         input_data = {
-            "intent_types": ["postgres.upsert", "consul.register"],
+            "intent_types": ["postgres.upsert", "kafka.produce"],
             "protocols": ["ProtocolReducer"],
             "node_type": "effect",
         }
@@ -456,7 +448,6 @@ class TestInferAll:
         result = rules.infer_all(
             intent_types=[
                 "postgres.upsert",
-                "consul.register",
                 "kafka.produce",
                 "valkey.get",
                 "http.post",
@@ -474,7 +465,6 @@ class TestInferAll:
             [
                 # Intent types
                 "postgres.storage",
-                "consul.registration",
                 "kafka.messaging",
                 "valkey.caching",
                 "http.transport",
@@ -530,7 +520,7 @@ class TestDeterminism:
         """Multiple runs with same input should produce identical results."""
         rules = CapabilityInferenceRules()
         inputs = {
-            "intent_types": ["http.post", "consul.register"],
+            "intent_types": ["http.post", "kafka.produce"],
             "protocols": ["ProtocolCacheAdapter", "ProtocolReducer"],
             "node_type": "reducer",
         }
@@ -543,7 +533,7 @@ class TestDeterminism:
         result1 = rules.infer_from_intent_types(
             [
                 "postgres.upsert",
-                "consul.register",
+                "valkey.get",
                 "kafka.produce",
             ]
         )
@@ -551,7 +541,7 @@ class TestDeterminism:
             [
                 "kafka.produce",
                 "postgres.upsert",
-                "consul.register",
+                "valkey.get",
             ]
         )
         assert result1 == result2
@@ -629,13 +619,11 @@ class TestPerformance:
     def test_large_mixed_list(self) -> None:
         """Large mixed list should process correctly and deterministically."""
         rules = CapabilityInferenceRules()
-        intents = (
-            [f"postgres.op_{i}" for i in range(100)]
-            + [f"consul.op_{i}" for i in range(100)]
-            + [f"kafka.op_{i}" for i in range(100)]
-        )
+        intents = [f"postgres.op_{i}" for i in range(100)] + [
+            f"kafka.op_{i}" for i in range(100)
+        ]
         result = rules.infer_from_intent_types(intents)
-        expected = ["consul.registration", "kafka.messaging", "postgres.storage"]
+        expected = ["kafka.messaging", "postgres.storage"]
         assert result == expected
 
 
@@ -646,7 +634,7 @@ class TestStatelessness:
         """Different instances should produce same results."""
         rules1 = CapabilityInferenceRules()
         rules2 = CapabilityInferenceRules()
-        input_data = ["postgres.upsert", "consul.register"]
+        input_data = ["postgres.upsert", "kafka.produce"]
         assert rules1.infer_from_intent_types(
             input_data
         ) == rules2.infer_from_intent_types(input_data)
@@ -657,8 +645,8 @@ class TestStatelessness:
         # First call
         rules.infer_from_intent_types(["postgres.upsert"])
         # Second call with different input
-        result = rules.infer_from_intent_types(["consul.register"])
-        assert result == ["consul.registration"]
+        result = rules.infer_from_intent_types(["kafka.produce"])
+        assert result == ["kafka.messaging"]
 
     def test_instance_reuse_no_state_leakage(self) -> None:
         """Reusing instance should not leak state between calls."""
@@ -668,9 +656,9 @@ class TestStatelessness:
             protocols=["ProtocolReducer"],
         )
         result2 = rules.infer_all(
-            intent_types=["consul.register"],
+            intent_types=["kafka.produce"],
         )
-        assert result2 == ["consul.registration"]
+        assert result2 == ["kafka.messaging"]
         # Verify result1 is unchanged
         assert "postgres.storage" in result1
         assert "state.reducer" in result1
@@ -704,8 +692,8 @@ class TestDependencyInjection:
         result = rules.infer_from_intent_types(["postgres.upsert"])
         assert result == ["custom.database"]
         # Other defaults should still work
-        result = rules.infer_from_intent_types(["consul.register"])
-        assert result == ["consul.registration"]
+        result = rules.infer_from_intent_types(["kafka.produce"])
+        assert result == ["kafka.messaging"]
 
     def test_custom_protocol_tags_extend_defaults(self) -> None:
         """Custom protocol tags should extend default tags."""
@@ -845,7 +833,6 @@ class TestDefaultConstants:
         assert hasattr(CapabilityInferenceRules, "DEFAULT_INTENT_PATTERNS")
         patterns = CapabilityInferenceRules.DEFAULT_INTENT_PATTERNS
         assert "postgres." in patterns
-        assert "consul." in patterns
         assert "kafka." in patterns
         assert "valkey." in patterns
         assert "http." in patterns
@@ -873,7 +860,6 @@ class TestDefaultConstants:
         """DEFAULT_INTENT_PATTERNS should have expected values."""
         patterns = CapabilityInferenceRules.DEFAULT_INTENT_PATTERNS
         assert patterns["postgres."] == "postgres.storage"
-        assert patterns["consul."] == "consul.registration"
         assert patterns["kafka."] == "kafka.messaging"
         assert patterns["valkey."] == "valkey.caching"
         assert patterns["http."] == "http.transport"

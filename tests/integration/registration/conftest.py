@@ -3,33 +3,31 @@
 """Pytest configuration and fixtures for registration integration tests.
 
 This conftest imports fixtures from the handlers conftest to enable
-Consul, PostgreSQL, Graph, Qdrant, Vault, and HTTP integration testing
+PostgreSQL, Graph, Qdrant, Vault, and HTTP integration testing
 in registration tests.
 
 Available Fixtures
 ------------------
 Infrastructure Availability Flags:
-    CONSUL_AVAILABLE, POSTGRES_AVAILABLE, GRAPH_AVAILABLE,
-    QDRANT_AVAILABLE, VAULT_AVAILABLE
+    POSTGRES_AVAILABLE, GRAPH_AVAILABLE, QDRANT_AVAILABLE, VAULT_AVAILABLE
     - Boolean/string constants indicating if infrastructure is reachable.
 
 Skip Marker Fixtures:
-    consul_available, graph_available, qdrant_available, vault_available
+    graph_available, qdrant_available, vault_available
     - Pytest fixtures that skip tests if infrastructure is unavailable.
 
 Configuration Fixtures:
-    consul_config, db_config, graph_config, qdrant_config, vault_config,
+    db_config, graph_config, qdrant_config, vault_config,
     http_handler_config, small_response_config
     - Return configuration dicts for handler initialization.
 
 Initialized Handler Fixtures:
-    initialized_consul_handler, initialized_db_handler, initialized_graph_handler,
+    initialized_db_handler, initialized_graph_handler,
     initialized_qdrant_handler, vault_handler
     - Provide ready-to-use handler instances with automatic cleanup.
 
 Unique ID Fixtures (for test isolation):
-    unique_kv_key, unique_service_name, unique_table_name,
-    unique_node_label, unique_collection_name
+    unique_table_name, unique_node_label, unique_collection_name
     - Generate unique identifiers to prevent test interference.
 
 Cleanup Fixtures:
@@ -69,8 +67,6 @@ Reference:
 # =============================================================================
 
 from tests.integration.handlers.conftest import (
-    # Consul fixtures
-    CONSUL_AVAILABLE,
     # Graph fixtures
     GRAPH_AVAILABLE,
     # Database fixtures
@@ -80,14 +76,11 @@ from tests.integration.handlers.conftest import (
     # Vault fixtures
     VAULT_AVAILABLE,
     cleanup_table,
-    consul_available,
-    consul_config,
     db_config,
     graph_available,
     graph_config,
     # HTTP fixtures
     http_handler_config,
-    initialized_consul_handler,
     initialized_db_handler,
     initialized_graph_handler,
     initialized_qdrant_handler,
@@ -97,9 +90,7 @@ from tests.integration.handlers.conftest import (
     qdrant_config,
     small_response_config,
     unique_collection_name,
-    unique_kv_key,
     unique_node_label,
-    unique_service_name,
     unique_table_name,
     vault_available,
     vault_config,

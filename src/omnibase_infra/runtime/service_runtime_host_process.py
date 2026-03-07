@@ -7,8 +7,9 @@ Implements RuntimeHostProcess — responsible for:
 - Registering handlers via the wiring module
 - Subscribing to event bus topics and routing envelopes to handlers
 - Handling errors by producing success=False response envelopes
-- Processing envelopes sequentially (no parallelism in MVP)
-- Basic shutdown (no graceful drain in MVP)
+- Processing envelopes with configurable parallelism (OMN-476)
+- Handler pooling per handler type for contention-free parallelism (OMN-477)
+- Graceful shutdown with in-flight message drain (OMN-756)
 
 The RuntimeHostProcess is the central coordinator for infrastructure runtime,
 bridging event-driven message routing with protocol handlers.
@@ -65,7 +66,6 @@ from omnibase_infra.enums import (
 )
 from omnibase_infra.errors import (
     EnvelopeValidationError,
-    InfraConsulError,
     InfraTimeoutError,
     InfraUnavailableError,
     ModelInfraErrorContext,
@@ -87,8 +87,13 @@ from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.runtime.model_resolved_dependencies import (
     ModelResolvedDependencies,
 )
+from omnibase_infra.runtime.batch_response_publisher import BatchResponsePublisher
 from omnibase_infra.runtime.contract_dependency_resolver import (
     ContractDependencyResolver,
+)
+from omnibase_infra.runtime.contract_registration_event_router import (
+    TOPIC_SUFFIX_CONTRACT_DEREGISTERED,
+    TOPIC_SUFFIX_CONTRACT_REGISTERED,
 )
 from omnibase_infra.runtime.dependency_materializer import DependencyMaterializer
 from omnibase_infra.runtime.envelope_validator import (
@@ -103,7 +108,10 @@ from omnibase_infra.runtime.models import (
 from omnibase_infra.runtime.models.model_materialized_resources import (
     ModelMaterializedResources,
 )
-from omnibase_infra.runtime.protocol_lifecycle_executor import ProtocolLifecycleExecutor
+from omnibase_infra.runtime.protocol_lifecycle_executor import (
+    DEFAULT_HANDLER_SHUTDOWN_TIMEOUT,
+    ProtocolLifecycleExecutor,
+)
 from omnibase_infra.runtime.runtime_contract_config_loader import (
     RuntimeContractConfigLoader,
 )
@@ -159,9 +167,20 @@ from omnibase_infra.runtime.handler_identity import (
     handler_identity,
 )
 from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+from omnibase_infra.runtime.handler_pool import (
+    DEFAULT_POOL_SIZE,
+    MAX_POOL_SIZE,
+    MIN_POOL_SIZE,
+    HandlerPool,
+)
 from omnibase_infra.runtime.kafka_contract_source import KafkaContractSource
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
-from omnibase_infra.topics import TopicResolutionError, TopicResolver
+from omnibase_infra.topics import (
+    SUFFIX_CONTRACT_DEREGISTERED,
+    SUFFIX_CONTRACT_REGISTERED,
+    TopicResolutionError,
+    TopicResolver,
+)
 
 # Expose wire_default_handlers as wire_handlers for test patching compatibility
 # Tests patch "omnibase_infra.runtime.service_runtime_host_process.wire_handlers"
@@ -214,6 +233,28 @@ DEFAULT_DRAIN_TIMEOUT_SECONDS: float = parse_env_float(
     transport_type=EnumInfraTransportType.RUNTIME,
     service_name="runtime_host_process",
 )
+
+# Parallel handler execution bounds (OMN-476)
+# Controls max concurrent envelope processing tasks
+MIN_MAX_CONCURRENT_HANDLERS = 1
+MAX_MAX_CONCURRENT_HANDLERS = 256
+DEFAULT_MAX_CONCURRENT_HANDLERS: int = int(
+    os.environ.get("ONEX_MAX_CONCURRENT_HANDLERS", "1")
+)
+
+# Batch response publishing defaults (OMN-478)
+# Controls batching of response envelopes for improved throughput.
+# When enabled, responses are buffered and flushed by size or timeout.
+DEFAULT_BATCH_RESPONSE_SIZE: int = int(os.environ.get("ONEX_BATCH_RESPONSE_SIZE", "10"))
+DEFAULT_BATCH_FLUSH_INTERVAL_MS: float = float(
+    os.environ.get("ONEX_BATCH_FLUSH_INTERVAL_MS", "100")
+)
+
+# Handler pool size bounds (OMN-477)
+# Controls number of handler instances per handler type.
+# When > 1 and max_concurrent_handlers > 1, handler instances are pooled
+# to eliminate contention between parallel envelope processing tasks.
+DEFAULT_HANDLER_POOL_SIZE: int = int(os.environ.get("ONEX_HANDLER_POOL_SIZE", "1"))
 
 
 def _parse_contract_event_payload(
@@ -819,9 +860,104 @@ class RuntimeHostProcess:
 
         self._drain_timeout_seconds: float = drain_timeout_value
 
+        # Parallel handler execution configuration (OMN-476)
+        # Controls max number of envelopes processed concurrently.
+        # Default: 1 (sequential, backwards compatible with MVP behavior).
+        _max_concurrent_raw = config.get("max_concurrent_handlers")
+        max_concurrent_value: int = DEFAULT_MAX_CONCURRENT_HANDLERS
+        if isinstance(_max_concurrent_raw, int):
+            max_concurrent_value = _max_concurrent_raw
+        elif isinstance(_max_concurrent_raw, str):
+            try:
+                max_concurrent_value = int(_max_concurrent_raw)
+            except ValueError:
+                logger.warning(
+                    "Invalid max_concurrent_handlers string value, using default",
+                    extra={
+                        "invalid_value": _max_concurrent_raw,
+                        "default_value": DEFAULT_MAX_CONCURRENT_HANDLERS,
+                    },
+                )
+                max_concurrent_value = DEFAULT_MAX_CONCURRENT_HANDLERS
+
+        # Clamp to valid range
+        if (
+            max_concurrent_value < MIN_MAX_CONCURRENT_HANDLERS
+            or max_concurrent_value > MAX_MAX_CONCURRENT_HANDLERS
+        ):
+            logger.warning(
+                "max_concurrent_handlers out of valid range, clamping",
+                extra={
+                    "original_value": max_concurrent_value,
+                    "min_value": MIN_MAX_CONCURRENT_HANDLERS,
+                    "max_value": MAX_MAX_CONCURRENT_HANDLERS,
+                    "clamped_value": max(
+                        MIN_MAX_CONCURRENT_HANDLERS,
+                        min(max_concurrent_value, MAX_MAX_CONCURRENT_HANDLERS),
+                    ),
+                },
+            )
+            max_concurrent_value = max(
+                MIN_MAX_CONCURRENT_HANDLERS,
+                min(max_concurrent_value, MAX_MAX_CONCURRENT_HANDLERS),
+            )
+
+        self._max_concurrent_handlers: int = max_concurrent_value
+        # Semaphore for backpressure: limits concurrent envelope processing (OMN-476)
+        self._handler_semaphore: asyncio.Semaphore = asyncio.Semaphore(
+            max_concurrent_value
+        )
+
+        # Per-handler shutdown timeout (OMN-882)
+        # Prevents a single slow handler from blocking entire shutdown sequence
+        _handler_shutdown_raw = config.get("handler_shutdown_timeout_seconds")
+        handler_shutdown_value: float = DEFAULT_HANDLER_SHUTDOWN_TIMEOUT
+        if isinstance(_handler_shutdown_raw, int | float):
+            handler_shutdown_value = float(_handler_shutdown_raw)
+
+        self._handler_shutdown_timeout_seconds: float = handler_shutdown_value
+
+        # Handler pool size configuration (OMN-477)
+        # When > 1, creates a pool of handler instances per handler type
+        # to eliminate contention under parallel execution.
+        _pool_size_raw = config.get("handler_pool_size")
+        pool_size_value: int = DEFAULT_HANDLER_POOL_SIZE
+        if isinstance(_pool_size_raw, int):
+            pool_size_value = _pool_size_raw
+        elif isinstance(_pool_size_raw, str):
+            try:
+                pool_size_value = int(_pool_size_raw)
+            except ValueError:
+                logger.warning(
+                    "Invalid handler_pool_size string value, using default",
+                    extra={
+                        "invalid_value": _pool_size_raw,
+                        "default_value": DEFAULT_HANDLER_POOL_SIZE,
+                    },
+                )
+                pool_size_value = DEFAULT_HANDLER_POOL_SIZE
+
+        # Clamp to valid range
+        if pool_size_value < MIN_POOL_SIZE or pool_size_value > MAX_POOL_SIZE:
+            logger.warning(
+                "handler_pool_size out of valid range, clamping",
+                extra={
+                    "original_value": pool_size_value,
+                    "min_value": MIN_POOL_SIZE,
+                    "max_value": MAX_POOL_SIZE,
+                    "clamped_value": max(
+                        MIN_POOL_SIZE, min(pool_size_value, MAX_POOL_SIZE)
+                    ),
+                },
+            )
+            pool_size_value = max(MIN_POOL_SIZE, min(pool_size_value, MAX_POOL_SIZE))
+
+        self._handler_pool_size: int = pool_size_value
+
         # Handler executor for lifecycle operations (shutdown, health check)
         self._lifecycle_executor = ProtocolLifecycleExecutor(
-            health_check_timeout_seconds=self._health_check_timeout_seconds
+            health_check_timeout_seconds=self._health_check_timeout_seconds,
+            handler_shutdown_timeout_seconds=self._handler_shutdown_timeout_seconds,
         )
 
         # Store full config for handler initialization
@@ -836,6 +972,12 @@ class RuntimeHostProcess:
         # Handler registry (handler_type -> handler instance)
         # This will be populated from the singleton registry during start()
         self._handlers: dict[str, ProtocolContainerAware] = {}
+
+        # Handler pools (handler_type -> HandlerPool) for pooled execution (OMN-477)
+        # When handler_pool_size > 1, each handler type gets a pool of instances.
+        # The pool is used for checkout/checkin during envelope processing.
+        # When pool_size == 1 (default), pools are not created and _handlers is used directly.
+        self._handler_pools: dict[str, HandlerPool] = {}
 
         # Track failed handler instantiations (handler_type -> error message)
         # Used by health_check() to report degraded state
@@ -874,6 +1016,10 @@ class RuntimeHostProcess:
         # Tracks protocol_types currently being materialized to prevent
         # duplicate instantiation and orphaned handler instances.
         self._materializing_handlers: set[str] = set()
+
+        # In-flight envelope processing tasks for parallel execution (OMN-476)
+        # Tracked for graceful shutdown drain and error isolation.
+        self._in_flight_tasks: set[asyncio.Task[None]] = set()
 
         # Idempotency guard for duplicate message detection (OMN-945)
         # None = disabled, otherwise points to configured store
@@ -933,6 +1079,58 @@ class RuntimeHostProcess:
         self._dependency_materializer: DependencyMaterializer | None = None
         self._materialized_resources: ModelMaterializedResources | None = None
 
+        # Batch response publisher (OMN-478)
+        # When enabled, responses are buffered and flushed by size or timeout
+        # instead of being published individually. Reduces event bus overhead
+        # and improves throughput for parallel handler execution.
+        self._batch_publisher: BatchResponsePublisher | None = None
+        _batch_enabled_raw = config.get("batch_response_enabled")
+        batch_enabled = False
+        if isinstance(_batch_enabled_raw, bool):
+            batch_enabled = _batch_enabled_raw
+        elif isinstance(_batch_enabled_raw, str):
+            batch_enabled = _batch_enabled_raw.lower() in ("true", "1", "yes")
+
+        if batch_enabled:
+            _batch_size_raw = config.get("batch_response_size")
+            batch_size = DEFAULT_BATCH_RESPONSE_SIZE
+            if isinstance(_batch_size_raw, int):
+                batch_size = _batch_size_raw
+            elif isinstance(_batch_size_raw, str):
+                try:
+                    batch_size = int(_batch_size_raw)
+                except ValueError:
+                    logger.warning(
+                        "Invalid batch_response_size string, using default",
+                        extra={
+                            "invalid_value": _batch_size_raw,
+                            "default_value": DEFAULT_BATCH_RESPONSE_SIZE,
+                        },
+                    )
+
+            _flush_interval_raw = config.get("batch_flush_interval_ms")
+            flush_interval_ms = DEFAULT_BATCH_FLUSH_INTERVAL_MS
+            if isinstance(_flush_interval_raw, (int, float)):
+                flush_interval_ms = float(_flush_interval_raw)
+            elif isinstance(_flush_interval_raw, str):
+                try:
+                    flush_interval_ms = float(_flush_interval_raw)
+                except ValueError:
+                    logger.warning(
+                        "Invalid batch_flush_interval_ms string, using default",
+                        extra={
+                            "invalid_value": _flush_interval_raw,
+                            "default_value": DEFAULT_BATCH_FLUSH_INTERVAL_MS,
+                        },
+                    )
+
+            self._batch_publisher = BatchResponsePublisher(
+                publish_fn=self._publish_envelope_safe,
+                topic=self._output_topic,
+                batch_size=batch_size,
+                flush_interval_ms=flush_interval_ms,
+            )
+
         logger.debug(
             "RuntimeHostProcess initialized",
             extra={
@@ -947,6 +1145,7 @@ class RuntimeHostProcess:
                 "contract_path_count": len(self._contract_paths),
                 "has_introspection_service": self._introspection_service is not None,
                 "introspection_enabled": self._introspection_config.enabled,
+                "batch_response_enabled": self._batch_publisher is not None,
             },
         )
 
@@ -1001,6 +1200,63 @@ class RuntimeHostProcess:
             Boolean indicating whether the process is running.
         """
         return self._is_running
+
+    @property
+    def max_concurrent_handlers(self) -> int:
+        """Return the maximum concurrent handler execution limit (OMN-476).
+
+        Returns:
+            The configured concurrency limit for parallel envelope processing.
+            1 means sequential processing (MVP backwards compatibility).
+        """
+        return self._max_concurrent_handlers
+
+    @property
+    def handler_pool_size(self) -> int:
+        """Return the configured handler pool size (OMN-477).
+
+        Returns:
+            The number of handler instances per handler type.
+            1 means single instance (no pooling, backwards compatible).
+        """
+        return self._handler_pool_size
+
+    @property
+    def handler_pools(self) -> dict[str, HandlerPool]:
+        """Return the handler pools dict (OMN-477).
+
+        Returns:
+            Mapping of handler_type to HandlerPool. Empty when pooling is disabled.
+        """
+        return self._handler_pools
+
+    @property
+    def in_flight_task_count(self) -> int:
+        """Return the number of currently in-flight parallel tasks (OMN-476).
+
+        Returns:
+            Number of asyncio tasks currently processing envelopes.
+        """
+        return len(self._in_flight_tasks)
+
+    @property
+    def batch_publisher(self) -> BatchResponsePublisher | None:
+        """Return the batch response publisher if enabled (OMN-478).
+
+        Returns:
+            The BatchResponsePublisher instance if batch publishing is enabled,
+            None otherwise.
+        """
+        return self._batch_publisher
+
+    @property
+    def batch_response_enabled(self) -> bool:
+        """Return whether batch response publishing is enabled (OMN-478).
+
+        Returns:
+            True if batch publishing is configured and active.
+        """
+        return self._batch_publisher is not None
 
     @property
     def input_topic(self) -> str:
@@ -1358,6 +1614,11 @@ class RuntimeHostProcess:
                 purpose=EnumConsumerGroupPurpose.CONSUME,
             )
 
+        # Step 5.5: Start batch response publisher (OMN-478)
+        # Must start after event bus is ready and before marking runtime as running.
+        if self._batch_publisher is not None:
+            await self._batch_publisher.start()
+
         self._is_running = True
 
         # Step 6: Publish introspection event with jitter (OMN-1930)
@@ -1488,6 +1749,12 @@ class RuntimeHostProcess:
         # Clear drain state after drain period completes
         self._is_draining = False
 
+        # Step 1.6: Drain in-flight parallel tasks (OMN-476)
+        # If parallel execution is enabled, wait for dispatched tasks to finish.
+        if self._in_flight_tasks:
+            remaining_drain = max(0.0, drain_deadline - loop.time())
+            await self.drain_in_flight_tasks(timeout=remaining_drain)
+
         logger.info(
             "Drain period completed",
             extra={
@@ -1497,6 +1764,38 @@ class RuntimeHostProcess:
                 "metric.forced_shutdown": self._pending_message_count > 0,
             },
         )
+
+        # Step 1.7: Stop batch response publisher (OMN-478)
+        # Flushes any remaining buffered responses before handler shutdown.
+        # Must happen after drain period (so all in-flight handlers have
+        # enqueued their responses) but before handler shutdown (so the
+        # event bus is still available for publishing).
+        if self._batch_publisher is not None:
+            await self._batch_publisher.stop()
+
+        # Step 1.8: Shutdown handler pools (OMN-477)
+        # Must happen before individual handler shutdown since pools manage
+        # their own instances with independent lifecycle.
+        if self._handler_pools:
+            logger.info(
+                "Shutting down handler pools",
+                extra={
+                    "pool_count": len(self._handler_pools),
+                    "pool_types": list(self._handler_pools.keys()),
+                },
+            )
+            for pool_type, pool in self._handler_pools.items():
+                try:
+                    await pool.shutdown()
+                except Exception as e:
+                    logger.warning(
+                        "Error shutting down handler pool",
+                        extra={
+                            "handler_type": pool_type,
+                            "error": str(e),
+                        },
+                    )
+            self._handler_pools.clear()
 
         # Step 2: Shutdown all handlers by priority (release resources like DB/Kafka connections)
         # Delegates to ProtocolLifecycleExecutor which handles:
@@ -2137,11 +2436,62 @@ class RuntimeHostProcess:
                 # Store the handler instance for routing
                 self._handlers[handler_type] = handler_instance
 
+                # Create handler pool if pooling is enabled (OMN-477)
+                # When pool_size > 1 AND parallel execution is enabled,
+                # create a pool of handler instances for this type.
+                # The first instance (already created above) is placed into
+                # _handlers for backwards compatibility; the pool manages
+                # additional instances for concurrent checkout.
+                if self._handler_pool_size > 1 and self._max_concurrent_handlers > 1:
+                    # Capture variables for the factory closure
+                    _cls = handler_cls
+                    _container = container
+                    _resolved = resolved_dependencies
+                    _accepts_deps = (
+                        resolved_dependencies is not None
+                        and self._accepts_dependencies_param(handler_cls)
+                    )
+
+                    def _make_factory(
+                        cls: type[ProtocolContainerAware],
+                        ctr: object,
+                        deps: object | None,
+                        accepts: bool,
+                    ) -> Callable[[], ProtocolContainerAware]:
+                        """Create a closure-safe factory for pool instances."""
+
+                        def factory() -> ProtocolContainerAware:
+                            if accepts and deps is not None:
+                                return cls(container=ctr, dependencies=deps)  # type: ignore[call-arg,arg-type]
+                            return cls(container=ctr)  # type: ignore[call-arg,arg-type]
+
+                        return factory
+
+                    pool = HandlerPool(
+                        handler_type=handler_type,
+                        factory=_make_factory(
+                            _cls, _container, _resolved, _accepts_deps
+                        ),
+                        pool_size=self._handler_pool_size,
+                    )
+                    await pool.initialize()
+                    self._handler_pools[handler_type] = pool
+
+                    logger.info(
+                        "Handler pool created",
+                        extra={
+                            "handler_type": handler_type,
+                            "pool_size": self._handler_pool_size,
+                            "handler_class": handler_cls.__name__,
+                        },
+                    )
+
                 logger.debug(
                     "Handler instantiated and initialized",
                     extra={
                         "handler_type": handler_type,
                         "handler_class": handler_cls.__name__,
+                        "pooled": handler_type in self._handler_pools,
                     },
                 )
 
@@ -2997,58 +3347,189 @@ class RuntimeHostProcess:
         """Handle incoming message from event bus subscription.
 
         This is the callback invoked by the event bus when a message arrives
-        on the input topic. It deserializes the envelope and routes it.
+        on the input topic. It deserializes the envelope and dispatches it
+        for processing.
+
+        Concurrency behavior (OMN-476):
+            When max_concurrent_handlers > 1, envelope processing is dispatched
+            as an asyncio task, allowing multiple envelopes to be processed in
+            parallel up to the configured concurrency limit. A semaphore provides
+            backpressure: when the limit is reached, this method blocks until a
+            slot becomes available.
+
+            When max_concurrent_handlers == 1 (the default), processing is
+            sequential and fully backwards compatible with the MVP behavior.
+
+        Error isolation (OMN-476):
+            Each envelope is processed in its own task with independent error
+            handling. A failure in one handler does not affect other in-flight
+            handlers. Correlation IDs are tracked per-envelope for tracing.
 
         The method tracks pending messages for graceful shutdown support (OMN-756).
-        The pending message count is incremented at the start of processing and
-        decremented when processing completes (success or failure).
 
         Args:
             message: The event message containing the envelope payload.
         """
-        # Increment pending message count (OMN-756: graceful shutdown tracking)
+        if self._max_concurrent_handlers <= 1:
+            # Sequential path: backwards compatible with MVP (OMN-249)
+            await self._process_message_sequential(message)
+        else:
+            # Parallel path: dispatch as task with semaphore backpressure (OMN-476)
+            # Acquire semaphore BEFORE creating the task to apply backpressure
+            # at the ingestion point, not inside the task.
+            await self._handler_semaphore.acquire()
+            task = asyncio.create_task(
+                self._process_message_with_semaphore(message),
+                name=f"envelope-{message.offset}-{message.topic}",
+            )
+            self._in_flight_tasks.add(task)
+            task.add_done_callback(self._in_flight_tasks.discard)
+
+    async def _process_message_sequential(self, message: ModelEventMessage) -> None:
+        """Process a single message sequentially (MVP path).
+
+        Args:
+            message: The event message containing the envelope payload.
+        """
         async with self._pending_lock:
             self._pending_message_count += 1
 
         try:
-            # Deserialize envelope from message value
             envelope = json.loads(message.value.decode("utf-8"))
             await self._handle_envelope(envelope)
         except json.JSONDecodeError as e:
-            # Create infrastructure error context for tracing
-            correlation_id = uuid4()
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="decode_envelope",
-                target_name=message.topic,
-                correlation_id=correlation_id,
-            )
-            # Chain the error with infrastructure context
-            infra_error = RuntimeHostError(
-                f"Failed to decode JSON envelope from message: {e}",
-                context=context,
-            )
-            infra_error.__cause__ = e  # Proper error chaining
-
-            logger.exception(
-                "Failed to decode envelope from message",
-                extra={
-                    "error": str(e),
-                    "topic": message.topic,
-                    "offset": message.offset,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            # Publish error response for malformed messages
-            error_response = self._create_error_response(
-                error=f"Invalid JSON in message: {e}",
-                correlation_id=correlation_id,
-            )
-            await self._publish_envelope_safe(error_response, self._output_topic)
+            await self._handle_decode_error(e, message)
         finally:
-            # Decrement pending message count (OMN-756: graceful shutdown tracking)
             async with self._pending_lock:
                 self._pending_message_count -= 1
+
+    async def _process_message_with_semaphore(self, message: ModelEventMessage) -> None:
+        """Process a single message with semaphore-based concurrency control (OMN-476).
+
+        The semaphore is acquired by the caller (_on_message) before this method
+        is invoked as a task. This method is responsible for releasing the
+        semaphore when processing completes, regardless of success or failure.
+
+        Error isolation: exceptions are caught and logged here, never propagated
+        to the task runner. This ensures one handler failure does not cancel or
+        affect other in-flight tasks.
+
+        Args:
+            message: The event message containing the envelope payload.
+        """
+        async with self._pending_lock:
+            self._pending_message_count += 1
+
+        try:
+            envelope = json.loads(message.value.decode("utf-8"))
+            await self._handle_envelope(envelope)
+        except json.JSONDecodeError as e:
+            await self._handle_decode_error(e, message)
+        except Exception:
+            # Catch-all for error isolation: log but never propagate.
+            # _handle_envelope already has its own exception handling, so this
+            # only catches truly unexpected errors (e.g., memory errors).
+            logger.exception(
+                "Unexpected error in parallel envelope processing",
+                extra={
+                    "topic": message.topic,
+                    "offset": message.offset,
+                },
+            )
+        finally:
+            self._handler_semaphore.release()
+            async with self._pending_lock:
+                self._pending_message_count -= 1
+
+    async def _handle_decode_error(
+        self, error: json.JSONDecodeError, message: ModelEventMessage
+    ) -> None:
+        """Handle JSON decode errors for malformed envelope messages.
+
+        Extracted to avoid duplication between sequential and parallel paths.
+
+        Args:
+            error: The JSON decode error.
+            message: The original event message.
+        """
+        correlation_id = uuid4()
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="decode_envelope",
+            target_name=message.topic,
+            correlation_id=correlation_id,
+        )
+        infra_error = RuntimeHostError(
+            f"Failed to decode JSON envelope from message: {error}",
+            context=context,
+        )
+        infra_error.__cause__ = error
+
+        logger.exception(
+            "Failed to decode envelope from message",
+            extra={
+                "error": str(error),
+                "topic": message.topic,
+                "offset": message.offset,
+                "correlation_id": str(correlation_id),
+            },
+        )
+        error_response = self._create_error_response(
+            error=f"Invalid JSON in message: {error}",
+            correlation_id=correlation_id,
+        )
+        await self._publish_envelope_safe(error_response, self._output_topic)
+
+    async def drain_in_flight_tasks(self, timeout: float | None = None) -> int:
+        """Wait for all in-flight parallel tasks to complete.
+
+        This method is used during graceful shutdown to ensure all dispatched
+        envelope processing tasks finish before the runtime stops.
+
+        Args:
+            timeout: Maximum seconds to wait. If None, uses drain_timeout_seconds.
+
+        Returns:
+            Number of tasks that were still in-flight when drain started.
+        """
+        if not self._in_flight_tasks:
+            return 0
+
+        tasks_count = len(self._in_flight_tasks)
+        effective_timeout = (
+            timeout if timeout is not None else self._drain_timeout_seconds
+        )
+
+        logger.info(
+            "Draining in-flight parallel tasks",
+            extra={
+                "in_flight_count": tasks_count,
+                "timeout_seconds": effective_timeout,
+            },
+        )
+
+        # Wait for all tasks with timeout
+        done, pending = await asyncio.wait(
+            self._in_flight_tasks,
+            timeout=effective_timeout,
+        )
+
+        if pending:
+            logger.warning(
+                "Some in-flight tasks did not complete within drain timeout",
+                extra={
+                    "completed": len(done),
+                    "timed_out": len(pending),
+                    "timeout_seconds": effective_timeout,
+                },
+            )
+            # Cancel remaining tasks
+            for task in pending:
+                task.cancel()
+            # Wait briefly for cancellation to propagate
+            await asyncio.gather(*pending, return_exceptions=True)
+
+        return tasks_count
 
     async def _handle_envelope(self, envelope: dict[str, object]) -> None:
         """Route envelope to appropriate handler.
@@ -3189,72 +3670,191 @@ class RuntimeHostProcess:
             )
             return
 
-        # Execute handler
+        # Execute handler — use pool checkout if pooling is enabled (OMN-477)
+        pool = self._handler_pools.get(str(handler_type))
+        if pool is not None:
+            await self._execute_handler_pooled(
+                pool, envelope, handler_type, operation, correlation_id
+            )
+        else:
+            await self._execute_handler_single(
+                handler, envelope, handler_type, operation, correlation_id
+            )
+
+    async def _execute_handler_single(
+        self,
+        handler: ProtocolContainerAware,
+        envelope: dict[str, object],
+        handler_type: object,
+        operation: str,
+        correlation_id: UUID,
+    ) -> None:
+        """Execute a handler directly (non-pooled path).
+
+        This is the original handler execution logic, extracted for clarity
+        when handler pooling (OMN-477) is not active for this handler type.
+
+        Args:
+            handler: The handler instance to execute.
+            envelope: The validated envelope dict.
+            handler_type: The handler type identifier.
+            operation: The operation string from the envelope.
+            correlation_id: The correlation ID for tracing.
+        """
         try:
-            # Handler expected to have async execute(envelope) method
-            # NOTE: MVP adapters use legacy execute(envelope: dict) signature.
-            # TODO(OMN-40): Migrate handlers to new protocol signature execute(request, operation_config)
-            response = await handler.execute(envelope)  # type: ignore[call-arg]  # NOTE: legacy signature
-
-            # Ensure response has correlation_id and publish
-            # Handle both dict and BaseModel responses from handlers
-            if isinstance(response, dict):
-                response = dict(response)  # Copy to avoid mutating handler state
-                if "correlation_id" not in response:
-                    response["correlation_id"] = correlation_id
-                await self._publish_envelope_safe(response, self._output_topic)
-            elif isinstance(response, BaseModel):
-                await self._publish_model_safe(
-                    response, self._output_topic, correlation_id=correlation_id
-                )
-            else:
-                # Fallback: convert to dict
-                await self._publish_envelope_safe(
-                    {"response": response, "correlation_id": correlation_id},
-                    self._output_topic,
-                )
-
-            logger.debug(
-                "Handler executed successfully",
-                extra={
-                    "handler_type": handler_type,
-                    "correlation_id": str(correlation_id),
-                    "operation": operation,
-                },
+            response = await handler.execute(envelope)  # type: ignore[call-arg]
+            await self._publish_handler_response(
+                response, handler_type, operation, correlation_id
             )
-
         except Exception as e:
-            # Create infrastructure error context for handler execution failure
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="handler_execution",
-                target_name=str(handler_type),
-                correlation_id=correlation_id,
+            await self._handle_execution_error(
+                e, handler_type, operation, correlation_id
             )
-            # Chain the error with infrastructure context
-            infra_error = RuntimeHostError(
-                f"Handler execution failed for {handler_type}: {e}",
-                context=context,
-            )
-            infra_error.__cause__ = e  # Proper error chaining
 
-            # Handler execution failed - produce failure envelope
-            error_response = self._create_error_response(
-                error=str(e),
-                correlation_id=correlation_id,
-            )
-            await self._publish_envelope_safe(error_response, self._output_topic)
+    async def _execute_handler_pooled(
+        self,
+        pool: HandlerPool,
+        envelope: dict[str, object],
+        handler_type: object,
+        operation: str,
+        correlation_id: UUID,
+    ) -> None:
+        """Execute a handler via pool checkout (OMN-477).
 
-            logger.exception(
-                "Handler execution failed",
-                extra={
-                    "handler_type": handler_type,
-                    "correlation_id": str(correlation_id),
-                    "operation": operation,
-                    "error": str(e),
-                    "infra_error": str(infra_error),
-                },
+        Checks out a handler instance from the pool, executes the envelope,
+        and returns the instance when done.  If the instance is unhealthy
+        after execution, the pool automatically recycles it.
+
+        Args:
+            pool: The handler pool to checkout from.
+            envelope: The validated envelope dict.
+            handler_type: The handler type identifier.
+            operation: The operation string from the envelope.
+            correlation_id: The correlation ID for tracing.
+        """
+        try:
+            async with pool.checkout() as handler:
+                response = await handler.execute(envelope)  # type: ignore[call-arg]
+                await self._publish_handler_response(
+                    response, handler_type, operation, correlation_id
+                )
+        except Exception as e:
+            await self._handle_execution_error(
+                e, handler_type, operation, correlation_id
             )
+
+    async def _publish_response(self, envelope: dict[str, object], topic: str) -> None:
+        """Publish a response envelope, optionally through the batch publisher (OMN-478).
+
+        When batch publishing is enabled and running, responses are enqueued
+        into the batch publisher's buffer for deferred batch publishing.
+        When disabled or not running, responses are published immediately
+        via _publish_envelope_safe.
+
+        Error responses and system responses bypass the batch publisher
+        and are always published immediately to maintain low latency for
+        error reporting.
+
+        Args:
+            envelope: The response envelope to publish.
+            topic: Target topic to publish to.
+        """
+        if self._batch_publisher is not None and self._batch_publisher.is_running:
+            # Serialize envelope before enqueuing to match _publish_envelope_safe behavior
+            json_safe_envelope = self._serialize_envelope(envelope)
+            await self._batch_publisher.enqueue(json_safe_envelope)
+        else:
+            await self._publish_envelope_safe(envelope, topic)
+
+    async def _publish_handler_response(
+        self,
+        response: object,
+        handler_type: object,
+        operation: str,
+        correlation_id: UUID,
+    ) -> None:
+        """Publish handler response to the output topic.
+
+        Handles dict, BaseModel, and fallback response types.
+        Extracted to avoid duplication between single and pooled paths (OMN-477).
+
+        Args:
+            response: The handler's return value.
+            handler_type: The handler type identifier.
+            operation: The operation string.
+            correlation_id: The correlation ID.
+        """
+        if isinstance(response, dict):
+            response = dict(response)
+            if "correlation_id" not in response:
+                response["correlation_id"] = correlation_id
+            await self._publish_envelope_safe(response, self._output_topic)
+        elif isinstance(response, BaseModel):
+            await self._publish_model_safe(
+                response, self._output_topic, correlation_id=correlation_id
+            )
+        else:
+            await self._publish_envelope_safe(
+                {"response": response, "correlation_id": correlation_id},
+                self._output_topic,
+            )
+
+        logger.debug(
+            "Handler executed successfully",
+            extra={
+                "handler_type": handler_type,
+                "correlation_id": str(correlation_id),
+                "operation": operation,
+            },
+        )
+
+    async def _handle_execution_error(
+        self,
+        error: Exception,
+        handler_type: object,
+        operation: str,
+        correlation_id: UUID,
+    ) -> None:
+        """Handle handler execution errors.
+
+        Creates infrastructure error context, publishes failure envelope,
+        and logs the error.  Extracted to avoid duplication between single
+        and pooled paths (OMN-477).
+
+        Args:
+            error: The exception from handler execution.
+            handler_type: The handler type identifier.
+            operation: The operation string.
+            correlation_id: The correlation ID.
+        """
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="handler_execution",
+            target_name=str(handler_type),
+            correlation_id=correlation_id,
+        )
+        infra_error = RuntimeHostError(
+            f"Handler execution failed for {handler_type}: {error}",
+            context=context,
+        )
+        infra_error.__cause__ = error
+
+        error_response = self._create_error_response(
+            error=str(error),
+            correlation_id=correlation_id,
+        )
+        await self._publish_envelope_safe(error_response, self._output_topic)
+
+        logger.exception(
+            "Handler execution failed",
+            extra={
+                "handler_type": handler_type,
+                "correlation_id": str(correlation_id),
+                "operation": operation,
+                "error": str(error),
+                "infra_error": str(infra_error),
+            },
+        )
 
     def _create_error_response(
         self,
@@ -3661,17 +4261,33 @@ class RuntimeHostProcess:
             and not no_handlers_registered
         )
 
+        # Collect handler pool metrics (OMN-477)
+        pool_metrics: dict[str, object] = {}
+        if self._handler_pools:
+            for pool_type, pool in self._handler_pools.items():
+                pool_metrics[pool_type] = await pool.health_check()
+
         return {
             "healthy": healthy,
             "degraded": degraded,
             "is_running": self._is_running,
             "is_draining": self._is_draining,
             "pending_message_count": self._pending_message_count,
+            "max_concurrent_handlers": self._max_concurrent_handlers,
+            "handler_pool_size": self._handler_pool_size,
+            "in_flight_tasks": len(self._in_flight_tasks),
+            "batch_response_enabled": self._batch_publisher is not None,
+            "batch_response_pending": (
+                self._batch_publisher.pending_count
+                if self._batch_publisher is not None
+                else 0
+            ),
             "event_bus": event_bus_health,
             "event_bus_healthy": event_bus_healthy,
             "failed_handlers": self._failed_handlers,
             "registered_handlers": list(self._handlers.keys()),
             "handlers": handler_health_results,
+            "handler_pools": pool_metrics,
             "no_handlers_registered": no_handlers_registered,
         }
 
@@ -3800,169 +4416,24 @@ class RuntimeHostProcess:
         return self._handlers.get(handler_type)
 
     async def get_subscribers_for_topic(self, topic: str) -> list[UUID]:
-        """Query Consul for node IDs that subscribe to a topic.
+        """Return node IDs that subscribe to a topic.
 
-        Provides dynamic topic-to-subscriber lookup via Consul KV store.
-        Topics are stored at `onex/topics/{topic}/subscribers` and contain a JSON
-        array of node UUID strings.
+        This method previously queried Consul KV for dynamic topic-to-subscriber
+        mappings (OMN-1613, via HandlerConsul + MixinConsulTopicIndex).
+        HandlerConsul was removed as part of OMN-3540; Consul-backed topic
+        routing no longer exists.  Always returns an empty list.
 
         Args:
             topic: Environment-qualified topic string
                    (e.g., "dev.onex.evt.intent-classified.v1")
 
         Returns:
-            List of node UUIDs that subscribe to this topic.
-            Empty list if no subscribers registered or Consul unavailable.
-
-        Note:
-            Returns node IDs, not handler names. Node ID is the stable registry key.
-            Handler selection is a separate concern that can change independently.
-
-        Example:
-            >>> runtime = RuntimeHostProcess()
-            >>> await runtime.start()
-            >>> subscribers = await runtime.get_subscribers_for_topic(
-            ...     "dev.onex.evt.intent-classified.v1"
-            ... )
-            >>> print(subscribers)  # [UUID('abc123...'), UUID('def456...')]
-
-        Related:
-            - OMN-1613: Add event bus topic storage to registry for dynamic topic discovery
-            - MixinConsulTopicIndex: Consul mixin that manages topic index storage
+            Empty list.  Consul-backed topic routing is no longer available.
         """
-        consul_handler = self.get_handler("consul")
-        if consul_handler is None:
-            logger.debug(
-                "Consul handler not available for topic subscriber lookup",
-                extra={"topic": topic},
-            )
-            return []
-
-        try:
-            correlation_id = uuid4()
-            envelope: dict[str, object] = {
-                "operation": "consul.kv_get",
-                "payload": {"key": f"onex/topics/{topic}/subscribers"},
-                "correlation_id": str(correlation_id),
-            }
-
-            # Execute the Consul KV get operation
-            # NOTE: MVP adapters use legacy execute(envelope: dict) signature.
-            result = await consul_handler.execute(envelope)  # type: ignore[call-arg]
-
-            # Navigate to the value in the response structure:
-            # ModelHandlerOutput -> result (ModelConsulHandlerResponse)
-            #   -> payload (ModelConsulHandlerPayload) -> data (ConsulPayload)
-            if result is None:
-                return []
-
-            # Check if result has the expected structure
-            if not hasattr(result, "result") or result.result is None:
-                return []
-
-            response = result.result
-            if not hasattr(response, "payload") or response.payload is None:
-                return []
-
-            payload_data = response.payload.data
-            if payload_data is None:
-                return []
-
-            # Check for "not found" response - key doesn't exist
-            if hasattr(payload_data, "found") and payload_data.found is False:
-                return []
-
-            # Get the value field from the payload
-            value = getattr(payload_data, "value", None)
-            if not value:
-                return []
-
-            # Parse JSON array of node ID strings
-            node_ids_raw = json.loads(value)
-            if not isinstance(node_ids_raw, list):
-                logger.warning(
-                    "Topic subscriber value is not a list",
-                    extra={
-                        "topic": topic,
-                        "correlation_id": str(correlation_id),
-                        "value_type": type(node_ids_raw).__name__,
-                    },
-                )
-                return []
-
-            # Convert string UUIDs to UUID objects (skip invalid entries)
-            subscribers: list[UUID] = []
-            invalid_ids: list[str] = []
-            for nid in node_ids_raw:
-                if not isinstance(nid, str):
-                    continue
-                try:
-                    subscribers.append(UUID(nid))
-                except ValueError:
-                    invalid_ids.append(nid)
-
-            if invalid_ids:
-                logger.warning(
-                    "Invalid UUIDs in topic subscriber list",
-                    extra={
-                        "topic": topic,
-                        "correlation_id": str(correlation_id),
-                        "invalid_count": len(invalid_ids),
-                    },
-                )
-            return subscribers
-
-        except json.JSONDecodeError as e:
-            logger.warning(
-                "Failed to parse topic subscriber JSON",
-                extra={
-                    "topic": topic,
-                    "error": str(e),
-                },
-            )
-            return []
-        except InfraConsulError as e:
-            logger.warning(
-                "Consul error querying topic subscribers",
-                extra={
-                    "topic": topic,
-                    "error": str(e),
-                    "error_type": "InfraConsulError",
-                    "consul_key": getattr(e, "consul_key", None),
-                },
-            )
-            return []
-        except InfraTimeoutError as e:
-            logger.warning(
-                "Timeout querying topic subscribers",
-                extra={
-                    "topic": topic,
-                    "error": str(e),
-                    "error_type": "InfraTimeoutError",
-                },
-            )
-            return []
-        except InfraUnavailableError as e:
-            logger.warning(
-                "Service unavailable for topic subscriber query",
-                extra={
-                    "topic": topic,
-                    "error": str(e),
-                    "error_type": "InfraUnavailableError",
-                },
-            )
-            return []
-        except Exception as e:
-            # Graceful degradation - Consul unavailable is not fatal
-            logger.warning(
-                "Failed to query topic subscribers from Consul",
-                extra={
-                    "topic": topic,
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                },
-            )
-            return []
+        # Consul-backed topic routing removed in OMN-3540 (HandlerConsul deleted).
+        # Callers that need dynamic subscriber lookup must use an alternative
+        # registry mechanism.
+        return []
 
     # =========================================================================
     # Architecture Validation Methods (OMN-1138)
@@ -4308,11 +4779,11 @@ class RuntimeHostProcess:
         topic_resolver = TopicResolver()
         try:
             registration_topic = topic_resolver.resolve(
-                "onex.evt.platform.contract-registered.v1",
+                TOPIC_SUFFIX_CONTRACT_REGISTERED,
                 correlation_id=wiring_correlation_id,
             )
             deregistration_topic = topic_resolver.resolve(
-                "onex.evt.platform.contract-deregistered.v1",
+                TOPIC_SUFFIX_CONTRACT_DEREGISTERED,
                 correlation_id=wiring_correlation_id,
             )
         except TopicResolutionError as e:

@@ -78,7 +78,7 @@ RETURNING ledger_entry_id
 class HandlerLedgerAppend:
     """Handler for appending events to the audit ledger with idempotent writes.
 
-    This handler implements the append operation for ProtocolLedgerPersistence,
+    The append operation for ProtocolLedgerPersistence,
     composing with HandlerDb for PostgreSQL operations. It provides:
 
     - Base64 decoding of event payloads to bytes
@@ -322,7 +322,7 @@ class HandlerLedgerAppend:
     ) -> ModelHandlerOutput[ModelLedgerAppendResult]:
         """Execute ledger append from envelope (ProtocolHandler interface).
 
-        This method provides the standard handler interface for contract-driven
+        The standard handler interface for contract-driven
         invocation. It extracts the payload from the envelope and delegates to
         the append() method.
 

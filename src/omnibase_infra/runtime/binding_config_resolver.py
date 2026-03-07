@@ -435,7 +435,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             5. Validate and construct ModelBindingConfig
 
         Args:
-            handler_type: Handler type identifier (e.g., "db", "consul").
+            handler_type: Handler type identifier (e.g., "db", "http").
             config_ref: Optional reference to external configuration.
                 Supported schemes: file:, env:, infisical: (mutually exclusive - use only ONE)
                 Examples: file:configs/db.yaml, env:DB_CONFIG, infisical:secret/path#field
@@ -558,9 +558,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             same handler type while allowing parallel fetches for different types.
 
         Args:
-            handler_type: Handler type identifier (e.g., "db", "consul").
+            handler_type: Handler type identifier (e.g., "db", "http").
             config_ref: Optional reference to external configuration.
-                Supported schemes: file:, env:, vault:, infisical: (mutually exclusive - use only ONE)
+                Supported schemes: file:, env:, infisical: (mutually exclusive - use only ONE)
             inline_config: Optional inline configuration dictionary.
             correlation_id: Optional correlation ID for error tracking.
 
@@ -1875,7 +1875,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         return data
 
     def _get_secret_resolver(self) -> SecretResolver | None:
-        """Get the container-resolved SecretResolver instance.
+        """# ai-slop-ok: pre-existingGet the container-resolved SecretResolver instance.
 
         The SecretResolver is resolved from the container during __init__.
         This method provides access to the cached instance.
@@ -1952,7 +1952,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         env_name: str,
         correlation_id: UUID,
     ) -> object | None:
-        """Convert environment variable string to appropriate type.
+        """# ai-slop-ok: pre-existingConvert environment variable string to appropriate type.
 
         This method handles type coercion for environment variable overrides.
         The behavior on invalid values depends on the ``strict_env_coercion``

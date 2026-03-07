@@ -19,7 +19,7 @@ Return Type:
     handlers return synchronous result data rather than emitting events to the event bus.
     ``for_effect()`` returns ``ModelHandlerOutput[None]`` with ``events`` tuple, which is
     intended for event-emitting orchestrator patterns. This is consistent with all other
-    EFFECT-category handlers (HandlerConsul, HandlerDb, HandlerHttp, etc.).
+    EFFECT-category handlers (HandlerDbPostgres, HandlerDb, HandlerHttp, etc.).
 
 .. versionadded:: 0.9.0
     Initial implementation for OMN-2286.

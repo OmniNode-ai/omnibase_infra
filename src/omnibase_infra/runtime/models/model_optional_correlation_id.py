@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Model for optional correlation ID values in runtime module.
 
-This module provides a strongly-typed Pydantic model for optional
+A strongly-typed Pydantic model for optional
 correlation ID values (UUIDs), replacing `UUID | None` union types
 to comply with ONEX standards.
 

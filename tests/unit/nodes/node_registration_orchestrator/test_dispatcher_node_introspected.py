@@ -48,7 +48,7 @@ def _make_handler() -> HandlerNodeIntrospected:
     mock_reader.get_entity_state = AsyncMock(
         return_value=None
     )  # new node -> AWAITING_ACK
-    reducer = RegistrationReducerService(ack_timeout_seconds=30.0, consul_enabled=True)
+    reducer = RegistrationReducerService(ack_timeout_seconds=30.0)
     return HandlerNodeIntrospected(mock_reader, reducer=reducer)
 
 

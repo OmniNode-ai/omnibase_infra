@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Database transaction context manager for asyncpg.
 
-This module provides a transaction context manager that properly wraps
+A transaction context manager that properly wraps
 database operations in transactions with configurable isolation levels,
 readonly mode, and statement timeouts.
 

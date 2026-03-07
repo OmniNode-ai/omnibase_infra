@@ -37,7 +37,7 @@ from omnibase_infra.models.handlers import (
 # =============================================================================
 
 # Valid handler_class values for testing
-VALID_HANDLER_CLASS = "omnibase_infra.handlers.handler_consul.HandlerConsul"
+VALID_HANDLER_CLASS = "omnibase_infra.handlers.handler_kafka.HandlerKafka"
 VALID_HANDLER_CLASS_SHORT = "myapp.handlers.MyHandler"
 
 # Invalid handler_class values for testing
@@ -148,7 +148,7 @@ class TestBootstrapHandlerDescriptorPatternValidation:
     def test_valid_handler_class_patterns(self) -> None:
         """Various valid handler_class patterns should be accepted."""
         valid_patterns = [
-            "omnibase_infra.handlers.handler_consul.HandlerConsul",
+            "omnibase_infra.handlers.handler_kafka.HandlerKafka",
             "myapp.handlers.MyHandler",
             "a.b.C",
             "module_name.SubModule.ClassName",
@@ -275,8 +275,8 @@ class TestBootstrapHandlerDescriptorToBase:
     def test_to_base_descriptor_copies_all_fields(self) -> None:
         """to_base_descriptor() should copy all field values correctly."""
         bootstrap_desc = ModelBootstrapHandlerDescriptor(
-            handler_id="proto.consul",
-            name="Consul Handler",
+            handler_id="proto.kafka",
+            name="Kafka Handler",
             version="2.1.3",
             handler_kind="effect",
             input_model="omnibase_infra.models.types.JsonDict",

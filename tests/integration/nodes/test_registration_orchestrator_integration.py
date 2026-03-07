@@ -193,7 +193,6 @@ class TestContractIntegration:
         required_fields = {
             "correlation_id",
             "status",
-            "consul_applied",
             "postgres_applied",
             "intent_results",
         }
@@ -222,32 +221,31 @@ class TestWorkflowGraphIntegration:
     """
 
     def test_execution_graph_has_all_nodes(self, contract_data: dict) -> None:
-        """Test that execution graph has all 8 required nodes.
+        """Test that execution graph has all 7 required nodes.
 
         The registration orchestrator workflow requires these nodes in order:
         1. receive_introspection - Receive introspection, tick, or ack events
         2. read_projection - Read current registration state from projection (OMN-930)
         3. evaluate_timeout - Evaluate timeout using injected time (OMN-973)
         4. compute_intents - Compute registration intents via reducer
-        5. execute_consul_registration - Execute Consul registration
-        6. execute_postgres_registration - Execute PostgreSQL registration
-        7. aggregate_results - Aggregate registration results
-        8. publish_outcome - Publish registration outcome event
+        5. execute_postgres_registration - Execute PostgreSQL registration
+        6. aggregate_results - Aggregate registration results
+        7. publish_outcome - Publish registration outcome event
 
-        This test ensures all 8 nodes are present with exact matching.
+        Consul registration was removed in OMN-3540.
+        This test ensures all 7 nodes are present with exact matching.
         """
         nodes = contract_data["workflow_coordination"]["workflow_definition"][
             "execution_graph"
         ]["nodes"]
         node_ids = {n["node_id"] for n in nodes}
 
-        # All 8 required execution graph nodes per C1 requirements
+        # All 7 required execution graph nodes (consul removed in OMN-3540)
         expected_nodes = {
             "receive_introspection",
             "read_projection",
             "evaluate_timeout",
             "compute_intents",
-            "execute_consul_registration",
             "execute_postgres_registration",
             "aggregate_results",
             "publish_outcome",
@@ -328,22 +326,21 @@ class TestWorkflowGraphIntegration:
                 f"Invalid node_type '{node_type}' for node {node['node_id']}"
             )
 
-    def test_consul_and_postgres_steps_are_effects(self, contract_data: dict) -> None:
-        """Test that registration steps are effect nodes."""
+    def test_postgres_step_is_effect(self, contract_data: dict) -> None:
+        """Test that PostgreSQL registration step is an effect node."""
         nodes = contract_data["workflow_coordination"]["workflow_definition"][
             "execution_graph"
         ]["nodes"]
 
-        # Find the registration nodes
+        # Find the postgres registration node
         for node in nodes:
-            if "consul" in node["node_id"].lower():
-                assert node["node_type"].lower() == "effect_generic", (
-                    "Consul registration should be effect_generic type"
-                )
             if "postgres" in node["node_id"].lower():
                 assert node["node_type"].lower() == "effect_generic", (
                     "Postgres registration should be effect_generic type"
                 )
+                break
+        else:
+            pytest.fail("execute_postgres_registration node not found")
 
     def test_compute_intents_is_reducer(self, contract_data: dict) -> None:
         """Test that compute_intents step is a reducer node."""
@@ -360,45 +357,44 @@ class TestWorkflowGraphIntegration:
         else:
             pytest.fail("compute_intents node not found")
 
-    def test_execution_graph_node_count_is_exactly_8(self, contract_data: dict) -> None:
-        """Test that execution graph has exactly 8 nodes (not more, not fewer).
+    def test_execution_graph_node_count_is_exactly_7(self, contract_data: dict) -> None:
+        """Test that execution graph has exactly 7 nodes (not more, not fewer).
 
         This is a strict count check that will fail if:
-        - Any of the 8 required nodes is missing
+        - Any of the 7 required nodes is missing
         - Any unexpected nodes are added
 
-        The 8 nodes are:
+        The 7 nodes are (Consul removed in OMN-3540):
         1. receive_introspection
         2. read_projection
         3. evaluate_timeout
         4. compute_intents
-        5. execute_consul_registration
-        6. execute_postgres_registration
-        7. aggregate_results
-        8. publish_outcome
+        5. execute_postgres_registration
+        6. aggregate_results
+        7. publish_outcome
         """
         nodes = contract_data["workflow_coordination"]["workflow_definition"][
             "execution_graph"
         ]["nodes"]
 
-        assert len(nodes) == 8, (
-            f"Execution graph must have exactly 8 nodes, found {len(nodes)}. "
+        assert len(nodes) == 7, (
+            f"Execution graph must have exactly 7 nodes, found {len(nodes)}. "
             f"Node IDs found: {[n['node_id'] for n in nodes]}"
         )
 
-    def test_all_8_nodes_have_correct_properties(self, contract_data: dict) -> None:
-        """Test that all 8 execution graph nodes have correct types and dependencies.
+    def test_all_7_nodes_have_correct_properties(self, contract_data: dict) -> None:
+        """Test that all 7 execution graph nodes have correct types and dependencies.
 
-        This test validates each of the 8 nodes in the registration orchestrator workflow:
+        This test validates each of the 7 nodes in the registration orchestrator workflow
+        (Consul removed in OMN-3540):
 
         1. receive_introspection (effect) - Entry point, no dependencies
         2. read_projection (effect) - Reads state, depends on receive_introspection
         3. evaluate_timeout (compute) - Evaluates timeout, depends on read_projection
         4. compute_intents (reducer) - Generates intents, depends on evaluate_timeout
-        5. execute_consul_registration (effect) - Consul registration, depends on compute_intents
-        6. execute_postgres_registration (effect) - PostgreSQL registration, depends on compute_intents
-        7. aggregate_results (compute) - Aggregates results, depends on both registrations
-        8. publish_outcome (effect) - Publishes result event, depends on aggregate_results
+        5. execute_postgres_registration (effect) - PostgreSQL registration, depends on compute_intents
+        6. aggregate_results (compute) - Aggregates results, depends on postgres registration
+        7. publish_outcome (effect) - Publishes result event, depends on aggregate_results
 
         Each node is validated for:
         - Correct node_type (effect, compute, or reducer)
@@ -412,7 +408,7 @@ class TestWorkflowGraphIntegration:
         # Build lookup for easier validation
         node_map = {n["node_id"]: n for n in nodes}
 
-        # Expected properties for all 8 nodes
+        # Expected properties for all 7 nodes (Consul removed in OMN-3540)
         # Format: node_id -> (node_type, depends_on)
         expected_node_properties = {
             # Node 1: Entry point - receives introspection, tick, or ack events
@@ -439,28 +435,21 @@ class TestWorkflowGraphIntegration:
                 "depends_on": ["evaluate_timeout"],
                 "description": "Compute registration intents from introspection event",
             },
-            # Node 5: Execute Consul registration
-            "execute_consul_registration": {
-                "node_type": "effect_generic",
-                "depends_on": ["compute_intents"],
-                "description": "Execute Consul registration intent",
-            },
-            # Node 6: Execute PostgreSQL registration
+            # Node 5: Execute PostgreSQL registration
             "execute_postgres_registration": {
                 "node_type": "effect_generic",
                 "depends_on": ["compute_intents"],
                 "description": "Execute PostgreSQL registration intent",
             },
-            # Node 7: Aggregate registration results
+            # Node 6: Aggregate registration results
             "aggregate_results": {
                 "node_type": "compute_generic",
                 "depends_on": [
-                    "execute_consul_registration",
                     "execute_postgres_registration",
                 ],
                 "description": "Aggregate registration results",
             },
-            # Node 8: Publish outcome event
+            # Node 7: Publish outcome event
             "publish_outcome": {
                 "node_type": "effect_generic",
                 "depends_on": ["aggregate_results"],
@@ -468,9 +457,9 @@ class TestWorkflowGraphIntegration:
             },
         }
 
-        # Validate we have exactly 8 nodes
-        assert len(expected_node_properties) == 8, "Test expects exactly 8 nodes"
-        assert len(node_map) == 8, f"Contract has {len(node_map)} nodes, expected 8"
+        # Validate we have exactly 7 nodes
+        assert len(expected_node_properties) == 7, "Test expects exactly 7 nodes"
+        assert len(node_map) == 7, f"Contract has {len(node_map)} nodes, expected 7"
 
         # Validate each node's properties
         for node_id, expected in expected_node_properties.items():
@@ -530,27 +519,17 @@ class TestCoordinationRulesIntegration:
         assert "timeout_ms" in rules
         assert rules["timeout_ms"] > 0
 
-    def test_parallel_execution_mode(self, contract_data: dict) -> None:
-        """Test that execution mode is parallel for concurrent registration.
+    def test_sequential_execution_mode(self, contract_data: dict) -> None:
+        """Test that execution mode is sequential (PostgreSQL only, OMN-3540).
 
-        The Registration Orchestrator uses parallel execution to run Consul
-        and Postgres registrations concurrently. Both steps depend only on
-        compute_intents, so they form a single wave and execute in parallel.
-
-        Benefits:
-        - Reduced latency for successful registrations
-        - Independent error handling (one failure doesn't block the other)
-
-        Note: execution_mode is consolidated in coordination_rules
-        along with all other coordination settings.
+        With Consul removed, the Registration Orchestrator uses sequential
+        execution for the single PostgreSQL registration backend.
         """
         rules = contract_data["workflow_coordination"]["workflow_definition"][
             "coordination_rules"
         ]
 
-        assert rules["execution_mode"] == "parallel"
-        assert rules["parallel_execution_allowed"] is True
-        assert rules["max_parallel_branches"] == 2
+        assert rules["execution_mode"] == "sequential"
 
     def test_checkpoint_enabled(self, contract_data: dict) -> None:
         """Test that checkpointing is enabled for recovery."""
@@ -780,9 +759,11 @@ class TestEventIntegration:
             assert segments[0] == "onex", (
                 f"ONEX topic must start with 'onex', got: {topic}"
             )
-            assert segments[1] in ("evt", "cmd", "intent"), (
-                f"ONEX topic segment 2 must be evt/cmd/intent, got: {topic}"
-            )
+            assert segments[1] in (
+                "evt",
+                "cmd",
+                "intent",
+            ), f"ONEX topic segment 2 must be evt/cmd/intent, got: {topic}"
             assert segments[4].startswith("v"), (
                 f"ONEX topic must end with version segment (v<N>), got: {topic}"
             )
@@ -1141,11 +1122,9 @@ class TestWorkflowExecutionWithMocks:
         - Has 'reduce' attribute (method presence)
         - 'reduce' is callable (method behavior)
 
-        Returns a list of intents for Consul and PostgreSQL registration.
+        Returns a list of intents for PostgreSQL registration (Consul removed in OMN-3540).
         """
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
-            ModelConsulIntentPayload,
-            ModelConsulRegistrationIntent,
             ModelPostgresIntentPayload,
             ModelPostgresUpsertIntent,
             ModelReducerState,
@@ -1172,16 +1151,8 @@ class TestWorkflowExecutionWithMocks:
                 self.received_events.append(event)
                 self.received_states.append(state)
 
-                # Generate test intents with typed payloads
+                # Generate test intents with typed payloads (PostgreSQL only, OMN-3540)
                 intents: list[ModelRegistrationIntent] = [
-                    ModelConsulRegistrationIntent(
-                        operation="register",
-                        node_id=self._node_id,
-                        correlation_id=self._correlation_id,
-                        payload=ModelConsulIntentPayload(
-                            service_name=f"onex-{event.node_type}",
-                        ),
-                    ),
                     ModelPostgresUpsertIntent(
                         operation="upsert",
                         node_id=self._node_id,
@@ -1227,13 +1198,12 @@ class TestWorkflowExecutionWithMocks:
         Returns successful execution results for all intents.
         """
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
-            ModelConsulRegistrationIntent,
             ModelIntentExecutionResult,
             ModelPostgresUpsertIntent,
         )
 
-        # Define the concrete union type for executed intents
-        ConcreteIntent = ModelConsulRegistrationIntent | ModelPostgresUpsertIntent
+        # Define the concrete type for executed intents (Consul removed in OMN-3540)
+        ConcreteIntent = ModelPostgresUpsertIntent
 
         class MockEffect:
             """Mock effect for testing workflow execution."""
@@ -1385,16 +1355,14 @@ class TestWorkflowExecutionWithMocks:
         assert mock_reducer.call_count == 1
         assert mock_reducer.received_events[0] == introspection_event
 
-        # Verify intents generated
-        assert len(intents) == 2
-        assert intents[0].kind == "consul"
-        assert intents[0].operation == "register"
-        assert intents[1].kind == "postgres"
-        assert intents[1].operation == "upsert"
+        # Verify intents generated (PostgreSQL only, Consul removed in OMN-3540)
+        assert len(intents) == 1
+        assert intents[0].kind == "postgres"
+        assert intents[0].operation == "upsert"
 
         # Verify state updated
         assert new_state.processed_node_ids == frozenset({introspection_event.node_id})
-        assert new_state.pending_registrations == 2
+        assert new_state.pending_registrations == 1
 
     @pytest.mark.asyncio
     async def test_effect_executes_intents_successfully(
@@ -1405,15 +1373,20 @@ class TestWorkflowExecutionWithMocks:
     ) -> None:
         """Test that effect executes intents and returns success results."""
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
-            ModelConsulIntentPayload,
-            ModelConsulRegistrationIntent,
+            ModelPostgresIntentPayload,
+            ModelPostgresUpsertIntent,
         )
 
-        intent = ModelConsulRegistrationIntent(
-            operation="register",
+        intent = ModelPostgresUpsertIntent(
+            operation="upsert",
             node_id=node_id,
             correlation_id=correlation_id,
-            payload=ModelConsulIntentPayload(service_name="test-node"),
+            payload=ModelPostgresIntentPayload(
+                node_id=node_id,
+                node_type=EnumNodeKind.EFFECT,
+                correlation_id=correlation_id,
+                timestamp="2025-01-15T12:00:00+00:00",
+            ),
         )
 
         result = await mock_effect.execute_intent(intent, correlation_id)
@@ -1422,7 +1395,7 @@ class TestWorkflowExecutionWithMocks:
         assert mock_effect.executed_intents[0] == intent
         assert mock_effect.received_correlation_ids[0] == correlation_id
         assert result.success is True
-        assert result.intent_kind == "consul"
+        assert result.intent_kind == "postgres"
         assert result.error is None
         assert result.execution_time_ms >= 0
 
@@ -1435,17 +1408,22 @@ class TestWorkflowExecutionWithMocks:
     ) -> None:
         """Test that effect returns failure result when configured to fail."""
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
-            ModelConsulIntentPayload,
-            ModelConsulRegistrationIntent,
+            ModelPostgresIntentPayload,
+            ModelPostgresUpsertIntent,
         )
 
         mock_effect.should_fail = True
 
-        intent = ModelConsulRegistrationIntent(
-            operation="register",
+        intent = ModelPostgresUpsertIntent(
+            operation="upsert",
             node_id=node_id,
             correlation_id=correlation_id,
-            payload=ModelConsulIntentPayload(service_name="test-node"),
+            payload=ModelPostgresIntentPayload(
+                node_id=node_id,
+                node_type=EnumNodeKind.EFFECT,
+                correlation_id=correlation_id,
+                timestamp="2025-01-15T12:00:00+00:00",
+            ),
         )
 
         result = await mock_effect.execute_intent(intent, correlation_id)
@@ -1525,13 +1503,12 @@ class TestWorkflowExecutionWithMocks:
             result = await mock_effect.execute_intent(intent, correlation_id)
             results.append(result)
 
-        # Verify all intents were executed
-        assert mock_effect.call_count == 2
-        assert len(mock_effect.executed_intents) == 2
+        # Verify all intents were executed (PostgreSQL only, OMN-3540)
+        assert mock_effect.call_count == 1
+        assert len(mock_effect.executed_intents) == 1
 
         # Verify intents match
         assert mock_effect.executed_intents[0] == intents[0]
-        assert mock_effect.executed_intents[1] == intents[1]
 
         # Verify all results are successful
         assert all(r.success for r in results)
@@ -1562,25 +1539,24 @@ class TestWorkflowExecutionWithMocks:
             results.append(result)
 
         # Aggregate results (simulating what the orchestrator would do)
-        consul_results = [r for r in results if r.intent_kind == "consul"]
         postgres_results = [r for r in results if r.intent_kind == "postgres"]
 
-        consul_applied = all(r.success for r in consul_results)
+        # Guard against vacuous success: postgres result must exist
+        assert len(postgres_results) >= 1, (
+            "Expected at least 1 postgres result, got 0 — "
+            "all() on empty list would vacuously return True"
+        )
+
         postgres_applied = all(r.success for r in postgres_results)
 
-        all_success = consul_applied and postgres_applied
-        any_success = consul_applied or postgres_applied
-
-        status = "success" if all_success else ("partial" if any_success else "failed")
+        status = "success" if postgres_applied else "failed"
 
         total_time = sum(r.execution_time_ms for r in results)
 
         output = ModelOrchestratorOutput(
             correlation_id=correlation_id,
             status=status,
-            consul_applied=consul_applied,
             postgres_applied=postgres_applied,
-            consul_error=None,
             postgres_error=None,
             intent_results=results,
             total_execution_time_ms=total_time,
@@ -1588,10 +1564,9 @@ class TestWorkflowExecutionWithMocks:
 
         # Verify output structure
         assert output.status == "success"
-        assert output.consul_applied is True
         assert output.postgres_applied is True
         assert output.correlation_id == correlation_id
-        assert len(output.intent_results) == 2
+        assert len(output.intent_results) == 1
         assert output.total_execution_time_ms >= 0
 
     @pytest.mark.asyncio
@@ -1609,8 +1584,8 @@ class TestWorkflowExecutionWithMocks:
             ModelReducerState,
         )
 
-        # Configure effect to fail on consul only
-        mock_effect.fail_on_kind = "consul"
+        # Configure effect to fail on postgres only
+        mock_effect.fail_on_kind = "postgres"
 
         # Execute reducer
         initial_state = ModelReducerState.initial()
@@ -1623,37 +1598,30 @@ class TestWorkflowExecutionWithMocks:
             results.append(result)
 
         # Aggregate
-        consul_results = [r for r in results if r.intent_kind == "consul"]
         postgres_results = [r for r in results if r.intent_kind == "postgres"]
 
-        consul_applied = all(r.success for r in consul_results)
         postgres_applied = all(r.success for r in postgres_results)
 
-        consul_error = next((r.error for r in consul_results if not r.success), None)
-
-        status = (
-            "success"
-            if consul_applied and postgres_applied
-            else ("partial" if consul_applied or postgres_applied else "failed")
+        postgres_error = next(
+            (r.error for r in postgres_results if not r.success), None
         )
+
+        status = "success" if postgres_applied else "failed"
 
         output = ModelOrchestratorOutput(
             correlation_id=correlation_id,
             status=status,
-            consul_applied=consul_applied,
             postgres_applied=postgres_applied,
-            consul_error=consul_error,
-            postgres_error=None,
+            postgres_error=postgres_error,
             intent_results=results,
             total_execution_time_ms=sum(r.execution_time_ms for r in results),
         )
 
-        # Verify partial failure
-        assert output.status == "partial"
-        assert output.consul_applied is False
-        assert output.postgres_applied is True
-        assert output.consul_error is not None
-        assert "Mock failure" in output.consul_error
+        # Verify failure
+        assert output.status == "failed"
+        assert output.postgres_applied is False
+        assert output.postgres_error is not None
+        assert "Mock failure" in output.postgres_error
 
     @pytest.mark.asyncio
     async def test_reducer_deduplicates_processed_nodes(
@@ -1672,11 +1640,11 @@ class TestWorkflowExecutionWithMocks:
             initial_state, introspection_event
         )
 
-        assert len(intents_first) == 2
+        assert len(intents_first) == 1
         assert introspection_event.node_id in state_after_first.processed_node_ids
 
-        # State should track processed node
-        assert state_after_first.pending_registrations == 2
+        # State should track processed node (PostgreSQL only, OMN-3540)
+        assert state_after_first.pending_registrations == 1
 
     @pytest.mark.asyncio
     async def test_workflow_sequence_reducer_before_effect(
@@ -1719,10 +1687,9 @@ class TestWorkflowExecutionWithMocks:
         for intent in intents:
             await mock_effect.execute_intent(intent, correlation_id)
 
-        # Verify order
+        # Verify order (PostgreSQL only, OMN-3540)
         assert call_order[0] == "reducer"
         assert call_order[1].startswith("effect:")
-        assert call_order[2].startswith("effect:")
 
     def test_orchestrator_instantiation_with_mocks(
         self,
@@ -1796,59 +1763,41 @@ class TestParallelExecutionStructure:
     """Integration tests for parallel execution of Consul and Postgres registrations.
 
     These tests verify that the workflow graph is correctly structured for
-    parallel execution of the registration steps:
+    sequential execution of the PostgreSQL registration step (Consul removed
+    in OMN-3540):
 
-    1. Both execute_consul_registration and execute_postgres_registration
-       depend only on compute_intents (not on each other)
-    2. This allows them to run in parallel as a single wave
-    3. aggregate_results depends on both, ensuring it waits for both to complete
+    1. execute_postgres_registration depends on compute_intents
+    2. aggregate_results depends on execute_postgres_registration
+    3. Execution mode is sequential (single backend)
 
-    Wave Structure (with parallel execution enabled):
+    Wave Structure:
         Wave 1: receive_introspection
         Wave 2: read_projection
         Wave 3: evaluate_timeout
         Wave 4: compute_intents
-        Wave 5: execute_consul_registration, execute_postgres_registration (PARALLEL)
+        Wave 5: execute_postgres_registration
         Wave 6: aggregate_results
         Wave 7: publish_outcome
     """
 
-    def test_consul_and_postgres_share_same_dependency(
-        self, contract_data: dict
-    ) -> None:
-        """Test that Consul and Postgres steps both depend only on compute_intents.
-
-        This is the key structural requirement for parallel execution - both
-        registration steps have the same single dependency, so they can run
-        concurrently in the same wave.
-        """
+    def test_postgres_depends_on_compute_intents(self, contract_data: dict) -> None:
+        """Test that PostgreSQL registration step depends only on compute_intents."""
         nodes = contract_data["workflow_coordination"]["workflow_definition"][
             "execution_graph"
         ]["nodes"]
 
         node_map = {n["node_id"]: n for n in nodes}
-
-        consul_node = node_map["execute_consul_registration"]
         postgres_node = node_map["execute_postgres_registration"]
 
-        # Both should depend only on compute_intents
-        assert consul_node.get("depends_on") == ["compute_intents"], (
-            f"execute_consul_registration should depend only on compute_intents, "
-            f"got {consul_node.get('depends_on')}"
-        )
         assert postgres_node.get("depends_on") == ["compute_intents"], (
             f"execute_postgres_registration should depend only on compute_intents, "
             f"got {postgres_node.get('depends_on')}"
         )
 
-    def test_aggregate_results_waits_for_both_registrations(
+    def test_aggregate_results_waits_for_postgres_registration(
         self, contract_data: dict
     ) -> None:
-        """Test that aggregate_results depends on both registration steps.
-
-        This ensures that result aggregation only occurs after both Consul
-        and Postgres registrations complete (successfully or with errors).
-        """
+        """Test that aggregate_results depends on the postgres registration step."""
         nodes = contract_data["workflow_coordination"]["workflow_definition"][
             "execution_graph"
         ]["nodes"]
@@ -1856,68 +1805,27 @@ class TestParallelExecutionStructure:
         node_map = {n["node_id"]: n for n in nodes}
         aggregate_node = node_map["aggregate_results"]
 
-        expected_deps = {"execute_consul_registration", "execute_postgres_registration"}
+        expected_deps = {"execute_postgres_registration"}
         actual_deps = set(aggregate_node.get("depends_on", []))
 
         assert actual_deps == expected_deps, (
-            f"aggregate_results should depend on both registration steps, "
+            f"aggregate_results should depend on execute_postgres_registration, "
             f"got {actual_deps}, expected {expected_deps}"
         )
 
-    def test_no_dependency_between_registration_steps(
+    def test_sequential_execution_in_coordination_rules(
         self, contract_data: dict
     ) -> None:
-        """Test that there is no dependency between Consul and Postgres steps.
+        """Test that sequential execution is configured in coordination rules.
 
-        The registration steps should be independent to enable parallel execution.
-        Neither should depend on the other.
-        """
-        nodes = contract_data["workflow_coordination"]["workflow_definition"][
-            "execution_graph"
-        ]["nodes"]
-
-        node_map = {n["node_id"]: n for n in nodes}
-
-        consul_deps = set(node_map["execute_consul_registration"].get("depends_on", []))
-        postgres_deps = set(
-            node_map["execute_postgres_registration"].get("depends_on", [])
-        )
-
-        # Consul should not depend on Postgres
-        assert "execute_postgres_registration" not in consul_deps, (
-            "execute_consul_registration should not depend on execute_postgres_registration"
-        )
-
-        # Postgres should not depend on Consul
-        assert "execute_consul_registration" not in postgres_deps, (
-            "execute_postgres_registration should not depend on execute_consul_registration"
-        )
-
-    def test_parallel_execution_enabled_in_coordination_rules(
-        self, contract_data: dict
-    ) -> None:
-        """Test that parallel execution is properly enabled in coordination rules.
-
-        Verifies all three parallel execution settings are correctly configured:
-        - execution_mode: parallel
-        - parallel_execution_allowed: true
-        - max_parallel_branches: 2 (for Consul and Postgres)
+        With only PostgreSQL as a backend (Consul removed in OMN-3540),
+        execution mode is sequential.
         """
         rules = contract_data["workflow_coordination"]["workflow_definition"][
             "coordination_rules"
         ]
 
-        # Execution mode must be parallel
-        assert rules["execution_mode"] == "parallel", (
-            f"execution_mode should be 'parallel', got {rules['execution_mode']}"
-        )
-
-        # Parallel execution must be allowed
-        assert rules["parallel_execution_allowed"] is True, (
-            "parallel_execution_allowed should be True"
-        )
-
-        # Max parallel branches should be at least 2 (for Consul and Postgres)
-        assert rules["max_parallel_branches"] >= 2, (
-            f"max_parallel_branches should be at least 2, got {rules['max_parallel_branches']}"
+        # Execution mode is sequential (single backend)
+        assert rules["execution_mode"] == "sequential", (
+            f"execution_mode should be 'sequential', got {rules['execution_mode']}"
         )

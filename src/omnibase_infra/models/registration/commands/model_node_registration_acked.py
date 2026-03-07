@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Registration Acknowledged Command Model.
 
-This module provides ModelNodeRegistrationAcked, a command sent by nodes
+ModelNodeRegistrationAcked, a command sent by nodes
 to acknowledge their registration in the ONEX 2-way registration pattern.
 
 Command vs Event Distinction:

@@ -7,8 +7,8 @@ These tests verify the FULL registration flow:
 2. Orchestrator consumes the event from Kafka
 3. Handler processes and triggers reducer
 4. Reducer generates intents
-5. Effects execute intents (Consul + PostgreSQL registration)
-6. Verify BOTH Consul AND PostgreSQL have the registration
+5. Effects execute intents (PostgreSQL registration)
+6. Verify PostgreSQL has the registration
 
 Unlike the component tests in test_two_way_registration_e2e.py, these tests
 validate the actual message consumption and processing pipeline.
@@ -24,8 +24,7 @@ Architecture Notes:
     This validates the REAL message flow, not just handler logic.
 
 Infrastructure Requirements (configured via environment variables):
-    - Kafka: KAFKA_BOOTSTRAP_SERVERS (e.g., localhost:29092)
-    - Consul: CONSUL_HTTP_ADDR (e.g., localhost:8500)
+    - Kafka: KAFKA_BOOTSTRAP_SERVERS (e.g., localhost:19092)
     - PostgreSQL: POSTGRES_HOST, POSTGRES_PORT (e.g., localhost:5432)
 
 Related Tickets:
@@ -125,7 +124,9 @@ TEST_INTROSPECTION_TOPIC = "e2e-test.node.introspection.v1"
 # =============================================================================
 
 
-def coerce_to_node_kind(node_type: str | EnumNodeKind | None) -> EnumNodeKind:
+def coerce_to_node_kind(  # ai-slop-ok: pre-existing
+    node_type: str | EnumNodeKind | None,
+) -> EnumNodeKind:
     """Coerce a node type string or enum to EnumNodeKind.
 
     This function handles the string-to-enum coercion needed when processing
@@ -424,7 +425,6 @@ class OrchestratorPipeline:
                     logger.info(
                         "  [EFFECT] SUCCESS\n"
                         "    Node ID: %s\n"
-                        "    Consul registration: Completed\n"
                         "    PostgreSQL registration: Completed",
                         event.node_id,
                     )
@@ -554,9 +554,6 @@ class OrchestratorPipeline:
             extra={
                 "node_id": str(event.node_id),
                 "status": response.status,
-                "consul_success": response.consul_result.success
-                if response.consul_result
-                else None,
                 "postgres_success": response.postgres_result.success
                 if response.postgres_result
                 else None,
@@ -620,13 +617,11 @@ class OrchestratorTestContext:
 
     Attributes:
         pipeline: The orchestrator pipeline for processing events.
-        mock_consul_client: Mock Consul client injected into the pipeline.
         mock_postgres_adapter: Mock PostgreSQL adapter injected into the pipeline.
         unsubscribe: Async function to unsubscribe from Kafka topic.
     """
 
     pipeline: OrchestratorPipeline
-    mock_consul_client: AsyncMock
     mock_postgres_adapter: AsyncMock
     unsubscribe: Callable[[], Awaitable[None]] | None = None
 
@@ -766,7 +761,7 @@ async def validate_test_topic_exists(real_kafka_event_bus: EventBusKafka) -> str
         pytest.fail(
             "KAFKA_BOOTSTRAP_SERVERS environment variable not set.\n"
             "Set it to your Kafka/Redpanda cluster address, e.g.:\n"
-            "  export KAFKA_BOOTSTRAP_SERVERS=localhost:29092"
+            "  export KAFKA_BOOTSTRAP_SERVERS=localhost:19092"
         )
 
     admin_client: AIOKafkaAdminClient | None = None
@@ -1468,15 +1463,14 @@ class TestFullPipelineWithRealInfrastructure:
         state = ModelRegistrationState()
         output = reducer.reduce(state, event)
 
-        # Verify intents generated (extension format)
-        assert len(output.intents) == 2, "Should generate Consul and PostgreSQL intents"
+        # Verify intents generated (PostgreSQL only, OMN-3540)
+        assert len(output.intents) == 1, "Should generate PostgreSQL intent"
 
         intent_types = {
             intent.payload.intent_type
             for intent in output.intents
             if intent.intent_type
         }
-        assert "consul.register" in intent_types, "Should include Consul intent"
         assert "postgres.upsert_registration" in intent_types, (
             "Should include PostgreSQL intent"
         )
@@ -1486,23 +1480,21 @@ class TestFullPipelineWithRealInfrastructure:
             f"Expected pending status, got {output.result.status}"
         )
 
-    async def test_effect_executes_dual_registration(
+    async def test_effect_executes_postgres_registration(
         self,
-        mock_consul_client: AsyncMock,
         mock_postgres_adapter: AsyncMock,
         unique_node_id: UUID,
         unique_correlation_id: UUID,
     ) -> None:
-        """Test that effect node executes both Consul and PostgreSQL registration.
+        """Test that effect node executes PostgreSQL registration.
 
-        Verifies both backend operations are called with correct parameters.
+        Verifies PostgreSQL backend operation is called with correct parameters.
+        Consul removed in OMN-3540.
         """
         from omnibase_infra.nodes.effects import NodeRegistryEffect
         from omnibase_infra.nodes.effects.models import ModelRegistryRequest
 
-        effect = NodeRegistryEffect(
-            consul_client=mock_consul_client, postgres_adapter=mock_postgres_adapter
-        )
+        effect = NodeRegistryEffect(postgres_adapter=mock_postgres_adapter)
 
         request = ModelRegistryRequest(
             node_id=unique_node_id,
@@ -1517,13 +1509,11 @@ class TestFullPipelineWithRealInfrastructure:
 
         response = await effect.register_node(request)
 
-        # Verify both backends called
-        assert mock_consul_client.register_service.called
+        # Verify PostgreSQL backend called (Consul removed in OMN-3540)
         assert mock_postgres_adapter.upsert.called
 
         # Verify response
         assert response.status == "success"
-        assert response.consul_result.success
         assert response.postgres_result.success
 
 

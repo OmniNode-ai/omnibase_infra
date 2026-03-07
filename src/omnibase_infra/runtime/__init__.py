@@ -18,7 +18,7 @@ Core Registries
 - **RegistryProtocolBinding**: SINGLE SOURCE OF TRUTH for protocol handler registration
     - Maps handler types to handler implementations
     - Enables protocol-based dependency injection
-    - Supports HTTP, database, Kafka, Vault, Consul, Valkey/Redis, gRPC handlers
+    - Supports HTTP, database, Kafka, Valkey/Redis, gRPC handlers
 
 - **RegistryEventBusBinding**: Registry for event bus implementations
     - Maps event bus kinds to event bus implementations
@@ -68,7 +68,6 @@ from omnibase_infra.runtime.envelope_validator import (
 from omnibase_infra.runtime.handler_registry import (
     EVENT_BUS_INMEMORY,
     EVENT_BUS_KAFKA,
-    HANDLER_TYPE_CONSUL,
     HANDLER_TYPE_DATABASE,
     HANDLER_TYPE_GRPC,
     HANDLER_TYPE_HTTP,
@@ -260,20 +259,6 @@ from omnibase_infra.runtime.constants_security import (
     TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
 )
 
-# Registry contract source (OMN-1100)
-from omnibase_infra.runtime.registry_contract_source import (
-    DEFAULT_CONSUL_HOST,
-    DEFAULT_CONSUL_PORT,
-    DEFAULT_CONTRACT_PREFIX,
-    RegistryContractSource,
-    adelete_contract_from_consul,
-    alist_contracts_in_consul,
-    astore_contract_in_consul,
-    delete_contract_from_consul,
-    list_contracts_in_consul,
-    store_contract_in_consul,
-)
-
 # Kafka contract source (OMN-1654)
 from omnibase_infra.runtime.kafka_contract_source import KafkaContractSource
 
@@ -305,7 +290,6 @@ __all__: list[str] = [
     # Event bus kind constants
     "EVENT_BUS_INMEMORY",
     "EVENT_BUS_KAFKA",
-    "HANDLER_TYPE_CONSUL",
     "HANDLER_TYPE_DATABASE",
     "HANDLER_TYPE_GRPC",
     # Handler type constants
@@ -453,17 +437,6 @@ __all__: list[str] = [
     "SECURITY_CONFIG_PATH_ENV_VAR",
     "TRUSTED_HANDLER_NAMESPACE_PREFIXES",
     "TRUSTED_PLUGIN_NAMESPACE_PREFIXES",
-    # Registry contract source (OMN-1100)
-    "DEFAULT_CONSUL_HOST",
-    "DEFAULT_CONSUL_PORT",
-    "DEFAULT_CONTRACT_PREFIX",
-    "RegistryContractSource",
-    "adelete_contract_from_consul",
-    "alist_contracts_in_consul",
-    "astore_contract_in_consul",
-    "delete_contract_from_consul",
-    "list_contracts_in_consul",
-    "store_contract_in_consul",
     # Kafka contract source (OMN-1654)
     "KafkaContractSource",
     # Baseline subscriptions (OMN-1696)

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Protocol Binding Registry - SINGLE SOURCE OF TRUTH for handler registration.
+"""# ai-slop-ok: pre-existingProtocol Binding Registry - SINGLE SOURCE OF TRUTH for handler registration.
 
 This module provides the RegistryProtocolBinding class which implements the
 ProtocolContainerAwareRegistry protocol from omnibase_spi. It serves as the
@@ -24,8 +24,9 @@ Handler Categories (by protocol type):
 - HTTP handlers: REST API integrations
 - Database handlers: PostgreSQL, Valkey connections
 - Message broker handlers: Kafka message processing
-- Service discovery handlers: Consul integration
-- Secret management handlers: Vault integration
+- Graph handlers: Memgraph/Neo4j operations
+- Intent handlers: Intent storage and query
+- MCP handlers: Model Context Protocol AI agent integration
 
 Example Usage:
     ```python

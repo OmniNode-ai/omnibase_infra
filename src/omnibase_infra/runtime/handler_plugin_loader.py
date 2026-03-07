@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Handler Plugin Loader for Contract-Driven Discovery.
+"""Handler Plugin Loader for Contract-Driven Discovery.  # ai-slop-ok: pre-existing
 
 This module provides HandlerPluginLoader, which discovers handler contracts
 from the filesystem, validates handlers against protocols, and creates
@@ -233,7 +233,7 @@ MAX_CONTRACT_SIZE = 10 * 1024 * 1024
 # ---------------------------------------------------------------------------
 
 
-class HandlerPluginLoader(ProtocolHandlerPluginLoader):
+class HandlerPluginLoader(ProtocolHandlerPluginLoader):  # ai-slop-ok: pre-existing
     """Load handlers as plugins from contracts.
 
     Discovers handler contracts, validates handlers against protocols,
@@ -1322,7 +1322,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 - ``health_check()``: Async method for connectivity verification.
                   While part of the ProtocolHandler protocol, this method is not
                   validated because existing handler implementations (HandlerHttp,
-                  HandlerDb, HandlerVault, HandlerConsul) do not implement it.
+                  HandlerDb, HandlerVault) do not implement it.
                   Future handler implementations SHOULD include health_check().
 
         Validation Approach:

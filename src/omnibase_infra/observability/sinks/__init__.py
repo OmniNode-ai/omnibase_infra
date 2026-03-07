@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Observability sinks for ONEX infrastructure.
 
-This module provides sink implementations for the ONEX observability stack.
+Sink implementations for the ONEX observability stack.
 Sinks are responsible for buffering and outputting observability data
 (logs, metrics) to various backends.
 

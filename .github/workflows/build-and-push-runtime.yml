@@ -42,12 +42,19 @@ env:
 jobs:
   build-and-push:
     name: Build and push runtime image
-    runs-on: ubuntu-latest
+    # OMNINODE_SELF_HOSTED_DOCKER_V1 — always self-hosted when enabled; kill-switch fallback to ubuntu-latest
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true')
+        && fromJSON('["self-hosted","omnibase-ci"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
     # Timeout breakdown (cold cache worst case):
     #   Docker build:        ~30 min (protobuf upgrade + cold cache adds ~16 min vs baseline)
     #   ECR push:            ~5 min
-    #   GHA cache export:    ~15 min
-    #   Total:               ~50 min — 60 min gives comfortable buffer
+    #   Total:               ~35 min
+    # Self-hosted runners use local Docker cache (no GHA cache export overhead).
+    # 60 min gives comfortable buffer for cold-cache builds.
     timeout-minutes: 60
 
     outputs:
@@ -57,12 +64,30 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+
+      - name: Verify Docker socket access
+        run: |
+          if ! docker info > /dev/null 2>&1; then
+            echo "::error::Docker daemon is not accessible. On self-hosted runners, ensure the runner user is in the docker group and /var/run/docker.sock is bind-mounted."
+            ls -la /var/run/docker.sock 2>/dev/null || echo "Socket not found"
+            echo "Current user: $(whoami) (uid=$(id -u), groups=$(id -Gn))"
+            exit 1
+          fi
+          echo "Docker daemon accessible"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
-          platforms: linux/amd64
+          driver: docker
+
+      - name: Verify Buildx driver
+        run: |
+          DRIVER=$(docker buildx inspect --bootstrap 2>/dev/null | grep -oP 'Driver:\s+\K\S+' || echo "unknown")
+          echo "Buildx driver: ${DRIVER}"
+          if [[ "${DRIVER}" != "docker" ]]; then
+            echo "::warning::Expected Buildx driver 'docker', got '${DRIVER}'"
+          fi
 
       - name: Configure AWS credentials (OIDC -> omninode-github-actions-role)
         uses: aws-actions/configure-aws-credentials@v6
@@ -110,8 +135,6 @@ jobs:
           push: false
           load: true
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
           build-args: |
             RUNTIME_VERSION=${{ github.ref_name }}
             BUILD_DATE=${{ steps.timestamp.outputs.build_date }}
@@ -120,7 +143,7 @@ jobs:
             UV_VERSION=${{ env.UV_VERSION }}
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.34.1
+        uses: aquasecurity/trivy-action@97e0b3872f55f89b95b2f65b3dbab56962816478  # v0.34.2 (pinned 2026-03-04)
         with:
           image-ref: '${{ steps.meta.outputs.image_repo }}:${{ github.sha }}'
           format: 'table'
@@ -196,7 +219,7 @@ jobs:
           cat ops/digests/build-manifest.json
 
       - name: Upload digest mapping artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-manifest-${{ github.sha }}
           path: ops/digests/build-manifest.json

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Handler Routing Loader for Contract-Driven Orchestrators.
 
-This module provides utilities for loading handler routing configuration
+Utilities for loading handler routing configuration
 from contract.yaml files. It supports the ONEX declarative pattern where
 orchestrators define handler routing in YAML rather than Python code.
 

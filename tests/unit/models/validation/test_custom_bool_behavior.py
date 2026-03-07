@@ -44,12 +44,6 @@ from omnibase_infra.models.validation.model_execution_shape_validation_result im
 from omnibase_infra.models.validation.model_validation_outcome import (
     ModelValidationOutcome,
 )
-from omnibase_infra.nodes.node_registration_orchestrator.models.model_consul_intent_payload import (
-    ModelConsulIntentPayload,
-)
-from omnibase_infra.nodes.node_registration_orchestrator.models.model_consul_registration_intent import (
-    ModelConsulRegistrationIntent,
-)
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_postgres_intent_payload import (
     ModelPostgresIntentPayload,
 )
@@ -63,19 +57,6 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_st
     ModelReducerState,
 )
 from omnibase_infra.runtime.models.model_lifecycle_result import ModelLifecycleResult
-
-
-def _make_consul_intent() -> ModelConsulRegistrationIntent:
-    """Helper to create a valid ModelConsulRegistrationIntent for tests."""
-    node_id = uuid4()
-    correlation_id = uuid4()
-    payload = ModelConsulIntentPayload(service_name="test-service")
-    return ModelConsulRegistrationIntent(
-        operation="register",
-        node_id=node_id,
-        correlation_id=correlation_id,
-        payload=payload,
-    )
 
 
 def _make_postgres_intent() -> ModelPostgresUpsertIntent:
@@ -117,7 +98,7 @@ class TestModelReducerExecutionResultBool:
         This is the 'truthy' case: there is work to be done.
         """
         state = ModelReducerState.initial()
-        intent = _make_consul_intent()
+        intent = _make_postgres_intent()
         result = ModelReducerExecutionResult(state=state, intents=(intent,))
 
         assert bool(result) is True
@@ -167,11 +148,11 @@ class TestModelReducerExecutionResultBool:
         The with_intents() factory creates a result with work to do.
         """
         state = ModelReducerState.initial()
-        consul_intent = _make_consul_intent()
-        postgres_intent = _make_postgres_intent()
+        intent_a = _make_postgres_intent()
+        intent_b = _make_postgres_intent()
         result = ModelReducerExecutionResult.with_intents(
             state=state,
-            intents=[consul_intent, postgres_intent],
+            intents=[intent_a, intent_b],
         )
 
         assert bool(result) is True
@@ -180,7 +161,7 @@ class TestModelReducerExecutionResultBool:
     def test_bool_with_multiple_intents(self) -> None:
         """Multiple intents all result in True evaluation."""
         state = ModelReducerState.initial()
-        intents = tuple(_make_consul_intent() for _ in range(5))
+        intents = tuple(_make_postgres_intent() for _ in range(5))
         result = ModelReducerExecutionResult(state=state, intents=intents)
 
         assert bool(result) is True
@@ -197,7 +178,7 @@ class TestModelReducerExecutionResultBool:
         # Pattern 1: Result with work
         work_result = ModelReducerExecutionResult.with_intents(
             state=state,
-            intents=[_make_consul_intent()],
+            intents=[_make_postgres_intent()],
         )
 
         work_done = False
@@ -228,7 +209,7 @@ class TestModelReducerExecutionResultBool:
         state = ModelReducerState.initial()
         with_intents = ModelReducerExecutionResult.with_intents(
             state=state,
-            intents=[_make_consul_intent()],
+            intents=[_make_postgres_intent()],
         )
         assert with_intents.has_intents == bool(with_intents)
         assert with_intents.has_intents is True
@@ -800,7 +781,7 @@ class TestEdgeCases:
         state = ModelReducerState.initial()
         result = ModelReducerExecutionResult(
             state=state,
-            intents=(_make_consul_intent(),),
+            intents=(_make_postgres_intent(),),
         )
         assert bool(result) is True
 

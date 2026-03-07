@@ -170,7 +170,7 @@ The ONEX development/staging infrastructure server hosts:
 - **PostgreSQL** on port 5436 (external) / 5432 (internal)
 - **Consul** on port 28500
 - **Vault** on port 8200
-- **Redpanda (Kafka)** on port 29092
+- **Redpanda (Kafka)** on port 19092
 
 The default server IP is configured in `tests/infrastructure_config.py`. To override:
 

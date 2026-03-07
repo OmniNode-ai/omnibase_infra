@@ -49,12 +49,6 @@ from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.models.validation.model_category_match_result import (
     ModelCategoryMatchResult,
 )
-from omnibase_infra.nodes.node_registration_orchestrator.models.model_consul_intent_payload import (
-    ModelConsulIntentPayload,
-)
-from omnibase_infra.nodes.node_registration_orchestrator.models.model_consul_registration_intent import (
-    ModelConsulRegistrationIntent,
-)
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_postgres_intent_payload import (
     ModelPostgresIntentPayload,
 )
@@ -71,21 +65,6 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_st
 # ============================================================================
 # Test Fixtures
 # ============================================================================
-
-
-@pytest.fixture
-def sample_consul_intent() -> ModelConsulRegistrationIntent:
-    """Create a sample Consul registration intent for testing."""
-    return ModelConsulRegistrationIntent(
-        operation="register",
-        node_id=uuid4(),
-        correlation_id=uuid4(),
-        payload=ModelConsulIntentPayload(
-            service_name="test-service",
-            tags=("test", "unit"),
-            meta=(("env", "test"),),
-        ),
-    )
 
 
 @pytest.fixture
@@ -130,20 +109,6 @@ class TestModelReducerExecutionResultBool:
     bool(model) always returns True for any valid model instance.
     """
 
-    def test_bool_true_with_single_consul_intent(
-        self,
-        initial_state: ModelReducerState,
-        sample_consul_intent: ModelConsulRegistrationIntent,
-    ) -> None:
-        """Verify bool(result) is True when a single Consul intent is present."""
-        result = ModelReducerExecutionResult(
-            state=initial_state,
-            intents=(sample_consul_intent,),
-        )
-
-        assert bool(result) is True
-        assert result  # Idiomatic usage should also pass
-
     def test_bool_true_with_single_postgres_intent(
         self,
         initial_state: ModelReducerState,
@@ -161,13 +126,12 @@ class TestModelReducerExecutionResultBool:
     def test_bool_true_with_multiple_intents(
         self,
         initial_state: ModelReducerState,
-        sample_consul_intent: ModelConsulRegistrationIntent,
         sample_postgres_intent: ModelPostgresUpsertIntent,
     ) -> None:
         """Verify bool(result) is True when multiple intents are present."""
         result = ModelReducerExecutionResult(
             state=initial_state,
-            intents=(sample_consul_intent, sample_postgres_intent),
+            intents=(sample_postgres_intent, sample_postgres_intent),
         )
 
         assert bool(result) is True
@@ -224,12 +188,12 @@ class TestModelReducerExecutionResultBool:
     def test_bool_true_for_with_intents_factory(
         self,
         initial_state: ModelReducerState,
-        sample_consul_intent: ModelConsulRegistrationIntent,
+        sample_postgres_intent: ModelPostgresUpsertIntent,
     ) -> None:
         """Verify bool(ModelReducerExecutionResult.with_intents(...)) is True."""
         result = ModelReducerExecutionResult.with_intents(
             state=initial_state,
-            intents=[sample_consul_intent],  # List is converted to tuple
+            intents=[sample_postgres_intent],  # List is converted to tuple
         )
 
         assert bool(result) is True
@@ -238,7 +202,7 @@ class TestModelReducerExecutionResultBool:
     def test_bool_matches_has_intents_property(
         self,
         initial_state: ModelReducerState,
-        sample_consul_intent: ModelConsulRegistrationIntent,
+        sample_postgres_intent: ModelPostgresUpsertIntent,
     ) -> None:
         """Verify bool(result) == result.has_intents in all cases."""
         # Case 1: Empty result
@@ -252,7 +216,7 @@ class TestModelReducerExecutionResultBool:
         # Case 3: Result with intents
         with_intents_result = ModelReducerExecutionResult.with_intents(
             state=initial_state,
-            intents=[sample_consul_intent],
+            intents=[sample_postgres_intent],
         )
         assert bool(with_intents_result) == with_intents_result.has_intents
 
@@ -285,13 +249,13 @@ class TestModelReducerExecutionResultBool:
     def test_bool_in_conditional_expression(
         self,
         initial_state: ModelReducerState,
-        sample_consul_intent: ModelConsulRegistrationIntent,
+        sample_postgres_intent: ModelPostgresUpsertIntent,
     ) -> None:
         """Verify __bool__ works correctly in conditional expressions."""
         empty_result = ModelReducerExecutionResult.empty()
         work_result = ModelReducerExecutionResult.with_intents(
             state=initial_state,
-            intents=[sample_consul_intent],
+            intents=[sample_postgres_intent],
         )
 
         # Ternary expression
@@ -304,14 +268,14 @@ class TestModelReducerExecutionResultBool:
     def test_bool_in_all_any(
         self,
         initial_state: ModelReducerState,
-        sample_consul_intent: ModelConsulRegistrationIntent,
+        sample_postgres_intent: ModelPostgresUpsertIntent,
     ) -> None:
         """Verify __bool__ works with all() and any() built-ins."""
         empty1 = ModelReducerExecutionResult.empty()
         empty2 = ModelReducerExecutionResult.no_change(initial_state)
         with_work = ModelReducerExecutionResult.with_intents(
             state=initial_state,
-            intents=[sample_consul_intent],
+            intents=[sample_postgres_intent],
         )
 
         # any() should find the one with work
@@ -623,7 +587,7 @@ class TestModelReducerExecutionResultImmutability:
     def test_mutation_of_state_field_raises_validation_error(
         self,
         initial_state: ModelReducerState,
-        sample_consul_intent: ModelConsulRegistrationIntent,
+        sample_postgres_intent: ModelPostgresUpsertIntent,
     ) -> None:
         """Verify that attempting to mutate the state field raises ValidationError.
 
@@ -632,7 +596,7 @@ class TestModelReducerExecutionResultImmutability:
         """
         result = ModelReducerExecutionResult(
             state=initial_state,
-            intents=(sample_consul_intent,),
+            intents=(sample_postgres_intent,),
         )
 
         # Attempting to assign a new state should raise ValidationError
@@ -649,7 +613,6 @@ class TestModelReducerExecutionResultImmutability:
     def test_mutation_of_intents_field_raises_validation_error(
         self,
         initial_state: ModelReducerState,
-        sample_consul_intent: ModelConsulRegistrationIntent,
         sample_postgres_intent: ModelPostgresUpsertIntent,
     ) -> None:
         """Verify that attempting to mutate the intents field raises ValidationError.
@@ -659,7 +622,7 @@ class TestModelReducerExecutionResultImmutability:
         """
         result = ModelReducerExecutionResult(
             state=initial_state,
-            intents=(sample_consul_intent,),
+            intents=(sample_postgres_intent,),
         )
 
         # Attempting to assign new intents should raise ValidationError
@@ -676,7 +639,7 @@ class TestModelReducerExecutionResultImmutability:
     def test_intents_field_is_tuple_not_list(
         self,
         initial_state: ModelReducerState,
-        sample_consul_intent: ModelConsulRegistrationIntent,
+        sample_postgres_intent: ModelPostgresUpsertIntent,
     ) -> None:
         """Verify that the intents field is a tuple, not a list.
 
@@ -689,7 +652,7 @@ class TestModelReducerExecutionResultImmutability:
         """
         result = ModelReducerExecutionResult(
             state=initial_state,
-            intents=(sample_consul_intent,),
+            intents=(sample_postgres_intent,),
         )
 
         # Verify the field is a tuple, not a list
@@ -699,7 +662,6 @@ class TestModelReducerExecutionResultImmutability:
     def test_with_intents_factory_converts_list_to_tuple(
         self,
         initial_state: ModelReducerState,
-        sample_consul_intent: ModelConsulRegistrationIntent,
         sample_postgres_intent: ModelPostgresUpsertIntent,
     ) -> None:
         """Verify that with_intents() factory converts list input to tuple.
@@ -710,7 +672,7 @@ class TestModelReducerExecutionResultImmutability:
         # Pass a list to the factory
         result = ModelReducerExecutionResult.with_intents(
             state=initial_state,
-            intents=[sample_consul_intent, sample_postgres_intent],  # List input
+            intents=[sample_postgres_intent, sample_postgres_intent],  # List input
         )
 
         # Result should have tuple, not list
@@ -748,6 +710,8 @@ class TestModelReducerExecutionResultImmutability:
 
         Note: This requires all nested types to also be hashable.
         ModelReducerState is also frozen, and tuples are hashable.
+        Empty-intents results are used here since unfrozen nested models
+        in postgres intent payloads would prevent hashing.
         """
         result1 = ModelReducerExecutionResult(state=initial_state, intents=())
         result2 = ModelReducerExecutionResult(state=initial_state, intents=())

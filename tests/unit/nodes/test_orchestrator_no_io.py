@@ -597,10 +597,10 @@ class TestContractIOOperationsAreEffectNodes:
         effect_node_ids = {n["node_id"] for n in effect_nodes}
 
         # Expected effect nodes for external system interaction
+        # Note: execute_consul_registration removed in OMN-3540 (Consul removal)
         expected_effect_operations = {
             "receive_introspection",  # Event consumption
             "read_projection",  # Projection read
-            "execute_consul_registration",  # Consul I/O
             "execute_postgres_registration",  # PostgreSQL I/O
             "publish_outcome",  # Event publishing
         }

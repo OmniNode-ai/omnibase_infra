@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Became Active Event Model.
 
-This module provides ModelNodeBecameActive for the ONEX 2-way registration
+ModelNodeBecameActive for the ONEX 2-way registration
 pattern. Emitted by the Registration Orchestrator when a node transitions
 to the active state.
 

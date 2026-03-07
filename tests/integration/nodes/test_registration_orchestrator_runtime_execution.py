@@ -49,8 +49,6 @@ TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.nodes.node_registration_orchestrator.models import (
-    ModelConsulIntentPayload,
-    ModelConsulRegistrationIntent,
     ModelIntentExecutionResult,
     ModelOrchestratorInput,
     ModelOrchestratorOutput,
@@ -126,14 +124,6 @@ class MockReducerImpl:
         else:
             # Generate default intents
             intents: list[ModelRegistrationIntent] = [
-                ModelConsulRegistrationIntent(
-                    operation="register",
-                    node_id=event.node_id,
-                    correlation_id=event.correlation_id,
-                    payload=ModelConsulIntentPayload(
-                        service_name=f"onex-{event.node_type}",
-                    ),
-                ),
                 ModelPostgresUpsertIntent(
                     operation="upsert",
                     node_id=event.node_id,
@@ -178,9 +168,7 @@ class MockEffectImpl:
 
     def __init__(self) -> None:
         self.call_count = 0
-        self.executed_intents: list[
-            ModelConsulRegistrationIntent | ModelPostgresUpsertIntent
-        ] = []
+        self.executed_intents: list[ModelPostgresUpsertIntent] = []
         self.received_correlation_ids: list[UUID] = []
         self.call_timestamps: list[float] = []
         self.should_fail = False
@@ -191,7 +179,7 @@ class MockEffectImpl:
 
     async def execute_intent(
         self,
-        intent: ModelConsulRegistrationIntent | ModelPostgresUpsertIntent,
+        intent: ModelPostgresUpsertIntent,
         correlation_id: UUID,
     ) -> ModelIntentExecutionResult:
         """Execute a single registration intent.
@@ -433,53 +421,31 @@ class TestWorkflowSequenceExecution:
         assert actual_kinds == expected_kinds
 
     @pytest.mark.asyncio
-    async def test_parallel_effects_execution(
+    async def test_single_effect_execution(
         self,
         mock_reducer: MockReducerImpl,
         mock_effect: MockEffectImpl,
         introspection_event: ModelNodeIntrospectionEvent,
         correlation_id: UUID,
     ) -> None:
-        """Test parallel effect execution (simulating parallel coordination)."""
-        # Add delay to make parallelism observable
-        mock_effect.execution_delay_ms = 50
-
+        """Test single effect execution (PostgreSQL only after Consul removal, OMN-3540)."""
         initial_state = ModelReducerState.initial()
         _, intents = await mock_reducer.reduce(initial_state, introspection_event)
 
-        # Execute sequentially first to measure baseline
-        sequential_start = time.perf_counter()
+        # With Consul removed, there should be exactly 1 intent (PostgreSQL)
+        assert len(intents) == 1, (
+            f"Expected 1 intent (PostgreSQL only), got {len(intents)}"
+        )
+
+        # Execute the single intent
+        results = []
         for intent in intents:
-            await mock_effect.execute_intent(intent, correlation_id)
-        sequential_elapsed = (time.perf_counter() - sequential_start) * 1000
-
-        # Reset for parallel execution
-        mock_effect.executed_intents.clear()
-
-        # Execute in parallel
-        start_time = time.perf_counter()
-        tasks = [
-            mock_effect.execute_intent(intent, correlation_id) for intent in intents
-        ]
-        results = await asyncio.gather(*tasks)
-        parallel_elapsed = (time.perf_counter() - start_time) * 1000
+            result = await mock_effect.execute_intent(intent, correlation_id)
+            results.append(result)
 
         # Verify all completed
-        assert len(results) == len(intents)
+        assert len(results) == 1
         assert all(r.success for r in results)
-
-        # CI-friendly timing assertion: Use relative comparison instead of absolute
-        # threshold to avoid flakiness across different CI environments.
-        # Parallel execution should be meaningfully faster than sequential execution.
-        # We use a generous 0.9x multiplier to account for CI variance while still
-        # proving parallelism provides a speedup.
-        #
-        # Local benchmark: parallel ~50ms vs sequential ~100ms (2x speedup)
-        # CI allowance: parallel can be up to 90% of sequential and still pass
-        assert parallel_elapsed < sequential_elapsed * 0.9, (
-            f"Parallel execution ({parallel_elapsed:.1f}ms) should be faster than "
-            f"sequential ({sequential_elapsed:.1f}ms) * 0.9 = {sequential_elapsed * 0.9:.1f}ms"
-        )
 
 
 # =============================================================================
@@ -620,27 +586,6 @@ class TestEventFlowCoordination:
     """
 
     @pytest.mark.asyncio
-    async def test_consul_intent_routing(
-        self,
-        mock_effect: MockEffectImpl,
-        node_id: UUID,
-        correlation_id: UUID,
-    ) -> None:
-        """Test that consul intents are executed correctly."""
-        intent = ModelConsulRegistrationIntent(
-            operation="register",
-            node_id=node_id,
-            correlation_id=correlation_id,
-            payload=ModelConsulIntentPayload(service_name="test-service"),
-        )
-
-        result = await mock_effect.execute_intent(intent, correlation_id)
-
-        assert result.intent_kind == "consul"
-        assert result.success is True
-        assert mock_effect.executed_intents[0].kind == "consul"
-
-    @pytest.mark.asyncio
     async def test_postgres_intent_routing(
         self,
         mock_effect: MockEffectImpl,
@@ -684,24 +629,20 @@ class TestEventFlowCoordination:
             results.append(result)
 
         # Aggregate results
-        consul_results = [r for r in results if r.intent_kind == "consul"]
         postgres_results = [r for r in results if r.intent_kind == "postgres"]
 
-        consul_applied = all(r.success for r in consul_results)
         postgres_applied = all(r.success for r in postgres_results)
-        all_success = consul_applied and postgres_applied
+        all_success = postgres_applied
 
         output = ModelOrchestratorOutput(
             correlation_id=correlation_id,
             status="success" if all_success else "failed",
-            consul_applied=consul_applied,
             postgres_applied=postgres_applied,
             intent_results=results,
             total_execution_time_ms=sum(r.execution_time_ms for r in results),
         )
 
         assert output.status == "success"
-        assert output.consul_applied is True
         assert output.postgres_applied is True
         assert len(output.intent_results) == len(intents)
 
@@ -713,8 +654,8 @@ class TestEventFlowCoordination:
         introspection_event: ModelNodeIntrospectionEvent,
         correlation_id: UUID,
     ) -> None:
-        """Test result aggregation when only some effects succeed."""
-        mock_effect.fail_on_kinds.add("consul")
+        """Test result aggregation when postgres fails."""
+        mock_effect.fail_on_kinds.add("postgres")
 
         initial_state = ModelReducerState.initial()
         _, intents = await mock_reducer.reduce(initial_state, introspection_event)
@@ -724,31 +665,25 @@ class TestEventFlowCoordination:
             result = await mock_effect.execute_intent(intent, correlation_id)
             results.append(result)
 
-        consul_results = [r for r in results if r.intent_kind == "consul"]
         postgres_results = [r for r in results if r.intent_kind == "postgres"]
 
-        consul_applied = all(r.success for r in consul_results)
         postgres_applied = all(r.success for r in postgres_results)
-        any_success = consul_applied or postgres_applied
-        all_success = consul_applied and postgres_applied
-
-        status = "success" if all_success else ("partial" if any_success else "failed")
-        consul_error = next((r.error for r in consul_results if not r.success), None)
+        postgres_error = next(
+            (r.error for r in postgres_results if not r.success), None
+        )
 
         output = ModelOrchestratorOutput(
             correlation_id=correlation_id,
-            status=status,
-            consul_applied=consul_applied,
+            status="failed",
             postgres_applied=postgres_applied,
-            consul_error=consul_error,
+            postgres_error=postgres_error,
             intent_results=results,
             total_execution_time_ms=sum(r.execution_time_ms for r in results),
         )
 
-        assert output.status == "partial"
-        assert output.consul_applied is False
-        assert output.postgres_applied is True
-        assert output.consul_error is not None
+        assert output.status == "failed"
+        assert output.postgres_applied is False
+        assert output.postgres_error is not None
 
     @pytest.mark.asyncio
     async def test_result_aggregation_all_failed(
@@ -769,7 +704,6 @@ class TestEventFlowCoordination:
             result = await mock_effect.execute_intent(intent, correlation_id)
             results.append(result)
 
-        consul_applied = any(r.success for r in results if r.intent_kind == "consul")
         postgres_applied = any(
             r.success for r in results if r.intent_kind == "postgres"
         )
@@ -777,16 +711,13 @@ class TestEventFlowCoordination:
         output = ModelOrchestratorOutput(
             correlation_id=correlation_id,
             status="failed",
-            consul_applied=consul_applied,
             postgres_applied=postgres_applied,
-            consul_error="Mock failure for consul register",
             postgres_error="Mock failure for postgres upsert",
             intent_results=results,
             total_execution_time_ms=sum(r.execution_time_ms for r in results),
         )
 
         assert output.status == "failed"
-        assert output.consul_applied is False
         assert output.postgres_applied is False
 
 
@@ -831,11 +762,16 @@ class TestErrorHandlingAndRecovery:
         """Test that effect failures are captured in result, not raised."""
         mock_effect.should_fail = True
 
-        intent = ModelConsulRegistrationIntent(
-            operation="register",
+        intent = ModelPostgresUpsertIntent(
+            operation="upsert",
             node_id=node_id,
             correlation_id=correlation_id,
-            payload=ModelConsulIntentPayload(service_name="test-service"),
+            payload=ModelPostgresIntentPayload(
+                node_id=node_id,
+                node_type=EnumNodeKind.EFFECT,
+                correlation_id=correlation_id,
+                timestamp=datetime.now(UTC).isoformat(),
+            ),
         )
 
         # Effect should not raise, but return failure result
@@ -853,8 +789,8 @@ class TestErrorHandlingAndRecovery:
         introspection_event: ModelNodeIntrospectionEvent,
         correlation_id: UUID,
     ) -> None:
-        """Test handling when specific intent types fail."""
-        # Only postgres fails
+        """Test handling when postgres intent fails."""
+        # postgres fails
         mock_effect.fail_on_kinds.add("postgres")
 
         initial_state = ModelReducerState.initial()
@@ -865,11 +801,9 @@ class TestErrorHandlingAndRecovery:
             result = await mock_effect.execute_intent(intent, correlation_id)
             results.append(result)
 
-        consul_results = [r for r in results if r.intent_kind == "consul"]
         postgres_results = [r for r in results if r.intent_kind == "postgres"]
 
-        # Consul should succeed, postgres should fail
-        assert all(r.success for r in consul_results)
+        # postgres should fail
         assert all(not r.success for r in postgres_results)
 
     @pytest.mark.asyncio
@@ -914,7 +848,7 @@ class TestErrorHandlingAndRecovery:
         correlation_id: UUID,
     ) -> None:
         """Test that workflow processes all intents even if some fail."""
-        mock_effect.fail_on_kinds.add("consul")
+        mock_effect.fail_on_kinds.add("postgres")
 
         initial_state = ModelReducerState.initial()
         _, intents = await mock_reducer.reduce(initial_state, introspection_event)
@@ -969,11 +903,16 @@ class TestCorrelationTracking:
         correlation_id: UUID,
     ) -> None:
         """Test that effect receives correlation ID parameter."""
-        intent = ModelConsulRegistrationIntent(
-            operation="register",
+        intent = ModelPostgresUpsertIntent(
+            operation="upsert",
             node_id=node_id,
             correlation_id=correlation_id,
-            payload=ModelConsulIntentPayload(service_name="test-service"),
+            payload=ModelPostgresIntentPayload(
+                node_id=node_id,
+                node_type=EnumNodeKind.EFFECT,
+                correlation_id=correlation_id,
+                timestamp=datetime.now(UTC).isoformat(),
+            ),
         )
 
         await mock_effect.execute_intent(intent, correlation_id)
@@ -1142,7 +1081,7 @@ class TestConcurrencyAndThreadSafety:
 
         # Each result should have intents
         for _state, intents in results:
-            assert len(intents) == 2  # consul and postgres
+            assert len(intents) >= 1  # postgres
 
     @pytest.mark.asyncio
     async def test_concurrent_effect_calls(
@@ -1154,11 +1093,16 @@ class TestConcurrencyAndThreadSafety:
         mock_effect.execution_delay_ms = 10  # Small delay for overlap
 
         intents = [
-            ModelConsulRegistrationIntent(
-                operation="register",
+            ModelPostgresUpsertIntent(
+                operation="upsert",
                 node_id=uuid4(),
                 correlation_id=correlation_id,
-                payload=ModelConsulIntentPayload(service_name=f"service-{i}"),
+                payload=ModelPostgresIntentPayload(
+                    node_id=uuid4(),
+                    node_type=EnumNodeKind.EFFECT,
+                    correlation_id=correlation_id,
+                    timestamp=TEST_TIMESTAMP.isoformat(),
+                ),
             )
             for i in range(10)
         ]

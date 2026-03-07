@@ -75,7 +75,7 @@ pytestmark = [
 # Constants
 # =============================================================================
 
-EXPECTED_REGISTRATION_INTENTS = 2
+EXPECTED_REGISTRATION_INTENTS = 1  # PostgreSQL only (Consul removed in OMN-3540)
 
 
 # =============================================================================
@@ -656,7 +656,7 @@ class TestIntentEmissionControl:
     ) -> None:
         """Test that first processing emits expected intents.
 
-        Baseline: first processing should emit Consul and PostgreSQL intents.
+        Baseline: first processing should emit PostgreSQL intent (Consul removed in OMN-3540).
         """
         event = event_factory.create_event()
 
@@ -665,13 +665,12 @@ class TestIntentEmissionControl:
 
         assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
-        # Verify extension intent types
+        # Verify extension intent types (PostgreSQL only after OMN-3540)
         intent_types = {
             intent.payload.intent_type
             for intent in output.intents
             if intent.intent_type
         }
-        assert "consul.register" in intent_types
         assert "postgres.upsert_registration" in intent_types
 
     def test_replay_never_emits_intents(

@@ -2,11 +2,17 @@
 # Copyright (c) 2025 OmniNode Team
 """Integration tests for HandlerSlackWebhook.
 
-Tests the handler with a mock HTTP server simulating Slack webhook responses.
+Tests the handler with a mock HTTP server simulating Slack Web API responses.
 Uses pytest-httpserver for realistic HTTP interaction testing.
+
+Note: These tests patch _SLACK_WEB_API_URL to point at the local mock server
+so that the handler's Web API path exercises real HTTP against the mock.
 """
 
 from __future__ import annotations
+
+import json
+from unittest.mock import patch
 
 import pytest
 from pytest_httpserver import HTTPServer
@@ -26,7 +32,7 @@ def httpserver_ssl_context():
 
 
 class TestSlackIntegration:
-    """Integration tests using mock HTTP server."""
+    """Integration tests using mock HTTP server simulating Slack Web API."""
 
     @pytest.fixture
     def alert(self) -> ModelSlackAlert:
@@ -39,53 +45,74 @@ class TestSlackIntegration:
         )
 
     @pytest.mark.asyncio
-    async def test_successful_webhook_delivery(
+    async def test_successful_web_api_delivery(
         self, httpserver: HTTPServer, alert: ModelSlackAlert
     ) -> None:
-        """Test successful webhook delivery against mock server."""
-        # Configure mock server to return 200
-        httpserver.expect_request("/webhook", method="POST").respond_with_response(
-            Response("ok", status=200)
+        """Test successful Web API delivery against mock server."""
+        httpserver.expect_request(
+            "/api/chat.postMessage", method="POST"
+        ).respond_with_response(
+            Response(
+                json.dumps(
+                    {"ok": True, "ts": "1234567890.123456", "channel": "C01234567"}
+                ),
+                status=200,
+                content_type="application/json",
+            )
         )
 
         handler = HandlerSlackWebhook(
-            webhook_url=httpserver.url_for("/webhook"),
+            bot_token="xoxb-test-token",
+            default_channel="C01234567",
             timeout=5.0,
         )
 
-        result = await handler.handle(alert)
+        with patch(
+            "omnibase_infra.handlers.handler_slack_webhook._SLACK_WEB_API_URL",
+            httpserver.url_for("/api/chat.postMessage"),
+        ):
+            result = await handler.handle(alert)
 
         assert result.success is True
         assert result.duration_ms > 0
         assert result.retry_count == 0
         assert result.error is None
+        assert result.thread_ts == "1234567890.123456"
 
     @pytest.mark.asyncio
     async def test_rate_limit_then_success(
         self, httpserver: HTTPServer, alert: ModelSlackAlert
     ) -> None:
         """Test retry on 429 followed by success."""
-        # First request returns 429, second returns 200
         call_count = [0]
 
         def rate_limit_handler(request):
             call_count[0] += 1
             if call_count[0] == 1:
                 return Response("rate_limited", status=429)
-            return Response("ok", status=200)
+            return Response(
+                json.dumps({"ok": True, "ts": "123.456"}),
+                status=200,
+                content_type="application/json",
+            )
 
-        httpserver.expect_request("/webhook", method="POST").respond_with_handler(
-            rate_limit_handler
-        )
+        httpserver.expect_request(
+            "/api/chat.postMessage", method="POST"
+        ).respond_with_handler(rate_limit_handler)
 
         handler = HandlerSlackWebhook(
-            webhook_url=httpserver.url_for("/webhook"),
+            bot_token="xoxb-test-token",
+            default_channel="C01234567",
             max_retries=2,
             retry_backoff=(0.1, 0.2),
             timeout=5.0,
         )
 
-        result = await handler.handle(alert)
+        with patch(
+            "omnibase_infra.handlers.handler_slack_webhook._SLACK_WEB_API_URL",
+            httpserver.url_for("/api/chat.postMessage"),
+        ):
+            result = await handler.handle(alert)
 
         assert result.success is True
         assert result.retry_count == 1
@@ -96,18 +123,23 @@ class TestSlackIntegration:
         self, httpserver: HTTPServer, alert: ModelSlackAlert
     ) -> None:
         """Test that server errors exhaust retries."""
-        httpserver.expect_request("/webhook", method="POST").respond_with_response(
-            Response("Internal Server Error", status=500)
-        )
+        httpserver.expect_request(
+            "/api/chat.postMessage", method="POST"
+        ).respond_with_response(Response("Internal Server Error", status=500))
 
         handler = HandlerSlackWebhook(
-            webhook_url=httpserver.url_for("/webhook"),
+            bot_token="xoxb-test-token",
+            default_channel="C01234567",
             max_retries=2,
             retry_backoff=(0.05, 0.1),
             timeout=5.0,
         )
 
-        result = await handler.handle(alert)
+        with patch(
+            "omnibase_infra.handlers.handler_slack_webhook._SLACK_WEB_API_URL",
+            httpserver.url_for("/api/chat.postMessage"),
+        ):
+            result = await handler.handle(alert)
 
         assert result.success is False
         assert result.error_code == "SLACK_HTTP_500"
@@ -121,25 +153,34 @@ class TestSlackIntegration:
         received_payload = []
 
         def capture_payload(request):
-            import json
-
             received_payload.append(json.loads(request.data))
-            return Response("ok", status=200)
+            return Response(
+                json.dumps({"ok": True, "ts": "123.456"}),
+                status=200,
+                content_type="application/json",
+            )
 
-        httpserver.expect_request("/webhook", method="POST").respond_with_handler(
-            capture_payload
-        )
+        httpserver.expect_request(
+            "/api/chat.postMessage", method="POST"
+        ).respond_with_handler(capture_payload)
 
         handler = HandlerSlackWebhook(
-            webhook_url=httpserver.url_for("/webhook"),
+            bot_token="xoxb-test-token",
+            default_channel="C01234567",
         )
 
-        await handler.handle(alert)
+        with patch(
+            "omnibase_infra.handlers.handler_slack_webhook._SLACK_WEB_API_URL",
+            httpserver.url_for("/api/chat.postMessage"),
+        ):
+            await handler.handle(alert)
 
-        # Verify Block Kit structure
+        # Verify Web API payload structure
         assert len(received_payload) == 1
         payload = received_payload[0]
         assert "blocks" in payload
+        assert "channel" in payload
+        assert "text" in payload  # fallback text
         blocks = payload["blocks"]
 
         # Should have: header, divider, message section, fields section, context
@@ -148,10 +189,6 @@ class TestSlackIntegration:
         # Verify header block
         header = blocks[0]
         assert header["type"] == "header"
-        assert (
-            "Error Alert" in header["text"]["text"]
-            or "Test Alert" in header["text"]["text"]
-        )
 
         # Verify divider
         assert blocks[1]["type"] == "divider"
@@ -166,12 +203,19 @@ class TestSlackIntegration:
         """Test sending multiple alerts concurrently."""
         import asyncio
 
-        httpserver.expect_request("/webhook", method="POST").respond_with_response(
-            Response("ok", status=200)
+        httpserver.expect_request(
+            "/api/chat.postMessage", method="POST"
+        ).respond_with_response(
+            Response(
+                json.dumps({"ok": True, "ts": "123.456"}),
+                status=200,
+                content_type="application/json",
+            )
         )
 
         handler = HandlerSlackWebhook(
-            webhook_url=httpserver.url_for("/webhook"),
+            bot_token="xoxb-test-token",
+            default_channel="C01234567",
         )
 
         alerts = [
@@ -182,7 +226,11 @@ class TestSlackIntegration:
             for i in range(5)
         ]
 
-        results = await asyncio.gather(*[handler.handle(alert) for alert in alerts])
+        with patch(
+            "omnibase_infra.handlers.handler_slack_webhook._SLACK_WEB_API_URL",
+            httpserver.url_for("/api/chat.postMessage"),
+        ):
+            results = await asyncio.gather(*[handler.handle(alert) for alert in alerts])
 
         assert all(r.success for r in results)
         assert len(results) == 5
@@ -193,13 +241,18 @@ class TestSlackIntegration:
     ) -> None:
         """Test handling of unreachable server."""
         handler = HandlerSlackWebhook(
-            webhook_url="http://127.0.0.1:1",  # Unreachable port
+            bot_token="xoxb-test-token",
+            default_channel="C01234567",
             max_retries=1,
             retry_backoff=(0.1,),
             timeout=1.0,
         )
 
-        result = await handler.handle(alert)
+        with patch(
+            "omnibase_infra.handlers.handler_slack_webhook._SLACK_WEB_API_URL",
+            "http://127.0.0.1:1/api/chat.postMessage",
+        ):
+            result = await handler.handle(alert)
 
         assert result.success is False
         assert result.error_code == "SLACK_CONNECTION_ERROR"

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Runtime-specific mixins.
 
-This module provides mixins for runtime components such as projectors.
+Mixins for runtime components such as projectors.
 
 Exports:
     - MixinProjectorSqlOperations: SQL execution methods for projector implementations

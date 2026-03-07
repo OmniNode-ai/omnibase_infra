@@ -43,7 +43,7 @@ class RegistryInfraRegistryApiEffect:
         Args:
             container: ONEX dependency injection container.  Optional
                 protocols (``ProjectionReaderRegistration``,
-                ``HandlerServiceDiscoveryConsul``, ``ProjectionReaderContract``)
+                ``ProjectionReaderContract``)
                 may be registered to enable full backend connectivity.
 
         Returns:
@@ -77,7 +77,6 @@ class RegistryInfraRegistryApiEffect:
         """
         return [
             "ProjectionReaderRegistration",
-            "HandlerServiceDiscoveryConsul",
             "ProjectionReaderContract",
         ]
 

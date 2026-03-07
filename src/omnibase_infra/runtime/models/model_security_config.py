@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Security Configuration Model for Runtime Handler and Plugin Loading.
 
-This module provides the Pydantic model for configuring trusted handler and plugin
+The Pydantic model for configuring trusted handler and plugin
 namespaces. The model allows operators to extend the trusted namespace list via
 configuration file while maintaining secure defaults for both handler loading and
 plugin discovery.

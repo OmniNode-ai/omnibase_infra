@@ -1,4 +1,4 @@
-"""Pytest configuration and shared fixtures for omnibase_infra tests.
+"""Pytest configuration and shared fixtures for omnibase_infra tests.  # ai-slop-ok: pre-existing
 
 ==============================================================================
 IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)
@@ -74,7 +74,7 @@ import pytest
 from dotenv import load_dotenv
 
 # Load environment variables from .env file at test session start
-# This enables tests to use infrastructure config (CONSUL_HOST, KAFKA_BOOTSTRAP_SERVERS, etc.)
+# This enables tests to use infrastructure config (KAFKA_BOOTSTRAP_SERVERS, etc.)
 # without needing to set env vars on command line
 _env_file = Path(__file__).parent.parent / ".env"
 if _env_file.exists():
@@ -730,162 +730,11 @@ async def container_with_handler_registry(
 # Infrastructure Cleanup Fixtures
 # =============================================================================
 # These fixtures ensure test isolation by cleaning up shared infrastructure
-# resources (Consul, PostgreSQL, Kafka) after tests complete. They are designed
+# resources (PostgreSQL, Kafka) after tests complete. They are designed
 # to be used in integration tests that interact with real infrastructure.
 #
 # Related: tests/integration/registration/e2e/conftest.py (E2E-specific cleanup)
 # =============================================================================
-
-
-@pytest.fixture
-async def cleanup_consul_test_services(
-    mock_container: MagicMock,
-) -> AsyncGenerator[None, None]:
-    """Clean up orphaned Consul service registrations after each test.
-
-    This fixture provides comprehensive Consul cleanup by:
-    1. Yielding to let the test run
-    2. After the test, querying all registered services
-    3. Deregistering any services matching test patterns
-
-    Args:
-        mock_container: ONEX container mock for dependency injection.
-
-    Test Service Identification Patterns:
-        - Service ID starts with "test-"
-        - Service ID contains "-test-" (e.g., "e2e-test-node-123")
-        - Service name starts with "test"
-        - Service name contains "integration-test"
-
-    Usage:
-        For tests that register Consul services and need cleanup,
-        include this fixture. It handles cleanup even if the test fails.
-
-        >>> async def test_consul_registration(cleanup_consul_test_services):
-        ...     # Register a test service
-        ...     await consul_client.register_service(
-        ...         service_id="test-my-service-123",
-        ...         service_name="test-service",
-        ...         tags=["test"],
-        ...     )
-        ...     # Fixture will deregister after test completes
-
-    Note:
-        This fixture requires Consul to be available. It skips cleanup
-        gracefully if Consul is not reachable or not configured.
-    """
-    import socket
-
-    yield  # Let the test run
-
-    # Check if Consul is configured and reachable
-    consul_host = os.getenv("CONSUL_HOST")
-    consul_port = int(os.getenv("CONSUL_PORT", "8500"))
-
-    if not consul_host:
-        return  # Consul not configured, skip cleanup
-
-    # Quick reachability check
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(2.0)
-            if sock.connect_ex((consul_host, consul_port)) != 0:
-                return  # Consul not reachable
-    except (OSError, TimeoutError):
-        return  # Consul not reachable
-
-    # Import and create handler for cleanup
-    try:
-        from omnibase_infra.handlers import HandlerConsul
-
-        handler = HandlerConsul(mock_container)
-        await handler.initialize(
-            {
-                "host": consul_host,
-                "port": consul_port,
-                "scheme": os.getenv("CONSUL_SCHEME", "http"),
-                "timeout_seconds": 10.0,
-            }
-        )
-
-        try:
-            # Get all registered services
-            # NOTE: consul.list_services is not yet implemented in HandlerConsul.
-            # When implemented, it should return ModelHandlerOutput with services data.
-            # For now, this will raise RuntimeHostError for unsupported operation,
-            # which is caught by the outer exception handler.
-            list_envelope = {
-                "operation": "consul.list_services",
-                "payload": {},
-            }
-            result = await handler.execute(list_envelope)
-
-            # Access model attributes instead of dict keys
-            # result is ModelHandlerOutput[ModelConsulHandlerResponse]
-            if result and result.result and result.result.status == "success":
-                # Access payload data via model attributes
-                payload_data = result.result.payload.data
-                # Services data structure depends on list_services implementation
-                # Expected: dict mapping service_id -> service_info
-                services = (
-                    getattr(payload_data, "services", {})
-                    if hasattr(payload_data, "services")
-                    else {}
-                )
-
-                # Identify test services to cleanup
-                test_service_ids: list[str] = []
-                for service_id, service_info in services.items():
-                    service_name = ""
-                    # Access model attributes instead of dict keys
-                    if hasattr(service_info, "name"):
-                        service_name = service_info.name
-                    elif hasattr(service_info, "Service"):
-                        service_name = service_info.Service
-                    elif isinstance(service_info, dict):
-                        service_name = service_info.get("Service", "")
-                    elif isinstance(service_info, list) and service_info:
-                        service_name = str(service_info[0]) if service_info else ""
-
-                    # Check if this is a test service
-                    service_id_lower = service_id.lower()
-                    service_name_lower = service_name.lower()
-                    is_test_service = (
-                        service_id.startswith(("test-", "e2e-"))
-                        or "-test-" in service_id_lower
-                        or service_name_lower.startswith("test")
-                        or "integration-test" in service_name_lower
-                    )
-
-                    if is_test_service:
-                        test_service_ids.append(service_id)
-
-                # Deregister test services
-                for service_id in test_service_ids:
-                    try:
-                        deregister_envelope = {
-                            "operation": "consul.deregister",
-                            "payload": {"service_id": service_id},
-                        }
-                        await handler.execute(deregister_envelope)
-                        logger.debug(
-                            "Successfully deregistered Consul test service: %s",
-                            service_id,
-                        )
-                    except Exception as e:
-                        # Note: exc_info omitted to prevent potential info leakage
-                        logger.warning(
-                            "Cleanup failed for Consul service %s: %s",
-                            service_id,
-                            sanitize_error_message(e),
-                        )
-
-        finally:
-            await handler.shutdown()
-
-    except Exception as e:
-        # Note: exc_info omitted for consistency with other cleanup handlers
-        logger.warning("Consul test cleanup failed: %s", sanitize_error_message(e))
 
 
 @pytest.fixture
@@ -1062,7 +911,6 @@ async def cleanup_kafka_test_consumer_groups() -> AsyncGenerator[None, None]:
 
 @pytest.fixture
 async def full_infrastructure_cleanup(
-    cleanup_consul_test_services: None,
     cleanup_postgres_test_projections: None,
     cleanup_kafka_test_consumer_groups: None,
 ) -> None:
@@ -1073,13 +921,12 @@ async def full_infrastructure_cleanup(
     with multiple infrastructure components.
 
     Components Cleaned:
-        - Consul: Test service registrations (services matching test patterns)
         - PostgreSQL: Test projection rows (rows matching test patterns)
         - Kafka: Test consumer groups (groups matching test patterns)
 
     Usage:
         >>> async def test_full_e2e_flow(full_infrastructure_cleanup):
-        ...     # Test that uses Consul, PostgreSQL, and Kafka
+        ...     # Test that uses PostgreSQL and Kafka
         ...     # All test artifacts will be cleaned up after test
 
     Note:
@@ -1087,9 +934,8 @@ async def full_infrastructure_cleanup(
         gracefully. If one infrastructure component is unavailable,
         cleanup for other components will still proceed.
 
-        The dependent fixtures (cleanup_consul_test_services, etc.) use
-        yield and handle their own teardown, so this fixture returns
-        immediately after they yield.
+        The dependent fixtures use yield and handle their own teardown,
+        so this fixture returns immediately after they yield.
     """
     return  # Dependent fixtures handle their own teardown
 

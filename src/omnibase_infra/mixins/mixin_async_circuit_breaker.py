@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Coroutine-safe async circuit breaker mixin for infrastructure components.
+"""Coroutine-safe async circuit breaker mixin for infrastructure components.  # ai-slop-ok: pre-existing
 
 This module provides a reusable circuit breaker implementation for infrastructure
 components such as event buses, service adapters, HTTP clients, and database
@@ -147,28 +147,28 @@ class MixinAsyncCircuitBreaker:
 
     Example:
         ```python
-        class ConsulAdapter(MixinAsyncCircuitBreaker):
+        class HttpAdapter(MixinAsyncCircuitBreaker):
             def __init__(self, config):
                 self._init_circuit_breaker(
                     threshold=5,
                     reset_timeout=30.0,
-                    service_name="consul.dev",
-                    transport_type=EnumInfraTransportType.CONSUL,
+                    service_name="http.api",
+                    transport_type=EnumInfraTransportType.HTTP,
                 )
 
-            async def register_service(
-                self, service: str, correlation_id: UUID | None = None
+            async def call_api(
+                self, endpoint: str, correlation_id: UUID | None = None
             ) -> None:
                 # Check circuit (coroutine-safe)
                 async with self._circuit_breaker_lock:
                     await self._check_circuit_breaker(
-                        operation="register_service",
+                        operation="call_api",
                         correlation_id=correlation_id,
                     )
 
                 try:
                     # Perform operation
-                    await self._consul_client.register(service)
+                    await self._http_client.get(endpoint)
 
                     # Record success (coroutine-safe)
                     async with self._circuit_breaker_lock:
@@ -178,7 +178,7 @@ class MixinAsyncCircuitBreaker:
                     # Record failure (coroutine-safe)
                     async with self._circuit_breaker_lock:
                         await self._record_circuit_failure(
-                            operation="register_service",
+                            operation="call_api",
                             correlation_id=correlation_id,
                         )
                     raise
@@ -298,7 +298,7 @@ class MixinAsyncCircuitBreaker:
             },
         )
 
-    def _init_circuit_breaker_from_config(
+    def _init_circuit_breaker_from_config(  # ai-slop-ok: pre-existing
         self,
         config: ModelCircuitBreakerConfig,
     ) -> None:

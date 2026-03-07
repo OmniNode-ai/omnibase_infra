@@ -1,47 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Notification Consumer - Routes notification events to Slack.
-
-This module provides the NotificationConsumer class that subscribes to
-notification topics from Kafka and routes events to the Slack alerter.
-
-Architecture:
-    ```
-    +-----------------+     Kafka     +----------------------+     Slack
-    | Event Publisher  | ------------> | NotificationConsumer | ------------> Webhook
-    | (omniclaude3)    |   Topics:     | (this file)          |   via
-    +-----------------+   blocked/    +----------------------+   HandlerSlackWebhook
-                          completed
-    ```
-
-The consumer transforms notification events into Slack alerts:
-- notification.blocked -> WARNING severity with ticket context
-- notification.completed -> INFO severity with completion summary
-
-Example Usage:
-    ```python
-    from omnibase_infra.runtime.emit_daemon import NotificationConsumer
-
-    # Create consumer with Kafka event bus
-    consumer = NotificationConsumer(
-        event_bus=kafka_event_bus,
-        webhook_url=os.getenv("SLACK_WEBHOOK_URL"),
-    )
-
-    # Start consuming (blocks until stopped)
-    await consumer.start()
-
-    # Or run as background task
-    task = asyncio.create_task(consumer.start())
-    # ... later ...
-    await consumer.stop()
-    ```
-
-Related Tickets:
-    - OMN-1831: Implement event-driven Slack notifications via runtime
-
-.. versionadded:: 0.4.1
-"""
+"""Notification Consumer — routes Kafka notification events to Slack (OMN-1831)."""
 
 from __future__ import annotations
 
@@ -95,7 +54,8 @@ class NotificationConsumer:
     Example:
         >>> consumer = NotificationConsumer(
         ...     event_bus=kafka_event_bus,
-        ...     webhook_url="https://hooks.slack.com/...",
+        ...     bot_token="xoxb-...",
+        ...     default_channel="C01234567",
         ... )
         >>> await consumer.start()
     """
@@ -103,7 +63,6 @@ class NotificationConsumer:
     def __init__(
         self,
         event_bus: ProtocolEventBusLike,
-        webhook_url: str | None = None,
         bot_token: str | None = None,
         default_channel: str | None = None,
     ) -> None:
@@ -111,15 +70,13 @@ class NotificationConsumer:
 
         Args:
             event_bus: Kafka event bus for subscribing to notification topics.
-            webhook_url: Optional Slack webhook URL. If not provided, reads
-                from SLACK_WEBHOOK_URL environment variable.
-            bot_token: Optional Slack Bot Token for Web API mode. If set,
-                the handler uses chat.postMessage which supports threading.
+            bot_token: Optional Slack Bot Token for Web API. If not provided,
+                reads from SLACK_BOT_TOKEN environment variable.
             default_channel: Optional default channel ID for Web API posts.
+                If not provided, reads from SLACK_CHANNEL_ID environment variable.
         """
         self._event_bus = event_bus
         self._handler = HandlerSlackWebhook(
-            webhook_url=webhook_url,
             bot_token=bot_token,
             default_channel=default_channel,
         )
@@ -127,10 +84,7 @@ class NotificationConsumer:
         self._consumer_tasks: list[asyncio.Task[None]] = []
         self._shutdown_event = asyncio.Event()
 
-        logger.debug(
-            "NotificationConsumer initialized",
-            extra={"mode": "web_api" if self._handler.uses_web_api else "webhook"},
-        )
+        logger.debug("NotificationConsumer initialized")
 
     async def start(self) -> None:
         """Start consuming notification events.

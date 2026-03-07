@@ -850,7 +850,6 @@ class TestTagUnion:
         events = []
         for pattern in [
             "postgres.query",
-            "consul.register",
             "kafka.send",
         ]:
             event = MagicMock()
@@ -862,7 +861,6 @@ class TestTagUnion:
 
         assert result is not None
         assert "postgres.storage" in result.capability_tags
-        assert "consul.registration" in result.capability_tags
         assert "kafka.messaging" in result.capability_tags
 
 

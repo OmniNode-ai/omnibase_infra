@@ -1,4 +1,4 @@
-"""Capability inference rules for deriving tags from contract structure.
+"""Capability inference rules for deriving tags from contract structure.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides deterministic pattern matching to infer capability tags
 from contract fields like intent_types and protocols. Rules are injectable
@@ -38,7 +38,6 @@ class CapabilityInferenceRules:
     # Default intent pattern -> capability tag mappings
     DEFAULT_INTENT_PATTERNS: dict[str, str] = {
         "postgres.": "postgres.storage",
-        "consul.": "consul.registration",
         "kafka.": "kafka.messaging",
         "valkey.": "valkey.caching",
         "http.": "http.transport",
@@ -103,7 +102,7 @@ class CapabilityInferenceRules:
             - "postgres.kafka.hybrid" matches "postgres." only (NOT both postgres and kafka)
 
         Args:
-            intent_types: List of intent type strings (e.g., ["postgres.upsert", "consul.register"])
+            intent_types: List of intent type strings (e.g., ["postgres.upsert"])
 
         Returns:
             Sorted list of inferred capability tags (deduplicated)

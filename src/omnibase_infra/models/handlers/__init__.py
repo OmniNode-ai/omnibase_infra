@@ -25,7 +25,7 @@ Note:
     to avoid circular imports between models.handlers and models.errors packages.
     The forward reference is resolved via model_rebuild() calls in runtime modules
     that import ModelHandlerValidationError (e.g., handler_contract_source.py,
-    handler_bootstrap_source.py, registry_contract_source.py). Each module calls
+    handler_bootstrap_source.py). Each module calls
     model_rebuild() after importing both the model and the forward-referenced type.
     This pattern is required because:
     1. models.errors imports ModelHandlerIdentifier from models.handlers
@@ -69,7 +69,7 @@ __all__ = [
 #
 # The forward reference is resolved via model_rebuild() in runtime modules that
 # import ModelHandlerValidationError (e.g., handler_contract_source.py,
-# handler_bootstrap_source.py, registry_contract_source.py, handler_source_resolver.py).
+# handler_bootstrap_source.py, handler_source_resolver.py).
 # Each module calls model_rebuild() at module level after importing both the model
 # and the forward-referenced type. This is safe because model_rebuild() is idempotent.
 #

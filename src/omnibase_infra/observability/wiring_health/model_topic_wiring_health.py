@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Wiring health metrics model for a single topic.
 
-This module provides the data model for wiring health status of a single topic,
+The data model for wiring health status of a single topic,
 including emission count, consumption count, and computed mismatch ratio.
 
 See Also:

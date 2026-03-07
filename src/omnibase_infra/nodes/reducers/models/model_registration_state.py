@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Registration State Model for Pure Reducer Pattern.
+"""Registration State Model for Pure Reducer Pattern.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides ModelRegistrationState, an immutable state model for the
-dual registration reducer workflow. The state follows the pure reducer pattern
+registration reducer workflow. The state follows the pure reducer pattern
 where state is passed in and returned from reduce(), with no internal mutation.
 
 Architecture:
     ModelRegistrationState is designed for use with the canonical RegistrationReducer
-    pattern defined in DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md. The state is:
+    pattern. The state is:
 
     - Immutable (frozen=True): State transitions create new instances
     - Minimal: Only tracks essential workflow state
@@ -20,8 +20,8 @@ Architecture:
 States:
     - idle: Waiting for introspection events
     - pending: Registration workflow started
-    - partial: One backend confirmed, waiting for the other
-    - complete: Both backends confirmed
+    - partial: N/A (kept for backwards compat; resolves to pending now)
+    - complete: Backend confirmed
     - failed: Validation or registration failed
 
 State Management:
@@ -54,8 +54,7 @@ State Management:
     All state transitions are performed via ``with_*`` methods:
 
     - ``with_pending_registration(node_id, event_id)``: idle -> pending
-    - ``with_consul_confirmed(event_id)``: pending -> partial, or partial -> complete
-    - ``with_postgres_confirmed(event_id)``: pending -> partial, or partial -> complete
+    - ``with_postgres_confirmed(event_id)``: pending -> complete
     - ``with_failure(reason, event_id)``: any -> failed
     - ``with_reset(event_id)``: failed -> idle (recovery transition)
 
@@ -83,57 +82,6 @@ State Management:
     4. **Serialization**: The Projector uses Pydantic's ``model_dump(mode="json")``
        to serialize state for PostgreSQL storage.
 
-    PostgreSQL Storage::
-
-        # Conceptual Projector implementation
-        async def persist(self, state: ModelRegistrationState, offset: int) -> None:
-            '''Persist state to PostgreSQL with idempotency.'''
-            await self.db.execute(
-                '''
-                UPDATE node_registrations
-                SET
-                    status = $1,
-                    consul_confirmed = $2,
-                    postgres_confirmed = $3,
-                    last_processed_event_id = $4,
-                    failure_reason = $5,
-                    last_event_offset = $6,
-                    updated_at = NOW()
-                WHERE
-                    node_id = $7
-                    AND (last_event_offset IS NULL OR $6 > last_event_offset)
-                ''',
-                state.status,
-                state.consul_confirmed,
-                state.postgres_confirmed,
-                state.last_processed_event_id,
-                state.failure_reason,
-                offset,
-                state.node_id,
-            )
-
-    **State Loading (Projection Reader)**::
-
-        # Conceptual ProtocolProjectionReader implementation
-        async def get_projection(
-            self, entity_type: str, entity_id: UUID
-        ) -> ModelRegistrationState | None:
-            '''Load state from PostgreSQL projection.'''
-            row = await self.db.fetchone(
-                'SELECT * FROM node_registrations WHERE node_id = $1',
-                entity_id,
-            )
-            if row is None:
-                return None  # Orchestrator creates initial idle state
-            return ModelRegistrationState(
-                status=row['status'],
-                node_id=row['node_id'],
-                consul_confirmed=row['consul_confirmed'],
-                postgres_confirmed=row['postgres_confirmed'],
-                last_processed_event_id=row['last_processed_event_id'],
-                failure_reason=row['failure_reason'],
-            )
-
     **IDEMPOTENCY VIA last_processed_event_id:**
 
     The ``last_processed_event_id`` field enables idempotent event processing:
@@ -143,18 +91,10 @@ State Management:
     - If True, the event was already processed; reducer returns current state
     - This enables safe replay after crashes or redelivery
 
-    Two levels of idempotency:
-
-    1. **Reducer Level**: ``is_duplicate_event()`` checks ``last_processed_event_id``
-    2. **Persistence Level**: Projector checks ``last_event_offset`` in SQL
-
-    Both levels are required for full replay safety.
-
 Related:
     - RegistrationReducer: Pure reducer that uses this state model
-    - DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md: Architecture design
-    - ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md: Tickets F0, F1, B3
     - OMN-889: Infrastructure MVP
+    - OMN-3540: Remove Consul entirely from omnibase_infra runtime
 """
 
 from __future__ import annotations
@@ -169,7 +109,7 @@ from omnibase_infra.enums import EnumRegistrationStatus
 # Type alias for failure reason literals
 FailureReason = Literal[
     "validation_failed",
-    "consul_failed",
+    "consul_failed",  # kept for existing DB records; no longer emitted by reducer
     "postgres_failed",
     "both_failed",
     "invalid_reset_state",
@@ -177,14 +117,19 @@ FailureReason = Literal[
 
 
 class ModelRegistrationState(BaseModel):
-    """State model for the dual registration reducer workflow.
+    """State model for the registration reducer workflow.
 
     Immutable state passed to and returned from reduce().
     Follows pure reducer pattern - no internal state mutation.
 
     The state tracks the current workflow status and confirmation state
-    for both Consul and PostgreSQL backends. State transitions are
-    performed via ``with_*`` methods that return new immutable instances.
+    for the PostgreSQL backend. State transitions are performed via
+    ``with_*`` methods that return new immutable instances.
+
+    Note on consul_confirmed:
+        This field is retained for backwards compatibility with existing
+        PostgreSQL projection rows. It is no longer set to True by any
+        reducer code (OMN-3540). New rows will always have consul_confirmed=False.
 
     Persistence Integration:
         This model is designed for persistence to PostgreSQL via the Projector:
@@ -195,9 +140,6 @@ class ModelRegistrationState(BaseModel):
 
         The reducer does NOT persist state directly - it returns the new state
         in ModelReducerOutput.result. The Runtime handles persistence.
-
-        See the module docstring "State Management" section for complete details
-        on persistence integration, including PostgreSQL schema and example code.
 
     Immutability:
         This model uses frozen=True to enforce strict immutability:
@@ -210,7 +152,7 @@ class ModelRegistrationState(BaseModel):
     Attributes:
         status: Current workflow status (idle, pending, partial, complete, failed).
         node_id: UUID of the node being registered, if any.
-        consul_confirmed: Whether Consul registration is confirmed.
+        consul_confirmed: Deprecated. Always False for new rows (OMN-3540).
         postgres_confirmed: Whether PostgreSQL registration is confirmed.
         last_processed_event_id: UUID of last processed event for idempotency.
         failure_reason: Reason for failure, if status is "failed".
@@ -224,9 +166,6 @@ class ModelRegistrationState(BaseModel):
         >>> state = state.with_pending_registration(node_id, event_id)
         >>> state.status
         'pending'
-        >>> state = state.with_consul_confirmed(uuid4())
-        >>> state.status
-        'partial'
         >>> state = state.with_postgres_confirmed(uuid4())
         >>> state.status
         'complete'
@@ -244,7 +183,7 @@ class ModelRegistrationState(BaseModel):
     )
     consul_confirmed: bool = Field(
         default=False,
-        description="Whether Consul registration is confirmed",
+        description="Deprecated: Consul was removed (OMN-3540). Always False for new rows.",
     )
     postgres_confirmed: bool = Field(
         default=False,
@@ -283,51 +222,19 @@ class ModelRegistrationState(BaseModel):
             failure_reason=None,
         )
 
-    def with_consul_confirmed(self, event_id: UUID) -> ModelRegistrationState:
-        """Transition state after Consul registration is confirmed.
-
-        If PostgreSQL is already confirmed, status becomes "complete".
-        Otherwise, status becomes "partial".
-
-        Args:
-            event_id: UUID of the event confirming Consul registration.
-
-        Returns:
-            New ModelRegistrationState with consul_confirmed=True.
-        """
-        new_status: EnumRegistrationStatus = (
-            EnumRegistrationStatus.COMPLETE
-            if self.postgres_confirmed
-            else EnumRegistrationStatus.PARTIAL
-        )
-        return ModelRegistrationState(
-            status=new_status,
-            node_id=self.node_id,
-            consul_confirmed=True,
-            postgres_confirmed=self.postgres_confirmed,
-            last_processed_event_id=event_id,
-            failure_reason=None,
-        )
-
     def with_postgres_confirmed(self, event_id: UUID) -> ModelRegistrationState:
         """Transition state after PostgreSQL registration is confirmed.
 
-        If Consul is already confirmed, status becomes "complete".
-        Otherwise, status becomes "partial".
+        Status becomes "complete" when PostgreSQL confirms.
 
         Args:
             event_id: UUID of the event confirming PostgreSQL registration.
 
         Returns:
-            New ModelRegistrationState with postgres_confirmed=True.
+            New ModelRegistrationState with postgres_confirmed=True and status=complete.
         """
-        new_status: EnumRegistrationStatus = (
-            EnumRegistrationStatus.COMPLETE
-            if self.consul_confirmed
-            else EnumRegistrationStatus.PARTIAL
-        )
         return ModelRegistrationState(
-            status=new_status,
+            status=EnumRegistrationStatus.COMPLETE,
             node_id=self.node_id,
             consul_confirmed=self.consul_confirmed,
             postgres_confirmed=True,
@@ -343,8 +250,8 @@ class ModelRegistrationState(BaseModel):
         Preserves current confirmation flags for diagnostic purposes.
 
         Args:
-            reason: The failure reason (validation_failed, consul_failed,
-                postgres_failed, or both_failed).
+            reason: The failure reason (validation_failed, postgres_failed,
+                both_failed, or invalid_reset_state).
             event_id: UUID of the event triggering the failure.
 
         Returns:
@@ -398,7 +305,7 @@ class ModelRegistrationState(BaseModel):
             >>> from uuid import uuid4
             >>> from omnibase_infra.enums import EnumRegistrationStatus
             >>> state = ModelRegistrationState(
-            ...     status=EnumRegistrationStatus.FAILED, failure_reason="consul_failed"
+            ...     status=EnumRegistrationStatus.FAILED, failure_reason="postgres_failed"
             ... )
             >>> reset_state = state.with_reset(uuid4())
             >>> reset_state.status == EnumRegistrationStatus.IDLE

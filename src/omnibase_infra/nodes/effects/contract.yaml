@@ -63,11 +63,6 @@ io_operations:
       - backend_status
 # Dependencies (protocols this node requires)
 dependencies:
-  - name: "protocol_consul_client"
-    type: "protocol"
-    class_name: "ProtocolConsulClient"
-    module: "omnibase_spi.protocols.consul"
-    description: "Consul service discovery operations"
   - name: "protocol_postgres_adapter"
     type: "protocol"
     class_name: "ProtocolPostgresAdapter"

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """ONEX Kernel - Contract-driven bootstrap entrypoint.
 
-This module provides the public API for the ONEX runtime kernel,
+The public API for the ONEX runtime kernel,
 re-exporting the core functions from service_kernel.py.
 
 Functions:

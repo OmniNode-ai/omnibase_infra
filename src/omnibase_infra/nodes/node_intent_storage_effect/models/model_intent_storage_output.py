@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """Intent Storage Output Model for Intent Storage Operations.
 
-This module provides ModelIntentStorageOutput, representing the result
+ModelIntentStorageOutput, representing the result
 of storing a classified intent in the graph database.
 
 Architecture:

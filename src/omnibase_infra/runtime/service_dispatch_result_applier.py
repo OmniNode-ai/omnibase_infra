@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Dispatch result applier for processing ModelDispatchResult outputs.
+"""# ai-slop-ok: pre-existingDispatch result applier for processing ModelDispatchResult outputs.
 
 This module provides the DispatchResultApplier, a runtime-level service
 that processes the output of MessageDispatchEngine dispatch operations. It
@@ -346,8 +346,8 @@ class DispatchResultApplier:
                     raise
 
         # Phase 1: Execute intents (writes) BEFORE publishing output events.
-        # This ensures read models (PostgreSQL projections, Consul registrations)
-        # are consistent before downstream consumers can observe the events.
+        # This ensures read models (PostgreSQL projections) are consistent
+        # before downstream consumers can observe the events.
         output_intents = result.output_intents
         if output_intents and self._intent_executor is None:
             context = ModelInfraErrorContext.with_correlation(

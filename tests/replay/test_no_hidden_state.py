@@ -459,7 +459,9 @@ class TestStateIsolation:
         for i, (status, node_id, intent_count) in enumerate(results):
             assert status == "pending", f"Call {i} produced unexpected status: {status}"
             assert node_id is not None, f"Call {i} produced None node_id"
-            assert intent_count == 2, f"Call {i} produced {intent_count} intents"
+            assert intent_count == 1, (
+                f"Call {i} produced {intent_count} intents (PostgreSQL only, OMN-3540)"
+            )
 
     def test_reducer_output_is_independent_of_input_reference(
         self,
@@ -622,19 +624,13 @@ class TestStateIsolation:
         assert state1.status == "idle"
         assert state2.status == "pending"
 
-        # with_consul_confirmed returns new instance
-        state3 = state2.with_consul_confirmed(id_generator.next_uuid())
-        assert state3 is not state2
-        assert state2.consul_confirmed is False
-        assert state3.consul_confirmed is True
-
         # with_postgres_confirmed returns new instance
-        state4 = state3.with_postgres_confirmed(id_generator.next_uuid())
-        assert state4 is not state3
-        assert state4.status == "complete"
+        state3 = state2.with_postgres_confirmed(id_generator.next_uuid())
+        assert state3 is not state2
+        assert state3.status == "complete"
 
         # with_failure returns new instance
-        failed_state = state2.with_failure("consul_failed", id_generator.next_uuid())
+        failed_state = state2.with_failure("postgres_failed", id_generator.next_uuid())
         assert failed_state is not state2
         assert failed_state.status == "failed"
 

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """LLM inference request model for the inference effect node.
 
-This module provides ModelLlmInferenceRequest, the input model for the LLM
+ModelLlmInferenceRequest, the input model for the LLM
 inference effect node. Supports chat completions and legacy completions with
 tool calling, generation parameters, resilience settings, and distributed
 tracing fields.

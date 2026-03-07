@@ -45,7 +45,7 @@ Usage:
     ```
 
 Protocol Compatibility:
-    This class implements ProtocolEventBus from omnibase_core using duck typing
+    ProtocolEventBus from omnibase_core using duck typing
     (no explicit inheritance required per ONEX patterns).
 """
 

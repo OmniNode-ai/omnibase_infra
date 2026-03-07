@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Registration Record for PostgreSQL Intent.
 
-This module provides ModelNodeRegistrationRecord, a frozen record model
+ModelNodeRegistrationRecord, a frozen record model
 suitable for use with ModelPostgresUpsertRegistrationIntent.
 
 Architecture:

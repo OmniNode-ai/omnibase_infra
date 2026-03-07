@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """LLM API response redaction utilities for sensitive data protection.
 
-This module provides functions to redact sensitive content from raw LLM API
+Functions to redact sensitive content from raw LLM API
 responses before they are stored as ``ContractLlmUsageRaw`` blobs. The
 redaction policy follows the OMN-2238 specification:
 

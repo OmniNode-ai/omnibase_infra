@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Handler Source Configuration Model.
 
-This module provides ModelHandlerSourceConfig, a Pydantic model for
+ModelHandlerSourceConfig, a Pydantic model for
 configuring handler source mode selection at runtime.
 
 The configuration controls how handlers are discovered and loaded:

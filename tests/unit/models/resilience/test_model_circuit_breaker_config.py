@@ -481,19 +481,17 @@ class TestModelCircuitBreakerConfigFromEnvErrorContext:
             )
             assert error.model.context["target_name"] == "postgresql-primary"
 
-    def test_error_context_with_consul_transport(self) -> None:
-        """Test error context correctly uses CONSUL transport type."""
+    def test_error_context_with_http_transport(self) -> None:
+        """Test error context correctly uses HTTP transport type."""
         with patch.dict(os.environ, {"ONEX_CB_RESET_TIMEOUT": "bad"}, clear=True):
             with pytest.raises(ProtocolConfigurationError) as exc_info:
                 ModelCircuitBreakerConfig.from_env(
-                    service_name="consul-primary",
-                    transport_type=EnumInfraTransportType.CONSUL,
+                    service_name="http-primary",
+                    transport_type=EnumInfraTransportType.HTTP,
                 )
 
             error = exc_info.value
-            assert (
-                error.model.context["transport_type"] == EnumInfraTransportType.CONSUL
-            )
+            assert error.model.context["transport_type"] == EnumInfraTransportType.HTTP
 
 
 @pytest.mark.unit
@@ -610,7 +608,6 @@ class TestModelCircuitBreakerConfigEdgeCases:
             EnumInfraTransportType.HTTP,
             EnumInfraTransportType.DATABASE,
             EnumInfraTransportType.KAFKA,
-            EnumInfraTransportType.CONSUL,
             EnumInfraTransportType.VALKEY,
             EnumInfraTransportType.GRPC,
             EnumInfraTransportType.RUNTIME,

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Injection Effectiveness Observability Service.
 
-This module provides Kafka consumers, PostgreSQL writers, readers, and
+Kafka consumers, PostgreSQL writers, readers, and
 ledger sinks for injection effectiveness metrics collected from omniclaude hooks.
 
 Topics consumed:

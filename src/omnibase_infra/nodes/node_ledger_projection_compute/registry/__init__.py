@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """Registry module for NodeLedgerProjectionCompute.
 
-This module provides the RegistryInfraLedgerProjection class for
+The RegistryInfraLedgerProjection class for
 dependency injection registration and factory methods.
 
 Usage:

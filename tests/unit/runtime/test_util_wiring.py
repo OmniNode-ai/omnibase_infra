@@ -27,7 +27,6 @@ def test_wire_default_handlers_includes_intent() -> None:
     # Create mock registries that accept any registration
     mock_handler_registry = MagicMock()
     mock_handler_registry.list_protocols.return_value = [
-        "consul",
         "db",
         "graph",
         "http",
@@ -138,7 +137,6 @@ def test_known_handlers_includes_all_expected_types() -> None:
     from pathlib import Path
 
     from omnibase_infra.runtime.handler_registry import (
-        HANDLER_TYPE_CONSUL,
         HANDLER_TYPE_DATABASE,
         HANDLER_TYPE_GRAPH,
         HANDLER_TYPE_HTTP,
@@ -148,7 +146,6 @@ def test_known_handlers_includes_all_expected_types() -> None:
     from omnibase_infra.runtime.util_wiring import _HANDLER_CONTRACT_PATHS
 
     expected_handlers = [
-        HANDLER_TYPE_CONSUL,
         HANDLER_TYPE_DATABASE,
         HANDLER_TYPE_GRAPH,
         HANDLER_TYPE_HTTP,

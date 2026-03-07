@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Contract-Based Handler Discovery Service for ONEX Infrastructure.
 
-This module provides ContractHandlerDiscovery, which bridges the HandlerPluginLoader
+ContractHandlerDiscovery, which bridges the HandlerPluginLoader
 (which loads handler metadata from contracts) with the RegistryProtocolBinding
 (which tracks handler classes for runtime instantiation).
 

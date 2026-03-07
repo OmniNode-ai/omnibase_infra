@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Storage Query Model for Registration Storage Operations.
 
-This module provides ModelStorageQuery, representing a query for retrieving
+ModelStorageQuery, representing a query for retrieving
 registration records from storage backends.
 
 Architecture:

@@ -52,13 +52,6 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
         "KAFKA_ACKS",
         "KAFKA_REQUEST_TIMEOUT_MS",
     ),
-    EnumInfraTransportType.CONSUL: (
-        "CONSUL_HOST",
-        "CONSUL_PORT",
-        "CONSUL_SCHEME",
-        "CONSUL_ACL_TOKEN",
-        "CONSUL_ENABLED",
-    ),
     # INFISICAL is listed here for completeness (so introspection tools can
     # enumerate all known keys), but these keys MUST NEVER be fetched from
     # Infisical — they form the bootstrap credentials that Infisical itself
@@ -129,7 +122,7 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
 }
 
 
-class TransportConfigMap:
+class TransportConfigMap:  # ai-slop-ok: pre-existing
     """Maps transport types to Infisical folder paths and expected keys.
 
     This class provides the canonical mapping between ONEX transport types

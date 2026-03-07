@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Protocol definitions for omnibase_infra.
 
-This module provides protocol definitions (duck-typed interfaces) for infrastructure
+Protocol definitions (duck-typed interfaces) for infrastructure
 components in the ONEX ecosystem.
 
 Protocols:

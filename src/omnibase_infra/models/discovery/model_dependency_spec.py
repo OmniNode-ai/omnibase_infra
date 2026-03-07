@@ -53,7 +53,7 @@ class ModelDependencySpec(BaseModel):
     Attributes:
         name: Dependency name for reference in code
         type: Dependency type (node or protocol)
-        capability: Capability tag (e.g., "consul.registration", "postgres.storage")
+        capability: Capability tag (e.g., "postgres.storage", "kafka.publish")
         intent_types: Intent types the dependency must handle
         protocol: Protocol the dependency must implement
         contract_type: Filter by contract type (effect, compute, reducer, orchestrator)
@@ -66,7 +66,7 @@ class ModelDependencySpec(BaseModel):
         >>> spec = ModelDependencySpec(
         ...     name="registry_effect",
         ...     type="node",
-        ...     capability="consul.registration",
+        ...     capability="postgres.registration",
         ...     contract_type="effect",
         ... )
 
@@ -109,7 +109,7 @@ class ModelDependencySpec(BaseModel):
         default=None,
         min_length=1,
         max_length=256,
-        description="Capability tag (e.g., 'consul.registration', 'postgres.storage')",
+        description="Capability tag (e.g., 'postgres.storage', 'kafka.publish')",
     )
     intent_types: list[str] | None = Field(
         default=None,

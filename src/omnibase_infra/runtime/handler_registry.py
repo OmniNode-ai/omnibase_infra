@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 # ruff: noqa: PLW0603
 # PLW0603 disabled: Global statement is intentional for singleton pattern with thread-safe initialization
-"""Handler Registry - Constants and singleton accessors for handler registration.
+"""Handler Registry - Constants and singleton accessors for handler registration.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides constants and singleton accessor functions for the
 RegistryProtocolBinding and RegistryEventBusBinding classes. The actual
@@ -93,9 +93,6 @@ Operations are routed by extracting the prefix before the first dot."""
 
 HANDLER_TYPE_KAFKA: str = "kafka"
 """Kafka message broker protocol handler type."""
-
-HANDLER_TYPE_CONSUL: str = "consul"
-"""HashiCorp Consul service discovery protocol handler type."""
 
 HANDLER_TYPE_VALKEY: str = "valkey"
 """Valkey (Redis-compatible) cache/message protocol handler type.
@@ -300,7 +297,6 @@ __all__: list[str] = [
     # Event bus kind constants
     "EVENT_BUS_INMEMORY",
     "EVENT_BUS_KAFKA",
-    "HANDLER_TYPE_CONSUL",
     "HANDLER_TYPE_DATABASE",
     "HANDLER_TYPE_GRPC",
     "HANDLER_TYPE_GRAPH",

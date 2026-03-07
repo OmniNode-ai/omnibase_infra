@@ -3,7 +3,7 @@
 
 """Cache information type for topic parser caching statistics.
 
-This module provides a type-safe NamedTuple for representing cache statistics,
+A type-safe NamedTuple for representing cache statistics,
 mirroring the structure of functools._CacheInfo for compatibility with LRU
 cache implementations.
 

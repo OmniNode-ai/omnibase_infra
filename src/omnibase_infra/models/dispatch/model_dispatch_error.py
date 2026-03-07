@@ -3,7 +3,7 @@
 """
 Dispatch Error Model for Error Information Grouping.
 
-This module provides the ModelDispatchError model that groups error-related
+The ModelDispatchError model that groups error-related
 fields (error_message, error_code, error_details) into a single sub-model.
 This reduces the number of optional fields in parent models like ModelDispatchResult.
 

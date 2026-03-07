@@ -740,22 +740,6 @@ class TestParseEnvFloatErrorContext:
     - value redaction for security
     """
 
-    def test_error_contains_transport_type(self) -> None:
-        """Test error context includes specified transport type."""
-        with patch.dict(os.environ, {"TEST_FLOAT_VAR": "invalid"}, clear=True):
-            with pytest.raises(ProtocolConfigurationError) as exc_info:
-                parse_env_float(
-                    "TEST_FLOAT_VAR",
-                    default=3.14,
-                    transport_type=EnumInfraTransportType.CONSUL,
-                    service_name="test_service",
-                )
-
-            error = exc_info.value
-            assert (
-                error.model.context["transport_type"] == EnumInfraTransportType.CONSUL
-            )
-
     def test_error_contains_parse_env_config_operation(self) -> None:
         """Test error context includes parse_env_config operation."""
         with patch.dict(os.environ, {"TEST_FLOAT_VAR": "invalid"}, clear=True):
@@ -884,7 +868,6 @@ class TestDifferentTransportTypes:
             EnumInfraTransportType.DATABASE,
             EnumInfraTransportType.KAFKA,
             EnumInfraTransportType.HTTP,
-            EnumInfraTransportType.CONSUL,
             EnumInfraTransportType.VALKEY,
             EnumInfraTransportType.GRPC,
             EnumInfraTransportType.RUNTIME,
@@ -912,7 +895,6 @@ class TestDifferentTransportTypes:
             EnumInfraTransportType.DATABASE,
             EnumInfraTransportType.KAFKA,
             EnumInfraTransportType.HTTP,
-            EnumInfraTransportType.CONSUL,
             EnumInfraTransportType.VALKEY,
             EnumInfraTransportType.GRPC,
             EnumInfraTransportType.RUNTIME,

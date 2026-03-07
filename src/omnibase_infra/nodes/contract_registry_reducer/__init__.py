@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Contract Registry Reducer Node.
 
-This module provides the declarative reducer node for projecting contract
+The declarative reducer node for projecting contract
 registration events to PostgreSQL. The reducer is FSM-driven and follows
 the ONEX declarative pattern.
 

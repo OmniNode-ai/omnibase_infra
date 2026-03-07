@@ -71,7 +71,7 @@ if TYPE_CHECKING:
 # Constants
 # =============================================================================
 
-EXPECTED_REGISTRATION_INTENTS = 2  # Consul + PostgreSQL
+EXPECTED_REGISTRATION_INTENTS = 1  # PostgreSQL only (Consul removed in OMN-3540)
 
 
 # =============================================================================
@@ -342,7 +342,7 @@ class TestEventSequenceSerialization:
             EventSequenceEntryDict(
                 event=events[0].model_dump(mode="json"),
                 expected_status="pending",
-                expected_intent_count=2,
+                expected_intent_count=1,  # PostgreSQL only (OMN-3540)
                 sequence_number=10,  # Explicit non-consecutive
             ),
             EventSequenceEntryDict(
@@ -466,7 +466,7 @@ class TestEventSequenceIntegrity:
             event_sequence_log.append(
                 event=event,
                 expected_status="pending",
-                expected_intent_count=2,
+                expected_intent_count=1,  # PostgreSQL only (OMN-3540)
             )
 
         # Verify order
@@ -495,7 +495,7 @@ class TestEventSequenceIntegrity:
             event_sequence_log.append(
                 event=event,
                 expected_status="pending",
-                expected_intent_count=2,
+                expected_intent_count=1,  # PostgreSQL only (OMN-3540)
             )
             node_ids.add(event.node_id)
             correlation_ids.add(event.correlation_id)
@@ -519,7 +519,7 @@ class TestEventSequenceIntegrity:
         event_sequence_log.append(
             event=event,
             expected_status="pending",
-            expected_intent_count=2,
+            expected_intent_count=1,  # PostgreSQL only (OMN-3540)
         )
 
         entry = event_sequence_log.entries[0]

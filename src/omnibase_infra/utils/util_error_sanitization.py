@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Error message sanitization utilities.
+"""Error message sanitization utilities.  # ai-slop-ok: pre-existing
 
 This module provides functions to sanitize error messages before they are:
 - Published to Dead Letter Queues (DLQ)
@@ -444,73 +444,10 @@ def sanitize_secret_path(path: str | None) -> str | None:
     return f"{mount}/***/***"
 
 
-def sanitize_consul_key(key: str | None) -> str | None:
-    """Sanitize a Consul key path to avoid exposing infrastructure details.
-
-    Consul keys often reveal infrastructure topology, service names,
-    configuration structures, and potentially sensitive data paths.
-    This function masks sensitive portions while preserving enough
-    information for debugging.
-
-    Sanitization rules:
-        1. If key is None or empty, return as-is
-        2. Preserve the first segment (typically namespace/service type)
-        3. Mask subsequent path segments with asterisks
-        4. Indicate depth with masked segments
-
-    Args:
-        key: The Consul key path to sanitize (e.g., "config/database/connection")
-
-    Returns:
-        Sanitized key safe for error messages and logging.
-        Format: "{prefix}/***/***" for multi-segment keys
-
-    Examples:
-        >>> sanitize_consul_key("config/database/connection")
-        'config/***/***'
-
-        >>> sanitize_consul_key("services/api-gateway/endpoints")
-        'services/***/***'
-
-        >>> sanitize_consul_key("config")
-        'config'
-
-        >>> sanitize_consul_key(None)
-
-        >>> sanitize_consul_key("")
-        ''
-
-    Security:
-        This function prevents exposure of:
-        - Service and application names (e.g., "api-gateway", "user-service")
-        - Database and infrastructure names (e.g., "postgres-primary")
-        - Configuration paths that reveal architecture
-        - Environment identifiers (e.g., "production", "staging")
-    """
-    if key is None:
-        return None
-
-    if not key:
-        return ""
-
-    # Split key into segments
-    segments = key.split("/")
-
-    if len(segments) <= 1:
-        # Just prefix or single segment - return as-is
-        return key
-
-    # Keep first segment (namespace like "config", "services", etc.)
-    # Replace everything else with masked indicator
-    prefix = segments[0]
-    return f"{prefix}/***/***"
-
-
 __all__: list[str] = [
     "SAFE_ERROR_PATTERNS",
     "SENSITIVE_PATTERNS",
     "sanitize_backend_error",
-    "sanitize_consul_key",
     "sanitize_error_message",
     "sanitize_error_string",
     "sanitize_secret_path",

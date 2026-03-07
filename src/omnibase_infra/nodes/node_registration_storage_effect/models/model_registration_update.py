@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Registration Update Model for Storage Operations.
 
-This module provides ModelRegistrationUpdate, representing a partial update
+ModelRegistrationUpdate, representing a partial update
 to a registration record. Only fields that are set (not None) will be updated.
 
 Architecture:

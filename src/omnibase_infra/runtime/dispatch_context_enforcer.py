@@ -267,7 +267,7 @@ class DispatchContextEnforcer:
         """
         Validate that a reducer context does not have time injection.
 
-        This method provides an explicit validation checkpoint that can be
+        An explicit validation checkpoint that can be
         called before dispatching to a reducer to ensure no time injection
         has occurred (e.g., via manual context construction).
 
@@ -299,7 +299,7 @@ class DispatchContextEnforcer:
         """
         Validate that a compute context does not have time injection.
 
-        This method provides an explicit validation checkpoint that can be
+        An explicit validation checkpoint that can be
         called before dispatching to a compute node to ensure no time injection
         has occurred (e.g., via manual context construction).
 
@@ -331,7 +331,7 @@ class DispatchContextEnforcer:
         """
         Validate that a deterministic node context does not have time injection.
 
-        This method provides an explicit validation checkpoint that can be
+        An explicit validation checkpoint that can be
         called before dispatching to a REDUCER or COMPUTE node to ensure no
         time injection has occurred (e.g., via manual context construction).
 

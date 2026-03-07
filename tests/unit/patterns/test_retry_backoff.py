@@ -9,9 +9,6 @@ Tests cover:
 - Max delay cap is respected
 - Non-retryable errors fail immediately (no retry)
 - Retryable errors trigger retry logic
-
-These tests validate the retry patterns documented in CLAUDE.md and
-implemented across handlers like HandlerConsul.
 """
 
 from __future__ import annotations
@@ -26,8 +23,6 @@ from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
-
-from omnibase_infra.handlers.models.consul import ModelConsulRetryConfig
 
 T = TypeVar("T")
 
@@ -108,7 +103,7 @@ class RetryExecutor:
     """Executes operations with retry and exponential backoff.
 
     This is a minimal implementation for testing the retry pattern.
-    Production handlers (HandlerConsul) have more features.
+    Production handlers have more features.
     """
 
     def __init__(
@@ -208,36 +203,6 @@ class RetryExecutor:
         if last_exception is not None:
             raise last_exception
         raise RuntimeError("Retry loop completed without result")
-
-
-# ---------------------------------------------------------------------------
-# Retry Config Model Tests
-# ---------------------------------------------------------------------------
-
-
-class TestConsulRetryConfig:
-    """Test ModelConsulRetryConfig validation and defaults."""
-
-    def test_default_config(self) -> None:
-        """Test default configuration values."""
-        config = ModelConsulRetryConfig()
-        assert config.max_attempts == 3
-        assert config.initial_delay_seconds == 1.0
-        assert config.max_delay_seconds == 30.0
-        assert config.exponential_base == 2.0
-
-    def test_custom_config(self) -> None:
-        """Test custom configuration values are accepted."""
-        config = ModelConsulRetryConfig(
-            max_attempts=5,
-            initial_delay_seconds=2.0,
-            max_delay_seconds=60.0,
-            exponential_base=2.5,
-        )
-        assert config.max_attempts == 5
-        assert config.initial_delay_seconds == 2.0
-        assert config.max_delay_seconds == 60.0
-        assert config.exponential_base == 2.5
 
 
 # ---------------------------------------------------------------------------
@@ -554,53 +519,9 @@ class TestNonRetryableErrors:
 # ---------------------------------------------------------------------------
 
 
-class TestRetryWithRealConfig:
-    """Integration tests using actual config models."""
-
-    @pytest.mark.asyncio
-    async def test_consul_retry_config_integration(self) -> None:
-        """Test retry behavior with ModelConsulRetryConfig values.
-
-        Uses minimum valid bounds from the config model:
-        - initial_delay_seconds: >= 0.1
-        - max_delay_seconds: >= 1.0
-        """
-        config = ModelConsulRetryConfig(
-            max_attempts=4,
-            initial_delay_seconds=0.5,  # Minimum is 0.1
-            max_delay_seconds=2.0,  # Minimum is 1.0
-            exponential_base=2.0,
-        )
-
-        executor = RetryExecutor(
-            max_attempts=config.max_attempts,
-            initial_delay=config.initial_delay_seconds,
-            max_delay=config.max_delay_seconds,
-            exponential_base=config.exponential_base,
-            jitter_factor=0.0,
-        )
-
-        # Verify the config is correctly applied to executor
-        assert executor.max_attempts == 4
-        assert executor.initial_delay == 0.5
-        assert executor.max_delay == 2.0
-
-        # Verify max_delay cap is respected
-        # Attempt 0: 0.5 * 2^0 = 0.5 (under cap)
-        # Attempt 1: 0.5 * 2^1 = 1.0 (under cap)
-        # Attempt 2: 0.5 * 2^2 = 2.0 (at cap)
-        # Attempt 3: 0.5 * 2^3 = 4.0 -> capped to 2.0
-        assert executor.calculate_delay(0) == pytest.approx(0.5, rel=0.01)
-        assert executor.calculate_delay(1) == pytest.approx(1.0, rel=0.01)
-        assert executor.calculate_delay(2) == pytest.approx(2.0, rel=0.01)
-        assert executor.calculate_delay(3) == pytest.approx(2.0, rel=0.01)  # Capped
-
-
 __all__: list[str] = [
-    "TestConsulRetryConfig",
     "TestExponentialBackoffCalculation",
     "TestJitterRandomization",
     "TestRetryLogic",
     "TestNonRetryableErrors",
-    "TestRetryWithRealConfig",
 ]

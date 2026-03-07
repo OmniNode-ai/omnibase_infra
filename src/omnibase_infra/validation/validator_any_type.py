@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """AST-based Any Type Validator for ONEX Strong Typing Policy.
 
-This module provides static analysis validation to detect improper Any type usage
+Static analysis validation to detect improper Any type usage
 following the ONEX ADR policy:
 
 - Any is BLOCKED in function signatures (parameters, return types)

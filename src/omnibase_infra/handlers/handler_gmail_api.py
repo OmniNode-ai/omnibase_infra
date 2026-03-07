@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Gmail API Handler - Shared OAuth2 + REST transport layer.
 
-This handler provides the shared transport layer for all Gmail nodes.
+The shared transport layer for all Gmail nodes.
 It manages OAuth2 token refresh internally and exposes a clean async API
 for listing, reading, searching, and modifying Gmail messages.
 

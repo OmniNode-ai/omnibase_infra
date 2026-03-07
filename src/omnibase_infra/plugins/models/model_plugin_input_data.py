@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Pydantic model for plugin input data.
 
-This module provides the ModelPluginInputData Pydantic BaseModel that replaces
+The ModelPluginInputData Pydantic BaseModel that replaces
 the former PluginInputData TypedDict definition.
 
 Design Notes:

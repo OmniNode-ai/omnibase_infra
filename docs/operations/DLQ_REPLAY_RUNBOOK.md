@@ -22,7 +22,7 @@ The DLQ Replay utility allows operators to reprocess failed messages from the De
 **Required**:
 ```bash
 # Kafka connection (REQUIRED - no default for security)
-export KAFKA_BOOTSTRAP_SERVERS="<infrastructure-host>:29092"
+export KAFKA_BOOTSTRAP_SERVERS="<infrastructure-host>:19092"
 ```
 
 **Optional (for PostgreSQL tracking)**:

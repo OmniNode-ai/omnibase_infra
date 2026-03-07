@@ -2013,7 +2013,7 @@ enable_auto_commit: false
     def test_config_with_all_parameters(self) -> None:
         """Test config with all parameters explicitly set."""
         config = ModelKafkaEventBusConfig(
-            bootstrap_servers="custom-broker:29092",
+            bootstrap_servers="custom-broker:19092",
             environment="prod",
             timeout_seconds=60,
             max_retry_attempts=5,

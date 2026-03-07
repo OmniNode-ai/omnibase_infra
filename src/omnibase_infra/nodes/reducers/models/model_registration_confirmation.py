@@ -1,46 +1,40 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Registration Confirmation Model for Dual Registration Workflow.
+"""Registration Confirmation Model for Dual Registration Workflow.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides ModelRegistrationConfirmation, the Pydantic model for
-confirmation events from the Effect layer. These events complete the dual
-registration workflow by confirming Consul and PostgreSQL operations.
+confirmation events from the Effect layer. These events complete the
+registration workflow by confirming PostgreSQL operations.
 
 Implementation Status:
     This model is actively used in production by
     RegistrationReducer.reduce_confirmation() (OMN-996).
 
-    - Effect layer nodes (ConsulAdapter, PostgresAdapter) publish
-      confirmation events using this model
+    - Effect layer nodes (PostgresAdapter) publish confirmation events using
+      this model
     - RegistrationReducer.reduce_confirmation() processes these events
     - Runtime routes confirmations based on event_type
 
 Confirmation Event Flow:
-    1. Reducer emits intents (consul.register, postgres.upsert_registration)
+    1. Reducer emits intents (postgres.upsert_registration)
     2. Effect nodes execute intents and perform I/O
     3. Effect nodes publish confirmation events to Kafka
     4. Runtime routes confirmations to RegistrationReducer.reduce_confirmation()
-    5. Reducer updates state: pending -> partial -> complete (or -> failed)
+    5. Reducer updates state: pending -> complete (or -> failed)
 
 Event Types:
-    - consul.registered: Consul service registration completed
+
     - postgres.registration_upserted: PostgreSQL record upsert completed
 
-    Both event types may indicate success or failure via the ``success`` field.
+    This event type may indicate success or failure via the ``success`` field.
     On failure, ``error_message`` provides diagnostic information (sanitized).
 
 State Transitions Triggered:
-    - success + consul.registered:
-        pending -> partial (if postgres pending)
-        partial -> complete (if postgres already confirmed)
-
     - success + postgres.registration_upserted:
-        pending -> partial (if consul pending)
-        partial -> complete (if consul already confirmed)
+        pending -> complete
 
     - failure (any event_type):
         pending -> failed
-        partial -> failed
 
 Related:
     - RegistrationReducer: Pure reducer that consumes this model
@@ -61,10 +55,10 @@ from omnibase_infra.enums import EnumConfirmationEventType
 
 
 class ModelRegistrationConfirmation(BaseModel):
-    """Confirmation event for dual registration operations.
+    """Confirmation event for registration operations.
 
-    This model represents confirmation events published by Effect layer nodes
-    (ConsulAdapter, PostgresAdapter) after executing registration intents.
+    This model represents confirmation events published by the PostgreSQL
+    Effect layer node (PostgresAdapter) after executing registration intents.
 
     Usage:
         This model is consumed by RegistrationReducer.reduce_confirmation()
@@ -87,7 +81,6 @@ class ModelRegistrationConfirmation(BaseModel):
 
     Attributes:
         event_type: The type of confirmation event.
-            - "consul.registered": Consul service registration result
             - "postgres.registration_upserted": PostgreSQL upsert result
         correlation_id: UUID linking this confirmation to the original
             introspection event. Used by the reducer to match confirmations
@@ -107,14 +100,14 @@ class ModelRegistrationConfirmation(BaseModel):
         >>> from uuid import uuid4
         >>> from omnibase_infra.enums import EnumConfirmationEventType
         >>> confirmation = ModelRegistrationConfirmation(
-        ...     event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
+        ...     event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
         ...     correlation_id=uuid4(),
         ...     node_id=uuid4(),
         ...     success=True,
         ...     timestamp=datetime.now(UTC),
         ... )
         >>> confirmation.event_type
-        <EnumConfirmationEventType.CONSUL_REGISTERED: 'consul.registered'>
+        <EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED: 'postgres.registration_upserted'>
         >>> confirmation.success
         True
 
@@ -138,7 +131,7 @@ class ModelRegistrationConfirmation(BaseModel):
 
     event_type: EnumConfirmationEventType = Field(
         ...,
-        description="The type of confirmation event (consul or postgres)",
+        description="The type of confirmation event (postgres)",
     )
     correlation_id: UUID = Field(
         ...,

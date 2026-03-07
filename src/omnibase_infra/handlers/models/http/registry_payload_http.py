@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Registry for HTTP payload types with decorator-based registration.
 
-This module provides:
+Exports:
 - RegistryPayloadHttp: Decorator-based registry for payload type discovery
 
 Design Pattern:

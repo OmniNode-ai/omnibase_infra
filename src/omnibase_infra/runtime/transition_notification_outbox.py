@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Transition Notification Outbox for guaranteed delivery.
 
-This module implements the outbox pattern for state transition notifications.
+The outbox pattern for state transition notifications.
 The outbox stores notifications in the same database transaction as projections,
 then processes them asynchronously via a background processor to ensure
 at-least-once delivery semantics.

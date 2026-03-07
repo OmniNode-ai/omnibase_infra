@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Prometheus metrics handler - EFFECT handler exposing /metrics HTTP endpoint.
 
-This module provides an EFFECT handler that exposes Prometheus metrics via an
+An EFFECT handler that exposes Prometheus metrics via an
 HTTP endpoint for scraping. It follows the ONEX handler pattern with contract-
 driven lifecycle management.
 
@@ -242,7 +242,7 @@ SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
 class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
     """Prometheus metrics EFFECT handler exposing HTTP /metrics endpoint.
 
-    This handler implements the ONEX handler protocol for exposing Prometheus
+    The ONEX handler protocol for exposing Prometheus
     metrics via an HTTP endpoint. It manages the lifecycle of an aiohttp HTTP
     server that serves metrics in Prometheus text exposition format.
 

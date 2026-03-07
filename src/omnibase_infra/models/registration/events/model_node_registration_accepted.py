@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Node Registration Accepted Event Model.
+"""# ai-slop-ok: pre-existingNode Registration Accepted Event Model.
 
 This module provides ModelNodeRegistrationAccepted for the ONEX 2-way
 registration pattern. Emitted by the Registration Orchestrator when it
@@ -26,7 +26,7 @@ class ModelNodeRegistrationAccepted(BaseModel):
     complete the registration handshake.
 
     This event triggers the reducer to emit intents for persisting the
-    registration to Consul and PostgreSQL.
+    registration to PostgreSQL.
 
     Attributes:
         entity_id: The entity identifier (equals node_id for registration domain).

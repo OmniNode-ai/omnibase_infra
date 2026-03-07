@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """PostgreSQL Repository Runtime.
 
-This module provides a generic runtime for executing repository contracts
+A generic runtime for executing repository contracts
 against PostgreSQL databases. The runtime enforces safety constraints,
 deterministic query ordering, and configurable operation limits.
 

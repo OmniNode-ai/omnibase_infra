@@ -69,7 +69,7 @@ forwarded to the DLQ topic: `onex.evt.omniclaude.agent-actions-dlq.v1`.
 
 ```bash
 # List DLQ messages
-kcat -C -b 192.168.86.200:29092 \
+kcat -C -b localhost:19092 \
   -t onex.evt.omniclaude.agent-actions-dlq.v1 \
   -c 10 -e | jq .
 ```

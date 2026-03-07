@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """PostgreSQL implementation of the validation event ledger repository.
 
-This module provides the PostgresValidationLedgerRepository which implements
+The PostgresValidationLedgerRepository which implements
 ProtocolValidationLedgerRepository using asyncpg for direct PostgreSQL access.
 
 Table: validation_event_ledger

@@ -5,7 +5,7 @@
 Collects and formats handler validation errors for clear presentation
 during application startup.
 
-This module provides the ValidationAggregator class for collecting handler
+The ValidationAggregator class for collecting handler
 validation errors from multiple validation paths (contract, security,
 architecture) and formatting them for console output, CI integration,
 and structured reporting.
@@ -214,7 +214,7 @@ class ValidationAggregator:
             result[error.source_type].append(error)
         return dict(result)
 
-    def format_for_console(self) -> str:
+    def format_for_console(self) -> str:  # ai-slop-ok: reST table
         """Format errors for console output with colors/symbols.
 
         Produces a human-readable multi-line output suitable for console

@@ -72,7 +72,7 @@ pytestmark = [
 # Constants
 # =============================================================================
 
-EXPECTED_REGISTRATION_INTENTS = 2
+EXPECTED_REGISTRATION_INTENTS = 1  # PostgreSQL only (Consul removed in OMN-3540)
 
 
 # =============================================================================

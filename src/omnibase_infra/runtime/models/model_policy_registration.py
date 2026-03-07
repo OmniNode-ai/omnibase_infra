@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Policy Registration Model.
 
-This module provides the Pydantic model for policy registration parameters,
+The Pydantic model for policy registration parameters,
 used to register policy plugins with the RegistryPolicy.
 """
 

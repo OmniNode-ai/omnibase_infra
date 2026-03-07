@@ -53,15 +53,14 @@ NOT_FOUND Classification Patterns:
     2. **Response-based NOT_FOUND** (for valid "empty" responses):
        When absence is a valid outcome (not an error), return a discriminated
        union variant. This is used by:
-       - ``EnumConsulOperationType.KV_GET_NOT_FOUND``: When a Consul key doesn't exist
        - Handler responses with optional data fields
 
        Callers check the response type to determine if data was found:
 
        .. code-block:: python
 
-           result = await consul_handler.kv_get("my/key")
-           if result.operation_type == EnumConsulOperationType.KV_GET_NOT_FOUND:
+           result = await backend_handler.get("my/key")
+           if result.operation_type == OperationType.NOT_FOUND:
                # Key doesn't exist - valid "empty" response
                return default_value
            else:
@@ -74,12 +73,16 @@ NOT_FOUND Classification Patterns:
     - Optional keys, cache lookups: Use discriminated union responses
 """
 
+from __future__ import annotations
+
+import traceback
 from typing import Any, cast
 from uuid import uuid4
 
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors.error_catalog import get_resolution
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
@@ -100,6 +103,9 @@ class RuntimeHostError(ModelOnexError):
         operation: Operation being performed
         correlation_id: Request correlation ID for tracking
         target_name: Target resource/endpoint name
+        suggested_resolution: Human-readable fix suggestion (auto-populated from catalog)
+        retry_after_seconds: Retry delay guidance (auto-populated from catalog)
+        original_error_type: Preserved original exception class name
 
     Example:
         >>> context = ModelInfraErrorContext(
@@ -126,6 +132,15 @@ class RuntimeHostError(ModelOnexError):
     ) -> None:
         """Initialize RuntimeHostError with structured fields.
 
+        When a ``ModelInfraErrorContext`` is provided, the constructor
+        automatically enriches the error with:
+
+        - ``suggested_resolution`` from the error catalog (if not already set
+          on the context)
+        - ``retry_after_seconds`` from the error catalog (if not already set)
+        - ``original_error_type`` from the context (for error chaining)
+        - ``stack_trace`` captured at raise-site for diagnostic logging
+
         Args:
             message: Human-readable error message
             error_code: Error code (defaults to OPERATION_FAILED)
@@ -137,7 +152,9 @@ class RuntimeHostError(ModelOnexError):
 
         # Extract fields from context model if provided
         correlation_id = None
+        transport_type = None
         if context is not None:
+            transport_type = context.transport_type
             if context.transport_type is not None:
                 structured_context["transport_type"] = context.transport_type
             if context.operation is not None:
@@ -146,11 +163,54 @@ class RuntimeHostError(ModelOnexError):
                 structured_context["target_name"] = context.target_name
             if context.namespace is not None:
                 structured_context["namespace"] = context.namespace
+            if context.original_error_type is not None:
+                structured_context["original_error_type"] = context.original_error_type
             correlation_id = context.correlation_id
+
+            # OMN-518: Auto-enrich from error catalog when context fields are absent
+            resolution = get_resolution(
+                type(self).__name__,
+                transport_type=transport_type,
+            )
+
+            # suggested_resolution: prefer explicit context > extra_context > catalog
+            if context.suggested_resolution is not None:
+                structured_context["suggested_resolution"] = (
+                    context.suggested_resolution
+                )
+            elif (
+                "suggested_resolution" not in structured_context
+                and resolution is not None
+            ):
+                structured_context["suggested_resolution"] = resolution.suggestion
+
+            # retry_after_seconds: prefer explicit context > extra_context > catalog
+            if context.retry_after_seconds is not None:
+                structured_context["retry_after_seconds"] = context.retry_after_seconds
+            elif (
+                "retry_after_seconds" not in structured_context
+                and resolution is not None
+                and resolution.retry_after_seconds is not None
+            ):
+                structured_context["retry_after_seconds"] = (
+                    resolution.retry_after_seconds
+                )
+
+        # OMN-518: Capture stack trace at raise-site for diagnostic logging
+        structured_context["stack_trace"] = "".join(traceback.format_stack()[:-1])
 
         # Auto-generate correlation_id if not provided (per CLAUDE.md guidelines)
         if correlation_id is None:
             correlation_id = uuid4()
+
+        # Store resolution metadata as instance attributes for programmatic access
+        self.suggested_resolution: str | None = cast(
+            "str | None", structured_context.get("suggested_resolution")
+        )
+        self.retry_after_seconds: float | None = cast(
+            "float | None", structured_context.get("retry_after_seconds")
+        )
+        self.stack_trace: str = cast("str", structured_context.get("stack_trace", ""))
 
         # Initialize base error with default error code
         # NOTE: Cast required for mypy - **dict[str, object] doesn't satisfy **context: Any
@@ -255,7 +315,8 @@ class InfraConnectionError(RuntimeHostError):
     in the context:
         - DATABASE -> DATABASE_CONNECTION_ERROR
         - HTTP, GRPC -> NETWORK_ERROR
-        - KAFKA, CONSUL, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP, LLM -> SERVICE_UNAVAILABLE
+        - RUNTIME, INMEMORY -> OPERATION_FAILED
+        - KAFKA, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP, LLM, BRIDGE -> SERVICE_UNAVAILABLE
         - None (no context) -> SERVICE_UNAVAILABLE
 
     Example:
@@ -297,7 +358,6 @@ class InfraConnectionError(RuntimeHostError):
         EnumInfraTransportType.HTTP: EnumCoreErrorCode.NETWORK_ERROR,
         EnumInfraTransportType.GRPC: EnumCoreErrorCode.NETWORK_ERROR,
         EnumInfraTransportType.KAFKA: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
-        EnumInfraTransportType.CONSUL: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.INFISICAL: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.VALKEY: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.RUNTIME: EnumCoreErrorCode.OPERATION_FAILED,
@@ -324,7 +384,9 @@ class InfraConnectionError(RuntimeHostError):
             Appropriate EnumCoreErrorCode for the transport type:
                 - DATABASE -> DATABASE_CONNECTION_ERROR
                 - HTTP, GRPC -> NETWORK_ERROR
-                - KAFKA, CONSUL, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP, LLM, None -> SERVICE_UNAVAILABLE
+                - RUNTIME, INMEMORY -> OPERATION_FAILED
+                - KAFKA, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP, LLM, BRIDGE -> SERVICE_UNAVAILABLE
+                - None -> SERVICE_UNAVAILABLE
         """
         if context is None:
             return cls._TRANSPORT_ERROR_CODE_MAP[None]
@@ -344,7 +406,8 @@ class InfraConnectionError(RuntimeHostError):
         The error code is automatically selected based on context.transport_type:
             - DATABASE -> DATABASE_CONNECTION_ERROR
             - HTTP, GRPC -> NETWORK_ERROR
-            - KAFKA, CONSUL, VAULT, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP -> SERVICE_UNAVAILABLE
+            - RUNTIME, INMEMORY -> OPERATION_FAILED
+            - KAFKA, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP, LLM, BRIDGE -> SERVICE_UNAVAILABLE
             - None (no context) -> SERVICE_UNAVAILABLE
 
         Args:

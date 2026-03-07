@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Handler Wiring Module - Registers concrete handlers with the handler registry.
+"""Handler Wiring Module - Registers concrete handlers with the handler registry.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides functions to wire up concrete handler implementations
 with the RegistryProtocolBinding and RegistryEventBusBinding. It serves as
@@ -145,7 +145,6 @@ from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationE
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.runtime.handler_registry import (
     EVENT_BUS_INMEMORY,
-    HANDLER_TYPE_CONSUL,
     HANDLER_TYPE_DATABASE,
     HANDLER_TYPE_GRAPH,
     HANDLER_TYPE_HTTP,
@@ -170,7 +169,6 @@ _HANDLERS_BASE = Path(__file__).parent.parent / "nodes" / "handlers"
 # Mapping of handler types to their contract paths.
 # Each entry maps a handler type constant to the path of its contract.yaml file.
 _HANDLER_CONTRACT_PATHS: dict[str, Path] = {
-    HANDLER_TYPE_CONSUL: _HANDLERS_BASE / "consul" / "contract.yaml",
     HANDLER_TYPE_DATABASE: _HANDLERS_BASE / "db" / "contract.yaml",
     HANDLER_TYPE_GRAPH: _HANDLERS_BASE / "graph" / "contract.yaml",
     HANDLER_TYPE_HTTP: _HANDLERS_BASE / "http" / "contract.yaml",
@@ -196,7 +194,7 @@ def _load_handler_from_contract(
     """Load handler class from a contract.yaml file.
 
     Args:
-        handler_type: The handler type identifier (e.g., "consul", "db").
+        handler_type: The handler type identifier (e.g., "db").
         contract_path: Path to the contract.yaml file.
 
     Returns:
@@ -334,13 +332,11 @@ def wire_default_handlers() -> dict[str, list[str]]:
     way to initialize the handler ecosystem.
 
     Registered Handlers:
-        - CONSUL: HandlerConsul for HashiCorp Consul service discovery
         - DB: HandlerDb for PostgreSQL database operations
         - GRAPH: HandlerGraph for graph database (Memgraph/Neo4j) operations
         - HTTP: HandlerHttpRest for HTTP/REST protocol operations
         - INTENT: HandlerIntent for intent storage and query (demo)
         - MCP: HandlerMCP for Model Context Protocol AI agent integration
-        - VAULT: HandlerVault for HashiCorp Vault secret management
 
     Registered Event Buses:
         - INMEMORY: EventBusInmemory for local/testing deployments
@@ -362,7 +358,7 @@ def wire_default_handlers() -> dict[str, list[str]]:
     Example:
         >>> summary = wire_default_handlers()
         >>> print(summary)
-        {'handlers': ['consul', 'db', 'http', 'mcp', 'vault'], 'event_buses': ['inmemory']}
+        {'handlers': ['db', 'graph', 'http', 'intent', 'mcp'], 'event_buses': ['inmemory']}
 
     Note:
         This function uses the singleton registries returned by
@@ -618,7 +614,7 @@ def get_known_handler_types() -> list[str]:
 
     Example:
         >>> get_known_handler_types()
-        ['consul', 'db', 'graph', 'http', 'intent', 'mcp', 'vault']
+        ['db', 'graph', 'http', 'intent', 'mcp']
     """
     return sorted(_HANDLER_CONTRACT_PATHS.keys())
 

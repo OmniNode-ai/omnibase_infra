@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """TypedDict for JSON-serialized performance metrics cache.
 
-This module provides a TypedDict that matches the JSON output of
+A TypedDict that matches the JSON output of
 ModelIntrospectionPerformanceMetrics.model_dump(mode="json"), enabling
 proper type checking for cached performance metrics without runtime
 validation overhead.

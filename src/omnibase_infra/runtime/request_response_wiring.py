@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Request-response wiring for correlation-based RPC-style Kafka communication.
 
-This module provides the RequestResponseWiring class for implementing request-response
+The RequestResponseWiring class for implementing request-response
 patterns over Kafka. Unlike the standard EventBusSubcontractWiring (designed for 24/7
 consumers), this wiring supports correlation-based request-response flows where a
 publisher sends a request and awaits a correlated response.
@@ -117,7 +117,7 @@ class RequestResponseInstanceState:
 class RequestResponseWiring(MixinAsyncCircuitBreaker):
     """Wires request-response patterns to Kafka for correlation-based RPC.
 
-    This class implements the request-response pattern over Kafka, where:
+    The request-response pattern over Kafka, where:
     1. A request is published to a request topic
     2. The wiring awaits a correlated response on reply topics
     3. Correlation is tracked via correlation_id in the message payload

@@ -15,7 +15,7 @@ Environment Variable Support:
         ONEX_CB_THRESHOLD=5
         ONEX_CB_RESET_TIMEOUT=60.0
 
-This module provides the configuration model used to initialize the
+The configuration model used to initialize the
 MixinAsyncCircuitBreaker mixin. Grouping parameters into a configuration
 model follows ONEX patterns for reducing function parameter count and
 union patterns.

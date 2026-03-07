@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Consumer-side retry configuration model.
 
-This module provides the configuration model for consumer-side retry behavior
+The configuration model for consumer-side retry behavior
 when message handlers fail. It distinguishes between:
 
 - **Content errors** (non-retryable): Malformed messages, validation failures,

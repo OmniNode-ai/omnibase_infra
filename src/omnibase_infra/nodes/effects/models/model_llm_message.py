@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """LLM chat message model for multi-turn conversations.
 
-This module provides ModelLlmMessage, representing a single message in an LLM
+ModelLlmMessage, representing a single message in an LLM
 chat conversation. Role-based invariants enforce correct field combinations
 for each message type.
 

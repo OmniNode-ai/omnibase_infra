@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Datetime validation and normalization utilities.
 
-This module provides utilities for ensuring datetime values are timezone-aware
+Utilities for ensuring datetime values are timezone-aware
 before persisting to databases. Naive datetimes (without timezone info) can cause
 subtle bugs when stored in PostgreSQL's TIMESTAMPTZ columns or when compared
 across different timezones.

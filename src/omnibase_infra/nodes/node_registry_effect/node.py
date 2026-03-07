@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Node Registry Effect - Declarative effect node for dual-backend registration.
+"""Node Registry Effect - Declarative effect node for PostgreSQL registration.
 
 This node follows the ONEX declarative pattern:
     - DECLARATIVE effect driven by contract.yaml
@@ -15,7 +15,7 @@ All handler routing is 100% driven by contract.yaml, not Python code.
 Handler Routing Pattern:
     1. Receive registration request (input_model in contract)
     2. Route to appropriate handler based on payload type (handler_routing)
-    3. Execute infrastructure I/O via handler (Consul, PostgreSQL)
+    3. Execute infrastructure I/O via handler (PostgreSQL)
     4. Return structured response (output_model in contract)
 
 Design Decisions:
@@ -34,7 +34,6 @@ The actual handler execution and routing is performed by:
     - Or direct handler invocation by callers
 
 Handlers receive their dependencies directly via constructor injection:
-    - HandlerConsulRegister(consul_client)
     - HandlerPostgresUpsert(postgres_adapter)
 
 Coroutine Safety:
@@ -43,7 +42,7 @@ Coroutine Safety:
 
 Related Modules:
     - contract.yaml: Handler routing and I/O model definitions
-    - handlers/: Backend-specific handlers (Consul, PostgreSQL)
+    - handlers/: Backend-specific handlers (PostgreSQL)
     - models/: Node-specific input/output models
     - NodeRegistrationOrchestrator: Coordinates handler execution
 
@@ -59,8 +58,8 @@ from omnibase_core.nodes.node_effect import NodeEffect
 
 
 # ONEX_EXCLUDE: declarative_node - legacy effect node with direct adapter access (OMN-1725)
-class NodeRegistryEffect(NodeEffect):
-    """Declarative effect node for dual-backend node registration.
+class NodeRegistryEffect(NodeEffect):  # ai-slop-ok: pre-existing
+    """Declarative effect node for PostgreSQL-backed node registration.
 
     This effect node is a lightweight shell that defines the I/O contract
     for registration operations. All routing and execution logic is driven
@@ -71,12 +70,12 @@ class NodeRegistryEffect(NodeEffect):
         - Direct handler invocation for simple use cases
 
     Supported Operations (defined in contract.yaml handler_routing):
-        - register_node: Register to both Consul and PostgreSQL
-        - deregister_node: Deregister from both backends
-        - retry_partial_failure: Retry a specific backend after partial failure
+        - register_node: Register to PostgreSQL
+        - deregister_node: Deregister from PostgreSQL
+        - retry_partial_failure: Retry PostgreSQL after a failed attempt
 
     Dependency Injection:
-        Backend adapters (Consul, PostgreSQL) are resolved via container.
+        The PostgreSQL adapter is resolved via container.
         Handlers receive their dependencies directly via constructor injection.
         This node contains NO instance variables for backend clients.
 
@@ -85,7 +84,6 @@ class NodeRegistryEffect(NodeEffect):
         from omnibase_core.models.container import ModelONEXContainer
         from omnibase_infra.nodes.node_registry_effect import NodeRegistryEffect
         from omnibase_infra.nodes.node_registry_effect.handlers import (
-            HandlerConsulRegister,
             HandlerPostgresUpsert,
         )
 
@@ -94,10 +92,7 @@ class NodeRegistryEffect(NodeEffect):
         effect = NodeRegistryEffect(container)
 
         # Handlers receive dependencies directly via constructor
-        consul_client = container.resolve(ProtocolConsulClient)
         postgres_adapter = container.resolve(ProtocolPostgresAdapter)
-
-        consul_handler = HandlerConsulRegister(consul_client)
         postgres_handler = HandlerPostgresUpsert(postgres_adapter)
 
         # Or use orchestrator for coordinated execution

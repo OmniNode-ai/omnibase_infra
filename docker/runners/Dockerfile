@@ -108,7 +108,13 @@ RUN mkdir -p /home/runner/.runner-creds && chown runner:runner /home/runner/.run
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-USER runner
+# Install gosu for privilege de-escalation in entrypoint.
+# The entrypoint starts as root to fix Docker socket GID, then drops to runner.
+RUN curl -fsSLo /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/1.17/gosu-amd64" \
+    && chmod +x /usr/local/bin/gosu \
+    && gosu nobody true
+
+# Run as root — entrypoint fixes Docker socket GID then drops to runner via gosu
 WORKDIR ${RUNNER_HOME}
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

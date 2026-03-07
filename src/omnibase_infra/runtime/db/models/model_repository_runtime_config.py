@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Repository Runtime Configuration Model.
 
-This module provides the configuration model for PostgresRepositoryRuntime.
+The configuration model for PostgresRepositoryRuntime.
 All fields are strongly typed to eliminate Any usage and enable proper validation.
 
 Safety Constraints:

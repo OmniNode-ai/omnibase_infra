@@ -3,7 +3,7 @@
 """
 Runtime Registry Module.
 
-This module provides registry implementations for the ONEX runtime infrastructure:
+Registry implementations for the ONEX runtime infrastructure:
 
 Protocol Binding Registry:
     - **RegistryProtocolBinding**: Handler registration and resolution

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Intent effect adapter for PostgreSQL registration UPDATE operations.
 
-This module provides the IntentEffectPostgresUpdate adapter, which bridges
+The IntentEffectPostgresUpdate adapter, which bridges
 ModelPayloadPostgresUpdateRegistration intent payloads to actual PostgreSQL
 UPDATE operations via raw SQL on the ProjectorShell's connection pool.
 

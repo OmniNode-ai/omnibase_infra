@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """TypedDict definition for JSON-serialized introspection cache data.
 
-This module provides a TypedDict that represents the JSON-serialized form of
+A TypedDict that represents the JSON-serialized form of
 ModelNodeIntrospectionEvent, enabling proper type checking for cache operations
 without requiring type: ignore comments.
 

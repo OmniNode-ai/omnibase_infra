@@ -82,16 +82,6 @@ capability_mappings:
     widget_type: table
     defaults:
       show_query_time: true
-  # Service discovery
-  consul.register:
-    widget_type: status_indicator
-    defaults:
-      show_service_id: true
-  consul.discover:
-    widget_type: status_grid
-    defaults:
-      show_health: true
-      group_by: service_name
   # Workflow capabilities
   workflow.orchestrate:
     widget_type: timeline

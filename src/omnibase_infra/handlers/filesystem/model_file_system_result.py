@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """FileSystem Result Model for FileSystem Handler Operations.
 
-This module provides ModelFileSystemResult, representing the output from the
+ModelFileSystemResult, representing the output from the
 FileSystem effect handler for filesystem operations.
 
 Architecture:

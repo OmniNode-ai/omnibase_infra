@@ -5,16 +5,14 @@
 This test suite validates the FSM state transitions defined in contract.yaml
 for the NodeRegistrationReducer. The FSM manages the registration lifecycle:
 
-    idle -> pending -> partial -> complete
-                   \\           \
-                    -> failed <-
+    idle -> pending -> complete
+                   \
+                    -> failed
 
-FSM Transitions (from contract.yaml):
+FSM Transitions:
     - idle -> pending (trigger: introspection_received)
-    - pending -> partial (trigger: consul_confirmed OR postgres_confirmed)
+    - pending -> complete (trigger: postgres_confirmed)
     - pending -> failed (trigger: error_received)
-    - partial -> complete (trigger: consul_confirmed OR postgres_confirmed - second)
-    - partial -> failed (trigger: error_received)
     - failed -> idle (trigger: reset)
     - complete -> idle (trigger: reset)
     - idle -> failed (trigger: validation_failed)
@@ -26,6 +24,7 @@ Related:
     - contract.yaml: FSM state machine definition
     - ModelRegistrationState: Immutable state model with transition methods
     - OMN-1104: Refactor to declarative reducer
+    - OMN-3540: Remove Consul entirely
 """
 
 from __future__ import annotations
@@ -65,23 +64,11 @@ def pending_state() -> ModelRegistrationState:
 
 
 @pytest.fixture
-def partial_state_consul_confirmed() -> ModelRegistrationState:
-    """Create a partial state with Consul confirmed.
-
-    Returns:
-        A ModelRegistrationState in partial status with consul_confirmed=True.
-    """
-    state = ModelRegistrationState()
-    pending = state.with_pending_registration(node_id=uuid4(), event_id=uuid4())
-    return pending.with_consul_confirmed(event_id=uuid4())
-
-
-@pytest.fixture
 def partial_state_postgres_confirmed() -> ModelRegistrationState:
-    """Create a partial state with PostgreSQL confirmed.
+    """Create a complete state with PostgreSQL confirmed (no partial anymore).
 
     Returns:
-        A ModelRegistrationState in partial status with postgres_confirmed=True.
+        A ModelRegistrationState in complete status with postgres_confirmed=True.
     """
     state = ModelRegistrationState()
     pending = state.with_pending_registration(node_id=uuid4(), event_id=uuid4())
@@ -97,7 +84,7 @@ def failed_state() -> ModelRegistrationState:
     """
     state = ModelRegistrationState()
     pending = state.with_pending_registration(node_id=uuid4(), event_id=uuid4())
-    return pending.with_failure(reason="consul_failed", event_id=uuid4())
+    return pending.with_failure(reason="postgres_failed", event_id=uuid4())
 
 
 @pytest.fixture
@@ -105,12 +92,11 @@ def complete_state() -> ModelRegistrationState:
     """Create a complete state for testing.
 
     Returns:
-        A ModelRegistrationState in complete status with both confirmations.
+        A ModelRegistrationState in complete status.
     """
     state = ModelRegistrationState()
     pending = state.with_pending_registration(node_id=uuid4(), event_id=uuid4())
-    partial = pending.with_consul_confirmed(event_id=uuid4())
-    return partial.with_postgres_confirmed(event_id=uuid4())
+    return pending.with_postgres_confirmed(event_id=uuid4())
 
 
 # =============================================================================
@@ -150,113 +136,21 @@ class TestFSMTransitions:
         assert new_state.postgres_confirmed is False
         assert new_state.failure_reason is None
 
-    def test_pending_to_partial_on_first_consul_confirmation(
+    def test_pending_to_complete_on_postgres_confirmation(
         self,
         pending_state: ModelRegistrationState,
     ) -> None:
-        """Test FSM transition: pending -> partial (trigger: consul_confirmed).
+        """Test FSM transition: pending -> complete (trigger: postgres_confirmed).
 
-        From contract.yaml:
-            - from_state: "pending"
-              to_state: "partial"
-              trigger: "consul_confirmed"
-              description: "Consul registration confirmed"
-
-        The first confirmation (Consul) transitions from pending to partial.
+        PostgreSQL confirmation transitions from pending directly to complete.
         """
         assert pending_state.status == "pending"
-        assert pending_state.consul_confirmed is False
-        assert pending_state.postgres_confirmed is False
-
-        event_id = uuid4()
-        new_state = pending_state.with_consul_confirmed(event_id)
-
-        assert new_state.status == "partial"
-        assert new_state.consul_confirmed is True
-        assert new_state.postgres_confirmed is False
-        assert new_state.last_processed_event_id == event_id
-
-    def test_pending_to_partial_on_first_postgres_confirmation(
-        self,
-        pending_state: ModelRegistrationState,
-    ) -> None:
-        """Test FSM transition: pending -> partial (trigger: postgres_confirmed).
-
-        From contract.yaml:
-            - from_state: "pending"
-              to_state: "partial"
-              trigger: "postgres_confirmed"
-              description: "PostgreSQL registration confirmed"
-
-        The first confirmation (PostgreSQL) transitions from pending to partial.
-        """
-        assert pending_state.status == "pending"
-        assert pending_state.consul_confirmed is False
         assert pending_state.postgres_confirmed is False
 
         event_id = uuid4()
         new_state = pending_state.with_postgres_confirmed(event_id)
 
-        assert new_state.status == "partial"
-        assert new_state.consul_confirmed is False
-        assert new_state.postgres_confirmed is True
-        assert new_state.last_processed_event_id == event_id
-
-    def test_partial_to_complete_on_second_confirmation_postgres(
-        self,
-        partial_state_consul_confirmed: ModelRegistrationState,
-    ) -> None:
-        """Test FSM transition: partial -> complete (trigger: postgres_confirmed).
-
-        From contract.yaml:
-            - from_state: "partial"
-              to_state: "complete"
-              trigger: "postgres_confirmed"
-              description: "PostgreSQL confirmed after consul - registration complete"
-              conditions:
-                - expression: "consul_confirmed is_true"
-                  required: true
-
-        When Consul is already confirmed, PostgreSQL confirmation completes.
-        """
-        assert partial_state_consul_confirmed.status == "partial"
-        assert partial_state_consul_confirmed.consul_confirmed is True
-        assert partial_state_consul_confirmed.postgres_confirmed is False
-
-        event_id = uuid4()
-        new_state = partial_state_consul_confirmed.with_postgres_confirmed(event_id)
-
         assert new_state.status == "complete"
-        assert new_state.consul_confirmed is True
-        assert new_state.postgres_confirmed is True
-        assert new_state.last_processed_event_id == event_id
-
-    def test_partial_to_complete_on_second_confirmation_consul(
-        self,
-        partial_state_postgres_confirmed: ModelRegistrationState,
-    ) -> None:
-        """Test FSM transition: partial -> complete (trigger: consul_confirmed).
-
-        From contract.yaml:
-            - from_state: "partial"
-              to_state: "complete"
-              trigger: "consul_confirmed"
-              description: "Consul confirmed after postgres - registration complete"
-              conditions:
-                - expression: "postgres_confirmed is_true"
-                  required: true
-
-        When PostgreSQL is already confirmed, Consul confirmation completes.
-        """
-        assert partial_state_postgres_confirmed.status == "partial"
-        assert partial_state_postgres_confirmed.consul_confirmed is False
-        assert partial_state_postgres_confirmed.postgres_confirmed is True
-
-        event_id = uuid4()
-        new_state = partial_state_postgres_confirmed.with_consul_confirmed(event_id)
-
-        assert new_state.status == "complete"
-        assert new_state.consul_confirmed is True
         assert new_state.postgres_confirmed is True
         assert new_state.last_processed_event_id == event_id
 
@@ -278,37 +172,6 @@ class TestFSMTransitions:
 
         event_id = uuid4()
         new_state = pending_state.with_failure(
-            reason="consul_failed",
-            event_id=event_id,
-        )
-
-        assert new_state.status == "failed"
-        assert new_state.failure_reason == "consul_failed"
-        assert new_state.last_processed_event_id == event_id
-        # Confirmation state is preserved for diagnostics
-        assert new_state.consul_confirmed is False
-        assert new_state.postgres_confirmed is False
-
-    def test_partial_to_failed_on_error(
-        self,
-        partial_state_consul_confirmed: ModelRegistrationState,
-    ) -> None:
-        """Test FSM transition: partial -> failed (trigger: error_received).
-
-        From contract.yaml:
-            - from_state: "partial"
-              to_state: "failed"
-              trigger: "error_received"
-              description: "Registration failed from partial state"
-
-        An error during registration transitions from partial to failed.
-        The confirmation state is preserved for diagnostic purposes.
-        """
-        assert partial_state_consul_confirmed.status == "partial"
-        assert partial_state_consul_confirmed.consul_confirmed is True
-
-        event_id = uuid4()
-        new_state = partial_state_consul_confirmed.with_failure(
             reason="postgres_failed",
             event_id=event_id,
         )
@@ -316,8 +179,7 @@ class TestFSMTransitions:
         assert new_state.status == "failed"
         assert new_state.failure_reason == "postgres_failed"
         assert new_state.last_processed_event_id == event_id
-        # Confirmation state preserved for diagnostics
-        assert new_state.consul_confirmed is True
+        assert new_state.consul_confirmed is False
         assert new_state.postgres_confirmed is False
 
     def test_failed_to_idle_on_reset(
@@ -362,7 +224,6 @@ class TestFSMTransitions:
         A reset event allows re-registration from complete state.
         """
         assert complete_state.status == "complete"
-        assert complete_state.consul_confirmed is True
         assert complete_state.postgres_confirmed is True
 
         event_id = uuid4()
@@ -456,10 +317,7 @@ class TestFSMStateImmutability:
         pending = idle_state.with_pending_registration(uuid4(), uuid4())
         states.append(pending)
 
-        partial = pending.with_consul_confirmed(uuid4())
-        states.append(partial)
-
-        complete = partial.with_postgres_confirmed(uuid4())
+        complete = pending.with_postgres_confirmed(uuid4())
         states.append(complete)
 
         reset = complete.with_reset(uuid4())
@@ -474,7 +332,7 @@ class TestFSMStateImmutability:
                     )
 
         # Verify expected statuses in order
-        expected_statuses = ["idle", "pending", "partial", "complete", "idle"]
+        expected_statuses = ["idle", "pending", "complete", "idle"]
         for state, expected in zip(states, expected_statuses, strict=True):
             assert state.status == expected
 
@@ -510,13 +368,6 @@ class TestFSMCanReset:
     ) -> None:
         """Verify can_reset() returns False for pending state."""
         assert pending_state.can_reset() is False
-
-    def test_cannot_reset_from_partial_state(
-        self,
-        partial_state_consul_confirmed: ModelRegistrationState,
-    ) -> None:
-        """Verify can_reset() returns False for partial state."""
-        assert partial_state_consul_confirmed.can_reset() is False
 
 
 @pytest.mark.unit

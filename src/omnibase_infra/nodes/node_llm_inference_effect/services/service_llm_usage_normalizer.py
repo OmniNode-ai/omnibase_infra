@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """LLM usage normalization service with provider fallback handling.
 
-This module implements the 5-case normalization logic specified in OMN-2238:
+The 5-case normalization logic specified in OMN-2238:
 
 1. **Complete** -- ``usage`` field present with all token counts
    -> ``source=API``, ``is_estimated=false``

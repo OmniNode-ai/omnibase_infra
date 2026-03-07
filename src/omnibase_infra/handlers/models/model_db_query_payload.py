@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Database Query Payload Model.
 
-This module provides the Pydantic model for database query result payloads.
+The Pydantic model for database query result payloads.
 
 Note on row typing:
     Database rows are typed as ``list[dict[str, object]]`` because:

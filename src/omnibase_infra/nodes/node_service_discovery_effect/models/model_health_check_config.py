@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Health Check Configuration Model for Service Discovery.
 
-This module provides ModelHealthCheckConfig, representing health check
+ModelHealthCheckConfig, representing health check
 configuration for service registration operations.
 
 Architecture:

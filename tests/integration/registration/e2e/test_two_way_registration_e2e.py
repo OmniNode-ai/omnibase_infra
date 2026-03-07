@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""E2E tests for ONEX 2-way registration pattern.
+"""# ai-slop-ok: pre-existingE2E tests for ONEX 2-way registration pattern.
 
 This module contains end-to-end integration tests for the node registration
 workflow, validating the complete registration flow against real infrastructure
@@ -478,6 +478,7 @@ class TestSuite2RegistryDualRegistration:
         assert initiated_event.node_id == unique_node_id
         assert initiated_event.correlation_id == unique_correlation_id
 
+    @pytest.mark.skip(reason="Requires consul removed in OMN-3540")
     @pytest.mark.asyncio
     async def test_consul_registration_succeeds(
         self,
@@ -598,6 +599,7 @@ class TestSuite2RegistryDualRegistration:
         assert pg_result.current_state == EnumRegistrationState.PENDING_REGISTRATION
         assert pg_result.node_type == EnumNodeKind.EFFECT
 
+    @pytest.mark.skip(reason="Requires consul removed in OMN-3540")
     @pytest.mark.asyncio
     async def test_dual_registration_consul_and_postgres(
         self,
@@ -682,6 +684,7 @@ class TestSuite2RegistryDualRegistration:
         assert postgres_result is not None, "PostgreSQL registration should be found"
         assert postgres_result.entity_id == unique_node_id
 
+    @pytest.mark.skip(reason="Requires consul removed in OMN-3540")
     @pytest.mark.asyncio
     async def test_dual_registration_under_300ms(
         self,
@@ -2003,6 +2006,7 @@ class TestSuite6MultipleNodes:
         - Verification that all registered nodes appear in both registries
     """
 
+    @pytest.mark.skip(reason="Requires consul removed in OMN-3540")
     @pytest.mark.asyncio
     @pytest.mark.slow
     async def test_multiple_nodes_register_simultaneously(
@@ -2156,6 +2160,7 @@ class TestSuite6MultipleNodes:
             f"concurrent operations (0-{concurrent_count - 1})"
         )
 
+    @pytest.mark.skip(reason="Requires consul removed in OMN-3540")
     @pytest.mark.asyncio
     async def test_all_nodes_appear_in_registry(
         self,
@@ -2435,6 +2440,7 @@ class TestSuite7GracefulDegradation:
         assert pg_result.current_state == EnumRegistrationState.PENDING_REGISTRATION
         assert pg_result.node_type == EnumNodeKind.EFFECT
 
+    @pytest.mark.skip(reason="Requires consul removed in OMN-3540")
     @pytest.mark.asyncio
     async def test_registry_works_when_postgres_unavailable(
         self,
@@ -2496,6 +2502,9 @@ class TestSuite7GracefulDegradation:
         assert consul_result["service_id"] == service_id
 
     @pytest.mark.asyncio
+    @pytest.mark.skip(
+        reason="Consul removed in OMN-3540; partial success between consul+postgres no longer applies"
+    )
     async def test_partial_success_reporting(
         self, unique_node_id: UUID, unique_correlation_id: UUID
     ) -> None:
@@ -2613,6 +2622,9 @@ class TestSuite7GracefulDegradation:
         assert response4.error_summary is None
 
     @pytest.mark.asyncio
+    @pytest.mark.skip(
+        reason="Consul removed in OMN-3540; dual-backend processing time no longer applies"
+    )
     async def test_partial_success_processing_time_calculation(
         self, unique_node_id: UUID, unique_correlation_id: UUID
     ) -> None:
@@ -2668,6 +2680,7 @@ class TestSuite8RegistrySelfRegistration:
         - Registry introspection data is complete and valid
     """
 
+    @pytest.mark.skip(reason="Requires consul removed in OMN-3540")
     @pytest.mark.asyncio
     async def test_registry_registers_itself(
         self,
@@ -2900,6 +2913,7 @@ class TestSuite8RegistrySelfRegistration:
         assert registry_capabilities.processing is True
         assert registry_capabilities.routing is True
 
+    @pytest.mark.skip(reason="Requires consul removed in OMN-3540")
     @pytest.mark.asyncio
     async def test_registry_discoverable_by_other_nodes(
         self,

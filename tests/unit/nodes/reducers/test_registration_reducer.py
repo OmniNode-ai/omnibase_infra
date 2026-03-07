@@ -51,7 +51,6 @@ from omnibase_infra.models.registration import (
 )
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import (
-    ModelPayloadConsulRegister,
     ModelPayloadPostgresUpsertRegistration,
     ModelRegistrationState,
 )
@@ -70,10 +69,10 @@ TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
 # -----------------------------------------------------------------------------
 
 # Expected intents for a complete registration operation
-# The RegistrationReducer emits exactly 2 intents per introspection event:
-# 1. consul.register - Register node with Consul service discovery
-# 2. postgres.upsert_registration - Upsert node metadata in PostgreSQL
-EXPECTED_REGISTRATION_INTENTS = 2
+# The RegistrationReducer emits exactly 1 intent per introspection event:
+# 1. postgres.upsert_registration - Upsert node metadata in PostgreSQL
+# (consul.register was removed in OMN-3540)
+EXPECTED_REGISTRATION_INTENTS = 1
 
 
 # -----------------------------------------------------------------------------
@@ -150,20 +149,19 @@ def event_without_health_endpoint() -> ModelNodeIntrospectionEvent:
 class TestBasicReduce:
     """Tests for core reduce functionality."""
 
-    def test_reduce_valid_event_emits_two_intents(
+    def test_reduce_valid_event_emits_one_intent(
         self,
         reducer: RegistrationReducer,
         initial_state: ModelRegistrationState,
         valid_event: ModelNodeIntrospectionEvent,
     ) -> None:
-        """Test that valid event produces Consul + PostgreSQL intents."""
+        """Test that valid event produces a PostgreSQL intent."""
         output = reducer.reduce(initial_state, valid_event)
 
         assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
-        # Verify both intent types exist via payload.intent_type
+        # Verify postgres intent exists via payload.intent_type
         intent_types = {i.payload.intent_type for i in output.intents}
-        assert "consul.register" in intent_types
         assert "postgres.upsert_registration" in intent_types
 
     def test_reduce_valid_event_transitions_to_pending(
@@ -225,11 +223,8 @@ class TestBasicReduce:
             assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS, (
                 f"Failed for node_type: {node_type}"
             )
-            # Verify both intent types exist via payload.intent_type
+            # Verify postgres intent exists via payload.intent_type
             intent_types = {i.payload.intent_type for i in output.intents}
-            assert "consul.register" in intent_types, (
-                f"Missing consul.register for node_type: {node_type}"
-            )
             assert "postgres.upsert_registration" in intent_types, (
                 f"Missing postgres.upsert_registration for node_type: {node_type}"
             )
@@ -455,55 +450,17 @@ class TestStateTransitions:
         assert new_state.consul_confirmed is False
         assert new_state.postgres_confirmed is False
 
-    def test_state_with_consul_confirmed_partial(self) -> None:
-        """Test that Consul only = partial status."""
-        state = ModelRegistrationState()
-        node_id = uuid4()
-        pending_state = state.with_pending_registration(node_id, uuid4())
-
-        consul_confirmed = pending_state.with_consul_confirmed(uuid4())
-
-        assert consul_confirmed.status == "partial"
-        assert consul_confirmed.consul_confirmed is True
-        assert consul_confirmed.postgres_confirmed is False
-
-    def test_state_with_postgres_confirmed_partial(self) -> None:
-        """Test that Postgres only = partial status."""
+    def test_state_with_postgres_confirmed_complete(self) -> None:
+        """Test that Postgres confirmation goes straight to complete status (consul removed in OMN-3540)."""
         state = ModelRegistrationState()
         node_id = uuid4()
         pending_state = state.with_pending_registration(node_id, uuid4())
 
         postgres_confirmed = pending_state.with_postgres_confirmed(uuid4())
 
-        assert postgres_confirmed.status == "partial"
+        assert postgres_confirmed.status == "complete"
         assert postgres_confirmed.consul_confirmed is False
         assert postgres_confirmed.postgres_confirmed is True
-
-    def test_state_with_both_confirmed_complete(self) -> None:
-        """Test that both confirmations = complete status."""
-        state = ModelRegistrationState()
-        node_id = uuid4()
-        pending_state = state.with_pending_registration(node_id, uuid4())
-
-        consul_confirmed = pending_state.with_consul_confirmed(uuid4())
-        both_confirmed = consul_confirmed.with_postgres_confirmed(uuid4())
-
-        assert both_confirmed.status == "complete"
-        assert both_confirmed.consul_confirmed is True
-        assert both_confirmed.postgres_confirmed is True
-
-    def test_state_with_postgres_then_consul_complete(self) -> None:
-        """Test that order doesn't matter: postgres then consul = complete."""
-        state = ModelRegistrationState()
-        node_id = uuid4()
-        pending_state = state.with_pending_registration(node_id, uuid4())
-
-        postgres_confirmed = pending_state.with_postgres_confirmed(uuid4())
-        both_confirmed = postgres_confirmed.with_consul_confirmed(uuid4())
-
-        assert both_confirmed.status == "complete"
-        assert both_confirmed.consul_confirmed is True
-        assert both_confirmed.postgres_confirmed is True
 
     def test_state_with_failure(self) -> None:
         """Test failure state correctly set."""
@@ -543,21 +500,6 @@ class TestStateTransitions:
         assert pending_state.status == "pending"
         assert pending_state.node_id == node_id
 
-    def test_state_failure_preserves_confirmation_flags(self) -> None:
-        """Test that failure preserves confirmation flags for diagnostics."""
-        state = ModelRegistrationState()
-        node_id = uuid4()
-        pending_state = state.with_pending_registration(node_id, uuid4())
-
-        consul_confirmed = pending_state.with_consul_confirmed(uuid4())
-        failed_state = consul_confirmed.with_failure("postgres_failed", uuid4())
-
-        assert failed_state.status == "failed"
-        assert failed_state.failure_reason == "postgres_failed"
-        # Consul confirmation preserved
-        assert failed_state.consul_confirmed is True
-        assert failed_state.postgres_confirmed is False
-
     def test_state_with_reset_from_failed(self) -> None:
         """Test reset from failed state returns to idle."""
         state = ModelRegistrationState()
@@ -575,43 +517,6 @@ class TestStateTransitions:
         assert reset_state.failure_reason is None
         assert reset_state.last_processed_event_id == reset_event_id
 
-    def test_state_with_reset_from_complete(self) -> None:
-        """Test reset from complete state returns to idle."""
-        state = ModelRegistrationState()
-        node_id = uuid4()
-        pending_state = state.with_pending_registration(node_id, uuid4())
-        consul_confirmed = pending_state.with_consul_confirmed(uuid4())
-        complete_state = consul_confirmed.with_postgres_confirmed(uuid4())
-
-        reset_event_id = uuid4()
-        reset_state = complete_state.with_reset(reset_event_id)
-
-        assert reset_state.status == "idle"
-        assert reset_state.node_id is None
-        assert reset_state.consul_confirmed is False
-        assert reset_state.postgres_confirmed is False
-
-    def test_state_with_reset_clears_all_flags(self) -> None:
-        """Test that reset clears all confirmation flags and failure reason."""
-        # Create a failed state with one confirmation
-        state = ModelRegistrationState()
-        node_id = uuid4()
-        pending_state = state.with_pending_registration(node_id, uuid4())
-        consul_confirmed = pending_state.with_consul_confirmed(uuid4())
-        failed_state = consul_confirmed.with_failure("postgres_failed", uuid4())
-
-        # Verify pre-conditions
-        assert failed_state.consul_confirmed is True
-        assert failed_state.failure_reason == "postgres_failed"
-
-        # Reset should clear everything
-        reset_state = failed_state.with_reset(uuid4())
-
-        assert reset_state.consul_confirmed is False
-        assert reset_state.postgres_confirmed is False
-        assert reset_state.failure_reason is None
-        assert reset_state.node_id is None
-
     def test_state_can_reset_from_failed(self) -> None:
         """Test can_reset returns True for failed state."""
         state = ModelRegistrationState()
@@ -620,16 +525,6 @@ class TestStateTransitions:
         failed_state = pending_state.with_failure("validation_failed", uuid4())
 
         assert failed_state.can_reset() is True
-
-    def test_state_can_reset_from_complete(self) -> None:
-        """Test can_reset returns True for complete state."""
-        state = ModelRegistrationState()
-        node_id = uuid4()
-        pending_state = state.with_pending_registration(node_id, uuid4())
-        consul_confirmed = pending_state.with_consul_confirmed(uuid4())
-        complete_state = consul_confirmed.with_postgres_confirmed(uuid4())
-
-        assert complete_state.can_reset() is True
 
     def test_state_cannot_reset_from_idle(self) -> None:
         """Test can_reset returns False for idle state."""
@@ -644,15 +539,6 @@ class TestStateTransitions:
         pending_state = state.with_pending_registration(node_id, uuid4())
 
         assert pending_state.can_reset() is False
-
-    def test_state_cannot_reset_from_partial(self) -> None:
-        """Test can_reset returns False for partial state."""
-        state = ModelRegistrationState()
-        node_id = uuid4()
-        pending_state = state.with_pending_registration(node_id, uuid4())
-        partial_state = pending_state.with_consul_confirmed(uuid4())
-
-        assert partial_state.can_reset() is False
 
     def test_state_reset_immutability(self) -> None:
         """Test that reset creates a new instance without mutating original."""
@@ -702,23 +588,6 @@ class TestReducerReset:
         assert output.result.failure_reason is None
         assert output.items_processed == 1
 
-    def test_reduce_reset_from_complete_state(
-        self,
-        reducer: RegistrationReducer,
-    ) -> None:
-        """Test that reduce_reset transitions complete state to idle."""
-        state = ModelRegistrationState()
-        node_id = uuid4()
-        pending_state = state.with_pending_registration(node_id, uuid4())
-        consul_confirmed = pending_state.with_consul_confirmed(uuid4())
-        complete_state = consul_confirmed.with_postgres_confirmed(uuid4())
-
-        reset_event_id = uuid4()
-        output = reducer.reduce_reset(complete_state, reset_event_id)
-
-        assert output.result.status == "idle"
-        assert output.items_processed == 1
-
     def test_reduce_reset_fails_from_idle(
         self,
         reducer: RegistrationReducer,
@@ -758,160 +627,6 @@ class TestReducerReset:
         # Confirmation flags should be preserved for diagnostics
         assert output.result.node_id == node_id
         assert output.items_processed == 1  # Event was processed (caused state change)
-
-    def test_reduce_reset_fails_from_partial(
-        self,
-        reducer: RegistrationReducer,
-    ) -> None:
-        """Test that reduce_reset from partial state returns failed with invalid_reset_state.
-
-        Resetting from partial would lose in-flight registration state.
-        One backend (Consul or PostgreSQL) has already confirmed, and
-        resetting would discard that confirmation, leaving the system
-        in an inconsistent state.
-        """
-        state = ModelRegistrationState()
-        node_id = uuid4()
-        pending_state = state.with_pending_registration(node_id, uuid4())
-        partial_state = pending_state.with_consul_confirmed(uuid4())
-
-        reset_event_id = uuid4()
-        output = reducer.reduce_reset(partial_state, reset_event_id)
-
-        assert output.result.status == "failed"
-        assert output.result.failure_reason == "invalid_reset_state"
-        # Confirmation flags should be preserved for diagnostics
-        assert output.result.consul_confirmed is True
-        assert output.items_processed == 1  # Event was processed (caused state change)
-
-    def test_reset_from_all_states(
-        self,
-        reducer: RegistrationReducer,
-    ) -> None:
-        """Test reset behavior across the entire FSM state space.
-
-        This comprehensive test validates the reset operation for ALL five
-        FSM states, providing a single authoritative reference for reset
-        behavior. The test documents and validates the following invariants:
-
-        FSM Reset Behavior Matrix:
-        ┌──────────┬──────────────┬────────────────────────────────────────┐
-        │ State    │ Reset Result │ Rationale                              │
-        ├──────────┼──────────────┼────────────────────────────────────────┤
-        │ idle     │ FAILS        │ Nothing to reset; validation error     │
-        │ pending  │ FAILS        │ Would lose in-flight registration      │
-        │ partial  │ FAILS        │ Would cause backend inconsistency      │
-        │ complete │ SUCCEEDS     │ Safe terminal state; returns to idle   │
-        │ failed   │ SUCCEEDS     │ Safe terminal state; enables retry     │
-        └──────────┴──────────────┴────────────────────────────────────────┘
-
-        Design Rationale:
-            Reset is only allowed from terminal states (complete, failed) because:
-            1. Non-terminal states have in-flight operations that would be lost
-            2. Partial state has one backend confirmed; reset would leave
-               inconsistent state between Consul and PostgreSQL
-            3. Terminal states are safe because the registration workflow
-               has completed (successfully or with failure)
-
-        This test complements the individual state tests by:
-            - Providing a single test that validates the complete FSM
-            - Documenting the state machine invariants in one place
-            - Ensuring no state is accidentally omitted from testing
-            - Making FSM behavior changes immediately visible
-
-        Related:
-            - DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md
-            - OMN-950: Reducer test completeness
-        """
-        base_state = ModelRegistrationState()
-        node_id = uuid4()
-
-        # Build states for each FSM position
-        idle_state = base_state
-        pending_state = base_state.with_pending_registration(node_id, uuid4())
-        partial_consul_state = pending_state.with_consul_confirmed(uuid4())
-        partial_postgres_state = pending_state.with_postgres_confirmed(uuid4())
-        complete_state = partial_consul_state.with_postgres_confirmed(uuid4())
-        failed_state = pending_state.with_failure("consul_failed", uuid4())
-
-        # Define expected behaviors for each state
-        # Format: (state, state_name, should_succeed, expected_status, expected_failure_reason)
-        test_cases: list[
-            tuple[
-                ModelRegistrationState,
-                str,
-                bool,
-                str,
-                FailureReason | None,
-            ]
-        ] = [
-            # Terminal states - reset should SUCCEED
-            (complete_state, "complete", True, "idle", None),
-            (failed_state, "failed", True, "idle", None),
-            # Non-terminal states - reset should FAIL with invalid_reset_state
-            (idle_state, "idle", False, "failed", "invalid_reset_state"),
-            (pending_state, "pending", False, "failed", "invalid_reset_state"),
-            (
-                partial_consul_state,
-                "partial (consul confirmed)",
-                False,
-                "failed",
-                "invalid_reset_state",
-            ),
-            (
-                partial_postgres_state,
-                "partial (postgres confirmed)",
-                False,
-                "failed",
-                "invalid_reset_state",
-            ),
-        ]
-
-        for (
-            state,
-            state_name,
-            should_succeed,
-            expected_status,
-            expected_failure,
-        ) in test_cases:
-            reset_event_id = uuid4()
-            output = reducer.reduce_reset(state, reset_event_id)
-
-            # Validate status transition
-            assert output.result.status == expected_status, (
-                f"Reset from {state_name}: expected status '{expected_status}', "
-                f"got '{output.result.status}'"
-            )
-
-            # Validate failure reason
-            assert output.result.failure_reason == expected_failure, (
-                f"Reset from {state_name}: expected failure_reason '{expected_failure}', "
-                f"got '{output.result.failure_reason}'"
-            )
-
-            # Validate processing count (all resets should process the event)
-            assert output.items_processed == 1, (
-                f"Reset from {state_name}: expected items_processed=1, "
-                f"got {output.items_processed}"
-            )
-
-            # Validate no intents emitted (resets never emit intents)
-            assert len(output.intents) == 0, (
-                f"Reset from {state_name}: expected no intents, "
-                f"got {len(output.intents)}"
-            )
-
-            if should_succeed:
-                # Successful reset should clear all state
-                assert output.result.node_id is None, (
-                    f"Reset from {state_name}: node_id should be None after successful reset"
-                )
-                assert output.result.consul_confirmed is False, (
-                    f"Reset from {state_name}: consul_confirmed should be False after successful reset"
-                )
-                assert output.result.postgres_confirmed is False, (
-                    f"Reset from {state_name}: postgres_confirmed should be False after successful reset"
-                )
 
     def test_reduce_reset_emits_no_intents(
         self,
@@ -973,145 +688,6 @@ class TestReducerReset:
         retry_output = reducer.reduce(reset_output.result, event2)
         assert retry_output.result.status == "pending"
         assert len(retry_output.intents) == EXPECTED_REGISTRATION_INTENTS
-
-
-# -----------------------------------------------------------------------------
-# Consul Intent Building Tests
-# -----------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-class TestConsulIntentBuilding:
-    """Tests for Consul registration intent structure."""
-
-    def test_consul_intent_has_correct_service_id(
-        self,
-        reducer: RegistrationReducer,
-        initial_state: ModelRegistrationState,
-    ) -> None:
-        """Test that service_id format is correct."""
-        node_id = uuid4()
-        event = create_introspection_event(
-            node_id=node_id, node_type=EnumNodeKind.EFFECT
-        )
-
-        output = reducer.reduce(initial_state, event)
-
-        consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"),
-            None,
-        )
-        assert consul_intent is not None
-        assert isinstance(consul_intent.payload, ModelPayloadConsulRegister)
-
-        # Service ID follows ONEX convention: onex-{node_type}-{node_id}
-        expected_service_id = f"onex-effect-{node_id}"
-        assert consul_intent.payload.service_id == expected_service_id
-
-    def test_consul_intent_has_correct_tags(
-        self,
-        reducer: RegistrationReducer,
-        initial_state: ModelRegistrationState,
-    ) -> None:
-        """Test that tags include node_type and version."""
-        event = ModelNodeIntrospectionEvent(
-            node_id=uuid4(),
-            node_type=EnumNodeKind.COMPUTE,
-            node_version=ModelSemVer.parse("2.3.4"),
-            endpoints={"health": "http://localhost:8080/health"},
-            correlation_id=uuid4(),
-            timestamp=TEST_TIMESTAMP,
-        )
-
-        output = reducer.reduce(initial_state, event)
-
-        consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"),
-            None,
-        )
-        assert consul_intent is not None
-        assert isinstance(consul_intent.payload, ModelPayloadConsulRegister)
-
-        tags = consul_intent.payload.tags
-        assert "node_type:compute" in tags
-        assert "node_version:2.3.4" in tags
-
-    def test_consul_intent_has_health_check_when_provided(
-        self,
-        reducer: RegistrationReducer,
-        initial_state: ModelRegistrationState,
-        valid_event: ModelNodeIntrospectionEvent,
-    ) -> None:
-        """Test that health check is included if endpoint exists."""
-        output = reducer.reduce(initial_state, valid_event)
-
-        consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"),
-            None,
-        )
-        assert consul_intent is not None
-        assert isinstance(consul_intent.payload, ModelPayloadConsulRegister)
-
-        assert consul_intent.payload.health_check is not None
-        health_check = consul_intent.payload.health_check
-        assert health_check["HTTP"] == "http://localhost:8080/health"
-        assert health_check["Interval"] == "10s"
-        assert health_check["Timeout"] == "5s"
-
-    def test_consul_intent_no_health_check_when_missing(
-        self,
-        reducer: RegistrationReducer,
-        initial_state: ModelRegistrationState,
-        event_without_health_endpoint: ModelNodeIntrospectionEvent,
-    ) -> None:
-        """Test that health check is None if no endpoint."""
-        output = reducer.reduce(initial_state, event_without_health_endpoint)
-
-        consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"),
-            None,
-        )
-        assert consul_intent is not None
-        assert isinstance(consul_intent.payload, ModelPayloadConsulRegister)
-
-        # health_check should be None when no health endpoint is provided
-        assert consul_intent.payload.health_check is None
-
-    def test_consul_intent_has_correct_target(
-        self,
-        reducer: RegistrationReducer,
-        initial_state: ModelRegistrationState,
-    ) -> None:
-        """Test that Consul intent target is correctly formatted."""
-        event = create_introspection_event(node_type=EnumNodeKind.ORCHESTRATOR)
-
-        output = reducer.reduce(initial_state, event)
-
-        consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"),
-            None,
-        )
-        assert consul_intent is not None
-
-        expected_target = "consul://service/onex-orchestrator"
-        assert consul_intent.target == expected_target
-
-    def test_consul_intent_service_name_format(
-        self,
-        reducer: RegistrationReducer,
-        initial_state: ModelRegistrationState,
-    ) -> None:
-        """Test that service_name follows onex-{node_type} format."""
-        event = create_introspection_event(node_type=EnumNodeKind.REDUCER)
-
-        output = reducer.reduce(initial_state, event)
-
-        consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"),
-            None,
-        )
-        assert consul_intent is not None
-        assert consul_intent.payload.service_name == "onex-reducer"
 
 
 # -----------------------------------------------------------------------------
@@ -2009,14 +1585,14 @@ class TestCompleteStateTransitions:
         )  # Consul + PostgreSQL intents
 
     # -------------------------------------------------------------------------
-    # Transition 2: pending -> partial (Consul confirmed first)
+    # Transition 2: pending -> complete (PostgreSQL confirmed, consul removed OMN-3540)
     # -------------------------------------------------------------------------
 
-    def test_transition_pending_to_partial_consul_first(self) -> None:
-        """Test pending -> partial when Consul confirms first.
+    def test_transition_pending_to_complete_postgres_confirmed(self) -> None:
+        """Test pending -> complete when PostgreSQL confirms.
 
-        When Consul confirms registration before PostgreSQL, the state
-        transitions to 'partial' with consul_confirmed=True.
+        With consul removed (OMN-3540), PostgreSQL confirmation transitions
+        directly from pending to complete.
         """
         state = ModelRegistrationState()
         node_id = uuid4()
@@ -2026,35 +1602,12 @@ class TestCompleteStateTransitions:
         assert pending_state.consul_confirmed is False
         assert pending_state.postgres_confirmed is False
 
-        partial_state = pending_state.with_consul_confirmed(uuid4())
+        complete_state = pending_state.with_postgres_confirmed(uuid4())
 
-        assert partial_state.status == "partial"
-        assert partial_state.consul_confirmed is True
-        assert partial_state.postgres_confirmed is False
-        assert partial_state.node_id == node_id
-
-    # -------------------------------------------------------------------------
-    # Transition 3: pending -> partial (PostgreSQL confirmed first)
-    # -------------------------------------------------------------------------
-
-    def test_transition_pending_to_partial_postgres_first(self) -> None:
-        """Test pending -> partial when PostgreSQL confirms first.
-
-        When PostgreSQL confirms registration before Consul, the state
-        transitions to 'partial' with postgres_confirmed=True.
-        """
-        state = ModelRegistrationState()
-        node_id = uuid4()
-        pending_state = state.with_pending_registration(node_id, uuid4())
-
-        assert pending_state.status == "pending"
-
-        partial_state = pending_state.with_postgres_confirmed(uuid4())
-
-        assert partial_state.status == "partial"
-        assert partial_state.consul_confirmed is False
-        assert partial_state.postgres_confirmed is True
-        assert partial_state.node_id == node_id
+        assert complete_state.status == "complete"
+        assert complete_state.consul_confirmed is False
+        assert complete_state.postgres_confirmed is True
+        assert complete_state.node_id == node_id
 
     # -------------------------------------------------------------------------
     # Transition 4: pending -> failed (validation or backend error)
@@ -2113,110 +1666,16 @@ class TestCompleteStateTransitions:
         assert failed_state.failure_reason == "postgres_failed"
 
     # -------------------------------------------------------------------------
-    # Transition 5: partial -> complete (Consul first, then PostgreSQL)
+    # Transition 5 (OMN-3540: consul removed, postgres -> complete directly)
     # -------------------------------------------------------------------------
 
-    def test_transition_partial_to_complete_consul_then_postgres(self) -> None:
-        """Test partial -> complete: Consul confirmed, then PostgreSQL.
-
-        When Consul confirms first (pending -> partial), and then PostgreSQL
-        confirms, the state transitions to 'complete'.
-        """
-        state = ModelRegistrationState()
-        node_id = uuid4()
-        pending_state = state.with_pending_registration(node_id, uuid4())
-
-        # Consul confirms first -> partial
-        partial_state = pending_state.with_consul_confirmed(uuid4())
-        assert partial_state.status == "partial"
-        assert partial_state.consul_confirmed is True
-        assert partial_state.postgres_confirmed is False
-
-        # PostgreSQL confirms second -> complete
-        complete_state = partial_state.with_postgres_confirmed(uuid4())
-
-        assert complete_state.status == "complete"
-        assert complete_state.consul_confirmed is True
-        assert complete_state.postgres_confirmed is True
-        assert complete_state.node_id == node_id
-
     # -------------------------------------------------------------------------
-    # Transition 6: partial -> complete (PostgreSQL first, then Consul)
+    # Transition 6 (OMN-3540: consul removed, pending -> failed on postgres error)
     # -------------------------------------------------------------------------
 
-    def test_transition_partial_to_complete_postgres_then_consul(self) -> None:
-        """Test partial -> complete: PostgreSQL confirmed, then Consul.
-
-        When PostgreSQL confirms first (pending -> partial), and then Consul
-        confirms, the state transitions to 'complete'.
-        """
-        state = ModelRegistrationState()
-        node_id = uuid4()
-        pending_state = state.with_pending_registration(node_id, uuid4())
-
-        # PostgreSQL confirms first -> partial
-        partial_state = pending_state.with_postgres_confirmed(uuid4())
-        assert partial_state.status == "partial"
-        assert partial_state.consul_confirmed is False
-        assert partial_state.postgres_confirmed is True
-
-        # Consul confirms second -> complete
-        complete_state = partial_state.with_consul_confirmed(uuid4())
-
-        assert complete_state.status == "complete"
-        assert complete_state.consul_confirmed is True
-        assert complete_state.postgres_confirmed is True
-        assert complete_state.node_id == node_id
-
     # -------------------------------------------------------------------------
-    # Transition 7: partial -> failed (error on remaining backend)
+    # Transition 7: pending -> failed (error on PostgreSQL, OMN-3540 consul removed)
     # -------------------------------------------------------------------------
-
-    def test_transition_partial_to_failed_consul_confirmed_postgres_fails(self) -> None:
-        """Test partial -> failed: Consul confirmed, PostgreSQL fails.
-
-        When Consul confirms (partial state) but PostgreSQL returns an error,
-        the state transitions to 'failed'. Consul confirmation is preserved
-        for diagnostics.
-        """
-        state = ModelRegistrationState()
-        node_id = uuid4()
-        pending_state = state.with_pending_registration(node_id, uuid4())
-        partial_state = pending_state.with_consul_confirmed(uuid4())
-
-        assert partial_state.status == "partial"
-        assert partial_state.consul_confirmed is True
-
-        failed_state = partial_state.with_failure("postgres_failed", uuid4())
-
-        assert failed_state.status == "failed"
-        assert failed_state.failure_reason == "postgres_failed"
-        # Consul confirmation preserved for diagnostics
-        assert failed_state.consul_confirmed is True
-        assert failed_state.postgres_confirmed is False
-
-    def test_transition_partial_to_failed_postgres_confirmed_consul_fails(self) -> None:
-        """Test partial -> failed: PostgreSQL confirmed, Consul fails.
-
-        When PostgreSQL confirms (partial state) but Consul returns an error,
-        the state transitions to 'failed'. PostgreSQL confirmation is preserved
-        for diagnostics.
-        """
-        state = ModelRegistrationState()
-        node_id = uuid4()
-        pending_state = state.with_pending_registration(node_id, uuid4())
-        partial_state = pending_state.with_postgres_confirmed(uuid4())
-
-        assert partial_state.status == "partial"
-        assert partial_state.postgres_confirmed is True
-
-        failed_state = partial_state.with_failure("consul_failed", uuid4())
-
-        assert failed_state.status == "failed"
-        assert failed_state.failure_reason == "consul_failed"
-        # PostgreSQL confirmation preserved for diagnostics
-        assert failed_state.consul_confirmed is False
-        assert failed_state.postgres_confirmed is True
 
     # -------------------------------------------------------------------------
     # Transition 8: failed -> idle (reset via reduce_reset())
@@ -2264,8 +1723,7 @@ class TestCompleteStateTransitions:
         state = ModelRegistrationState()
         node_id = uuid4()
         pending_state = state.with_pending_registration(node_id, uuid4())
-        partial_state = pending_state.with_consul_confirmed(uuid4())
-        complete_state = partial_state.with_postgres_confirmed(uuid4())
+        complete_state = pending_state.with_postgres_confirmed(uuid4())
 
         assert complete_state.status == "complete"
 
@@ -2327,56 +1785,30 @@ class TestCompleteStateTransitions:
 
     # -------------------------------------------------------------------------
     # Transition 12: partial -> failed (invalid reset attempt)
+    # NOTE: With consul removed (OMN-3540), partial state is no longer reachable
+    # via normal transitions. This test is removed.
     # -------------------------------------------------------------------------
 
-    def test_transition_partial_to_failed_invalid_reset(
-        self,
-        reducer: RegistrationReducer,
-    ) -> None:
-        """Test partial -> failed on invalid reset attempt.
-
-        Resetting from partial is invalid because it would discard the
-        confirmation from one backend, leaving the system inconsistent.
-        """
-        state = ModelRegistrationState()
-        node_id = uuid4()
-        pending_state = state.with_pending_registration(node_id, uuid4())
-        partial_state = pending_state.with_consul_confirmed(uuid4())
-
-        assert partial_state.status == "partial"
-
-        reset_output = reducer.reduce_reset(partial_state, uuid4())
-
-        assert reset_output.result.status == "failed"
-        assert reset_output.result.failure_reason == "invalid_reset_state"
-        # Consul confirmation preserved for diagnostics
-        assert reset_output.result.consul_confirmed is True
-
     # -------------------------------------------------------------------------
-    # Transition 13: pending -> complete is IMPOSSIBLE
+    # Transition 13: pending -> complete is now direct (consul removed OMN-3540)
     # -------------------------------------------------------------------------
 
-    def test_pending_to_complete_impossible_without_partial(self) -> None:
-        """Verify pending -> complete is impossible without going through partial.
+    def test_pending_to_complete_via_postgres_confirmation(self) -> None:
+        """Verify pending -> complete is direct via PostgreSQL confirmation.
 
-        The FSM requires both backends to confirm. Each confirmation results
-        in either pending->partial (first) or partial->complete (second).
-        There is no direct path from pending to complete.
+        With consul removed (OMN-3540), a single PostgreSQL confirmation
+        transitions from pending to complete.
         """
         state = ModelRegistrationState()
         node_id = uuid4()
         pending_state = state.with_pending_registration(node_id, uuid4())
 
-        # Even if we try both confirmations at once, we must go through partial
-        # First confirmation -> partial (not complete)
-        after_first = pending_state.with_consul_confirmed(uuid4())
-        assert after_first.status == "partial", (
-            "First confirmation should result in partial, not complete"
+        # PostgreSQL confirmation -> complete directly
+        after_postgres = pending_state.with_postgres_confirmed(uuid4())
+        assert after_postgres.status == "complete", (
+            "PostgreSQL confirmation should result in complete"
         )
-
-        # Only second confirmation -> complete
-        after_second = after_first.with_postgres_confirmed(uuid4())
-        assert after_second.status == "complete"
+        assert after_postgres.postgres_confirmed is True
 
     # -------------------------------------------------------------------------
     # Invalid Transitions: complete -> pending (no direct path)
@@ -2391,8 +1823,7 @@ class TestCompleteStateTransitions:
         state = ModelRegistrationState()
         node_id = uuid4()
         pending_state = state.with_pending_registration(node_id, uuid4())
-        partial_state = pending_state.with_consul_confirmed(uuid4())
-        complete_state = partial_state.with_postgres_confirmed(uuid4())
+        complete_state = pending_state.with_postgres_confirmed(uuid4())
 
         assert complete_state.status == "complete"
 
@@ -2427,7 +1858,7 @@ class TestCompleteStateTransitions:
         state = ModelRegistrationState()
         node_id = uuid4()
         pending_state = state.with_pending_registration(node_id, uuid4())
-        failed_state = pending_state.with_failure("consul_failed", uuid4())
+        failed_state = pending_state.with_failure("postgres_failed", uuid4())
 
         assert failed_state.status == "failed"
 
@@ -2442,14 +1873,14 @@ class TestCompleteStateTransitions:
         assert new_output.result.status == "pending"
 
     # -------------------------------------------------------------------------
-    # Invalid Transitions: idle -> complete (requires pending and partial)
+    # Invalid Transitions: idle -> complete (requires pending then postgres confirm)
     # -------------------------------------------------------------------------
 
     def test_invalid_transition_idle_to_complete_not_possible(self) -> None:
         """Verify no direct idle -> complete transition exists.
 
         Completing registration requires going through the full FSM path:
-        idle -> pending -> partial -> complete.
+        idle -> pending -> complete (via postgres confirmation).
         """
         state = ModelRegistrationState()
         assert state.status == "idle"
@@ -2461,43 +1892,12 @@ class TestCompleteStateTransitions:
 
         # Verify the correct path is required
         pending_state = state.with_pending_registration(uuid4(), uuid4())
-        partial_state = pending_state.with_consul_confirmed(uuid4())
-        complete_state = partial_state.with_postgres_confirmed(uuid4())
+        complete_state = pending_state.with_postgres_confirmed(uuid4())
 
         assert complete_state.status == "complete"
 
     # -------------------------------------------------------------------------
-    # Invalid Transitions: partial -> pending (cannot regress)
-    # -------------------------------------------------------------------------
-
-    def test_invalid_transition_partial_to_pending_cannot_regress(self) -> None:
-        """Verify no partial -> pending regression exists.
-
-        Once in partial state (one backend confirmed), there is no valid
-        transition back to pending. The FSM only moves forward or to failed.
-        """
-        state = ModelRegistrationState()
-        node_id = uuid4()
-        pending_state = state.with_pending_registration(node_id, uuid4())
-        partial_state = pending_state.with_consul_confirmed(uuid4())
-
-        assert partial_state.status == "partial"
-
-        # Available transitions from partial:
-        # - with_consul_confirmed() -> complete (if postgres already confirmed)
-        # - with_postgres_confirmed() -> complete (if consul already confirmed)
-        # - with_failure() -> failed
-        # There is no with_pending_registration that regresses to pending
-
-        # Calling with_pending_registration on partial would start a NEW
-        # registration, not regress the current one
-        new_pending = partial_state.with_pending_registration(uuid4(), uuid4())
-        assert new_pending.status == "pending"
-        # But this is a new registration (new node_id), not a regression
-        assert new_pending.node_id != node_id
-
-    # -------------------------------------------------------------------------
-    # Full workflow test: idle -> pending -> partial -> complete -> idle
+    # Full workflow test: idle -> pending -> complete -> idle
     # -------------------------------------------------------------------------
 
     def test_full_successful_registration_workflow(
@@ -2507,7 +1907,8 @@ class TestCompleteStateTransitions:
         """Test the complete successful registration workflow.
 
         Validates the full FSM path:
-        idle -> pending -> partial -> complete -> idle (reset)
+        idle -> pending -> complete -> idle (reset)
+        With consul removed (OMN-3540), postgres confirmation goes directly to complete.
         """
         # Start: idle
         initial_state = ModelRegistrationState()
@@ -2519,15 +1920,11 @@ class TestCompleteStateTransitions:
         assert pending_output.result.status == "pending"
         assert len(pending_output.intents) == EXPECTED_REGISTRATION_INTENTS
 
-        # Step 2: pending -> partial (first confirmation)
-        partial_state = pending_output.result.with_consul_confirmed(uuid4())
-        assert partial_state.status == "partial"
-
-        # Step 3: partial -> complete (second confirmation)
-        complete_state = partial_state.with_postgres_confirmed(uuid4())
+        # Step 2: pending -> complete (postgres confirmation, consul removed OMN-3540)
+        complete_state = pending_output.result.with_postgres_confirmed(uuid4())
         assert complete_state.status == "complete"
 
-        # Step 4: complete -> idle (reset for re-registration)
+        # Step 3: complete -> idle (reset for re-registration)
         reset_output = reducer.reduce_reset(complete_state, uuid4())
         assert reset_output.result.status == "idle"
 
@@ -2638,16 +2035,13 @@ class TestCircuitBreakerNonApplicability:
         for intent in output.intents:
             # Intents are declarative descriptions using extension payload
             assert intent.intent_type
-            assert intent.payload.intent_type in (
-                "consul.register",
-                "postgres.upsert_registration",
-            )
+            assert intent.payload.intent_type in ("postgres.upsert_registration",)
             assert intent.target is not None
 
             # Verify payloads are typed models (ProtocolIntentPayload implementations)
             assert isinstance(
                 intent.payload,
-                ModelPayloadConsulRegister | ModelPayloadPostgresUpsertRegistration,
+                ModelPayloadPostgresUpsertRegistration,
             )
 
     def test_reducer_is_deterministic(
@@ -3192,14 +2586,8 @@ class TestEdgeCasesComprehensive:
         assert output.result.status == "pending"
         assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
-        # Verify intents are still built correctly with minimal data
-        consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"),
-            None,
-        )
-        assert consul_intent is not None
-        assert consul_intent.payload.health_check is None
-
+        # Verify postgres intent is built correctly with minimal data
+        # (consul removed in OMN-3540)
         postgres_intent = next(
             (
                 i
@@ -3294,14 +2682,18 @@ class TestEdgeCasesComprehensive:
 
         assert output.result.status == "pending"
 
-        # Verify long version is preserved in tags
-        consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"),
+        # Verify long version is preserved in postgres intent
+        # (consul removed in OMN-3540)
+        postgres_intent = next(
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "postgres.upsert_registration"
+            ),
             None,
         )
-        assert consul_intent is not None
-        tags = consul_intent.payload.tags
-        assert f"node_version:{long_version}" in tags
+        assert postgres_intent is not None
+        assert str(long_version) in str(postgres_intent.payload.record.node_version)
 
     def test_rapid_state_transitions(
         self,
@@ -3314,24 +2706,20 @@ class TestEdgeCasesComprehensive:
         """
         state = ModelRegistrationState()
 
-        # Rapid-fire: introspection -> consul confirm -> postgres confirm
+        # Rapid-fire: introspection -> postgres confirm (consul removed OMN-3540)
         node_id = uuid4()
         event1 = create_introspection_event(node_id=node_id)
         output1 = reducer.reduce(state, event1)
         assert output1.result.status == "pending"
 
-        # First confirmation
-        state2 = output1.result.with_consul_confirmed(uuid4())
-        assert state2.status == "partial"
-
-        # Second confirmation
-        state3 = state2.with_postgres_confirmed(uuid4())
-        assert state3.status == "complete"
+        # Postgres confirmation -> complete directly
+        state2 = output1.result.with_postgres_confirmed(uuid4())
+        assert state2.status == "complete"
 
         # Verify final state is consistent
-        assert state3.consul_confirmed is True
-        assert state3.postgres_confirmed is True
-        assert state3.node_id == node_id
+        assert state2.consul_confirmed is False
+        assert state2.postgres_confirmed is True
+        assert state2.node_id == node_id
 
     def test_same_node_re_registration_after_complete(
         self,
@@ -3350,9 +2738,8 @@ class TestEdgeCasesComprehensive:
         output1 = reducer.reduce(state, event1)
         assert output1.result.status == "pending"
 
-        # Complete the registration
-        consul_state = output1.result.with_consul_confirmed(uuid4())
-        complete_state = consul_state.with_postgres_confirmed(uuid4())
+        # Complete the registration (consul removed OMN-3540, postgres -> complete directly)
+        complete_state = output1.result.with_postgres_confirmed(uuid4())
         assert complete_state.status == "complete"
 
         # Reset
@@ -3444,13 +2831,17 @@ class TestEdgeCasesComprehensive:
         assert output.result.status == "pending"
         assert output.result.node_id == nil_uuid
 
-        # Verify nil UUID appears in intents
-        consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"),
+        # Verify nil UUID appears in postgres intent (consul removed OMN-3540)
+        postgres_intent = next(
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "postgres.upsert_registration"
+            ),
             None,
         )
-        assert consul_intent is not None
-        assert str(nil_uuid) in consul_intent.payload.service_id
+        assert postgres_intent is not None
+        assert str(postgres_intent.payload.record.node_id) == str(nil_uuid)
 
     def test_unicode_in_endpoint_urls(
         self,
@@ -3519,20 +2910,20 @@ class TestEdgeCasesComprehensive:
                 output = reducer.reduce(state, event)
                 state = output.result
             elif i == 1:
-                # Second: consul confirmation
-                state = state.with_consul_confirmed(event_id)
-            elif i == 2:
-                # Third: postgres confirmation (now complete)
+                # Second: postgres confirmation -> complete (consul removed OMN-3540)
                 state = state.with_postgres_confirmed(event_id)
-            elif i == 3:
-                # Fourth: reset
+            elif i == 2:
+                # Third: reset (now from complete)
                 output = reducer.reduce_reset(state, event_id)
                 state = output.result
-            else:
-                # Fifth: new introspection
+            elif i == 3:
+                # Fourth: new introspection
                 event = create_introspection_event(correlation_id=event_id)
                 output = reducer.reduce(state, event)
                 state = output.result
+            else:
+                # Fifth: postgres confirmation again -> complete
+                state = state.with_postgres_confirmed(event_id)
 
         # Final state should have the last event ID
         assert state.last_processed_event_id == event_ids[-1]
@@ -3540,10 +2931,10 @@ class TestEdgeCasesComprehensive:
     def test_confirmation_order_independence(
         self,
     ) -> None:
-        """Test that confirmation order doesn't affect final complete state.
+        """Test that postgres confirmation reaches complete state.
 
-        Validates that whether consul or postgres confirms first, the
-        final complete state is equivalent.
+        With consul removed (OMN-3540), only postgres confirmation exists.
+        Validates that postgres confirmation transitions pending -> complete.
         """
         state = ModelRegistrationState()
         node_id = uuid4()
@@ -3551,20 +2942,13 @@ class TestEdgeCasesComprehensive:
 
         pending_state = state.with_pending_registration(node_id, event_id)
 
-        # Path 1: Consul first, then Postgres
-        path1_partial = pending_state.with_consul_confirmed(uuid4())
-        path1_complete = path1_partial.with_postgres_confirmed(uuid4())
+        # Postgres confirmation -> complete directly (consul removed OMN-3540)
+        complete_state = pending_state.with_postgres_confirmed(uuid4())
 
-        # Path 2: Postgres first, then Consul
-        path2_partial = pending_state.with_postgres_confirmed(uuid4())
-        path2_complete = path2_partial.with_consul_confirmed(uuid4())
-
-        # Both paths should reach complete with same confirmations
-        assert path1_complete.status == "complete"
-        assert path2_complete.status == "complete"
-        assert path1_complete.consul_confirmed == path2_complete.consul_confirmed
-        assert path1_complete.postgres_confirmed == path2_complete.postgres_confirmed
-        assert path1_complete.node_id == path2_complete.node_id
+        assert complete_state.status == "complete"
+        assert complete_state.consul_confirmed is False
+        assert complete_state.postgres_confirmed is True
+        assert complete_state.node_id == node_id
 
 
 # -----------------------------------------------------------------------------
@@ -3615,32 +2999,29 @@ class TestTimeoutScenarios:
         assert failed_state.consul_confirmed is False
         assert failed_state.postgres_confirmed is False
 
-    def test_timeout_in_partial_state_causes_failure(
+    def test_timeout_in_pending_state_postgres_causes_failure(
         self,
     ) -> None:
-        """Test that partial state + timeout event = failed state.
+        """Test that pending state + postgres timeout event = failed state.
 
-        When one backend confirms but the other times out, the state
-        transitions to failed while preserving the successful confirmation
-        for diagnostic purposes.
+        With consul removed (OMN-3540), only postgres timeout is relevant.
+        When postgres times out, the state transitions to failed.
         """
         state = ModelRegistrationState()
         node_id = uuid4()
         pending_state = state.with_pending_registration(node_id, uuid4())
 
-        # Consul confirmed, waiting for postgres
-        partial_state = pending_state.with_consul_confirmed(uuid4())
-        assert partial_state.status == "partial"
-        assert partial_state.consul_confirmed is True
+        assert pending_state.status == "pending"
+        assert pending_state.postgres_confirmed is False
 
         # Postgres times out
         timeout_event_id = uuid4()
-        failed_state = partial_state.with_failure("postgres_failed", timeout_event_id)
+        failed_state = pending_state.with_failure("postgres_failed", timeout_event_id)
 
         assert failed_state.status == "failed"
         assert failed_state.failure_reason == "postgres_failed"
-        # Consul confirmation is preserved for diagnostics
-        assert failed_state.consul_confirmed is True
+        # No confirmations before timeout
+        assert failed_state.consul_confirmed is False
         assert failed_state.postgres_confirmed is False
 
     def test_recovery_after_timeout_failure(
@@ -3680,11 +3061,10 @@ class TestTimeoutScenarios:
         assert output2.result.status == "pending"
         assert len(output2.intents) == EXPECTED_REGISTRATION_INTENTS
 
-        # Step 5: Complete successfully
-        consul_confirmed = output2.result.with_consul_confirmed(uuid4())
-        both_confirmed = consul_confirmed.with_postgres_confirmed(uuid4())
-        assert both_confirmed.status == "complete"
-        assert both_confirmed.failure_reason is None
+        # Step 5: Complete successfully (consul removed OMN-3540, postgres -> complete)
+        postgres_confirmed = output2.result.with_postgres_confirmed(uuid4())
+        assert postgres_confirmed.status == "complete"
+        assert postgres_confirmed.failure_reason is None
 
     def test_timeout_preserves_node_id_for_retry(
         self,
@@ -3738,11 +3118,10 @@ class TestTimeoutScenarios:
         output = reducer.reduce(state, event)
         assert output.result.status == "pending"
 
-        consul_confirmed = output.result.with_consul_confirmed(uuid4())
-        both_confirmed = consul_confirmed.with_postgres_confirmed(uuid4())
+        postgres_confirmed = output.result.with_postgres_confirmed(uuid4())
 
-        assert both_confirmed.status == "complete"
-        assert both_confirmed.node_id == node_id
+        assert postgres_confirmed.status == "complete"
+        assert postgres_confirmed.node_id == node_id
 
     def test_timeout_different_failure_reasons(
         self,
@@ -3756,29 +3135,13 @@ class TestTimeoutScenarios:
         node_id = uuid4()
         pending_state = state.with_pending_registration(node_id, uuid4())
 
-        # Scenario 1: Consul times out first (waiting for both)
-        consul_timeout = pending_state.with_failure("consul_failed", uuid4())
-        assert consul_timeout.failure_reason == "consul_failed"
-
-        # Scenario 2: Postgres times out first (waiting for both)
+        # Scenario 1: Postgres times out (waiting for postgres, consul removed OMN-3540)
         postgres_timeout = pending_state.with_failure("postgres_failed", uuid4())
         assert postgres_timeout.failure_reason == "postgres_failed"
 
-        # Scenario 3: Both time out (no confirmations received)
+        # Scenario 2: Both timed out (legacy reason still valid)
         both_timeout = pending_state.with_failure("both_failed", uuid4())
         assert both_timeout.failure_reason == "both_failed"
-
-        # Scenario 4: Consul confirmed but postgres times out
-        partial_consul = pending_state.with_consul_confirmed(uuid4())
-        postgres_after_consul = partial_consul.with_failure("postgres_failed", uuid4())
-        assert postgres_after_consul.failure_reason == "postgres_failed"
-        assert postgres_after_consul.consul_confirmed is True
-
-        # Scenario 5: Postgres confirmed but consul times out
-        partial_postgres = pending_state.with_postgres_confirmed(uuid4())
-        consul_after_postgres = partial_postgres.with_failure("consul_failed", uuid4())
-        assert consul_after_postgres.failure_reason == "consul_failed"
-        assert consul_after_postgres.postgres_confirmed is True
 
 
 # -----------------------------------------------------------------------------
@@ -3981,7 +3344,7 @@ class TestCommandFoldingPrevention:
             # Verify payload is a typed model (ProtocolIntentPayload implementation)
             assert isinstance(
                 intent.payload,
-                ModelPayloadConsulRegister | ModelPayloadPostgresUpsertRegistration,
+                ModelPayloadPostgresUpsertRegistration,
             ), (
                 f"Intent payload should be a typed payload model, "
                 f"found {type(intent.payload)}"
@@ -4587,10 +3950,7 @@ class TestEventReplayDeterminism:
         state = output.result
         assert state.status == "pending"
 
-        # Simulate confirmations
-        state = state.with_consul_confirmed(uuid4())
-        assert state.status == "partial"
-
+        # Simulate postgres confirmation -> complete (consul removed OMN-3540)
         state = state.with_postgres_confirmed(uuid4())
         assert state.status == "complete"
 
@@ -4616,7 +3976,6 @@ class TestEventReplayDeterminism:
         output = reducer.reduce(state, event1)
         state = output.result
 
-        state = state.with_consul_confirmed(uuid4())
         state = state.with_postgres_confirmed(uuid4())
 
         reset_output = reducer.reduce_reset(state, uuid4())
@@ -4923,14 +4282,8 @@ class TestPropertyBasedStateInvariants:
         pending_state = output.result
         assert pending_state.node_id == node_id, "node_id should be set after pending"
 
-        # Transition: pending -> partial (via consul)
-        partial_consul = pending_state.with_consul_confirmed(uuid4())
-        assert partial_consul.node_id == node_id, (
-            "node_id should be preserved after with_consul_confirmed"
-        )
-
-        # Transition: partial -> complete (via postgres)
-        complete_state = partial_consul.with_postgres_confirmed(uuid4())
+        # Transition: pending -> complete (via postgres, consul removed OMN-3540)
+        complete_state = pending_state.with_postgres_confirmed(uuid4())
         assert complete_state.node_id == node_id, (
             "node_id should be preserved after with_postgres_confirmed"
         )
@@ -4942,7 +4295,7 @@ class TestPropertyBasedStateInvariants:
         )
 
         # Also verify failure preserves node_id
-        failed_state = pending_state.with_failure("consul_failed", uuid4())
+        failed_state = pending_state.with_failure("postgres_failed", uuid4())
         assert failed_state.node_id == node_id, (
             "node_id should be preserved after with_failure"
         )
@@ -5030,22 +4383,15 @@ class TestPropertyBasedStateInvariants:
             current_state = replay_output.result
 
     @given(
-        initial_status=st.sampled_from(["pending", "partial"]),
-        confirm_consul_first=st.booleans(),
+        initial_status=st.sampled_from(["pending"]),
     )
-    @settings(max_examples=20)
-    def test_confirmation_order_invariant(
-        self, initial_status: str, confirm_consul_first: bool
-    ) -> None:
-        """Property: Confirmation order doesn't affect final 'complete' state structure.
+    @settings(max_examples=10)
+    def test_confirmation_order_invariant(self, initial_status: str) -> None:
+        """Property: PostgreSQL confirmation always produces 'complete' state.
 
-        This invariant ensures that:
-        - Whether consul confirms before postgres or vice versa
-        - The final 'complete' state has both confirmations=True
-        - The node_id is preserved regardless of order
-
-        This is important for distributed systems where confirmation
-        events may arrive out of order due to network latency.
+        With consul removed (OMN-3540), only postgres confirmation exists.
+        This invariant ensures that postgres confirmation from pending
+        always produces a complete state with node_id preserved.
         """
         node_id = uuid4()
         event_id = uuid4()
@@ -5059,20 +4405,16 @@ class TestPropertyBasedStateInvariants:
             last_processed_event_id=event_id,
         )
 
-        if confirm_consul_first:
-            # Path 1: Consul -> Postgres
-            partial = pending_state.with_consul_confirmed(uuid4())
-            complete = partial.with_postgres_confirmed(uuid4())
-        else:
-            # Path 2: Postgres -> Consul
-            partial = pending_state.with_postgres_confirmed(uuid4())
-            complete = partial.with_consul_confirmed(uuid4())
+        # Postgres confirmation -> complete directly
+        complete = pending_state.with_postgres_confirmed(uuid4())
 
         # Verify final state invariants
         assert complete.status == "complete", (
             f"Final status should be 'complete', got '{complete.status}'"
         )
-        assert complete.consul_confirmed is True, "Consul should be confirmed"
+        assert complete.consul_confirmed is False, (
+            "Consul should not be confirmed (removed OMN-3540)"
+        )
         assert complete.postgres_confirmed is True, "Postgres should be confirmed"
         assert complete.node_id == node_id, "node_id should be preserved"
         assert complete.failure_reason is None, (
@@ -5228,14 +4570,7 @@ class TestBoundaryConditions:
         assert output.result.node_id == max_uuid
         assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
-        # Verify max UUID appears correctly in intents
-        consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"),
-            None,
-        )
-        assert consul_intent is not None
-        assert str(max_uuid) in consul_intent.payload.service_id
-
+        # Verify max UUID appears correctly in postgres intent (consul removed OMN-3540)
         postgres_intent = next(
             (
                 i
@@ -5278,13 +4613,17 @@ class TestBoundaryConditions:
         assert output.result.node_id == min_uuid
         assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
-        # Verify min UUID appears correctly in intents
-        consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"),
+        # Verify min UUID appears correctly in postgres intent (consul removed OMN-3540)
+        postgres_intent = next(
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "postgres.upsert_registration"
+            ),
             None,
         )
-        assert consul_intent is not None
-        assert str(min_uuid) in consul_intent.payload.service_id
+        assert postgres_intent is not None
+        assert str(postgres_intent.payload.record.node_id) == str(min_uuid)
 
     def test_empty_string_version_rejected(
         self,
@@ -5332,14 +4671,17 @@ class TestBoundaryConditions:
         assert output.result.status == "pending"
         assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
-        # Verify minimal version is preserved in intents
-        consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"),
+        # Verify minimal version is preserved in postgres intent (consul removed OMN-3540)
+        postgres_intent = next(
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "postgres.upsert_registration"
+            ),
             None,
         )
-        assert consul_intent is not None
-        tags = consul_intent.payload.tags
-        assert "node_version:0.0.0" in tags
+        assert postgres_intent is not None
+        assert str(postgres_intent.payload.record.node_version) == "0.0.0"
 
     def test_very_long_endpoint_url(
         self,
@@ -5384,16 +4726,7 @@ class TestBoundaryConditions:
         assert output.result.status == "pending"
         assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
-        # Verify long URLs are preserved without truncation
-        consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"),
-            None,
-        )
-        assert consul_intent is not None
-        health_check = consul_intent.payload.health_check
-        assert health_check is not None
-        assert health_check["HTTP"] == very_long_url
-
+        # Verify long URLs are preserved in postgres intent (consul removed OMN-3540)
         postgres_intent = next(
             (
                 i
@@ -5479,16 +4812,16 @@ class TestBoundaryConditions:
         import concurrent.futures
         import threading
 
-        # Create a state with data
+        # Create a state with data (consul removed OMN-3540, use postgres confirmation)
         state = ModelRegistrationState()
         node_id = uuid4()
         pending_state = state.with_pending_registration(node_id, uuid4())
-        consul_confirmed = pending_state.with_consul_confirmed(uuid4())
+        complete_state = pending_state.with_postgres_confirmed(uuid4())
 
         # Verify the state is frozen (immutable)
         # Attempting to modify should raise an error
         with pytest.raises(ValidationError):
-            consul_confirmed.status = "complete"  # type: ignore[misc]
+            complete_state.status = "idle"  # type: ignore[misc]
 
         # Track results from concurrent reads
         results: list[tuple[str, UUID | None, bool]] = []
@@ -5497,9 +4830,9 @@ class TestBoundaryConditions:
         def read_state() -> None:
             """Read state values from multiple threads."""
             for _ in range(100):
-                status = consul_confirmed.status
-                nid = consul_confirmed.node_id
-                confirmed = consul_confirmed.consul_confirmed
+                status = complete_state.status
+                nid = complete_state.node_id
+                confirmed = complete_state.postgres_confirmed
                 with lock:
                     results.append((status, nid, confirmed))
 
@@ -5511,7 +4844,7 @@ class TestBoundaryConditions:
         # All reads should return consistent values
         assert len(results) == 1000  # 10 threads * 100 reads each
         for status, nid, confirmed in results:
-            assert status == "partial"
+            assert status == "complete"
             assert nid == node_id
             assert confirmed is True
 
@@ -5791,7 +5124,7 @@ class TestCommandFoldingProhibited:
             # Intent payload should be a typed model (ProtocolIntentPayload)
             assert isinstance(
                 intent.payload,
-                ModelPayloadConsulRegister | ModelPayloadPostgresUpsertRegistration,
+                ModelPayloadPostgresUpsertRegistration,
             ), f"Intent payload should be typed model, not {type(intent.payload)}"
 
             # Intent should not have execute/run methods
@@ -5985,7 +5318,11 @@ class TestCommandFoldingProhibited:
 
 @pytest.mark.unit
 class TestReduceConfirmation:
-    """Tests for reduce_confirmation() method — Phase 2 confirmation event handling."""
+    """Tests for reduce_confirmation() method — Phase 2 confirmation event handling.
+
+    Note: With consul removed (OMN-3540), only POSTGRES_REGISTRATION_UPSERTED
+    confirmation events are handled. Consul-related tests have been removed.
+    """
 
     # -- Fixtures --
 
@@ -6011,23 +5348,12 @@ class TestReduceConfirmation:
         )
 
     @pytest.fixture
-    def partial_consul_state(self, node_id: UUID) -> ModelRegistrationState:
-        """State with consul confirmed, postgres pending."""
-        return ModelRegistrationState(
-            status=EnumRegistrationStatus.PARTIAL,
-            node_id=node_id,
-            consul_confirmed=True,
-            postgres_confirmed=False,
-            last_processed_event_id=uuid4(),
-        )
-
-    @pytest.fixture
     def complete_state(self, node_id: UUID) -> ModelRegistrationState:
-        """State with both backends confirmed."""
+        """State with postgres confirmed (complete)."""
         return ModelRegistrationState(
             status=EnumRegistrationStatus.COMPLETE,
             node_id=node_id,
-            consul_confirmed=True,
+            consul_confirmed=False,
             postgres_confirmed=True,
             last_processed_event_id=uuid4(),
         )
@@ -6041,35 +5367,10 @@ class TestReduceConfirmation:
             consul_confirmed=False,
             postgres_confirmed=False,
             last_processed_event_id=uuid4(),
-            failure_reason="consul_failed",
+            failure_reason="postgres_failed",
         )
 
     # -- Tests --
-
-    def test_consul_confirmation_success(
-        self,
-        reducer: RegistrationReducer,
-        pending_state: ModelRegistrationState,
-        node_id: UUID,
-        correlation_id: UUID,
-    ) -> None:
-        """Consul success confirmation transitions pending -> partial."""
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
-
-        confirmation = ModelRegistrationConfirmation(
-            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
-            correlation_id=correlation_id,
-            node_id=node_id,
-            success=True,
-            timestamp=TEST_TIMESTAMP,
-        )
-
-        output = reducer.reduce_confirmation(pending_state, confirmation)
-
-        assert output.result.status == EnumRegistrationStatus.PARTIAL
-        assert output.result.consul_confirmed is True
-        assert output.result.postgres_confirmed is False
-        assert output.intents == ()
 
     def test_postgres_confirmation_success(
         self,
@@ -6078,7 +5379,7 @@ class TestReduceConfirmation:
         node_id: UUID,
         correlation_id: UUID,
     ) -> None:
-        """Postgres success confirmation transitions pending -> partial."""
+        """Postgres success confirmation transitions pending -> complete (consul removed OMN-3540)."""
         from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
 
         confirmation = ModelRegistrationConfirmation(
@@ -6091,113 +5392,9 @@ class TestReduceConfirmation:
 
         output = reducer.reduce_confirmation(pending_state, confirmation)
 
-        assert output.result.status == EnumRegistrationStatus.PARTIAL
+        assert output.result.status == EnumRegistrationStatus.COMPLETE
         assert output.result.consul_confirmed is False
         assert output.result.postgres_confirmed is True
-        assert output.intents == ()
-
-    def test_both_confirmations_complete(
-        self,
-        reducer: RegistrationReducer,
-        pending_state: ModelRegistrationState,
-        node_id: UUID,
-    ) -> None:
-        """Processing consul then postgres confirmation reaches complete state."""
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
-
-        consul_corr = uuid4()
-        postgres_corr = uuid4()
-
-        consul_confirmation = ModelRegistrationConfirmation(
-            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
-            correlation_id=consul_corr,
-            node_id=node_id,
-            success=True,
-            timestamp=TEST_TIMESTAMP,
-        )
-
-        output1 = reducer.reduce_confirmation(pending_state, consul_confirmation)
-        assert output1.result.status == EnumRegistrationStatus.PARTIAL
-        assert output1.result.consul_confirmed is True
-
-        postgres_confirmation = ModelRegistrationConfirmation(
-            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
-            correlation_id=postgres_corr,
-            node_id=node_id,
-            success=True,
-            timestamp=TEST_TIMESTAMP,
-        )
-
-        output2 = reducer.reduce_confirmation(output1.result, postgres_confirmation)
-        assert output2.result.status == EnumRegistrationStatus.COMPLETE
-        assert output2.result.consul_confirmed is True
-        assert output2.result.postgres_confirmed is True
-        assert output2.intents == ()
-
-    def test_both_confirmations_complete_reverse_order(
-        self,
-        reducer: RegistrationReducer,
-        pending_state: ModelRegistrationState,
-        node_id: UUID,
-    ) -> None:
-        """Processing postgres then consul confirmation reaches complete state."""
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
-
-        postgres_corr = uuid4()
-        consul_corr = uuid4()
-
-        # Step 1: postgres confirmation first -> PARTIAL
-        postgres_confirmation = ModelRegistrationConfirmation(
-            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
-            correlation_id=postgres_corr,
-            node_id=node_id,
-            success=True,
-            timestamp=TEST_TIMESTAMP,
-        )
-
-        output1 = reducer.reduce_confirmation(pending_state, postgres_confirmation)
-        assert output1.result.status == EnumRegistrationStatus.PARTIAL
-        assert output1.result.postgres_confirmed is True
-        assert output1.result.consul_confirmed is False
-
-        # Step 2: consul confirmation second -> COMPLETE
-        consul_confirmation = ModelRegistrationConfirmation(
-            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
-            correlation_id=consul_corr,
-            node_id=node_id,
-            success=True,
-            timestamp=TEST_TIMESTAMP,
-        )
-
-        output2 = reducer.reduce_confirmation(output1.result, consul_confirmation)
-        assert output2.result.status == EnumRegistrationStatus.COMPLETE
-        assert output2.result.consul_confirmed is True
-        assert output2.result.postgres_confirmed is True
-        assert output2.intents == ()
-
-    def test_consul_confirmation_failure(
-        self,
-        reducer: RegistrationReducer,
-        pending_state: ModelRegistrationState,
-        node_id: UUID,
-        correlation_id: UUID,
-    ) -> None:
-        """Consul failure confirmation transitions to failed with consul_failed reason."""
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
-
-        confirmation = ModelRegistrationConfirmation(
-            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
-            correlation_id=correlation_id,
-            node_id=node_id,
-            success=False,
-            error_message="Connection refused",
-            timestamp=TEST_TIMESTAMP,
-        )
-
-        output = reducer.reduce_confirmation(pending_state, confirmation)
-
-        assert output.result.status == EnumRegistrationStatus.FAILED
-        assert output.result.failure_reason == "consul_failed"
         assert output.intents == ()
 
     def test_postgres_confirmation_failure(
@@ -6225,58 +5422,6 @@ class TestReduceConfirmation:
         assert output.result.failure_reason == "postgres_failed"
         assert output.intents == ()
 
-    def test_partial_to_complete_postgres_confirmation(
-        self,
-        reducer: RegistrationReducer,
-        partial_consul_state: ModelRegistrationState,
-        node_id: UUID,
-        correlation_id: UUID,
-    ) -> None:
-        """Postgres success on partial (consul confirmed) state transitions to complete."""
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
-
-        confirmation = ModelRegistrationConfirmation(
-            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
-            correlation_id=correlation_id,
-            node_id=node_id,
-            success=True,
-            timestamp=TEST_TIMESTAMP,
-        )
-
-        output = reducer.reduce_confirmation(partial_consul_state, confirmation)
-
-        assert output.result.status == EnumRegistrationStatus.COMPLETE
-        assert output.result.consul_confirmed is True
-        assert output.result.postgres_confirmed is True
-        assert output.intents == ()
-
-    def test_partial_to_failed_postgres_failure(
-        self,
-        reducer: RegistrationReducer,
-        partial_consul_state: ModelRegistrationState,
-        node_id: UUID,
-        correlation_id: UUID,
-    ) -> None:
-        """Postgres failure on partial (consul confirmed) state transitions to failed."""
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
-
-        confirmation = ModelRegistrationConfirmation(
-            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
-            correlation_id=correlation_id,
-            node_id=node_id,
-            success=False,
-            error_message="Timeout on upsert",
-            timestamp=TEST_TIMESTAMP,
-        )
-
-        output = reducer.reduce_confirmation(partial_consul_state, confirmation)
-
-        assert output.result.status == EnumRegistrationStatus.FAILED
-        assert output.result.failure_reason == "postgres_failed"
-        # Consul confirmation is preserved for diagnostics
-        assert output.result.consul_confirmed is True
-        assert output.intents == ()
-
     def test_duplicate_confirmation_skipped(
         self,
         reducer: RegistrationReducer,
@@ -6288,7 +5433,7 @@ class TestReduceConfirmation:
         from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
 
         confirmation = ModelRegistrationConfirmation(
-            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
+            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
             correlation_id=correlation_id,
             node_id=node_id,
             success=True,
@@ -6297,7 +5442,7 @@ class TestReduceConfirmation:
 
         # First call transitions state
         output1 = reducer.reduce_confirmation(pending_state, confirmation)
-        assert output1.result.status == EnumRegistrationStatus.PARTIAL
+        assert output1.result.status == EnumRegistrationStatus.COMPLETE
 
         # Second call on the NEW state with the SAME confirmation is a no-op
         output2 = reducer.reduce_confirmation(output1.result, confirmation)
@@ -6315,7 +5460,7 @@ class TestReduceConfirmation:
         wrong_node_id = uuid4()
 
         confirmation = ModelRegistrationConfirmation(
-            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
+            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
             correlation_id=correlation_id,
             node_id=wrong_node_id,
             success=True,
@@ -6338,7 +5483,7 @@ class TestReduceConfirmation:
         from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
 
         confirmation = ModelRegistrationConfirmation(
-            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
+            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
             correlation_id=correlation_id,
             node_id=node_id,
             success=True,
@@ -6361,7 +5506,7 @@ class TestReduceConfirmation:
         from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
 
         confirmation = ModelRegistrationConfirmation(
-            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
+            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
             correlation_id=correlation_id,
             node_id=node_id,
             success=True,
@@ -6382,7 +5527,7 @@ class TestReduceConfirmation:
         from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
 
         confirmation = ModelRegistrationConfirmation(
-            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
+            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
             correlation_id=uuid4(),
             node_id=uuid4(),
             success=True,
@@ -6394,25 +5539,17 @@ class TestReduceConfirmation:
         assert output.result.model_dump() == initial_state.model_dump()
         assert output.intents == ()
 
-    def test_event_id_derivation_unique_per_event_type(
+    def test_event_id_derivation_deterministic(
         self,
         reducer: RegistrationReducer,
     ) -> None:
-        """Same correlation_id with different event types produces different event IDs."""
+        """Same confirmation input always produces the same derived event ID."""
         from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
 
         shared_corr = uuid4()
         shared_node = uuid4()
 
-        consul_confirmation = ModelRegistrationConfirmation(
-            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
-            correlation_id=shared_corr,
-            node_id=shared_node,
-            success=True,
-            timestamp=TEST_TIMESTAMP,
-        )
-
-        postgres_confirmation = ModelRegistrationConfirmation(
+        confirmation = ModelRegistrationConfirmation(
             event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
             correlation_id=shared_corr,
             node_id=shared_node,
@@ -6421,7 +5558,9 @@ class TestReduceConfirmation:
         )
 
         # Access private method for direct verification
-        consul_event_id = reducer._derive_confirmation_event_id(consul_confirmation)
-        postgres_event_id = reducer._derive_confirmation_event_id(postgres_confirmation)
+        event_id_1 = reducer._derive_confirmation_event_id(confirmation)
+        event_id_2 = reducer._derive_confirmation_event_id(confirmation)
 
-        assert consul_event_id != postgres_event_id
+        assert event_id_1 == event_id_2, (
+            "Derived event ID must be deterministic for the same input"
+        )

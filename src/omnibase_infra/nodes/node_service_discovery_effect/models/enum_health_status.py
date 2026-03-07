@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Health Status Enum for Service Discovery.
 
-This module provides EnumHealthStatus, representing the health status
+EnumHealthStatus, representing the health status
 of a service instance in service discovery operations.
 
 Architecture:

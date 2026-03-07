@@ -108,7 +108,7 @@ class TestEventLogReconstruction:
         assert output.result.status == "pending"
         assert output.result.node_id == node_id
         assert output.result.last_processed_event_id == correlation_id
-        assert len(output.intents) == 2  # Consul + PostgreSQL intents
+        assert len(output.intents) == 1  # PostgreSQL only (OMN-3540)
 
     def test_state_from_event_sequence(
         self,
@@ -231,15 +231,14 @@ class TestMultipleReconstructionScenarios:
         assert output.result.node_id == node_id
         assert output.result.consul_confirmed is False
         assert output.result.postgres_confirmed is False
-        assert len(output.intents) == 2
+        assert len(output.intents) == 1  # PostgreSQL only (OMN-3540)
 
-        # Verify intents for both backends (extension pattern)
+        # Verify intents for PostgreSQL backend (Consul removed in OMN-3540)
         intent_types = {
             intent.payload.intent_type
             for intent in output.intents
             if intent.intent_type
         }
-        assert "consul.register" in intent_types
         assert "postgres.upsert_registration" in intent_types
 
     def test_node_update_scenario(
@@ -314,7 +313,7 @@ class TestMultipleReconstructionScenarios:
         output1 = reducer.reduce(initial_state, event)
         state_after_first = output1.result
 
-        assert len(output1.intents) == 2  # Intents emitted
+        assert len(output1.intents) == 1  # PostgreSQL only (OMN-3540)
 
         # Second processing (duplicate/heartbeat)
         output2 = reducer.reduce(state_after_first, event)
@@ -391,12 +390,13 @@ class TestMultipleReconstructionScenarios:
                 f"Node type {node_type} failed to transition to pending"
             )
             assert output.result.node_id == node_id
-            assert len(output.intents) == 2
+            assert len(output.intents) == 1  # PostgreSQL only (OMN-3540)
 
-            # Verify intent targets include node type
-            for intent in output.intents:
-                if intent.intent_type == "consul.register":
-                    assert node_type in intent.target
+            # Verify PostgreSQL intent generated (Consul removed in OMN-3540)
+            assert any(
+                intent.intent_type == "postgres.upsert_registration"
+                for intent in output.intents
+            )
 
 
 # =============================================================================

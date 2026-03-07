@@ -67,7 +67,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolSnapshotStore": "protocols/protocol_snapshot_store.py",
     "ProtocolValidationLedgerRepository": "protocols/protocol_validation_ledger_repository.py",
     # === [DI] Dependency injection boundaries ===
-    "ProtocolConsulClient": "nodes/effects/protocol_consul_client.py",
+    # ProtocolConsulClient removed in OMN-3540 (Consul removal)
     "ProtocolEffectIdempotencyStore": "nodes/effects/protocol_effect_idempotency_store.py",
     "ProtocolPostgresAdapter": "nodes/effects/protocol_postgres_adapter.py",
     "ProtocolToolExecutor": "handlers/mcp/protocols.py",
@@ -83,10 +83,6 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolCircuitBreakerAware": "mixins/protocol_circuit_breaker_aware.py",
     "ProtocolKafkaDlqHost": "event_bus/mixin_kafka_dlq.py",
     "ProtocolKafkaBroadcastHost": "event_bus/mixin_kafka_broadcast.py",
-    "ProtocolConsulServiceDependencies": "handlers/mixins/mixin_consul_service.py",
-    "ProtocolConsulTopicIndexDependencies": "handlers/mixins/mixin_consul_topic_index.py",
-    "ProtocolConsulKVDependencies": "handlers/mixins/mixin_consul_kv.py",
-    "ProtocolConsulInitDependencies": "handlers/mixins/mixin_consul_initialization.py",
     "ProtocolProjectorNotificationContext": "runtime/mixins/mixin_projector_notification_publishing.py",
     "ProtocolProjectorContext": "runtime/mixins/mixin_projector_sql_operations.py",
     # === [NODE] Node-internal protocols ===

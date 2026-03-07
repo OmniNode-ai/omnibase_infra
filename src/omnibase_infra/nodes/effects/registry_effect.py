@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Registry Effect Node for Dual-Backend Registration.
+"""Registry Effect Node for PostgreSQL Registration.  # ai-slop-ok: pre-existing docstring opener
 
 Note on ONEX Naming Convention:
     This node class is named `NodeRegistryEffect` following ONEX convention:
@@ -17,7 +17,7 @@ Note on ONEX Naming Convention:
     models/, and contract.yaml subdirectories.
 
 This module provides NodeRegistryEffect, an Effect node responsible for executing
-registration operations against both Consul and PostgreSQL backends.
+registration operations against PostgreSQL.
 
 Intent Format Compatibility (OMN-1258):
     This Effect node receives domain-specific request objects (ModelRegistryRequest),
@@ -25,8 +25,8 @@ Intent Format Compatibility (OMN-1258):
     Orchestrator layer.
 
     The RegistrationReducer emits intents with typed payloads:
-        - intent_type is set to the payload's specific routing key
-          (e.g., "consul.register" or "postgres.upsert_registration")
+        - intent_type is set to "postgres.upsert_registration"
+          (the sole registration intent after Consul removal in OMN-3540)
 
     The Orchestrator/Runtime layer is responsible for:
         1. Consuming ModelIntent objects from reducer output
@@ -35,30 +35,18 @@ Intent Format Compatibility (OMN-1258):
         4. Calling NodeRegistryEffect.register_node(request)
 
     This design keeps the Effect layer focused on I/O execution without coupling
-    to the intent format. Infrastructure handlers (ConsulHandler, DbHandler) work
-    similarly with envelope-based `operation` routing, not intent_type checking.
+    to the intent format.
 
 Architecture:
     NodeRegistryEffect follows the ONEX Effect node pattern:
     - Receives registration requests (from Reducer intents)
-    - Executes I/O operations against external backends
-    - Returns structured responses with per-backend results
+    - Executes I/O operations against PostgreSQL
+    - Returns structured responses with backend results
     - Supports partial failure handling and targeted retries
 
-    The Effect node coordinates with:
-    - ConsulClient: For service discovery registration
-    - PostgresHandler: For registration record persistence
-
 Partial Failure Handling:
-    When one backend fails:
-    1. The successful backend's result is preserved
-    2. The failed backend's error is captured with context
-    3. Response status is set to "partial"
-    4. Callers can retry only the failed backend
-
-Idempotency:
-    For retry scenarios, the Effect tracks which backends have already
-    succeeded using an IdempotencyStore. The default in-memory store has:
+    The effect tracks which backends have already succeeded using an
+    IdempotencyStore. The default in-memory store has:
     - Bounded size (max 10,000 entries by default) with LRU eviction
     - TTL-based expiration (1 hour by default)
     - NOT persistent across restarts
@@ -86,6 +74,7 @@ Related:
     - ProtocolEffectIdempotencyStore: Protocol for pluggable backends
     - RegistrationReducer: Emits intents consumed by this Effect
     - OMN-954: Partial failure scenario testing
+    - OMN-3540: Remove Consul entirely from omnibase_infra runtime
 """
 
 from __future__ import annotations
@@ -111,7 +100,6 @@ from omnibase_infra.nodes.effects.models.model_registry_request import (
 from omnibase_infra.nodes.effects.models.model_registry_response import (
     ModelRegistryResponse,
 )
-from omnibase_infra.nodes.effects.protocol_consul_client import ProtocolConsulClient
 from omnibase_infra.nodes.effects.protocol_effect_idempotency_store import (
     ProtocolEffectIdempotencyStore,
 )
@@ -125,10 +113,10 @@ from omnibase_infra.utils import sanitize_backend_error, sanitize_error_message
 
 
 class NodeRegistryEffect:
-    """Effect node for dual-backend node registration.
+    """Effect node for PostgreSQL node registration.
 
-    Executes registration operations against both Consul and PostgreSQL,
-    with support for partial failure handling and targeted retries.
+    Executes registration operations against PostgreSQL, with support for
+    partial failure handling and targeted retries.
 
     Idempotency Store:
         Uses a pluggable idempotency store for tracking completed backends.
@@ -159,7 +147,6 @@ class NodeRegistryEffect:
         - Throughput: >5,000 ops/sec (single worker), >10,000 concurrent
 
         Actual registration latency dominated by backend I/O:
-        - Consul registration: typically 1-10ms (network dependent)
         - PostgreSQL upsert: typically 1-5ms (network dependent)
         - Idempotency overhead: <0.1ms
 
@@ -168,15 +155,13 @@ class NodeRegistryEffect:
         uses asyncio.Lock for coroutine-safe operations.
 
     Attributes:
-        consul_client: Client for Consul service registration.
         postgres_handler: Handler for PostgreSQL record persistence.
         idempotency_store: Store for tracking completed backends.
 
     Example:
         >>> from unittest.mock import AsyncMock
-        >>> consul = AsyncMock()
         >>> postgres = AsyncMock()
-        >>> effect = NodeRegistryEffect(consul, postgres)
+        >>> effect = NodeRegistryEffect(postgres)
         >>> # Configure mocks and call register_node...
 
         >>> # With custom idempotency config (smaller cache, shorter TTL):
@@ -185,7 +170,7 @@ class NodeRegistryEffect:
         ...     max_cache_size=1000,
         ...     cache_ttl_seconds=300.0,
         ... )
-        >>> effect = NodeRegistryEffect(consul, postgres, idempotency_config=config)
+        >>> effect = NodeRegistryEffect(postgres, idempotency_config=config)
 
     See Also:
         - README.md: Comprehensive documentation with configuration guide
@@ -195,16 +180,14 @@ class NodeRegistryEffect:
 
     def __init__(
         self,
-        consul_client: ProtocolConsulClient,
         postgres_adapter: ProtocolPostgresAdapter,
         *,
         idempotency_store: ProtocolEffectIdempotencyStore | None = None,
         idempotency_config: ModelEffectIdempotencyConfig | None = None,
     ) -> None:
-        """Initialize the NodeRegistryEffect with backend clients.
+        """Initialize the NodeRegistryEffect with backend client.
 
         Args:
-            consul_client: Client for Consul service registration.
             postgres_adapter: Adapter for PostgreSQL record persistence.
             idempotency_store: Optional custom idempotency store.
                 If provided, idempotency_config is ignored.
@@ -218,7 +201,6 @@ class NodeRegistryEffect:
             - Max memory: ~1MB
             - TTL: 1 hour
         """
-        self._consul_client = consul_client
         self._postgres_adapter = postgres_adapter
 
         # Use provided store or create default with optional config
@@ -233,17 +215,15 @@ class NodeRegistryEffect:
         self,
         request: ModelRegistryRequest,
         *,
-        skip_consul: bool = False,
         skip_postgres: bool = False,
     ) -> ModelRegistryResponse:
-        """Execute dual-backend node registration.
+        """Execute node registration against PostgreSQL.
 
-        Registers the node in both Consul (service discovery) and PostgreSQL
-        (registration record) backends. Supports partial failure scenarios
-        where one backend succeeds and the other fails.
+        Registers the node in PostgreSQL (registration record). Supports
+        partial failure scenarios.
 
         Idempotency:
-            If a backend has already succeeded for this correlation_id,
+            If the backend has already succeeded for this correlation_id,
             it will be skipped on retry. This enables safe retries after
             partial failures.
 
@@ -256,29 +236,15 @@ class NodeRegistryEffect:
 
         Args:
             request: Registration request with node details.
-            skip_consul: If True, skip Consul registration (for retry scenarios).
             skip_postgres: If True, skip PostgreSQL upsert (for retry scenarios).
 
         Returns:
-            ModelRegistryResponse with per-backend results and overall status.
+            ModelRegistryResponse with backend result and overall status.
         """
         correlation_id = request.correlation_id
 
         # Check for already-completed backends (idempotency)
         completed = await self._idempotency_store.get_completed_backends(correlation_id)
-
-        # Execute Consul registration if not skipped and not already completed
-        if skip_consul or "consul" in completed:
-            consul_result = ModelBackendResult(
-                success=True,
-                duration_ms=0.0,
-                backend_id="consul",
-                correlation_id=correlation_id,
-            )
-        else:
-            consul_result = await self._register_consul(request)
-            if consul_result.success:
-                await self._idempotency_store.mark_completed(correlation_id, "consul")
 
         # Execute PostgreSQL upsert if not skipped and not already completed
         if skip_postgres or "postgres" in completed:
@@ -296,109 +262,9 @@ class NodeRegistryEffect:
         return ModelRegistryResponse.from_backend_results(
             node_id=request.node_id,
             correlation_id=correlation_id,
-            consul_result=consul_result,
             postgres_result=postgres_result,
             timestamp=datetime.now(UTC),
         )
-
-    async def _register_consul(
-        self,
-        request: ModelRegistryRequest,
-    ) -> ModelBackendResult:
-        """Execute Consul service registration.
-
-        Args:
-            request: Registration request with node details.
-
-        Returns:
-            ModelBackendResult with operation outcome.
-        """
-        start_time = time.perf_counter()
-
-        try:
-            service_id = f"onex-{request.node_type}-{request.node_id}"
-            service_name = request.service_name or f"onex-{request.node_type}"
-
-            result = await self._consul_client.register_service(
-                service_id=service_id,
-                service_name=service_name,
-                tags=request.tags,
-                health_check=request.health_check_config,
-            )
-
-            duration_ms = (time.perf_counter() - start_time) * 1000
-
-            if result.success:
-                return ModelBackendResult(
-                    success=True,
-                    duration_ms=duration_ms,
-                    backend_id="consul",
-                    correlation_id=request.correlation_id,
-                )
-            else:
-                # Sanitize backend error to avoid exposing secrets
-                # (connection strings, credentials, internal hostnames)
-                sanitized_error = sanitize_backend_error("consul", result.error)
-                return ModelBackendResult(
-                    success=False,
-                    error=sanitized_error,
-                    error_code="CONSUL_REGISTRATION_ERROR",
-                    duration_ms=duration_ms,
-                    backend_id="consul",
-                    correlation_id=request.correlation_id,
-                )
-
-        except (TimeoutError, InfraTimeoutError) as e:
-            # Timeout during registration - retriable error
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code="CONSUL_TIMEOUT_ERROR",
-                duration_ms=duration_ms,
-                backend_id="consul",
-                correlation_id=request.correlation_id,
-            )
-
-        except InfraAuthenticationError as e:
-            # Authentication failure - non-retriable error
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code="CONSUL_AUTH_ERROR",
-                duration_ms=duration_ms,
-                backend_id="consul",
-                correlation_id=request.correlation_id,
-            )
-
-        except InfraConnectionError as e:
-            # Connection failure - retriable error
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code="CONSUL_CONNECTION_ERROR",
-                duration_ms=duration_ms,
-                backend_id="consul",
-                correlation_id=request.correlation_id,
-            )
-
-        except Exception as e:
-            # Unknown exception - sanitize to prevent credential exposure
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code="CONSUL_UNKNOWN_ERROR",
-                duration_ms=duration_ms,
-                backend_id="consul",
-                correlation_id=request.correlation_id,
-            )
 
     async def _upsert_postgres(
         self,
@@ -514,7 +380,7 @@ class NodeRegistryEffect:
             correlation_id: The correlation ID to check.
 
         Returns:
-            Set of backend names that have completed ("consul", "postgres").
+            Set of backend names that have completed ("postgres").
         """
         return await self._idempotency_store.get_completed_backends(correlation_id)
 

@@ -9,7 +9,7 @@ src/omnibase_infra/cli/infra_test/introspect.py:25
 src/omnibase_infra/cli/infra_test/run_suite.py:216
 src/omnibase_infra/cli/infra_test/run_suite.py:277
 src/omnibase_infra/cli/infra_test/run_suite.py:358
-src/omnibase_infra/cli/infra_test/verify.py:203
+src/omnibase_infra/cli/infra_test/verify.py:201
 src/omnibase_infra/cli/linear_relay.py:50
 src/omnibase_infra/cli/model_demo_reset_config.py:28
 src/omnibase_infra/cli/model_demo_reset_config.py:29
@@ -34,8 +34,8 @@ src/omnibase_infra/nodes/node_reward_binder_effect/handlers/handler_reward_binde
 src/omnibase_infra/runtime/contract_registration_event_router.py:73
 src/omnibase_infra/runtime/contract_registration_event_router.py:74
 src/omnibase_infra/runtime/contract_registration_event_router.py:75
-src/omnibase_infra/runtime/service_runtime_host_process.py:4311
-src/omnibase_infra/runtime/service_runtime_host_process.py:4315
+src/omnibase_infra/runtime/service_runtime_host_process.py:4299
+src/omnibase_infra/runtime/service_runtime_host_process.py:4303
 src/omnibase_infra/services/observability/agent_actions/config.py:131
 src/omnibase_infra/services/observability/agent_actions/config.py:55
 src/omnibase_infra/services/observability/agent_actions/config.py:56

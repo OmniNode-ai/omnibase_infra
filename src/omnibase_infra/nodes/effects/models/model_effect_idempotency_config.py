@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Configuration model for Effect layer idempotency store.
 
-This module provides configuration for the in-memory idempotency store used
+Configuration for the in-memory idempotency store used
 by Effect nodes to track completed backends during dual-backend operations.
 
 Memory Characteristics:

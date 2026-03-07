@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Filesystem List Directory Result Model.
 
-This module provides the Pydantic model for the filesystem.list_directory operation
+The Pydantic model for the filesystem.list_directory operation
 result, replacing untyped dict[str, object] patterns.
 """
 

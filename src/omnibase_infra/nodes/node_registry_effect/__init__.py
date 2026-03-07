@@ -3,13 +3,13 @@
 """Node Registry Effect package - Declarative effect node for dual-backend registration.
 
 This package provides NodeRegistryEffect, a declarative effect node that coordinates
-node registration against both Consul (service discovery) and PostgreSQL (persistence).
+node registration against PostgreSQL.
 
 Architecture (OMN-1103 Refactoring):
     This package follows the ONEX declarative node pattern:
     - node.py: Declarative node shell extending NodeEffect
     - models/: Node-specific Pydantic models
-    - handlers/: Operation-specific handlers (PostgreSQL, Consul)
+    - handlers/: Operation-specific handlers (PostgreSQL)
     - registry/: Infrastructure registry for dependency injection
     - contract.yaml: Operation routing and I/O definitions
 
@@ -18,18 +18,16 @@ Architecture (OMN-1103 Refactoring):
     via container dependency injection.
 
 Node Type: EFFECT_GENERIC
-Purpose: Execute infrastructure I/O operations (Consul registration, PostgreSQL upsert)
+Purpose: Execute infrastructure I/O operations (PostgreSQL upsert)
          based on requests from the registration orchestrator.
 
 Implementation Details:
-    - Dual-backend registration (Consul + PostgreSQL)
+    - PostgreSQL-backed registration
     - Partial failure handling with per-backend results
     - Idempotency tracking for retry safety
     - Error sanitization for security
 
 Handlers:
-    - HandlerConsulRegister: Consul service registration
-    - HandlerConsulDeregister: Consul service deregistration
     - HandlerPostgresUpsert: PostgreSQL registration record upsert
     - HandlerPostgresDeactivate: PostgreSQL registration deactivation
     - HandlerPartialRetry: Targeted retry for partial failures
@@ -56,8 +54,6 @@ from __future__ import annotations
 
 # Export handlers
 from omnibase_infra.nodes.node_registry_effect.handlers import (
-    HandlerConsulDeregister,
-    HandlerConsulRegister,
     HandlerPartialRetry,
     HandlerPostgresDeactivate,
     HandlerPostgresUpsert,
@@ -77,8 +73,6 @@ __all__: list[str] = [
     # Registry
     "RegistryInfraRegistryEffect",
     # Handlers
-    "HandlerConsulDeregister",
-    "HandlerConsulRegister",
     "HandlerPartialRetry",
     "HandlerPostgresDeactivate",
     "HandlerPostgresUpsert",

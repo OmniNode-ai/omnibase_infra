@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Event bus implementations for omnibase_infra.
 
-This module provides event bus implementations for the ONEX infrastructure.
+Event bus implementations for the ONEX infrastructure.
 Two implementations are supported:
 - EventBusInmemory: For unit testing and local development without external dependencies
 - EventBusKafka: For production use with Kafka/Redpanda (see event_bus_kafka.py)
@@ -33,12 +33,21 @@ Topic Constants:
 
 from __future__ import annotations
 
+from omnibase_infra.event_bus.enum_topic_validation_status import (
+    EnumTopicValidationStatus,
+)
 from omnibase_infra.event_bus.event_bus_inmemory import (
     EventBusInmemory,
     ModelEventHeaders,
     ModelEventMessage,
 )
+from omnibase_infra.event_bus.model_topic_validation_result import (
+    ModelTopicValidationResult,
+)
 from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
+from omnibase_infra.event_bus.service_topic_startup_validator import (
+    TopicStartupValidator,
+)
 from omnibase_infra.event_bus.topic_constants import (
     DLQ_CATEGORY_SUFFIXES,
     DLQ_COMMAND_TOPIC_SUFFIX,
@@ -63,12 +72,16 @@ __all__: list[str] = [
     "DLQ_TOPIC_PATTERN",
     # Topic Constants
     "DLQ_TOPIC_VERSION",
+    # Enums
+    "EnumTopicValidationStatus",
     # Event Bus
     "EventBusInmemory",
     "ModelEventHeaders",
     "ModelEventMessage",
     # Topic Management
+    "ModelTopicValidationResult",
     "TopicProvisioner",
+    "TopicStartupValidator",
     # Topic Functions
     "build_dlq_topic",
     "derive_dlq_topic_for_event_type",

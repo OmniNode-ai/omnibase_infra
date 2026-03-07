@@ -77,13 +77,15 @@ class TestNotificationConsumerInit:
         assert consumer._running is False
         assert consumer._consumer_tasks == []
 
-    def test_init_with_webhook_url(self, mock_event_bus: MagicMock) -> None:
-        """Should initialize with optional webhook URL."""
+    def test_init_with_bot_token(self, mock_event_bus: MagicMock) -> None:
+        """Should initialize with optional bot token."""
         consumer = NotificationConsumer(
             event_bus=mock_event_bus,
-            webhook_url="https://hooks.slack.com/test",
+            bot_token="xoxb-test-token",
+            default_channel="C01234567",
         )
-        assert consumer._handler._webhook_url == "https://hooks.slack.com/test"
+        assert consumer._handler._bot_token == "xoxb-test-token"
+        assert consumer._handler._default_channel == "C01234567"
 
 
 class TestNotificationConsumerStartStop:

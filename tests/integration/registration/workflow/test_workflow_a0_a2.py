@@ -2,9 +2,9 @@
 # Copyright (c) 2025 OmniNode Team
 """Tests A0, A1, A2 for OMN-915 mocked E2E registration workflow.
 
-This module provides mocked E2E tests proving the registration architecture
-with ZERO real infrastructure. All Consul/PostgreSQL/Kafka operations are
-replaced with controllable test doubles.
+Proves the registration architecture with ZERO real infrastructure.
+All PostgreSQL/Kafka operations are replaced with controllable test
+doubles (Consul removed in OMN-3540).
 
 Test Scenarios:
     A0 - Purity Gate: Verify reducer performs no I/O, effect handles all external calls
@@ -68,8 +68,8 @@ if TYPE_CHECKING:
 # Test Constants
 # =============================================================================
 
-# Expected number of intents emitted by reducer (Consul + PostgreSQL)
-EXPECTED_INTENT_COUNT = 2
+# Expected number of intents emitted by reducer (PostgreSQL only, OMN-3540)
+EXPECTED_INTENT_COUNT = 1
 
 # =============================================================================
 # A0 - Purity Gate Tests
@@ -137,7 +137,7 @@ class TestA0PurityGate:
 
         # Assert: Reducer did emit intents for Effect layer
         assert len(output.intents) == EXPECTED_INTENT_COUNT, (
-            f"Reducer should emit {EXPECTED_INTENT_COUNT} intents (Consul + PostgreSQL), "
+            f"Reducer should emit {EXPECTED_INTENT_COUNT} intents (PostgreSQL only, OMN-3540), "
             f"got {len(output.intents)}"
         )
 
@@ -147,9 +147,6 @@ class TestA0PurityGate:
             for intent in output.intents
             if intent.intent_type
         }
-        assert "consul.register" in intent_types, (
-            "Missing consul.register extension intent"
-        )
         assert "postgres.upsert_registration" in intent_types, (
             "Missing postgres.upsert_registration extension intent"
         )
@@ -189,7 +186,6 @@ class TestA0PurityGate:
         )
 
         # Assert precondition: no calls before effect execution
-        assert consul_client.call_count == 0, "Consul should have 0 calls initially"
         assert postgres_adapter.call_count == 0, (
             "Postgres should have 0 calls initially"
         )
@@ -198,9 +194,7 @@ class TestA0PurityGate:
         response = await tracked_effect.register_node(request)
 
         # Assert: Effect DID perform I/O (this is correct behavior for Effects)
-        assert consul_client.call_count > 0, (
-            "Effect should call Consul - this is where I/O belongs"
-        )
+        # Note: Consul removed in OMN-3540, only PostgreSQL I/O expected
         assert postgres_adapter.call_count > 0, (
             "Effect should call PostgreSQL - this is where I/O belongs"
         )
@@ -243,7 +237,6 @@ class TestA0PurityGate:
 
         # Verify reducer was tracked and performed no I/O
         assert tracked_reducer.reduce_call_count == 1, "Reducer should be called once"
-        assert consul_client.call_count == 0, "Reducer must not call Consul"
         assert postgres_adapter.call_count == 0, "Reducer must not call PostgreSQL"
 
         # Act - Phase 2: Effect executes registration (with I/O)
@@ -263,8 +256,7 @@ class TestA0PurityGate:
         )
         await tracked_effect.register_node(request)
 
-        # Assert: Effect performed I/O after reducer
-        assert consul_client.call_count > 0, "Effect should call Consul"
+        # Assert: Effect performed I/O after reducer (PostgreSQL only, OMN-3540)
         assert postgres_adapter.call_count > 0, "Effect should call PostgreSQL"
 
         # Verify call order: reducer THEN effect
@@ -781,8 +773,7 @@ class TestWorkflowIntegration:
         initial_state = ModelRegistrationState()
         output = tracked_reducer.reduce(initial_state, introspection_event)
 
-        # Verify reducer purity
-        assert consul_client.call_count == 0, "Reducer must not call Consul"
+        # Verify reducer purity (PostgreSQL only, OMN-3540)
         assert postgres_adapter.call_count == 0, "Reducer must not call Postgres"
         assert len(output.intents) == EXPECTED_INTENT_COUNT, (
             f"Reducer should emit {EXPECTED_INTENT_COUNT} intents"
@@ -805,16 +796,16 @@ class TestWorkflowIntegration:
         )
         response = await tracked_effect.register_node(request)
 
-        # Verify effect performed I/O
-        assert consul_client.call_count > 0, "Effect should call Consul"
+        # Verify effect performed I/O (PostgreSQL only, OMN-3540)
         assert postgres_adapter.call_count > 0, "Effect should call Postgres"
         assert response.is_complete_success(), "Registration should succeed"
 
         # Step 4: Verify workflow order (A2 - correlation)
         call_order = call_tracker.get_call_order()
-        assert call_order == ["reducer", "effect"], (
-            f"Workflow order should be [reducer, effect], got {call_order}"
-        )
+        assert call_order == [
+            "reducer",
+            "effect",
+        ], f"Workflow order should be [reducer, effect], got {call_order}"
 
         # Verify correlation ID was preserved (would be in effect's request)
         assert request.correlation_id == correlation_id, (

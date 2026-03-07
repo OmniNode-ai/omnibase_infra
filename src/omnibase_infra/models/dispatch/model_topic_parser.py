@@ -143,7 +143,7 @@ def _parse_topic_cached(topic: str) -> ModelParsedTopic:
     """
     Module-level cached topic parsing implementation.
 
-    This function contains the actual parsing logic and is decorated with
+    The actual parsing logic and is decorated with
     @lru_cache to provide automatic caching with LRU eviction.
 
     Args:

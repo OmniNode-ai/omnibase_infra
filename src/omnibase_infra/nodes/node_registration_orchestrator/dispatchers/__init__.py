@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Registration dispatcher adapters for MessageDispatchEngine integration.
 
-This module provides ProtocolMessageDispatcher adapters that wrap the
+ProtocolMessageDispatcher adapters that wrap the
 registration orchestrator handlers for integration with MessageDispatchEngine's
 category-based routing.
 

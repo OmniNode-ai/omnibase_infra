@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Registration Result Model for Service Discovery Operations.
 
-This module provides ModelRegistrationResult, representing the result
+ModelRegistrationResult, representing the result
 of service registration operations from the NodeServiceDiscoveryEffect node.
 
 Architecture:

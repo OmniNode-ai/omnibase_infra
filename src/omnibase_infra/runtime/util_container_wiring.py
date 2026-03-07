@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Container wiring for omnibase_infra services.
+"""Container wiring for omnibase_infra services.  # ai-slop-ok: pre-existing
 
 This module provides functions to register infrastructure services
 with ModelONEXContainer from omnibase_core. It establishes container-based
@@ -71,7 +71,6 @@ if TYPE_CHECKING:
     import asyncpg
 
     from omnibase_core.container import ModelONEXContainer
-    from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeIntrospected,
         HandlerNodeRegistrationAcked,
@@ -840,7 +839,6 @@ async def wire_registration_handlers(
     pool: asyncpg.Pool,
     liveness_interval_seconds: int | None = None,
     projector: ProjectorShell | None = None,
-    consul_handler: HandlerConsul | None = None,
     snapshot_publisher: ProtocolSnapshotPublisher | None = None,
 ) -> WiringResult:
     """Register registration orchestrator handlers with the container.
@@ -868,9 +866,6 @@ async def wire_registration_handlers(
             database using ProjectorShell.partial_update() and upsert_partial().
             If None, the handler operates in read-only mode (useful for testing
             or when projection persistence is handled elsewhere).
-        consul_handler: Optional HandlerConsul for dual registration with Consul.
-            If provided, HandlerNodeIntrospected will register nodes with Consul
-            for service discovery. If None, only PostgreSQL registration occurs.
         snapshot_publisher: Optional ProtocolSnapshotPublisher for publishing
             compacted snapshots to Kafka. If provided, handlers will publish
             snapshots after state transitions (best-effort, non-blocking).
@@ -916,7 +911,6 @@ async def wire_registration_handlers(
         pool,
         liveness_interval_seconds=liveness_interval_seconds,
         projector=projector,
-        consul_handler=consul_handler,
         snapshot_publisher=snapshot_publisher,
     )
 

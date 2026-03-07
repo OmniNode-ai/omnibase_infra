@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Service Information Model for Service Discovery Handlers.
 
-This module provides the ModelServiceInfo class representing service metadata
+The ModelServiceInfo class representing service metadata
 for service discovery handler operations.
 
 Note:

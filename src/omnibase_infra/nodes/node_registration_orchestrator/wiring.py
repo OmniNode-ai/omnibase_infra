@@ -73,7 +73,6 @@ if TYPE_CHECKING:
 
     from omnibase_core.container import ModelONEXContainer
     from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
-    from omnibase_infra.handlers.handler_consul import HandlerConsul
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeHeartbeat,
         HandlerNodeIntrospected,
@@ -555,7 +554,6 @@ async def wire_registration_handlers(
     pool: asyncpg.Pool,
     liveness_interval_seconds: int | None = None,
     projector: ProjectorShell | None = None,
-    consul_handler: HandlerConsul | None = None,
     snapshot_publisher: ProtocolSnapshotPublisher | None = None,
     event_bus: ProtocolEventBus | None = None,
     correlation_id: UUID | None = None,
@@ -575,7 +573,6 @@ async def wire_registration_handlers(
         liveness_interval_seconds: Liveness deadline interval for ack handler.
             If None, uses ONEX_LIVENESS_INTERVAL_SECONDS env var or default (60s).
         projector: Optional ProjectorShell for persisting state transitions.
-        consul_handler: Optional HandlerConsul for dual registration with Consul.
         snapshot_publisher: Optional ProtocolSnapshotPublisher for publishing
             compacted snapshots to Kafka. If provided, handlers will publish
             snapshots after state transitions (best-effort, non-blocking).
@@ -659,7 +656,6 @@ async def wire_registration_handlers(
 
         reducer = RegistrationReducerService(
             liveness_interval_seconds=resolved_liveness_interval,
-            consul_enabled=consul_handler is not None,
         )
         await container.service_registry.register_instance(
             interface=RegistrationReducerService,

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Manifest Retrieve Result Model.
 
-This module provides the Pydantic model for the manifest.retrieve operation
+The Pydantic model for the manifest.retrieve operation
 result, containing the retrieved manifest or indication of not found.
 """
 

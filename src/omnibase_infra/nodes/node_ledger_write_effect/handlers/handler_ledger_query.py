@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """Handler for ledger query operations with internal routing.
 
-This handler provides query operations for the event ledger, supporting
+Query operations for the event ledger, supporting
 queries by correlation_id and time_range. Both operations share:
     - Input validation and normalization
     - DB connection/session lifecycle (via HandlerDb composition)
@@ -121,7 +121,7 @@ WHERE COALESCE(event_timestamp, ledger_written_at) >= $1
 class HandlerLedgerQuery:
     """Handler for querying events from the audit ledger.
 
-    This handler implements query operations for ProtocolLedgerPersistence,
+    Query operations for ProtocolLedgerPersistence,
     composing with HandlerDb for PostgreSQL operations. It provides:
 
     - Query by correlation_id (distributed tracing)

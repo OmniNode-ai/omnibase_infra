@@ -5,7 +5,6 @@
 Tests validate:
 - Happy path: handler returns ModelTopicCatalogResponse with catalog data
 - Malformed query payload: returns empty response with invalid_query_payload warning
-- Consul unavailable: ServiceTopicCatalog returns warnings, handler passes them through
 - Unexpected exception from catalog service: returns empty response with internal_error warning
 - Handler properties: handler_id, category, message_types, node_kind, handler_type
 
@@ -26,8 +25,6 @@ from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.catalog.catalog_warning_codes import (
-    CONSUL_SCAN_TIMEOUT,
-    CONSUL_UNAVAILABLE,
     INTERNAL_ERROR,
     INVALID_QUERY_PAYLOAD,
 )
@@ -219,50 +216,6 @@ async def test_handler_malformed_payload_returns_warning() -> None:
 
     # Catalog service should NOT be called for malformed payloads
     service.build_catalog.assert_not_awaited()
-
-
-# ---------------------------------------------------------------------------
-# Consul unavailable
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-async def test_handler_consul_unavailable_returns_warning() -> None:
-    """When Consul is unavailable, ServiceTopicCatalog returns consul_unavailable warning."""
-    correlation_id = uuid4()
-    consul_unavailable_response = _empty_catalog_response(
-        correlation_id=correlation_id,
-        warnings=(CONSUL_UNAVAILABLE,),
-    )
-    service = _make_catalog_service(response=consul_unavailable_response)
-    handler = HandlerTopicCatalogQuery(catalog_service=service)
-
-    envelope = _make_query_envelope(correlation_id=correlation_id)
-    output = await handler.handle(envelope)
-
-    assert len(output.events) == 1
-    response = output.events[0]
-    assert isinstance(response, ModelTopicCatalogResponse)
-    assert CONSUL_UNAVAILABLE in response.warnings
-    assert len(response.topics) == 0
-
-
-@pytest.mark.unit
-async def test_handler_consul_scan_timeout_passes_through_warnings() -> None:
-    """When Consul scan times out, ServiceTopicCatalog warning is passed through."""
-    correlation_id = uuid4()
-    timeout_response = _empty_catalog_response(
-        correlation_id=correlation_id,
-        warnings=(CONSUL_SCAN_TIMEOUT,),
-    )
-    service = _make_catalog_service(response=timeout_response)
-    handler = HandlerTopicCatalogQuery(catalog_service=service)
-
-    envelope = _make_query_envelope(correlation_id=correlation_id)
-    output = await handler.handle(envelope)
-
-    response = output.events[0]
-    assert CONSUL_SCAN_TIMEOUT in response.warnings
 
 
 # ---------------------------------------------------------------------------

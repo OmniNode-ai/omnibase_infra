@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """DLQ Replay Status Enum.
 
-This module provides the status enum for DLQ replay operations.
+The status enum for DLQ replay operations.
 
 Related:
     - scripts/dlq_replay.py - CLI tool that uses this enum

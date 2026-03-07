@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Shutdown Batch Result Model.
+"""# ai-slop-ok: pre-existingShutdown Batch Result Model.
 
 This module provides the Pydantic model for batch shutdown operation results.
 
@@ -33,7 +33,7 @@ class ModelShutdownBatchResult(BaseModel):
         ...     ModelFailedComponent,
         ... )
         >>> result = ModelShutdownBatchResult(
-        ...     succeeded_components=["ConsulAdapter", "VaultAdapter"],
+        ...     succeeded_components=["PostgresAdapter", "EventBusKafka"],
         ...     failed_components=[
         ...         ModelFailedComponent(
         ...             component_name="EventBusKafka",

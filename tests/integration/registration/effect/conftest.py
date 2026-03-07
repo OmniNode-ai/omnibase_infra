@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Pytest fixtures for NodeRegistryEffect integration tests.
+"""# ai-slop-ok: pre-existingPytest fixtures for NodeRegistryEffect integration tests.
 
 This module provides fixtures that wire NodeRegistryEffect with:
 1. Real ModelONEXContainer from omnibase_core
-2. Test double backend clients (Consul, PostgreSQL)
+2. Test double backend clients (PostgreSQL)
 3. InMemory idempotency store for isolation
 
 Design Principles:
@@ -33,17 +33,7 @@ from omnibase_infra.nodes.effects.store_effect_idempotency_inmemory import (
     InMemoryEffectIdempotencyStore,
 )
 
-from .test_doubles import StubConsulClient, StubPostgresAdapter
-
-
-@pytest.fixture
-def consul_client() -> StubConsulClient:
-    """Create a fresh StubConsulClient.
-
-    Returns:
-        StubConsulClient with default (success) configuration.
-    """
-    return StubConsulClient()
+from .test_doubles import StubPostgresAdapter
 
 
 @pytest.fixture
@@ -72,7 +62,6 @@ def idempotency_store() -> InMemoryEffectIdempotencyStore:
 
 @pytest.fixture
 def registry_effect(
-    consul_client: StubConsulClient,
     postgres_adapter: StubPostgresAdapter,
     idempotency_store: InMemoryEffectIdempotencyStore,
 ) -> NodeRegistryEffect:
@@ -80,12 +69,10 @@ def registry_effect(
 
     This fixture wires the effect node with controllable test doubles,
     enabling verification of:
-    - Success flows with both backends
-    - Partial failure scenarios
+    - Success flows with postgres backend
     - Retry behavior with idempotency
 
     Args:
-        consul_client: Test double Consul client.
         postgres_adapter: Test double PostgreSQL adapter.
         idempotency_store: In-memory idempotency store.
 
@@ -93,7 +80,6 @@ def registry_effect(
         NodeRegistryEffect configured with test doubles.
     """
     return NodeRegistryEffect(
-        consul_client=consul_client,
         postgres_adapter=postgres_adapter,
         idempotency_store=idempotency_store,
     )

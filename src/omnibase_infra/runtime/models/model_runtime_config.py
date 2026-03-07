@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Runtime Configuration Model.
 
-This module provides the top-level Pydantic model for ONEX runtime kernel configuration.
+The top-level Pydantic model for ONEX runtime kernel configuration.
 All fields are strongly typed to eliminate Any usage and enable proper validation.
 
 Configuration Priority (highest to lowest):

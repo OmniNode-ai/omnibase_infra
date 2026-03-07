@@ -5,7 +5,7 @@
 .. versionadded:: 0.8.0
     Initial implementation for OMN-765.
 
-This module provides the ModelConfigRefParseResult for representing
+The ModelConfigRefParseResult for representing
 the result of parsing a configuration reference string.
 """
 

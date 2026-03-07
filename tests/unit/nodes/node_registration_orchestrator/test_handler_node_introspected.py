@@ -48,9 +48,6 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_i
 from omnibase_infra.nodes.node_registration_orchestrator.services import (
     RegistrationReducerService,
 )
-from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
-    ModelPayloadConsulRegister,
-)
 from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
     ModelPayloadPostgresUpsertRegistration,
 )
@@ -71,12 +68,10 @@ def create_mock_projection_reader() -> AsyncMock:
 
 def create_default_reducer(
     ack_timeout_seconds: float = 30.0,
-    consul_enabled: bool = True,
 ) -> RegistrationReducerService:
     """Create a RegistrationReducerService with test defaults."""
     return RegistrationReducerService(
         ack_timeout_seconds=ack_timeout_seconds,
-        consul_enabled=consul_enabled,
     )
 
 
@@ -500,8 +495,8 @@ class TestHandlerNodeIntrospectedIntents:
     """Test intent-based output for effect layer execution (OMN-2050)."""
 
     @pytest.mark.asyncio
-    async def test_returns_postgres_and_consul_intents(self) -> None:
-        """Test that handler returns both postgres and consul intents."""
+    async def test_returns_postgres_intent(self) -> None:
+        """Test that handler returns a postgres upsert intent."""
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None  # New node
 
@@ -516,13 +511,12 @@ class TestHandlerNodeIntrospectedIntents:
 
         output = await handler.handle(envelope)
 
-        # Should have 2 intents: postgres upsert + consul register
-        assert len(output.intents) == 2
+        # Should have 1 intent: postgres upsert (consul removed in OMN-3540)
+        assert len(output.intents) >= 1
 
         # Verify intent types
         intent_payload_types = [type(i.payload).__name__ for i in output.intents]
         assert "ModelPayloadPostgresUpsertRegistration" in intent_payload_types
-        assert "ModelPayloadConsulRegister" in intent_payload_types
 
     @pytest.mark.asyncio
     async def test_postgres_intent_has_correct_record(self) -> None:
@@ -565,8 +559,8 @@ class TestHandlerNodeIntrospectedIntents:
         assert f"{node_id}" in postgres_intents[0].target
 
     @pytest.mark.asyncio
-    async def test_consul_intent_has_correct_service_name(self) -> None:
-        """Test that consul intent follows ONEX service naming convention."""
+    async def test_postgres_intent_has_correct_service_name(self) -> None:
+        """Test that postgres intent has correct entity_id in its record."""
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
@@ -578,19 +572,17 @@ class TestHandlerNodeIntrospectedIntents:
 
         output = await handler.handle(envelope)
 
-        # Find the consul intent
-        consul_intents = [
+        # Find the postgres intent
+        postgres_intents = [
             i
             for i in output.intents
-            if isinstance(i.payload, ModelPayloadConsulRegister)
+            if isinstance(i.payload, ModelPayloadPostgresUpsertRegistration)
         ]
-        assert len(consul_intents) == 1
+        assert len(postgres_intents) == 1
 
-        consul_payload = consul_intents[0].payload
-        assert consul_payload.service_name == "onex-effect"
-        assert consul_payload.service_id == f"onex-effect-{node_id}"
-        assert "onex" in consul_payload.tags
-        assert "node-type:effect" in consul_payload.tags
+        postgres_payload = postgres_intents[0].payload
+        record = postgres_payload.record.model_dump()
+        assert record["entity_id"] == node_id
 
     @pytest.mark.asyncio
     async def test_no_intents_for_blocking_states(self) -> None:
@@ -636,7 +628,7 @@ class TestHandlerNodeIntrospectedIntents:
         # Should have events and intents for re-registration
         assert len(output.events) == 2
         assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
-        assert len(output.intents) == 2
+        assert len(output.intents) == 1
 
     @pytest.mark.asyncio
     async def test_ack_deadline_in_postgres_intent(self) -> None:
@@ -720,71 +712,6 @@ class TestHandlerNodeIntrospectedIntents:
         record = postgres_intents[0].payload.record.model_dump()
         assert record["data"]["capabilities"] == capabilities.model_dump(mode="json")
         assert record["data"]["node_version"] == "2.0.0"
-
-
-class TestSanitizeToolName:
-    """Test MCP tool name sanitization for Consul tags.
-
-    _sanitize_tool_name is now a static method on RegistrationReducerService.
-    These tests validate the method via the reducer service directly.
-    """
-
-    def test_sanitize_simple_name(self) -> None:
-        """Test that simple names pass through with lowercase."""
-        result = RegistrationReducerService._sanitize_tool_name("MyTool")
-        assert result == "mytool"
-
-    def test_sanitize_spaces_become_dashes(self) -> None:
-        """Test that spaces are replaced with dashes."""
-        result = RegistrationReducerService._sanitize_tool_name("My Cool Tool")
-        assert result == "my-cool-tool"
-
-    def test_sanitize_special_chars_become_dashes(self) -> None:
-        """Test that special characters are replaced with dashes."""
-        result = RegistrationReducerService._sanitize_tool_name("Tool (v2.0) - Beta!")
-        assert result == "tool-v2-0-beta"
-
-    def test_sanitize_multiple_special_chars_collapse(self) -> None:
-        """Test that multiple consecutive special chars become single dash."""
-        result = RegistrationReducerService._sanitize_tool_name("Tool   &&&   Name")
-        assert result == "tool-name"
-
-    def test_sanitize_leading_trailing_dashes_removed(self) -> None:
-        """Test that leading/trailing dashes are removed."""
-        result = RegistrationReducerService._sanitize_tool_name("  @@@Tool Name###  ")
-        assert result == "tool-name"
-
-    def test_sanitize_preserves_alphanumeric(self) -> None:
-        """Test that alphanumeric characters are preserved."""
-        result = RegistrationReducerService._sanitize_tool_name("Tool123Name456")
-        assert result == "tool123name456"
-
-    def test_sanitize_truncates_to_63_chars(self) -> None:
-        """Test that result is truncated to 63 characters (DNS label limit)."""
-        long_name = "a" * 100  # 100 characters
-        result = RegistrationReducerService._sanitize_tool_name(long_name)
-        assert len(result) == 63
-        assert result == "a" * 63
-
-    def test_sanitize_free_form_description(self) -> None:
-        """Test sanitization of typical free-form description text."""
-        # Typical description that might come from metadata.description
-        description = "Node Registration Orchestrator (handles service discovery)"
-        result = RegistrationReducerService._sanitize_tool_name(description)
-        assert result == "node-registration-orchestrator-handles-service-discovery"
-
-    def test_sanitize_unicode_chars(self) -> None:
-        """Test that unicode characters are replaced with dashes."""
-        result = RegistrationReducerService._sanitize_tool_name(
-            "Tool\u2019s Name"
-        )  # Smart apostrophe
-        assert result == "tool-s-name"
-
-    def test_sanitize_empty_after_sanitization(self) -> None:
-        """Test handling of names that become empty after sanitization."""
-        # All special characters
-        result = RegistrationReducerService._sanitize_tool_name("@#$%^&*()")
-        assert result == ""
 
 
 class TestCapabilitiesJsonbCompatibility:

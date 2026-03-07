@@ -77,7 +77,7 @@ class RoundRobinEntry(NamedTuple):
 class ServiceNodeSelector:
     """Selects a node from candidates using various strategies.
 
-    This service implements node selection logic for capability-based discovery.
+    Node selection logic for capability-based discovery.
     When multiple nodes match a capability query, this selector chooses one
     based on the configured strategy.
 

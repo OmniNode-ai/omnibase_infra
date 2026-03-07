@@ -186,7 +186,7 @@ Envelopes are always frozen (`frozen=True`). They cross node boundaries and must
 **Architectural meaning**: The event bus is the pub/sub backbone of the ONEX platform. It decouples nodes by routing events between them. The bus is accessed only through `ProtocolEventBus` — never directly.
 
 **Two implementations**:
-- `EventBusKafka` — production; backed by Redpanda/Kafka at `192.168.86.200:29092` (external) or `omninode-bridge-redpanda:9092` (Docker-internal).
+- `EventBusKafka` — production; backed by Redpanda/Kafka at `localhost:19092` (external) or `redpanda:9092` (Docker-internal).
 - `EventBusInmemory` — testing; all events remain in process.
 
 **Wire format**: `EventBusKafka.publish_envelope()` wraps events in `ModelEventEnvelope`. Consumer callbacks must unwrap `data.get("payload", data)` to access the actual event data.

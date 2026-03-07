@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Runtime Introspection Configuration Model.
 
-This module provides the configuration model for auto-introspection behavior
+The configuration model for auto-introspection behavior
 in RuntimeHostProcess. It controls startup introspection timing, jitter for
 stampede prevention, and throttling for rapid restart scenarios.
 

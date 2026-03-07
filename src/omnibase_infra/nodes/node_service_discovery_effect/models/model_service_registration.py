@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Service Registration Model for Service Discovery Operations.
 
-This module provides ModelServiceRegistration, representing input for
+ModelServiceRegistration, representing input for
 service registration operations in the NodeServiceDiscoveryEffect node.
 
 Architecture:

@@ -100,7 +100,7 @@ class TestProtocolValidationCompleteness:
         """Verify health_check() is NOT required by validation.
 
         Per the protocol definition, health_check() is optional because
-        existing handlers (HandlerHttp, HandlerDb, HandlerVault, HandlerConsul)
+        existing handlers (HandlerHttp, HandlerDb, HandlerVault)
         do not implement it.
         """
         loader = HandlerPluginLoader()
@@ -252,13 +252,12 @@ class TestProtocolValidationAgainstRealHandlers:
     REAL_HANDLERS = [
         "omnibase_infra.handlers.handler_http.HandlerHttpRest",
         "omnibase_infra.handlers.handler_db.HandlerDb",
-        "omnibase_infra.handlers.handler_consul.HandlerConsul",
     ]
 
     @pytest.mark.parametrize(
         "handler_class_path",
         REAL_HANDLERS,
-        ids=["http", "db", "consul"],
+        ids=["http", "db"],
     )
     def test_real_handlers_pass_validation(self, handler_class_path: str) -> None:
         """Verify all real handlers pass protocol validation.
@@ -287,7 +286,7 @@ class TestProtocolValidationAgainstRealHandlers:
     @pytest.mark.parametrize(
         "handler_class_path",
         REAL_HANDLERS,
-        ids=["http", "db", "consul"],
+        ids=["http", "db"],
     )
     def test_real_handlers_have_all_required_methods(
         self, handler_class_path: str

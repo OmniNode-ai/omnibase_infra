@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Discovery Error Model for Handler Discovery Operations.
 
-This module provides the ModelDiscoveryError model for tracking errors
+The ModelDiscoveryError model for tracking errors
 encountered during handler discovery operations.
 
 See Also:

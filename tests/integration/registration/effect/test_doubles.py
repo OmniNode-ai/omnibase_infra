@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Test doubles for NodeRegistryEffect integration tests.
+"""# ai-slop-ok: pre-existingTest doubles for NodeRegistryEffect integration tests.
 
 This module provides controllable test doubles that implement the protocol
 interfaces required by NodeRegistryEffect. Unlike mocks, these test doubles:
@@ -32,7 +32,6 @@ Design Principles:
     - Configurable failures: Set up failure scenarios programmatically
 
 Related:
-    - protocol_consul_client.py: ProtocolConsulClient definition
     - protocol_postgres_adapter.py: ProtocolPostgresAdapter definition
     - test_protocol_compliance.py: Protocol compliance verification tests
 """

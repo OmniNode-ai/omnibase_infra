@@ -14,6 +14,7 @@ Usage (pre-commit — check staged files):
 from __future__ import annotations
 
 import argparse
+import ast
 import re
 import subprocess
 import sys
@@ -40,6 +41,64 @@ def has_bypass_comment(content: str) -> bool:
     return bool(BYPASS_RE.search(content))
 
 
+def _get_merge_base() -> str:
+    """Return the merge-base SHA between HEAD and origin/main."""
+    try:
+        return subprocess.check_output(
+            ["git", "merge-base", "HEAD", "origin/main"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except subprocess.CalledProcessError:
+        print(
+            "WARNING: could not determine merge-base with origin/main", file=sys.stderr
+        )
+        return ""
+
+
+def _strip_docstrings(tree: ast.Module) -> ast.Module:
+    """Remove docstring nodes from module/class/function bodies for comparison."""
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            if (
+                node.body
+                and isinstance(node.body[0], ast.Expr)
+                and isinstance(node.body[0].value, ast.Constant)
+                and isinstance(node.body[0].value.value, str)
+            ):
+                node.body = node.body[1:]
+    return tree
+
+
+def is_cosmetic_only(path: str, merge_base: str) -> bool:
+    """True if the diff for this file is comments/docstrings/whitespace only."""
+    if not merge_base:
+        return False
+
+    try:
+        base_src = subprocess.check_output(
+            ["git", "show", f"{merge_base}:{path}"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except subprocess.CalledProcessError:
+        return False  # new file
+
+    current_src = Path(path).read_text(encoding="utf-8")
+
+    try:
+        base_tree = _strip_docstrings(ast.parse(base_src))
+        current_tree = _strip_docstrings(ast.parse(current_src))
+    except SyntaxError:
+        return False
+
+    return ast.dump(base_tree, include_attributes=False) == ast.dump(
+        current_tree, include_attributes=False
+    )
+
+
 def get_changed_files(ci: bool) -> list[str]:
     if ci:
         base = subprocess.check_output(
@@ -56,7 +115,7 @@ def get_changed_files(ci: bool) -> list[str]:
 
 def find_violations(
     changed_files: list[str],
-    bypass_comment: str | None,
+    merge_base: str = "",
 ) -> list[str]:
     """Return list of writer files that lack a corresponding migration."""
     writer_files = [f for f in changed_files if is_writer_file(f)]
@@ -72,13 +131,13 @@ def find_violations(
 
     violations = []
     for wf in writer_files:
+        if merge_base and is_cosmetic_only(wf, merge_base):
+            continue
         path = Path(wf)
         if path.exists():
-            content = path.read_text()
+            content = path.read_text(encoding="utf-8")
             if has_bypass_comment(content):
                 continue
-        if bypass_comment and has_bypass_comment(bypass_comment):
-            continue
         violations.append(wf)
 
     return violations
@@ -90,8 +149,9 @@ def main() -> None:
     parser.add_argument("--pre-commit", action="store_true")
     args = parser.parse_args()
 
+    merge_base = _get_merge_base()
     changed = get_changed_files(ci=args.ci)
-    violations = find_violations(changed, bypass_comment=None)
+    violations = find_violations(changed, merge_base=merge_base)
 
     if violations:
         print("ERROR: Writer file(s) changed without a migration file in this PR:")

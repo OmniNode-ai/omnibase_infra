@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Filesystem Directory Entry Model.
 
-This module provides the Pydantic model for a single directory entry,
+The Pydantic model for a single directory entry,
 used in the filesystem.list_directory operation result.
 """
 

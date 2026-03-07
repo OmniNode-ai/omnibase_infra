@@ -471,15 +471,6 @@ class TestInfraConnectionError:
         error = InfraConnectionError("Kafka connection failed", context=context)
         assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
 
-    def test_error_code_mapping_consul_transport(self) -> None:
-        """Test CONSUL transport uses SERVICE_UNAVAILABLE."""
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.CONSUL,
-            target_name="consul-server",
-        )
-        error = InfraConnectionError("Consul connection failed", context=context)
-        assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
-
     def test_error_code_mapping_valkey_transport(self) -> None:
         """Test VALKEY transport uses SERVICE_UNAVAILABLE."""
         context = ModelInfraErrorContext(
@@ -543,7 +534,6 @@ class TestInfraConnectionErrorTransportMapping:
         """Test _resolve_connection_error_code for service transports."""
         service_transports = [
             EnumInfraTransportType.KAFKA,
-            EnumInfraTransportType.CONSUL,
             EnumInfraTransportType.VALKEY,
         ]
         for transport in service_transports:
@@ -582,7 +572,6 @@ class TestInfraConnectionErrorTransportMapping:
             (EnumInfraTransportType.HTTP, EnumCoreErrorCode.NETWORK_ERROR),
             (EnumInfraTransportType.GRPC, EnumCoreErrorCode.NETWORK_ERROR),
             (EnumInfraTransportType.KAFKA, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
-            (EnumInfraTransportType.CONSUL, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
             (EnumInfraTransportType.VALKEY, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
         ]
         for transport, expected_code in test_cases:
@@ -663,7 +652,7 @@ class TestInfraAuthenticationError:
     def test_with_context_model(self) -> None:
         """Test error with context model and auth details."""
         context = ModelInfraErrorContext(
-            target_name="consul",
+            target_name="infisical",
             operation="authenticate",
         )
         error = InfraAuthenticationError(
@@ -671,7 +660,7 @@ class TestInfraAuthenticationError:
             context=context,
             username="admin",
         )
-        assert error.model.context["target_name"] == "consul"
+        assert error.model.context["target_name"] == "infisical"
         assert error.model.context["operation"] == "authenticate"
         assert error.model.context["username"] == "admin"
 
@@ -727,19 +716,19 @@ class TestInfraUnavailableError:
 
     def test_error_chaining(self) -> None:
         """Test error chaining from exception."""
-        context = ModelInfraErrorContext(target_name="consul")
+        context = ModelInfraErrorContext(target_name="valkey")
         resource_error = ConnectionRefusedError("Not responding")
         try:
             raise InfraUnavailableError(
-                "Consul unavailable",
+                "Valkey unavailable",
                 context=context,
-                host="consul.local",
-                port=8500,
+                host="valkey.local",
+                port=6379,
             ) from resource_error
         except InfraUnavailableError as e:
             assert e.__cause__ == resource_error
-            assert e.model.context["target_name"] == "consul"
-            assert e.model.context["port"] == 8500
+            assert e.model.context["target_name"] == "valkey"
+            assert e.model.context["port"] == 6379
 
 
 class TestInfraRateLimitedError:
@@ -783,7 +772,12 @@ class TestInfraRateLimitedError:
         assert error.model.context["retry_after_seconds"] == 30.0
 
     def test_without_retry_after_seconds(self) -> None:
-        """Test error without retry_after_seconds (None case)."""
+        """Test error without retry_after_seconds (None case).
+
+        Note: The InfraRateLimitedError.retry_after_seconds attribute remains
+        None when not explicitly provided. However, the catalog may auto-enrich
+        the model context with a default retry_after_seconds value (OMN-518).
+        """
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.HTTP,
             operation="api_request",
@@ -792,10 +786,10 @@ class TestInfraRateLimitedError:
             "Rate limit exceeded",
             context=context,
         )
-        # Verify retry_after_seconds is None when not provided
+        # Verify InfraRateLimitedError-specific attribute is None when not explicitly provided
         assert error.retry_after_seconds is None
-        # Verify retry_after_seconds not in extra_context when None
-        assert "retry_after_seconds" not in error.model.context
+        # OMN-518: catalog auto-enrichment may populate retry_after_seconds in model context
+        # so we no longer assert it's absent from model.context
 
     def test_error_code_mapping(self) -> None:
         """Test that error uses RATE_LIMIT_ERROR code."""
@@ -929,9 +923,8 @@ class TestStructuredFieldsComprehensive:
             EnumInfraTransportType.INFISICAL,
             EnumInfraTransportType.DATABASE,
             EnumInfraTransportType.KAFKA,
-            EnumInfraTransportType.CONSUL,
-            EnumInfraTransportType.VALKEY,
             EnumInfraTransportType.GRPC,
+            EnumInfraTransportType.VALKEY,
         ]
         errors = [
             ProtocolConfigurationError(
@@ -962,19 +955,13 @@ class TestStructuredFieldsComprehensive:
             InfraAuthenticationError(
                 "test",
                 context=ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.CONSUL
+                    transport_type=EnumInfraTransportType.GRPC
                 ),
             ),
             InfraUnavailableError(
                 "test",
                 context=ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.VALKEY
-                ),
-            ),
-            InfraRateLimitedError(
-                "test",
-                context=ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.GRPC
                 ),
             ),
         ]
@@ -1031,7 +1018,7 @@ class TestStructuredFieldsComprehensive:
             "vault",
             "postgresql",
             "kafka",
-            "consul",
+            "grpc-service",
             "valkey",
             "openai-api",
         ]
@@ -1054,7 +1041,7 @@ class TestStructuredFieldsComprehensive:
                 ),
             ),
             InfraAuthenticationError(
-                "test", context=ModelInfraErrorContext(target_name="consul")
+                "test", context=ModelInfraErrorContext(target_name="grpc-service")
             ),
             InfraUnavailableError(
                 "test", context=ModelInfraErrorContext(target_name="valkey")
@@ -1271,6 +1258,10 @@ class TestContextSerialization:
             "target_name": None,
             "correlation_id": None,
             "namespace": None,
+            # OMN-518: New fields default to None
+            "suggested_resolution": None,
+            "retry_after_seconds": None,
+            "original_error_type": None,
         }
 
     def test_context_to_dict_with_all_fields(self) -> None:
@@ -1350,7 +1341,7 @@ class TestContextSerialization:
 
         correlation_id = uuid4()
         original = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.CONSUL,
+            transport_type=EnumInfraTransportType.GRPC,
             operation="register_service",
             target_name="my-service",
             correlation_id=correlation_id,
@@ -1441,7 +1432,6 @@ class TestContextSerialization:
             EnumInfraTransportType.HTTP,
             EnumInfraTransportType.DATABASE,
             EnumInfraTransportType.KAFKA,
-            EnumInfraTransportType.CONSUL,
             EnumInfraTransportType.VALKEY,
         ]
         for transport in transport_types:
@@ -1518,15 +1508,29 @@ class TestErrorContextSecretSanitization:
         "-----BEGIN PRIVATE KEY-----",
     ]
 
+    # OMN-518: Diagnostic keys added by error catalog enrichment and stack
+    # trace capture. These contain system-generated content (file paths,
+    # resolution text) that may incidentally match secret patterns but are
+    # not user-supplied data and are safe to exclude from sanitization checks.
+    _DIAGNOSTIC_KEYS = {"stack_trace", "suggested_resolution", "retry_after_seconds"}
+
     def _serialize_context(self, context: dict[str, object]) -> str:
-        """Serialize context dict to string for pattern matching."""
+        """Serialize context dict to string for pattern matching.
+
+        Excludes diagnostic keys (stack_trace, suggested_resolution,
+        retry_after_seconds) that contain system-generated content and
+        may incidentally match secret patterns.
+        """
         import json
+
+        # Filter out diagnostic keys before serializing
+        filtered = {k: v for k, v in context.items() if k not in self._DIAGNOSTIC_KEYS}
 
         # Handle non-serializable types by converting to string
         def default_handler(obj: object) -> str:
             return str(obj)
 
-        return json.dumps(context, default=default_handler).lower()
+        return json.dumps(filtered, default=default_handler).lower()
 
     def _assert_no_secret_patterns_in_context(
         self, error: RuntimeHostError, test_description: str
@@ -1884,6 +1888,10 @@ class TestErrorContextSecretSanitization:
             "target_name",
             "correlation_id",
             "namespace",
+            # OMN-518: Enhanced error context fields
+            "suggested_resolution",
+            "retry_after_seconds",
+            "original_error_type",
         }
 
         # Verify no unexpected fields

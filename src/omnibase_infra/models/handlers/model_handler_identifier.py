@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Handler Identifier Model for Validation Error Reporting.
 
-This module provides ModelHandlerIdentifier for uniquely identifying handlers
+ModelHandlerIdentifier for uniquely identifying handlers
 in validation error contexts. Part of OMN-1091 structured validation and error
 reporting for handlers.
 

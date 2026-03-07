@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """LLM tool choice model for caller constraints on tool selection.
 
-This module provides ModelLlmToolChoice, a structured model that controls
+ModelLlmToolChoice, a structured model that controls
 how the LLM should use available tools. Uses a mode discriminator rather
 than a plain string to preserve expressiveness across providers.
 

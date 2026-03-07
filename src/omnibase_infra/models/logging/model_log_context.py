@@ -3,7 +3,7 @@
 """
 Structured Log Context Model.
 
-This module provides the ModelLogContext Pydantic model for structured logging
+The ModelLogContext Pydantic model for structured logging
 in ONEX infrastructure components. It replaces the common union pattern
 ``dict[str, str | int | float]`` with a strongly-typed model that maintains
 flexibility while providing type safety.
@@ -240,7 +240,7 @@ class ModelLogContext(BaseModel):
         sentinel values), suitable for passing to ``logging.Logger`` methods
         via the ``extra`` parameter.
 
-        This method provides integration with standard logging interfaces that
+        Integration with standard logging interfaces that
         expect ``dict[str, str | int | float]`` for logging context.
 
         Returns:

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Handler Contract Configuration Loader.
+"""Handler Contract Configuration Loader.  # ai-slop-ok: pre-existing
 
 This module provides utilities for loading handler configuration from contract
 YAML files. It supports both relative and absolute paths and extracts handler-
@@ -17,12 +17,12 @@ Contract File Structure:
     Handler contracts follow this schema (see contracts/handlers/*/handler_contract.yaml):
 
     ```yaml
-    name: handler-consul
-    handler_class: omnibase_infra.handlers.handler_consul.HandlerConsul
+    name: handler-db-postgres
+    handler_class: omnibase_infra.handlers.handler_db_postgres.HandlerDbPostgres
     handler_type: effect
     tags:
-      - consul
-      - service-discovery
+      - postgres
+      - database
     security:
       trusted_namespace: omnibase_infra.handlers
       audit_logging: true
@@ -94,11 +94,11 @@ def load_handler_contract_config(
 
     Example:
         >>> contract = load_handler_contract_config(
-        ...     "contracts/handlers/consul/handler_contract.yaml",
-        ...     "proto.consul",
+        ...     "contracts/handlers/db/handler_contract.yaml",
+        ...     "proto.db",
         ... )
         >>> contract["name"]
-        'handler-consul'
+        'handler-db-postgres'
     """
     if contract_path is None:
         raise ProtocolConfigurationError(
@@ -404,7 +404,7 @@ def extract_handler_config(
     Supports Two Contract Formats:
 
     Basic Contract Structure (contracts/handlers/*/handler_contract.yaml):
-        - name: Handler name (e.g., "handler-consul") [REQUIRED]
+        - name: Handler name (e.g., "handler-db-postgres") [REQUIRED]
         - handler_class: Fully qualified class path [REQUIRED]
         - handler_type: Handler kind (effect, compute, etc.) [REQUIRED*]
         - tags: List of discovery tags
@@ -439,7 +439,7 @@ def extract_handler_config(
 
     Args:
         contract: Parsed contract dict from load_handler_contract_config().
-        handler_type: Handler type identifier (e.g., "consul", "db") for
+        handler_type: Handler type identifier (e.g., "db", "http") for
             logging and context.
         require_basic_fields: If True (default), validates required fields are
             present and raises ProtocolConfigurationError if missing. Set to
@@ -473,18 +473,18 @@ def extract_handler_config(
     Example:
         >>> # Basic contract
         >>> contract = {
-        ...     "name": "handler-consul",
-        ...     "handler_class": "omnibase_infra.handlers.handler_consul.HandlerConsul",
+        ...     "name": "handler-db-postgres",
+        ...     "handler_class": "omnibase_infra.handlers.handler_db_postgres.HandlerDbPostgres",
         ...     "handler_type": "effect",
-        ...     "tags": ["consul", "service-discovery"],
+        ...     "tags": ["postgres", "database"],
         ...     "security": {
         ...         "trusted_namespace": "omnibase_infra.handlers",
         ...         "audit_logging": True,
         ...     },
         ... }
-        >>> config = extract_handler_config(contract, "consul")
+        >>> config = extract_handler_config(contract, "postgres")
         >>> config["name"]
-        'handler-consul'
+        'handler-db-postgres'
         >>> config["audit_logging"]
         True
 

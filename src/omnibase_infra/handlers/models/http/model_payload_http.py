@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Base HTTP payload model for registry-based type resolution.
 
-This module provides:
+Exports:
 - ModelPayloadHttp: Base model for all HTTP handler payloads
 
 Design Pattern:

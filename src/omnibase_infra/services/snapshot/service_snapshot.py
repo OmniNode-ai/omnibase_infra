@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Generic Snapshot Service for Point-in-Time State Capture.
 
-This module provides the ServiceSnapshot class, a high-level service for
+The ServiceSnapshot class, a high-level service for
 managing point-in-time snapshots of entity state. The service handles:
 
 - Snapshot creation with automatic sequence numbering

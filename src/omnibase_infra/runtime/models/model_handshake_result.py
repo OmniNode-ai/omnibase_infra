@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Handshake validation result model.
 
-This module provides the ModelHandshakeResult for representing the outcome
+The ModelHandshakeResult for representing the outcome
 of plugin handshake validation during kernel bootstrap. The handshake gate
 ensures that all prerequisite checks (B1-B3) pass before consumers,
 dispatchers, or handlers are wired.

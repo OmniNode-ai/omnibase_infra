@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Loaded Handler Model for Handler Plugin Loader.
 
-This module provides ModelLoadedHandler, which represents a handler that has been
+ModelLoadedHandler, which represents a handler that has been
 successfully discovered, validated, and registered by the HandlerPluginLoader.
 
 The model captures essential metadata about loaded handlers for runtime tracking,

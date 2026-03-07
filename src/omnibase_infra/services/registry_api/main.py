@@ -13,11 +13,10 @@ Usage:
     container = ModelONEXContainer()
     app = create_app(container=container, cors_origins=["http://localhost:3000"])
 
-    # Create app with full backends
+    # Create app with projection reader
     app = create_app(
         container=container,
         projection_reader=reader,
-        consul_handler=handler,
         cors_origins=["http://localhost:3000"],
     )
 
@@ -47,7 +46,6 @@ from omnibase_infra.services.registry_api.routes import router
 from omnibase_infra.services.registry_api.service import ServiceRegistryDiscovery
 
 if TYPE_CHECKING:
-    from omnibase_infra.handlers.service_discovery import HandlerServiceDiscoveryConsul
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
 logger = logging.getLogger(__name__)
@@ -57,11 +55,10 @@ API_TITLE = "ONEX Registry API"
 API_DESCRIPTION = """
 Registry Discovery API for ONEX Dashboard Integration.
 
-This API provides access to node registrations and live service instances
-for dashboard consumption. It combines data from:
+This API provides access to node registrations for dashboard consumption.
+It serves data from:
 
 - **PostgreSQL Projections**: Node registration state, capabilities, and metadata
-- **Consul Service Discovery**: Live service instances with health status
 
 ## Key Features
 
@@ -100,7 +97,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "Registry service configured",
             extra={
                 "has_projection_reader": service.has_projection_reader,
-                "has_consul_handler": service.has_consul_handler,
             },
         )
     else:
@@ -110,22 +106,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     logger.info("Registry API shutting down")
 
-    # Cleanup Consul handler if we own it
-    if service is not None and service.consul_handler is not None:
-        try:
-            await service.consul_handler.shutdown()
-            logger.info("Consul handler shutdown complete")
-        except Exception as e:
-            logger.exception(
-                "Error during Consul handler shutdown",
-                extra={"error_type": type(e).__name__},
-            )
-
 
 def create_app(
     container: ModelONEXContainer,
     projection_reader: ProjectionReaderRegistration | None = None,
-    consul_handler: HandlerServiceDiscoveryConsul | None = None,
     widget_mapping_path: Path | None = None,
     cors_origins: list[str] | None = None,
 ) -> FastAPI:
@@ -139,7 +123,6 @@ def create_app(
         container: ONEX container for dependency injection. Required for
             ONEX DI pattern compliance.
         projection_reader: Optional projection reader for node registrations.
-        consul_handler: Optional Consul handler for live instances.
         widget_mapping_path: Optional path to widget mapping YAML.
         cors_origins: Optional list of allowed CORS origins.
             If not provided, reads from CORS_ORIGINS environment variable.
@@ -208,7 +191,6 @@ def create_app(
     service = ServiceRegistryDiscovery(
         container=container,
         projection_reader=projection_reader,
-        consul_handler=consul_handler,
         widget_mapping_path=widget_mapping_path,
     )
     app.state.registry_service = service
@@ -249,7 +231,6 @@ def create_app(
 #     app = create_app(
 #         container=container,
 #         projection_reader=reader,
-#         consul_handler=handler,
 #         cors_origins=["http://localhost:3000"],
 #     )
 #     uvicorn.run(app, host="0.0.0.0", port=8000)

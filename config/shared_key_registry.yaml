@@ -55,12 +55,6 @@ shared:
     - KAFKA_GROUP_ID
     - KAFKA_ACKS
     - KAFKA_REQUEST_TIMEOUT_MS
-  "/shared/consul/":
-    - CONSUL_HOST
-    - CONSUL_PORT
-    - CONSUL_SCHEME
-    - CONSUL_ACL_TOKEN
-    - CONSUL_ENABLED
   # NOTE: No VAULT transport type in EnumInfraTransportType yet — VAULT_ADDR is seeded
   # but cannot be prefetched via ConfigPrefetcher until VAULT is added to the enum.
   # TODO: add VAULT to EnumInfraTransportType and transport_config_map.py to enable ConfigPrefetcher support
@@ -117,8 +111,8 @@ shared:
     - QDRANT_API_KEY
     - QDRANT_URL
   # NOT prefetched by ConfigPrefetcher — no EnumInfraTransportType.ENV entry; keys resolved via shell env fallback.
+  # SLACK_WEBHOOK_URL removed (OMN-3332) — Web API-only mode enforced.
   "/shared/env/":
-    - SLACK_WEBHOOK_URL
     - SLACK_BOT_TOKEN
     - SLACK_CHANNEL_ID
 # Keys that must NEVER be seeded into Infisical.

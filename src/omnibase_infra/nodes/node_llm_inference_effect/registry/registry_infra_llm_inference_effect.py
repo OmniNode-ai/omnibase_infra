@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """Registry for LLM Inference Effect Node Dependencies.
 
-This module provides RegistryInfraLlmInferenceEffect for registering
+RegistryInfraLlmInferenceEffect for registering
 inference handler dependencies with the ONEX container and creating
 configured node instances.
 

@@ -307,16 +307,6 @@ pattern_exemptions:
   # ==========================================================================
   # Infrastructure handlers require multiple methods for: connection lifecycle,
   # operation dispatching, health checks, and protocol-specific operations.
-  - file_pattern: 'handler_consul\.py'
-    class_pattern: "Class 'HandlerConsul'"
-    violation_pattern: 'has \d+ methods'
-    reason: >
-      Infrastructure handler pattern requires multiple methods: connection lifecycle (connect, disconnect), operation dispatch (handle_operation, handle_kv_*, handle_service_*), properties (handler_type, handler_category), and health/describe methods. This is standard for infrastructure handlers.
-
-    documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
-      - CLAUDE.md (Infrastructure Patterns - Adapter Pattern)
-    ticket: OMN-1092
   # ==========================================================================
   # Projector Schema Model Exemptions (OMN-1168)
   # ==========================================================================
@@ -723,29 +713,6 @@ pattern_exemptions:
       - CLAUDE.md (Container-Based Dependency Injection)
     ticket: OMN-529
   # ==========================================================================
-  # Consul Service ID Exemptions (OMN-889)
-  # ==========================================================================
-  # consul_service_id is a Consul-specific identifier that is a user-defined string,
-  # NOT a UUID. The Consul API accepts any string as a service ID. This field is
-  # named with the 'consul_' prefix to clarify it's a Consul concept.
-  - file_pattern: 'model_consul_register_payload\.py'
-    violation_pattern: "Field 'consul_service_id' should use UUID"
-    reason: >
-      consul_service_id is a Consul-specific identifier that is a user-defined string, not a UUID. The Consul API accepts any string as a service ID.
-
-    documentation:
-      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
-      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
-    ticket: OMN-889
-  - file_pattern: 'model_consul_deregister_payload\.py'
-    violation_pattern: "Field 'consul_service_id' should use UUID"
-    reason: >
-      consul_service_id is a Consul-specific identifier that is a user-defined string, not a UUID. The Consul API accepts any string as a service ID.
-
-    documentation:
-      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
-    ticket: OMN-889
-  # ==========================================================================
   # MessageTypeRegistry Exemptions (OMN-983)
   # ==========================================================================
   - file_pattern: 'registry_message_type\.py'
@@ -859,20 +826,6 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Registry Naming Conventions)
     ticket: OMN-811
-  # ==========================================================================
-  # Consul Intent Payload Exemptions (OMN-888)
-  # ==========================================================================
-  # service_name in ModelConsulIntentPayload is the Consul service name to register,
-  # NOT a reference to an internal entity. It is a Consul-specific configuration field.
-  - file_pattern: 'model_consul_intent_payload\.py'
-    violation_pattern: "Field 'service_name' might reference an entity"
-    reason: >
-      service_name is the Consul service name to register in service discovery (e.g., "node-effect-123"). This is Consul-specific configuration, not an entity reference. The field specifies how the node appears in Consul's service catalog.
-
-    documentation:
-      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
-      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
-    ticket: OMN-888
   # ==========================================================================
   # Private Class Naming Exemptions (OMN-811)
   # ==========================================================================
@@ -1285,6 +1238,15 @@ pattern_exemptions:
     documentation:
       - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
     ticket: OMN-1132
+  - file_pattern: 'handler_pool\.py'
+    class_pattern: "Class name 'HandlerPool'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      HandlerPool manages pools of ONEX handler instances per handler type for parallel execution without contention (OMN-477). The "Handler" refers to ONEX handler protocol instances, consistent with HandlerPluginLoader.
+
+    documentation:
+      - CLAUDE.md (Handler System)
+    ticket: OMN-477
   - file_pattern: 'model_loaded_handler\.py'
     class_pattern: "Class name 'ModelLoadedHandler'"
     violation_pattern: "contains anti-pattern 'Handler'"
@@ -1506,15 +1468,6 @@ pattern_exemptions:
     documentation:
       - asyncpg Pool Configuration (https://magicstack.github.io/asyncpg/current/api/index.html#connection-pools)
     ticket: OMN-1131
-  - file_pattern: 'handlers/service_discovery/handler_service_discovery_consul\.py'
-    method_pattern: "Function '__init__'"
-    violation_pattern: 'has \d+ parameters'
-    reason: >
-      Consul handler requires multiple configuration parameters: consul_client, token, scheme, host, port, dc, circuit_breaker_config. These are standard Consul connection parameters.
-
-    documentation:
-      - HashiCorp Consul API Configuration (https://developer.hashicorp.com/consul/api-docs)
-    ticket: OMN-1131
   - file_pattern: 'handlers/service_discovery/models/model_service_info\.py'
     violation_pattern: "Field 'service_name' might reference an entity"
     reason: >
@@ -1566,38 +1519,6 @@ pattern_exemptions:
 
     documentation:
       - docs/patterns/error_handling_patterns.md
-    ticket: OMN-1104
-  # ==========================================================================
-  # Consul Registration Payload Exemptions (OMN-1104)
-  # ==========================================================================
-  # service_id and service_name are Consul native formats (strings), not UUIDs
-  # or entity references. Consul service registry uses string identifiers.
-  - file_pattern: 'model_payload_consul_register\.py'
-    violation_pattern: "Field 'service_id' should use UUID"
-    reason: >
-      service_id is Consul's native string format for service identifiers. Consul does not use UUIDs for service identification - it uses human-readable string IDs.
-
-    documentation:
-      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
-      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
-    ticket: OMN-1104
-  - file_pattern: 'model_payload_consul_deregister\.py'
-    violation_pattern: "Field 'service_id' should use UUID"
-    reason: >
-      service_id is Consul's native string format for service identifiers. Consul does not use UUIDs for service identification - it uses human-readable string IDs. Mirrors model_payload_consul_register.py.
-
-    documentation:
-      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
-      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
-    ticket: OMN-2115
-  - file_pattern: 'model_payload_consul_register\.py'
-    violation_pattern: "Field 'service_name' might reference an entity"
-    reason: >
-      service_name is a display string for the Consul service catalog, not an entity reference. It's the human-readable name shown in Consul's UI.
-
-    documentation:
-      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
-      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
     ticket: OMN-1104
   # ==========================================================================
   # Snapshot Topic Naming Exemption (OMN-2115)

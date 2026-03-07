@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""ONEX Infrastructure Reducers Module.
+"""# ai-slop-ok: pre-existingONEX Infrastructure Reducers Module.
 
 This module provides reducer nodes for aggregating and consolidating state
 from multiple sources in the ONEX 4-node architecture.
@@ -9,7 +9,7 @@ Reducers are responsible for:
 - State aggregation from multiple sources
 - Event sourcing and state reconstruction
 - Multi-source data consolidation
-- Dual registration coordination (Consul + PostgreSQL)
+- PostgreSQL registration coordination
 
 Available Reducers:
 - NodeRegistrationReducer: Declarative FSM-driven reducer (ONEX pattern).

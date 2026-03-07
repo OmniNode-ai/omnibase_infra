@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Metadata Model.
 
-This module provides ModelNodeMetadata for strongly-typed node metadata
+ModelNodeMetadata for strongly-typed node metadata
 in the ONEX 2-way registration pattern.
 """
 

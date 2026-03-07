@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Idempotency configuration model for event bus message consumption.
 
-This module provides the configuration model for idempotency behavior in
+The configuration model for idempotency behavior in
 event bus consumers. When enabled, consumers deduplicate messages based on
 the `envelope_id` field from the event envelope using an INSERT ON CONFLICT
 DO NOTHING pattern.

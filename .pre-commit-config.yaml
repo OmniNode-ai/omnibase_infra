@@ -242,7 +242,7 @@ repos:
       - id: check-ai-slop
         name: Check for AI-slop patterns
         language: system
-        entry: uv run python scripts/validation/check_ai_slop.py
+        entry: uv run python scripts/validation/check_ai_slop.py --strict
         types_or: [python, markdown]
         pass_filenames: true
         stages: [pre-commit]
@@ -272,6 +272,22 @@ repos:
         language: system
         entry: uv run python scripts/check_migration_required.py --pre-commit
         pass_filenames: false
+        stages: [pre-commit]
+      # OMN-3617: Block planning docs (belong in omni_home/docs/plans/)
+      - id: no-planning-docs
+        name: Block planning docs (belong in omni_home/docs/plans/)
+        entry: 'bash -c ''PLAN_FILES=$(git diff --cached --name-only -- "docs/plans/"); if [ -n "$PLAN_FILES" ]; then echo "ERROR: Planning docs must live in omni_home/docs/plans/, not in this repo:"; echo "$PLAN_FILES"; echo ""; echo "Move your file to /Volumes/PRO-G40/Code/omni_home/docs/plans/"; exit 1; fi'''
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+      # OMN-3777: Block cloud bus references in source code
+      - id: no-cloud-bus
+        name: Block cloud bus references
+        entry: bash scripts/check_no_cloud_bus_wrapper.sh
+        language: system
+        pass_filenames: false
+        always_run: true
         stages: [pre-commit]
 # Configuration
 default_install_hook_types: [pre-commit, pre-push]

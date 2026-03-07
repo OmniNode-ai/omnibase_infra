@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Domain plugin result model.
 
-This module provides the ModelDomainPluginResult dataclass for representing
+The ModelDomainPluginResult dataclass for representing
 the outcome of domain plugin lifecycle operations.
 
 Design Pattern:

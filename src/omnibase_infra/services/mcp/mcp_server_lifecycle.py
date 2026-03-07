@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """MCP Server Lifecycle - Orchestrates startup and shutdown of MCP services.
 
-This module provides the MCPServerLifecycle class that manages the complete
+The MCPServerLifecycle class that manages the complete
 lifecycle of the MCP server, including:
 - Cold start: Discover tools from the event bus registry and populate registry
 - Hot reload: Start Kafka subscription for real-time updates
@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 class MCPServerLifecycle:
     """Orchestrates startup and shutdown of MCP server components.
 
-    This class manages the lifecycle of all MCP-related services:
+    The lifecycle of all MCP-related services:
     - ServiceMCPToolRegistry: In-memory cache of tool definitions
     - ServiceMCPToolDiscovery: Event bus registry scanner for MCP-enabled orchestrators
     - ServiceMCPToolSync: Kafka listener for hot reload

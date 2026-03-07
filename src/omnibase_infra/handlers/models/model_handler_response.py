@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Generic Handler Response Model.
+"""Generic Handler Response Model.  # ai-slop-ok: pre-existing
 
 This module provides a generic handler response model that can be parameterized
 with different payload types, enabling consistent response patterns across all
@@ -9,10 +9,9 @@ infrastructure handlers.
 Usage Pattern:
     Each handler defines its own payload model and uses ModelHandlerResponse[PayloadType]:
 
-    - HandlerConsul: ModelHandlerResponse[ModelConsulHandlerPayload]
+    - HandlerDbPostgres: ModelHandlerResponse[ModelDbQueryPayload]
     - HandlerDb: ModelHandlerResponse[ModelDbQueryPayload]
-    - HandlerVault: ModelHandlerResponse[ModelVaultHandlerPayload]
-    - HttpRestHandler: ModelHandlerResponse[ModelHttpHandlerPayload]
+    - HandlerHttp: ModelHandlerResponse[ModelHttpHandlerPayload]
 
 This replaces raw dict[str, JsonType] responses with strongly-typed models,
 ensuring consistent access patterns (response.status, response.payload, etc.)

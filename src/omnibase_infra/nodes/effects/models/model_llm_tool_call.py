@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """LLM tool call model for assistant message responses.
 
-This module provides ModelLlmToolCall, representing a single tool call
+ModelLlmToolCall, representing a single tool call
 returned by the model in an assistant message.
 
 Related:

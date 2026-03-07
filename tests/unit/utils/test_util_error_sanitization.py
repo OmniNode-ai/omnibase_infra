@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from omnibase_infra.utils import (
     SENSITIVE_PATTERNS,
-    sanitize_consul_key,
     sanitize_error_message,
     sanitize_secret_path,
     sanitize_url,
@@ -318,51 +317,6 @@ class TestSanitizeSecretPath:
         assert "password" not in result
 
 
-class TestSanitizeConsulKey:
-    """Tests for sanitize_consul_key function."""
-
-    def test_none_returns_none(self) -> None:
-        """None input should return None."""
-        assert sanitize_consul_key(None) is None
-
-    def test_empty_string_returns_empty(self) -> None:
-        """Empty string should return empty string."""
-        assert sanitize_consul_key("") == ""
-
-    def test_single_segment_unchanged(self) -> None:
-        """Single segment keys should be unchanged."""
-        assert sanitize_consul_key("config") == "config"
-        assert sanitize_consul_key("services") == "services"
-
-    def test_multi_segment_key_sanitized(self) -> None:
-        """Multi-segment keys should be sanitized."""
-        result = sanitize_consul_key("config/database/connection")
-        assert result == "config/***/***"
-        assert "database" not in result
-        assert "connection" not in result
-
-    def test_two_segment_key_sanitized(self) -> None:
-        """Two-segment keys should be sanitized."""
-        result = sanitize_consul_key("config/myapp")
-        assert result == "config/***/***"
-        assert "myapp" not in result
-
-    def test_service_keys_sanitized(self) -> None:
-        """Service registry keys should be sanitized."""
-        result = sanitize_consul_key("services/api-gateway/endpoints")
-        assert result == "services/***/***"
-        assert "api-gateway" not in result
-        assert "endpoints" not in result
-
-    def test_preserves_prefix_only(self) -> None:
-        """Only the first segment should be visible in sanitized key."""
-        result = sanitize_consul_key("config/production/api/internal/database/primary")
-        assert result.startswith("config/")
-        assert "production" not in result
-        assert "internal" not in result
-        assert "primary" not in result
-
-
 class TestSanitizeUrl:
     """Tests for sanitize_url function."""
 
@@ -491,29 +445,3 @@ class TestSanitizeUrl:
         """Non-URL strings should remain unchanged after the hostname-None fix."""
         assert sanitize_url("not-a-url") == "not-a-url"
         assert sanitize_url("plain-hostname:8080") == "plain-hostname:8080"
-
-
-class TestErrorClassSanitization:
-    """Tests verifying error classes sanitize paths correctly."""
-
-    def test_infra_consul_error_sanitizes_consul_key(self) -> None:
-        """InfraConsulError should sanitize consul_key in extra_context."""
-        from omnibase_infra.enums import EnumInfraTransportType
-        from omnibase_infra.errors import InfraConsulError, ModelInfraErrorContext
-
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.CONSUL,
-            operation="kv_get",
-            target_name="consul-primary",
-        )
-
-        error = InfraConsulError(
-            "Failed to read key",
-            context=context,
-            consul_key="config/database/connection",
-        )
-
-        # The error should have sanitized consul_key
-        error_str = str(error)
-        # Full path should not be in the string representation
-        assert "database/connection" not in error_str

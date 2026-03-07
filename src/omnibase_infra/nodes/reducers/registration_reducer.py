@@ -11,7 +11,7 @@ Performance Characteristics:
     following targets:
 
     - reduce() processing: <300ms per event (target)
-    - Intent building: <50ms per intent (includes Consul + PostgreSQL)
+    - Intent building: <50ms per intent (PostgreSQL)
     - Idempotency check: <1ms
 
     Performance is logged when thresholds are exceeded. These thresholds are
@@ -36,7 +36,7 @@ Circuit Breaker Considerations:
        always produces the same output. There's no "retry" semantic.
 
     4. **Effect Layer Responsibility**: Circuit breakers should be implemented
-       in the Effect layer nodes (ConsulAdapter, PostgresAdapter) that actually
+       in the Effect layer nodes (PostgresAdapter) that actually
        perform the external I/O operations.
 
     See CLAUDE.md "Dispatcher Resilience Pattern" section for the general
@@ -75,7 +75,7 @@ State Persistence Strategy:
         node_registrations:
             node_id            UUID PRIMARY KEY
             status             VARCHAR(20)  -- 'idle', 'pending', 'partial', 'complete', 'failed'
-            consul_confirmed   BOOLEAN
+            consul_confirmed   BOOLEAN      -- deprecated (OMN-3540), always False for new rows
             postgres_confirmed BOOLEAN
             last_processed_event_id  UUID
             failure_reason     VARCHAR(50)
@@ -175,7 +175,6 @@ State Persistence Strategy:
 Intent Emission:
     The reducer emits ModelIntent objects (reducer-layer intents) that wrap
     the typed infrastructure intents:
-    - consul.register: Consul service registration
     - postgres.upsert_registration: PostgreSQL record upsert
 
     The payload contains the serialized typed intent for Effect layer execution.
@@ -189,9 +188,8 @@ Confirmation Event Flow:
         +----------------+     +-----------+     +------------------+
         | Node emits     | --> | Reducer   | --> | Intents emitted  |
         | Introspection  |     | processes |     | to Kafka         |
-        | Event          |     | event     |     | (consul.register,|
-        +----------------+     +-----------+     | postgres.upsert) |
-                                                 +------------------+
+        | Event          |     | event     |     | (postgres.upsert)|
+        +----------------+     +-----------+     +------------------+
                                                           |
                                                           v
                                              +------------------------+
@@ -202,15 +200,12 @@ Confirmation Event Flow:
     2. EFFECT LAYER EXECUTION:
 
         +-------------------+     +------------------+     +------------------+
-        | ConsulAdapter     | --> | Execute intent   | --> | Publish          |
-        | (Effect Node)     |     | (register svc)   |     | confirmation     |
+        | PostgresAdapter   | --> | Execute intent   | --> | Publish          |
+        | (Effect Node)     |     | (upsert record)  |     | confirmation     |
         +-------------------+     +------------------+     | event to Kafka   |
                                                           +------------------+
                                                                    |
-        +-------------------+     +------------------+             |
-        | PostgresAdapter   | --> | Execute intent   | ------------+
-        | (Effect Node)     |     | (upsert record)  |             |
-        +-------------------+     +------------------+             v
+                                                                   v
                                                           +------------------+
                                                           | Confirmation     |
                                                           | events on Kafka  |
@@ -233,16 +228,6 @@ Confirmation Event Flow:
 
     4. CONFIRMATION EVENT TYPES:
 
-        - consul.registered: Confirmation from ConsulAdapter that service
-          was successfully registered in Consul. Published to:
-          onex.registration.events (or onex.<domain>.events)
-
-          Payload includes:
-            - correlation_id: Links back to original introspection event
-            - service_id: The registered Consul service ID
-            - success: bool indicating registration outcome
-            - error: Optional error message if failed
-
         - postgres.registration_upserted: Confirmation from PostgresAdapter
           that registration record was successfully upserted. Published to:
           onex.registration.events
@@ -259,28 +244,20 @@ Confirmation Event Flow:
         | idle  | ----------------> | pending |
         +-------+                   +---------+
            ^                         |       |
-           |       consul confirmed  |       | postgres confirmed
-           |       (first)          v       v (first)
-           |                  +---------+
-           |                  | partial |
-           |                  +---------+
-           |                    |       |
-           |   remaining        |       | error received
-           |   confirmed        v       v
-           |              +---------+ +---------+
-           +---reset------| complete| | failed  |---reset---+
-                          +---------+ +---------+           |
-                                                            v
-                                                      +-------+
-                                                      | idle  |
-                                                      +-------+
+           |    postgres confirmed   |       | error received
+           |                        v       v
+           |                  +---------+ +---------+
+           +---reset----------| complete| | failed  |---reset---+
+                              +---------+ +---------+           |
+                                                                v
+                                                          +-------+
+                                                          | idle  |
+                                                          +-------+
 
         Transitions:
         - idle -> pending: On introspection event (emits intents)
-        - pending -> partial: First confirmation received (consul OR postgres)
+        - pending -> complete: Postgres confirmation received
         - pending -> failed: Error confirmation received
-        - partial -> complete: Second confirmation received (both confirmed)
-        - partial -> failed: Error confirmation for remaining backend
         - any -> failed: Validation or backend error
         - failed -> idle: Reset event (allows retry after failure)
         - complete -> idle: Reset event (allows re-registration)
@@ -296,13 +273,12 @@ Confirmation Event Flow:
             3. Failure path: maps event_type to failure_reason, transitions
                to failed state via state.with_failure()
             4. Success path: transitions state based on confirmation type:
-               - consul.registered -> state.with_consul_confirmed()
                - postgres.registration_upserted -> state.with_postgres_confirmed()
             5. State progression: pending -> partial -> complete (or -> failed)
             6. Confirmations never emit new intents
 
         The confirmation event model (ModelRegistrationConfirmation) includes:
-            - event_type: "consul.registered" | "postgres.registration_upserted"
+            - event_type: "postgres.registration_upserted"
             - correlation_id: UUID linking to original introspection
             - node_id: UUID of the registered node
             - success: bool
@@ -353,9 +329,6 @@ from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
     ModelNodeRegistrationRecord,
 )
-from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
-    ModelPayloadConsulRegister,
-)
 from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
     ModelPayloadPostgresUpsertRegistration,
 )
@@ -400,7 +373,7 @@ PERF_THRESHOLD_REDUCE_MS: float = float(
 )
 
 # Target processing time for intent building (<50ms per intent)
-# Consul and PostgreSQL intent construction should be fast.
+# PostgreSQL intent construction should be fast.
 PERF_THRESHOLD_INTENT_BUILD_MS: float = float(
     os.getenv("ONEX_PERF_THRESHOLD_INTENT_BUILD_MS", "50.0")
 )
@@ -512,7 +485,7 @@ class RegistrationReducer:
     Follows ProtocolReducer pattern:
     - reduce(state, event) -> ModelReducerOutput
     - Pure function, no side effects
-    - Emits intents for Consul and PostgreSQL registration
+    - Emits intents for PostgreSQL registration
 
     This is a stateless class - all state is passed in and returned via
     ModelRegistrationState. The class exists to group related pure functions.
@@ -524,18 +497,18 @@ class RegistrationReducer:
            emits registration intents for Effect layer execution.
 
         2. reduce_confirmation(state, confirmation_event) -> Processes confirmation
-           events from Effect layer, updates state to partial/complete/failed.
+           events from Effect layer, updates state to complete/failed.
            (See module docstring section 6 for implementation details.)
 
     Complete Event Cycle:
         1. Node publishes introspection event to Kafka
         2. Runtime routes introspection to this reducer via reduce()
-        3. Reducer emits intents (consul.register, postgres.upsert_registration)
+        3. Reducer emits intents (postgres.upsert_registration)
         4. Runtime publishes intents to Kafka intent topics
-        5. Effect layer nodes (ConsulAdapter, PostgresAdapter) consume intents
+        5. Effect layer nodes (PostgresAdapter) consume intents
         6. Effect nodes execute I/O and publish confirmation events to Kafka
         7. Runtime routes confirmation events back to this reducer
-        8. Reducer updates state: pending -> partial -> complete
+        8. Reducer updates state: pending -> complete
 
     Topic Subscriptions:
         The reducer node subscribes to:
@@ -561,7 +534,7 @@ class RegistrationReducer:
         ... )
         >>> output = reducer.reduce(state, event)
         >>> print(output.result.status)  # "pending"
-        >>> print(len(output.intents))   # 2 (Consul + PostgreSQL)
+        >>> print(len(output.intents))   # 1 (PostgreSQL)
     """
 
     def reduce(
@@ -571,9 +544,9 @@ class RegistrationReducer:
     ) -> ModelReducerOutput[ModelRegistrationState]:
         """Pure reduce function: state + event -> new_state + intents.
 
-        Processes a node introspection event and emits registration intents
-        for both Consul and PostgreSQL backends. The returned output contains
-        the new state and any intents to be executed by the Effect layer.
+        Processes a node introspection event and emits a registration intent
+        for the PostgreSQL backend. The returned output contains the new state
+        and any intents to be executed by the Effect layer.
 
         This is PHASE 1 of the confirmation event flow:
             1. Node publishes introspection event -> Runtime routes here
@@ -656,7 +629,6 @@ class RegistrationReducer:
         # =====================================================================
         # CONFIRMATION FLOW STEP 2: Build intents for Effect layer
         # These intents describe the desired I/O operations:
-        #   - consul.register: Register service in Consul
         #   - postgres.upsert_registration: Upsert record in PostgreSQL
         #
         # The correlation_id is propagated to enable confirmation tracking.
@@ -666,12 +638,11 @@ class RegistrationReducer:
         # =====================================================================
 
         correlation_id = event.correlation_id or event_id
-        consul_intent = self._build_consul_intent(event, correlation_id)
         postgres_intent = self._build_postgres_intent(event, correlation_id)
 
         # Collect non-None intents
         intents: tuple[ModelIntent, ...] = tuple(
-            intent for intent in [consul_intent, postgres_intent] if intent is not None
+            intent for intent in [postgres_intent] if intent is not None
         )
 
         # =====================================================================
@@ -680,10 +651,10 @@ class RegistrationReducer:
         #
         # After this method returns:
         #   - Runtime publishes intents to Kafka (onex.registration.intents)
-        #   - Effect nodes (ConsulAdapter, PostgresAdapter) consume intents
+        #   - Effect nodes (PostgresAdapter) consume intents
         #   - Effect nodes execute I/O and publish confirmation events
         #   - Runtime routes confirmation events to reduce_confirmation()
-        #   - reduce_confirmation() transitions: pending -> partial -> complete
+        #   - reduce_confirmation() transitions: pending -> complete
         # =====================================================================
 
         new_state = state.with_pending_registration(event.node_id, event_id)
@@ -824,58 +795,6 @@ class RegistrationReducer:
 
         return uuid5(_NAMESPACE_REGISTRATION, canonical_content)
 
-    def _build_consul_intent(
-        self,
-        event: ModelNodeIntrospectionEvent,
-        correlation_id: UUID,
-    ) -> ModelIntent | None:
-        """Build Consul registration intent (pure, no I/O).
-
-        Creates a ModelIntent that describes the desired Consul service
-        registration. The Effect layer is responsible for executing this intent.
-
-        Args:
-            event: Introspection event containing node data.
-            correlation_id: Correlation ID for tracing.
-
-        Returns:
-            ModelIntent with intent_type matching payload.intent_type for routing.
-        """
-        service_id = f"onex-{event.node_type.value}-{event.node_id}"
-        service_name = f"onex-{event.node_type.value}"
-        tags = [
-            f"node_type:{event.node_type.value}",
-            f"node_version:{event.node_version}",
-        ]
-
-        # Build health check configuration if health endpoint is provided
-        health_endpoint = event.endpoints.get("health") if event.endpoints else None
-        health_check: dict[str, str] | None = None
-        if health_endpoint:
-            health_check = {
-                "HTTP": health_endpoint,
-                "Interval": "10s",
-                "Timeout": "5s",
-            }
-
-        # Build typed Consul registration payload (implements ProtocolIntentPayload)
-        consul_payload = ModelPayloadConsulRegister(
-            correlation_id=correlation_id,
-            node_id=str(event.node_id),
-            service_id=service_id,
-            service_name=service_name,
-            tags=tags,
-            health_check=health_check,
-            event_bus_config=event.event_bus,  # Pass through from introspection event
-        )
-
-        # ModelIntent.payload expects ProtocolIntentPayload, which our model implements
-        return ModelIntent(
-            intent_type=consul_payload.intent_type,
-            target=f"consul://service/{service_name}",
-            payload=consul_payload,
-        )
-
     def _build_postgres_intent(
         self,
         event: ModelNodeIntrospectionEvent,
@@ -941,9 +860,9 @@ class RegistrationReducer:
     # =========================================================================
     # CONFIRMATION EVENT HANDLING (PHASE 2 of the event flow)
     #
-    # Processes confirmation events from Effect layer (ConsulAdapter,
-    # PostgresAdapter) and transitions registration state through
-    # pending -> partial -> complete (or -> failed).
+    # Processes confirmation events from Effect layer (PostgresAdapter)
+    # and transitions registration state through
+    # pending -> complete (or -> failed).
     #
     # See module docstring section 6 for detailed implementation notes.
     # =========================================================================
@@ -955,8 +874,8 @@ class RegistrationReducer:
     ) -> ModelReducerOutput[ModelRegistrationState]:
         """Process confirmation event from Effect layer.
 
-        Handles confirmation events from Consul and PostgreSQL Effect nodes,
-        transitioning state through pending -> partial -> complete (or -> failed).
+        Handles confirmation events from the PostgreSQL Effect node,
+        transitioning state through pending -> complete (or -> failed).
 
         Args:
             state: Current registration state (immutable).
@@ -1029,7 +948,6 @@ class RegistrationReducer:
         # Step 5: Failure path
         if not confirmation.success:
             failure_map: dict[EnumConfirmationEventType, FailureReason] = {
-                EnumConfirmationEventType.CONSUL_REGISTERED: "consul_failed",
                 EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED: "postgres_failed",
             }
             failure_reason = failure_map.get(confirmation.event_type)
@@ -1067,9 +985,7 @@ class RegistrationReducer:
             )
 
         # Step 6: Success path
-        if confirmation.event_type == EnumConfirmationEventType.CONSUL_REGISTERED:
-            new_state = state.with_consul_confirmed(event_id)
-        elif (
+        if (
             confirmation.event_type
             == EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED
         ):
@@ -1152,11 +1068,11 @@ class RegistrationReducer:
 
             This validation prevents accidental loss of in-flight registration state.
             If a reset is attempted while registration is in progress (pending/partial),
-            the Consul or PostgreSQL confirmations could be lost, leaving the system
+            the PostgreSQL confirmation could be lost, leaving the system
             in an inconsistent state.
 
         Use Cases:
-            - Retry after registration failure (consul_failed, postgres_failed)
+            - Retry after registration failure (postgres_failed)
             - Re-register a node after deregistration
             - Manual recovery triggered by operator
 
@@ -1190,7 +1106,7 @@ class RegistrationReducer:
             >>> # Reset from failed state succeeds
             >>> failed_state = ModelRegistrationState(
             ...     status="failed",
-            ...     failure_reason="consul_failed"
+            ...     failure_reason="postgres_failed"
             ... )
             >>> output = reducer.reduce_reset(failed_state, uuid4())
             >>> output.result.status
@@ -1217,8 +1133,7 @@ class RegistrationReducer:
 
         # Validate state allows reset - only terminal states (failed, complete)
         # can be reset. Resetting from pending or partial would lose in-flight
-        # registration state, potentially causing inconsistency between Consul
-        # and PostgreSQL.
+        # registration state, potentially causing inconsistency in PostgreSQL.
         if not state.can_reset():
             # Not in a resettable state - transition to failed with clear error
             # This prevents accidental loss of in-flight registration state.

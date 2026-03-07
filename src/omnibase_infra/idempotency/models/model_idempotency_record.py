@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Idempotency Record Model.
 
-This module provides the Pydantic model for storing idempotency records
+The Pydantic model for storing idempotency records
 that track processed messages to prevent duplicate processing.
 
 The record captures essential metadata about when and how a message was

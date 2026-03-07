@@ -141,11 +141,9 @@ class TestA3OrchestratedDualRegistration:
 
         # Verify initial state
         assert initial_state.status == "idle"
-        assert initial_state.consul_confirmed is False
         assert initial_state.postgres_confirmed is False
 
         # Record initial mock call counts (should be 0)
-        assert consul_client.call_count == 0
         assert postgres_adapter.call_count == 0
 
         # === PHASE 2: Reducer computes intents (NO I/O) ===
@@ -157,11 +155,9 @@ class TestA3OrchestratedDualRegistration:
         # Verify reducer output contains new state and intents
         assert reducer_output.result.status == "pending"
         assert reducer_output.result.node_id == event.node_id
-        assert len(reducer_output.intents) == 2  # Consul + PostgreSQL intents
+        assert len(reducer_output.intents) == 1  # PostgreSQL only (OMN-3540)
 
         # Verify reducer did NOT perform any I/O
-        # Mock call counts should still be 0 after reducer runs
-        assert consul_client.call_count == 0, "Reducer should NOT call Consul"
         assert postgres_adapter.call_count == 0, "Reducer should NOT call PostgreSQL"
 
         # Verify intents are for correct backends (extension format)
@@ -170,7 +166,6 @@ class TestA3OrchestratedDualRegistration:
             for intent in reducer_output.intents
             if intent.intent_type
         }
-        assert "consul.register" in intent_types
         assert "postgres.upsert_registration" in intent_types
 
         # === PHASE 3: Effect executes intents (DOES I/O) ===
@@ -180,20 +175,19 @@ class TestA3OrchestratedDualRegistration:
         # Verify effect was called
         assert tracked_effect.register_node_call_count == 1
 
-        # Verify effect DID perform I/O (mock call counts should be incremented)
-        assert consul_client.call_count == 1, "Effect should call Consul"
+        # Verify effect DID perform I/O (PostgreSQL only, OMN-3540)
         assert postgres_adapter.call_count == 1, "Effect should call PostgreSQL"
 
         # Verify effect response shows success
         assert effect_response.status == "success"
-        assert effect_response.consul_result.success is True
         assert effect_response.postgres_result.success is True
 
         # === PHASE 4: Verify call order ===
         call_order = call_tracker.get_call_order()
-        assert call_order == ["reducer", "effect"], (
-            f"Expected reducer before effect, got: {call_order}"
-        )
+        assert call_order == [
+            "reducer",
+            "effect",
+        ], f"Expected reducer before effect, got: {call_order}"
 
         # Verify correlation ID propagation
         reducer_calls = call_tracker.get_reducer_calls()
@@ -202,12 +196,6 @@ class TestA3OrchestratedDualRegistration:
         assert effect_calls[0].correlation_id == event.correlation_id
 
         # === PHASE 5: Verify backend registrations ===
-        # Consul registration recorded
-        assert len(consul_client.registrations) == 1
-        consul_reg = consul_client.registrations[0]
-        # Service ID follows ONEX convention: onex-{node_type}-{node_id}
-        assert f"onex-{event.node_type}-{event.node_id}" == consul_reg.service_id
-
         # PostgreSQL registration recorded
         assert len(postgres_adapter.registrations) == 1
         pg_reg = postgres_adapter.registrations[0]
@@ -222,36 +210,26 @@ class TestA3OrchestratedDualRegistration:
         """Verify reducer produces properly typed intents.
 
         The reducer should produce ModelIntent objects with typed payloads
-        for both Consul and PostgreSQL backends.
+        for PostgreSQL backend (Consul removed in OMN-3540).
         """
         initial_state = ModelRegistrationState()
         reducer_output = tracked_reducer.reduce(
             initial_state, sample_introspection_event
         )
 
-        # Verify intent structure
-        assert len(reducer_output.intents) == 2
+        # Verify intent structure (PostgreSQL only, OMN-3540)
+        assert len(reducer_output.intents) == 1
 
         for intent in reducer_output.intents:
             # All intents use extension format
             assert intent.intent_type
             assert intent.target is not None
             assert intent.payload is not None
-            assert intent.payload.intent_type in (
-                "consul.register",
-                "postgres.upsert_registration",
-            )
+            assert intent.payload.intent_type == "postgres.upsert_registration"
 
-            if intent.payload.intent_type == "consul.register":
-                # Consul intent should have service registration payload attributes
-                assert hasattr(intent.payload, "correlation_id")
-                assert hasattr(intent.payload, "service_id")
-                assert hasattr(intent.payload, "service_name")
-
-            elif intent.payload.intent_type == "postgres.upsert_registration":
-                # PostgreSQL intent should have record payload attributes
-                assert hasattr(intent.payload, "correlation_id")
-                assert hasattr(intent.payload, "record")
+            # PostgreSQL intent should have record payload attributes
+            assert hasattr(intent.payload, "correlation_id")
+            assert hasattr(intent.payload, "record")
 
     async def test_a3_multiple_node_types(
         self,
@@ -337,7 +315,7 @@ class TestA4IdempotentReplay:
         # Verify first emission produced pending state with intents
         assert state_after_first.status == "pending"
         assert state_after_first.node_id == event.node_id
-        assert len(reducer_output_1.intents) == 2
+        assert len(reducer_output_1.intents) == 1  # PostgreSQL only (OMN-3540)
 
         # Process through effect
         request_1 = _convert_intents_to_request(event, reducer_output_1.intents)
@@ -345,10 +323,8 @@ class TestA4IdempotentReplay:
 
         # Verify first emission succeeded
         assert effect_response_1.status == "success"
-        first_consul_call_count = consul_client.call_count
         first_postgres_call_count = postgres_adapter.call_count
         first_reducer_call_count = tracked_reducer.reduce_call_count
-        assert first_consul_call_count == 1
         assert first_postgres_call_count == 1
         assert first_reducer_call_count == 1
 
@@ -376,18 +352,11 @@ class TestA4IdempotentReplay:
         assert effect_response_2.status == "success"
 
         # Verify backends were NOT called again (idempotency store tracked them)
-        assert consul_client.call_count == first_consul_call_count, (
-            "Consul should NOT be called again (idempotency)"
-        )
         assert postgres_adapter.call_count == first_postgres_call_count, (
             "PostgreSQL should NOT be called again (idempotency)"
         )
 
         # === VERIFY NO DUPLICATE REGISTRATIONS ===
-        # Only one registration per backend
-        assert len(consul_client.registrations) == 1, (
-            "Should have exactly 1 Consul registration"
-        )
         assert len(postgres_adapter.registrations) == 1, (
             "Should have exactly 1 PostgreSQL registration"
         )
@@ -396,7 +365,6 @@ class TestA4IdempotentReplay:
         completed_backends = await tracked_effect.get_completed_backends(
             event.correlation_id
         )
-        assert "consul" in completed_backends
         assert "postgres" in completed_backends
 
     async def test_a4_reducer_idempotency_with_event_id(
@@ -423,7 +391,7 @@ class TestA4IdempotentReplay:
         output_1 = tracked_reducer.reduce(initial_state, event)
         assert output_1.result.status == "pending"
         assert output_1.result.last_processed_event_id == correlation_id
-        assert len(output_1.intents) == 2
+        assert len(output_1.intents) == 1  # PostgreSQL only (OMN-3540)
 
         # Replay with same event (same correlation_id)
         output_2 = tracked_reducer.reduce(output_1.result, event)
@@ -472,17 +440,14 @@ class TestA4IdempotentReplay:
         completed_after = await tracked_effect.get_completed_backends(
             event.correlation_id
         )
-        assert "consul" in completed_after
         assert "postgres" in completed_after
 
-        # Verify call counts
-        assert consul_client.call_count == 1
+        # Verify call counts (PostgreSQL only, OMN-3540)
         assert postgres_adapter.call_count == 1
 
         # Replay - should not call backends again
         response_2 = await tracked_effect.register_node(request)
         assert response_2.status == "success"
-        assert consul_client.call_count == 1  # Unchanged
         assert postgres_adapter.call_count == 1  # Unchanged
 
     async def test_a4_different_correlation_ids_processed_independently(
@@ -514,14 +479,13 @@ class TestA4IdempotentReplay:
         output_2 = tracked_reducer.reduce(state_2, event_2)
 
         # Second event should produce intents (not detected as duplicate)
-        assert len(output_2.intents) == 2
+        assert len(output_2.intents) == 1  # PostgreSQL only (OMN-3540)
 
         # Execute second event through effect
         request_2 = _convert_intents_to_request(event_2, output_2.intents)
         await tracked_effect.register_node(request_2)
 
-        # Both should have been processed independently
-        assert consul_client.call_count == 2
+        # Both should have been processed independently (PostgreSQL only, OMN-3540)
         assert postgres_adapter.call_count == 2
 
         # Idempotency stores track them separately
@@ -531,9 +495,7 @@ class TestA4IdempotentReplay:
         completed_2 = await tracked_effect.get_completed_backends(
             event_2.correlation_id
         )
-        assert "consul" in completed_1
         assert "postgres" in completed_1
-        assert "consul" in completed_2
         assert "postgres" in completed_2
 
     async def test_a4_state_immutability_on_replay(
@@ -582,63 +544,48 @@ class TestOrchestratedWorkflowIntegration:
     These tests verify edge cases and error handling in the workflow.
     """
 
-    async def test_workflow_with_partial_failure_then_retry(
+    async def test_workflow_with_failure_then_retry(
         self,
         tracked_reducer: TrackedRegistrationReducer,
         tracked_effect: TrackedNodeRegistryEffect,
-        consul_client: StubConsulClient,
         postgres_adapter: StubPostgresAdapter,
         sample_introspection_event: ModelNodeIntrospectionEvent,
     ) -> None:
-        """Test workflow handles partial failure and retry correctly.
+        """Test workflow handles failure and retry correctly.
 
-        Scenario:
-        1. First attempt: Consul fails, PostgreSQL succeeds
-        2. Retry: Consul fixed, PostgreSQL skipped (idempotency)
-        3. Final: Both backends registered
+        Scenario (OMN-3540: PostgreSQL only, Consul removed):
+        1. First attempt: PostgreSQL fails
+        2. Retry: PostgreSQL fixed, succeeds
         """
         event = sample_introspection_event
         initial_state = ModelRegistrationState()
 
-        # Configure Consul to fail initially
-        consul_client.should_fail = True
-        consul_client.failure_error = "Connection refused"
+        # Configure PostgreSQL to fail initially
+        postgres_adapter.should_fail = True
+        postgres_adapter.failure_error = "Connection refused"
 
         # First attempt
         reducer_output = tracked_reducer.reduce(initial_state, event)
         request = _convert_intents_to_request(event, reducer_output.intents)
         response_1 = await tracked_effect.register_node(request)
 
-        # Verify partial failure
-        assert response_1.status == "partial"
-        assert response_1.consul_result.success is False
-        assert response_1.postgres_result.success is True
+        # Verify failure
+        assert response_1.postgres_result.success is False
 
-        # PostgreSQL was registered
-        assert len(postgres_adapter.registrations) == 1
-        assert len(consul_client.registrations) == 0
+        # No registrations recorded
+        assert len(postgres_adapter.registrations) == 0
 
-        postgres_calls_before_retry = postgres_adapter.call_count
-
-        # Fix Consul for retry
-        consul_client.should_fail = False
+        # Fix PostgreSQL for retry
+        postgres_adapter.should_fail = False
 
         # Retry with same correlation_id
         response_2 = await tracked_effect.register_node(request)
 
         # Verify success
         assert response_2.status == "success"
-        assert response_2.consul_result.success is True
         assert response_2.postgres_result.success is True
 
-        # Consul was called again (retry)
-        assert consul_client.call_count == 2
-
-        # PostgreSQL was NOT called again (idempotency)
-        assert postgres_adapter.call_count == postgres_calls_before_retry
-
-        # Both backends now have registrations
-        assert len(consul_client.registrations) == 1
+        # PostgreSQL now has registration
         assert len(postgres_adapter.registrations) == 1
 
     async def test_workflow_correlation_id_propagation(

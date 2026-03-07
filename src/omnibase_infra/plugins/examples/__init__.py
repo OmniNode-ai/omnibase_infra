@@ -1,6 +1,6 @@
 """Example compute plugins demonstrating deterministic computation patterns.
 
-This module contains reference implementations that demonstrate best practices
+Reference implementations that demonstrate best practices
 for compute plugin development.
 
 Available Examples:

@@ -274,7 +274,9 @@ class TestDeterminismGates:
         assert result1.result.status == "pending", (
             "First reduce should transition to pending"
         )
-        assert len(result1.intents) == 2, "First reduce should emit 2 intents"
+        assert len(result1.intents) == 1, (
+            "First reduce should emit 1 intent (postgres only, consul removed)"
+        )
 
         # Second processing with SAME event on the NEW state
         # This simulates replay after the first processing
@@ -673,7 +675,6 @@ class TestDeterminismGates:
         # Results must be identical
         assert result1.result.status == result2.result.status
         assert result1.result.node_id == result2.result.node_id
-        assert result1.result.consul_confirmed == result2.result.consul_confirmed
         assert result1.result.postgres_confirmed == result2.result.postgres_confirmed
         assert len(result1.intents) == len(result2.intents)
 
@@ -738,9 +739,6 @@ class TestDeterminismGates:
         )
         assert initial_state.node_id == state_before.node_id, (
             "Input state.node_id was mutated"
-        )
-        assert initial_state.consul_confirmed == state_before.consul_confirmed, (
-            "Input state.consul_confirmed was mutated"
         )
         assert initial_state.postgres_confirmed == state_before.postgres_confirmed, (
             "Input state.postgres_confirmed was mutated"
@@ -1602,9 +1600,9 @@ class TestSecurityGates:
         # Run the reducer
         result = reducer.reduce(state, event)
 
-        # Verify intents were emitted
-        assert len(result.intents) == 2, (
-            f"Expected 2 intents (Consul + PostgreSQL), got {len(result.intents)}"
+        # Verify intents were emitted (postgres only; consul removed OMN-3540)
+        assert len(result.intents) == 1, (
+            f"Expected 1 intent (PostgreSQL only, consul removed), got {len(result.intents)}"
         )
 
         # Check each intent payload for sensitive data

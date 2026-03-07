@@ -193,13 +193,6 @@ workflow_coordination:
           step_config:
             reducer_protocol: "ProtocolReducer"
             output_type: "list[ModelRegistrationIntent]"
-        - node_id: "execute_consul_registration"
-          node_type: EFFECT_GENERIC
-          description: "Execute Consul registration intent"
-          depends_on: ["compute_intents"]
-          step_config:
-            effect_node: "node_registry_effect"
-            intent_filter: "consul.*"
         - node_id: "execute_postgres_registration"
           node_type: EFFECT_GENERIC
           description: "Execute PostgreSQL registration intent"
@@ -210,9 +203,9 @@ workflow_coordination:
         - node_id: "aggregate_results"
           node_type: COMPUTE_GENERIC
           description: "Aggregate registration results"
-          depends_on: ["execute_consul_registration", "execute_postgres_registration"]
+          depends_on: ["execute_postgres_registration"]
           step_config:
-            aggregation_strategy: "all_or_partial"
+            aggregation_strategy: "all_or_none"
         - node_id: "publish_outcome"
           node_type: EFFECT_GENERIC
           description: "Publish registration outcome event"
@@ -232,27 +225,23 @@ workflow_coordination:
     # │   - Rollback configuration                                               │
     # └─────────────────────────────────────────────────────────────────────────┘
     #
-    # Parallel Execution Design:
-    # The workflow uses parallel mode to execute Consul and Postgres registrations
-    # concurrently. Both depend only on compute_intents, so they run in the same
-    # wave. Error handling ensures one failure doesn't block the other's cleanup.
-    # See: omnibase_core.utils.workflow_executor._execute_parallel for wave-based
-    # parallel execution with proper error aggregation.
+    # Sequential Execution Design:
+    # The workflow uses sequential mode to execute PostgreSQL registration after
+    # computing intents. Consul registration has been removed; only the postgres
+    # backend remains.
     coordination_rules:
       # Execution mode configuration
-      # PARALLEL: Steps with same dependencies run concurrently (wave-based)
-      # - execute_consul_registration and execute_postgres_registration run in parallel
-      # - Both depend only on compute_intents, so they form a single wave
-      # - Reduces latency for successful registrations
-      execution_mode: parallel
-      parallel_execution_allowed: true
-      max_parallel_branches: 2
+      # SEQUENTIAL: Steps execute one after another
+      # - execute_postgres_registration depends on compute_intents
+      execution_mode: sequential
+      parallel_execution_allowed: false
+      max_parallel_branches: 1
       # ┌─────────────────────────────────────────────────────────────────────┐
       # │ WORKFLOW STEP RETRIES (coordination_rules.max_retries)              │
       # ├─────────────────────────────────────────────────────────────────────┤
       # │ Purpose: Retry an entire workflow step when it fails.               │
       # │                                                                     │
-      # │ Behavior: If a step (e.g., execute_consul_registration) fails,      │
+      # │ Behavior: If a step (e.g., execute_postgres_registration) fails,     │
       # │ the orchestrator will retry the ENTIRE step up to max_retries       │
       # │ times before marking the workflow as failed.                        │
       # │                                                                     │
@@ -492,13 +481,9 @@ published_events:
     event_type: "NodeLivenessExpired"
 intent_consumption:
   subscribed_intents:
-    - "consul.register"
-    - "consul.deregister"
     - "postgres.upsert_registration"
     - "postgres.update_registration"
   intent_routing_table:
-    "consul.register": "node_registry_effect"
-    "consul.deregister": "node_registry_effect"
     "postgres.upsert_registration": "node_registry_effect"
     "postgres.update_registration": "node_registry_effect"
 dependencies:

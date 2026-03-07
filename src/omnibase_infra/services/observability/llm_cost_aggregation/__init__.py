@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """LLM cost aggregation consumer and writer.
 
-This module provides infrastructure for consuming LLM call completed events
+Infrastructure for consuming LLM call completed events
 from Kafka and aggregating costs into the ``llm_cost_aggregates`` table
 in PostgreSQL.
 

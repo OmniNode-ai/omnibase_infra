@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Contract-driven intent routing loader.
+"""Contract-driven intent routing loader.  # ai-slop-ok: pre-existing
 
 This module provides a function to load the intent_routing_table from a
 contract YAML file. The routing table maps intent_type strings to target
@@ -21,12 +21,8 @@ Contract Format:
     ```yaml
     intent_consumption:
       subscribed_intents:
-        - "consul.register"
-        - "consul.deregister"
         - "postgres.upsert_registration"
       intent_routing_table:
-        "consul.register": "node_registry_effect"
-        "consul.deregister": "node_registry_effect"
         "postgres.upsert_registration": "node_registry_effect"
     ```
 
@@ -71,8 +67,7 @@ def load_intent_routing_table(
     Example:
         >>> table = load_intent_routing_table(Path("contract.yaml"))
         >>> print(table)
-        {'consul.register': 'node_registry_effect',
-         'postgres.upsert_registration': 'node_registry_effect'}
+        {'postgres.upsert_registration': 'node_registry_effect'}
     """
     _logger = logger_override or logger
 

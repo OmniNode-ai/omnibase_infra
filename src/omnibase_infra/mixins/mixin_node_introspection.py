@@ -4,7 +4,7 @@
 # G201 disabled: Logging extra dict is intentional for structured logging with correlation IDs
 """Node introspection mixin providing automatic capability discovery.
 
-This module provides a reusable mixin for ONEX nodes to implement automatic
+A reusable mixin for ONEX nodes to implement automatic
 capability discovery, endpoint reporting, and periodic heartbeat broadcasting.
 It uses reflection to discover node capabilities and integrates with the event
 bus for distributed service discovery.
@@ -2756,7 +2756,7 @@ class MixinNodeIntrospection:
     ) -> None:
         """Start background introspection tasks from a configuration model.
 
-        This method provides an alternative to ``start_introspection_tasks()``
+        An alternative to ``start_introspection_tasks()``
         using a configuration model instead of individual parameters. This
         reduces union types in calling code and follows ONEX patterns.
 

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Discovery Result Model for Handler Discovery Operations.
 
-This module provides the ModelDiscoveryResult model for aggregating the results
+The ModelDiscoveryResult model for aggregating the results
 of handler discovery operations, including counts and any errors or warnings.
 
 See Also:

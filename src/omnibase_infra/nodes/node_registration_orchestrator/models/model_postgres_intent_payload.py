@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """PostgreSQL intent payload model for registration orchestrator.
 
-This module provides the typed payload model for PostgreSQL registration intents.
+The typed payload model for PostgreSQL registration intents.
 
 Design Note:
     This model uses strongly-typed ModelNodeCapabilities and ModelNodeMetadata

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Registration intent type aliases for the registration orchestrator.
+"""Registration intent type aliases for the registration orchestrator.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides type aliases that aggregate the individual intent and
 payload models into discriminated unions. These aliases enable type narrowing
@@ -42,16 +42,6 @@ Related:
 
 from __future__ import annotations
 
-from typing import Annotated
-
-from pydantic import Field
-
-from omnibase_infra.nodes.node_registration_orchestrator.models.model_consul_intent_payload import (
-    ModelConsulIntentPayload,
-)
-from omnibase_infra.nodes.node_registration_orchestrator.models.model_consul_registration_intent import (
-    ModelConsulRegistrationIntent,
-)
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_postgres_intent_payload import (
     ModelPostgresIntentPayload,
 )
@@ -63,7 +53,7 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_registry_i
 )
 
 # Type alias for intent payloads
-IntentPayload = ModelConsulIntentPayload | ModelPostgresIntentPayload
+IntentPayload = ModelPostgresIntentPayload
 
 # =============================================================================
 # Discriminated Union Definitions
@@ -76,20 +66,15 @@ IntentPayload = ModelConsulIntentPayload | ModelPostgresIntentPayload
 #   4. Run validate_union_registry_sync() to verify
 # =============================================================================
 
-# Discriminated union of all intent types using Annotated pattern
-# This enables type narrowing based on the `kind` field
+# Single intent type after Consul removal (OMN-3540).
+# When multiple intent types are re-introduced, use:
+#   Annotated[UnionType, Field(discriminator="kind")]
 # SYNC: Must include all types registered in RegistryIntent
-ModelRegistrationIntent = Annotated[
-    ModelConsulRegistrationIntent | ModelPostgresUpsertIntent,
-    Field(discriminator="kind"),
-]
+ModelRegistrationIntent = ModelPostgresUpsertIntent
 
 # Explicit list of intent model classes in the union
 # Used by validate_union_registry_sync() for verification
-_UNION_INTENT_TYPES: tuple[type, ...] = (
-    ModelConsulRegistrationIntent,
-    ModelPostgresUpsertIntent,
-)
+_UNION_INTENT_TYPES: tuple[type, ...] = (ModelPostgresUpsertIntent,)
 
 
 def validate_union_registry_sync() -> tuple[bool, list[str]]:
@@ -167,8 +152,6 @@ def get_union_intent_types() -> tuple[type, ...]:
 
 __all__ = [
     "IntentPayload",
-    "ModelConsulIntentPayload",
-    "ModelConsulRegistrationIntent",
     "ModelPostgresIntentPayload",
     "ModelPostgresUpsertIntent",
     "ModelRegistrationIntent",

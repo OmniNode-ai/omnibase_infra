@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Version Normalization Utilities.
 
-This module provides shared version normalization logic for consistent
+Shared version normalization logic for consistent
 version handling across all ONEX components. The normalization ensures
 that equivalent version strings (e.g., "1.0", "1.0.0", "v1.0.0") all
 resolve to the same canonical format.

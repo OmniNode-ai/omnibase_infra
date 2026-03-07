@@ -348,8 +348,7 @@ class ProtocolEffect(Protocol):
     Example:
         ```python
         class MyEffect:
-            def __init__(self, consul_client, db_client):
-                self._consul = consul_client
+            def __init__(self, db_client):
                 self._db = db_client
 
             async def execute_intent(
@@ -359,9 +358,7 @@ class ProtocolEffect(Protocol):
             ) -> ModelIntentExecutionResult:
                 start_time = time.perf_counter()
                 try:
-                    if intent.kind == "consul":
-                        await self._consul.register(intent.payload)
-                    elif intent.kind == "postgres":
+                    if intent.kind == "postgres":
                         await self._db.upsert(intent.payload)
 
                     return ModelIntentExecutionResult(

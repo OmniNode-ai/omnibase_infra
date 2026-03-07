@@ -185,7 +185,7 @@ class HandlerPostgresHeartbeat(MixinPostgresOpExecutor):
     ) -> None:
         """Execute the heartbeat UPDATE query.
 
-        This method contains the handler-specific business logic:
+        The handler-specific business logic:
         - Execute the UPDATE query
         - Parse the affected row count
         - Log success/warning based on row_found

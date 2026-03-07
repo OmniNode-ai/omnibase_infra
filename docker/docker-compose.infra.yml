@@ -4,8 +4,7 @@
 # This compose file provides the complete ONEX platform: infrastructure services
 # (PostgreSQL, Valkey, Redpanda) and runtime services (kernel, effects, workers).
 # OMN-3431: Local Docker Redpanda replaces the remote M2 Ultra broker (always-on).
-# Broker addresses are hardcoded as literals (not interpolated from host env) so
-# running bus-cloud on the host cannot contaminate container routing.
+# Broker addresses are hardcoded as literals (not interpolated from host env).
 #
 #
 # Usage:
@@ -14,9 +13,6 @@
 #
 #   # With runtime services
 #   docker compose -f docker/docker-compose.infra.yml --profile runtime up -d
-#
-#   # With Consul (service discovery)
-#   docker compose -f docker/docker-compose.infra.yml --profile consul up -d
 #
 #   # With secrets management (Infisical)
 #   docker compose -f docker/docker-compose.infra.yml --profile secrets up -d
@@ -43,16 +39,14 @@
 # Profiles:
 #   - (default): Core infrastructure (postgres, valkey, redpanda)
 #   - runtime: ONEX runtime services (omninode-runtime, effects, workers, observability)
-#   - consul: HashiCorp Consul for service discovery
 #   - secrets: Infisical for secrets management
 #   - auth: Keycloak OIDC/auth service (local dev)
-#   - full: All services (infrastructure + runtime + consul + secrets + auth)
+#   - full: All services (infrastructure + runtime + secrets + auth)
 #   - bootstrap: Infrastructure + secrets (for bootstrap-infisical.sh sequence)
 #
 # Redpanda / Kafka:
 #   OMN-3431: Local Docker Redpanda is the default event bus (always-on, no profile needed).
 #   Containers use redpanda:9092 (Docker-internal). Host scripts use localhost:19092.
-#   Cloud bus (localhost:29092, launchd tunnel) is a separate bus for interactive dev sessions.
 #   Invariant: NO Docker service inherits KAFKA_BOOTSTRAP_SERVERS from the host environment.
 #              All broker addresses are hardcoded literals in compose.
 #
@@ -60,8 +54,7 @@
 #   Infrastructure:
 #     - PostgreSQL: 5436 (internal 5432)
 #     - Valkey: 16379 (internal 6379)
-#     - Redpanda: 19092 (internal 9092) [always-on; 29092 reserved for cloud bus tunnel]
-#     - Consul: 28500 (internal 8500) [consul profile]
+#     - Redpanda: 19092 (internal 9092) [always-on]
 #     - Infisical: 8880 (internal 8080) [secrets profile]
 #     - Keycloak: 28080 (internal 8080) [auth profile]
 #   Runtime:
@@ -136,12 +129,10 @@ x-runtime-env: &runtime-env
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:?OMNIBASE_INFRA_DB_URL must be set in ~/.omnibase/.env}
-  # Hardcoded literals: never inherit from host shell env (bus-cloud contamination prevention)
   # OMN-3431: Local Docker Redpanda — containers use Docker-internal redpanda:9092
   KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
   # Allowlist lets service_kernel.py's denylist accept Docker-internal redpanda: hostname
   KAFKA_BROKER_ALLOWLIST: "redpanda:"
-  # Always local for containers — never inherit BUS_ID=cloud from a bus-cloud shell
   BUS_ID: "local"
   ONEX_CONTRACTS_DIR: /app/contracts
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
@@ -165,8 +156,6 @@ x-runtime-env: &runtime-env
   # (the default) to allow standard environment variable resolution as fallback.
   INFISICAL_REQUIRED: ${INFISICAL_REQUIRED:-}
   # --- Fallback values (used when Infisical is not configured) ---
-  CONSUL_HOST: ${CONSUL_HOST:-consul}
-  CONSUL_PORT: ${CONSUL_PORT:-8500}
   VALKEY_HOST: ${VALKEY_HOST:-valkey}
   VALKEY_PORT: ${VALKEY_PORT:-6379}
   VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
@@ -239,7 +228,6 @@ services:
   # ==========================================================================
   # OMN-3431: Local Docker Redpanda replaces the remote M2 Ultra broker.
   # Containers: redpanda:9092 (Docker-internal). Host: localhost:19092 (external).
-  # Cloud bus (localhost:29092, launchd tunnel) is a separate bus for dev sessions.
   # Invariant: NO Docker service inherits KAFKA_BOOTSTRAP_SERVERS from the host env.
   #            All broker addresses are hardcoded literals in compose.
   # Memory: REDPANDA_MEMORY defaults to 8G. Override via env for constrained hosts.
@@ -326,29 +314,6 @@ services:
     restart: unless-stopped
     labels:
       - "com.omninode.service=valkey"
-      - "com.omninode.layer=infrastructure"
-  # ==========================================================================
-  # Consul - Service Discovery (Optional)
-  # ==========================================================================
-  consul:
-    image: hashicorp/consul:1.18
-    container_name: omnibase-infra-consul
-    profiles: ["consul", "full"]
-    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0 -data-dir=/consul/data
-    ports:
-      - "${CONSUL_EXTERNAL_PORT:-28500}:8500"
-      - "${CONSUL_DNS_PORT:-8600}:8600/udp"
-    volumes:
-      - consul_data:/consul/data
-    networks:
-      - omnibase-infra-network
-    healthcheck:
-      !!merge <<: *healthcheck-defaults
-      test: ["CMD", "consul", "members"]
-    logging: *logging-defaults
-    restart: unless-stopped
-    labels:
-      - "com.omninode.service=consul"
       - "com.omninode.layer=infrastructure"
   # ==========================================================================
   # Infisical - Secrets Management (Optional)
@@ -438,6 +403,53 @@ services:
       - "com.omninode.layer=infrastructure"
       - "com.omninode.ticket=OMN-3361"
   # ==========================================================================
+  # Migration Gate - Boot-Order Sentinel (Runtime Profile) [OMN-3737]
+  # ==========================================================================
+  # Lightweight healthcheck-only service that gates runtime service startup
+  # on all forward migrations being applied. The healthcheck queries
+  # db_metadata.migrations_complete (set by migration 037). Runtime services
+  # depend on this gate via service_healthy condition.
+  #
+  # Why: omniintelligence's validate_handshake auto-stamps a schema fingerprint
+  # on first boot. If tables like idempotency_records don't exist yet, the
+  # fingerprint is wrong and all subsequent boots fail (Audit Gap #7).
+  migration-gate:
+    image: postgres:16-alpine
+    container_name: omnibase-infra-migration-gate
+    profiles: ["runtime", "full"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: omnibase_infra
+    # Stay alive so healthcheck can run; no actual workload.
+    entrypoint: ["sh", "-c", "while true; do sleep 3600; done"]
+    volumes:
+      - ../scripts/check_migrations_complete.sh:/check_migrations_complete.sh:ro
+    networks:
+      - omnibase-infra-network
+    healthcheck:
+      test: ["CMD-SHELL", "sh /check_migrations_complete.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    logging: *logging-defaults
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 32M
+    labels:
+      - "com.omninode.service=migration-gate"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.ticket=OMN-3737"
+  # ==========================================================================
   # ONEX Runtime - Main Kernel (Runtime Profile)
   # ==========================================================================
   # Primary runtime service that handles the kernel bootstrap process.
@@ -446,7 +458,7 @@ services:
     container_name: omninode-runtime
     profiles: ["runtime", "full"]
     depends_on:
-      postgres:
+      migration-gate:
         condition: service_healthy
       redpanda:
         condition: service_healthy
@@ -571,13 +583,12 @@ services:
     container_name: omninode-agent-actions-consumer
     profiles: ["runtime", "full"]
     depends_on:
-      postgres:
+      migration-gate:
         condition: service_healthy
       redpanda:
         condition: service_healthy
     command: ["python", "-m", "omnibase_infra.services.observability.agent_actions.consumer"]
     environment:
-      # Hardcoded literal: never inherit from host shell env (bus-cloud contamination prevention)
       # OMN-3431: Local Docker Redpanda
       OMNIBASE_INFRA_AGENT_ACTIONS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       # NOTE: Uses dedicated OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN rather than
@@ -625,13 +636,12 @@ services:
     container_name: omninode-skill-lifecycle-consumer
     profiles: ["runtime", "full"]
     depends_on:
-      postgres:
+      migration-gate:
         condition: service_healthy
       redpanda:
         condition: service_healthy
     command: ["python", "-m", "omnibase_infra.services.observability.skill_lifecycle.consumer"]
     environment:
-      # Hardcoded literal: never inherit from host shell env (bus-cloud contamination prevention)
       # OMN-3431: Local Docker Redpanda
       OMNIBASE_INFRA_SKILL_LIFECYCLE_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN: ${OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN:?OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN must be set in ~/.omnibase/.env}
@@ -673,7 +683,7 @@ services:
     container_name: omnibase-intelligence-api
     profiles: ["runtime", "full"]
     depends_on:
-      postgres:
+      migration-gate:
         condition: service_healthy
       redpanda:
         condition: service_healthy
@@ -817,7 +827,7 @@ services:
   # Scope: only containers labeled autoheal=true are watched (not infra services
   # like postgres/valkey, which could cascade-fail dependents if restarted).
   #
-  # Profiles: runtime, full only. Not active in dev/bootstrap/auth/consul profiles.
+  # Profiles: runtime, full only. Not active in dev/bootstrap/auth profiles.
   #
   # LOCAL INFRA ONLY: docker.sock mount grants root-equivalent Docker control.
   # Do not use this pattern in shared or multi-user environments.
@@ -859,8 +869,6 @@ volumes:
     name: omnibase-infra-redpanda-data
   valkey_data:
     name: omnibase-infra-valkey-data
-  consul_data:
-    name: omnibase-infra-consul-data
   keycloak_data:
     name: omnibase-infra-keycloak-data
   # Runtime volumes

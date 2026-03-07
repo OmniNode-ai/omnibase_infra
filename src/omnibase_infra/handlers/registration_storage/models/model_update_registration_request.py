@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Update Registration Request Model.
 
-This module provides ModelUpdateRegistrationRequest, representing a request
+ModelUpdateRegistrationRequest, representing a request
 to update an existing registration record.
 
 Architecture:

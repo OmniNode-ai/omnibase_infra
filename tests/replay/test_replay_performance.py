@@ -2,9 +2,8 @@
 # Copyright (c) 2025 OmniNode Team
 """Replay Performance Tests for OMN-955.
 
-This module provides performance tests for large event replay sequences.
-These tests measure and validate performance characteristics of the replay
-system under load conditions.
+Performance tests for large event replay sequences — measures and validates
+replay system behavior under load conditions.
 
 Statistical Rigor:
     - All performance tests use multiple iterations (not single runs)
@@ -590,10 +589,6 @@ class TestMemoryUsagePerformance:
         - Reports peak memory and growth from baseline
     """
 
-    @pytest.mark.xfail(
-        reason="omnibase_core 0.7.0 adds intent_type mismatch warnings that increase memory usage beyond 10MB tolerance. See OMN-1361.",
-        strict=True,
-    )
     async def test_memory_usage_10k_events(
         self,
         reducer: RegistrationReducer,
@@ -755,15 +750,6 @@ class TestReplayThroughput:
         - Uses PerformanceStats for comprehensive analysis
     """
 
-    @pytest.mark.xfail(
-        reason=(
-            "Performance test with absolute P95/median threshold (< 2.0) is inherently "
-            "flaky in CI environments due to variable CPU/memory resources. "
-            "omnibase_core 0.7.0 intent_type mismatch warnings add logging overhead "
-            "that causes timing variability. See OMN-1361."
-        ),
-        strict=True,
-    )
     async def test_sustained_replay_throughput(
         self,
         reducer: RegistrationReducer,

@@ -8,12 +8,10 @@ ONEX registration pipeline including smoke, idempotency, and failure suites.
 
 from omnibase_infra.cli.infra_test._helpers import (
     get_broker,
-    get_consul_addr,
     get_postgres_dsn,
 )
 
 __all__ = [
     "get_broker",
-    "get_consul_addr",
     "get_postgres_dsn",
 ]

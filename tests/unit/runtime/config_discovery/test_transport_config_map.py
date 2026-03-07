@@ -70,13 +70,6 @@ class TestTransportConfigMap:
         assert spec.service_slug == ""
         assert len(spec.keys) > 0
 
-    def test_shared_spec_consul(self) -> None:
-        """Consul shared spec should use consul slug."""
-        spec = self.tcm.shared_spec(EnumInfraTransportType.CONSUL)
-        assert spec.infisical_folder == "/shared/consul/"
-        assert "CONSUL_HOST" in spec.keys
-        assert "CONSUL_ENABLED" in spec.keys
-
     def test_shared_spec_qdrant(self) -> None:
         """Qdrant shared spec should include QDRANT_URL alongside host/port keys."""
         spec = self.tcm.shared_spec(EnumInfraTransportType.QDRANT)
@@ -162,11 +155,10 @@ class TestTransportConfigMap:
     def test_all_shared_specs(self) -> None:
         """Should return specs for all transports with keys."""
         specs = self.tcm.all_shared_specs()
-        # At least DATABASE, KAFKA, CONSUL should be present
+        # At least DATABASE and KAFKA should be present
         transport_types = {s.transport_type for s in specs}
         assert EnumInfraTransportType.DATABASE in transport_types
         assert EnumInfraTransportType.KAFKA in transport_types
-        assert EnumInfraTransportType.CONSUL in transport_types
         # INMEMORY and RUNTIME should NOT be present
         assert EnumInfraTransportType.INMEMORY not in transport_types
         assert EnumInfraTransportType.RUNTIME not in transport_types

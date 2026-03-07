@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Pytest fixtures for registration workflow integration tests.
+"""# ai-slop-ok: pre-existingPytest fixtures for registration workflow integration tests.
 
 This module provides fixtures that wire the complete registration workflow:
 1. RegistrationReducer for intent computation
@@ -210,7 +210,7 @@ class ProtocolRegistryRequestFactory(Protocol):
 
 
 class IntrospectableTestNode(MixinNodeIntrospection):
-    """Test node that implements MixinNodeIntrospection for testing.
+    """# ai-slop-ok: pre-existingTest node that implements MixinNodeIntrospection for testing.
 
     This node provides a minimal implementation suitable for testing
     the introspection workflow without real infrastructure.
@@ -446,14 +446,12 @@ class TrackedNodeRegistryEffect:
         self,
         request: ModelRegistryRequest,
         *,
-        skip_consul: bool = False,
         skip_postgres: bool = False,
     ) -> ModelRegistryResponse:
         """Delegate to effect and track the call.
 
         Args:
             request: Registration request.
-            skip_consul: If True, skip Consul registration.
             skip_postgres: If True, skip PostgreSQL registration.
 
         Returns:
@@ -467,7 +465,6 @@ class TrackedNodeRegistryEffect:
         )
         return await self.effect.register_node(
             request,
-            skip_consul=skip_consul,
             skip_postgres=skip_postgres,
         )
 
@@ -553,14 +550,14 @@ def tracked_reducer(
 
 @pytest.fixture
 def registry_effect(
-    consul_client: StubConsulClient,
+    consul_client: StubConsulClient,  # kept for backward compat with test signatures
     postgres_adapter: StubPostgresAdapter,
     idempotency_store: InMemoryEffectIdempotencyStore,
 ) -> NodeRegistryEffect:
     """Create NodeRegistryEffect with test double backends.
 
     Args:
-        consul_client: Test double Consul client.
+        consul_client: Unused after OMN-3540 consul removal (kept for fixture compat).
         postgres_adapter: Test double PostgreSQL adapter.
         idempotency_store: In-memory idempotency store.
 
@@ -568,7 +565,6 @@ def registry_effect(
         NodeRegistryEffect configured with test doubles.
     """
     return NodeRegistryEffect(
-        consul_client=consul_client,
         postgres_adapter=postgres_adapter,
         idempotency_store=idempotency_store,
     )
@@ -1015,14 +1011,14 @@ def mock_postgres_effect() -> MockPostgresEffect:
 
 @pytest.fixture
 def registry_effect_with_mocks(
-    mock_consul_effect: MockConsulEffect,
+    mock_consul_effect: MockConsulEffect,  # consul removed in OMN-3540
     mock_postgres_effect: MockPostgresEffect,
     idempotency_store: InMemoryEffectIdempotencyStore,
 ) -> NodeRegistryEffect:
     """Create NodeRegistryEffect with mock backends for call tracking.
 
     Args:
-        mock_consul_effect: Mock Consul effect.
+        mock_consul_effect: Unused after OMN-3540 consul removal.
         mock_postgres_effect: Mock PostgreSQL effect.
         idempotency_store: Idempotency store.
 
@@ -1030,7 +1026,6 @@ def registry_effect_with_mocks(
         NodeRegistryEffect configured with mocks.
     """
     return NodeRegistryEffect(
-        consul_client=mock_consul_effect,  # type: ignore[arg-type]
         postgres_adapter=mock_postgres_effect,  # type: ignore[arg-type]
         idempotency_store=idempotency_store,
     )

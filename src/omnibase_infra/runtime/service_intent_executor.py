@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Runtime-level intent executor for contract-driven intent routing.
+"""Runtime-level intent executor for contract-driven intent routing.  # ai-slop-ok: pre-existing
 
 This module provides the IntentExecutor, which routes intents
 produced by handlers to the appropriate effect layer handlers. The routing
@@ -25,9 +25,8 @@ Intent Type Convention:
     envelope.
 
     Examples of short-form suffixes:
-        - ``consul.register`` -- Register a service in Consul
-        - ``consul.deregister`` -- Deregister a service from Consul
         - ``postgres.upsert_registration`` -- Upsert a registration projection
+        - ``postgres.update_registration`` -- Update a registration record
         - ``ledger.append`` -- Append an entry to the event ledger
 
 Related:
@@ -89,7 +88,7 @@ class IntentExecutor:
 
     Payload-Driven Routing:
         The authoritative routing key is ``payload.intent_type``, a Literal
-        field on each typed payload model (e.g., ``ModelPayloadConsulRegister``).
+        field on each typed payload model (e.g., ``ModelPayloadPostgresUpsertRegistration``).
         While ``ModelIntent.intent_type`` may mirror the payload value, the
         executor deliberately does **not** fall back to the envelope field.
         This ensures that misconfigured payloads lacking an ``intent_type``
@@ -108,8 +107,8 @@ class IntentExecutor:
         executor = IntentExecutor(
             container=container,
             effect_handlers={
-                "consul.register": consul_register_handler,
                 "postgres.upsert_registration": postgres_upsert_handler,
+                "ledger.append": ledger_append_handler,
             },
         )
         await executor.execute(intent, correlation_id)
@@ -138,7 +137,7 @@ class IntentExecutor:
         """Register an effect handler for an intent type.
 
         Args:
-            intent_type: The intent_type string to route (e.g., "consul.register").
+            intent_type: The intent_type string to route (e.g., "postgres.upsert_registration").
             handler: Handler implementing ProtocolIntentEffect (async execute()).
         """
         self._effect_handlers[intent_type] = handler
@@ -176,7 +175,7 @@ class IntentExecutor:
         # Get intent_type from payload using protocol-based isinstance check.
         # Typed payloads extend BaseModel with an explicit intent_type Literal field.
         # Do NOT fall back to intent.intent_type — the authoritative routing key
-        # lives on the payload (e.g., "consul.register", "postgres.upsert_registration").
+        # lives on the payload (e.g., "postgres.upsert_registration", "ledger.append").
         # While intent.intent_type may mirror the payload's value, the payload is
         # the canonical source. Falling back to the envelope field would mask
         # misconfigured payloads that lack an intent_type field.
@@ -257,8 +256,8 @@ class IntentExecutor:
         """Execute multiple intents sequentially.
 
         Intents are executed in order. If an intent fails, earlier intents
-        that already executed (e.g., Consul register, PostgreSQL upsert)
-        are **not** rolled back. The exception propagates to the caller,
+        that already executed (e.g., PostgreSQL upsert) are **not** rolled
+        back. The exception propagates to the caller,
         which prevents Kafka offset commit so the message will be redelivered.
         Effect adapters must therefore be idempotent.
 

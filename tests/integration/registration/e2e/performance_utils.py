@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Performance timing utilities for E2E registration tests.
 
-This module provides utilities for measuring and asserting performance thresholds
+Utilities for measuring and asserting performance thresholds
 in the ONEX 2-way registration pattern E2E tests (OMN-892).
 
 Performance Thresholds (calibrated for remote infrastructure):
@@ -59,10 +59,9 @@ class PerformanceThresholds:
     operations in the ONEX 2-way registration pattern.
 
     Threshold Calibration Context
-    =============================
 
     **Target Infrastructure**: Remote services (configured via environment variables)
-        - Redpanda (Kafka): KAFKA_BOOTSTRAP_SERVERS (default port 29092)
+        - Redpanda (Kafka): KAFKA_BOOTSTRAP_SERVERS (default port 19092)
         - PostgreSQL: POSTGRES_HOST (default port 5436)
         - Consul: CONSUL_HOST (default port 28500)
 
@@ -73,7 +72,6 @@ class PerformanceThresholds:
         - Connection establishment overhead: 20-50ms (first connection)
 
     Threshold Rationale
-    ===================
 
     Each threshold is calculated as: base_operation_time + network_overhead + safety_margin
 
@@ -116,7 +114,6 @@ class PerformanceThresholds:
         - 16% tolerance is industry-standard for heartbeat mechanisms
 
     Environment Adjustment Guide
-    ============================
 
     **Local Infrastructure (services on localhost)**:
         - INTROSPECTION_BROADCAST_MS: 50ms (no network RTT)
@@ -136,7 +133,6 @@ class PerformanceThresholds:
         - These assume dedicated infrastructure with predictable latency
 
     Calibration Methodology
-    =======================
 
     Thresholds were established through empirical measurement (December 2024):
 
@@ -147,7 +143,6 @@ class PerformanceThresholds:
     5. Rounding: Rounded to nearest 50ms for cleaner thresholds
 
     When to Recalibrate
-    ===================
 
     Consider recalibration when:
     - Infrastructure changes (new host, different network topology)
@@ -410,7 +405,6 @@ class PerformanceCollector:
 
         Output:
             Performance Summary
-            ===================
             [PASS] introspection: 35.50ms/50.0ms
             [PASS] registry_process: 78.20ms/100.0ms
 

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Service Discovery Effect Node - Capability-Oriented Effect Node.
+"""Service Discovery Effect Node - Capability-Oriented Effect Node.  # ai-slop-ok: pre-existing
 
 This node provides capability-oriented service discovery operations following
 the ONEX principle: "I'm interested in what you do, not what you are".
@@ -39,7 +39,7 @@ Usage:
         container = ModelONEXContainer()
         container.register(
             ProtocolDiscoveryOperations,
-            consul_handler_instance,
+            discovery_handler_instance,
         )
 
         # Create node
@@ -63,7 +63,7 @@ if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
 
-class NodeServiceDiscoveryEffect(NodeEffect):
+class NodeServiceDiscoveryEffect(NodeEffect):  # ai-slop-ok: pre-existing
     """Effect node for service discovery operations.
 
     Capability: service.discovery

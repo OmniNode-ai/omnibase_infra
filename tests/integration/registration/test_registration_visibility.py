@@ -90,7 +90,6 @@ class TestRegistrationHandlerInterface:
 
         reducer = RegistrationReducerService(
             ack_timeout_seconds=30.0,
-            consul_enabled=False,  # Avoid consul intent generation
         )
         handler = HandlerNodeIntrospected(
             projection_reader=mock_reader,
@@ -165,6 +164,7 @@ class TestRegistrationHandlerProperties:
         assert "ModelNodeIntrospectionEvent" in handler.message_types
 
 
+@pytest.mark.skip(reason="Consul removed from runtime in OMN-3540")
 class TestConsulRegistrationVisible:
     """Tests that Consul registration is visible after introspection processing."""
 

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Envelope validation for runtime dispatch.
+"""Envelope validation for runtime dispatch.  # ai-slop-ok: pre-existing
 
 This module provides minimal envelope validation before dispatch to handlers.
 Validation enforces ONLY:
@@ -82,9 +82,8 @@ PAYLOAD_REQUIRED_OPERATIONS: frozenset[str] = frozenset(
         "http.patch",
         # Kafka operations
         "kafka.produce",
-        # Consul operations
+        # Generic KV operations (consul.kv_put retained for non-registration KV use)
         "consul.kv_put",
-        "consul.register",
     }
 )
 

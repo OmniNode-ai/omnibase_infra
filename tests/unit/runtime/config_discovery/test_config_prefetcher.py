@@ -165,17 +165,15 @@ class TestConfigPrefetcher:
 
     def test_prefetch_env_dependencies(self) -> None:
         """Should prefetch explicit env dependencies."""
-        handler = self._make_handler(
-            secrets={"SLACK_WEBHOOK_URL": "https://hooks.slack.com/test"}
-        )
+        handler = self._make_handler(secrets={"SLACK_BOT_TOKEN": "xoxb-test-token"})
         prefetcher = ConfigPrefetcher(handler=handler)
         reqs = self._make_requirements(
-            env_deps=[("SLACK_WEBHOOK_URL", "/test/contract.yaml")]
+            env_deps=[("SLACK_BOT_TOKEN", "/test/contract.yaml")]
         )
 
         result = prefetcher.prefetch(reqs)
 
-        assert "SLACK_WEBHOOK_URL" in result.resolved
+        assert "SLACK_BOT_TOKEN" in result.resolved
 
     def test_prefetch_with_service_slug(self) -> None:
         """Should use per-service paths when service_slug is set."""

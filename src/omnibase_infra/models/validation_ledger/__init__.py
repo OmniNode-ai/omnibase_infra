@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """Validation ledger models for cross-repo validation event persistence.
 
-This module provides Pydantic models for the validation_event_ledger table,
+Pydantic models for the validation_event_ledger table,
 supporting append, query, and replay operations for cross-repository
 validation events.
 

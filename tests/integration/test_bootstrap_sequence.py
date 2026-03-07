@@ -72,13 +72,6 @@ class TestBootstrapSequence:
 
         assert EnumInfraTransportType.DATABASE in reqs.transport_types
 
-    def test_real_contracts_have_consul_transport(self) -> None:
-        """Real contracts should declare CONSUL transport type."""
-        extractor = ContractConfigExtractor()
-        reqs = extractor.extract_from_paths([NODES_DIR])
-
-        assert EnumInfraTransportType.CONSUL in reqs.transport_types
-
     def test_real_contracts_have_env_dependencies(self) -> None:
         """Real contracts should have environment dependencies."""
         extractor = ContractConfigExtractor()

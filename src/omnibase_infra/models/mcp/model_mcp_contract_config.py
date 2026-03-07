@@ -16,7 +16,7 @@ Example contract.yaml:
 Enforcement Rule:
     The `mcp.expose` field is ONLY valid for ORCHESTRATOR_GENERIC nodes.
     Non-orchestrator nodes with `mcp.expose: true` will be ignored during
-    registration - the MCP tags will not be added to Consul.
+    registration - the MCP tags will not be added to the registry.
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ class ModelMCPContractConfig(BaseModel):
 
     Attributes:
         expose: Whether to expose this node as an MCP tool. When True and
-            the node is an orchestrator, it will be registered with Consul
-            using MCP-specific tags for tool discovery.
+            the node is an orchestrator, it will be registered with
+            MCP-specific tags for tool discovery.
         tool_name: Optional stable name for the MCP tool. If not provided,
             defaults to the node's name. Use this to provide a consistent
             tool name across node version changes.

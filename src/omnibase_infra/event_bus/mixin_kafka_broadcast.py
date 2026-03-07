@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Broadcast messaging mixin for Kafka event bus.
 
-This module provides broadcast and group messaging functionality that can be
+Broadcast and group messaging functionality that can be
 mixed into EventBusKafka to support environment-wide and group-specific
 message distribution.
 

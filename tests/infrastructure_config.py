@@ -2,8 +2,8 @@
 # Copyright (c) 2025 OmniNode Team
 """Central configuration for test infrastructure endpoints.
 
-This module provides a single source of truth for infrastructure server
-configuration used in integration tests. It enables:
+Single source of truth for infrastructure server configuration
+used in integration tests. It enables:
 
 1. **Environment Variable Override**: All infrastructure endpoints can be
    overridden via environment variables for different deployment scenarios.
@@ -15,7 +15,6 @@ configuration used in integration tests. It enables:
    server and its purpose.
 
 Development Infrastructure Server
-=================================
 
 The default values point to the ONEX development/staging infrastructure
 server, which hosts shared services for integration testing:
@@ -30,7 +29,6 @@ against real infrastructure components. It is NOT accessible from public CI/CD
 runners (e.g., GitHub Actions) without VPN access.
 
 Environment Variable Overrides
-==============================
 
 For local development or alternative infrastructure, set these environment
 variables to override the defaults:
@@ -46,7 +44,6 @@ variables to override the defaults:
         KAFKA_BOOTSTRAP_SERVERS: Kafka bootstrap servers
 
 CI/CD Graceful Skip Behavior
-============================
 
 When infrastructure is unavailable (e.g., CI/CD without VPN):
 
@@ -62,7 +59,6 @@ Example Output in CI::
     test_consul_health_check SKIPPED (Consul not available - cannot connect)
 
 Usage in Tests
-==============
 
 Import the configuration constants from this module:
 
@@ -79,7 +75,6 @@ For environment-aware configuration with fallbacks:
     >>> host = get_postgres_host()  # Returns POSTGRES_HOST or REMOTE_INFRA_HOST
 
 Related Files
-=============
 
     - tests/integration/handlers/conftest.py: Uses these constants for fixtures
     - tests/integration/handlers/README.md: Documents infrastructure setup
@@ -97,7 +92,7 @@ import os
 #   - PostgreSQL (port 5436)
 #   - Consul (port 28500)
 #   - Vault (port 8200)
-#   - Kafka/Redpanda (port 29092)
+#   - Kafka/Redpanda (port 19092)
 #
 # This server provides a shared development environment for integration testing
 # against real infrastructure components. For CI/CD environments without access
@@ -138,7 +133,7 @@ DEFAULT_CONSUL_PORT: int = 28500
 DEFAULT_VAULT_PORT: int = 8200
 """Vault HTTP API port on the infrastructure server."""
 
-DEFAULT_KAFKA_PORT: int = 29092
+DEFAULT_KAFKA_PORT: int = 19092
 """Kafka/Redpanda external port on the infrastructure server."""
 
 
@@ -206,7 +201,7 @@ def get_kafka_bootstrap_servers() -> str | None:
     Tests should explicitly require KAFKA_BOOTSTRAP_SERVERS to be set.
 
     Returns:
-        Kafka bootstrap servers (e.g., 'localhost:29092') if configured,
+        Kafka bootstrap servers (e.g., 'localhost:19092') if configured,
         None otherwise.
     """
     return os.getenv("KAFKA_BOOTSTRAP_SERVERS")
@@ -239,6 +234,6 @@ def build_default_kafka_servers() -> str:
 
     Example:
         >>> build_default_kafka_servers()
-        'localhost:29092'
+        'localhost:19092'
     """
     return f"{REMOTE_INFRA_HOST}:{DEFAULT_KAFKA_PORT}"

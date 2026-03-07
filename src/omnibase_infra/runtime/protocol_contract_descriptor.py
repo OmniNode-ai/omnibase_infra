@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Contract Descriptor Protocol Definition (Fallback).
 
-This module provides a fallback protocol definition for contract descriptors
+A fallback protocol definition for contract descriptors
 when omnibase_spi is not available.
 
 Part of OMN-1097: HandlerContractSource + Filesystem Discovery.

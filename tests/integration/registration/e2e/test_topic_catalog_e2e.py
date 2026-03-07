@@ -113,21 +113,18 @@ def mock_container_for_catalog() -> MagicMock:
 
 @pytest.fixture
 def catalog_service(
-    real_consul_handler: HandlerConsul,
     mock_container_for_catalog: MagicMock,
 ) -> ServiceTopicCatalog:
-    """ServiceTopicCatalog backed by real Consul.
+    """ServiceTopicCatalog stub (Consul removed in OMN-3540).
 
     Args:
-        real_consul_handler: Connected HandlerConsul instance.
         mock_container_for_catalog: Minimal mock container for DI.
 
     Returns:
-        ServiceTopicCatalog with real Consul backend.
+        ServiceTopicCatalog stub that returns empty results.
     """
     return ServiceTopicCatalog(
         container=mock_container_for_catalog,
-        consul_handler=real_consul_handler,
     )
 
 
@@ -808,6 +805,9 @@ class TestChangeNotificationFlow:
     """
 
     @pytest.mark.serial
+    @pytest.mark.skip(
+        reason="Consul KV write removed in OMN-3540; test requires rewrite"
+    )
     async def test_register_node_produces_correct_catalog_changed(
         self,
         catalog_service: ServiceTopicCatalog,

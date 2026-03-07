@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Topic pattern constants for event bus topic validation.
 
-This module provides shared regex patterns for validating event bus topic names.
+Shared regex patterns for validating event bus topic names.
 These patterns are used across multiple modules (e.g., MixinConsulTopicIndex,
 MixinNodeIntrospection) to ensure consistent topic validation.
 

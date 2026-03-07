@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Intent effect adapter for PostgreSQL registration upserts.
 
-This module provides the IntentEffectPostgresUpsert adapter, which bridges
+The IntentEffectPostgresUpsert adapter, which bridges
 ModelPayloadPostgresUpsertRegistration intent payloads to actual PostgreSQL
 upsert operations via the ProjectorShell.
 

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """PostgreSQL upsert intent model for registration orchestrator.
 
-This module provides the typed intent model for PostgreSQL upsert operations.
+The typed intent model for PostgreSQL upsert operations.
 Registered with RegistryIntent for dynamic type resolution.
 
 Related:

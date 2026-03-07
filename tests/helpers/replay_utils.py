@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Replay testing utilities for OMN-955.
+"""Replay testing utilities for OMN-955.  # ai-slop-ok: pre-existing
 
 This module provides shared utilities for replay testing scenarios including:
 - Output comparison helpers for determinism testing
@@ -153,12 +153,6 @@ def compare_outputs(
     if output1.result.node_id != output2.result.node_id:
         differences.append(
             f"Node ID mismatch: {output1.result.node_id} != {output2.result.node_id}"
-        )
-
-    if output1.result.consul_confirmed != output2.result.consul_confirmed:
-        differences.append(
-            f"Consul confirmed mismatch: "
-            f"{output1.result.consul_confirmed} != {output2.result.consul_confirmed}"
         )
 
     if output1.result.postgres_confirmed != output2.result.postgres_confirmed:

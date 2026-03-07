@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """LLM function definition model for tool-calling interactions.
 
-This module provides ModelLlmFunctionDef, a JSON-Schema description
+ModelLlmFunctionDef, a JSON-Schema description
 of a callable function that an LLM may invoke.
 
 Related:

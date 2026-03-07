@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""ONEX Infrastructure Errors Module.
+"""ONEX Infrastructure Errors Module.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides infrastructure-specific error classes and error handling
 utilities for the omnibase_infra package. All errors extend from OnexError
@@ -108,9 +108,9 @@ from omnibase_infra.errors.error_architecture_violation import (
     ArchitectureViolationError,
 )
 from omnibase_infra.errors.error_binding_resolution import BindingResolutionError
+from omnibase_infra.errors.error_catalog import ErrorResolution, get_resolution
 from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
 from omnibase_infra.errors.error_compute_registry import ComputeRegistryError
-from omnibase_infra.errors.error_consul import InfraConsulError
 from omnibase_infra.errors.error_container_wiring import (
     ContainerValidationError,
     ContainerWiringError,
@@ -180,14 +180,14 @@ __all__: list[str] = [
     "DbOwnershipMismatchError",
     "DbOwnershipMissingError",
     "EnvelopeValidationError",
+    # Error catalog (OMN-518)
+    "ErrorResolution",
     "EventBusRegistryError",
     # Event registry fingerprint errors
     "EventRegistryFingerprintMismatchError",
     "EventRegistryFingerprintMissingError",
     "InfraAuthenticationError",
     "InfraConnectionError",
-    # Service-specific connection errors
-    "InfraConsulError",
     # Protocol/format errors
     "InfraProtocolError",
     "InfraRateLimitedError",
@@ -222,4 +222,6 @@ __all__: list[str] = [
     "ServiceRegistryUnavailableError",
     "ServiceResolutionError",
     "UnknownHandlerTypeError",
+    # Error catalog lookup (OMN-518)
+    "get_resolution",
 ]

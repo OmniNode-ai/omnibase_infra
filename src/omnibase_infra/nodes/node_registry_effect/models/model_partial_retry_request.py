@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Partial Retry Request Model for targeted backend retries.
+"""Partial Retry Request Model for targeted backend retries.  # ai-slop-ok: pre-existing
 
 This module provides ModelPartialRetryRequest, a Pydantic model that implements
 the ProtocolPartialRetryRequest protocol for use with HandlerPartialRetry.
@@ -36,16 +36,13 @@ class ModelPartialRetryRequest(BaseModel):
         node_id: Unique identifier for the node being registered.
         node_type: Type of ONEX node (effect, compute, reducer, orchestrator).
         node_version: Semantic version of the node.
-        target_backend: Backend to retry ("consul" or "postgres").
+        target_backend: Backend to retry ("postgres").
         idempotency_key: Optional key for idempotent retry semantics.
-        service_name: Optional service name for Consul registration.
-        tags: Tags for Consul service discovery.
-        health_check_config: Optional Consul health check configuration.
         endpoints: Dict of endpoint type to URL for PostgreSQL.
         metadata: Additional metadata for PostgreSQL registration.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     node_id: UUID = Field(
         ...,
@@ -61,23 +58,11 @@ class ModelPartialRetryRequest(BaseModel):
     )
     target_backend: EnumBackendType = Field(
         ...,
-        description="Backend to retry: 'consul' or 'postgres'",
+        description="Backend to retry: 'postgres'",
     )
     idempotency_key: str | None = Field(
         default=None,
         description="Optional key for idempotent retry semantics",
-    )
-    service_name: str | None = Field(
-        default=None,
-        description="Name for service discovery registration (Consul)",
-    )
-    tags: list[str] = Field(
-        default_factory=list,
-        description="List of tags for service discovery (Consul)",
-    )
-    health_check_config: dict[str, str] | None = Field(
-        default=None,
-        description="Optional health check configuration (Consul)",
     )
     endpoints: dict[str, str] = Field(
         default_factory=dict,

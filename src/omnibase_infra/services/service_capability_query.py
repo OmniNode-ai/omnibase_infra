@@ -14,7 +14,7 @@ Coroutine Safety:
     of the underlying ProjectionReaderRegistration's circuit breaker.
 
 Circuit Breaker:
-    This service implements its own circuit breaker as a defense-in-depth layer.
+    Its own circuit breaker as a defense-in-depth layer.
     While ProjectionReaderRegistration also has circuit breakers, having them
     at the service layer provides:
     - Service-level failure isolation
@@ -92,7 +92,7 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
         3. Applies the selection strategy to choose one node
 
     Circuit Breaker:
-        This service implements MixinAsyncCircuitBreaker for defense-in-depth
+        MixinAsyncCircuitBreaker for defense-in-depth
         protection. While ProjectionReaderRegistration has its own circuit
         breakers, the service-level circuit breaker provides:
         - Independent failure isolation at the service layer

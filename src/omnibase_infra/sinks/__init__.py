@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """Ledger sink implementations for runtime traceability.
 
-This module provides sink implementations for the ProtocolLedgerSink interface.
+Sink implementations for the ProtocolLedgerSink interface.
 Sinks receive ledger events and handle durability, batching, and delivery.
 
 Sinks:
