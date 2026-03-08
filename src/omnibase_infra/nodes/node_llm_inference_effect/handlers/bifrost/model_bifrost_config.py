@@ -68,6 +68,7 @@ class ModelBifrostBackendConfig(BaseModel):
     )
     hmac_secret: str | None = Field(
         default=None,
+        max_length=256,
         repr=False,
         description="HMAC-SHA256 secret for X-ONEX-Signature header (None = disabled).",
     )
