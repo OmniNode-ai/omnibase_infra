@@ -31,6 +31,7 @@ Start here to understand the ONEX architecture:
 | [Handler Protocol-Driven Architecture](HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md) | Handler system design |
 | [Handler Classification Rules](HANDLER_CLASSIFICATION_RULES.md) | Classification rubric for mixin/service → handler refactoring (Epic 3, OMN-4004) |
 | [Handler Classification 3.2a — Circuit Breaker + Retry](HANDLER_CLASSIFICATION_3_2A_CIRCUIT_BREAKER_RETRY.md) | Classification of MixinAsyncCircuitBreaker + MixinRetryExecution: KEEP AS MIXIN (OMN-4006) |
+| [Handler Classification 3.3 — LLM HTTP Transport](HANDLER_CLASSIFICATION_3_3_LLM_HTTP_TRANSPORT.md) | MixinLlmHttpTransport: CONVERT justified (5/5), deferred — protocol interface mismatch abort (OMN-4008) |
 | [Snapshot Publishing](SNAPSHOT_PUBLISHING.md) | Snapshot publication patterns |
 
 ## Registration System
