@@ -7,10 +7,15 @@
 # a validated list of ModelContractTopicEntry objects.  All downstream components
 # (generator, scripts) consume its output without re-validating.
 #
-# Ticket: OMN-2963
+# Also supports extracting topics from Python source files containing
+# hardcoded topic constants (e.g., topic_constants.py) to close the
+# CONTRACT_DRIFT gap (OMN-3254).
+#
+# Ticket: OMN-2963, OMN-3254
 
 from __future__ import annotations
 
+import ast
 import re
 import sys
 from pathlib import Path
@@ -27,6 +32,12 @@ _VALID_KINDS: frozenset[str] = frozenset({"evt", "cmd", "intent"})
 _RE_VERSION = re.compile(r"^v\d+$")
 _RE_EVENT_NAME = re.compile(r"^[a-z0-9._-]+$")
 _RE_PRODUCER = re.compile(r"^[a-z0-9-]+$")  # no underscores allowed
+
+# Regex to identify ONEX topic string literals in Python source code.
+# Matches: onex.<kind>.<producer>.<event-name>.<version>
+_RE_ONEX_TOPIC_LITERAL = re.compile(
+    r"^onex\.(evt|cmd|intent)\.[a-z0-9-]+\.[a-z0-9._-]+\.v\d+$"
+)
 
 # YAML keys to inspect — ordered by spec; always check ALL, no early break.
 # Each entry is (top-level-key, sub-key-for-topic, sub-key-for-name).
@@ -191,6 +202,55 @@ def _extract_raw_topics_from_contract(
     return raw_topics
 
 
+def _extract_topics_from_python_ast(source_path: Path) -> list[str]:
+    """Extract ONEX topic string literals from a Python source file using AST.
+
+    Parses the file's AST and collects all string constants that match the
+    ONEX topic naming convention (onex.<kind>.<producer>.<event-name>.<version>).
+
+    Only extracts from module-level assignments (Final[str] constants),
+    not from docstrings, comments, or function bodies.
+
+    Args:
+        source_path: Path to a Python source file.
+
+    Returns:
+        Deduplicated list of raw topic strings found in the file.
+    """
+    try:
+        source_text = source_path.read_text(encoding="utf-8")
+        tree = ast.parse(source_text, filename=str(source_path))
+    except (SyntaxError, OSError) as exc:
+        _warn(f"Could not parse Python source {source_path}: {exc} — skipping")
+        return []
+
+    topics: list[str] = []
+    seen: set[str] = set()
+
+    for node in ast.iter_child_nodes(tree):
+        # Only look at module-level assignments (not inside functions/classes)
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+
+        # Walk all string constants in the assignment value
+        if isinstance(node, ast.AnnAssign):
+            if node.value is None:
+                continue
+            value_node = node.value
+        else:
+            # ast.Assign.value is always present (not Optional)
+            value_node = node.value
+
+        for child in ast.walk(value_node):
+            if isinstance(child, ast.Constant) and isinstance(child.value, str):
+                val = child.value.strip()
+                if _RE_ONEX_TOPIC_LITERAL.match(val) and val not in seen:
+                    topics.append(val)
+                    seen.add(val)
+
+    return topics
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -270,5 +330,101 @@ class ContractTopicExtractor:
                     accumulated[raw] = existing.merge_sources(entry)
                 else:
                     accumulated[raw] = entry
+
+        return sorted(accumulated.values(), key=lambda e: e.topic)
+
+    def extract_from_python_sources(
+        self, source_paths: list[Path]
+    ) -> list[ModelContractTopicEntry]:
+        """Extract and validate ONEX topics from Python source files.
+
+        Parses each file's AST, collects string literals matching the ONEX
+        topic naming convention, validates them, and returns deduplicated
+        entries. This is used to capture topics defined as hardcoded constants
+        (e.g., in topic_constants.py) that are not declared in contract.yaml.
+
+        Args:
+            source_paths: List of Python source file paths to scan.
+
+        Returns:
+            Sorted (by topic string) list of ModelContractTopicEntry objects.
+
+        Raises:
+            RuntimeError: If the same topic string yields inconsistent
+                parsed components across files (implies a parser bug).
+        """
+        accumulated: dict[str, ModelContractTopicEntry] = {}
+
+        for source_path in sorted(source_paths):
+            raw_topics = _extract_topics_from_python_ast(source_path)
+
+            for raw in raw_topics:
+                entry = _parse_topic(raw, source_path)
+                if entry is None:
+                    continue
+
+                if raw in accumulated:
+                    existing = accumulated[raw]
+                    if (
+                        existing.kind != entry.kind
+                        or existing.producer != entry.producer
+                        or existing.event_name != entry.event_name
+                        or existing.version != entry.version
+                    ):
+                        _error(
+                            f"Inconsistent parsed components for topic {raw!r}: "
+                            f"first seen in {existing.source_contracts[0]}, "
+                            f"now in {source_path}. This implies a parser bug."
+                        )
+                    accumulated[raw] = existing.merge_sources(entry)
+                else:
+                    accumulated[raw] = entry
+
+        return sorted(accumulated.values(), key=lambda e: e.topic)
+
+    def extract_all(
+        self,
+        contracts_root: Path,
+        supplementary_sources: list[Path] | None = None,
+    ) -> list[ModelContractTopicEntry]:
+        """Extract topics from contracts AND supplementary Python sources.
+
+        Combines results from contract.yaml scanning and Python source file
+        scanning into a single deduplicated list. Topics appearing in both
+        sources are merged (source_contracts combined).
+
+        This is the recommended entry point for the generation pipeline
+        (OMN-3254) to ensure all topics -- whether declared in contracts
+        or hardcoded in Python constants -- appear in the generated enums.
+
+        Args:
+            contracts_root: Directory to scan for contract.yaml files.
+            supplementary_sources: Optional list of Python files to scan
+                for additional topic constants.
+
+        Returns:
+            Sorted, deduplicated list of ModelContractTopicEntry objects.
+
+        Raises:
+            RuntimeError: On inconsistent parsed components.
+        """
+        # Start with contract-derived topics
+        contract_entries = self.extract(contracts_root)
+        accumulated: dict[str, ModelContractTopicEntry] = {
+            e.topic: e for e in contract_entries
+        }
+
+        # Merge supplementary sources
+        if supplementary_sources:
+            supplementary_entries = self.extract_from_python_sources(
+                supplementary_sources
+            )
+            for entry in supplementary_entries:
+                if entry.topic in accumulated:
+                    existing = accumulated[entry.topic]
+                    # Same topic from both contract and Python source — merge sources
+                    accumulated[entry.topic] = existing.merge_sources(entry)
+                else:
+                    accumulated[entry.topic] = entry
 
         return sorted(accumulated.values(), key=lambda e: e.topic)
