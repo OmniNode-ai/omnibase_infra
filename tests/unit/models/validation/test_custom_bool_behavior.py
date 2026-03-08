@@ -32,7 +32,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from omnibase_core.enums import EnumNodeKind
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
 from omnibase_infra.models.validation.model_category_match_result import (

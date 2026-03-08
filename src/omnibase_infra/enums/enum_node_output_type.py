@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 if TYPE_CHECKING:
-    from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+    from omnibase_core.enums import EnumMessageCategory
 
 
 class EnumNodeOutputType(str, Enum):
@@ -156,7 +156,7 @@ class EnumNodeOutputType(str, Enum):
         from omnibase_infra.enums.enum_infra_transport_type import (
             EnumInfraTransportType,
         )
-        from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+        from omnibase_core.enums import EnumMessageCategory
         from omnibase_infra.errors import (
             ModelInfraErrorContext,
             ProtocolConfigurationError,

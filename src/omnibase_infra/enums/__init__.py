@@ -60,7 +60,7 @@ Exports:
     EnumLifecycleTier: Pattern lifecycle promotion tiers (OBSERVED through DEFAULT, SUPPRESSED)
 """
 
-from omnibase_core.enums import EnumTopicType
+from omnibase_core.enums import EnumMessageCategory, EnumTopicType
 from omnibase_infra.enums.enum_adjudicator_state import EnumAdjudicatorState
 from omnibase_infra.enums.enum_any_type_violation import EnumAnyTypeViolation
 from omnibase_infra.enums.enum_auth_decision import EnumAuthDecision
@@ -103,7 +103,6 @@ from omnibase_infra.enums.enum_ledger_sink_drop_policy import EnumLedgerSinkDrop
 from omnibase_infra.enums.enum_lifecycle_tier import EnumLifecycleTier
 from omnibase_infra.enums.enum_llm_finish_reason import EnumLlmFinishReason
 from omnibase_infra.enums.enum_llm_operation_type import EnumLlmOperationType
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_archetype import EnumNodeArchetype
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.enums.enum_non_retryable_error_category import (

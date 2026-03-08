@@ -20,7 +20,7 @@ import pytest
 from pydantic import ValidationError
 
 from omnibase_core.enums.enum_topic_taxonomy import EnumTopicType
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_topic_parser import (
     EnumTopicStandard,
     ModelParsedTopic,

@@ -26,7 +26,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.models.validation.model_category_match_result import (
     ModelCategoryMatchResult,

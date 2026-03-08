@@ -29,7 +29,7 @@ import yaml
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from tests.helpers.dispatchers import ContextCapturingDispatcher
 from tests.helpers.path_utils import find_project_root

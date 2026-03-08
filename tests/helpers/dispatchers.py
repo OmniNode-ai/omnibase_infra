@@ -29,7 +29,7 @@ from uuid import uuid4
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 
