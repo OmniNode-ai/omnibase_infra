@@ -2,13 +2,9 @@
 # Copyright (c) 2026 OmniNode Team
 """Pytest fixtures for Event Ledger integration tests.
 
-This module provides fixtures for testing:
-- HandlerLedgerAppend idempotent writes
-- HandlerLedgerQuery correlation_id lookups
-- E2E pipeline from event to database
-
-Fixtures connect to real PostgreSQL (configured via environment variables)
-and provide cleanup of test data after each test.
+Covers HandlerLedgerAppend idempotent writes, HandlerLedgerQuery
+correlation_id lookups, and E2E pipeline from event to database.
+Connects to real PostgreSQL and cleans up test data after each test.
 """
 
 from __future__ import annotations

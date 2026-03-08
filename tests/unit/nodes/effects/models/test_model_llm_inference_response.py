@@ -20,7 +20,6 @@ import pytest
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumLlmFinishReason, EnumLlmOperationType
-from omnibase_infra.models.model_backend_result import ModelBackendResult
 from omnibase_infra.models.llm.model_llm_function_call import (
     ModelLlmFunctionCall,
 )
@@ -29,6 +28,7 @@ from omnibase_infra.models.llm.model_llm_inference_response import (
 )
 from omnibase_infra.models.llm.model_llm_tool_call import ModelLlmToolCall
 from omnibase_infra.models.llm.model_llm_usage import ModelLlmUsage
+from omnibase_infra.models.model_backend_result import ModelBackendResult
 
 
 def _success_backend() -> ModelBackendResult:

@@ -368,18 +368,21 @@ _NAMESPACE_REGISTRATION = UUID("f47ac10b-58cc-4372-a567-0d02b2c3d479")
 
 # Target processing time for reduce() method (<300ms per event)
 # This is the primary performance metric for the reducer.
+# ONEX_EXCLUDE: io_audit - Module-level config loaded at import, reduce() remains pure
 PERF_THRESHOLD_REDUCE_MS: float = float(
     os.getenv("ONEX_PERF_THRESHOLD_REDUCE_MS", "300.0")
 )
 
 # Target processing time for intent building (<50ms per intent)
 # PostgreSQL intent construction should be fast.
+# ONEX_EXCLUDE: io_audit - Module-level config loaded at import, reduce() remains pure
 PERF_THRESHOLD_INTENT_BUILD_MS: float = float(
     os.getenv("ONEX_PERF_THRESHOLD_INTENT_BUILD_MS", "50.0")
 )
 
 # Target processing time for idempotency check (<1ms)
 # Simple UUID comparison should be nearly instant.
+# ONEX_EXCLUDE: io_audit - Module-level config loaded at import, reduce() remains pure
 PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS: float = float(
     os.getenv("ONEX_PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS", "1.0")
 )

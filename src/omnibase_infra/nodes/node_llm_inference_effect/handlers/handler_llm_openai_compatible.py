@@ -80,7 +80,6 @@ from omnibase_infra.enums import (
     EnumLlmOperationType,
 )
 from omnibase_infra.mixins.mixin_llm_http_transport import MixinLlmHttpTransport
-from omnibase_infra.models.model_backend_result import ModelBackendResult
 from omnibase_infra.models.llm.model_llm_function_call import (
     ModelLlmFunctionCall,
 )
@@ -95,6 +94,7 @@ from omnibase_infra.models.llm.model_llm_tool_definition import (
     ModelLlmToolDefinition,
 )
 from omnibase_infra.models.llm.model_llm_usage import ModelLlmUsage
+from omnibase_infra.models.model_backend_result import ModelBackendResult
 from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request import (
     ModelLlmInferenceRequest,
 )

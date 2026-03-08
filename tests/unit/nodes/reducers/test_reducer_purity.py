@@ -49,7 +49,9 @@ _get_imported_root_modules = get_imported_root_modules
 _NODES_ROOT = Path("src/omnibase_infra/nodes")
 
 # Canonical path after OMN-3989 migration (moved from nodes/reducers/)
-REDUCER_FILE = Path("src/omnibase_infra/nodes/node_registration_reducer/registration_reducer.py")
+REDUCER_FILE = Path(
+    "src/omnibase_infra/nodes/node_registration_reducer/registration_reducer.py"
+)
 
 
 def discover_all_reducer_files() -> list[Path]:
