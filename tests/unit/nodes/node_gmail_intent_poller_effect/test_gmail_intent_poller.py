@@ -750,7 +750,7 @@ class TestGmailBodyParsing:
         async def run() -> ModelGmailIntentPollerResult:
             return await handler.handle(config)
 
-        result = asyncio.get_event_loop().run_until_complete(run())
+        result = asyncio.run(run())
 
         assert len(result.pending_events) == 1
         event = result.pending_events[0]
