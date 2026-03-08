@@ -1,0 +1,21 @@
+version: "1.0.0"
+description: "Test registry"
+artifacts:
+  - artifact_id: "doc-handler-lifecycle"
+    artifact_type: "doc"
+    title: "Handler Lifecycle"
+    path: "docs/architecture/handler_lifecycle.md"
+    repo: "omnibase_infra"
+    update_policy: "require"
+    source_triggers:
+      - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
+        change_scope: "structural"
+  - artifact_id: "ref-topic-catalog"
+    artifact_type: "reference"
+    title: "Topic Catalog"
+    path: "omnidash/docs/architecture/TOPIC_CATALOG.md"
+    repo: "omnidash"
+    source_triggers:
+      - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
+        change_scope: "structural"
+        match_fields: ["event_bus.publish_topics"]
