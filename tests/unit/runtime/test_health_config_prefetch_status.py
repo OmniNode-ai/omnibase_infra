@@ -165,3 +165,49 @@ class TestHealthCheckIncludesConfigPrefetchStatus:
 
         health = await process.health_check()
         assert health["config_prefetch_status"] == "degraded_error"
+
+    @pytest.mark.asyncio
+    async def test_status_degraded_error_on_soft_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When prefetch returns result.errors (soft failure), status must be 'degraded_error'.
+
+        Regression test for the bug where config_prefetch_status was set to 'ok'
+        unconditionally even when ConfigPrefetcher.prefetch() returned soft errors
+        via result.errors without raising an exception.
+        """
+        monkeypatch.setenv("INFISICAL_ADDR", "http://localhost:8880")
+        monkeypatch.setenv("INFISICAL_CLIENT_ID", "test-id")
+        monkeypatch.setenv("INFISICAL_CLIENT_SECRET", "test-secret")
+        monkeypatch.setenv("INFISICAL_PROJECT_ID", "test-project")
+
+        mock_extractor = MagicMock()
+        mock_requirements = MagicMock()
+        mock_requirements.requirements = [MagicMock()]
+        mock_extractor.return_value.extract_from_paths.return_value = mock_requirements
+
+        # Simulate a soft failure: prefetch() returns without raising,
+        # but result.errors is non-empty.
+        mock_result = MagicMock()
+        mock_result.success_count = 0
+        mock_result.missing = []
+        mock_result.errors = {"SOME_KEY": "fetch failed"}
+
+        mock_prefetcher = MagicMock()
+        mock_prefetcher.return_value.prefetch.return_value = mock_result
+        mock_prefetcher.return_value.apply_to_environment.return_value = 0
+
+        mock_handler_cls = MagicMock()
+        mock_handler_instance = AsyncMock()
+        mock_handler_cls.return_value = mock_handler_instance
+
+        with (
+            patch(_EXTRACTOR_PATH, mock_extractor),
+            patch(_PREFETCHER_PATH, mock_prefetcher),
+            patch(_HANDLER_PATH, mock_handler_cls),
+        ):
+            process = _make_process()
+            await process._prefetch_config_from_infisical()
+
+        health = await process.health_check()
+        assert health["config_prefetch_status"] == "degraded_error"

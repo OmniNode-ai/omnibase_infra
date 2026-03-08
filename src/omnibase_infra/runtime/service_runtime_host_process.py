@@ -3073,7 +3073,9 @@ class RuntimeHostProcess:
                 # Step 4: Apply to environment
                 applied = prefetcher.apply_to_environment(result)
 
-                self._config_prefetch_status = "ok"
+                self._config_prefetch_status = (
+                    "degraded_error" if result.errors else "ok"
+                )
                 logger.info(
                     "Config prefetch complete",
                     extra={
