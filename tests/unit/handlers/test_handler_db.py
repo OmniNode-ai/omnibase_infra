@@ -2053,9 +2053,7 @@ class TestHandlerDbSqlstateMetrics:
             )
             mock_classification_counter.labels.return_value.inc.assert_called_once()
 
-    def test_no_sqlstate_does_not_increment_counters(
-        self, handler: HandlerDb
-    ) -> None:
+    def test_no_sqlstate_does_not_increment_counters(self, handler: HandlerDb) -> None:
         """Test errors without SQLSTATE do not increment SQLSTATE counters."""
         import omnibase_infra.handlers.handler_db as handler_module
 
@@ -2086,12 +2084,8 @@ class TestHandlerDbSqlstateMetrics:
         import omnibase_infra.handlers.handler_db as handler_module
 
         with (
-            patch.object(
-                handler_module, "_UNKNOWN_SQLSTATE_CLASS_COUNTER", None
-            ),
-            patch.object(
-                handler_module, "_SQLSTATE_CLASSIFICATION_COUNTER", None
-            ),
+            patch.object(handler_module, "_UNKNOWN_SQLSTATE_CLASS_COUNTER", None),
+            patch.object(handler_module, "_SQLSTATE_CLASSIFICATION_COUNTER", None),
         ):
             # Unknown class - should not raise even with None counters
             error = asyncpg.PostgresError("unknown error")
