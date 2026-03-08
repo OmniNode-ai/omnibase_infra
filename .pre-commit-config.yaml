@@ -289,6 +289,16 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      # OMN-3254: Topic enum drift check — verify generated enums include all topics
+      # from contracts AND supplementary sources (topic_constants.py)
+      - id: topic-enum-drift-check
+        name: Topic Enum Drift Check
+        entry: uv run python scripts/generate_topic_enums.py --check
+        language: system
+        types_or: [yaml, python]
+        files: (contract.*\.yaml|topic_constants\.py|enums/generated/)
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-3777: Block cloud bus references in source code
       - id: no-cloud-bus
         name: Block cloud bus references

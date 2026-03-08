@@ -60,6 +60,12 @@ _REPO_ROOT = _SCRIPT_DIR.parent
 _DEFAULT_CONTRACTS_ROOT = _REPO_ROOT / "src" / "omnibase_infra" / "nodes"
 _DEFAULT_OUTPUT_DIR = _REPO_ROOT / "src" / "omnibase_infra" / "enums" / "generated"
 
+# Supplementary Python source files containing hardcoded topic constants
+# that are not declared in contract.yaml files (OMN-3254).
+_DEFAULT_SUPPLEMENTARY_SOURCES: tuple[Path, ...] = (
+    _REPO_ROOT / "src" / "omnibase_infra" / "event_bus" / "topic_constants.py",
+)
+
 # Pattern for stale-file detection (only these may be removed)
 _STALE_PATTERN = "enum_*_topic.py"
 
@@ -162,6 +168,25 @@ Examples:
             f"Output directory for generated enum files. Default: {_DEFAULT_OUTPUT_DIR}"
         ),
     )
+    parser.add_argument(
+        "--no-supplementary",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip supplementary Python source files (e.g., topic_constants.py). "
+            "By default, these are included to capture hardcoded topic constants."
+        ),
+    )
+    parser.add_argument(
+        "--supplementary-sources",
+        metavar="PATH",
+        nargs="*",
+        default=None,
+        help=(
+            "Additional Python source files to scan for topic constants. "
+            "Overrides the default supplementary sources."
+        ),
+    )
     return parser
 
 
@@ -170,7 +195,11 @@ Examples:
 # ---------------------------------------------------------------------------
 
 
-def _run_generate(contracts_root: Path, output_dir: Path) -> int:
+def _run_generate(
+    contracts_root: Path,
+    output_dir: Path,
+    supplementary_sources: list[Path] | None = None,
+) -> int:
     """
     Generate per-producer enum files.
 
@@ -185,7 +214,9 @@ def _run_generate(contracts_root: Path, output_dir: Path) -> int:
 
     try:
         extractor = ContractTopicExtractor()
-        entries = extractor.extract(contracts_root)
+        entries = extractor.extract_all(
+            contracts_root, supplementary_sources=supplementary_sources
+        )
     except RuntimeError as exc:
         # Hard-stop: inconsistent parsed components (parser bug)
         print(f"ERROR (hard-stop): {exc}", file=sys.stderr)
@@ -256,7 +287,11 @@ def _run_generate(contracts_root: Path, output_dir: Path) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _run_check(contracts_root: Path, output_dir: Path) -> int:
+def _run_check(
+    contracts_root: Path,
+    output_dir: Path,
+    supplementary_sources: list[Path] | None = None,
+) -> int:
     """
     Check that generated files are up to date with current contracts.
 
@@ -271,7 +306,9 @@ def _run_check(contracts_root: Path, output_dir: Path) -> int:
 
     try:
         extractor = ContractTopicExtractor()
-        entries = extractor.extract(contracts_root)
+        entries = extractor.extract_all(
+            contracts_root, supplementary_sources=supplementary_sources
+        )
     except RuntimeError as exc:
         print(f"ERROR (hard-stop): {exc}", file=sys.stderr)
         return 2
@@ -364,10 +401,23 @@ def main() -> int:
         )
         return 3
 
+    # Resolve supplementary sources
+    supplementary_sources: list[Path] | None = None
+    if not args.no_supplementary:
+        if args.supplementary_sources is not None:
+            supplementary_sources = [
+                Path(p).resolve() for p in args.supplementary_sources
+            ]
+        else:
+            # Default supplementary sources (topic_constants.py)
+            supplementary_sources = [
+                p for p in _DEFAULT_SUPPLEMENTARY_SOURCES if p.exists()
+            ]
+
     if args.generate:
-        return _run_generate(contracts_root, output_dir)
+        return _run_generate(contracts_root, output_dir, supplementary_sources)
     else:  # args.check
-        return _run_check(contracts_root, output_dir)
+        return _run_check(contracts_root, output_dir, supplementary_sources)
 
 
 if __name__ == "__main__":
