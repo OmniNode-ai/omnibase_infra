@@ -153,10 +153,10 @@ class EnumNodeOutputType(str, Enum):
             ProtocolConfigurationError: Invalid output type for message category: expected EVENT, COMMAND, or INTENT, got 'projection'
         """
         # Import at runtime to avoid circular imports
+        from omnibase_core.enums import EnumMessageCategory
         from omnibase_infra.enums.enum_infra_transport_type import (
             EnumInfraTransportType,
         )
-        from omnibase_core.enums import EnumMessageCategory
         from omnibase_infra.errors import (
             ModelInfraErrorContext,
             ProtocolConfigurationError,

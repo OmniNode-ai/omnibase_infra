@@ -21,10 +21,10 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.enums.enum_execution_shape_violation import (
     EnumExecutionShapeViolation,
 )
-from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.validation.validator_routing_coverage import (
     RoutingCoverageError,
