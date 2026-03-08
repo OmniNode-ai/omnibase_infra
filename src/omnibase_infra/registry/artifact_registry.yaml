@@ -1,0 +1,230 @@
+version: "1.0.0"
+description: "Artifact registry for omnibase_infra documentation — tracks docs, design specs, and reference material that must be kept in sync with code changes."
+
+artifacts:
+  # ── Architecture Documentation ──────────────────────────────────────────────
+
+  - artifact_id: "a1b2c3d4-0001-0001-0001-000000000001"
+    artifact_type: "doc"
+    title: "Handler Protocol-Driven Architecture"
+    path: "docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md"
+    repo: "omnibase_infra"
+    owner_hint: "platform-core"
+    update_policy: "require"
+    tags: ["handler", "architecture", "protocol"]
+    source_triggers:
+      - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
+        change_scope: "structural"
+        match_fields: ["handler_routing"]
+      - pattern: "src/omnibase_infra/nodes/handlers/**/*.py"
+        change_scope: "any"
+
+  - artifact_id: "a1b2c3d4-0001-0001-0001-000000000002"
+    artifact_type: "doc"
+    title: "Event Bus Integration Guide"
+    path: "docs/architecture/EVENT_BUS_INTEGRATION_GUIDE.md"
+    repo: "omnibase_infra"
+    owner_hint: "platform-core"
+    update_policy: "require"
+    tags: ["event-bus", "kafka", "architecture"]
+    source_triggers:
+      - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
+        change_scope: "structural"
+        match_fields: ["event_bus.publish_topics", "event_bus.subscribe_topics"]
+      - pattern: "src/omnibase_infra/nodes/handlers/kafka/**/*.py"
+        change_scope: "any"
+
+  - artifact_id: "a1b2c3d4-0001-0001-0001-000000000003"
+    artifact_type: "reference"
+    title: "Topic Catalog Architecture"
+    path: "docs/architecture/TOPIC_CATALOG_ARCHITECTURE.md"
+    repo: "omnibase_infra"
+    owner_hint: "platform-core"
+    update_policy: "strict"
+    tags: ["kafka", "topics", "reference", "event-bus"]
+    source_triggers:
+      - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
+        change_scope: "structural"
+        match_fields: ["event_bus.publish_topics", "event_bus.subscribe_topics"]
+
+  - artifact_id: "a1b2c3d4-0001-0001-0001-000000000004"
+    artifact_type: "doc"
+    title: "Node Registration Workflow"
+    path: "docs/architecture/REGISTRATION_WORKFLOW.md"
+    repo: "omnibase_infra"
+    owner_hint: "platform-core"
+    update_policy: "require"
+    tags: ["registration", "architecture", "workflow"]
+    source_triggers:
+      - pattern: "src/omnibase_infra/nodes/node_registration_reducer/**/*.py"
+        change_scope: "any"
+      - pattern: "src/omnibase_infra/nodes/node_registration_storage_effect/**/*.py"
+        change_scope: "any"
+      - pattern: "src/omnibase_infra/nodes/node_registration_reducer/contract.yaml"
+        change_scope: "structural"
+
+  - artifact_id: "a1b2c3d4-0001-0001-0001-000000000005"
+    artifact_type: "doc"
+    title: "Message Dispatch Engine"
+    path: "docs/architecture/MESSAGE_DISPATCH_ENGINE.md"
+    repo: "omnibase_infra"
+    owner_hint: "platform-core"
+    update_policy: "require"
+    tags: ["dispatch", "routing", "architecture"]
+    source_triggers:
+      - pattern: "src/omnibase_infra/nodes/handlers/**/*.py"
+        change_scope: "structural"
+      - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
+        change_scope: "structural"
+        match_fields: ["handler_routing.routing_strategy"]
+
+  - artifact_id: "a1b2c3d4-0001-0001-0001-000000000006"
+    artifact_type: "doc"
+    title: "LLM Infrastructure Guide"
+    path: "docs/architecture/LLM_INFRASTRUCTURE.md"
+    repo: "omnibase_infra"
+    owner_hint: "platform-ml"
+    update_policy: "warn"
+    tags: ["llm", "inference", "architecture"]
+    source_triggers:
+      - pattern: "src/omnibase_infra/nodes/node_llm_embedding_effect/**/*.py"
+        change_scope: "any"
+      - pattern: "src/omnibase_infra/nodes/node_llm_inference_effect/**/*.py"
+        change_scope: "any"
+      - pattern: "src/omnibase_infra/nodes/node_llm_embedding_effect/contract.yaml"
+        change_scope: "structural"
+
+  - artifact_id: "a1b2c3d4-0001-0001-0001-000000000007"
+    artifact_type: "doc"
+    title: "Config Discovery Architecture"
+    path: "docs/architecture/CONFIG_DISCOVERY.md"
+    repo: "omnibase_infra"
+    owner_hint: "platform-core"
+    update_policy: "require"
+    tags: ["config", "infisical", "architecture"]
+    source_triggers:
+      - pattern: "src/omnibase_infra/runtime/config_discovery/**/*.py"
+        change_scope: "any"
+      - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
+        change_scope: "structural"
+        match_fields: ["dependencies"]
+
+  - artifact_id: "a1b2c3d4-0001-0001-0001-000000000008"
+    artifact_type: "doc"
+    title: "Current Node Architecture"
+    path: "docs/architecture/CURRENT_NODE_ARCHITECTURE.md"
+    repo: "omnibase_infra"
+    owner_hint: "platform-core"
+    update_policy: "require"
+    tags: ["nodes", "architecture", "overview"]
+    source_triggers:
+      - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
+        change_scope: "structural"
+        match_fields: ["node_type"]
+      - pattern: "src/omnibase_infra/nodes/*/node.py"
+        change_scope: "structural"
+
+  # ── Pattern Documentation ────────────────────────────────────────────────────
+
+  - artifact_id: "a1b2c3d4-0001-0001-0001-000000000009"
+    artifact_type: "reference"
+    title: "Circuit Breaker Implementation Pattern"
+    path: "docs/patterns/circuit_breaker_implementation.md"
+    repo: "omnibase_infra"
+    owner_hint: "platform-core"
+    update_policy: "warn"
+    tags: ["circuit-breaker", "resilience", "pattern"]
+    source_triggers:
+      - pattern: "src/omnibase_infra/mixins/mixin_async_circuit_breaker.py"
+        change_scope: "any"
+      - pattern: "src/omnibase_infra/nodes/handlers/**/*.py"
+        change_scope: "structural"
+
+  - artifact_id: "a1b2c3d4-0001-0001-0001-000000000010"
+    artifact_type: "reference"
+    title: "Handler Plugin Loader Pattern"
+    path: "docs/patterns/handler_plugin_loader.md"
+    repo: "omnibase_infra"
+    owner_hint: "platform-core"
+    update_policy: "require"
+    tags: ["handler", "plugin-loader", "pattern", "security"]
+    source_triggers:
+      - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
+        change_scope: "structural"
+        match_fields: ["handler_routing"]
+      - pattern: "src/omnibase_infra/runtime/handler_plugin_loader.py"
+        change_scope: "any"
+
+  - artifact_id: "a1b2c3d4-0001-0001-0001-000000000011"
+    artifact_type: "reference"
+    title: "Error Handling Patterns"
+    path: "docs/patterns/error_handling_patterns.md"
+    repo: "omnibase_infra"
+    owner_hint: "platform-core"
+    update_policy: "warn"
+    tags: ["errors", "pattern", "resilience"]
+    source_triggers:
+      - pattern: "src/omnibase_infra/errors/**/*.py"
+        change_scope: "structural"
+      - pattern: "src/omnibase_infra/models/model_infra_error_context.py"
+        change_scope: "any"
+
+  # ── Design Specs (ADRs) ──────────────────────────────────────────────────────
+
+  - artifact_id: "a1b2c3d4-0001-0001-0001-000000000012"
+    artifact_type: "design_spec"
+    title: "ADR-006: Message Dispatch Engine Canonical Routing"
+    path: "docs/decisions/adr-006-message-dispatch-engine-canonical-routing.md"
+    repo: "omnibase_infra"
+    owner_hint: "platform-core"
+    update_policy: "strict"
+    tags: ["adr", "routing", "dispatch"]
+    source_triggers:
+      - pattern: "src/omnibase_infra/nodes/handlers/**/*.py"
+        change_scope: "structural"
+      - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
+        change_scope: "structural"
+        match_fields: ["handler_routing.routing_strategy"]
+
+  - artifact_id: "a1b2c3d4-0001-0001-0001-000000000013"
+    artifact_type: "design_spec"
+    title: "ADR-008: Realm-Agnostic Topics"
+    path: "docs/decisions/adr-008-realm-agnostic-topics.md"
+    repo: "omnibase_infra"
+    owner_hint: "platform-core"
+    update_policy: "strict"
+    tags: ["adr", "kafka", "topics", "naming"]
+    source_triggers:
+      - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
+        change_scope: "structural"
+        match_fields: ["event_bus.publish_topics", "event_bus.subscribe_topics"]
+
+  # ── Cross-Repo Reference ─────────────────────────────────────────────────────
+
+  - artifact_id: "a1b2c3d4-0001-0001-0001-000000000014"
+    artifact_type: "reference"
+    title: "Omnidash Topic Catalog Architecture"
+    path: "docs/architecture/TOPIC_CATALOG_ARCHITECTURE.md"
+    repo: "omnidash"
+    owner_hint: "platform-observability"
+    update_policy: "require"
+    tags: ["kafka", "topics", "omnidash", "reference"]
+    source_triggers:
+      - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
+        change_scope: "structural"
+        match_fields: ["event_bus.publish_topics", "event_bus.subscribe_topics"]
+
+  - artifact_id: "a1b2c3d4-0001-0001-0001-000000000015"
+    artifact_type: "doc"
+    title: "Event Streaming Topics Reference"
+    path: "docs/architecture/EVENT_STREAMING_TOPICS.md"
+    repo: "omnibase_infra"
+    owner_hint: "platform-core"
+    update_policy: "require"
+    tags: ["kafka", "topics", "event-bus", "reference"]
+    source_triggers:
+      - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
+        change_scope: "structural"
+        match_fields: ["event_bus.publish_topics", "event_bus.subscribe_topics"]
+      - pattern: "src/omnibase_infra/nodes/node_artifact_change_detector_effect/contract.yaml"
+        change_scope: "structural"
