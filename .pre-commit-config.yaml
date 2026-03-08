@@ -26,7 +26,7 @@ repos:
     rev: v0.17.2
     hooks:
       - id: yamlfmt
-        exclude: ^(archived/|tests/fixtures/|\.github/workflows/)
+        exclude: ^(archived/|tests/fixtures/|tests/unit/registry/fixtures/|\.github/workflows/)
   # Essential file formatting (standard across ecosystem)
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

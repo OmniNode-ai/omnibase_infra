@@ -27,10 +27,7 @@ node_version:
   patch: 0
 node_type: "EFFECT_GENERIC"
 description: >
-  Effect node that detects artifact-relevant code changes from three surfaces:
-  GitHub PR webhook events, watchdog-based contract file system events, and
-  manual reconcile commands from the CLI. Emits ModelUpdateTrigger events to
-  onex.evt.artifact.change-detected.v1 for downstream impact analysis.
+  Effect node that detects artifact-relevant code changes from three surfaces: GitHub PR webhook events, watchdog-based contract file system events, and manual reconcile commands from the CLI. Emits ModelUpdateTrigger events to onex.evt.artifact.change-detected.v1 for downstream impact analysis.
 
 # Input topics: PR webhooks and manual commands
 input_subscriptions:
@@ -38,14 +35,12 @@ input_subscriptions:
     operation: "artifact.ingest_pr_webhook"
   - topic: "onex.cmd.artifact.reconcile.v1"
     operation: "artifact.manual_trigger"
-
 event_bus:
   subscribe_topics:
     - "onex.evt.github.pr-webhook.v1"
     - "onex.cmd.artifact.reconcile.v1"
   publish_topics:
     - "onex.evt.artifact.change-detected.v1"
-
 input_model:
   name: "ModelPRWebhookEvent"
   module: "omnibase_infra.nodes.node_artifact_change_detector_effect.models.model_pr_webhook_event"
@@ -54,7 +49,6 @@ output_model:
   name: "ModelUpdateTrigger"
   module: "omnibase_infra.nodes.node_artifact_change_detector_effect.models.model_update_trigger"
   description: "Trigger event emitted to onex.evt.artifact.change-detected.v1."
-
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
@@ -85,7 +79,6 @@ handler_routing:
         - trigger_id
         - trigger_type
         - changed_files
-
 error_handling:
   retry_policy:
     max_retries: 0
@@ -102,7 +95,6 @@ error_handling:
       description: "PR webhook event failed validation"
       recoverable: true
       retry_strategy: "none"
-
 io_operations:
   - operation: "artifact.ingest_pr_webhook"
     description: "Ingest GitHub PR webhook and emit change trigger"
@@ -132,13 +124,11 @@ io_operations:
     output_fields:
       - trigger_id
       - trigger_type
-
 config:
   watch_root: "src/omnibase_infra/nodes"
   debounce_seconds: 1.0
   contract_glob: "contract.yaml"
   source_repo: "omnibase_infra"
-
 dependencies:
   - name: "watchdog"
     type: "library"
@@ -149,7 +139,6 @@ dependencies:
     type: "protocol"
     protocol: "ProtocolEventPublisher"
     description: "Event publisher for onex.evt.artifact.change-detected.v1"
-
 capabilities:
   - name: "pr_webhook_ingestion"
     description: "Ingest GitHub PR webhook events and map to change triggers"
@@ -159,7 +148,6 @@ capabilities:
     description: "Convert manual reconcile CLI commands to change triggers"
   - name: "kafka_event_production"
     description: "Publish ModelUpdateTrigger to onex.evt.artifact.change-detected.v1"
-
 metadata:
   author: "OmniNode Team"
   license: "MIT"
