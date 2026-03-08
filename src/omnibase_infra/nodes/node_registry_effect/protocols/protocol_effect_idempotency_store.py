@@ -18,7 +18,7 @@ Design Rationale:
     deduplication with domain isolation, which is a different use case.
 
 Available Implementations:
-    - InMemoryEffectIdempotencyStore: Bounded LRU cache with TTL (default)
+    - StoreEffectIdempotencyInmemory: Bounded LRU cache with TTL (default)
     - Future: RedisEffectIdempotencyStore, PostgresEffectIdempotencyStore
 
 Production Considerations:
@@ -31,7 +31,7 @@ Production Considerations:
 
 Related:
     - ModelEffectIdempotencyConfig: Configuration for in-memory store
-    - InMemoryEffectIdempotencyStore: Default in-memory implementation
+    - StoreEffectIdempotencyInmemory: Default in-memory implementation
     - NodeRegistryEffect: Consumes this protocol for dual-backend idempotency
     - OMN-954: Registry effect idempotency requirements
 """

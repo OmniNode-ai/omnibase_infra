@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Unit tests for InMemoryEffectIdempotencyStore.
+"""Unit tests for StoreEffectIdempotencyInmemory.
 
 This test suite validates the bounded in-memory idempotency store used by
 Effect nodes to track completed backends during dual-backend operations.
@@ -13,7 +13,7 @@ Test Coverage:
     5. Memory bounds verification
 
 Related:
-    - InMemoryEffectIdempotencyStore: Store implementation
+    - StoreEffectIdempotencyInmemory: Store implementation
     - ModelEffectIdempotencyConfig: Configuration model
     - ProtocolEffectIdempotencyStore: Protocol interface
     - NodeRegistryEffect: Primary consumer of this store
@@ -34,7 +34,7 @@ from omnibase_infra.nodes.node_registry_effect.models.model_effect_idempotency_c
     ModelEffectIdempotencyConfig,
 )
 from omnibase_infra.nodes.node_registry_effect.store_effect_idempotency_inmemory import (
-    InMemoryEffectIdempotencyStore,
+    StoreEffectIdempotencyInmemory,
 )
 
 # -----------------------------------------------------------------------------
@@ -43,30 +43,30 @@ from omnibase_infra.nodes.node_registry_effect.store_effect_idempotency_inmemory
 
 
 @pytest.fixture
-def default_store() -> InMemoryEffectIdempotencyStore:
+def default_store() -> StoreEffectIdempotencyInmemory:
     """Create a store with default configuration."""
-    return InMemoryEffectIdempotencyStore()
+    return StoreEffectIdempotencyInmemory()
 
 
 @pytest.fixture
-def small_cache_store() -> InMemoryEffectIdempotencyStore:
+def small_cache_store() -> StoreEffectIdempotencyInmemory:
     """Create a store with small cache for LRU testing."""
     config = ModelEffectIdempotencyConfig(
         max_cache_size=3,
         cache_ttl_seconds=3600.0,
     )
-    return InMemoryEffectIdempotencyStore(config=config)
+    return StoreEffectIdempotencyInmemory(config=config)
 
 
 @pytest.fixture
-def short_ttl_store() -> InMemoryEffectIdempotencyStore:
+def short_ttl_store() -> StoreEffectIdempotencyInmemory:
     """Create a store with minimum TTL for expiration testing."""
     config = ModelEffectIdempotencyConfig(
         max_cache_size=100,
         cache_ttl_seconds=1.0,  # Minimum TTL (1 second)
         cleanup_interval_seconds=1.0,  # Minimum interval
     )
-    return InMemoryEffectIdempotencyStore(config=config)
+    return StoreEffectIdempotencyInmemory(config=config)
 
 
 # -----------------------------------------------------------------------------
@@ -81,7 +81,7 @@ class TestBasicOperations:
     @pytest.mark.asyncio
     async def test_mark_and_check_completed(
         self,
-        default_store: InMemoryEffectIdempotencyStore,
+        default_store: StoreEffectIdempotencyInmemory,
     ) -> None:
         """Test marking a backend as completed and checking it."""
         correlation_id = uuid4()
@@ -101,7 +101,7 @@ class TestBasicOperations:
     @pytest.mark.asyncio
     async def test_get_completed_backends(
         self,
-        default_store: InMemoryEffectIdempotencyStore,
+        default_store: StoreEffectIdempotencyInmemory,
     ) -> None:
         """Test getting all completed backends for a correlation ID."""
         correlation_id = uuid4()
@@ -121,7 +121,7 @@ class TestBasicOperations:
     @pytest.mark.asyncio
     async def test_clear_correlation_id(
         self,
-        default_store: InMemoryEffectIdempotencyStore,
+        default_store: StoreEffectIdempotencyInmemory,
     ) -> None:
         """Test clearing completed backends for a correlation ID."""
         correlation_id = uuid4()
@@ -144,7 +144,7 @@ class TestBasicOperations:
     @pytest.mark.asyncio
     async def test_clear_all(
         self,
-        default_store: InMemoryEffectIdempotencyStore,
+        default_store: StoreEffectIdempotencyInmemory,
     ) -> None:
         """Test clearing all entries from the store."""
         # Add multiple correlation IDs
@@ -163,7 +163,7 @@ class TestBasicOperations:
     @pytest.mark.asyncio
     async def test_returns_copy_of_backends(
         self,
-        default_store: InMemoryEffectIdempotencyStore,
+        default_store: StoreEffectIdempotencyInmemory,
     ) -> None:
         """Test that get_completed_backends returns a copy."""
         correlation_id = uuid4()
@@ -192,7 +192,7 @@ class TestLRUEviction:
     @pytest.mark.asyncio
     async def test_lru_eviction_on_overflow(
         self,
-        small_cache_store: InMemoryEffectIdempotencyStore,
+        small_cache_store: StoreEffectIdempotencyInmemory,
     ) -> None:
         """Test that oldest entries are evicted when cache exceeds max_size."""
         # Cache max size is 3
@@ -225,7 +225,7 @@ class TestLRUEviction:
     @pytest.mark.asyncio
     async def test_access_updates_lru_order(
         self,
-        small_cache_store: InMemoryEffectIdempotencyStore,
+        small_cache_store: StoreEffectIdempotencyInmemory,
     ) -> None:
         """Test that accessing an entry updates its LRU position."""
         # Cache max size is 3
@@ -253,7 +253,7 @@ class TestLRUEviction:
     @pytest.mark.asyncio
     async def test_update_existing_entry_moves_to_end(
         self,
-        small_cache_store: InMemoryEffectIdempotencyStore,
+        small_cache_store: StoreEffectIdempotencyInmemory,
     ) -> None:
         """Test that updating an entry moves it to end of LRU."""
         id1, id2, id3, id4 = uuid4(), uuid4(), uuid4(), uuid4()
@@ -291,7 +291,7 @@ class TestTTLExpiration:
     @pytest.mark.asyncio
     async def test_expired_entry_returns_not_completed(
         self,
-        short_ttl_store: InMemoryEffectIdempotencyStore,
+        short_ttl_store: StoreEffectIdempotencyInmemory,
     ) -> None:
         """Test that expired entries return False for is_completed."""
         correlation_id = uuid4()
@@ -318,7 +318,7 @@ class TestTTLExpiration:
     @pytest.mark.asyncio
     async def test_expired_entry_returns_empty_set(
         self,
-        short_ttl_store: InMemoryEffectIdempotencyStore,
+        short_ttl_store: StoreEffectIdempotencyInmemory,
     ) -> None:
         """Test that get_completed_backends returns empty set for expired entries."""
         correlation_id = uuid4()
@@ -343,7 +343,7 @@ class TestTTLExpiration:
     @pytest.mark.asyncio
     async def test_cleanup_expired_removes_entries(
         self,
-        short_ttl_store: InMemoryEffectIdempotencyStore,
+        short_ttl_store: StoreEffectIdempotencyInmemory,
     ) -> None:
         """Test that cleanup_expired removes stale entries."""
         start_time = time.monotonic()
@@ -379,7 +379,7 @@ class TestTTLExpiration:
             cache_ttl_seconds=10.0,  # 10 second TTL
             cleanup_interval_seconds=60.0,  # High to avoid auto-cleanup
         )
-        store = InMemoryEffectIdempotencyStore(config=config)
+        store = StoreEffectIdempotencyInmemory(config=config)
         start_time = time.monotonic()
 
         with patch(
@@ -440,7 +440,7 @@ class TestConfiguration:
             max_cache_size=50,
             cache_ttl_seconds=120.0,
         )
-        store = InMemoryEffectIdempotencyStore(config=config)
+        store = StoreEffectIdempotencyInmemory(config=config)
 
         assert store.max_cache_size == 50
         assert store.cache_ttl_seconds == 120.0
@@ -458,12 +458,12 @@ class TestConcurrentAccess:
     @pytest.mark.asyncio
     async def test_concurrent_writes_are_safe(
         self,
-        default_store: InMemoryEffectIdempotencyStore,
+        default_store: StoreEffectIdempotencyInmemory,
     ) -> None:
         """Test that concurrent writes don't corrupt state."""
 
         # Create many tasks that write concurrently
-        async def write_entry(store: InMemoryEffectIdempotencyStore, n: int) -> None:
+        async def write_entry(store: StoreEffectIdempotencyInmemory, n: int) -> None:
             cid = uuid4()
             await store.mark_completed(cid, f"backend_{n}")
             # Verify our write is visible
@@ -479,7 +479,7 @@ class TestConcurrentAccess:
     @pytest.mark.asyncio
     async def test_concurrent_reads_and_writes(
         self,
-        default_store: InMemoryEffectIdempotencyStore,
+        default_store: StoreEffectIdempotencyInmemory,
     ) -> None:
         """Test concurrent reads and writes don't cause issues."""
         shared_id = uuid4()
@@ -487,7 +487,7 @@ class TestConcurrentAccess:
 
         read_count = 0
 
-        async def reader(store: InMemoryEffectIdempotencyStore) -> None:
+        async def reader(store: StoreEffectIdempotencyInmemory) -> None:
             nonlocal read_count
             for _ in range(50):
                 result = await store.is_completed(shared_id, "consul")
@@ -495,7 +495,7 @@ class TestConcurrentAccess:
                     read_count += 1
                 await asyncio.sleep(0)  # Yield to other tasks
 
-        async def writer(store: InMemoryEffectIdempotencyStore) -> None:
+        async def writer(store: StoreEffectIdempotencyInmemory) -> None:
             for i in range(50):
                 await store.mark_completed(uuid4(), f"backend_{i}")
                 await asyncio.sleep(0)  # Yield to other tasks
@@ -525,7 +525,7 @@ class TestMemoryBounds:
     async def test_cache_does_not_exceed_max_size(self) -> None:
         """Test that cache never exceeds configured max_size."""
         config = ModelEffectIdempotencyConfig(max_cache_size=10)
-        store = InMemoryEffectIdempotencyStore(config=config)
+        store = StoreEffectIdempotencyInmemory(config=config)
 
         # Add more than max_size entries
         for _ in range(50):
@@ -538,7 +538,7 @@ class TestMemoryBounds:
     async def test_repeated_updates_same_entry(self) -> None:
         """Test that updating same entry repeatedly doesn't grow cache."""
         config = ModelEffectIdempotencyConfig(max_cache_size=10)
-        store = InMemoryEffectIdempotencyStore(config=config)
+        store = StoreEffectIdempotencyInmemory(config=config)
 
         cid = uuid4()
 

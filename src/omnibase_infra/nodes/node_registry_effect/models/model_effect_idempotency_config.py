@@ -25,7 +25,7 @@ Production Note:
 
 Related:
     - NodeRegistryEffect: Uses this for dual-backend idempotency
-    - InMemoryEffectIdempotencyStore: Implementation using this config
+    - StoreEffectIdempotencyInmemory: Implementation using this config
     - OMN-954: Registry effect idempotency requirements
 """
 
@@ -62,7 +62,7 @@ class ModelEffectIdempotencyConfig(BaseModel):
         ...     max_cache_size=5000,
         ...     cache_ttl_seconds=1800.0,  # 30 minutes
         ... )
-        >>> store = InMemoryEffectIdempotencyStore(config)
+        >>> store = StoreEffectIdempotencyInmemory(config)
     """
 
     max_cache_size: int = Field(

@@ -30,7 +30,7 @@ from omnibase_infra.nodes.node_registry_effect.models import (
     ModelRegistryRequest,
 )
 from omnibase_infra.nodes.node_registry_effect.store_effect_idempotency_inmemory import (
-    InMemoryEffectIdempotencyStore,
+    StoreEffectIdempotencyInmemory,
 )
 
 from .test_doubles import StubPostgresAdapter
@@ -47,23 +47,23 @@ def postgres_adapter() -> StubPostgresAdapter:
 
 
 @pytest.fixture
-def idempotency_store() -> InMemoryEffectIdempotencyStore:
-    """Create a fresh InMemoryEffectIdempotencyStore.
+def idempotency_store() -> StoreEffectIdempotencyInmemory:
+    """Create a fresh StoreEffectIdempotencyInmemory.
 
     Returns:
-        InMemoryEffectIdempotencyStore with default configuration.
+        StoreEffectIdempotencyInmemory with default configuration.
     """
     config = ModelEffectIdempotencyConfig(
         max_cache_size=1000,
         cache_ttl_seconds=3600.0,
     )
-    return InMemoryEffectIdempotencyStore(config=config)
+    return StoreEffectIdempotencyInmemory(config=config)
 
 
 @pytest.fixture
 def registry_effect(
     postgres_adapter: StubPostgresAdapter,
-    idempotency_store: InMemoryEffectIdempotencyStore,
+    idempotency_store: StoreEffectIdempotencyInmemory,
 ) -> NodeRegistryEffect:
     """Create NodeRegistryEffect with test double backends.
 

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Performance tests for InMemoryEffectIdempotencyStore.
+"""Performance tests for StoreEffectIdempotencyInmemory.
 
 This test suite focuses on idempotency store-specific performance
 characteristics including LRU eviction efficiency, TTL cleanup,
@@ -18,7 +18,7 @@ Usage:
 
 Related:
     - OMN-954: Effect node testing requirements
-    - InMemoryEffectIdempotencyStore: Store implementation
+    - StoreEffectIdempotencyInmemory: Store implementation
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from omnibase_infra.nodes.node_registry_effect.models.model_effect_idempotency_c
     ModelEffectIdempotencyConfig,
 )
 from omnibase_infra.nodes.node_registry_effect.store_effect_idempotency_inmemory import (
-    InMemoryEffectIdempotencyStore,
+    StoreEffectIdempotencyInmemory,
 )
 from omnibase_infra.testing import is_ci_environment
 
@@ -69,7 +69,7 @@ class TestLRUEvictionEfficiency:
             max_cache_size=1000,
             cache_ttl_seconds=3600.0,
         )
-        store = InMemoryEffectIdempotencyStore(config=config)
+        store = StoreEffectIdempotencyInmemory(config=config)
 
         # Measure latency at different fill levels
         latencies_by_level: dict[int, list[float]] = {
@@ -116,7 +116,7 @@ class TestLRUEvictionEfficiency:
             max_cache_size=100,
             cache_ttl_seconds=3600.0,
         )
-        store = InMemoryEffectIdempotencyStore(config=config)
+        store = StoreEffectIdempotencyInmemory(config=config)
 
         # Add 10,000 entries to 100-entry cache (99% evicted)
         start = time.perf_counter()
@@ -156,7 +156,7 @@ class TestTTLCleanupPerformance:
             max_cache_size=10000,
             cache_ttl_seconds=1.0,  # 1 second TTL
         )
-        store = InMemoryEffectIdempotencyStore(config=config)
+        store = StoreEffectIdempotencyInmemory(config=config)
 
         # Add 5000 entries
         start_time = time.monotonic()
@@ -199,7 +199,7 @@ class TestTTLCleanupPerformance:
             max_cache_size=10000,
             cache_ttl_seconds=10.0,  # 10 second TTL
         )
-        store = InMemoryEffectIdempotencyStore(config=config)
+        store = StoreEffectIdempotencyInmemory(config=config)
 
         start_time = time.monotonic()
         expired_ids: list[UUID] = []
@@ -274,7 +274,7 @@ class TestConcurrentAccessScaling:
         that the store remains stable and performs reasonably under concurrent
         load, not that it scales linearly.
         """
-        store = InMemoryEffectIdempotencyStore()
+        store = StoreEffectIdempotencyInmemory()
 
         worker_counts = [1, 2, 4, 8, 16]
         ops_per_worker = 500
@@ -328,7 +328,7 @@ class TestConcurrentAccessScaling:
 
         Tests different read/write ratios to understand contention.
         """
-        store = InMemoryEffectIdempotencyStore()
+        store = StoreEffectIdempotencyInmemory()
 
         # Pre-populate
         correlation_ids = [uuid4() for _ in range(1000)]
@@ -393,7 +393,7 @@ class TestCacheWarmup:
         )
 
         # Cold cache test
-        cold_store = InMemoryEffectIdempotencyStore(config=config)
+        cold_store = StoreEffectIdempotencyInmemory(config=config)
         cold_latencies: list[float] = []
         for _ in range(500):
             start = time.perf_counter()
@@ -401,7 +401,7 @@ class TestCacheWarmup:
             cold_latencies.append(time.perf_counter() - start)
 
         # Warm cache test (90% full)
-        warm_store = InMemoryEffectIdempotencyStore(config=config)
+        warm_store = StoreEffectIdempotencyInmemory(config=config)
         for _ in range(900):
             await warm_store.mark_completed(uuid4(), "consul")
 
@@ -443,7 +443,7 @@ class TestMixedWorkload:
         - Second operation if not completed
         - Occasional cleanup
         """
-        store = InMemoryEffectIdempotencyStore()
+        store = StoreEffectIdempotencyInmemory()
 
         operations = 0
         duplicates = 0
@@ -492,7 +492,7 @@ class TestMixedWorkload:
         Simulates realistic traffic with bursts of activity
         followed by quiet periods.
         """
-        store = InMemoryEffectIdempotencyStore()
+        store = StoreEffectIdempotencyInmemory()
 
         burst_size = 100
         num_bursts = 10
@@ -534,7 +534,7 @@ class TestEdgeCasePerformance:
 
         Validates that per-entry backend set doesn't degrade performance.
         """
-        store = InMemoryEffectIdempotencyStore()
+        store = StoreEffectIdempotencyInmemory()
 
         cid = uuid4()
 
@@ -572,7 +572,7 @@ class TestEdgeCasePerformance:
 
         Simulates workload where entries are added and cleared quickly.
         """
-        store = InMemoryEffectIdempotencyStore()
+        store = StoreEffectIdempotencyInmemory()
 
         cycles = 100
         entries_per_cycle = 100
