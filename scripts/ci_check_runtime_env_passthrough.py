@@ -52,8 +52,13 @@ REQUIRED_KEYS: frozenset[str] = frozenset(
 # ---------------------------------------------------------------------------
 
 
-def _extract_runtime_env_keys(compose_path: Path) -> set[str]:
-    """Parse *compose_path* and return the set of keys in ``x-runtime-env``."""
+def _extract_runtime_env_keys(compose_path: Path) -> set[str] | None:
+    """Parse *compose_path* and return the set of keys in ``x-runtime-env``.
+
+    Returns ``None`` on any extraction or parsing error (with the error already
+    printed to stderr).  Returns an empty ``set`` when ``x-runtime-env`` is a
+    valid but empty mapping — callers must distinguish between the two cases.
+    """
     with compose_path.open() as fh:
         data = yaml.safe_load(fh)
 
@@ -62,7 +67,7 @@ def _extract_runtime_env_keys(compose_path: Path) -> set[str]:
             f"ERROR: {compose_path} did not parse as a YAML mapping",
             file=sys.stderr,
         )
-        return set()
+        return None
 
     runtime_env = data.get("x-runtime-env")
     if runtime_env is None:
@@ -70,14 +75,14 @@ def _extract_runtime_env_keys(compose_path: Path) -> set[str]:
             f"ERROR: {compose_path} has no x-runtime-env anchor",
             file=sys.stderr,
         )
-        return set()
+        return None
 
     if not isinstance(runtime_env, dict):
         print(
             f"ERROR: x-runtime-env is not a mapping (got {type(runtime_env).__name__})",
             file=sys.stderr,
         )
-        return set()
+        return None
 
     return set(runtime_env.keys())
 
@@ -102,8 +107,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     actual_keys = _extract_runtime_env_keys(compose_path)
-    if not actual_keys:
-        # Error already printed
+    if actual_keys is None:
+        # Extraction error already printed to stderr
         return 1
 
     missing = REQUIRED_KEYS - actual_keys
