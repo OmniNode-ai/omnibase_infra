@@ -226,7 +226,6 @@ class ModelBindingResolutionMetrics(BaseModel):
         success: bool,
         operation: str,
         bindings_resolved: int = 0,
-        error_code: str | None = None,
     ) -> ModelBindingResolutionMetrics:
         """Record a binding resolution attempt and return updated metrics.
 
@@ -238,7 +237,6 @@ class ModelBindingResolutionMetrics(BaseModel):
             success: Whether the resolution succeeded.
             operation: Operation name (e.g., "db.query").
             bindings_resolved: Number of individual bindings resolved.
-            error_code: Error code if resolution failed (e.g., "BINDING_LOADER_010").
 
         Returns:
             New ModelBindingResolutionMetrics with updated statistics.
@@ -277,28 +275,41 @@ class ModelBindingResolutionMetrics(BaseModel):
         if not success:
             new_per_op_errors[operation] = new_per_op_errors.get(operation, 0) + 1
 
-        # Update error code breakdown
-        new_error_counts = dict(self.error_counts_by_code)
-        if error_code is not None:
-            new_error_counts[error_code] = new_error_counts.get(error_code, 0) + 1
-
         return self.model_copy(
             update={
                 "total_resolutions": self.total_resolutions + 1,
                 "successful_resolutions": self.successful_resolutions
                 + (1 if success else 0),
-                "failed_resolutions": self.failed_resolutions
-                + (0 if success else 1),
+                "failed_resolutions": self.failed_resolutions + (0 if success else 1),
                 "bindings_resolved_count": self.bindings_resolved_count
                 + bindings_resolved,
                 "total_latency_ms": self.total_latency_ms + duration_ms,
                 "min_latency_ms": new_min,
                 "max_latency_ms": new_max,
                 "latency_histogram": new_histogram,
-                "error_counts_by_code": new_error_counts,
                 "per_operation_resolutions": new_per_op,
                 "per_operation_errors": new_per_op_errors,
             },
+        )
+
+    def record_error_code(self, error_code: str) -> ModelBindingResolutionMetrics:
+        """Record a binding resolution error by error code.
+
+        Use after ``record_resolution(success=False)`` to track the
+        specific error code (e.g., ``BINDING_LOADER_010``).
+
+        Args:
+            error_code: Error code string (e.g., "BINDING_LOADER_010").
+
+        Returns:
+            New instance with incremented error code count.
+
+        .. versionadded:: 0.2.8
+        """
+        new_error_counts = dict(self.error_counts_by_code)
+        new_error_counts[error_code] = new_error_counts.get(error_code, 0) + 1
+        return self.model_copy(
+            update={"error_counts_by_code": new_error_counts},
         )
 
     def record_missing_context_path_warning(self) -> ModelBindingResolutionMetrics:
@@ -309,8 +320,7 @@ class ModelBindingResolutionMetrics(BaseModel):
         """
         return self.model_copy(
             update={
-                "missing_context_path_warnings": self.missing_context_path_warnings
-                + 1,
+                "missing_context_path_warnings": self.missing_context_path_warnings + 1,
             },
         )
 
