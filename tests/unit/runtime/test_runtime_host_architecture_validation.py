@@ -60,7 +60,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from omnibase_infra.errors import ArchitectureViolationError
-from omnibase_infra.nodes.architecture_validator import (
+from omnibase_infra.nodes.node_architecture_validator import (
     EnumValidationSeverity,
     ModelArchitectureValidationResult,
     ModelArchitectureViolation,
@@ -552,7 +552,7 @@ class TestContainerHandling:
             ),
             patch.object(process._event_bus, "subscribe", new_callable=AsyncMock),
             patch(
-                "omnibase_infra.nodes.architecture_validator.HandlerArchitectureValidation"
+                "omnibase_infra.nodes.node_architecture_validator.HandlerArchitectureValidation"
             ) as mock_handler_cls,
         ):
             mock_registry = MagicMock()
@@ -613,7 +613,7 @@ class TestContainerHandling:
             ),
             patch.object(process._event_bus, "subscribe", new_callable=AsyncMock),
             patch(
-                "omnibase_infra.nodes.architecture_validator.HandlerArchitectureValidation"
+                "omnibase_infra.nodes.node_architecture_validator.HandlerArchitectureValidation"
             ) as mock_handler_cls,
         ):
             mock_registry = MagicMock()

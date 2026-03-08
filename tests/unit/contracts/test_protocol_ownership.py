@@ -86,7 +86,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolProjectorNotificationContext": "runtime/mixins/mixin_projector_notification_publishing.py",
     "ProtocolProjectorContext": "runtime/mixins/mixin_projector_sql_operations.py",
     # === [NODE] Node-internal protocols ===
-    "ProtocolArchitectureRule": "nodes/architecture_validator/protocols/protocol_architecture_rule.py",
+    "ProtocolArchitectureRule": "nodes/node_architecture_validator/protocols/protocol_architecture_rule.py",
     "ProtocolRegistrationIntent": "nodes/node_registration_orchestrator/protocols.py",
     "ProtocolReducer": "nodes/node_registration_orchestrator/protocols.py",
     "ProtocolEffect": "nodes/node_registration_orchestrator/protocols.py",
@@ -133,7 +133,7 @@ KNOWN_DUPLICATE_LOCATIONS: dict[str, list[str]] = {
         "handlers/service_discovery/protocol_discovery_operations.py",
     ],
     "ProtocolIntentEffect": [
-        "nodes/contract_registry_reducer/contract_registration_event_router.py",
+        "nodes/node_contract_registry_reducer/contract_registration_event_router.py",
     ],
 }
 

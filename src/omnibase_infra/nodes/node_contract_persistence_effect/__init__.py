@@ -59,7 +59,7 @@ Related:
     - node.py: Declarative node implementation
     - handlers/: PostgreSQL operation handlers
     - registry/: Infrastructure registry
-    - contract_registry_reducer/: Source of intents
+    - node_contract_registry_reducer/: Source of intents
     - OMN-1845: Implementation ticket
     - OMN-1653: ContractRegistryReducer ticket
 """

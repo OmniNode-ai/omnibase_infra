@@ -83,11 +83,11 @@ from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.models import ModelNodeIdentity
-from omnibase_infra.nodes.contract_registry_reducer.contract_registration_event_router import (
+from omnibase_infra.nodes.node_contract_registry_reducer.contract_registration_event_router import (
     ContractRegistrationEventRouter,
     ProtocolIntentEffect,
 )
-from omnibase_infra.nodes.contract_registry_reducer.reducer import (
+from omnibase_infra.nodes.node_contract_registry_reducer.reducer import (
     ContractRegistryReducer,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.plugin import (

@@ -58,7 +58,7 @@ def discover_all_reducer_files() -> list[Path]:
     Discovers reducer files using two strategies:
     1. Files matching ``*_reducer.py`` pattern (e.g., ``registration_reducer.py``)
     2. Files named ``reducer.py`` inside reducer node directories (e.g.,
-       ``contract_registry_reducer/reducer.py``)
+       ``node_contract_registry_reducer/reducer.py``)
 
     Excludes:
     - ``__init__.py`` files
@@ -455,7 +455,7 @@ class TestParameterizedStructuralPurity:
         # These reducers must always be discovered
         expected_reducers = {
             "registration_reducer.py",
-            "reducer.py",  # contract_registry_reducer/reducer.py
+            "reducer.py",  # node_contract_registry_reducer/reducer.py
         }
 
         missing = expected_reducers - reducer_names

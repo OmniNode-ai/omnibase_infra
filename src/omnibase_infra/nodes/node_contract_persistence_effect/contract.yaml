@@ -113,7 +113,7 @@ handler_routing:
       description: "Insert or update contract record in contracts table"
       input_model:
         name: "ModelPayloadUpsertContract"
-        module: "omnibase_infra.nodes.contract_registry_reducer.models.model_payload_upsert_contract"
+        module: "omnibase_infra.nodes.node_contract_registry_reducer.models.model_payload_upsert_contract"
       output_fields:
         - success
         - contract_id
@@ -130,7 +130,7 @@ handler_routing:
       description: "Update topic routing table with producer/consumer info"
       input_model:
         name: "ModelPayloadUpdateTopic"
-        module: "omnibase_infra.nodes.contract_registry_reducer.models.model_payload_update_topic"
+        module: "omnibase_infra.nodes.node_contract_registry_reducer.models.model_payload_update_topic"
       output_fields:
         - success
         - topic_suffix
@@ -147,7 +147,7 @@ handler_routing:
       description: "Batch mark contracts as stale based on last_seen_at threshold"
       input_model:
         name: "ModelPayloadMarkStale"
-        module: "omnibase_infra.nodes.contract_registry_reducer.models.model_payload_mark_stale"
+        module: "omnibase_infra.nodes.node_contract_registry_reducer.models.model_payload_mark_stale"
       output_fields:
         - success
         - contracts_marked
@@ -163,7 +163,7 @@ handler_routing:
       description: "Update contract heartbeat timestamp"
       input_model:
         name: "ModelPayloadUpdateHeartbeat"
-        module: "omnibase_infra.nodes.contract_registry_reducer.models.model_payload_update_heartbeat"
+        module: "omnibase_infra.nodes.node_contract_registry_reducer.models.model_payload_update_heartbeat"
       output_fields:
         - success
         - contract_id
@@ -179,7 +179,7 @@ handler_routing:
       description: "Mark contract as inactive (soft delete)"
       input_model:
         name: "ModelPayloadDeactivateContract"
-        module: "omnibase_infra.nodes.contract_registry_reducer.models.model_payload_deactivate_contract"
+        module: "omnibase_infra.nodes.node_contract_registry_reducer.models.model_payload_deactivate_contract"
       output_fields:
         - success
         - contract_id
@@ -195,7 +195,7 @@ handler_routing:
       description: "Remove contract from topic references"
       input_model:
         name: "ModelPayloadCleanupTopicReferences"
-        module: "omnibase_infra.nodes.contract_registry_reducer.models.model_payload_cleanup_topic_references"
+        module: "omnibase_infra.nodes.node_contract_registry_reducer.models.model_payload_cleanup_topic_references"
       output_fields:
         - success
         - contract_id

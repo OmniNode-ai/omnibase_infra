@@ -135,7 +135,9 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.models.handlers import ModelHandlerSourceConfig
     from omnibase_infra.models.runtime import ModelRuntimeIntrospectionConfig
-    from omnibase_infra.nodes.architecture_validator import ProtocolArchitectureRule
+    from omnibase_infra.nodes.node_architecture_validator import (
+        ProtocolArchitectureRule,
+    )
     from omnibase_infra.protocols import (
         ProtocolContainerAware,
         ProtocolNodeIntrospection,
@@ -4492,7 +4494,7 @@ class RuntimeHostProcess:
 
         # Import architecture validator components
         from omnibase_infra.errors import ArchitectureViolationError
-        from omnibase_infra.nodes.architecture_validator import (
+        from omnibase_infra.nodes.node_architecture_validator import (
             HandlerArchitectureValidation,
             ModelArchitectureValidationRequest,
         )
