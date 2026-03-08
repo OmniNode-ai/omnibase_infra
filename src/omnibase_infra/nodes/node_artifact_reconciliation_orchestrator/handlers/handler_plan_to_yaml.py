@@ -27,6 +27,7 @@ from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
 )
+from omnibase_infra.enums.generated import EnumArtifactTopic
 from omnibase_infra.nodes.node_artifact_reconciliation_orchestrator.models.model_yaml_emit_result import (
     ModelYamlEmitResult,
 )
@@ -36,7 +37,7 @@ from omnibase_infra.nodes.node_update_plan_reducer.models.model_update_plan impo
 
 logger = logging.getLogger(__name__)
 
-_EMIT_TOPIC: str = "onex.evt.artifact.update-plan-emitted.v1"
+_EMIT_TOPIC: EnumArtifactTopic = EnumArtifactTopic.EVT_UPDATE_PLAN_EMITTED_V1
 
 
 class HandlerPlanToYaml:

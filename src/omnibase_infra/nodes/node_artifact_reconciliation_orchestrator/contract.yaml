@@ -26,10 +26,7 @@ node_version:
 node_type: "ORCHESTRATOR_GENERIC"
 # Description
 description: >
-  Orchestrator for the artifact reconciliation pipeline. Consumes artifact update plans
-  from the REDUCER node, posts PR comments via HandlerPlanToPRComment (for PR-triggered
-  plans only), and emits YAML plan events via HandlerPlanToYaml. Drives the
-  post_pr_comment -> emit_yaml_plan workflow.
+  Orchestrator for the artifact reconciliation pipeline. Consumes artifact update plans from the REDUCER node, posts PR comments via HandlerPlanToPRComment (for PR-triggered plans only), and emits YAML plan events via HandlerPlanToYaml. Drives the post_pr_comment -> emit_yaml_plan workflow.
 
 # Strongly typed I/O models
 input_model:
@@ -40,7 +37,6 @@ output_model:
   name: "ModelUpdatePlan"
   module: "omnibase_infra.nodes.node_update_plan_reducer.models.model_update_plan"
   description: "The same update plan, after orchestration actions are complete."
-
 # Event Bus Subcontract
 event_bus:
   version:
@@ -52,7 +48,6 @@ event_bus:
   publish_topics:
     - "onex.evt.artifact.pr-comment-posted.v1"
     - "onex.evt.artifact.update-plan-emitted.v1"
-
 # Handler Routing Configuration
 handler_routing:
   routing_strategy: "payload_type_match"
@@ -77,20 +72,17 @@ handler_routing:
       output_events:
         - "onex.evt.artifact.update-plan-emitted.v1"
       description: "Serialize update plan to YAML and emit as event payload."
-
 # Consumed events
 consumed_events:
   - topic: "onex.evt.artifact.update-plan-created.v1"
     event_type: "ArtifactUpdatePlanCreated"
     description: "Update plan produced by the REDUCER node"
-
 # Published events
 published_events:
   - topic: "onex.evt.artifact.pr-comment-posted.v1"
     event_type: "ArtifactPRCommentPosted"
   - topic: "onex.evt.artifact.update-plan-emitted.v1"
     event_type: "ArtifactUpdatePlanEmitted"
-
 # Workflow Coordination Configuration
 workflow_coordination:
   workflow_definition:
@@ -126,7 +118,6 @@ workflow_coordination:
       checkpoint_enabled: false
       state_persistence_enabled: false
       rollback_enabled: false
-
 # Dependencies
 dependencies:
   - name: "container"
@@ -136,7 +127,6 @@ dependencies:
   - name: "github_token"
     type: "environment"
     description: "GITHUB_TOKEN environment variable for GitHub API authentication"
-
 # Error Handling Configuration
 error_handling:
   retry_policy:
@@ -150,13 +140,11 @@ error_handling:
       description: "Failed to serialize update plan to YAML"
       recoverable: false
       retry_strategy: "none"
-
 # Health check
 health_check:
   enabled: true
   endpoint: "/health"
   interval_seconds: 30
-
 # Metadata
 metadata:
   author: "OmniNode Team"

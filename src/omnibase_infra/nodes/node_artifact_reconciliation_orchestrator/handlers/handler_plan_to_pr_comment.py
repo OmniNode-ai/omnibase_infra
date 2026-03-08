@@ -47,9 +47,7 @@ from omnibase_infra.nodes.node_update_plan_reducer.models.model_update_plan impo
 logger = logging.getLogger(__name__)
 
 # PR trigger types that should receive a comment
-_PR_TRIGGER_TYPES: frozenset[str] = frozenset(
-    {"pr_opened", "pr_updated", "pr_merged"}
-)
+_PR_TRIGGER_TYPES: frozenset[str] = frozenset({"pr_opened", "pr_updated", "pr_merged"})
 
 # Hidden HTML anchor template embedded in each posted comment
 _ANCHOR_TEMPLATE: str = "<!-- onex-artifact-plan:{plan_id} -->"
@@ -281,7 +279,7 @@ class HandlerPlanToPRComment:
             response = await client.get(url, headers=headers, params={"per_page": 100})
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            logger.error(
+            logger.exception(
                 "Failed to fetch PR comments: status=%d body=%s",
                 exc.response.status_code,
                 exc.response.text,
@@ -289,7 +287,7 @@ class HandlerPlanToPRComment:
             )
             return None
         except httpx.RequestError as exc:
-            logger.error(
+            logger.exception(
                 "Network error fetching PR comments: %s",
                 exc,
                 extra={"owner": owner, "repo": repo, "pr": pr_number},
@@ -329,12 +327,10 @@ class HandlerPlanToPRComment:
         """
         url = f"/repos/{owner}/{repo}/issues/{pr_number}/comments"
         try:
-            response = await client.post(
-                url, headers=headers, json={"body": body}
-            )
+            response = await client.post(url, headers=headers, json={"body": body})
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            logger.error(
+            logger.exception(
                 "Failed to post PR comment: status=%d body=%s plan_id=%s",
                 exc.response.status_code,
                 exc.response.text,
@@ -345,7 +341,7 @@ class HandlerPlanToPRComment:
                 error=f"HTTP {exc.response.status_code}: {exc.response.text}",
             )
         except httpx.RequestError as exc:
-            logger.error(
+            logger.exception(
                 "Network error posting PR comment: %s plan_id=%s",
                 exc,
                 str(plan_id),
@@ -387,12 +383,10 @@ class HandlerPlanToPRComment:
         """
         url = f"/repos/{owner}/{repo}/issues/comments/{comment_id}"
         try:
-            response = await client.patch(
-                url, headers=headers, json={"body": body}
-            )
+            response = await client.patch(url, headers=headers, json={"body": body})
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            logger.error(
+            logger.exception(
                 "Failed to update PR comment: status=%d body=%s plan_id=%s",
                 exc.response.status_code,
                 exc.response.text,
@@ -403,7 +397,7 @@ class HandlerPlanToPRComment:
                 error=f"HTTP {exc.response.status_code}: {exc.response.text}",
             )
         except httpx.RequestError as exc:
-            logger.error(
+            logger.exception(
                 "Network error updating PR comment: %s plan_id=%s",
                 exc,
                 str(plan_id),

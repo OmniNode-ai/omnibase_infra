@@ -75,25 +75,24 @@ from omnibase_infra.registry.models.model_artifact_registry_entry import (
 )
 from omnibase_infra.registry.models.model_source_trigger import ModelSourceTrigger
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def artifact_id_1() -> UUID:
     """UUID for the first test artifact."""
     return UUID("a1b2c3d4-0001-0001-0001-000000000001")
 
 
-@pytest.fixture()
+@pytest.fixture
 def artifact_id_2() -> UUID:
     """UUID for the second test artifact."""
     return UUID("a1b2c3d4-0001-0001-0001-000000000002")
 
 
-@pytest.fixture()
+@pytest.fixture
 def test_registry(artifact_id_1: UUID, artifact_id_2: UUID) -> ModelArtifactRegistry:
     """Minimal test artifact registry with two entries."""
     return ModelArtifactRegistry(
@@ -134,7 +133,7 @@ def test_registry(artifact_id_1: UUID, artifact_id_2: UUID) -> ModelArtifactRegi
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def pr_trigger() -> ModelUpdateTrigger:
     """A PR-opened trigger that modifies contract.yaml files."""
     return ModelUpdateTrigger(
@@ -147,7 +146,7 @@ def pr_trigger() -> ModelUpdateTrigger:
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def manual_trigger() -> ModelUpdateTrigger:
     """A manual plan request trigger."""
     return ModelUpdateTrigger(
@@ -160,19 +159,19 @@ def manual_trigger() -> ModelUpdateTrigger:
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def impact_handler() -> HandlerImpactAnalysis:
     """The impact analysis COMPUTE handler."""
     return HandlerImpactAnalysis()
 
 
-@pytest.fixture()
+@pytest.fixture
 def plan_handler() -> HandlerCreatePlan:
     """The update plan REDUCER handler."""
     return HandlerCreatePlan()
 
 
-@pytest.fixture()
+@pytest.fixture
 def yaml_handler() -> HandlerPlanToYaml:
     """The plan-to-YAML ORCHESTRATOR handler."""
     return HandlerPlanToYaml()
