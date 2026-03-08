@@ -33,6 +33,7 @@ class EnumPlatformTopic(str, Enum):
     EVT_INTENT_STORED_V1 = "onex.evt.platform.intent-stored.v1"  # onex.evt.platform.intent-stored.v1
     EVT_LEDGER_APPENDED_V1 = "onex.evt.platform.ledger-appended.v1"  # onex.evt.platform.ledger-appended.v1
     EVT_LEDGER_QUERY_RESULT_V1 = "onex.evt.platform.ledger-query-result.v1"  # onex.evt.platform.ledger-query-result.v1
+    EVT_MERGE_GATE_DECISION_V1 = "onex.evt.platform.merge-gate-decision.v1"  # onex.evt.platform.merge-gate-decision.v1
     EVT_NODE_BECAME_ACTIVE_V1 = "onex.evt.platform.node-became-active.v1"  # onex.evt.platform.node-became-active.v1
     EVT_NODE_HEARTBEAT_V1 = "onex.evt.platform.node-heartbeat.v1"  # onex.evt.platform.node-heartbeat.v1
     EVT_NODE_INTROSPECTION_V1 = "onex.evt.platform.node-introspection.v1"  # onex.evt.platform.node-introspection.v1
