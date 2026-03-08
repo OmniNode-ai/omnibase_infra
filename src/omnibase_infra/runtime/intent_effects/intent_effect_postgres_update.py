@@ -47,7 +47,7 @@ from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
 from omnibase_infra.models.projectors.util_sql_identifiers import quote_identifier
-from omnibase_infra.nodes.reducers.models.model_payload_postgres_update_registration import (
+from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_update_registration import (
     ModelPayloadPostgresUpdateRegistration,
 )
 from omnibase_infra.utils import sanitize_error_message

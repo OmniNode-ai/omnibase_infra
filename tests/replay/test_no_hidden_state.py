@@ -35,8 +35,8 @@ import inspect
 import pytest
 from pydantic import ValidationError
 
-from omnibase_infra.nodes.reducers import RegistrationReducer
-from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+from omnibase_infra.nodes.node_registration_reducer.models import ModelRegistrationState
 from omnibase_infra.testing import is_ci_environment
 from tests.helpers import (
     DeterministicClock,

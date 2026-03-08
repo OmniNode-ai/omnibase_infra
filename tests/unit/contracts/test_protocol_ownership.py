@@ -68,8 +68,8 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolValidationLedgerRepository": "protocols/protocol_validation_ledger_repository.py",
     # === [DI] Dependency injection boundaries ===
     # ProtocolConsulClient removed in OMN-3540 (Consul removal)
-    "ProtocolEffectIdempotencyStore": "nodes/effects/protocol_effect_idempotency_store.py",
-    "ProtocolPostgresAdapter": "nodes/effects/protocol_postgres_adapter.py",
+    "ProtocolEffectIdempotencyStore": "nodes/node_registry_effect/protocols/protocol_effect_idempotency_store.py",
+    "ProtocolPostgresAdapter": "nodes/node_registry_effect/protocols/protocol_postgres_adapter.py",
     "ProtocolToolExecutor": "handlers/mcp/protocols.py",
     "ProtocolLlmHandler": "nodes/node_llm_inference_effect/services/protocol_llm_handler.py",
     "ProtocolContractPublisherSource": "services/contract_publisher/sources/protocol.py",

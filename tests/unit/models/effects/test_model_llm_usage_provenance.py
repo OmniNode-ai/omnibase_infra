@@ -21,7 +21,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from omnibase_infra.nodes.effects.models.model_llm_usage import ModelLlmUsage
+from omnibase_infra.models.llm.model_llm_usage import ModelLlmUsage
 from omnibase_spi.contracts.measurement import ContractEnumUsageSource
 
 # ============================================================================

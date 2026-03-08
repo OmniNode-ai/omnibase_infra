@@ -24,8 +24,7 @@ import pytest
 
 from omnibase_infra.enums import EnumLlmOperationType
 from omnibase_infra.errors import ProtocolConfigurationError
-from omnibase_infra.models.types import JsonType
-from omnibase_infra.nodes.effects.models import (
+from omnibase_infra.models.llm import (
     ModelLlmFunctionCall,
     ModelLlmFunctionDef,
     ModelLlmInferenceRequest,
@@ -33,6 +32,7 @@ from omnibase_infra.nodes.effects.models import (
     ModelLlmToolCall,
     ModelLlmToolDefinition,
 )
+from omnibase_infra.models.types import JsonType
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_ollama import (
     _build_ollama_options,
     _parse_ollama_tool_calls,

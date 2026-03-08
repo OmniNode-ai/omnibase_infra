@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "package_version": "0.11.0",
+  "package_version": "0.16.0",
   "protocol_count": 19,
   "protocols": {
     "ProtocolCapabilityProjection": {
@@ -638,7 +638,7 @@
             {
               "name": "category",
               "kind": "POSITIONAL_OR_KEYWORD",
-              "annotation": "omnibase_infra.enums.enum_message_category.EnumMessageCategory | None",
+              "annotation": "omnibase_core.enums.enum_execution_shape.EnumMessageCategory | None",
               "default": "None"
             },
             {

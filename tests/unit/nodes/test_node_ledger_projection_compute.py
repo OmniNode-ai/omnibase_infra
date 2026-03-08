@@ -47,7 +47,7 @@ from omnibase_infra.nodes.node_ledger_projection_compute import (
     HandlerLedgerProjection,
     NodeLedgerProjectionCompute,
 )
-from omnibase_infra.nodes.reducers.models.model_payload_ledger_append import (
+from omnibase_infra.nodes.node_registration_reducer.models.model_payload_ledger_append import (
     ModelPayloadLedgerAppend,
 )
 

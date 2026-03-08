@@ -22,10 +22,10 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from omnibase_infra.nodes.effects.models.model_llm_function_call import (
+from omnibase_infra.models.llm.model_llm_function_call import (
     ModelLlmFunctionCall,
 )
-from omnibase_infra.nodes.effects.models.model_llm_tool_call import ModelLlmToolCall
+from omnibase_infra.models.llm.model_llm_tool_call import ModelLlmToolCall
 
 # ============================================================================
 # Construction Tests

@@ -48,8 +48,10 @@ _get_imported_root_modules = get_imported_root_modules
 # Root path for node source files (relative to project root)
 _NODES_ROOT = Path("src/omnibase_infra/nodes")
 
-# Legacy constant kept for backward compatibility with existing tests
-REDUCER_FILE = Path("src/omnibase_infra/nodes/reducers/registration_reducer.py")
+# Canonical path after OMN-3989 migration (moved from nodes/reducers/)
+REDUCER_FILE = Path(
+    "src/omnibase_infra/nodes/node_registration_reducer/registration_reducer.py"
+)
 
 
 def discover_all_reducer_files() -> list[Path]:
@@ -123,8 +125,8 @@ ALL_REDUCER_FILES = discover_all_reducer_files()
 def _reducer_file_id(path: Path) -> str:
     """Generate a short test ID from a reducer file path.
 
-    Example: ``src/omnibase_infra/nodes/reducers/registration_reducer.py``
-    becomes ``reducers/registration_reducer.py``.
+    Example: ``src/omnibase_infra/nodes/node_registration_reducer/registration_reducer.py``
+    becomes ``node_registration_reducer/registration_reducer.py``.
     """
     try:
         return str(path.relative_to(_NODES_ROOT))
@@ -234,7 +236,7 @@ class TestStructuralPurityGates:
         The state model is part of the reducer's pure function boundary.
         """
         state_model_file = Path(
-            "src/omnibase_infra/nodes/reducers/models/model_registration_state.py"
+            "src/omnibase_infra/nodes/node_registration_reducer/models/model_registration_state.py"
         )
 
         if not state_model_file.exists():
@@ -506,8 +508,10 @@ class TestDeterminismGates:
         from uuid import UUID
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-        from omnibase_infra.nodes.reducers import RegistrationReducer
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationState,
+        )
 
         # Use fixed UUIDs and timestamp for determinism
         fixed_node_id = UUID("12345678-1234-1234-1234-123456789abc")
@@ -562,8 +566,10 @@ class TestDeterminismGates:
         from uuid import UUID
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-        from omnibase_infra.nodes.reducers import RegistrationReducer
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationState,
+        )
 
         fixed_node_id = UUID("12345678-1234-1234-1234-123456789abc")
         fixed_correlation_id = UUID("abcdef12-abcd-abcd-abcd-abcdefabcdef")
@@ -610,7 +616,7 @@ class TestDeterminismGates:
         from uuid import UUID
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-        from omnibase_infra.nodes.reducers.registration_reducer import (
+        from omnibase_infra.nodes.node_registration_reducer.registration_reducer import (
             RegistrationReducer,
         )
 
@@ -678,7 +684,7 @@ class TestDeterminismGates:
         from uuid import UUID
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-        from omnibase_infra.nodes.reducers.registration_reducer import (
+        from omnibase_infra.nodes.node_registration_reducer.registration_reducer import (
             RegistrationReducer,
         )
 
@@ -958,8 +964,10 @@ class TestDeterminismGates:
         from uuid import UUID
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-        from omnibase_infra.nodes.reducers import RegistrationReducer
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationState,
+        )
 
         fixed_node_id = UUID("12345678-1234-1234-1234-123456789abc")
         fixed_correlation_id = UUID("abcdef12-abcd-abcd-abcd-abcdefabcdef")
@@ -1017,8 +1025,10 @@ class TestDeterminismGates:
         from uuid import UUID
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-        from omnibase_infra.nodes.reducers import RegistrationReducer
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationState,
+        )
 
         # Use fixed UUIDs and timestamp for determinism
         fixed_node_id = UUID("12345678-1234-1234-1234-123456789abc")
@@ -1082,8 +1092,10 @@ class TestDeterminismGates:
         from uuid import UUID
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-        from omnibase_infra.nodes.reducers import RegistrationReducer
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationState,
+        )
         from omnibase_infra.testing import is_ci_environment
 
         # Use fixed UUIDs and timestamp for determinism
@@ -1198,7 +1210,7 @@ class TestBehavioralPurityGates:
         """
         import inspect
 
-        from omnibase_infra.nodes.reducers import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
 
         sig = inspect.signature(RegistrationReducer.__init__)
         param_names = [p.lower() for p in sig.parameters if p != "self"]
@@ -1233,7 +1245,7 @@ class TestBehavioralPurityGates:
         """
         import inspect
 
-        from omnibase_infra.nodes.reducers import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
 
         assert not inspect.iscoroutinefunction(RegistrationReducer.reduce), (
             "Reducer.reduce() must be synchronous (not async). "
@@ -1247,7 +1259,7 @@ class TestBehavioralPurityGates:
         """
         import inspect
 
-        from omnibase_infra.nodes.reducers import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
 
         if hasattr(RegistrationReducer, "reduce_reset"):
             assert not inspect.iscoroutinefunction(RegistrationReducer.reduce_reset), (
@@ -1265,8 +1277,10 @@ class TestBehavioralPurityGates:
         from unittest.mock import patch
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-        from omnibase_infra.nodes.reducers import RegistrationReducer
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationState,
+        )
 
         # Create test fixtures
         reducer = RegistrationReducer()
@@ -1303,8 +1317,10 @@ class TestBehavioralPurityGates:
         from unittest.mock import patch
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-        from omnibase_infra.nodes.reducers import RegistrationReducer
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationState,
+        )
 
         reducer = RegistrationReducer()
         state = ModelRegistrationState()
@@ -1322,8 +1338,9 @@ class TestBehavioralPurityGates:
         original_open = open
 
         # Paths that indicate reducer code (not framework/test infrastructure)
+        # OMN-3989: updated from nodes/reducers -> node_registration_reducer
         reducer_code_markers = (
-            "omnibase_infra/nodes/reducers",
+            "omnibase_infra/nodes/node_registration_reducer",
             "registration_reducer.py",
         )
 
@@ -1391,8 +1408,10 @@ class TestAdditionalBehavioralGates:
         from unittest.mock import patch
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-        from omnibase_infra.nodes.reducers import RegistrationReducer
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationState,
+        )
 
         reducer = RegistrationReducer()
         state = ModelRegistrationState()
@@ -1426,8 +1445,10 @@ class TestAdditionalBehavioralGates:
         from unittest.mock import patch
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-        from omnibase_infra.nodes.reducers import RegistrationReducer
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationState,
+        )
 
         reducer = RegistrationReducer()
         state = ModelRegistrationState()
@@ -1452,7 +1473,7 @@ class TestAdditionalBehavioralGates:
         """
         import inspect
 
-        from omnibase_infra.nodes.reducers import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
 
         sig = inspect.signature(RegistrationReducer.__init__)
         # Find required positional/keyword-only parameters (not variadic)
@@ -1495,7 +1516,7 @@ class TestAdditionalBehavioralGates:
         import asyncio
         import inspect
 
-        from omnibase_infra.nodes.reducers import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
 
         reducer = RegistrationReducer()
         reducer_class = type(reducer)
@@ -1572,7 +1593,7 @@ class TestAdditionalBehavioralGates:
 
         Class variables that store mutable state would violate purity.
         """
-        from omnibase_infra.nodes.reducers import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
 
         # Get class variables (not instance variables, not methods)
         class_vars = {
@@ -1616,8 +1637,10 @@ class TestAdditionalBehavioralGates:
         from uuid import UUID
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-        from omnibase_infra.nodes.reducers import RegistrationReducer
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationState,
+        )
 
         # Use fixed UUIDs and timestamp for determinism
         fixed_node_id = UUID("12345678-1234-1234-1234-123456789abc")
@@ -1869,8 +1892,10 @@ class TestSecurityGates:
         from omnibase_infra.models.registration.model_node_metadata import (
             ModelNodeMetadata,
         )
-        from omnibase_infra.nodes.reducers import RegistrationReducer
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationState,
+        )
 
         # Fixed identifiers for determinism
         fixed_node_id = UUID("12345678-1234-1234-1234-123456789abc")
@@ -1948,8 +1973,10 @@ class TestSecurityGates:
         from uuid import UUID
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-        from omnibase_infra.nodes.reducers import RegistrationReducer
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationState,
+        )
 
         fixed_node_id = UUID("12345678-1234-1234-1234-123456789abc")
         fixed_correlation_id = UUID("abcdef12-abcd-abcd-abcd-abcdefabcdef")
@@ -2001,8 +2028,10 @@ class TestSecurityGates:
         from uuid import UUID
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-        from omnibase_infra.nodes.reducers import RegistrationReducer
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+        from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationState,
+        )
 
         fixed_correlation_id = UUID("abcdef12-abcd-abcd-abcd-abcdefabcdef")
         fixed_timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
@@ -2016,7 +2045,7 @@ class TestSecurityGates:
 
         # Get the reducer's logger
         reducer_logger = logging.getLogger(
-            "omnibase_infra.nodes.reducers.registration_reducer"
+            "omnibase_infra.nodes.node_registration_reducer.registration_reducer"
         )
         original_level = reducer_logger.level
         capturing_handler = CapturingHandler()

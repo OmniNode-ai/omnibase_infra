@@ -49,12 +49,14 @@ from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
     ModelNodeMetadata,
 )
-from omnibase_infra.nodes.reducers import RegistrationReducer
-from omnibase_infra.nodes.reducers.models import (
+from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+from omnibase_infra.nodes.node_registration_reducer.models import (
     ModelPayloadPostgresUpsertRegistration,
     ModelRegistrationState,
 )
-from omnibase_infra.nodes.reducers.models.model_registration_state import FailureReason
+from omnibase_infra.nodes.node_registration_reducer.models.model_registration_state import (
+    FailureReason,
+)
 from tests.helpers import create_introspection_event
 
 if TYPE_CHECKING:
@@ -1327,7 +1329,7 @@ class TestPerformance:
 
     def test_performance_constants_are_exported(self) -> None:
         """Test that performance threshold constants are properly exported."""
-        from omnibase_infra.nodes.reducers.registration_reducer import (
+        from omnibase_infra.nodes.node_registration_reducer.registration_reducer import (
             PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS,
             PERF_THRESHOLD_INTENT_BUILD_MS,
             PERF_THRESHOLD_REDUCE_MS,
@@ -1354,7 +1356,7 @@ class TestPerformance:
         This test validates the primary performance target: <300ms per event.
         In practice, typical execution is <5ms on standard hardware.
         """
-        from omnibase_infra.nodes.reducers.registration_reducer import (
+        from omnibase_infra.nodes.node_registration_reducer.registration_reducer import (
             PERF_THRESHOLD_REDUCE_MS,
         )
 
@@ -1375,7 +1377,7 @@ class TestPerformance:
         reducer: RegistrationReducer,
     ) -> None:
         """Test that reduce_reset() completes well within the threshold."""
-        from omnibase_infra.nodes.reducers.registration_reducer import (
+        from omnibase_infra.nodes.node_registration_reducer.registration_reducer import (
             PERF_THRESHOLD_REDUCE_MS,
         )
 
@@ -1446,7 +1448,7 @@ class TestPerformance:
         This test validates that the reducer doesn't have hidden O(n^2)
         behavior or state accumulation issues.
         """
-        from omnibase_infra.nodes.reducers.registration_reducer import (
+        from omnibase_infra.nodes.node_registration_reducer.registration_reducer import (
             PERF_THRESHOLD_REDUCE_MS,
         )
 
@@ -5380,7 +5382,9 @@ class TestReduceConfirmation:
         correlation_id: UUID,
     ) -> None:
         """Postgres success confirmation transitions pending -> complete (consul removed OMN-3540)."""
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationConfirmation,
+        )
 
         confirmation = ModelRegistrationConfirmation(
             event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
@@ -5405,7 +5409,9 @@ class TestReduceConfirmation:
         correlation_id: UUID,
     ) -> None:
         """Postgres failure confirmation transitions to failed with postgres_failed reason."""
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationConfirmation,
+        )
 
         confirmation = ModelRegistrationConfirmation(
             event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
@@ -5430,7 +5436,9 @@ class TestReduceConfirmation:
         correlation_id: UUID,
     ) -> None:
         """Processing the same confirmation twice returns unchanged state on second call."""
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationConfirmation,
+        )
 
         confirmation = ModelRegistrationConfirmation(
             event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
@@ -5455,7 +5463,9 @@ class TestReduceConfirmation:
         correlation_id: UUID,
     ) -> None:
         """Confirmation with mismatched node_id leaves state unchanged."""
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationConfirmation,
+        )
 
         wrong_node_id = uuid4()
 
@@ -5480,7 +5490,9 @@ class TestReduceConfirmation:
         correlation_id: UUID,
     ) -> None:
         """Confirmation on a complete state is a no-op."""
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationConfirmation,
+        )
 
         confirmation = ModelRegistrationConfirmation(
             event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
@@ -5503,7 +5515,9 @@ class TestReduceConfirmation:
         correlation_id: UUID,
     ) -> None:
         """Confirmation on a failed state is a no-op."""
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationConfirmation,
+        )
 
         confirmation = ModelRegistrationConfirmation(
             event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
@@ -5524,7 +5538,9 @@ class TestReduceConfirmation:
         initial_state: ModelRegistrationState,
     ) -> None:
         """Confirmation on an idle state (node_id=None) is a no-op."""
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationConfirmation,
+        )
 
         confirmation = ModelRegistrationConfirmation(
             event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
@@ -5544,7 +5560,9 @@ class TestReduceConfirmation:
         reducer: RegistrationReducer,
     ) -> None:
         """Same confirmation input always produces the same derived event ID."""
-        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelRegistrationConfirmation,
+        )
 
         shared_corr = uuid4()
         shared_node = uuid4()

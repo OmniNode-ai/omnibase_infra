@@ -31,10 +31,10 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from omnibase_infra.nodes.effects.models.model_effect_idempotency_config import (
+from omnibase_infra.nodes.node_registry_effect.models.model_effect_idempotency_config import (
     ModelEffectIdempotencyConfig,
 )
-from omnibase_infra.nodes.effects.store_effect_idempotency_inmemory import (
+from omnibase_infra.nodes.node_registry_effect.store_effect_idempotency_inmemory import (
     InMemoryEffectIdempotencyStore,
 )
 from omnibase_infra.testing import is_ci_environment
@@ -161,7 +161,7 @@ class TestTTLCleanupPerformance:
         # Add 5000 entries
         start_time = time.monotonic()
         with patch(
-            "omnibase_infra.nodes.effects.store_effect_idempotency_inmemory.time.monotonic"
+            "omnibase_infra.nodes.node_registry_effect.store_effect_idempotency_inmemory.time.monotonic"
         ) as mock_monotonic:
             mock_monotonic.return_value = start_time
 
@@ -206,7 +206,7 @@ class TestTTLCleanupPerformance:
         fresh_ids: list[UUID] = []
 
         with patch(
-            "omnibase_infra.nodes.effects.store_effect_idempotency_inmemory.time.monotonic"
+            "omnibase_infra.nodes.node_registry_effect.store_effect_idempotency_inmemory.time.monotonic"
         ) as mock_monotonic:
             mock_monotonic.return_value = start_time
 

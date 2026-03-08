@@ -27,11 +27,11 @@ from omnibase_infra.enums import EnumLlmFinishReason, EnumLlmOperationType
 from omnibase_infra.enums.enum_cost_tier import EnumCostTier
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.mixins.mixin_llm_http_transport import MixinLlmHttpTransport
-from omnibase_infra.models.model_backend_result import ModelBackendResult
-from omnibase_infra.nodes.effects.models.model_llm_inference_response import (
+from omnibase_infra.models.llm.model_llm_inference_response import (
     ModelLlmInferenceResponse,
 )
-from omnibase_infra.nodes.effects.models.model_llm_usage import ModelLlmUsage
+from omnibase_infra.models.llm.model_llm_usage import ModelLlmUsage
+from omnibase_infra.models.model_backend_result import ModelBackendResult
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost import (
     HandlerBifrostGateway,
     ModelBifrostConfig,
