@@ -48,7 +48,6 @@ runs:
         key: ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles(inputs.lock-file-path) }}-${{ inputs.cache-version }}
         restore-keys: |
           ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ inputs.python-version }}-${{ inputs.cache-version }}-
-
     - name: Install dependencies
       if: inputs.skip-install != 'true'
       shell: bash

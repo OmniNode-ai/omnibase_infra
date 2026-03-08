@@ -1,9 +1,7 @@
 version: "1.0.0"
 description: "Artifact registry for omnibase_infra documentation — tracks docs, design specs, and reference material that must be kept in sync with code changes."
-
 artifacts:
   # ── Architecture Documentation ──────────────────────────────────────────────
-
   - artifact_id: "a1b2c3d4-0001-0001-0001-000000000001"
     artifact_type: "doc"
     title: "Handler Protocol-Driven Architecture"
@@ -18,7 +16,6 @@ artifacts:
         match_fields: ["handler_routing"]
       - pattern: "src/omnibase_infra/nodes/handlers/**/*.py"
         change_scope: "any"
-
   - artifact_id: "a1b2c3d4-0001-0001-0001-000000000002"
     artifact_type: "doc"
     title: "Event Bus Integration Guide"
@@ -33,7 +30,6 @@ artifacts:
         match_fields: ["event_bus.publish_topics", "event_bus.subscribe_topics"]
       - pattern: "src/omnibase_infra/nodes/handlers/kafka/**/*.py"
         change_scope: "any"
-
   - artifact_id: "a1b2c3d4-0001-0001-0001-000000000003"
     artifact_type: "reference"
     title: "Topic Catalog Architecture"
@@ -46,7 +42,6 @@ artifacts:
       - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
         change_scope: "structural"
         match_fields: ["event_bus.publish_topics", "event_bus.subscribe_topics"]
-
   - artifact_id: "a1b2c3d4-0001-0001-0001-000000000004"
     artifact_type: "doc"
     title: "Node Registration Workflow"
@@ -62,7 +57,6 @@ artifacts:
         change_scope: "any"
       - pattern: "src/omnibase_infra/nodes/node_registration_reducer/contract.yaml"
         change_scope: "structural"
-
   - artifact_id: "a1b2c3d4-0001-0001-0001-000000000005"
     artifact_type: "doc"
     title: "Message Dispatch Engine"
@@ -77,7 +71,6 @@ artifacts:
       - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
         change_scope: "structural"
         match_fields: ["handler_routing.routing_strategy"]
-
   - artifact_id: "a1b2c3d4-0001-0001-0001-000000000006"
     artifact_type: "doc"
     title: "LLM Infrastructure Guide"
@@ -93,7 +86,6 @@ artifacts:
         change_scope: "any"
       - pattern: "src/omnibase_infra/nodes/node_llm_embedding_effect/contract.yaml"
         change_scope: "structural"
-
   - artifact_id: "a1b2c3d4-0001-0001-0001-000000000007"
     artifact_type: "doc"
     title: "Config Discovery Architecture"
@@ -108,7 +100,6 @@ artifacts:
       - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
         change_scope: "structural"
         match_fields: ["dependencies"]
-
   - artifact_id: "a1b2c3d4-0001-0001-0001-000000000008"
     artifact_type: "doc"
     title: "Current Node Architecture"
@@ -123,9 +114,7 @@ artifacts:
         match_fields: ["node_type"]
       - pattern: "src/omnibase_infra/nodes/*/node.py"
         change_scope: "structural"
-
   # ── Pattern Documentation ────────────────────────────────────────────────────
-
   - artifact_id: "a1b2c3d4-0001-0001-0001-000000000009"
     artifact_type: "reference"
     title: "Circuit Breaker Implementation Pattern"
@@ -139,7 +128,6 @@ artifacts:
         change_scope: "any"
       - pattern: "src/omnibase_infra/nodes/handlers/**/*.py"
         change_scope: "structural"
-
   - artifact_id: "a1b2c3d4-0001-0001-0001-000000000010"
     artifact_type: "reference"
     title: "Handler Plugin Loader Pattern"
@@ -154,7 +142,6 @@ artifacts:
         match_fields: ["handler_routing"]
       - pattern: "src/omnibase_infra/runtime/handler_plugin_loader.py"
         change_scope: "any"
-
   - artifact_id: "a1b2c3d4-0001-0001-0001-000000000011"
     artifact_type: "reference"
     title: "Error Handling Patterns"
@@ -168,9 +155,7 @@ artifacts:
         change_scope: "structural"
       - pattern: "src/omnibase_infra/models/model_infra_error_context.py"
         change_scope: "any"
-
   # ── Design Specs (ADRs) ──────────────────────────────────────────────────────
-
   - artifact_id: "a1b2c3d4-0001-0001-0001-000000000012"
     artifact_type: "design_spec"
     title: "ADR-006: Message Dispatch Engine Canonical Routing"
@@ -185,7 +170,6 @@ artifacts:
       - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
         change_scope: "structural"
         match_fields: ["handler_routing.routing_strategy"]
-
   - artifact_id: "a1b2c3d4-0001-0001-0001-000000000013"
     artifact_type: "design_spec"
     title: "ADR-008: Realm-Agnostic Topics"
@@ -198,9 +182,7 @@ artifacts:
       - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
         change_scope: "structural"
         match_fields: ["event_bus.publish_topics", "event_bus.subscribe_topics"]
-
   # ── Cross-Repo Reference ─────────────────────────────────────────────────────
-
   - artifact_id: "a1b2c3d4-0001-0001-0001-000000000014"
     artifact_type: "reference"
     title: "Omnidash Topic Catalog Architecture"
@@ -213,7 +195,6 @@ artifacts:
       - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
         change_scope: "structural"
         match_fields: ["event_bus.publish_topics", "event_bus.subscribe_topics"]
-
   - artifact_id: "a1b2c3d4-0001-0001-0001-000000000015"
     artifact_type: "doc"
     title: "Event Streaming Topics Reference"
