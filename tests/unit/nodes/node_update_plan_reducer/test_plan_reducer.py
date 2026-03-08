@@ -17,7 +17,7 @@ Tracking:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from uuid import UUID, uuid4
 
 import pytest
@@ -38,7 +38,6 @@ from omnibase_infra.nodes.node_update_plan_reducer.handlers.handler_create_plan 
 from omnibase_infra.nodes.node_update_plan_reducer.models.model_update_plan_state import (
     ModelUpdatePlanState,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -428,9 +427,7 @@ class TestModelUpdatePlanStateInvalidTransitions:
             EnumUpdatePlanState.CLOSED,
             EnumUpdatePlanState.WAIVED,
         }
-        kwargs: dict[str, EnumUpdatePlanState | UUID | None] = {
-            "status": source_status
-        }
+        kwargs: dict[str, EnumUpdatePlanState | UUID | None] = {"status": source_status}
         if source_status in needs_plan_id:
             kwargs["plan_id"] = uuid4()
         state = ModelUpdatePlanState(**kwargs)  # type: ignore[arg-type]
@@ -693,13 +690,13 @@ class TestHandlerCreatePlan:
         handler = HandlerCreatePlan()
         result = _make_result()
 
-        before = datetime.now(timezone.utc)
+        before = datetime.now(UTC)
         plan = handler.create_plan(
             result=result,
             source_entity_ref="pr/omnibase_infra/133",
             summary="Timestamp test",
         )
-        after = datetime.now(timezone.utc)
+        after = datetime.now(UTC)
 
         assert plan.created_at.tzinfo is not None
         assert before <= plan.created_at <= after

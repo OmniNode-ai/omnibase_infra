@@ -23,7 +23,7 @@ Tracking:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from uuid import UUID, uuid4
 
 from omnibase_infra.enums import (
@@ -105,7 +105,7 @@ class HandlerCreatePlan:
             impacted_artifacts=list(result.impacted_artifacts),
             tasks=tasks,
             merge_policy=result.highest_merge_policy,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
 
         logger.info(

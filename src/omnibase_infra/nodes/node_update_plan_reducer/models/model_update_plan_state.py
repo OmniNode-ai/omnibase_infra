@@ -115,9 +115,7 @@ class ModelUpdatePlanState(BaseModel):
     # State transition methods (pure — return new instances)
     # ------------------------------------------------------------------
 
-    def with_plan_created(
-        self, plan_id: UUID, event_id: UUID
-    ) -> ModelUpdatePlanState:
+    def with_plan_created(self, plan_id: UUID, event_id: UUID) -> ModelUpdatePlanState:
         """Transition: idle -> created.
 
         Args:
@@ -151,9 +149,7 @@ class ModelUpdatePlanState(BaseModel):
             RuntimeHostError: If current state is not CREATED.
         """
         if self.status != EnumUpdatePlanState.CREATED:
-            raise _make_transition_error(
-                self.status.value, "comment_posted", "CREATED"
-            )
+            raise _make_transition_error(self.status.value, "comment_posted", "CREATED")
         return ModelUpdatePlanState(
             status=EnumUpdatePlanState.COMMENT_POSTED,
             plan_id=self.plan_id,
@@ -195,9 +191,7 @@ class ModelUpdatePlanState(BaseModel):
             RuntimeHostError: If current state is not YAML_EMITTED.
         """
         if self.status != EnumUpdatePlanState.YAML_EMITTED:
-            raise _make_transition_error(
-                self.status.value, "closed", "YAML_EMITTED"
-            )
+            raise _make_transition_error(self.status.value, "closed", "YAML_EMITTED")
         return ModelUpdatePlanState(
             status=EnumUpdatePlanState.CLOSED,
             plan_id=self.plan_id,
