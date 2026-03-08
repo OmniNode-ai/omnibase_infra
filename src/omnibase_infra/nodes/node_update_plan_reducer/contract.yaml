@@ -1,0 +1,233 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+# ONEX Node Contract — Update Plan Reducer
+#
+# Pure FSM for update plan lifecycle management.
+# Tracks: idle -> created -> comment_posted -> yaml_emitted -> closed/waived
+#
+# Related Tickets:
+#   - OMN-3943: Task 6 — Update Plan REDUCER Node
+#   - OMN-3925: Artifact Reconciliation + Update Planning MVP
+# =============================================================================
+# Contract identifiers
+name: "node_update_plan_reducer"
+contract_name: "node_update_plan_reducer"
+node_name: "node_update_plan_reducer"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+# Node type
+node_type: "REDUCER_GENERIC"
+# Description
+description: >
+  Pure reducer for artifact update plan lifecycle management. Tracks the FSM
+  idle -> created -> comment_posted -> yaml_emitted -> closed (or waived) for
+  each impact analysis event. Emits intents for PR comment posting and YAML
+  plan emission. Translates ModelImpactAnalysisResult into ModelUpdatePlan with
+  deterministic task_type assignment.
+
+# I/O Models
+input_model:
+  name: "ModelReducerInput"
+  module: "omnibase_core.models.reducer.model_reducer_input"
+  description: "Reducer input containing impact analysis event and trigger."
+output_model:
+  name: "ModelReducerOutput"
+  module: "omnibase_core.models.reducer.model_reducer_output"
+  description: "Reducer output containing new plan state and update plan intents."
+
+# Event Bus
+event_bus:
+  subscribe_topics:
+    - "onex.evt.artifact.impact-analyzed.v1"
+  publish_topics:
+    - "onex.evt.artifact.update-plan-created.v1"
+
+# Handler Routing
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "artifact.create_plan"
+      handler:
+        name: "HandlerCreatePlan"
+        module: "omnibase_infra.nodes.node_update_plan_reducer.handlers.handler_create_plan"
+
+# FSM State Machine Definition
+# ============================
+#
+# State Diagram:
+#
+#   +------+  create_plan  +---------+  post_comment  +----------------+
+#   | idle | ------------> | created | -------------> | comment_posted |
+#   +------+               +---------+                +----------------+
+#                               |                            |
+#                               | waive                      | emit_yaml
+#                               v                            v
+#                          +--------+               +-------------+
+#                          | waived |               | yaml_emitted|
+#                          +--------+               +-------------+
+#                               ^                          |
+#                               | waive                    | close
+#                               |                          v
+#                          +--------+              +--------+
+#                          | waived |<------------ | closed |
+#                          +--------+   waive      +--------+
+#
+state_machine:
+  state_machine_name: "update_plan_lifecycle_fsm"
+  initial_state: "idle"
+  states:
+    - state_name: "idle"
+      description: "No active plan — waiting for impact analysis result"
+      entry_actions: []
+      exit_actions: []
+      required_data: []
+    - state_name: "created"
+      description: "Plan created from impact analysis result, tasks assigned"
+      entry_actions:
+        - "emit_update_plan_created_event"
+      exit_actions: []
+      required_data:
+        - "plan_id"
+    - state_name: "comment_posted"
+      description: "PR comment with impact summary has been posted"
+      entry_actions:
+        - "emit_pr_comment_posted_event"
+      exit_actions: []
+      required_data:
+        - "plan_id"
+    - state_name: "yaml_emitted"
+      description: "YAML plan emitted as structured artifact"
+      entry_actions:
+        - "emit_update_plan_emitted_event"
+      exit_actions: []
+      required_data:
+        - "plan_id"
+    - state_name: "closed"
+      description: "Plan fully processed and closed"
+      entry_actions: []
+      exit_actions: []
+      required_data:
+        - "plan_id"
+    - state_name: "waived"
+      description: "Plan explicitly waived (e.g. no-op merge policy)"
+      entry_actions: []
+      exit_actions: []
+      required_data: []
+  transitions:
+    # idle -> created: On receiving impact analysis result
+    - from_state: "idle"
+      to_state: "created"
+      trigger: "create_plan"
+      description: "Create update plan from impact analysis result"
+      conditions:
+        - expression: "plan_id is_present"
+          required: true
+      actions:
+        - action_name: "build_update_plan_created_intent"
+          action_type: "intent_emission"
+    # created -> comment_posted: After PR comment is posted
+    - from_state: "created"
+      to_state: "comment_posted"
+      trigger: "post_comment"
+      description: "Post PR comment with impact summary"
+      actions:
+        - action_name: "build_pr_comment_posted_intent"
+          action_type: "intent_emission"
+    # comment_posted -> yaml_emitted: After YAML artifact emitted
+    - from_state: "comment_posted"
+      to_state: "yaml_emitted"
+      trigger: "emit_yaml"
+      description: "Emit YAML plan as structured artifact"
+      actions:
+        - action_name: "build_update_plan_emitted_intent"
+          action_type: "intent_emission"
+    # yaml_emitted -> closed: Plan fully processed
+    - from_state: "yaml_emitted"
+      to_state: "closed"
+      trigger: "close"
+      description: "Close plan after full processing"
+      actions: []
+    # created -> waived: Immediate waiver (e.g. merge_policy == "none")
+    - from_state: "created"
+      to_state: "waived"
+      trigger: "waive"
+      description: "Waive plan (no action required)"
+      actions: []
+    # comment_posted -> waived: Waiver after comment
+    - from_state: "comment_posted"
+      to_state: "waived"
+      trigger: "waive"
+      description: "Waive plan after comment posted"
+      actions: []
+  persistence_enabled: true
+  terminal_states:
+    - "closed"
+    - "waived"
+
+# Intent Emission Configuration
+# ============================
+intent_emission:
+  enabled: true
+  intents:
+    - intent_type: "artifact.update-plan-created"
+      target_pattern: "kafka://onex.evt.artifact.update-plan-created.v1"
+      payload_model: "ModelUpdatePlan"
+      payload_module: "omnibase_infra.nodes.node_update_plan_reducer.models"
+      description: "Emit update plan created event for orchestrator"
+    - intent_type: "artifact.pr-comment"
+      target_pattern: "kafka://onex.evt.artifact.pr-comment-posted.v1"
+      payload_model: "ModelUpdatePlan"
+      payload_module: "omnibase_infra.nodes.node_update_plan_reducer.models"
+      description: "Request PR comment posting via orchestrator"
+
+# State Model Configuration
+state_model:
+  name: "ModelUpdatePlanState"
+  module: "omnibase_infra.nodes.node_update_plan_reducer.models"
+  description: "Immutable state model for update plan lifecycle FSM"
+
+# Idempotency Configuration
+idempotency:
+  enabled: true
+  strategy: "event_id_tracking"
+  description: "Skip duplicate events based on last_processed_event_id"
+
+# Dependencies
+dependencies:
+  - name: "container"
+    type: "ModelONEXContainer"
+    module: "omnibase_core.models.container.model_onex_container"
+    description: "ONEX dependency injection container"
+
+# Error Handling
+error_handling:
+  retry_policy:
+    max_retries: 0
+
+# Health check
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-03-08"
+  tags:
+    - reducer
+    - artifact
+    - update-plan
+    - fsm
+    - pure-function
+    - impact-analysis
+  related_tickets:
+    - "OMN-3943"
+    - "OMN-3925"
