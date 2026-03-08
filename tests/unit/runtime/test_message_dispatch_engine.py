@@ -36,7 +36,10 @@ from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
-from omnibase_infra.runtime.service_message_dispatch_engine import MessageDispatchEngine
+from omnibase_infra.runtime.service_message_dispatch_engine import (
+    MessageDispatchEngine,
+    coerce_message_category,
+)
 
 # ============================================================================
 # Test Event Types (for category inference)
@@ -4976,3 +4979,105 @@ class TestDispatchDlqRouting:
 
         assert result.status == EnumDispatchStatus.NO_DISPATCHER
         assert result.dlq_topic is None
+
+
+# ============================================================================
+# coerce_message_category Unit Tests (OMN-4034)
+# ============================================================================
+
+
+class TestCoerceMessageCategory:
+    """Unit tests for the coerce_message_category boundary normalization helper."""
+
+    @pytest.mark.unit
+    def test_canonical_instance_passthrough(self) -> None:
+        """Canonical EnumMessageCategory instance is returned unchanged."""
+        for member in EnumMessageCategory:
+            assert coerce_message_category(member) is member
+
+    @pytest.mark.unit
+    def test_valid_string_coercion(self) -> None:
+        """Valid string values are coerced to the corresponding enum member."""
+        assert coerce_message_category("event") is EnumMessageCategory.EVENT
+        assert coerce_message_category("command") is EnumMessageCategory.COMMAND
+        assert coerce_message_category("intent") is EnumMessageCategory.INTENT
+
+    @pytest.mark.unit
+    def test_foreign_enum_coercion(self) -> None:
+        """A foreign enum whose .value matches a valid string is coerced correctly."""
+        import enum
+
+        class ForeignCategory(enum.Enum):
+            EVENT = "event"
+            COMMAND = "command"
+
+        assert (
+            coerce_message_category(ForeignCategory.EVENT) is EnumMessageCategory.EVENT
+        )
+        assert (
+            coerce_message_category(ForeignCategory.COMMAND)
+            is EnumMessageCategory.COMMAND
+        )
+
+    @pytest.mark.unit
+    def test_invalid_string_raises_value_error(self) -> None:
+        """Invalid string raises ValueError listing valid values."""
+        with pytest.raises(ValueError, match="invalid_garbage") as exc_info:
+            coerce_message_category("invalid_garbage")
+        # Error message must list valid values
+        for member in EnumMessageCategory:
+            assert member.value in str(exc_info.value)
+
+    @pytest.mark.unit
+    def test_invalid_foreign_enum_value_raises_value_error(self) -> None:
+        """Foreign enum whose .value is not a valid category string raises ValueError."""
+        import enum
+
+        class UnrelatedCategory(enum.Enum):
+            UNKNOWN = "UNKNOWN_GARBAGE"
+
+        with pytest.raises(ValueError):
+            coerce_message_category(UnrelatedCategory.UNKNOWN)
+
+    @pytest.mark.unit
+    def test_result_type_is_canonical(self) -> None:
+        """All coercion paths return exactly EnumMessageCategory (not a subclass)."""
+        result = coerce_message_category("event")
+        assert type(result) is EnumMessageCategory
+
+    @pytest.mark.unit
+    def test_register_dispatcher_accepts_string_category(
+        self, dispatch_engine: MessageDispatchEngine
+    ) -> None:
+        """register_dispatcher coerces a valid string category via coerce_message_category."""
+
+        def handler(envelope: ModelEventEnvelope[object]) -> str:
+            return "handled"
+
+        # Passing a valid string should no longer raise; the engine normalises it.
+        dispatch_engine.register_dispatcher(
+            dispatcher_id="str-category-handler",
+            dispatcher=handler,
+            category="event",  # type: ignore[arg-type]
+        )
+        # Verify the dispatcher was stored under the canonical enum key.
+        assert dispatch_engine.dispatcher_count == 1
+
+    @pytest.mark.unit
+    def test_register_dispatcher_invalid_string_still_raises_model_error(
+        self, dispatch_engine: MessageDispatchEngine
+    ) -> None:
+        """register_dispatcher wraps ValueError from coercion into ModelOnexError."""
+
+        def handler(envelope: ModelEventEnvelope[object]) -> str:
+            return "handled"
+
+        with pytest.raises(ModelOnexError) as exc_info:
+            dispatch_engine.register_dispatcher(
+                dispatcher_id="bad-category-handler",
+                dispatcher=handler,
+                category="not_a_category",  # type: ignore[arg-type]
+            )
+
+        assert exc_info.value.error_code == EnumCoreErrorCode.INVALID_PARAMETER
+        assert "not_a_category" in exc_info.value.message
