@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Pytest fixtures for Docker integration tests.
 
-This module provides shared fixtures for Docker integration tests including:
+Shared fixtures for Docker integration tests including:
 - Docker client initialization with availability detection
 - Image build and cleanup helpers
 - Container lifecycle management
