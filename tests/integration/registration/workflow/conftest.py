@@ -49,7 +49,7 @@ from omnibase_infra.nodes.node_registry_effect.models import (
     ModelRegistryResponse,
 )
 from omnibase_infra.nodes.node_registry_effect.store_effect_idempotency_inmemory import (
-    InMemoryEffectIdempotencyStore,
+    StoreEffectIdempotencyInMemory,
 )
 
 # =============================================================================
@@ -508,17 +508,17 @@ def postgres_adapter() -> StubPostgresAdapter:
 
 
 @pytest.fixture
-def idempotency_store() -> InMemoryEffectIdempotencyStore:
-    """Create a fresh InMemoryEffectIdempotencyStore.
+def idempotency_store() -> StoreEffectIdempotencyInMemory:
+    """Create a fresh StoreEffectIdempotencyInMemory.
 
     Returns:
-        InMemoryEffectIdempotencyStore with default configuration.
+        StoreEffectIdempotencyInMemory with default configuration.
     """
     config = ModelEffectIdempotencyConfig(
         max_cache_size=1000,
         cache_ttl_seconds=3600.0,
     )
-    return InMemoryEffectIdempotencyStore(config=config)
+    return StoreEffectIdempotencyInMemory(config=config)
 
 
 @pytest.fixture
@@ -552,7 +552,7 @@ def tracked_reducer(
 def registry_effect(
     consul_client: StubConsulClient,  # kept for backward compat with test signatures
     postgres_adapter: StubPostgresAdapter,
-    idempotency_store: InMemoryEffectIdempotencyStore,
+    idempotency_store: StoreEffectIdempotencyInMemory,
 ) -> NodeRegistryEffect:
     """Create NodeRegistryEffect with test double backends.
 
@@ -1013,7 +1013,7 @@ def mock_postgres_effect() -> MockPostgresEffect:
 def registry_effect_with_mocks(
     mock_consul_effect: MockConsulEffect,  # consul removed in OMN-3540
     mock_postgres_effect: MockPostgresEffect,
-    idempotency_store: InMemoryEffectIdempotencyStore,
+    idempotency_store: StoreEffectIdempotencyInMemory,
 ) -> NodeRegistryEffect:
     """Create NodeRegistryEffect with mock backends for call tracking.
 

@@ -13,7 +13,7 @@ Usage:
 
 Related:
     - OMN-954: Effect idempotency testing requirements
-    - InMemoryEffectIdempotencyStore: Primary store under test
+    - StoreEffectIdempotencyInMemory: Primary store under test
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from omnibase_infra.nodes.node_registry_effect.models.model_effect_idempotency_c
     ModelEffectIdempotencyConfig,
 )
 from omnibase_infra.nodes.node_registry_effect.store_effect_idempotency_inmemory import (
-    InMemoryEffectIdempotencyStore,
+    StoreEffectIdempotencyInMemory,
 )
 
 # -----------------------------------------------------------------------------
@@ -45,41 +45,41 @@ from omnibase_infra.nodes.node_registry_effect.store_effect_idempotency_inmemory
 
 
 @pytest.fixture
-def default_effect_store() -> InMemoryEffectIdempotencyStore:
-    """Create InMemoryEffectIdempotencyStore with default config for testing.
+def default_effect_store() -> StoreEffectIdempotencyInMemory:
+    """Create StoreEffectIdempotencyInMemory with default config for testing.
 
     Returns:
-        InMemoryEffectIdempotencyStore with default 10k max size.
+        StoreEffectIdempotencyInMemory with default 10k max size.
     """
-    return InMemoryEffectIdempotencyStore()
+    return StoreEffectIdempotencyInMemory()
 
 
 @pytest.fixture
-def small_cache_effect_store() -> InMemoryEffectIdempotencyStore:
-    """Create InMemoryEffectIdempotencyStore with small cache for LRU testing.
+def small_cache_effect_store() -> StoreEffectIdempotencyInMemory:
+    """Create StoreEffectIdempotencyInMemory with small cache for LRU testing.
 
     Returns:
-        InMemoryEffectIdempotencyStore with 100 entry max size.
+        StoreEffectIdempotencyInMemory with 100 entry max size.
     """
     config = ModelEffectIdempotencyConfig(
         max_cache_size=100,
         cache_ttl_seconds=3600.0,
     )
-    return InMemoryEffectIdempotencyStore(config=config)
+    return StoreEffectIdempotencyInMemory(config=config)
 
 
 @pytest.fixture
-def large_cache_effect_store() -> InMemoryEffectIdempotencyStore:
-    """Create InMemoryEffectIdempotencyStore with large cache for stress testing.
+def large_cache_effect_store() -> StoreEffectIdempotencyInMemory:
+    """Create StoreEffectIdempotencyInMemory with large cache for stress testing.
 
     Returns:
-        InMemoryEffectIdempotencyStore with 100k entry max size.
+        StoreEffectIdempotencyInMemory with 100k entry max size.
     """
     config = ModelEffectIdempotencyConfig(
         max_cache_size=100000,
         cache_ttl_seconds=3600.0,
     )
-    return InMemoryEffectIdempotencyStore(config=config)
+    return StoreEffectIdempotencyInMemory(config=config)
 
 
 @pytest.fixture

@@ -25,11 +25,7 @@ node_version:
 node_type: "REDUCER_GENERIC"
 # Description
 description: >
-  Pure reducer for artifact update plan lifecycle management. Tracks the FSM
-  idle -> created -> comment_posted -> yaml_emitted -> closed (or waived) for
-  each impact analysis event. Emits intents for PR comment posting and YAML
-  plan emission. Translates ModelImpactAnalysisResult into ModelUpdatePlan with
-  deterministic task_type assignment.
+  Pure reducer for artifact update plan lifecycle management. Tracks the FSM idle -> created -> comment_posted -> yaml_emitted -> closed (or waived) for each impact analysis event. Emits intents for PR comment posting and YAML plan emission. Translates ModelImpactAnalysisResult into ModelUpdatePlan with deterministic task_type assignment.
 
 # I/O Models
 input_model:
@@ -40,14 +36,12 @@ output_model:
   name: "ModelReducerOutput"
   module: "omnibase_core.models.reducer.model_reducer_output"
   description: "Reducer output containing new plan state and update plan intents."
-
 # Event Bus
 event_bus:
   subscribe_topics:
     - "onex.evt.artifact.impact-analyzed.v1"
   publish_topics:
     - "onex.evt.artifact.update-plan-created.v1"
-
 # Handler Routing
 handler_routing:
   routing_strategy: "operation_match"
@@ -56,7 +50,6 @@ handler_routing:
       handler:
         name: "HandlerCreatePlan"
         module: "omnibase_infra.nodes.node_update_plan_reducer.handlers.handler_create_plan"
-
 # FSM State Machine Definition
 # ============================
 #
@@ -169,7 +162,6 @@ state_machine:
   terminal_states:
     - "closed"
     - "waived"
-
 # Intent Emission Configuration
 # ============================
 intent_emission:
@@ -185,37 +177,31 @@ intent_emission:
       payload_model: "ModelUpdatePlan"
       payload_module: "omnibase_infra.nodes.node_update_plan_reducer.models"
       description: "Request PR comment posting via orchestrator"
-
 # State Model Configuration
 state_model:
   name: "ModelUpdatePlanState"
   module: "omnibase_infra.nodes.node_update_plan_reducer.models"
   description: "Immutable state model for update plan lifecycle FSM"
-
 # Idempotency Configuration
 idempotency:
   enabled: true
   strategy: "event_id_tracking"
   description: "Skip duplicate events based on last_processed_event_id"
-
 # Dependencies
 dependencies:
   - name: "container"
     type: "ModelONEXContainer"
     module: "omnibase_core.models.container.model_onex_container"
     description: "ONEX dependency injection container"
-
 # Error Handling
 error_handling:
   retry_policy:
     max_retries: 0
-
 # Health check
 health_check:
   enabled: true
   endpoint: "/health"
   interval_seconds: 30
-
 # Metadata
 metadata:
   author: "OmniNode Team"
