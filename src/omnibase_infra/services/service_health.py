@@ -11,6 +11,7 @@ health check requirements.
 The service exposes:
     - GET /health: Returns runtime liveness status as JSON (process alive)
     - GET /ready: Returns runtime readiness status as JSON (can serve traffic)
+    - GET /health/detailed: Returns verbose per-component diagnostics (OMN-519)
 
 Configuration:
     ONEX_HTTP_PORT: Port to listen on (default: 8085)
@@ -57,6 +58,8 @@ See Also:
 from __future__ import annotations
 
 import logging
+import time
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID
 
@@ -68,6 +71,10 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
+)
+from omnibase_infra.runtime.models.model_component_health import ModelComponentHealth
+from omnibase_infra.runtime.models.model_detailed_health_response import (
+    ModelDetailedHealthResponse,
 )
 from omnibase_infra.runtime.models.model_health_check_response import (
     ModelHealthCheckResponse,
@@ -283,6 +290,9 @@ class ServiceHealth:
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
         self._is_running: bool = False
+
+        # OMN-519: Track last successful health check timestamps per component
+        self._last_healthy_timestamps: dict[str, str] = {}
 
         logger.debug(
             "ServiceHealth initialized",
@@ -565,6 +575,8 @@ class ServiceHealth:
             # Register routes (OMN-1931: /ready has its own handler)
             self._app.router.add_get("/health", self._handle_health)
             self._app.router.add_get("/ready", self._handle_readiness)
+            # OMN-519: Detailed diagnostics endpoint
+            self._app.router.add_get("/health/detailed", self._handle_health_detailed)
 
             # Create and start runner
             self._runner = web.AppRunner(self._app)
@@ -586,7 +598,7 @@ class ServiceHealth:
                 extra={
                     "host": self._host,
                     "port": self._port,
-                    "endpoints": ["/health", "/ready"],
+                    "endpoints": ["/health", "/ready", "/health/detailed"],
                     "version": self._version,
                 },
             )
@@ -880,10 +892,18 @@ class ServiceHealth:
                 status = "unhealthy"
                 http_status = 503
 
+            # OMN-519: Add component breakdown to health response details
+            components = self._build_component_health(health_details)
+            enriched_details = dict(health_details)
+            enriched_details["components"] = {
+                name: comp.model_dump(exclude_none=True)
+                for name, comp in components.items()
+            }
+
             response = ModelHealthCheckResponse.success(
                 status=status,
                 version=self._version,
-                details=cast("dict[str, JsonType]", health_details),
+                details=cast("dict[str, JsonType]", enriched_details),
             )
 
             return web.Response(
@@ -1008,6 +1028,206 @@ class ServiceHealth:
             )
 
             error_response = ModelHealthCheckResponse.failure(
+                version=self._version,
+                error=str(e),
+                error_type=type(e).__name__,
+                correlation_id=str(correlation_id),
+            )
+
+            return web.Response(
+                text=error_response.model_dump_json(exclude_none=True),
+                status=503,
+                content_type="application/json",
+            )
+
+    def _build_component_health(
+        self,
+        health_details: dict[str, object],
+    ) -> dict[str, ModelComponentHealth]:
+        """Build per-component health status from runtime health details.
+
+        Extracts component-level health information from the runtime's
+        health_check() response and constructs typed ModelComponentHealth
+        instances for each component.
+
+        OMN-519: Component-level health diagnostics.
+
+        Args:
+            health_details: The raw health check dict from RuntimeHostProcess.
+
+        Returns:
+            Dictionary mapping component name to ModelComponentHealth.
+        """
+        now = datetime.now(tz=UTC).isoformat()
+        components: dict[str, ModelComponentHealth] = {}
+
+        # Event bus health
+        event_bus_healthy = bool(health_details.get("event_bus_healthy", False))
+        event_bus_data = health_details.get("event_bus", {})
+        if event_bus_healthy:
+            self._last_healthy_timestamps["event_bus"] = now
+        event_bus_details: dict[str, JsonType] | None = None
+        if isinstance(event_bus_data, dict):
+            event_bus_details = cast("dict[str, JsonType]", event_bus_data)
+        if event_bus_healthy:
+            components["event_bus"] = ModelComponentHealth.healthy(
+                name="event_bus",
+                last_healthy=self._last_healthy_timestamps.get("event_bus"),
+                details=event_bus_details,
+            )
+        else:
+            error_msg = ""
+            if isinstance(event_bus_data, dict):
+                error_msg = str(event_bus_data.get("error", "unhealthy"))
+            else:
+                error_msg = "unhealthy"
+            components["event_bus"] = ModelComponentHealth.unhealthy(
+                name="event_bus",
+                error=error_msg,
+                last_healthy=self._last_healthy_timestamps.get("event_bus"),
+                details=event_bus_details,
+            )
+
+        # Per-handler health
+        handlers_data = health_details.get("handlers", {})
+        if isinstance(handlers_data, dict):
+            for handler_type, handler_health in handlers_data.items():
+                handler_healthy = False
+                handler_details: dict[str, JsonType] | None = None
+                handler_error: str | None = None
+
+                if isinstance(handler_health, dict):
+                    handler_healthy = bool(handler_health.get("healthy", False))
+                    handler_details = cast("dict[str, JsonType]", handler_health)
+                    if not handler_healthy:
+                        handler_error = str(
+                            handler_health.get("error", "health check failed")
+                        )
+
+                if handler_healthy:
+                    self._last_healthy_timestamps[handler_type] = now
+                    components[handler_type] = ModelComponentHealth.healthy(
+                        name=handler_type,
+                        last_healthy=self._last_healthy_timestamps.get(handler_type),
+                        details=handler_details,
+                    )
+                else:
+                    components[handler_type] = ModelComponentHealth.unhealthy(
+                        name=handler_type,
+                        error=handler_error or "health check failed",
+                        last_healthy=self._last_healthy_timestamps.get(handler_type),
+                        details=handler_details,
+                    )
+
+        # Failed handlers (degraded components)
+        failed_handlers = health_details.get("failed_handlers", {})
+        if isinstance(failed_handlers, dict):
+            for handler_type, error_msg_raw in failed_handlers.items():
+                components[handler_type] = ModelComponentHealth.degraded(
+                    name=handler_type,
+                    error=str(error_msg_raw),
+                    last_healthy=self._last_healthy_timestamps.get(handler_type),
+                )
+
+        return components
+
+    async def _handle_health_detailed(self, request: web.Request) -> web.Response:
+        """Handle GET /health/detailed requests (verbose diagnostics).
+
+        Returns per-component health breakdowns, last successful health check
+        timestamps, and dependency health status. This endpoint provides more
+        detail than /health for debugging degraded or unhealthy states.
+
+        OMN-519: Health Check - Add degraded status detailed diagnostics.
+
+        HTTP Status Codes:
+            - 200: Healthy or degraded (container operational)
+            - 503: Unhealthy (container should be restarted)
+
+        Response Format:
+            {
+                "status": "degraded",
+                "version": "x.y.z",
+                "checked_at": "2025-12-08T10:05:00Z",
+                "components": {
+                    "kafka": {"name": "kafka", "status": "healthy", "latency_ms": 5},
+                    "postgres": {"name": "postgres", "status": "healthy", "latency_ms": 12},
+                    "consul": {"name": "consul", "status": "degraded", "error": "timeout",
+                               "last_healthy": "2025-12-08T10:00:00Z"}
+                },
+                "details": { ... }
+            }
+
+        Args:
+            request: Incoming HTTP request (unused per aiohttp handler contract).
+
+        Returns:
+            JSON response with detailed component health information.
+        """
+        _ = request
+
+        try:
+            check_start = time.monotonic()
+            health_details = await self.runtime.health_check()
+            check_duration_ms = (time.monotonic() - check_start) * 1000
+
+            if not isinstance(health_details, dict):
+                context = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.HTTP,
+                    operation="validate_health_check_response",
+                    target_name="RuntimeHostProcess.health_check",
+                )
+                raise ProtocolConfigurationError(
+                    f"health_check() must return dict, got {type(health_details).__name__}",
+                    context=context,
+                )
+
+            is_healthy = bool(health_details.get("healthy", False))
+            is_degraded = bool(health_details.get("degraded", False))
+
+            if is_healthy:
+                status: Literal["healthy", "degraded", "unhealthy"] = "healthy"
+                http_status = 200
+            elif is_degraded:
+                status = "degraded"
+                http_status = 200
+            else:
+                status = "unhealthy"
+                http_status = 503
+
+            checked_at = datetime.now(tz=UTC).isoformat()
+            components = self._build_component_health(health_details)
+
+            # Add overall check latency to details
+            enriched_details = dict(health_details)
+            enriched_details["check_latency_ms"] = round(check_duration_ms, 2)
+
+            response = ModelDetailedHealthResponse.success(
+                status=status,
+                version=self._version,
+                checked_at=checked_at,
+                components=components,
+                details=cast("dict[str, JsonType]", enriched_details),
+            )
+
+            return web.Response(
+                text=response.model_dump_json(exclude_none=True),
+                status=http_status,
+                content_type="application/json",
+            )
+
+        except Exception as e:
+            correlation_id = generate_correlation_id()
+            logger.exception(
+                "Detailed health check failed with exception (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+            )
+
+            error_response = ModelDetailedHealthResponse.failure(
                 version=self._version,
                 error=str(e),
                 error_type=type(e).__name__,
