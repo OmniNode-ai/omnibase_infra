@@ -70,7 +70,7 @@ Related:
     - ModelRegistryResponse: Output response model
     - ModelBackendResult: Per-backend result model
     - ModelEffectIdempotencyConfig: Idempotency store configuration
-    - InMemoryEffectIdempotencyStore: Default bounded cache implementation
+    - StoreEffectIdempotencyInmemory: Default bounded cache implementation
     - ProtocolEffectIdempotencyStore: Protocol for pluggable backends
     - RegistrationReducer: Emits intents consumed by this Effect
     - OMN-954: Partial failure scenario testing
@@ -107,7 +107,7 @@ from omnibase_infra.nodes.node_registry_effect.protocols.protocol_postgres_adapt
     ProtocolPostgresAdapter,
 )
 from omnibase_infra.nodes.node_registry_effect.store_effect_idempotency_inmemory import (
-    InMemoryEffectIdempotencyStore,
+    StoreEffectIdempotencyInmemory,
 )
 from omnibase_infra.utils import sanitize_backend_error, sanitize_error_message
 
@@ -120,7 +120,7 @@ class NodeRegistryEffect:
 
     Idempotency Store:
         Uses a pluggable idempotency store for tracking completed backends.
-        The default InMemoryEffectIdempotencyStore provides:
+        The default StoreEffectIdempotencyInmemory provides:
         - Bounded size with LRU eviction (default 10,000 entries)
         - TTL-based expiration (default 1 hour)
         - ~1MB max memory at default settings
@@ -174,7 +174,7 @@ class NodeRegistryEffect:
 
     See Also:
         - README.md: Comprehensive documentation with configuration guide
-        - InMemoryEffectIdempotencyStore: Default store implementation details
+        - StoreEffectIdempotencyInmemory: Default store implementation details
         - ProtocolEffectIdempotencyStore: Protocol for custom backends
     """
 
@@ -207,7 +207,7 @@ class NodeRegistryEffect:
         if idempotency_store is not None:
             self._idempotency_store: ProtocolEffectIdempotencyStore = idempotency_store
         else:
-            self._idempotency_store = InMemoryEffectIdempotencyStore(
+            self._idempotency_store = StoreEffectIdempotencyInmemory(
                 config=idempotency_config
             )
 

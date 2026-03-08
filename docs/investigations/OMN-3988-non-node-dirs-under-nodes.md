@@ -46,7 +46,7 @@ nodes/effects/contract.yaml             — ONEX contract for NodeRegistryEffect
 nodes/effects/registry_effect.py        — NodeRegistryEffect class implementation
 nodes/effects/protocol_postgres_adapter.py       — ProtocolPostgresAdapter protocol
 nodes/effects/protocol_effect_idempotency_store.py — ProtocolEffectIdempotencyStore protocol
-nodes/effects/store_effect_idempotency_inmemory.py — InMemoryEffectIdempotencyStore implementation
+nodes/effects/store_effect_idempotency_inmemory.py — StoreEffectIdempotencyInmemory implementation
 nodes/effects/README.md                 — documentation
 
 nodes/effects/models/__init__.py        — re-exports all shared LLM + registry models

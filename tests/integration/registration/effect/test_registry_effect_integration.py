@@ -40,7 +40,7 @@ from omnibase_infra.nodes.node_registry_effect.models import (
     ModelRegistryRequest,
 )
 from omnibase_infra.nodes.node_registry_effect.store_effect_idempotency_inmemory import (
-    InMemoryEffectIdempotencyStore,
+    StoreEffectIdempotencyInmemory,
 )
 
 from .test_doubles import StubPostgresAdapter
@@ -134,7 +134,7 @@ class TestPostgresFailureFlow:
     async def test_postgres_failure_result(
         self,
         postgres_adapter: StubPostgresAdapter,
-        idempotency_store: InMemoryEffectIdempotencyStore,
+        idempotency_store: StoreEffectIdempotencyInmemory,
         sample_request: ModelRegistryRequest,
     ) -> None:
         """Test failure when PostgreSQL fails.
@@ -175,7 +175,7 @@ class TestPostgresFailureFlow:
     async def test_postgres_exception_handled(
         self,
         postgres_adapter: StubPostgresAdapter,
-        idempotency_store: InMemoryEffectIdempotencyStore,
+        idempotency_store: StoreEffectIdempotencyInmemory,
         sample_request: ModelRegistryRequest,
     ) -> None:
         """Test that postgres exceptions are handled gracefully.
@@ -350,7 +350,7 @@ class TestAsyncBehavior:
     async def test_concurrent_registrations_isolated(
         self,
         postgres_adapter: StubPostgresAdapter,
-        idempotency_store: InMemoryEffectIdempotencyStore,
+        idempotency_store: StoreEffectIdempotencyInmemory,
         request_factory: Callable[..., ModelRegistryRequest],
     ) -> None:
         """Test that concurrent registrations don't interfere.

@@ -31,7 +31,7 @@ Usage:
 
 Related:
     - OMN-954: Registry Effect Node testing requirements
-    - InMemoryEffectIdempotencyStore: Primary store under test
+    - StoreEffectIdempotencyInmemory: Primary store under test
     - NodeRegistryEffect: Effect node implementation (when available)
 """
 
@@ -52,7 +52,7 @@ from omnibase_infra.nodes.node_registry_effect.models.model_effect_idempotency_c
     ModelEffectIdempotencyConfig,
 )
 from omnibase_infra.nodes.node_registry_effect.store_effect_idempotency_inmemory import (
-    InMemoryEffectIdempotencyStore,
+    StoreEffectIdempotencyInmemory,
 )
 
 if TYPE_CHECKING:
@@ -377,7 +377,7 @@ class TestIdempotencyCacheStress:
             max_cache_size=100,
             cache_ttl_seconds=3600.0,
         )
-        store = InMemoryEffectIdempotencyStore(config=config)
+        store = StoreEffectIdempotencyInmemory(config=config)
 
         # Track correlation IDs in order
         correlation_ids: list[UUID] = []
@@ -409,7 +409,7 @@ class TestIdempotencyCacheStress:
         Validates that the default cache size (10k) works correctly
         and operations remain fast.
         """
-        store = InMemoryEffectIdempotencyStore()  # Default 10k max
+        store = StoreEffectIdempotencyInmemory()  # Default 10k max
 
         correlation_ids: list[UUID] = []
 
@@ -447,7 +447,7 @@ class TestIdempotencyCacheStress:
             max_cache_size=50,
             cache_ttl_seconds=3600.0,
         )
-        store = InMemoryEffectIdempotencyStore(config=config)
+        store = StoreEffectIdempotencyInmemory(config=config)
 
         async def add_entries(batch_id: int) -> None:
             for i in range(100):
@@ -485,7 +485,7 @@ class TestMemoryBounds:
             max_cache_size=1000,
             cache_ttl_seconds=3600.0,
         )
-        store = InMemoryEffectIdempotencyStore(config=config)
+        store = StoreEffectIdempotencyInmemory(config=config)
 
         # Process 10,000 entries through 1000-entry cache
         for _ in range(10000):
@@ -510,7 +510,7 @@ class TestMemoryBounds:
         Each entry can track multiple backends. Verify that adding
         many backends to same entry doesn't cause unbounded growth.
         """
-        store = InMemoryEffectIdempotencyStore()
+        store = StoreEffectIdempotencyInmemory()
 
         cid = uuid4()
 
@@ -596,7 +596,7 @@ class TestLatencyDistribution:
         Validates that read operations are not significantly slower
         than write operations.
         """
-        store = InMemoryEffectIdempotencyStore()
+        store = StoreEffectIdempotencyInmemory()
 
         # Pre-populate with some entries
         correlation_ids = [uuid4() for _ in range(100)]
@@ -647,7 +647,7 @@ class TestThroughput:
         Runs continuous operations for a fixed duration and
         calculates throughput.
         """
-        store = InMemoryEffectIdempotencyStore()
+        store = StoreEffectIdempotencyInmemory()
 
         target_duration = 1.0  # Run for 1 second
         operations = 0
@@ -676,7 +676,7 @@ class TestThroughput:
 
         Uses multiple concurrent tasks to measure peak throughput.
         """
-        store = InMemoryEffectIdempotencyStore()
+        store = StoreEffectIdempotencyInmemory()
 
         num_workers = 10
         ops_per_worker = 1000

@@ -88,7 +88,7 @@ class CacheEntry:
         self.accessed_at = time.monotonic()
 
 
-class InMemoryEffectIdempotencyStore(ProtocolEffectIdempotencyStore):
+class StoreEffectIdempotencyInmemory(ProtocolEffectIdempotencyStore):
     """In-memory idempotency store with LRU eviction and TTL expiration.
 
     Implements ProtocolEffectIdempotencyStore using an OrderedDict for
@@ -146,7 +146,7 @@ class InMemoryEffectIdempotencyStore(ProtocolEffectIdempotencyStore):
         ...     max_cache_size=5000,
         ...     cache_ttl_seconds=1800.0,
         ... )
-        >>> store = InMemoryEffectIdempotencyStore(config)
+        >>> store = StoreEffectIdempotencyInmemory(config)
         >>> await store.mark_completed(correlation_id, "consul")
         >>> assert await store.is_completed(correlation_id, "consul")
 
@@ -324,7 +324,7 @@ class InMemoryEffectIdempotencyStore(ProtocolEffectIdempotencyStore):
             Estimated memory usage in bytes.
 
         Example:
-            >>> store = InMemoryEffectIdempotencyStore()
+            >>> store = StoreEffectIdempotencyInmemory()
             >>> await store.mark_completed(uuid4(), "consul")
             >>> memory = await store.get_estimated_memory_bytes()
             >>> assert memory > 0
@@ -422,4 +422,4 @@ class InMemoryEffectIdempotencyStore(ProtocolEffectIdempotencyStore):
         return evicted
 
 
-__all__ = ["InMemoryEffectIdempotencyStore"]
+__all__ = ["StoreEffectIdempotencyInmemory"]
