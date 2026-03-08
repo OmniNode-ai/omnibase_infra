@@ -82,7 +82,7 @@ def _md5_of_file(path: Path) -> str | None:
         return None
 
 
-class HandlerContractFsEvent(FileSystemEventHandler):
+class HandlerContractFileEvent(FileSystemEventHandler):
     """Internal watchdog event handler that enqueues changed contract paths."""
 
     def __init__(
@@ -292,7 +292,7 @@ class HandlerContractFileWatcher:
         self._loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
         self._seed_hashes()
 
-        event_handler = HandlerContractFsEvent(
+        event_handler = HandlerContractFileEvent(
             watch_root=self._watch_root,
             contract_glob=self._contract_glob,
             pending=self._pending_paths,
