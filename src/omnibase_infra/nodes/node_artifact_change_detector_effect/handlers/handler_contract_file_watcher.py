@@ -41,7 +41,7 @@ import logging
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 try:
@@ -54,6 +54,9 @@ except ImportError:
     FileSystemEventHandler = object  # type: ignore[assignment,misc]
     WatchdogObserver = None  # type: ignore[assignment]
     FileSystemEvent = object  # type: ignore[assignment,misc]
+
+if TYPE_CHECKING:
+    from watchdog.observers.api import BaseObserver as _ObserverType
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_artifact_change_detector_effect.models.model_update_trigger import (
@@ -180,7 +183,7 @@ class HandlerContractFileWatcher:
         # Trigger queue: populated by _process_pending, consumed by get_pending_triggers
         self._trigger_queue: asyncio.Queue[ModelUpdateTrigger] = asyncio.Queue()
         # Internal state
-        self._observer: Any = None
+        self._observer: _ObserverType | None = None
         self._running = False
         self._debounce_task: asyncio.Task[None] | None = None
 
