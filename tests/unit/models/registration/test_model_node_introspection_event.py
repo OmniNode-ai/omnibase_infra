@@ -21,6 +21,7 @@ from pydantic import ValidationError
 
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_infra.models.discovery import ModelIntrospectionPerformanceMetrics
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
     ModelNodeIntrospectionEvent,
@@ -1031,3 +1032,207 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
         json_str = event.model_dump_json()
         restored = ModelNodeIntrospectionEvent.model_validate_json(json_str)
         assert restored.endpoints == event.endpoints
+
+
+class TestModelNodeIntrospectionEventPerformanceMetrics:
+    """Tests for performance_metrics field on introspection events.
+
+    Validates that ModelIntrospectionPerformanceMetrics can be attached to
+    introspection events, serialized, and deserialized correctly. This is
+    the core observability feature from OMN-926.
+    """
+
+    def test_performance_metrics_default_none(self) -> None:
+        """Test that performance_metrics defaults to None when not provided."""
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type=EnumNodeKind.EFFECT,
+            correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
+        )
+        assert event.performance_metrics is None
+
+    def test_performance_metrics_with_values(self) -> None:
+        """Test that performance_metrics can be set with a valid model."""
+        metrics = ModelIntrospectionPerformanceMetrics(
+            get_capabilities_ms=12.5,
+            discover_capabilities_ms=8.2,
+            get_endpoints_ms=0.5,
+            get_current_state_ms=0.1,
+            total_introspection_ms=21.3,
+            cache_hit=False,
+            method_count=15,
+            threshold_exceeded=False,
+            slow_operations=[],
+        )
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type=EnumNodeKind.EFFECT,
+            correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
+            performance_metrics=metrics,
+        )
+        assert event.performance_metrics is not None
+        assert event.performance_metrics.get_capabilities_ms == 12.5
+        assert event.performance_metrics.total_introspection_ms == 21.3
+        assert event.performance_metrics.method_count == 15
+
+    def test_performance_metrics_with_threshold_exceeded(self) -> None:
+        """Test event with metrics indicating threshold violations."""
+        metrics = ModelIntrospectionPerformanceMetrics(
+            get_capabilities_ms=55.0,
+            total_introspection_ms=100.3,
+            method_count=42,
+            threshold_exceeded=True,
+            slow_operations=["get_capabilities", "total_introspection"],
+        )
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type=EnumNodeKind.COMPUTE,
+            correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
+            performance_metrics=metrics,
+        )
+        assert event.performance_metrics is not None
+        assert event.performance_metrics.threshold_exceeded is True
+        assert "get_capabilities" in event.performance_metrics.slow_operations
+        assert "total_introspection" in event.performance_metrics.slow_operations
+
+    def test_performance_metrics_cache_hit(self) -> None:
+        """Test event with cache hit metrics (minimal timing)."""
+        metrics = ModelIntrospectionPerformanceMetrics(
+            total_introspection_ms=0.05,
+            cache_hit=True,
+        )
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type=EnumNodeKind.EFFECT,
+            correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
+            performance_metrics=metrics,
+        )
+        assert event.performance_metrics is not None
+        assert event.performance_metrics.cache_hit is True
+
+    def test_performance_metrics_json_serialization_roundtrip(self) -> None:
+        """Test that performance_metrics survives JSON serialization roundtrip."""
+        metrics = ModelIntrospectionPerformanceMetrics(
+            get_capabilities_ms=15.0,
+            discover_capabilities_ms=10.0,
+            get_endpoints_ms=1.0,
+            get_current_state_ms=0.5,
+            total_introspection_ms=26.5,
+            cache_hit=False,
+            method_count=20,
+            threshold_exceeded=False,
+            slow_operations=[],
+            captured_at=datetime(2025, 6, 15, 10, 30, 0, tzinfo=UTC),
+        )
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type=EnumNodeKind.REDUCER,
+            correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
+            performance_metrics=metrics,
+        )
+        json_str = event.model_dump_json()
+        restored = ModelNodeIntrospectionEvent.model_validate_json(json_str)
+
+        assert restored.performance_metrics is not None
+        assert restored.performance_metrics.get_capabilities_ms == 15.0
+        assert restored.performance_metrics.discover_capabilities_ms == 10.0
+        assert restored.performance_metrics.get_endpoints_ms == 1.0
+        assert restored.performance_metrics.get_current_state_ms == 0.5
+        assert restored.performance_metrics.total_introspection_ms == 26.5
+        assert restored.performance_metrics.cache_hit is False
+        assert restored.performance_metrics.method_count == 20
+        assert restored.performance_metrics.threshold_exceeded is False
+        assert restored.performance_metrics.slow_operations == []
+
+    def test_performance_metrics_none_json_roundtrip(self) -> None:
+        """Test that None performance_metrics survives JSON serialization."""
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type=EnumNodeKind.EFFECT,
+            correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
+            performance_metrics=None,
+        )
+        json_str = event.model_dump_json()
+        restored = ModelNodeIntrospectionEvent.model_validate_json(json_str)
+        assert restored.performance_metrics is None
+
+    def test_performance_metrics_in_model_dump(self) -> None:
+        """Test that performance_metrics appears correctly in model_dump."""
+        metrics = ModelIntrospectionPerformanceMetrics(
+            total_introspection_ms=30.0,
+            method_count=10,
+            threshold_exceeded=True,
+            slow_operations=["total_introspection"],
+        )
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type=EnumNodeKind.EFFECT,
+            correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
+            performance_metrics=metrics,
+        )
+        data = event.model_dump()
+        assert "performance_metrics" in data
+        pm = data["performance_metrics"]
+        assert pm is not None
+        assert pm["total_introspection_ms"] == 30.0
+        assert pm["method_count"] == 10
+        assert pm["threshold_exceeded"] is True
+        assert pm["slow_operations"] == ["total_introspection"]
+
+    def test_performance_metrics_immutable_on_event(self) -> None:
+        """Test that performance_metrics cannot be reassigned on frozen event."""
+        metrics = ModelIntrospectionPerformanceMetrics(
+            total_introspection_ms=25.0,
+        )
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type=EnumNodeKind.EFFECT,
+            correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
+            performance_metrics=metrics,
+        )
+        with pytest.raises(ValidationError):
+            event.performance_metrics = None  # type: ignore[misc]
+
+    def test_performance_metrics_model_copy_preserves(self) -> None:
+        """Test that model_copy preserves performance_metrics."""
+        metrics = ModelIntrospectionPerformanceMetrics(
+            total_introspection_ms=25.0,
+            method_count=10,
+        )
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type=EnumNodeKind.EFFECT,
+            correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
+            performance_metrics=metrics,
+        )
+        copied = event.model_copy()
+        assert copied.performance_metrics is not None
+        assert copied.performance_metrics.total_introspection_ms == 25.0
+        assert copied.performance_metrics.method_count == 10
+
+    def test_performance_metrics_model_copy_deep(self) -> None:
+        """Test that deep model_copy creates independent metrics."""
+        metrics = ModelIntrospectionPerformanceMetrics(
+            total_introspection_ms=25.0,
+            slow_operations=["get_capabilities"],
+        )
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type=EnumNodeKind.EFFECT,
+            correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
+            performance_metrics=metrics,
+        )
+        copied = event.model_copy(deep=True)
+        assert copied.performance_metrics is not None
+        assert copied.performance_metrics is not event.performance_metrics
+        assert copied.performance_metrics.total_introspection_ms == 25.0

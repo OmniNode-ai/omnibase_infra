@@ -76,7 +76,13 @@ See Also
 - Runtime kernel: omnibase_infra.runtime.service_kernel
 """
 
-__version__ = "0.14.0"
+# Do not hardcode versions here; version is sourced from distribution metadata.
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("omnibase-infra")
+except PackageNotFoundError:
+    __version__ = "0.0.0-dev"
 
 from . import (
     enums,

@@ -1,0 +1,236 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeDeltaBundleEffect
+#
+# Tracks PR lifecycle as delta bundles from merge-gate decision through
+# to final outcome (merged/reverted/closed). Supports fix-PR detection
+# via stabilizes:<pr_ref> label convention.
+#
+# Related Tickets:
+#   - OMN-3142: NodeDeltaBundleEffect + NodeDeltaMetricsEffect
+#   - Migration 039: delta_bundles table
+#
+# Contract identifiers
+name: "node_delta_bundle_effect"
+contract_name: "node_delta_bundle_effect"
+node_name: "node_delta_bundle_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+# Node type
+node_type: "EFFECT_GENERIC"
+# Description
+description: >
+  Effect node for delta bundle lifecycle tracking. Receives merge-gate-decision
+  events (idempotent INSERT ON CONFLICT DO NOTHING) and pr-outcome events
+  (UPDATE with outcome, merged_at, bundle_completed_at). Detects fix-PRs via
+  the stabilizes:<pr_ref> label convention and populates is_fix_pr and
+  stabilizes_pr_ref fields accordingly.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelIntent"
+  module: "omnibase_core.models.reducer.model_intent"
+  description: "Intent model with write_bundle or update_outcome typed payload."
+output_model:
+  name: "ModelBackendResult"
+  module: "omnibase_infra.models.model_backend_result"
+  description: "Output model containing PostgreSQL operation result."
+# =============================================================================
+# HANDLER ROUTING (Declarative Handler Dispatch)
+# =============================================================================
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    # Write Bundle -- idempotent INSERT from merge-gate-decision event
+    - payload_type: "delta_bundle.write_bundle"
+      handler:
+        name: "HandlerWriteBundle"
+        module: "omnibase_infra.nodes.node_delta_bundle_effect.handlers.handler_write_bundle"
+      backend: "postgres"
+      description: "Idempotent INSERT into delta_bundles ON CONFLICT (pr_ref, head_sha) DO NOTHING."
+      input_model:
+        name: "ModelPayloadWriteBundle"
+        module: "omnibase_infra.nodes.node_delta_bundle_effect.models.model_payload_write_bundle"
+      output_fields:
+        - success
+        - error
+        - error_code
+        - duration_ms
+        - correlation_id
+    # Update Outcome -- UPDATE bundle with PR outcome
+    - payload_type: "delta_bundle.update_outcome"
+      handler:
+        name: "HandlerUpdateOutcome"
+        module: "omnibase_infra.nodes.node_delta_bundle_effect.handlers.handler_update_outcome"
+      backend: "postgres"
+      description: "UPDATE delta_bundles with outcome, merged_at, bundle_completed_at."
+      input_model:
+        name: "ModelPayloadUpdateOutcome"
+        module: "omnibase_infra.nodes.node_delta_bundle_effect.models.model_payload_update_outcome"
+      output_fields:
+        - success
+        - error
+        - error_code
+        - duration_ms
+        - correlation_id
+  # Execution configuration
+  execution_mode: "sequential"
+  partial_failure_handling: false
+  aggregation_strategy: "first_match"
+# =============================================================================
+# ERROR HANDLING (Circuit Breaker + Retry + Sanitization)
+# =============================================================================
+error_handling:
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+    half_open_max_requests: 3
+    per_backend: false
+    backends:
+      - name: "postgres"
+        failure_threshold: 5
+        reset_timeout_ms: 60000
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+      - "InfraUnavailableError"
+      - "RepositoryExecutionError"
+  error_sanitization:
+    enabled: true
+    utility: "omnibase_infra.utils.util_error_sanitization"
+    sanitize_patterns:
+      - "password"
+      - "secret"
+      - "token"
+      - "api_key"
+      - "connection_string"
+  error_types:
+    - name: "InfraConnectionError"
+      description: "Failed to connect to PostgreSQL"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "InfraTimeoutError"
+      description: "PostgreSQL operation timed out"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "InfraUnavailableError"
+      description: "PostgreSQL is unavailable (circuit open)"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "RepositoryExecutionError"
+      description: "PostgreSQL query execution failed"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+  error_codes:
+    - code: "POSTGRES_CONNECTION_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "Connection to PostgreSQL server failed"
+      retriable: true
+    - code: "POSTGRES_UPSERT_ERROR"
+      backend: "postgres"
+      operation: "write_bundle"
+      description: "PostgreSQL bundle upsert failed"
+      retriable: false
+    - code: "POSTGRES_UPDATE_ERROR"
+      backend: "postgres"
+      operation: "update_outcome"
+      description: "PostgreSQL outcome update failed"
+      retriable: false
+# IO operations (EFFECT node specific)
+io_operations:
+  - operation: "write_bundle"
+    description: "Idempotent INSERT of delta bundle from merge-gate-decision event"
+    input_fields:
+      - bundle_id
+      - correlation_id
+      - pr_ref
+      - head_sha
+      - base_sha
+      - coding_model
+      - subsystem
+      - gate_decision
+      - gate_violations
+      - labels
+    output_fields:
+      - success
+      - error
+      - error_code
+      - duration_ms
+      - correlation_id
+  - operation: "update_outcome"
+    description: "UPDATE bundle with PR outcome from pr-outcome event"
+    input_fields:
+      - correlation_id
+      - pr_ref
+      - head_sha
+      - outcome
+      - merged_at
+    output_fields:
+      - success
+      - error
+      - error_code
+      - duration_ms
+      - correlation_id
+# Dependencies (protocols this node requires)
+dependencies:
+  - name: "protocol_postgres_adapter"
+    type: "protocol"
+    class_name: "ProtocolPostgresAdapter"
+    module: "omnibase_infra.adapters.protocol_postgres_adapter"
+    description: "PostgreSQL database operations"
+  - name: "protocol_circuit_breaker_aware"
+    type: "protocol"
+    class_name: "ProtocolCircuitBreakerAware"
+    module: "omnibase_infra.mixins.protocol_circuit_breaker_aware"
+    description: "Circuit breaker awareness for backend protection"
+# Capabilities provided by this node
+capabilities:
+  - name: "delta_bundle_persistence"
+    description: "Persist delta bundles to PostgreSQL delta_bundles table"
+  - name: "idempotent_bundle_insert"
+    description: "INSERT ON CONFLICT (pr_ref, head_sha) DO NOTHING for gate-decision events"
+  - name: "outcome_update"
+    description: "UPDATE bundle with outcome, merged_at, bundle_completed_at"
+  - name: "fix_pr_detection"
+    description: "Parse stabilizes:<pr_ref> labels and set is_fix_pr + stabilizes_pr_ref"
+  - name: "circuit_breaker_protection"
+    description: "Protect PostgreSQL with circuit breaker pattern"
+# Health check configuration
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  backends:
+    - name: "postgres"
+      check_type: "connection"
+      timeout_ms: 5000
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-03-07"
+  updated: "2026-03-07"
+  tags:
+    - effect
+    - delta-bundle
+    - postgresql
+    - persistence
+    - pr-lifecycle
+    - circuit-breaker
+  related_tickets:
+    - "OMN-3142"

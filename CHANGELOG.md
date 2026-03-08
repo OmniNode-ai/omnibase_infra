@@ -5,6 +5,83 @@ All notable changes to the ONEX Infrastructure (omnibase_infra) will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-03-07
+
+### Added
+- Instrument runtime with Phoenix OTEL traces (OMN-3811, #655)
+- Registry-first startup topic assertions for event bus (OMN-3769, #649)
+- Canonical system health gate script (OMN-3772, #650)
+- Wire omnidash read-model migrations into bootstrap Step 1d (OMN-3748, #646)
+- Boot-order migration sentinel (OMN-3737, #645)
+- Handler pooling for parallel execution (OMN-477, #619)
+- Batch response publishing to RuntimeHostProcess (OMN-478, #618)
+- Parallel handler execution with asyncio concurrency (OMN-476, #617)
+- Per-handler shutdown timeouts (OMN-882, #613)
+- Enhanced error context with stack traces and suggestions (OMN-518, #615)
+- AST-based cosmetic change filter for writer-migration gate (OMN-3671, #623)
+- Topic completeness check script (OMN-3257, #620)
+- WARNING_PATTERN alerting for known recurring warnings (#610)
+- RestartWatcher thread for restart-loop detection (OMN-3596, #609)
+- Validate-kafka-schema-handshake CI gate with --changed-only (OMN-3411, #602)
+- Pre-commit validator blocks duplicate migration sequence numbers (OMN-3570, #601)
+- Writer-migration coupling gate (OMN-3530, #598)
+- Migration-integration job to CI gate (OMN-3529, #592)
+- NodeSetupOrchestrator — handler, node, contract, registry (OMN-3495, #591)
+- onex-setup.py interactive CLI with cloud gate output (OMN-3496, #595)
+- Provision cross-repo tables script + bootstrap wire-in (OMN-3531, #594)
+- Kafka-no-hardcoded-fallback pre-commit guard (OMN-3554, #593)
+- Health monitor with Slack alerts for runners (#641)
+- Untagged image prune to Docker cron (OMN-3719, #637)
+- Cloud bus guard pre-commit hook (OMN-3777, #652)
+- No-planning-docs pre-commit hook (OMN-3617, #611)
+
+### Fixed
+- Use venv Python for torch verification in Docker builder stage (OMN-3819, #656)
+- Idle-aware health check for skill-lifecycle-consumer (OMN-3784, #653)
+- Convert emitted_at to datetime for asyncpg (#648)
+- Reduce Docker image size with CPU-only torch + cleanup (#640)
+- Replace broken migration runner with fingerprint stamp in entrypoint (OMN-3734, #643)
+- restamp_fingerprint() calls installed module instead of missing script (#642)
+- Remove SLACK_WEBHOOK_URL fallback, enforce Web API-only (OMN-3332, #616)
+- Run-loop diagnostics for worker exit-code-0 debugging (OMN-3591, #614)
+- Reorder shutdown to stop runtime before unsubscribing consumers (OMN-3593, #612)
+- Install all Docker plugins with --no-deps to prevent core version downgrade (#624)
+- Pin qdrant-client>=1.16.0 and add grpcio>=1.62.0 lower bound (OMN-3548, #580)
+- Bump build-and-push-runtime timeout 45-60 min (OMN-3523, #600)
+- Upgrade protobuf to clear CVE-2026-0994 (OMN-3523, #599)
+- Pin Trivy to v0.69.3 (OMN-3523, #596)
+- Pin actions/checkout@v4 and actions/setup-python@v5 (OMN-3809, #654)
+- Pin torch CPU-only in Dockerfile.runtime (OMN-3715, #636)
+
+### Changed
+- Remove Consul entirely from omnibase_infra runtime (OMN-3540, #588)
+- Purge cloud bus (29092) references from omnibase_infra (OMN-3752, #647)
+- Scale CI runners 5->10 + update Docker image threshold (OMN-3714, OMN-3720, #644)
+- Migrate Docker workflows to self-hosted runners (#639)
+- CI resilience fixes (OMN-3662, #621)
+
+### Chores
+- Fix pre-existing AI-slop violations for --strict mode (OMN-3669, #622)
+- Remove dead _REAL_SCHEMA_FILE variable from test (OMN-3575, #608)
+- Bump docker/build-push-action from 5 to 6 (#625)
+- Bump actions/upload-artifact from 4 to 7 (#628)
+- Bump astral-sh/setup-uv from 3 to 7 (#626)
+- Bump actions/checkout from 4 to 6 (#629)
+- Bump actions/setup-python from 5 to 6 (#631)
+- Update types-aiofiles requirement (#627)
+- Update ruff requirement (#630)
+- Update uvicorn requirement (#632)
+- Update opentelemetry-instrumentation requirement (#633)
+- Update textual requirement (#634)
+
+### Tests
+- E2E integration tests for NodeSetupOrchestrator (OMN-3497, #597)
+- Tighten warning assertion in test_unexpected_error_logged_as_warning (OMN-3574, #607)
+- Verify advisory lock executes inside transaction block (OMN-3573, #606)
+- Remove xfail from intent boundary pair (OMN-3248, #604)
+- Cover advisory lock failure path in schema init tests (OMN-3572, #605)
+- Unit tests for schema init advisory lock (OMN-3567, #603)
+
 ## [0.14.0] - 2026-03-03
 
 ### Added

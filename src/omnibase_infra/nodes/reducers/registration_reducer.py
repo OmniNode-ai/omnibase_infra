@@ -812,6 +812,7 @@ class RegistrationReducer:
         Returns:
             ModelIntent with intent_type matching payload.intent_type for routing.
         """
+        # ONEX_EXCLUDE: clock_access - registration timestamp for first-seen records
         now = datetime.now(UTC)
 
         # Build the registration record using strongly-typed models.

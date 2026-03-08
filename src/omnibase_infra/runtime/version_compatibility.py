@@ -73,8 +73,11 @@ def _locate_pyproject() -> Path | None:
 
 
 def _parse_dep_bounds(spec: str) -> tuple[str, str] | None:
-    """Extract (min_version, max_version) from a PEP 508 specifier like
-    ``omnibase-core>=0.22.0,<0.23.0``.
+    """Extract (min_version, max_version) from a PEP 508 specifier.
+
+    Supports both range pins (``>=0.23.0,<0.24.0``) and exact pins
+    (``==0.24.0``).  For exact pins, the max version is derived as
+    the next minor release (e.g. ``0.24.0`` -> ``0.25.0``).
 
     Args:
         spec: A single dependency string from pyproject.toml.
@@ -82,10 +85,20 @@ def _parse_dep_bounds(spec: str) -> tuple[str, str] | None:
     Returns:
         (min_version, max_version) tuple, or None if bounds are incomplete.
     """
+    # Range pin: >=X,<Y
     min_match = re.search(r">=\s*([0-9][^\s,;\"']*)", spec)
     max_match = re.search(r"<\s*([0-9][^\s,;\"']*)", spec)
     if min_match and max_match:
         return min_match.group(1), max_match.group(1)
+
+    # Exact pin: ==X.Y.Z
+    eq_match = re.search(r"==\s*([0-9][^\s,;\"']*)", spec)
+    if eq_match:
+        pinned = eq_match.group(1)
+        parts = pinned.split(".")
+        if len(parts) >= 2:
+            next_minor = f"{parts[0]}.{int(parts[1]) + 1}.0"
+            return pinned, next_minor
     return None
 
 
@@ -152,12 +165,12 @@ def _build_matrix_from_pyproject(
 _FALLBACK_MATRIX: list[VersionConstraint] = [
     VersionConstraint(
         package="omnibase_core",
-        min_version="0.23.0",
-        max_version="0.24.0",
+        min_version="0.24.0",
+        max_version="0.25.0",
     ),
     VersionConstraint(
         package="omnibase_spi",
-        min_version="0.15.0",
+        min_version="0.15.1",
         max_version="0.16.0",
     ),
 ]
@@ -219,19 +232,24 @@ def _version_in_range(
 def _get_installed_version(package_name: str) -> str | None:
     """Get the installed version of a package.
 
+    Uses ``importlib.metadata.version`` which reads the version from the
+    installed package metadata (set by pyproject.toml at build time), rather
+    than ``__version__`` attributes which may be out of sync.
+
     Args:
-        package_name: Package name (using underscores, e.g., "omnibase_core").
+        package_name: Package name (using underscores or hyphens,
+            e.g., "omnibase_core" or "omnibase-core").
 
     Returns:
         Version string, or None if the package is not installed.
     """
-    try:
-        import importlib
+    from importlib.metadata import PackageNotFoundError, version
 
-        mod = importlib.import_module(package_name)
-        version: str | None = getattr(mod, "__version__", None)
-        return version
-    except ImportError:
+    # importlib.metadata uses distribution names (hyphens), not import names
+    dist_name = package_name.replace("_", "-")
+    try:
+        return version(dist_name)
+    except PackageNotFoundError:
         return None
 
 
