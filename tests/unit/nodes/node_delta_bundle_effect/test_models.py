@@ -11,7 +11,7 @@ Related Tickets:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -119,7 +119,7 @@ class TestModelPayloadUpdateOutcome:
 
     def test_with_merged_at(self) -> None:
         """Payload with merged_at timestamp."""
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         payload = ModelPayloadUpdateOutcome(
             correlation_id=uuid4(),
             pr_ref="owner/repo#1",
