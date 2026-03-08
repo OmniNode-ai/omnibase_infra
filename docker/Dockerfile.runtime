@@ -201,7 +201,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "asyncio-mqtt>=0.16.0,<1.0.0" \
     "alembic>=1.13.0,<2.0.0" \
     "psycopg2-binary>=2.9.10,<3.0.0" \
-    "mcp>=1.8.0,<2.0.0"
+    "mcp>=1.8.0,<2.0.0" \
+    "python-snappy>=0.7.0,<1.0.0"
 
 # Security: upgrade protobuf to clear CVE-2026-0994 (HIGH, DoS, fixed in >=5.29.6).
 # protobuf 4.25.8 (from transitive deps) is flagged by Trivy scan (ignore-unfixed: true).
