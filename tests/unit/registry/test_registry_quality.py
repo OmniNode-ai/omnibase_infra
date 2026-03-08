@@ -4,6 +4,7 @@ These tests verify structural integrity and data quality of the production
 artifact registry — not the loader mechanics (those live in
 test_artifact_registry_loader.py).
 """
+
 from __future__ import annotations
 
 import re
@@ -140,9 +141,7 @@ class TestArtifactPathConventions:
         self, artifacts: list[ModelArtifactRegistryEntry]
     ) -> None:
         for a in artifacts:
-            assert a.repo.strip(), (
-                f"Artifact '{a.title}' has empty repo"
-            )
+            assert a.repo.strip(), f"Artifact '{a.title}' has empty repo"
 
     def test_known_repos_only(
         self, artifacts: list[ModelArtifactRegistryEntry]
