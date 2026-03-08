@@ -160,14 +160,14 @@ intent_emission:
     - intent_type: "postgres.upsert_registration"
       target_pattern: "postgres://node_registrations/{node_id}"
       payload_model: "ModelPayloadPostgresUpsertRegistration"
-      payload_module: "omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration"
+      payload_module: "omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_upsert_registration"
       description: "Upsert node registration record in PostgreSQL"
 # State Model Configuration
 # =========================
 # The reducer uses ModelRegistrationState for immutable state management.
 state_model:
   name: "ModelRegistrationState"
-  module: "omnibase_infra.nodes.reducers.models.model_registration_state"
+  module: "omnibase_infra.nodes.node_registration_reducer.models.model_registration_state"
   description: "Immutable state model for pure reducer pattern"
 # Validation Configuration
 # ========================

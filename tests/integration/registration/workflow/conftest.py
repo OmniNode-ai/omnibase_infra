@@ -38,19 +38,19 @@ if TYPE_CHECKING:
 
 from omnibase_infra.mixins import MixinNodeIntrospection
 from omnibase_infra.models.discovery import ModelIntrospectionConfig
+from omnibase_infra.models.model_backend_result import ModelBackendResult
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-from omnibase_infra.nodes.effects import NodeRegistryEffect
-from omnibase_infra.nodes.effects.models import (
-    ModelBackendResult,
+from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+from omnibase_infra.nodes.node_registration_reducer.models import ModelRegistrationState
+from omnibase_infra.nodes.node_registry_effect import NodeRegistryEffect
+from omnibase_infra.nodes.node_registry_effect.models import (
     ModelEffectIdempotencyConfig,
     ModelRegistryRequest,
     ModelRegistryResponse,
 )
-from omnibase_infra.nodes.effects.store_effect_idempotency_inmemory import (
+from omnibase_infra.nodes.node_registry_effect.store_effect_idempotency_inmemory import (
     InMemoryEffectIdempotencyStore,
 )
-from omnibase_infra.nodes.reducers import RegistrationReducer
-from omnibase_infra.nodes.reducers.models import ModelRegistrationState
 
 # =============================================================================
 # Cross-Module Fixture Imports

@@ -16,12 +16,12 @@ from __future__ import annotations
 
 import pytest
 
-from omnibase_infra.nodes.effects.models.adapter_llm_usage_to_contract import (
+from omnibase_infra.models.llm.adapter_llm_usage_to_contract import (
     to_call_metrics,
     to_usage_normalized,
     to_usage_raw,
 )
-from omnibase_infra.nodes.effects.models.model_llm_usage import ModelLlmUsage
+from omnibase_infra.models.llm.model_llm_usage import ModelLlmUsage
 from omnibase_spi.contracts.measurement import (
     ContractEnumUsageSource,
     ContractLlmCallMetrics,

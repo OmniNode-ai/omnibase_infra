@@ -32,10 +32,10 @@ from omnibase_infra.models.registration import (
     ModelNodeMetadata,
     ModelNodeRegistration,
 )
-from omnibase_infra.nodes.effects.models.model_effect_idempotency_config import (
+from omnibase_infra.nodes.node_registry_effect.models.model_effect_idempotency_config import (
     ModelEffectIdempotencyConfig,
 )
-from omnibase_infra.nodes.effects.store_effect_idempotency_inmemory import (
+from omnibase_infra.nodes.node_registry_effect.store_effect_idempotency_inmemory import (
     InMemoryEffectIdempotencyStore,
 )
 

@@ -53,8 +53,7 @@ from omnibase_infra.enums import (
 )
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.mixins import MixinLlmHttpTransport
-from omnibase_infra.models.model_backend_result import ModelBackendResult
-from omnibase_infra.nodes.effects.models import (
+from omnibase_infra.models.llm import (
     ModelLlmFunctionCall,
     ModelLlmInferenceRequest,
     ModelLlmInferenceResponse,
@@ -63,6 +62,7 @@ from omnibase_infra.nodes.effects.models import (
     ModelLlmToolDefinition,
     ModelLlmUsage,
 )
+from omnibase_infra.models.model_backend_result import ModelBackendResult
 from omnibase_spi.contracts.measurement import ContractEnumUsageSource
 
 logger = logging.getLogger(__name__)

@@ -21,7 +21,7 @@ Related:
 
 from __future__ import annotations
 
-from omnibase_infra.nodes.effects.models.model_llm_usage import ModelLlmUsage
+from omnibase_infra.models.llm.model_llm_usage import ModelLlmUsage
 from omnibase_spi.contracts.measurement import (
     ContractEnumUsageSource,
     ContractLlmCallMetrics,

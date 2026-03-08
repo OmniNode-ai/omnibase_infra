@@ -22,10 +22,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.nodes.reducers.models.model_registration_ack_update import (
+from omnibase_infra.nodes.node_registration_reducer.models.model_registration_ack_update import (
     ModelRegistrationAckUpdate,
 )
-from omnibase_infra.nodes.reducers.models.model_registration_heartbeat_update import (
+from omnibase_infra.nodes.node_registration_reducer.models.model_registration_heartbeat_update import (
     ModelRegistrationHeartbeatUpdate,
 )
 

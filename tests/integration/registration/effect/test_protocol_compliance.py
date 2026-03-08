@@ -38,7 +38,7 @@ import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.models import ModelBackendResult
-from omnibase_infra.nodes.effects.protocol_postgres_adapter import (
+from omnibase_infra.nodes.node_registry_effect.protocols.protocol_postgres_adapter import (
     ProtocolPostgresAdapter,
 )
 from tests.integration.registration.effect.test_doubles import (

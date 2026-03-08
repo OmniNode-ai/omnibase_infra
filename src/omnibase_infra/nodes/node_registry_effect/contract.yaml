@@ -444,8 +444,8 @@ capabilities:
 #   The input_model and output_model reference the node's local models package:
 #     - omnibase_infra.nodes.node_registry_effect.models
 #   This package re-exports shared effect models from:
-#     - omnibase_infra.nodes.effects.models.model_registry_request
-#     - omnibase_infra.nodes.effects.models.model_registry_response
+#     - omnibase_infra.nodes.node_registry_effect.models.model_registry_request
+#     - omnibase_infra.nodes.node_registry_effect.models.model_registry_response
 #     - omnibase_infra.nodes.effects.models.model_backend_result
 #
 # Sync Status:

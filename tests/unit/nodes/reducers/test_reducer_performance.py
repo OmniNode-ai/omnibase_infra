@@ -38,9 +38,9 @@ from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
     ModelNodeMetadata,
 )
-from omnibase_infra.nodes.reducers import RegistrationReducer
-from omnibase_infra.nodes.reducers.models import ModelRegistrationState
-from omnibase_infra.nodes.reducers.registration_reducer import (
+from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+from omnibase_infra.nodes.node_registration_reducer.models import ModelRegistrationState
+from omnibase_infra.nodes.node_registration_reducer.registration_reducer import (
     PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS,
     PERF_THRESHOLD_INTENT_BUILD_MS,
     PERF_THRESHOLD_REDUCE_MS,

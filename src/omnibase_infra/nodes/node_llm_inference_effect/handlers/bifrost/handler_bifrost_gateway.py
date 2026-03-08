@@ -64,7 +64,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.nodes.effects.models.model_llm_inference_response import (
+from omnibase_infra.models.llm.model_llm_inference_response import (
     ModelLlmInferenceResponse,
 )
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost.model_bifrost_config import (

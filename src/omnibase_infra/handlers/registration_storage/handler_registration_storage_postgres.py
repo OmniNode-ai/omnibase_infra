@@ -76,7 +76,7 @@ from omnibase_infra.nodes.node_registration_storage_effect.models import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_infra.nodes.effects.protocol_postgres_adapter import (
+    from omnibase_infra.nodes.node_registry_effect.protocols.protocol_postgres_adapter import (
         ProtocolPostgresAdapter,
     )
 

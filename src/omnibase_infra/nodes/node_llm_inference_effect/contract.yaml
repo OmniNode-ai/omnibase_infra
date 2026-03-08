@@ -26,17 +26,17 @@ description: >
   LLM inference effect node for provider-agnostic inference operations. Delegates to provider-specific handlers (OpenAI-compatible, Ollama) via declarative operation routing. Supports chat completions and text completions with tool calling, generation parameters, and structured response parsing.
 
 # Strongly typed I/O models
-# Note: These models live in the shared omnibase_infra.nodes.effects.models
-# package rather than co-located with this node. They are shared across all
-# LLM inference handlers (OpenAI-compatible, Ollama) to ensure a single
-# canonical request/response contract for the inference effect layer.
+# Note: These models live in the shared omnibase_infra.models.llm package.
+# They are shared across all LLM inference handlers (OpenAI-compatible, Ollama)
+# to ensure a single canonical request/response contract for the inference effect layer.
+# Migrated from omnibase_infra.nodes.effects.models (OMN-3989).
 input_model:
   name: "ModelLlmInferenceRequest"
-  module: "omnibase_infra.nodes.effects.models"
+  module: "omnibase_infra.models.llm"
   description: "Input model containing LLM inference parameters and routing configuration."
 output_model:
   name: "ModelLlmInferenceResponse"
-  module: "omnibase_infra.nodes.effects.models"
+  module: "omnibase_infra.models.llm"
   description: "Output model containing inference result, usage, and tracing metadata."
 # =============================================================================
 # HANDLER ROUTING (Declarative Handler Dispatch)

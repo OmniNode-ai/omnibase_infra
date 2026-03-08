@@ -53,10 +53,10 @@ import time
 from collections import OrderedDict
 from uuid import UUID
 
-from omnibase_infra.nodes.effects.models.model_effect_idempotency_config import (
+from omnibase_infra.nodes.node_registry_effect.models.model_effect_idempotency_config import (
     ModelEffectIdempotencyConfig,
 )
-from omnibase_infra.nodes.effects.protocol_effect_idempotency_store import (
+from omnibase_infra.nodes.node_registry_effect.protocols.protocol_effect_idempotency_store import (
     ProtocolEffectIdempotencyStore,
 )
 

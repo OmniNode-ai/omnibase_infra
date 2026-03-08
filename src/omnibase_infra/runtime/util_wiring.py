@@ -14,7 +14,7 @@ The wiring module is responsible for:
 
 Contract-Driven Handler Loading:
     Handler classes are discovered and loaded from contract.yaml files located
-    in nodes/handlers/<handler_type>/contract.yaml. Each contract specifies:
+    in contracts/handlers/<handler_type>/contract.yaml. Each contract specifies:
     - handler.module: The Python module path
     - handler.name: The class name to load
 
@@ -60,7 +60,7 @@ Adding New Handlers:
                 return {"success": True, "data": ...}
         ```
 
-    2. Create a contract.yaml in nodes/handlers/<type>/contract.yaml:
+    2. Create a contract.yaml in contracts/handlers/<type>/contract.yaml:
 
         ```yaml
         name: "handler_custom"
@@ -164,7 +164,7 @@ logger = logging.getLogger(__name__)
 
 # Handler contract directory path.
 # Handler configurations are loaded from contract.yaml files in this directory.
-_HANDLERS_BASE = Path(__file__).parent.parent / "nodes" / "handlers"
+_HANDLERS_BASE = Path(__file__).parent.parent / "contracts" / "handlers"
 
 # Mapping of handler types to their contract paths.
 # Each entry maps a handler type constant to the path of its contract.yaml file.
@@ -607,7 +607,7 @@ def wire_handlers_from_contract(
 def get_known_handler_types() -> list[str]:
     """Get list of known handler types that can be wired.
 
-    Handler types are discovered from contract.yaml files in nodes/handlers/.
+    Handler types are discovered from contract.yaml files in contracts/handlers/.
 
     Returns:
         Sorted list of handler type strings.

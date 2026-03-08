@@ -43,7 +43,7 @@ from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
     ModelNodeMetadata,
 )
-from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+from omnibase_infra.nodes.node_registration_reducer.models import ModelRegistrationState
 from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
 
 if TYPE_CHECKING:

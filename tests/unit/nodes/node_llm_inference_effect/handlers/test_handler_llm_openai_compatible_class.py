@@ -31,7 +31,7 @@ from omnibase_infra.enums import (
     EnumLlmOperationType,
 )
 from omnibase_infra.mixins.mixin_llm_http_transport import MixinLlmHttpTransport
-from omnibase_infra.nodes.effects.models import (
+from omnibase_infra.models.llm import (
     ModelLlmFunctionDef,
     ModelLlmToolChoice,
     ModelLlmToolDefinition,

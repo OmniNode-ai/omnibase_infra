@@ -63,8 +63,8 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
 from omnibase_infra.nodes.node_registration_orchestrator.services import (
     RegistrationReducerService,
 )
-from omnibase_infra.nodes.reducers import RegistrationReducer
-from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+from omnibase_infra.nodes.node_registration_reducer.models import ModelRegistrationState
 
 # Note: ALL_INFRA_AVAILABLE skipif is handled by conftest.py for all E2E tests
 from .conftest import make_e2e_test_identity, wait_for_consumer_ready
@@ -72,7 +72,7 @@ from .verification_helpers import wait_for_postgres_registration
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
-    from omnibase_infra.nodes.effects import NodeRegistryEffect
+    from omnibase_infra.nodes.node_registry_effect import NodeRegistryEffect
     from omnibase_infra.projectors import ProjectionReaderRegistration
     from omnibase_infra.runtime import ProjectorShell
 
@@ -584,7 +584,9 @@ class OrchestratorPipeline:
             event: The introspection event.
             correlation_id: Correlation ID for tracing.
         """
-        from omnibase_infra.nodes.effects.models import ModelRegistryRequest
+        from omnibase_infra.nodes.node_registry_effect.models import (
+            ModelRegistryRequest,
+        )
 
         # Convert metadata to dict[str, str], filtering out None values
         # and converting non-string values to strings
@@ -724,7 +726,7 @@ async def registry_effect_node(
     Returns:
         NodeRegistryEffect: Configured effect node.
     """
-    from omnibase_infra.nodes.effects import NodeRegistryEffect
+    from omnibase_infra.nodes.node_registry_effect import NodeRegistryEffect
 
     return NodeRegistryEffect(
         consul_client=mock_consul_client, postgres_adapter=mock_postgres_adapter
@@ -1549,8 +1551,10 @@ class TestFullPipelineWithRealInfrastructure:
         Verifies PostgreSQL backend operation is called with correct parameters.
         Consul removed in OMN-3540.
         """
-        from omnibase_infra.nodes.effects import NodeRegistryEffect
-        from omnibase_infra.nodes.effects.models import ModelRegistryRequest
+        from omnibase_infra.nodes.node_registry_effect import NodeRegistryEffect
+        from omnibase_infra.nodes.node_registry_effect.models import (
+            ModelRegistryRequest,
+        )
 
         effect = NodeRegistryEffect(postgres_adapter=mock_postgres_adapter)
 
