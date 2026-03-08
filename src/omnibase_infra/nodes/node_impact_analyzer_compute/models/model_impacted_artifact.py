@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,7 +19,7 @@ class ModelImpactedArtifact(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    artifact_id: str
+    artifact_id: UUID
     artifact_type: Literal[
         "doc",
         "design_spec",

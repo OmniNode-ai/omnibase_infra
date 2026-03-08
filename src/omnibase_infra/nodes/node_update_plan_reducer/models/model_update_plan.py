@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
@@ -26,8 +27,8 @@ class ModelUpdatePlan(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    plan_id: str
-    source_trigger_id: str
+    plan_id: UUID
+    source_trigger_id: UUID
     source_entity_ref: str
     summary: str
     impacted_artifacts: list[ModelImpactedArtifact]

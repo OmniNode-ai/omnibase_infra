@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
@@ -22,6 +23,6 @@ class ModelImpactAnalysisResult(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    source_trigger_id: str
+    source_trigger_id: UUID
     impacted_artifacts: list[ModelImpactedArtifact]
     highest_merge_policy: Literal["none", "warn", "require", "strict"]

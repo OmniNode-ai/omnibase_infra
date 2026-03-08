@@ -3,8 +3,25 @@
 """Unit tests for artifact reconciliation domain event models."""
 
 from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
 import pytest
+
+# Deterministic UUIDs for test clarity
+_TRIGGER_1 = UUID("00000000-0000-4000-8000-000000000001")
+_TRIGGER_2 = UUID("00000000-0000-4000-8000-000000000002")
+_TRIGGER_3 = UUID("00000000-0000-4000-8000-000000000003")
+_TRIGGER_BAD = UUID("00000000-0000-4000-8000-0000000000ff")
+_TRIGGER_FREEZE = UUID("00000000-0000-4000-8000-0000000000f0")
+_TRIGGER_EMPTY = UUID("00000000-0000-4000-8000-0000000000e0")
+_ARTIFACT_DOC = UUID("00000000-0000-4000-8000-000000000010")
+_ARTIFACT_A = UUID("00000000-0000-4000-8000-000000000011")
+_ARTIFACT_B = UUID("00000000-0000-4000-8000-000000000012")
+_ARTIFACT_X = UUID("00000000-0000-4000-8000-0000000000aa")
+_TASK_1 = UUID("00000000-0000-4000-8000-000000000020")
+_TASK_BAD = UUID("00000000-0000-4000-8000-0000000000bb")
+_PLAN_1 = UUID("00000000-0000-4000-8000-000000000030")
+_PLAN_BAD = UUID("00000000-0000-4000-8000-0000000000cc")
 
 
 @pytest.mark.unit
@@ -15,7 +32,7 @@ class TestUpdateTrigger:
         )
 
         trigger = ModelUpdateTrigger(
-            trigger_id="t-001",
+            trigger_id=_TRIGGER_1,
             trigger_type="pr_opened",
             source_repo="omnibase_infra",
             source_ref="refs/pull/123/head",
@@ -31,7 +48,7 @@ class TestUpdateTrigger:
         )
 
         trigger = ModelUpdateTrigger(
-            trigger_id="t-002",
+            trigger_id=_TRIGGER_2,
             trigger_type="contract_changed",
             source_repo="omnibase_infra",
             changed_files=["src/omnibase_infra/nodes/node_bar/contract.yaml"],
@@ -45,7 +62,7 @@ class TestUpdateTrigger:
         )
 
         trigger = ModelUpdateTrigger(
-            trigger_id="t-003",
+            trigger_id=_TRIGGER_3,
             trigger_type="manual_plan_request",
             source_repo="omnibase_infra",
             changed_files=[],
@@ -62,7 +79,7 @@ class TestUpdateTrigger:
 
         with pytest.raises(ValueError):
             ModelUpdateTrigger(
-                trigger_id="t-bad",
+                trigger_id=_TRIGGER_BAD,
                 trigger_type="invalid_type",
                 source_repo="omnibase_infra",
                 changed_files=[],
@@ -76,7 +93,7 @@ class TestUpdateTrigger:
 
         with pytest.raises(ValueError):
             ModelUpdateTrigger(
-                trigger_id="t-bad",
+                trigger_id=_TRIGGER_BAD,
                 trigger_type="pr_opened",
                 source_repo="omnibase_infra",
                 changed_files=[],
@@ -90,14 +107,14 @@ class TestUpdateTrigger:
         )
 
         trigger = ModelUpdateTrigger(
-            trigger_id="t-freeze",
+            trigger_id=_TRIGGER_FREEZE,
             trigger_type="pr_opened",
             source_repo="omnibase_infra",
             changed_files=[],
             timestamp=datetime.now(UTC),
         )
         with pytest.raises(ValueError):
-            trigger.trigger_id = "modified"  # type: ignore[misc]
+            trigger.trigger_id = uuid4()  # type: ignore[misc]
 
 
 @pytest.mark.unit
@@ -108,7 +125,7 @@ class TestImpactedArtifact:
         )
 
         artifact = ModelImpactedArtifact(
-            artifact_id="doc-handler-lifecycle",
+            artifact_id=_ARTIFACT_DOC,
             artifact_type="doc",
             path="docs/architecture/handler_lifecycle.md",
             impact_strength=0.85,
@@ -124,7 +141,7 @@ class TestImpactedArtifact:
 
         with pytest.raises(ValueError):
             ModelImpactedArtifact(
-                artifact_id="x",
+                artifact_id=_ARTIFACT_X,
                 artifact_type="doc",
                 path="x",
                 impact_strength=1.5,
@@ -139,7 +156,7 @@ class TestImpactedArtifact:
 
         with pytest.raises(ValueError):
             ModelImpactedArtifact(
-                artifact_id="x",
+                artifact_id=_ARTIFACT_X,
                 artifact_type="doc",
                 path="x",
                 impact_strength=-0.1,
@@ -154,7 +171,7 @@ class TestImpactedArtifact:
 
         # Exactly 0.0 and 1.0 should be valid
         a0 = ModelImpactedArtifact(
-            artifact_id="a",
+            artifact_id=_ARTIFACT_A,
             artifact_type="doc",
             path="p",
             impact_strength=0.0,
@@ -162,7 +179,7 @@ class TestImpactedArtifact:
             required_action="none",
         )
         a1 = ModelImpactedArtifact(
-            artifact_id="b",
+            artifact_id=_ARTIFACT_B,
             artifact_type="doc",
             path="p",
             impact_strength=1.0,
@@ -179,7 +196,7 @@ class TestImpactedArtifact:
 
         with pytest.raises(ValueError):
             ModelImpactedArtifact(
-                artifact_id="x",
+                artifact_id=_ARTIFACT_X,
                 artifact_type="invalid",
                 path="x",
                 impact_strength=0.5,
@@ -199,7 +216,7 @@ class TestImpactAnalysisResult:
         )
 
         artifact = ModelImpactedArtifact(
-            artifact_id="doc-test",
+            artifact_id=_ARTIFACT_DOC,
             artifact_type="doc",
             path="docs/test.md",
             impact_strength=0.7,
@@ -207,7 +224,7 @@ class TestImpactAnalysisResult:
             required_action="review",
         )
         result = ModelImpactAnalysisResult(
-            source_trigger_id="t-001",
+            source_trigger_id=_TRIGGER_1,
             impacted_artifacts=[artifact],
             highest_merge_policy="require",
         )
@@ -220,7 +237,7 @@ class TestImpactAnalysisResult:
         )
 
         result = ModelImpactAnalysisResult(
-            source_trigger_id="t-empty",
+            source_trigger_id=_TRIGGER_EMPTY,
             impacted_artifacts=[],
             highest_merge_policy="none",
         )
@@ -235,9 +252,9 @@ class TestUpdateTask:
         )
 
         task = ModelUpdateTask(
-            task_id="ut-001",
+            task_id=_TASK_1,
             title="Review handler lifecycle doc",
-            target_artifact_id="doc-handler-lifecycle",
+            target_artifact_id=_ARTIFACT_DOC,
             task_type="human_author",
             blocking=True,
         )
@@ -252,9 +269,9 @@ class TestUpdateTask:
 
         with pytest.raises(ValueError):
             ModelUpdateTask(
-                task_id="ut-bad",
+                task_id=_TASK_BAD,
                 title="Bad task",
-                target_artifact_id="x",
+                target_artifact_id=_ARTIFACT_X,
                 task_type="invalid",
             )
 
@@ -265,9 +282,9 @@ class TestUpdateTask:
 
         with pytest.raises(ValueError):
             ModelUpdateTask(
-                task_id="ut-bad",
+                task_id=_TASK_BAD,
                 title="Bad task",
-                target_artifact_id="x",
+                target_artifact_id=_ARTIFACT_X,
                 task_type="human_author",
                 status="invalid",
             )
@@ -284,15 +301,15 @@ class TestUpdatePlan:
         )
 
         task = ModelUpdateTask(
-            task_id="ut-001",
+            task_id=_TASK_1,
             title="Review handler lifecycle doc",
-            target_artifact_id="doc-handler-lifecycle",
+            target_artifact_id=_ARTIFACT_DOC,
             task_type="human_author",
             blocking=True,
         )
         plan = ModelUpdatePlan(
-            plan_id="plan-001",
-            source_trigger_id="t-001",
+            plan_id=_PLAN_1,
+            source_trigger_id=_TRIGGER_1,
             source_entity_ref="pr/omnibase_infra/123",
             summary="PR #123 modified contract.yaml",
             impacted_artifacts=[],
@@ -311,8 +328,8 @@ class TestUpdatePlan:
 
         with pytest.raises(ValueError):
             ModelUpdatePlan(
-                plan_id="plan-bad",
-                source_trigger_id="t-001",
+                plan_id=_PLAN_BAD,
+                source_trigger_id=_TRIGGER_1,
                 source_entity_ref="pr/test/1",
                 summary="Bad plan",
                 impacted_artifacts=[],
@@ -328,8 +345,8 @@ class TestUpdatePlan:
 
         with pytest.raises(ValueError):
             ModelUpdatePlan(
-                plan_id="plan-bad",
-                source_trigger_id="t-001",
+                plan_id=_PLAN_BAD,
+                source_trigger_id=_TRIGGER_1,
                 source_entity_ref="pr/test/1",
                 summary="Bad plan",
                 impacted_artifacts=[],

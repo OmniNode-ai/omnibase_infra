@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,9 +19,9 @@ class ModelUpdateTask(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    task_id: str
+    task_id: UUID
     title: str
-    target_artifact_id: str
+    target_artifact_id: UUID
     task_type: Literal[
         "patch_existing",
         "regenerate",

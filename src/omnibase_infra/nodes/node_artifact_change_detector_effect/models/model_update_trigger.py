@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,7 +20,7 @@ class ModelUpdateTrigger(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    trigger_id: str
+    trigger_id: UUID
     trigger_type: Literal[
         "pr_opened",
         "pr_updated",
