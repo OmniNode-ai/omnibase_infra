@@ -71,7 +71,7 @@ jobs:
             uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
 
       - name: Install dependencies
-        run: uv sync
+        run: rm -rf .venv && uv sync
 
       - name: Check ruff formatting
         run: uv run ruff format --check src/ tests/
@@ -120,7 +120,7 @@ jobs:
             uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
 
       - name: Install dependencies
-        run: uv sync
+        run: rm -rf .venv && uv sync
 
       - name: Run architecture layer check
         run: |
@@ -193,7 +193,7 @@ jobs:
             uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
 
       - name: Install dependencies
-        run: uv sync
+        run: rm -rf .venv && uv sync
 
       - name: Check schema fingerprint (CI twin for B2)
         run: uv run python scripts/check_schema_fingerprint.py verify
@@ -240,7 +240,7 @@ jobs:
             uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
 
       - name: Install dependencies
-        run: uv sync
+        run: rm -rf .venv && uv sync
 
       - name: Run demo loop assertion gate
         run: |
@@ -313,7 +313,7 @@ jobs:
             uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
 
       - name: Install dependencies
-        run: uv sync
+        run: rm -rf .venv && uv sync
 
       - name: Check topic enum drift
         run: |
@@ -361,7 +361,7 @@ jobs:
             uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
 
       - name: Install dependencies
-        run: uv sync
+        run: rm -rf .venv && uv sync
 
       - name: Lint topic names
         run: |
@@ -485,7 +485,7 @@ jobs:
             uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
 
       - name: Install dependencies
-        run: uv sync
+        run: rm -rf .venv && uv sync
 
       - name: Check for raw topic literals in production code
         run: |
@@ -541,7 +541,7 @@ jobs:
             uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
 
       - name: Install dependencies
-        run: uv sync
+        run: rm -rf .venv && uv sync
 
       - name: Run test split ${{ matrix.split }}/10
         run: |
@@ -759,7 +759,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - name: Install dependencies
-        run: uv sync --frozen
+        run: rm -rf .venv && uv sync --frozen
       - name: Check writer-migration coupling
         run: uv run python scripts/check_migration_required.py --ci
 
@@ -805,7 +805,7 @@ jobs:
             uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
 
       - name: Install dependencies
-        run: uv sync --frozen
+        run: rm -rf .venv && uv sync --frozen
 
       - name: Apply all migrations
         env:

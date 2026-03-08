@@ -257,7 +257,7 @@ jobs:
             uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
 
       - name: Install dependencies
-        run: uv sync
+        run: rm -rf .venv && uv sync
 
       # Run Docker integration tests WITHOUT pytest-xdist (no -n auto)
       # This prevents worker crashes during Docker builds
