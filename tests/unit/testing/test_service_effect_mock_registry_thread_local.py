@@ -1,22 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Unit tests for thread-local ServiceEffectMockRegistry utilities.
+"""Unit tests for thread-local EffectMockRegistry utilities.
 
 Tests cover thread isolation, the scoped context manager, and
 cleanup behavior of the thread-local registry helpers.
 
 Related:
-    - OMN-1336: Add thread-local utility for ServiceEffectMockRegistry
+    - OMN-1336: Add thread-local utility for EffectMockRegistry
 """
 
 from __future__ import annotations
 
 import threading
-from typing import Any
+from collections.abc import Generator
 
 import pytest
 
 from omnibase_infra.testing.service_effect_mock_registry import (
-    ServiceEffectMockRegistry,
+    EffectMockRegistry,
 )
 from omnibase_infra.testing.service_effect_mock_registry_thread_local import (
     clear_thread_local_registry,
@@ -26,7 +26,7 @@ from omnibase_infra.testing.service_effect_mock_registry_thread_local import (
 
 
 @pytest.fixture(autouse=True)
-def _clean_thread_local() -> Any:
+def _clean_thread_local() -> Generator[None, None, None]:
     """Ensure thread-local state is clean before and after each test."""
     clear_thread_local_registry()
     yield
@@ -38,9 +38,9 @@ class TestGetThreadLocalRegistry:
     """Tests for get_thread_local_registry()."""
 
     def test_returns_registry_instance(self) -> None:
-        """Returns a ServiceEffectMockRegistry instance."""
+        """Returns a EffectMockRegistry instance."""
         registry = get_thread_local_registry()
-        assert isinstance(registry, ServiceEffectMockRegistry)
+        assert isinstance(registry, EffectMockRegistry)
 
     def test_returns_same_instance_on_repeated_calls(self) -> None:
         """Returns the same instance when called multiple times in same thread."""
@@ -53,7 +53,7 @@ class TestGetThreadLocalRegistry:
         main_registry = get_thread_local_registry()
         main_registry.register("MainThreadProtocol", object())
 
-        thread_registry: ServiceEffectMockRegistry | None = None
+        thread_registry: EffectMockRegistry | None = None
         thread_has_main_protocol: bool | None = None
 
         def worker() -> None:
@@ -73,7 +73,7 @@ class TestGetThreadLocalRegistry:
         """Registrations in one thread do not affect another thread."""
         main_registry = get_thread_local_registry()
 
-        results: dict[str, Any] = {}
+        results: dict[str, bool] = {}
 
         def thread_a() -> None:
             reg = get_thread_local_registry()
@@ -131,9 +131,9 @@ class TestScopedEffectMockRegistry:
     """Tests for scoped_effect_mock_registry() context manager."""
 
     def test_yields_registry(self) -> None:
-        """Context manager yields a ServiceEffectMockRegistry."""
+        """Context manager yields a EffectMockRegistry."""
         with scoped_effect_mock_registry() as registry:
-            assert isinstance(registry, ServiceEffectMockRegistry)
+            assert isinstance(registry, EffectMockRegistry)
 
     def test_clears_on_exit(self) -> None:
         """Registrations are cleared when context exits."""

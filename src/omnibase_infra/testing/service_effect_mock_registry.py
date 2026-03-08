@@ -14,7 +14,7 @@ Design:
 
 Example::
 
-    registry = ServiceEffectMockRegistry()
+    registry = EffectMockRegistry()
     registry.register("ProtocolPostgresAdapter", StubPostgresAdapter())
     registry.register("ProtocolConsulClient", StubConsulClient())
 
@@ -22,16 +22,14 @@ Example::
     assert isinstance(adapter, StubPostgresAdapter)
 
 Related:
-    - OMN-1336: Add thread-local utility for ServiceEffectMockRegistry
+    - OMN-1336: Add thread-local utility for EffectMockRegistry
     - OMN-1147: Effect Classification System
 """
 
 from __future__ import annotations
 
-from typing import Any
 
-
-class ServiceEffectMockRegistry:
+class EffectMockRegistry:
     """Registry for mock/stub effect service implementations.
 
     Maps protocol names (strings) to mock or stub instances for use in
@@ -47,7 +45,7 @@ class ServiceEffectMockRegistry:
 
     Example::
 
-        registry = ServiceEffectMockRegistry()
+        registry = EffectMockRegistry()
         registry.register("ProtocolEventBus", mock_bus)
 
         bus = registry.resolve("ProtocolEventBus")
@@ -56,9 +54,9 @@ class ServiceEffectMockRegistry:
 
     def __init__(self) -> None:
         """Initialize an empty mock registry."""
-        self._services: dict[str, Any] = {}
+        self._services: dict[str, object] = {}
 
-    def register(self, protocol_name: str, mock: Any) -> None:
+    def register(self, protocol_name: str, mock: object) -> None:
         """Register a mock implementation for a protocol name.
 
         Args:
@@ -72,7 +70,7 @@ class ServiceEffectMockRegistry:
             raise ValueError("protocol_name must be a non-empty string")
         self._services[protocol_name] = mock
 
-    def resolve(self, protocol_name: str) -> Any:
+    def resolve(self, protocol_name: str) -> object:
         """Resolve a mock implementation by protocol name.
 
         Args:
@@ -113,9 +111,7 @@ class ServiceEffectMockRegistry:
             KeyError: If no mock is registered for the given protocol name.
         """
         if protocol_name not in self._services:
-            raise KeyError(
-                f"Cannot unregister '{protocol_name}': not registered"
-            )
+            raise KeyError(f"Cannot unregister '{protocol_name}': not registered")
         del self._services[protocol_name]
 
     def clear(self) -> None:
@@ -138,4 +134,4 @@ class ServiceEffectMockRegistry:
     def __repr__(self) -> str:
         """Return a developer-friendly representation."""
         protocols = ", ".join(self.registered_protocols)
-        return f"ServiceEffectMockRegistry(protocols=[{protocols}])"
+        return f"EffectMockRegistry(protocols=[{protocols}])"

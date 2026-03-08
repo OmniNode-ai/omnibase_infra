@@ -7,7 +7,7 @@ and thread-local registry helpers.
 """
 
 from omnibase_infra.testing.service_effect_mock_registry import (
-    ServiceEffectMockRegistry,
+    EffectMockRegistry,
 )
 from omnibase_infra.testing.service_effect_mock_registry_thread_local import (
     clear_thread_local_registry,
@@ -17,7 +17,7 @@ from omnibase_infra.testing.service_effect_mock_registry_thread_local import (
 from omnibase_infra.testing.utils import is_ci_environment
 
 __all__ = [
-    "ServiceEffectMockRegistry",
+    "EffectMockRegistry",
     "clear_thread_local_registry",
     "get_thread_local_registry",
     "is_ci_environment",

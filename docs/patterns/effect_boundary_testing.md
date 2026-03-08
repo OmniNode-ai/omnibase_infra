@@ -6,18 +6,18 @@
 
 Effect nodes perform external I/O (database, HTTP, Kafka, etc.). Testing code that
 depends on effect services requires mock or stub implementations that replace real
-infrastructure. The `ServiceEffectMockRegistry` and its thread-local utilities
+infrastructure. The `EffectMockRegistry` and its thread-local utilities
 provide a lightweight pattern for managing these test doubles.
 
-## ServiceEffectMockRegistry
+## EffectMockRegistry
 
 A simple registry mapping protocol names to mock/stub instances. Use it when you need
 to wire up multiple effect mocks for a test without full container setup.
 
 ```python
-from omnibase_infra.testing import ServiceEffectMockRegistry
+from omnibase_infra.testing import EffectMockRegistry
 
-registry = ServiceEffectMockRegistry()
+registry = EffectMockRegistry()
 registry.register("ProtocolPostgresAdapter", StubPostgresAdapter())
 registry.register("ProtocolConsulClient", StubConsulClient())
 
@@ -94,14 +94,14 @@ def clean_thread_local():
 
 | Scenario | Approach |
 |----------|----------|
-| Single test, few mocks | Direct `ServiceEffectMockRegistry()` instance |
+| Single test, few mocks | Direct `EffectMockRegistry()` instance |
 | Parallel tests (pytest-xdist) | `get_thread_local_registry()` |
 | Fixture with auto-cleanup | `scoped_effect_mock_registry()` context manager |
 | Full container wiring | `ModelONEXContainer` with `RegistryInfra*` classes |
 
 ## API Reference
 
-### `ServiceEffectMockRegistry`
+### `EffectMockRegistry`
 
 | Method | Description |
 |--------|-------------|
@@ -125,5 +125,5 @@ def clean_thread_local():
 - [Container Dependency Injection](./container_dependency_injection.md) - Full DI patterns
 - [Testing Patterns](./testing_patterns.md) - General testing conventions
 - [Protocol Patterns](./protocol_patterns.md) - Protocol interface design
-- OMN-1336: Add thread-local utility for ServiceEffectMockRegistry
+- OMN-1336: Add thread-local utility for EffectMockRegistry
 - OMN-1147: Effect Classification System

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Thread-local utility for ServiceEffectMockRegistry.
+"""Thread-local utility for EffectMockRegistry.
 
-Provides thread-safe access to :class:`ServiceEffectMockRegistry` instances
+Provides thread-safe access to :class:`EffectMockRegistry` instances
 via ``threading.local()``. Each thread receives its own isolated registry,
 preventing cross-thread contamination during parallel test execution
 (e.g. ``pytest -n auto`` with ``pytest-xdist``).
@@ -25,12 +25,12 @@ Usage Patterns:
         # registry is cleared on exit
 
 Design:
-    The core ``ServiceEffectMockRegistry`` is deliberately NOT thread-safe
+    The core ``EffectMockRegistry`` is deliberately NOT thread-safe
     to keep it simple and explicit. This module provides the opt-in
     thread-local wrapper for users who need thread safety.
 
 Related:
-    - OMN-1336: Add thread-local utility for ServiceEffectMockRegistry
+    - OMN-1336: Add thread-local utility for EffectMockRegistry
     - OMN-1147: Effect Classification System
 """
 
@@ -41,21 +41,21 @@ from collections.abc import Generator
 from contextlib import contextmanager
 
 from omnibase_infra.testing.service_effect_mock_registry import (
-    ServiceEffectMockRegistry,
+    EffectMockRegistry,
 )
 
 _thread_local = threading.local()
 
 
-def get_thread_local_registry() -> ServiceEffectMockRegistry:
+def get_thread_local_registry() -> EffectMockRegistry:
     """Get or create a thread-local mock registry instance.
 
-    Each thread gets its own ``ServiceEffectMockRegistry``. The instance
+    Each thread gets its own ``EffectMockRegistry``. The instance
     persists for the lifetime of the thread (or until
     :func:`clear_thread_local_registry` is called).
 
     Returns:
-        The thread-local ``ServiceEffectMockRegistry`` instance.
+        The thread-local ``EffectMockRegistry`` instance.
 
     Example::
 
@@ -64,8 +64,8 @@ def get_thread_local_registry() -> ServiceEffectMockRegistry:
         resolved = registry.resolve("ProtocolPostgresAdapter")
     """
     if not hasattr(_thread_local, "registry"):
-        _thread_local.registry = ServiceEffectMockRegistry()
-    registry: ServiceEffectMockRegistry = _thread_local.registry
+        _thread_local.registry = EffectMockRegistry()
+    registry: EffectMockRegistry = _thread_local.registry
     return registry
 
 
@@ -84,14 +84,14 @@ def clear_thread_local_registry() -> None:
 
 
 @contextmanager
-def scoped_effect_mock_registry() -> Generator[ServiceEffectMockRegistry, None, None]:
+def scoped_effect_mock_registry() -> Generator[EffectMockRegistry, None, None]:
     """Context manager providing a scoped thread-local mock registry.
 
     Creates (or reuses) the thread-local registry on entry and clears it
     on exit, ensuring no mock registrations leak between test scopes.
 
     Yields:
-        The thread-local ``ServiceEffectMockRegistry`` instance.
+        The thread-local ``EffectMockRegistry`` instance.
 
     Example::
 
