@@ -71,11 +71,9 @@ jobs:
         with:
           path: ~/.cache/uv
           key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/uv.lock') }}-${{ env.CACHE_VERSION }}
-          restore-keys: |
-            uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --reinstall-package omnibase-core --reinstall-package omnibase-spi
 
       # Run slow and chaos tests with extended timeout
       # These tests validate resilience and performance characteristics
