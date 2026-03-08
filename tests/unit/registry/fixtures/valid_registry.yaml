@@ -1,7 +1,7 @@
 version: "1.0.0"
 description: "Test registry"
 artifacts:
-  - artifact_id: "doc-handler-lifecycle"
+  - artifact_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
     artifact_type: "doc"
     title: "Handler Lifecycle"
     path: "docs/architecture/handler_lifecycle.md"
@@ -10,7 +10,7 @@ artifacts:
     source_triggers:
       - pattern: "src/omnibase_infra/nodes/*/contract.yaml"
         change_scope: "structural"
-  - artifact_id: "ref-topic-catalog"
+  - artifact_id: "b2c3d4e5-f6a7-8901-bcde-f12345678901"
     artifact_type: "reference"
     title: "Topic Catalog"
     path: "omnidash/docs/architecture/TOPIC_CATALOG.md"

@@ -1,13 +1,16 @@
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
 from omnibase_infra.registry.loader import load_artifact_registry
 from omnibase_infra.registry.models.model_artifact_registry import (
     ModelArtifactRegistry,
-    ModelArtifactRegistryEntry,
-    ModelSourceTrigger,
 )
+from omnibase_infra.registry.models.model_artifact_registry_entry import (
+    ModelArtifactRegistryEntry,
+)
+from omnibase_infra.registry.models.model_source_trigger import ModelSourceTrigger
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
@@ -34,7 +37,7 @@ class TestArtifactRegistryModels:
 
     def test_registry_entry_minimal(self):
         entry = ModelArtifactRegistryEntry(
-            artifact_id="doc-test",
+            artifact_id="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
             artifact_type="doc",
             title="Test Doc",
             path="docs/test.md",
@@ -43,11 +46,12 @@ class TestArtifactRegistryModels:
         assert entry.update_policy == "warn"
         assert entry.owner_hint is None
         assert entry.last_verified is None
+        assert isinstance(entry.artifact_id, UUID)
 
     def test_registry_entry_rejects_extra_fields(self):
         with pytest.raises(ValueError):
             ModelArtifactRegistryEntry(
-                artifact_id="doc-test",
+                artifact_id="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                 artifact_type="doc",
                 title="Test",
                 path="docs/test.md",
