@@ -1,0 +1,59 @@
+name: 'Setup Python and uv'
+description: 'Common setup for Python projects with uv: install Python, uv, restore cache, and install dependencies'
+author: 'OmniNode'
+
+inputs:
+  python-version:
+    description: 'Python version to install'
+    required: false
+    default: '3.12'
+  uv-version:
+    description: 'uv version to install'
+    required: false
+    default: '0.6.14'
+  cache-version:
+    description: 'Cache version suffix for busting stale caches'
+    required: false
+    default: '0.6.0'
+  cache-key-prefix:
+    description: 'Custom prefix for the cache key (e.g., uv-boundary, uv-handshake)'
+    required: false
+    default: 'uv'
+  lock-file-path:
+    description: 'Path to uv.lock for cache key hashing (glob pattern)'
+    required: false
+    default: '**/uv.lock'
+  install-args:
+    description: 'Extra arguments passed to uv sync (e.g., --frozen)'
+    required: false
+    default: '--reinstall-package omnibase-core --reinstall-package omnibase-spi'
+  skip-install:
+    description: 'Set to "true" to skip the uv sync step (useful for multi-repo setups that install manually)'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        version: ${{ inputs.uv-version }}
+
+    - name: Load cached uv
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/uv
+        key: ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles(inputs.lock-file-path) }}-${{ inputs.cache-version }}
+        restore-keys: |
+          ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ inputs.python-version }}-${{ inputs.cache-version }}-
+
+    - name: Install dependencies
+      if: inputs.skip-install != 'true'
+      shell: bash
+      run: uv sync ${{ inputs.install-args }}
