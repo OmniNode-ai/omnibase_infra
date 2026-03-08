@@ -29,9 +29,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_infra.enums import EnumLlmFinishReason, EnumLlmOperationType
+from omnibase_infra.models.llm.model_llm_tool_call import ModelLlmToolCall
+from omnibase_infra.models.llm.model_llm_usage import ModelLlmUsage
 from omnibase_infra.models.model_backend_result import ModelBackendResult
-from omnibase_infra.nodes.effects.models.model_llm_tool_call import ModelLlmToolCall
-from omnibase_infra.nodes.effects.models.model_llm_usage import ModelLlmUsage
 from omnibase_infra.utils import validate_timezone_aware_datetime
 
 
@@ -79,7 +79,7 @@ class ModelLlmInferenceResponse(BaseModel):
         >>> from uuid import uuid4
         >>> from omnibase_infra.enums import EnumLlmFinishReason, EnumLlmOperationType
         >>> from omnibase_infra.models.model_backend_result import ModelBackendResult
-        >>> from omnibase_infra.nodes.effects.models.model_llm_usage import ModelLlmUsage
+        >>> from omnibase_infra.models.llm.model_llm_usage import ModelLlmUsage
         >>> resp = ModelLlmInferenceResponse(
         ...     generated_text="Hello, world!",
         ...     model_used="qwen2.5-coder-14b",

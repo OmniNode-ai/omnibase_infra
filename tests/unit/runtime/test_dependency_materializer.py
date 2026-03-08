@@ -131,7 +131,7 @@ def tmp_contract_protocol_only(tmp_path: Path) -> Path:
                 "name": "protocol_postgres_adapter",
                 "type": "protocol",
                 "class_name": "ProtocolPostgresAdapter",
-                "module": "omnibase_infra.nodes.effects.protocol_postgres_adapter",
+                "module": "omnibase_infra.nodes.node_registry_effect.protocols.protocol_postgres_adapter",
             },
         ],
     }

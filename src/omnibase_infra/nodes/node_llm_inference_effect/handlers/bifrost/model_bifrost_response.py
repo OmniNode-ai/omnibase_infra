@@ -16,7 +16,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.nodes.effects.models.model_llm_inference_response import (
+from omnibase_infra.models.llm.model_llm_inference_response import (
     ModelLlmInferenceResponse,
 )
 

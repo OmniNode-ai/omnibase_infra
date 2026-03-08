@@ -59,8 +59,9 @@ from omnibase_infra.nodes.node_registry_effect.handlers import (
     HandlerPostgresUpsert,
 )
 
-# Export the declarative node
-from omnibase_infra.nodes.node_registry_effect.node import NodeRegistryEffect
+# Export the functional NodeRegistryEffect (direct programmatic use).
+# For the ONEX declarative runtime, use node_registry_effect.node.NodeRegistryEffect.
+from omnibase_infra.nodes.node_registry_effect.registry_effect import NodeRegistryEffect
 
 # Export registry
 from omnibase_infra.nodes.node_registry_effect.registry import (
@@ -68,7 +69,7 @@ from omnibase_infra.nodes.node_registry_effect.registry import (
 )
 
 __all__: list[str] = [
-    # Node
+    # Node (functional implementation)
     "NodeRegistryEffect",
     # Registry
     "RegistryInfraRegistryEffect",

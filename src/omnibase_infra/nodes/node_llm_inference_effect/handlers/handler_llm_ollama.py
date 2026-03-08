@@ -54,7 +54,7 @@ from omnibase_infra.enums import (
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.mixins import MixinLlmHttpTransport
 from omnibase_infra.models.model_backend_result import ModelBackendResult
-from omnibase_infra.nodes.effects.models import (
+from omnibase_infra.models.llm import (
     ModelLlmFunctionCall,
     ModelLlmInferenceRequest,
     ModelLlmInferenceResponse,

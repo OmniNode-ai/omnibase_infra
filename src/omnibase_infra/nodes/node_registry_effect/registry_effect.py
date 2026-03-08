@@ -91,22 +91,22 @@ from omnibase_infra.errors import (
 from omnibase_infra.models.model_backend_result import (
     ModelBackendResult,
 )
-from omnibase_infra.nodes.effects.models.model_effect_idempotency_config import (
+from omnibase_infra.nodes.node_registry_effect.models.model_effect_idempotency_config import (
     ModelEffectIdempotencyConfig,
 )
-from omnibase_infra.nodes.effects.models.model_registry_request import (
+from omnibase_infra.nodes.node_registry_effect.models.model_registry_request import (
     ModelRegistryRequest,
 )
-from omnibase_infra.nodes.effects.models.model_registry_response import (
+from omnibase_infra.nodes.node_registry_effect.models.model_registry_response import (
     ModelRegistryResponse,
 )
-from omnibase_infra.nodes.effects.protocol_effect_idempotency_store import (
+from omnibase_infra.nodes.node_registry_effect.protocols.protocol_effect_idempotency_store import (
     ProtocolEffectIdempotencyStore,
 )
-from omnibase_infra.nodes.effects.protocol_postgres_adapter import (
+from omnibase_infra.nodes.node_registry_effect.protocols.protocol_postgres_adapter import (
     ProtocolPostgresAdapter,
 )
-from omnibase_infra.nodes.effects.store_effect_idempotency_inmemory import (
+from omnibase_infra.nodes.node_registry_effect.store_effect_idempotency_inmemory import (
     InMemoryEffectIdempotencyStore,
 )
 from omnibase_infra.utils import sanitize_backend_error, sanitize_error_message
@@ -165,7 +165,7 @@ class NodeRegistryEffect:
         >>> # Configure mocks and call register_node...
 
         >>> # With custom idempotency config (smaller cache, shorter TTL):
-        >>> from omnibase_infra.nodes.effects.models import ModelEffectIdempotencyConfig
+        >>> from omnibase_infra.nodes.node_registry_effect.models import ModelEffectIdempotencyConfig
         >>> config = ModelEffectIdempotencyConfig(
         ...     max_cache_size=1000,
         ...     cache_ttl_seconds=300.0,

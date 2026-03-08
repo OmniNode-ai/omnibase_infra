@@ -2522,7 +2522,7 @@ class TestSuite7GracefulDegradation:
         from omnibase_infra.models.model_backend_result import (
             ModelBackendResult,
         )
-        from omnibase_infra.nodes.effects.models.model_registry_response import (
+        from omnibase_infra.nodes.node_registry_effect.models.model_registry_response import (
             ModelRegistryResponse,
         )
 
@@ -2637,7 +2637,7 @@ class TestSuite7GracefulDegradation:
         from omnibase_infra.models.model_backend_result import (
             ModelBackendResult,
         )
-        from omnibase_infra.nodes.effects.models.model_registry_response import (
+        from omnibase_infra.nodes.node_registry_effect.models.model_registry_response import (
             ModelRegistryResponse,
         )
 

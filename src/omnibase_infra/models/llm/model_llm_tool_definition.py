@@ -16,7 +16,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.nodes.effects.models.model_llm_function_def import (
+from omnibase_infra.models.llm.model_llm_function_def import (
     ModelLlmFunctionDef,
 )
 
@@ -32,7 +32,7 @@ class ModelLlmToolDefinition(BaseModel):
         function: The function schema to expose to the model.
 
     Example:
-        >>> from omnibase_infra.nodes.effects.models.model_llm_function_def import (
+        >>> from omnibase_infra.models.llm.model_llm_function_def import (
         ...     ModelLlmFunctionDef,
         ... )
         >>> defn = ModelLlmToolDefinition(

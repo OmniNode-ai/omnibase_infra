@@ -63,7 +63,7 @@ from omnibase_infra.models.registration.commands.model_node_registration_acked i
 from omnibase_infra.nodes.node_registration_orchestrator.services import (
     RegistrationReducerService,
 )
-from omnibase_infra.nodes.reducers.models.model_payload_postgres_update_registration import (
+from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_update_registration import (
     ModelPayloadPostgresUpdateRegistration,
 )
 from omnibase_infra.projectors.projection_reader_registration import (

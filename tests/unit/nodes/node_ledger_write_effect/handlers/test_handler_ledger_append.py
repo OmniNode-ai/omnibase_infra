@@ -31,7 +31,7 @@ from omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_appen
 from omnibase_infra.nodes.node_ledger_write_effect.protocols.protocol_ledger_persistence import (
     ProtocolLedgerPersistence,
 )
-from omnibase_infra.nodes.reducers.models.model_payload_ledger_append import (
+from omnibase_infra.nodes.node_registration_reducer.models.model_payload_ledger_append import (
     ModelPayloadLedgerAppend,
 )
 

@@ -16,7 +16,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.nodes.effects.models.model_llm_function_call import (
+from omnibase_infra.models.llm.model_llm_function_call import (
     ModelLlmFunctionCall,
 )
 
@@ -30,7 +30,7 @@ class ModelLlmToolCall(BaseModel):
         function: The function invocation details.
 
     Example:
-        >>> from omnibase_infra.nodes.effects.models.model_llm_function_call import (
+        >>> from omnibase_infra.models.llm.model_llm_function_call import (
         ...     ModelLlmFunctionCall,
         ... )
         >>> tc = ModelLlmToolCall(

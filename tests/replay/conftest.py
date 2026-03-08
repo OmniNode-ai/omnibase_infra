@@ -25,8 +25,8 @@ from uuid import UUID
 import pytest
 
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-from omnibase_infra.nodes.reducers import RegistrationReducer
-from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+from omnibase_infra.nodes.node_registration_reducer.models import ModelRegistrationState
 
 # =============================================================================
 # Cross-Module Fixture Imports

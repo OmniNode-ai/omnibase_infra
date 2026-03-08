@@ -36,11 +36,11 @@ import pytest
 
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-from omnibase_infra.nodes.effects import (
-    ModelBackendResult,
+from omnibase_infra.models.model_backend_result import ModelBackendResult
+from omnibase_infra.nodes.node_registry_effect import NodeRegistryEffect
+from omnibase_infra.nodes.node_registry_effect.models import (
     ModelRegistryRequest,
     ModelRegistryResponse,
-    NodeRegistryEffect,
 )
 
 # -----------------------------------------------------------------------------

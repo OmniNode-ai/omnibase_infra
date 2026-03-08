@@ -34,8 +34,8 @@ import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-from omnibase_infra.nodes.reducers import RegistrationReducer
-from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+from omnibase_infra.nodes.node_registration_reducer.models import ModelRegistrationState
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -496,7 +496,7 @@ class TestA6Observability:
         )
 
         # Act - Capture logs during reduce
-        logger_name = "omnibase_infra.nodes.reducers.registration_reducer"
+        logger_name = "omnibase_infra.nodes.node_registration_reducer.registration_reducer"
         with caplog.at_level(logging.WARNING, logger=logger_name):
             result = registration_reducer.reduce(ModelRegistrationState(), event)
 
@@ -534,7 +534,7 @@ class TestA6Observability:
         )
 
         # Act - Capture all logs
-        logger_name = "omnibase_infra.nodes.reducers.registration_reducer"
+        logger_name = "omnibase_infra.nodes.node_registration_reducer.registration_reducer"
         with caplog.at_level(logging.DEBUG, logger=logger_name):
             _result = registration_reducer.reduce(ModelRegistrationState(), event)
 
@@ -610,7 +610,7 @@ class TestA6Observability:
         )
 
         # Act - Capture logs
-        logger_name = "omnibase_infra.nodes.reducers.registration_reducer"
+        logger_name = "omnibase_infra.nodes.node_registration_reducer.registration_reducer"
         with caplog.at_level(logging.WARNING, logger=logger_name):
             # Note: This event is valid, so validation passes.
             # Validation failure logging is tested via unit tests.
@@ -647,7 +647,7 @@ class TestA6Observability:
         )
 
         # Act - Capture all logs
-        logger_name = "omnibase_infra.nodes.reducers.registration_reducer"
+        logger_name = "omnibase_infra.nodes.node_registration_reducer.registration_reducer"
         with caplog.at_level(logging.DEBUG, logger=logger_name):
             _result = registration_reducer.reduce(ModelRegistrationState(), event)
 
@@ -688,7 +688,7 @@ class TestA6Observability:
         )
 
         # Act
-        logger_name = "omnibase_infra.nodes.reducers.registration_reducer"
+        logger_name = "omnibase_infra.nodes.node_registration_reducer.registration_reducer"
         with caplog.at_level(logging.ERROR, logger=logger_name):
             # Normal processing - no exceptions expected
             result = registration_reducer.reduce(ModelRegistrationState(), event)
@@ -753,7 +753,7 @@ class TestA6Observability:
         )
 
         # Act - Capture all logs during processing
-        logger_name = "omnibase_infra.nodes.reducers.registration_reducer"
+        logger_name = "omnibase_infra.nodes.node_registration_reducer.registration_reducer"
         with caplog.at_level(logging.DEBUG, logger=logger_name):
             result = registration_reducer.reduce(ModelRegistrationState(), event)
 
@@ -821,7 +821,7 @@ class TestA6Observability:
         )
 
         # Act - Process event and collect any warning/error messages
-        logger_name = "omnibase_infra.nodes.reducers.registration_reducer"
+        logger_name = "omnibase_infra.nodes.node_registration_reducer.registration_reducer"
         with caplog.at_level(logging.WARNING, logger=logger_name):
             result = registration_reducer.reduce(ModelRegistrationState(), event)
 

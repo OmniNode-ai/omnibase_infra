@@ -18,7 +18,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from omnibase_infra.nodes.effects.models.model_llm_tool_call import ModelLlmToolCall
+from omnibase_infra.models.llm.model_llm_tool_call import ModelLlmToolCall
 
 
 class ModelLlmMessage(BaseModel):

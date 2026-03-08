@@ -5,8 +5,7 @@
 This package contains node-specific Pydantic models for the registry effect node.
 Models follow ONEX naming conventions: Model<Name>.
 
-Shared models are re-exported from the effects package for convenience.
-Node-specific models are defined here.
+All models are now local to this package (OMN-3989: migrated from nodes.effects.models).
 
 Model Categories:
     - Input Models: Request payloads for effect operations
@@ -15,7 +14,6 @@ Model Categories:
     - Config Models: Node configuration schemas
 
 Related:
-    - omnibase_infra.nodes.effects.models: Shared effect models
     - contract.yaml: Model references in input_model/output_model
 """
 
@@ -23,15 +21,17 @@ from __future__ import annotations
 
 # Re-export shared models for convenience
 from omnibase_infra.models import ModelBackendResult
-from omnibase_infra.nodes.effects.models import (
+from omnibase_infra.nodes.node_registry_effect.models.model_effect_idempotency_config import (
     ModelEffectIdempotencyConfig,
-    ModelRegistryRequest,
-    ModelRegistryResponse,
 )
-
-# Node-specific models
 from omnibase_infra.nodes.node_registry_effect.models.model_partial_retry_request import (
     ModelPartialRetryRequest,
+)
+from omnibase_infra.nodes.node_registry_effect.models.model_registry_request import (
+    ModelRegistryRequest,
+)
+from omnibase_infra.nodes.node_registry_effect.models.model_registry_response import (
+    ModelRegistryResponse,
 )
 
 __all__ = [
