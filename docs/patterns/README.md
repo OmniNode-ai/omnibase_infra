@@ -19,6 +19,7 @@ This directory contains detailed implementation guides and best practices for ON
 
 ### Observability
 - **[Correlation ID Tracking](./correlation_id_tracking.md)** - Request tracing, envelope pattern, distributed logging
+- **[Operation Bindings](./operation_bindings.md)** - Declarative handler parameter resolution, `additional_context_paths` contract, binding resolution metrics
 - **[Event Streaming Topics](../architecture/EVENT_STREAMING_TOPICS.md)** - Kafka/Redpanda topic catalog, schemas, and usage patterns
 
 ### Architecture

@@ -1307,11 +1307,12 @@ class TestHandlerDbLogWarnings:
         )
 
 
-class TestHandlerDbMapPostgresError:
-    """Test suite for _map_postgres_error helper function.
+class TestHandlerDbHandlePostgresError:
+    """Test suite for _handle_postgres_error shared error handler.
 
-    Tests the extracted error mapping helper that centralizes exception-to-error
-    mapping logic, reducing complexity in _execute_statement and _execute_query.
+    Tests the consolidated error handling method that centralizes exception-to-error
+    mapping and circuit breaker recording logic, reducing duplication between
+    _execute_statement and _execute_query.
     """
 
     @pytest.fixture
@@ -1332,144 +1333,187 @@ class TestHandlerDbMapPostgresError:
             correlation_id=uuid4(),
         )
 
-    def test_query_canceled_returns_timeout_error(
-        self, handler: HandlerDb, error_context: ModelInfraErrorContext
+    @pytest.fixture
+    def correlation_id(self, error_context: ModelInfraErrorContext) -> UUID:
+        """Extract correlation_id from error context for convenience."""
+        assert error_context.correlation_id is not None
+        return error_context.correlation_id
+
+    @pytest.mark.asyncio
+    async def test_query_canceled_raises_timeout_error(
+        self,
+        handler: HandlerDb,
+        error_context: ModelInfraErrorContext,
+        correlation_id: UUID,
     ) -> None:
-        """Test QueryCanceledError maps to InfraTimeoutError."""
+        """Test QueryCanceledError raises InfraTimeoutError."""
         exc = asyncpg.QueryCanceledError("query timeout")
 
-        result = handler._map_postgres_error(exc, error_context)
+        with pytest.raises(InfraTimeoutError, match="timed out"):
+            await handler._handle_postgres_error(
+                exc, "db.execute", error_context, correlation_id
+            )
 
-        assert isinstance(result, InfraTimeoutError)
-        assert "timed out" in str(result).lower()
-        # timeout_seconds is passed as extra context to the error
-        assert str(handler._timeout) in str(result)
-
-    def test_connection_error_returns_infra_connection_error(
-        self, handler: HandlerDb, error_context: ModelInfraErrorContext
+    @pytest.mark.asyncio
+    async def test_connection_error_raises_infra_connection_error(
+        self,
+        handler: HandlerDb,
+        error_context: ModelInfraErrorContext,
+        correlation_id: UUID,
     ) -> None:
-        """Test PostgresConnectionError maps to InfraConnectionError."""
+        """Test PostgresConnectionError raises InfraConnectionError."""
         exc = asyncpg.PostgresConnectionError("connection lost")
 
-        result = handler._map_postgres_error(exc, error_context)
+        with pytest.raises(InfraConnectionError, match="connection"):
+            await handler._handle_postgres_error(
+                exc, "db.execute", error_context, correlation_id
+            )
 
-        assert isinstance(result, InfraConnectionError)
-        assert "connection" in str(result).lower()
-
-    def test_syntax_error_returns_runtime_error(
-        self, handler: HandlerDb, error_context: ModelInfraErrorContext
+    @pytest.mark.asyncio
+    async def test_syntax_error_raises_runtime_error(
+        self,
+        handler: HandlerDb,
+        error_context: ModelInfraErrorContext,
+        correlation_id: UUID,
     ) -> None:
-        """Test PostgresSyntaxError maps to RuntimeHostError with syntax prefix."""
+        """Test PostgresSyntaxError raises RuntimeHostError with syntax prefix."""
         exc = asyncpg.PostgresSyntaxError("syntax error near 'SELEKT'")
         exc.message = "syntax error at or near 'SELEKT'"
 
-        result = handler._map_postgres_error(exc, error_context)
+        with pytest.raises(RuntimeHostError, match="SQL syntax error") as exc_info:
+            await handler._handle_postgres_error(
+                exc, "db.execute", error_context, correlation_id
+            )
+        assert "SELEKT" in str(exc_info.value)
 
-        assert isinstance(result, RuntimeHostError)
-        assert "SQL syntax error" in str(result)
-        assert "SELEKT" in str(result)
-
-    def test_undefined_table_returns_runtime_error(
-        self, handler: HandlerDb, error_context: ModelInfraErrorContext
+    @pytest.mark.asyncio
+    async def test_undefined_table_raises_runtime_error(
+        self,
+        handler: HandlerDb,
+        error_context: ModelInfraErrorContext,
+        correlation_id: UUID,
     ) -> None:
-        """Test UndefinedTableError maps to RuntimeHostError with table prefix."""
+        """Test UndefinedTableError raises RuntimeHostError with table prefix."""
         exc = asyncpg.UndefinedTableError("table not found")
         exc.message = 'relation "nonexistent" does not exist'
 
-        result = handler._map_postgres_error(exc, error_context)
+        with pytest.raises(RuntimeHostError, match="Table not found") as exc_info:
+            await handler._handle_postgres_error(
+                exc, "db.execute", error_context, correlation_id
+            )
+        assert "nonexistent" in str(exc_info.value)
 
-        assert isinstance(result, RuntimeHostError)
-        assert "Table not found" in str(result)
-        assert "nonexistent" in str(result)
-
-    def test_undefined_column_returns_runtime_error(
-        self, handler: HandlerDb, error_context: ModelInfraErrorContext
+    @pytest.mark.asyncio
+    async def test_undefined_column_raises_runtime_error(
+        self,
+        handler: HandlerDb,
+        error_context: ModelInfraErrorContext,
+        correlation_id: UUID,
     ) -> None:
-        """Test UndefinedColumnError maps to RuntimeHostError with column prefix."""
+        """Test UndefinedColumnError raises RuntimeHostError with column prefix."""
         exc = asyncpg.UndefinedColumnError("column not found")
         exc.message = 'column "unknown_col" does not exist'
 
-        result = handler._map_postgres_error(exc, error_context)
+        with pytest.raises(RuntimeHostError, match="Column not found") as exc_info:
+            await handler._handle_postgres_error(
+                exc, "db.execute", error_context, correlation_id
+            )
+        assert "unknown_col" in str(exc_info.value)
 
-        assert isinstance(result, RuntimeHostError)
-        assert "Column not found" in str(result)
-        assert "unknown_col" in str(result)
-
-    def test_unique_violation_returns_runtime_error(
-        self, handler: HandlerDb, error_context: ModelInfraErrorContext
+    @pytest.mark.asyncio
+    async def test_unique_violation_raises_runtime_error(
+        self,
+        handler: HandlerDb,
+        error_context: ModelInfraErrorContext,
+        correlation_id: UUID,
     ) -> None:
-        """Test UniqueViolationError maps to RuntimeHostError with unique prefix."""
+        """Test UniqueViolationError raises RuntimeHostError with unique prefix."""
         exc = asyncpg.UniqueViolationError("unique violation")
         exc.message = "duplicate key value violates unique constraint"
 
-        result = handler._map_postgres_error(exc, error_context)
+        with pytest.raises(RuntimeHostError, match="Unique constraint violation"):
+            await handler._handle_postgres_error(
+                exc, "db.execute", error_context, correlation_id
+            )
 
-        assert isinstance(result, RuntimeHostError)
-        assert "Unique constraint violation" in str(result)
-
-    def test_foreign_key_violation_returns_runtime_error(
-        self, handler: HandlerDb, error_context: ModelInfraErrorContext
+    @pytest.mark.asyncio
+    async def test_foreign_key_violation_raises_runtime_error(
+        self,
+        handler: HandlerDb,
+        error_context: ModelInfraErrorContext,
+        correlation_id: UUID,
     ) -> None:
-        """Test ForeignKeyViolationError maps to RuntimeHostError with FK prefix."""
+        """Test ForeignKeyViolationError raises RuntimeHostError with FK prefix."""
         exc = asyncpg.ForeignKeyViolationError("foreign key violation")
         exc.message = "insert violates foreign key constraint"
 
-        result = handler._map_postgres_error(exc, error_context)
+        with pytest.raises(RuntimeHostError, match="Foreign key constraint violation"):
+            await handler._handle_postgres_error(
+                exc, "db.execute", error_context, correlation_id
+            )
 
-        assert isinstance(result, RuntimeHostError)
-        assert "Foreign key constraint violation" in str(result)
-
-    def test_not_null_violation_returns_runtime_error(
-        self, handler: HandlerDb, error_context: ModelInfraErrorContext
+    @pytest.mark.asyncio
+    async def test_not_null_violation_raises_runtime_error(
+        self,
+        handler: HandlerDb,
+        error_context: ModelInfraErrorContext,
+        correlation_id: UUID,
     ) -> None:
-        """Test NotNullViolationError maps to RuntimeHostError with NOT NULL prefix."""
+        """Test NotNullViolationError raises RuntimeHostError with NOT NULL prefix."""
         exc = asyncpg.NotNullViolationError("not null violation")
         exc.message = "null value in column violates not-null constraint"
 
-        result = handler._map_postgres_error(exc, error_context)
+        with pytest.raises(RuntimeHostError, match="Not null constraint violation"):
+            await handler._handle_postgres_error(
+                exc, "db.execute", error_context, correlation_id
+            )
 
-        assert isinstance(result, RuntimeHostError)
-        assert "Not null constraint violation" in str(result)
-
-    def test_check_violation_returns_runtime_error(
-        self, handler: HandlerDb, error_context: ModelInfraErrorContext
+    @pytest.mark.asyncio
+    async def test_check_violation_raises_runtime_error(
+        self,
+        handler: HandlerDb,
+        error_context: ModelInfraErrorContext,
+        correlation_id: UUID,
     ) -> None:
-        """Test CheckViolationError maps to RuntimeHostError with check prefix."""
+        """Test CheckViolationError raises RuntimeHostError with check prefix."""
         exc = asyncpg.CheckViolationError("check violation")
         exc.message = "new row violates check constraint"
 
-        result = handler._map_postgres_error(exc, error_context)
+        with pytest.raises(RuntimeHostError, match="Check constraint violation"):
+            await handler._handle_postgres_error(
+                exc, "db.execute", error_context, correlation_id
+            )
 
-        assert isinstance(result, RuntimeHostError)
-        assert "Check constraint violation" in str(result)
-
-    def test_unknown_postgres_error_returns_runtime_error_with_default_prefix(
-        self, handler: HandlerDb, error_context: ModelInfraErrorContext
+    @pytest.mark.asyncio
+    async def test_unknown_postgres_error_raises_runtime_error_with_default_prefix(
+        self,
+        handler: HandlerDb,
+        error_context: ModelInfraErrorContext,
+        correlation_id: UUID,
     ) -> None:
-        """Test unknown PostgresError maps to RuntimeHostError with default prefix."""
-        # Use a generic PostgresError that's not specifically mapped
+        """Test unknown PostgresError raises RuntimeHostError with default prefix."""
         exc = asyncpg.PostgresError("some error")
 
-        result = handler._map_postgres_error(exc, error_context)
+        with pytest.raises(RuntimeHostError, match="Database error"):
+            await handler._handle_postgres_error(
+                exc, "db.execute", error_context, correlation_id
+            )
 
-        assert isinstance(result, RuntimeHostError)
-        assert "Database error" in str(result)
-
-    def test_error_without_message_attribute_uses_type_name(
-        self, handler: HandlerDb, error_context: ModelInfraErrorContext
+    @pytest.mark.asyncio
+    async def test_error_without_message_attribute_uses_type_name(
+        self,
+        handler: HandlerDb,
+        error_context: ModelInfraErrorContext,
+        correlation_id: UUID,
     ) -> None:
         """Test error without message attribute uses exception type name."""
-        # PostgresError by default doesn't have a message attribute
         exc = asyncpg.PostgresError("generic error")
-        # Verify no message attribute exists (or it has no value)
-        # getattr with default will return the type name fallback
         assert not hasattr(exc, "message") or exc.message is None
 
-        result = handler._map_postgres_error(exc, error_context)
-
-        assert isinstance(result, RuntimeHostError)
-        # Should contain the type name as fallback
-        assert "PostgresError" in str(result)
+        with pytest.raises(RuntimeHostError, match="PostgresError"):
+            await handler._handle_postgres_error(
+                exc, "db.execute", error_context, correlation_id
+            )
 
 
 class TestHandlerDbTransientErrorClassification:
@@ -1915,6 +1959,194 @@ class TestHandlerDbCircuitBreakerErrorClassification:
             await handler.shutdown()
 
 
+class TestHandlerDbSqlstateMetrics:
+    """Test suite for Prometheus metrics on SQLSTATE classification (OMN-1366).
+
+    Verifies that Prometheus counters are incremented correctly when
+    _is_transient_error classifies SQLSTATE codes as transient, permanent,
+    or unknown.
+    """
+
+    @pytest.fixture
+    def handler(self, mock_container: MagicMock) -> HandlerDb:
+        """Create HandlerDb fixture."""
+        return HandlerDb(mock_container)
+
+    def test_unknown_sqlstate_class_increments_unknown_counter(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test unknown SQLSTATE class increments the unknown counter."""
+        import omnibase_infra.handlers.handler_db as handler_module
+
+        mock_unknown_counter = MagicMock()
+        mock_classification_counter = MagicMock()
+
+        with (
+            patch.object(
+                handler_module,
+                "_UNKNOWN_SQLSTATE_CLASS_COUNTER",
+                mock_unknown_counter,
+            ),
+            patch.object(
+                handler_module,
+                "_SQLSTATE_CLASSIFICATION_COUNTER",
+                mock_classification_counter,
+            ),
+        ):
+            error = asyncpg.PostgresError("unknown error")
+            error.sqlstate = "XX123"
+            result = handler._is_transient_error(error)
+
+            assert result is False
+            mock_unknown_counter.labels.assert_called_once_with(
+                sqlstate_class="XX", error_type="PostgresError"
+            )
+            mock_unknown_counter.labels.return_value.inc.assert_called_once()
+            mock_classification_counter.labels.assert_called_once_with(
+                sqlstate_class="XX", classification="unknown"
+            )
+            mock_classification_counter.labels.return_value.inc.assert_called_once()
+
+    def test_transient_sqlstate_increments_classification_counter(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test transient SQLSTATE class increments classification counter."""
+        import omnibase_infra.handlers.handler_db as handler_module
+
+        mock_classification_counter = MagicMock()
+
+        with patch.object(
+            handler_module,
+            "_SQLSTATE_CLASSIFICATION_COUNTER",
+            mock_classification_counter,
+        ):
+            error = asyncpg.PostgresError("connection exception")
+            error.sqlstate = "08000"
+            result = handler._is_transient_error(error)
+
+            assert result is True
+            mock_classification_counter.labels.assert_called_once_with(
+                sqlstate_class="08", classification="transient"
+            )
+            mock_classification_counter.labels.return_value.inc.assert_called_once()
+
+    def test_permanent_sqlstate_increments_classification_counter(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test permanent SQLSTATE class increments classification counter."""
+        import omnibase_infra.handlers.handler_db as handler_module
+
+        mock_classification_counter = MagicMock()
+
+        with patch.object(
+            handler_module,
+            "_SQLSTATE_CLASSIFICATION_COUNTER",
+            mock_classification_counter,
+        ):
+            error = asyncpg.PostgresError("constraint violation")
+            error.sqlstate = "23503"
+            result = handler._is_transient_error(error)
+
+            assert result is False
+            mock_classification_counter.labels.assert_called_once_with(
+                sqlstate_class="23", classification="permanent"
+            )
+            mock_classification_counter.labels.return_value.inc.assert_called_once()
+
+    def test_no_sqlstate_does_not_increment_counters(self, handler: HandlerDb) -> None:
+        """Test errors without SQLSTATE do not increment SQLSTATE counters."""
+        import omnibase_infra.handlers.handler_db as handler_module
+
+        mock_unknown_counter = MagicMock()
+        mock_classification_counter = MagicMock()
+
+        with (
+            patch.object(
+                handler_module,
+                "_UNKNOWN_SQLSTATE_CLASS_COUNTER",
+                mock_unknown_counter,
+            ),
+            patch.object(
+                handler_module,
+                "_SQLSTATE_CLASSIFICATION_COUNTER",
+                mock_classification_counter,
+            ),
+        ):
+            error = asyncpg.PostgresError("no sqlstate")
+            result = handler._is_transient_error(error)
+
+            assert result is False
+            mock_unknown_counter.labels.assert_not_called()
+            mock_classification_counter.labels.assert_not_called()
+
+    def test_counters_none_does_not_raise(self, handler: HandlerDb) -> None:
+        """Test graceful degradation when counters are None (prometheus not available)."""
+        import omnibase_infra.handlers.handler_db as handler_module
+
+        with (
+            patch.object(handler_module, "_UNKNOWN_SQLSTATE_CLASS_COUNTER", None),
+            patch.object(handler_module, "_SQLSTATE_CLASSIFICATION_COUNTER", None),
+        ):
+            # Unknown class - should not raise even with None counters
+            error = asyncpg.PostgresError("unknown error")
+            error.sqlstate = "XX123"
+            result = handler._is_transient_error(error)
+            assert result is False
+
+            # Transient class - should not raise even with None counters
+            error.sqlstate = "08000"
+            result = handler._is_transient_error(error)
+            assert result is True
+
+            # Permanent class - should not raise even with None counters
+            error.sqlstate = "23503"
+            result = handler._is_transient_error(error)
+            assert result is False
+
+    def test_multiple_unknown_classes_tracked_separately(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test that different unknown SQLSTATE classes are tracked as separate labels."""
+        import omnibase_infra.handlers.handler_db as handler_module
+
+        mock_unknown_counter = MagicMock()
+        mock_classification_counter = MagicMock()
+
+        with (
+            patch.object(
+                handler_module,
+                "_UNKNOWN_SQLSTATE_CLASS_COUNTER",
+                mock_unknown_counter,
+            ),
+            patch.object(
+                handler_module,
+                "_SQLSTATE_CLASSIFICATION_COUNTER",
+                mock_classification_counter,
+            ),
+        ):
+            # First unknown class
+            error1 = asyncpg.PostgresError("error 1")
+            error1.sqlstate = "XX123"
+            handler._is_transient_error(error1)
+
+            # Second unknown class
+            error2 = asyncpg.PostgresError("error 2")
+            error2.sqlstate = "YY456"
+            handler._is_transient_error(error2)
+
+            # Verify both classes were tracked
+            assert mock_unknown_counter.labels.call_count == 2
+            calls = mock_unknown_counter.labels.call_args_list
+            assert calls[0].kwargs == {
+                "sqlstate_class": "XX",
+                "error_type": "PostgresError",
+            }
+            assert calls[1].kwargs == {
+                "sqlstate_class": "YY",
+                "error_type": "PostgresError",
+            }
+
+
 __all__: list[str] = [
     "TestHandlerDbInitialization",
     "TestHandlerDbQueryOperations",
@@ -1926,7 +2158,8 @@ __all__: list[str] = [
     "TestHandlerDbDsnSecurity",
     "TestHandlerDbRowCountParsing",
     "TestHandlerDbLogWarnings",
-    "TestHandlerDbMapPostgresError",
+    "TestHandlerDbHandlePostgresError",
     "TestHandlerDbTransientErrorClassification",
     "TestHandlerDbCircuitBreakerErrorClassification",
+    "TestHandlerDbSqlstateMetrics",
 ]

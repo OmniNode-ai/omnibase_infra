@@ -10,7 +10,7 @@ If the same introspection event is replayed tomorrow, next week, or after a cras
 
 If this is not true, the system is broken.
 
-Ticket: OMN-914
+Ticket: OMN-914, OMN-1005
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 __all__ = [
     "TestStructuralPurityGates",
+    "TestParameterizedStructuralPurity",
     "TestDeterminismGates",
     "TestBehavioralPurityGates",
     "TestAdditionalBehavioralGates",
@@ -34,16 +35,8 @@ __all__ = [
 ]
 
 # =============================================================================
-# STRUCTURAL GATES: Dependency Graph
+# REDUCER DISCOVERY: Auto-discover all reducer files
 # =============================================================================
-
-# TODO(OMN-future): Parameterize these tests to support multiple reducers.
-# Currently hard-coded for RegistrationReducer (OMN-914).
-# Future enhancement: Use pytest.mark.parametrize with:
-#   - REDUCER_FILES = list(Path("src/omnibase_infra/nodes/reducers").glob("*_reducer.py"))
-# This would enable automatic purity validation for all reducers in the codebase.
-REDUCER_FILE = Path("src/omnibase_infra/nodes/reducers/registration_reducer.py")
-
 
 # Import shared AST analysis utilities from test helpers
 # See: tests/helpers/ast_analysis.py for implementation details.
@@ -51,6 +44,97 @@ from tests.helpers.ast_analysis import get_imported_root_modules
 
 # Alias for backward compatibility with existing test code in this file
 _get_imported_root_modules = get_imported_root_modules
+
+# Root path for node source files (relative to project root)
+_NODES_ROOT = Path("src/omnibase_infra/nodes")
+
+# Legacy constant kept for backward compatibility with existing tests
+REDUCER_FILE = Path("src/omnibase_infra/nodes/reducers/registration_reducer.py")
+
+
+def discover_all_reducer_files() -> list[Path]:
+    """Auto-discover all reducer Python files under the nodes directory.
+
+    Discovers reducer files using two strategies:
+    1. Files matching ``*_reducer.py`` pattern (e.g., ``registration_reducer.py``)
+    2. Files named ``reducer.py`` inside reducer node directories (e.g.,
+       ``contract_registry_reducer/reducer.py``)
+
+    Excludes:
+    - ``__init__.py`` files
+    - ``__pycache__`` directories
+    - Registry files (``registry_*.py``)
+    - Node shell files (``node.py``) — these are declarative shells, not reducer logic
+    - Test files
+
+    Returns:
+        Sorted list of Path objects to all discovered reducer files.
+    """
+    reducer_files: set[Path] = set()
+
+    if not _NODES_ROOT.exists():
+        return []
+
+    # Strategy 1: Files matching *_reducer.py (the older naming convention)
+    for path in _NODES_ROOT.rglob("*_reducer.py"):
+        if (
+            "__pycache__" not in str(path)
+            and "__init__" not in path.name
+            and not path.name.startswith("registry_")
+            and "test" not in path.name.lower()
+        ):
+            reducer_files.add(path)
+
+    # Strategy 2: Files named reducer.py inside *_reducer directories
+    for path in _NODES_ROOT.rglob("reducer.py"):
+        if "__pycache__" not in str(path) and "test" not in path.name.lower():
+            reducer_files.add(path)
+
+    return sorted(reducer_files)
+
+
+def _discover_reducer_model_files(reducer_file: Path) -> list[Path]:
+    """Discover model files associated with a given reducer file.
+
+    Looks for a ``models/`` directory adjacent to the reducer file and
+    returns all ``model_*.py`` files found within it.
+
+    Args:
+        reducer_file: Path to the reducer file.
+
+    Returns:
+        List of model file paths, or empty list if none found.
+    """
+    models_dir = reducer_file.parent / "models"
+    if not models_dir.exists():
+        return []
+
+    return sorted(
+        p
+        for p in models_dir.glob("model_*.py")
+        if "__pycache__" not in str(p) and p.name != "__init__.py"
+    )
+
+
+# Discover all reducer files at module load time for parameterization
+ALL_REDUCER_FILES = discover_all_reducer_files()
+
+
+def _reducer_file_id(path: Path) -> str:
+    """Generate a short test ID from a reducer file path.
+
+    Example: ``src/omnibase_infra/nodes/reducers/registration_reducer.py``
+    becomes ``reducers/registration_reducer.py``.
+    """
+    try:
+        return str(path.relative_to(_NODES_ROOT))
+    except ValueError:
+        return path.name
+
+
+# =============================================================================
+# STRUCTURAL GATES: Dependency Graph
+# =============================================================================
 
 
 def _payload_to_dict(payload: object) -> dict[str, object]:
@@ -163,6 +247,233 @@ class TestStructuralPurityGates:
         assert not violations, (
             f"State model imports forbidden I/O modules: {sorted(violations)}. "
             f"State models must be pure data classes."
+        )
+
+
+# =============================================================================
+# PARAMETERIZED STRUCTURAL PURITY: All Reducers (OMN-1005)
+# =============================================================================
+
+
+class TestParameterizedStructuralPurity:
+    """Parameterized structural purity gates for ALL discovered reducers.
+
+    These tests auto-discover every reducer file under ``src/omnibase_infra/nodes/``
+    and validate structural purity constraints via AST analysis. This ensures that
+    purity violations are caught across the entire reducer codebase, not just the
+    original RegistrationReducer.
+
+    Discovery strategies:
+    - Files matching ``*_reducer.py`` (e.g., ``registration_reducer.py``)
+    - Files named ``reducer.py`` inside reducer node directories
+
+    Ticket: OMN-1005
+    """
+
+    @pytest.mark.parametrize(
+        "reducer_file",
+        ALL_REDUCER_FILES,
+        ids=[_reducer_file_id(f) for f in ALL_REDUCER_FILES],
+    )
+    def test_reducer_has_no_io_imports(self, reducer_file: Path) -> None:
+        """Every reducer module must not import I/O libraries.
+
+        Structural gate: If any reducer imports a forbidden I/O library,
+        this test fails. Reducers must be pure functions with no side effects.
+        """
+        assert reducer_file.exists(), f"Reducer file not found: {reducer_file}"
+
+        tree = ast.parse(reducer_file.read_text())
+        imported_modules = _get_imported_root_modules(tree)
+
+        violations = imported_modules & FORBIDDEN_IO_MODULES
+        assert not violations, (
+            f"Reducer '{reducer_file}' imports forbidden I/O modules: "
+            f"{sorted(violations)}. "
+            f"Reducers must be pure - move I/O to Effect layer."
+        )
+
+    @pytest.mark.parametrize(
+        "reducer_file",
+        ALL_REDUCER_FILES,
+        ids=[_reducer_file_id(f) for f in ALL_REDUCER_FILES],
+    )
+    def test_reducer_models_have_no_io_imports(self, reducer_file: Path) -> None:
+        """State/payload model files associated with each reducer must not import I/O.
+
+        The models directory adjacent to a reducer contains state models and
+        intent payload models. These are part of the reducer's pure function
+        boundary and must not import I/O libraries.
+        """
+        model_files = _discover_reducer_model_files(reducer_file)
+        if not model_files:
+            pytest.skip(f"No model files found for {reducer_file}")
+
+        all_violations: list[str] = []
+        for model_file in model_files:
+            tree = ast.parse(model_file.read_text())
+            imported_modules = _get_imported_root_modules(tree)
+            violations = imported_modules & FORBIDDEN_IO_MODULES
+            if violations:
+                all_violations.append(f"  {model_file.name}: {sorted(violations)}")
+
+        assert not all_violations, (
+            f"Reducer models for '{reducer_file}' import forbidden I/O modules:\n"
+            + "\n".join(all_violations)
+            + "\nState/payload models must be pure data classes."
+        )
+
+    @pytest.mark.parametrize(
+        "reducer_file",
+        ALL_REDUCER_FILES,
+        ids=[_reducer_file_id(f) for f in ALL_REDUCER_FILES],
+    )
+    def test_reducer_has_no_datetime_now_calls(self, reducer_file: Path) -> None:
+        """Every reducer must not call datetime.now() or datetime.utcnow().
+
+        Reducers must receive time as an input parameter (via events or metadata),
+        not access the system clock. Clock access breaks determinism and makes
+        event replay produce different results.
+
+        Lines marked with ``# ONEX_EXCLUDE: clock_access`` are excluded from
+        this check (for documented, intentional uses).
+        """
+        from tests.helpers.ast_analysis import find_datetime_now_calls
+
+        assert reducer_file.exists(), f"Reducer file not found: {reducer_file}"
+
+        source = reducer_file.read_text()
+        tree = ast.parse(source)
+        raw_violations = find_datetime_now_calls(tree)
+
+        if not raw_violations:
+            return
+
+        # Filter out violations on lines with ONEX_EXCLUDE: clock_access.
+        # The exclude marker can appear on the same line as the violation or
+        # on the line immediately preceding it (comment-before-line pattern).
+        source_lines = source.splitlines()
+        violations = []
+        for v in raw_violations:
+            # Extract line number from "datetime.now() at line N"
+            match = re.search(r"at line (\d+)", v)
+            if match:
+                line_num = int(match.group(1))
+                # Check the violation line itself
+                line_text = (
+                    source_lines[line_num - 1] if line_num <= len(source_lines) else ""
+                )
+                if "ONEX_EXCLUDE: clock_access" in line_text:
+                    continue
+                # Check the preceding line (comment-before-line pattern)
+                prev_line = source_lines[line_num - 2] if line_num >= 2 else ""
+                if "ONEX_EXCLUDE: clock_access" in prev_line:
+                    continue
+            violations.append(v)
+
+        assert not violations, (
+            f"Reducer '{reducer_file}' accesses system clock: {violations}. "
+            f"Reducers must receive time via event parameters, not datetime.now(). "
+            f"If intentional, add '# ONEX_EXCLUDE: clock_access' to the line."
+        )
+
+    @pytest.mark.parametrize(
+        "reducer_file",
+        ALL_REDUCER_FILES,
+        ids=[_reducer_file_id(f) for f in ALL_REDUCER_FILES],
+    )
+    def test_reducer_has_no_subprocess_imports(self, reducer_file: Path) -> None:
+        """Every reducer must not import subprocess-related modules.
+
+        Subprocess execution is I/O and breaks reducer purity.
+        """
+        assert reducer_file.exists(), f"Reducer file not found: {reducer_file}"
+
+        tree = ast.parse(reducer_file.read_text())
+        imported_modules = _get_imported_root_modules(tree)
+
+        subprocess_modules = {"subprocess", "multiprocessing", "os"}
+        # os is allowed at module level for os.getenv() config - check for os
+        # only if it's used for process operations, not env config. For now we
+        # check subprocess and multiprocessing which are unambiguous violations.
+        forbidden_process_modules = {"subprocess", "multiprocessing"}
+        violations = imported_modules & forbidden_process_modules
+
+        assert not violations, (
+            f"Reducer '{reducer_file}' imports process modules: "
+            f"{sorted(violations)}. "
+            f"Reducers must not spawn subprocesses."
+        )
+
+    @pytest.mark.parametrize(
+        "reducer_file",
+        ALL_REDUCER_FILES,
+        ids=[_reducer_file_id(f) for f in ALL_REDUCER_FILES],
+    )
+    def test_reducer_has_no_http_client_imports(self, reducer_file: Path) -> None:
+        """Every reducer must not import HTTP client libraries.
+
+        Checks that no HTTP client library is imported, which would indicate
+        the reducer is designed to perform network I/O.
+
+        Note: We check imports rather than method calls because common dict
+        methods like ``.get()`` create false positives with method-call analysis.
+        """
+        assert reducer_file.exists(), f"Reducer file not found: {reducer_file}"
+
+        tree = ast.parse(reducer_file.read_text())
+        imported_modules = _get_imported_root_modules(tree)
+
+        http_client_modules = {
+            "requests",
+            "httpx",
+            "aiohttp",
+            "urllib3",
+            "urllib",
+            "http",
+        }
+        # urllib and http are stdlib modules that include HTTP clients
+        # We only flag them if they appear as direct imports (urllib.request, etc.)
+        # Since get_imported_root_modules extracts root modules, we check the roots
+        violations = imported_modules & http_client_modules
+
+        assert not violations, (
+            f"Reducer '{reducer_file}' imports HTTP client modules: "
+            f"{sorted(violations)}. "
+            f"Reducers must not perform HTTP requests."
+        )
+
+    def test_discovery_finds_expected_reducers(self) -> None:
+        """Verify that reducer discovery finds at least the known reducers.
+
+        This test acts as a guard against the discovery mechanism silently
+        breaking (e.g., due to directory restructuring). It verifies that
+        the known reducers are always found.
+        """
+        reducer_names = {f.name for f in ALL_REDUCER_FILES}
+
+        # These reducers must always be discovered
+        expected_reducers = {
+            "registration_reducer.py",
+            "reducer.py",  # contract_registry_reducer/reducer.py
+        }
+
+        missing = expected_reducers - reducer_names
+        assert not missing, (
+            f"Reducer discovery missed expected files: {missing}. "
+            f"Found: {sorted(reducer_names)}. "
+            f"Check discover_all_reducer_files() logic."
+        )
+
+    def test_discovery_returns_non_empty(self) -> None:
+        """Verify that at least one reducer file is discovered.
+
+        If this fails, the parameterized tests silently produce zero test cases,
+        which could mask a complete structural regression.
+        """
+        assert len(ALL_REDUCER_FILES) > 0, (
+            "No reducer files discovered. Parameterized purity tests will not run. "
+            f"Searched under: {_NODES_ROOT}"
         )
 
 

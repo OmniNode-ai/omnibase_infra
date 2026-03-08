@@ -55,11 +55,23 @@ TRACKED_PACKAGES: tuple[str, ...] = ("omnibase_core", "omnibase_spi")
 
 
 def _parse_dep_bounds(spec: str) -> tuple[str, str] | None:
-    """Return (min_version, max_version) from a PEP 508 specifier, or None."""
+    """Return (min_version, max_version) from a PEP 508 specifier, or None.
+
+    Supports range pins (``>=X,<Y``) and exact pins (``==X.Y.Z``).
+    For exact pins, max is derived as the next minor (e.g. 0.24.0 -> 0.25.0).
+    """
+    # Range pin: >=X,<Y
     min_match = re.search(r">=\s*([0-9][^\s,;\"']*)", spec)
     max_match = re.search(r"<\s*([0-9][^\s,;\"']*)", spec)
     if min_match and max_match:
         return min_match.group(1), max_match.group(1)
+    # Exact pin: ==X.Y.Z
+    eq_match = re.search(r"==\s*([0-9][^\s,;\"']*)", spec)
+    if eq_match:
+        pinned = eq_match.group(1)
+        parts = pinned.split(".")
+        if len(parts) >= 2:
+            return pinned, f"{parts[0]}.{int(parts[1]) + 1}.0"
     return None
 
 
@@ -95,8 +107,8 @@ def _load_bounds_from_pyproject() -> dict[str, tuple[str, str]]:
 
     if missing:
         print(
-            f"ERROR: could not extract >=/<  bounds for: {missing}\n"
-            "       Ensure pyproject.toml uses 'pkg>=X.Y.Z,<A.B.C' format.",
+            f"ERROR: could not extract version bounds for: {missing}\n"
+            "       Ensure pyproject.toml uses 'pkg>=X.Y.Z,<A.B.C' or 'pkg==X.Y.Z' format.",
             file=sys.stderr,
         )
         sys.exit(3)

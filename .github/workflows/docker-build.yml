@@ -257,7 +257,7 @@ jobs:
             uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --reinstall-package omnibase-core --reinstall-package omnibase-spi
 
       # Run Docker integration tests WITHOUT pytest-xdist (no -n auto)
       # This prevents worker crashes during Docker builds

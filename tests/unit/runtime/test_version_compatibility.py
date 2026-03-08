@@ -232,16 +232,24 @@ class TestVersionMatrixConsistency:
             )
 
             spec = pyproject_specs[constraint.package]
-            # Verify min version appears in the spec
-            assert constraint.min_version in spec, (
-                f"{constraint.package}: VERSION_MATRIX min_version "
-                f"{constraint.min_version} not found in pyproject.toml spec: {spec}"
-            )
-            # Verify max version appears in the spec
-            assert constraint.max_version in spec, (
-                f"{constraint.package}: VERSION_MATRIX max_version "
-                f"{constraint.max_version} not found in pyproject.toml spec: {spec}"
-            )
+
+            # Exact pins (==X.Y.Z): min_version matches the pinned version,
+            # max_version is derived (next minor) and won't appear in spec.
+            if "==" in spec:
+                assert constraint.min_version in spec, (
+                    f"{constraint.package}: VERSION_MATRIX min_version "
+                    f"{constraint.min_version} not found in exact pin spec: {spec}"
+                )
+            else:
+                # Range pins (>=X,<Y): both bounds appear in spec
+                assert constraint.min_version in spec, (
+                    f"{constraint.package}: VERSION_MATRIX min_version "
+                    f"{constraint.min_version} not found in pyproject.toml spec: {spec}"
+                )
+                assert constraint.max_version in spec, (
+                    f"{constraint.package}: VERSION_MATRIX max_version "
+                    f"{constraint.max_version} not found in pyproject.toml spec: {spec}"
+                )
 
     def test_constraint_is_frozen_dataclass(self) -> None:
         """VersionConstraint must be immutable (frozen dataclass)."""

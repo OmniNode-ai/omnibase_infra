@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2025 OmniNode Team
+# Copyright (c) 2026 OmniNode Team
 """
 Unit tests for ONEX Infrastructure Contract Linter.
 
@@ -10,6 +10,10 @@ Tests the contract_linter module for:
 - Node type validation
 - Contract version format
 - Input/output model reference validation
+- Line-number error reporting (OMN-517)
+- "Did you mean?" suggestions for unrecognized fields (OMN-517)
+- Contract dependency validation (OMN-517)
+- Contract version compatibility validation (OMN-517)
 """
 
 from pathlib import Path
@@ -17,11 +21,14 @@ from pathlib import Path
 import pytest
 
 from omnibase_infra.validation.linter_contract import (
+    KNOWN_CONTRACT_FIELDS,
     ContractLinter,
     ContractRuleId,
     EnumContractViolationSeverity,
     ModelContractLintResult,
     ModelContractViolation,
+    _get_yaml_line_numbers,
+    _suggest_similar_field,
     convert_violation_to_handler_error,
     lint_contract_file,
     lint_contracts_in_directory,
@@ -933,4 +940,778 @@ node_type: INVALID_TYPE
         assert (
             error.remediation_hint
             == "Review contract.yaml and fix the validation error"
+        )
+
+    def test_convert_preserves_line_number(self) -> None:
+        """Test that line numbers are passed through to handler errors (OMN-517)."""
+        violation = ModelContractViolation(
+            file_path="nodes/test/contract.yaml",
+            field_path="node_type",
+            message="Invalid node_type",
+            severity=EnumContractViolationSeverity.ERROR,
+            line_number=23,
+        )
+
+        error = convert_violation_to_handler_error(violation)
+        assert error.line_number == 23
+
+
+class TestLineNumberTracking:
+    """Tests for line-number error reporting (OMN-517)."""
+
+    def test_yaml_line_numbers_extracted(self, tmp_path: Path) -> None:
+        """Test that line numbers are extracted from YAML files."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\n"
+            "node_type: EFFECT_GENERIC\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+        )
+
+        line_map = _get_yaml_line_numbers(contract_file)
+
+        assert line_map["name"] == 1
+        assert line_map["node_type"] == 2
+        assert line_map["contract_version"] == 3
+        assert line_map["contract_version.major"] == 4
+        assert line_map["contract_version.minor"] == 5
+        assert line_map["contract_version.patch"] == 6
+
+    def test_yaml_line_numbers_with_comments(self, tmp_path: Path) -> None:
+        """Test that comments are skipped in line number extraction."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "# This is a comment\n"
+            "name: test_node\n"
+            "# Another comment\n"
+            "node_type: EFFECT_GENERIC\n"
+        )
+
+        line_map = _get_yaml_line_numbers(contract_file)
+
+        assert line_map["name"] == 2
+        assert line_map["node_type"] == 4
+
+    def test_violation_includes_line_number(self, tmp_path: Path) -> None:
+        """Test that violations include line numbers when available."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\n"
+            "node_type: INVALID_TYPE\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelInput\n"
+            "  module: some.module\n"
+            "output_model:\n"
+            "  name: ModelOutput\n"
+            "  module: some.module\n"
+        )
+
+        linter = ContractLinter(check_imports=False, check_unknown_fields=False)
+        result = linter.lint_file(contract_file)
+
+        # Find the node_type violation
+        node_type_violations = [
+            v for v in result.violations if v.field_path == "node_type"
+        ]
+        assert len(node_type_violations) == 1
+        assert node_type_violations[0].line_number == 2
+
+    def test_violation_str_includes_line_number(self) -> None:
+        """Test that violation string includes line number when present."""
+        violation = ModelContractViolation(
+            file_path="/path/to/contract.yaml",
+            field_path="node_type",
+            message="Invalid node_type",
+            severity=EnumContractViolationSeverity.ERROR,
+            line_number=23,
+        )
+        result = str(violation)
+        assert "/path/to/contract.yaml:23:node_type" in result
+
+    def test_violation_str_without_line_number(self) -> None:
+        """Test that violation string omits line when not available."""
+        violation = ModelContractViolation(
+            file_path="/path/to/contract.yaml",
+            field_path="node_type",
+            message="Invalid node_type",
+            severity=EnumContractViolationSeverity.ERROR,
+        )
+        result = str(violation)
+        assert "/path/to/contract.yaml:node_type" in result
+
+    def test_yaml_parse_error_includes_line_number(self, tmp_path: Path) -> None:
+        """Test that YAML parse errors include the error line number."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\nnode_type: EFFECT_GENERIC\nbad_yaml: [invalid: syntax\n"
+        )
+
+        linter = ContractLinter(check_imports=False)
+        result = linter.lint_file(contract_file)
+
+        assert not result.is_valid
+        yaml_errors = [v for v in result.violations if "yaml" in v.message.lower()]
+        assert len(yaml_errors) == 1
+        # YAML parser should provide a line number
+        assert yaml_errors[0].line_number is not None
+
+
+class TestDidYouMeanSuggestions:
+    """Tests for 'Did you mean?' suggestions for unrecognized fields (OMN-517)."""
+
+    def test_suggest_similar_field_typo(self) -> None:
+        """Test that close typos get suggestions."""
+        assert _suggest_similar_field("node_typ", KNOWN_CONTRACT_FIELDS) == "node_type"
+        assert (
+            _suggest_similar_field("input_modle", KNOWN_CONTRACT_FIELDS)
+            == "input_model"
+        )
+        assert (
+            _suggest_similar_field("descrption", KNOWN_CONTRACT_FIELDS) == "description"
+        )
+
+    def test_suggest_no_match_for_gibberish(self) -> None:
+        """Test that completely unrelated strings get no suggestion."""
+        assert (
+            _suggest_similar_field("zzz_nonexistent_xyz", KNOWN_CONTRACT_FIELDS) is None
+        )
+
+    def test_unknown_field_warning_with_suggestion(self, tmp_path: Path) -> None:
+        """Test that unknown fields produce warnings with suggestions."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\n"
+            "node_type: EFFECT_GENERIC\n"
+            "node_typ: COMPUTE_GENERIC\n"  # Typo of node_type
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelInput\n"
+            "  module: some.module\n"
+            "output_model:\n"
+            "  name: ModelOutput\n"
+            "  module: some.module\n"
+        )
+
+        linter = ContractLinter(
+            check_imports=False,
+            check_unknown_fields=True,
+        )
+        result = linter.lint_file(contract_file)
+
+        # Find the unknown field warning
+        unknown_warnings = [
+            v
+            for v in result.violations
+            if v.field_path == "node_typ"
+            and v.severity == EnumContractViolationSeverity.WARNING
+        ]
+        assert len(unknown_warnings) == 1
+        assert "Did you mean" in unknown_warnings[0].message
+        assert "node_type" in unknown_warnings[0].message
+
+    def test_unknown_field_with_line_number(self, tmp_path: Path) -> None:
+        """Test that unknown field warnings include line numbers."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\n"
+            "node_type: EFFECT_GENERIC\n"
+            "descrption: A typo\n"  # Line 3
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelInput\n"
+            "  module: some.module\n"
+            "output_model:\n"
+            "  name: ModelOutput\n"
+            "  module: some.module\n"
+        )
+
+        linter = ContractLinter(check_imports=False, check_unknown_fields=True)
+        result = linter.lint_file(contract_file)
+
+        unknown_warnings = [
+            v for v in result.violations if v.field_path == "descrption"
+        ]
+        assert len(unknown_warnings) == 1
+        assert unknown_warnings[0].line_number == 3
+        assert "description" in unknown_warnings[0].suggestion
+
+    def test_no_warnings_for_known_fields(self, tmp_path: Path) -> None:
+        """Test that known fields do not produce unknown-field warnings."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\n"
+            "node_type: EFFECT_GENERIC\n"
+            "description: A valid description\n"
+            "node_version: '1.0.0'\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelInput\n"
+            "  module: some.module\n"
+            "output_model:\n"
+            "  name: ModelOutput\n"
+            "  module: some.module\n"
+            "dependencies: []\n"
+            "metadata:\n"
+            "  author: test\n"
+        )
+
+        linter = ContractLinter(check_imports=False, check_unknown_fields=True)
+        result = linter.lint_file(contract_file)
+
+        unknown_warnings = [
+            v for v in result.violations if "unknown field" in v.message.lower()
+        ]
+        assert len(unknown_warnings) == 0
+
+    def test_unknown_field_rule_id_mapping(self) -> None:
+        """Test that unknown field violations map to CONTRACT-013."""
+        violation = ModelContractViolation(
+            file_path="nodes/test/contract.yaml",
+            field_path="node_typ",
+            message="Unknown field 'node_typ'. Did you mean 'node_type'?",
+            severity=EnumContractViolationSeverity.WARNING,
+        )
+
+        error = convert_violation_to_handler_error(violation)
+        assert error.rule_id == ContractRuleId.UNKNOWN_FIELD
+
+    def test_check_unknown_fields_disabled(self, tmp_path: Path) -> None:
+        """Test that unknown field checking can be disabled."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\n"
+            "node_type: EFFECT_GENERIC\n"
+            "totally_unknown_field: value\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelInput\n"
+            "  module: some.module\n"
+            "output_model:\n"
+            "  name: ModelOutput\n"
+            "  module: some.module\n"
+        )
+
+        linter = ContractLinter(check_imports=False, check_unknown_fields=False)
+        result = linter.lint_file(contract_file)
+
+        unknown_warnings = [
+            v for v in result.violations if "unknown field" in v.message.lower()
+        ]
+        assert len(unknown_warnings) == 0
+
+
+class TestDependencyValidation:
+    """Tests for contract dependency validation (OMN-517)."""
+
+    def test_valid_dependencies(self, tmp_path: Path) -> None:
+        """Test that valid dependencies pass validation."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\n"
+            "node_type: ORCHESTRATOR_GENERIC\n"
+            "description: test\n"
+            "node_version: '1.0.0'\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelInput\n"
+            "  module: some.module\n"
+            "output_model:\n"
+            "  name: ModelOutput\n"
+            "  module: some.module\n"
+            "dependencies:\n"
+            "  - name: reducer_protocol\n"
+            "    type: protocol\n"
+            "    description: Protocol for reducer\n"
+            "  - name: env_var\n"
+            "    type: environment\n"
+            "    description: Environment variable\n"
+        )
+
+        linter = ContractLinter(
+            check_imports=False,
+            check_unknown_fields=False,
+            check_version_compatibility=False,
+        )
+        result = linter.lint_file(contract_file)
+
+        dep_errors = [
+            v
+            for v in result.violations
+            if "dependencies" in v.field_path
+            and v.severity == EnumContractViolationSeverity.ERROR
+        ]
+        assert len(dep_errors) == 0
+
+    def test_dependencies_not_a_list(self, tmp_path: Path) -> None:
+        """Test that non-list dependencies are flagged."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\n"
+            "node_type: EFFECT_GENERIC\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelInput\n"
+            "  module: some.module\n"
+            "output_model:\n"
+            "  name: ModelOutput\n"
+            "  module: some.module\n"
+            "dependencies: not_a_list\n"
+        )
+
+        linter = ContractLinter(
+            check_imports=False,
+            check_unknown_fields=False,
+            check_version_compatibility=False,
+        )
+        result = linter.lint_file(contract_file)
+
+        dep_errors = [
+            v
+            for v in result.violations
+            if v.field_path == "dependencies"
+            and v.severity == EnumContractViolationSeverity.ERROR
+        ]
+        assert len(dep_errors) == 1
+        assert "must be a list" in dep_errors[0].message
+
+    def test_dependency_missing_name(self, tmp_path: Path) -> None:
+        """Test that dependencies without name are flagged."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\n"
+            "node_type: EFFECT_GENERIC\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelInput\n"
+            "  module: some.module\n"
+            "output_model:\n"
+            "  name: ModelOutput\n"
+            "  module: some.module\n"
+            "dependencies:\n"
+            "  - type: protocol\n"
+            "    description: Missing name\n"
+        )
+
+        linter = ContractLinter(
+            check_imports=False,
+            check_unknown_fields=False,
+            check_version_compatibility=False,
+        )
+        result = linter.lint_file(contract_file)
+
+        name_errors = [
+            v
+            for v in result.violations
+            if "name" in v.field_path
+            and "dependencies" in v.field_path
+            and v.severity == EnumContractViolationSeverity.ERROR
+        ]
+        assert len(name_errors) == 1
+
+    def test_dependency_invalid_type(self, tmp_path: Path) -> None:
+        """Test that dependencies with invalid type are flagged."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\n"
+            "node_type: EFFECT_GENERIC\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelInput\n"
+            "  module: some.module\n"
+            "output_model:\n"
+            "  name: ModelOutput\n"
+            "  module: some.module\n"
+            "dependencies:\n"
+            "  - name: bad_dep\n"
+            "    type: invalid_type\n"
+            "    description: Bad type\n"
+        )
+
+        linter = ContractLinter(
+            check_imports=False,
+            check_unknown_fields=False,
+            check_version_compatibility=False,
+        )
+        result = linter.lint_file(contract_file)
+
+        type_errors = [
+            v
+            for v in result.violations
+            if "type" in v.field_path
+            and "dependencies" in v.field_path
+            and v.severity == EnumContractViolationSeverity.ERROR
+        ]
+        assert len(type_errors) == 1
+        assert "invalid_type" in type_errors[0].message
+
+    def test_dependency_missing_description_info(self, tmp_path: Path) -> None:
+        """Test that dependencies without description get INFO violation."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\n"
+            "node_type: EFFECT_GENERIC\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelInput\n"
+            "  module: some.module\n"
+            "output_model:\n"
+            "  name: ModelOutput\n"
+            "  module: some.module\n"
+            "dependencies:\n"
+            "  - name: my_dep\n"
+            "    type: protocol\n"
+        )
+
+        linter = ContractLinter(
+            check_imports=False,
+            check_unknown_fields=False,
+            check_version_compatibility=False,
+        )
+        result = linter.lint_file(contract_file)
+
+        desc_infos = [
+            v
+            for v in result.violations
+            if "description" in v.field_path
+            and "dependencies" in v.field_path
+            and v.severity == EnumContractViolationSeverity.INFO
+        ]
+        assert len(desc_infos) == 1
+
+    def test_dependency_rule_id_mapping(self) -> None:
+        """Test that dependency violations map to CONTRACT-014."""
+        violation = ModelContractViolation(
+            file_path="nodes/test/contract.yaml",
+            field_path="dependencies[0].type",
+            message="Invalid dependency type",
+            severity=EnumContractViolationSeverity.ERROR,
+        )
+
+        error = convert_violation_to_handler_error(violation)
+        assert error.rule_id == ContractRuleId.INVALID_DEPENDENCY
+
+
+class TestVersionCompatibilityValidation:
+    """Tests for contract version compatibility validation (OMN-517)."""
+
+    def test_valid_node_version(self, tmp_path: Path) -> None:
+        """Test that valid semver node_version passes."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\n"
+            "node_type: EFFECT_GENERIC\n"
+            "description: test\n"
+            "node_version: '1.0.0'\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelInput\n"
+            "  module: some.module\n"
+            "output_model:\n"
+            "  name: ModelOutput\n"
+            "  module: some.module\n"
+        )
+
+        linter = ContractLinter(
+            check_imports=False,
+            check_unknown_fields=False,
+            check_dependencies=False,
+        )
+        result = linter.lint_file(contract_file)
+
+        version_errors = [
+            v
+            for v in result.violations
+            if "node_version" in v.field_path
+            and v.severity == EnumContractViolationSeverity.ERROR
+        ]
+        assert len(version_errors) == 0
+
+    def test_invalid_node_version_format(self, tmp_path: Path) -> None:
+        """Test that invalid node_version format is flagged."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\n"
+            "node_type: EFFECT_GENERIC\n"
+            "description: test\n"
+            "node_version: 'not-a-version'\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelInput\n"
+            "  module: some.module\n"
+            "output_model:\n"
+            "  name: ModelOutput\n"
+            "  module: some.module\n"
+        )
+
+        linter = ContractLinter(
+            check_imports=False,
+            check_unknown_fields=False,
+            check_dependencies=False,
+        )
+        result = linter.lint_file(contract_file)
+
+        version_warnings = [
+            v
+            for v in result.violations
+            if v.field_path == "node_version"
+            and v.severity == EnumContractViolationSeverity.WARNING
+        ]
+        assert len(version_warnings) == 1
+        assert "not a valid semantic version" in version_warnings[0].message
+
+    def test_node_version_non_string_non_dict(self, tmp_path: Path) -> None:
+        """Test that non-string, non-dict node_version is flagged."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\n"
+            "node_type: EFFECT_GENERIC\n"
+            "description: test\n"
+            "node_version: 123\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelInput\n"
+            "  module: some.module\n"
+            "output_model:\n"
+            "  name: ModelOutput\n"
+            "  module: some.module\n"
+        )
+
+        linter = ContractLinter(
+            check_imports=False,
+            check_unknown_fields=False,
+            check_dependencies=False,
+        )
+        result = linter.lint_file(contract_file)
+
+        version_errors = [
+            v
+            for v in result.violations
+            if v.field_path == "node_version"
+            and v.severity == EnumContractViolationSeverity.ERROR
+        ]
+        assert len(version_errors) == 1
+        assert "must be a string or dict" in version_errors[0].message
+
+    def test_node_version_dict_format(self, tmp_path: Path) -> None:
+        """Test that dict-style node_version is accepted."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\n"
+            "node_type: EFFECT_GENERIC\n"
+            "description: test\n"
+            "node_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelInput\n"
+            "  module: some.module\n"
+            "output_model:\n"
+            "  name: ModelOutput\n"
+            "  module: some.module\n"
+        )
+
+        linter = ContractLinter(
+            check_imports=False,
+            check_unknown_fields=False,
+            check_dependencies=False,
+        )
+        result = linter.lint_file(contract_file)
+
+        version_errors = [
+            v
+            for v in result.violations
+            if "node_version" in v.field_path
+            and v.severity == EnumContractViolationSeverity.ERROR
+        ]
+        assert len(version_errors) == 0
+
+    def test_semver_with_prerelease(self, tmp_path: Path) -> None:
+        """Test that semver with prerelease tag is accepted."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\n"
+            "node_type: EFFECT_GENERIC\n"
+            "description: test\n"
+            "node_version: '0.1.0-beta'\n"
+            "contract_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelInput\n"
+            "  module: some.module\n"
+            "output_model:\n"
+            "  name: ModelOutput\n"
+            "  module: some.module\n"
+        )
+
+        linter = ContractLinter(
+            check_imports=False,
+            check_unknown_fields=False,
+            check_dependencies=False,
+        )
+        result = linter.lint_file(contract_file)
+
+        version_warnings = [
+            v
+            for v in result.violations
+            if v.field_path == "node_version" and "not a valid" in v.message
+        ]
+        assert len(version_warnings) == 0
+
+    def test_version_mismatch_info_string_format(self, tmp_path: Path) -> None:
+        """Test version mismatch with string node_version format."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\n"
+            "node_type: EFFECT_GENERIC\n"
+            "description: test\n"
+            "node_version: '1.0.0'\n"
+            "contract_version:\n"
+            "  major: 0\n"
+            "  minor: 1\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelInput\n"
+            "  module: some.module\n"
+            "output_model:\n"
+            "  name: ModelOutput\n"
+            "  module: some.module\n"
+        )
+
+        linter = ContractLinter(
+            check_imports=False,
+            check_unknown_fields=False,
+            check_dependencies=False,
+        )
+        result = linter.lint_file(contract_file)
+
+        version_infos = [
+            v
+            for v in result.violations
+            if v.field_path == "contract_version"
+            and v.severity == EnumContractViolationSeverity.INFO
+            and "compatibility" in v.message.lower()
+        ]
+        assert len(version_infos) == 1
+        assert "bump" in version_infos[0].suggestion.lower()
+
+    def test_version_mismatch_info_dict_format(self, tmp_path: Path) -> None:
+        """Test version mismatch with dict node_version format."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            "name: test_node\n"
+            "node_type: EFFECT_GENERIC\n"
+            "description: test\n"
+            "node_version:\n"
+            "  major: 1\n"
+            "  minor: 0\n"
+            "  patch: 0\n"
+            "contract_version:\n"
+            "  major: 0\n"
+            "  minor: 1\n"
+            "  patch: 0\n"
+            "input_model:\n"
+            "  name: ModelInput\n"
+            "  module: some.module\n"
+            "output_model:\n"
+            "  name: ModelOutput\n"
+            "  module: some.module\n"
+        )
+
+        linter = ContractLinter(
+            check_imports=False,
+            check_unknown_fields=False,
+            check_dependencies=False,
+        )
+        result = linter.lint_file(contract_file)
+
+        version_infos = [
+            v
+            for v in result.violations
+            if v.field_path == "contract_version"
+            and v.severity == EnumContractViolationSeverity.INFO
+            and "compatibility" in v.message.lower()
+        ]
+        assert len(version_infos) == 1
+        assert "bump" in version_infos[0].suggestion.lower()
+
+
+class TestRealContractWithNewValidations:
+    """Tests that existing real contracts pass with new validation features (OMN-517)."""
+
+    def test_lint_real_nodes_with_all_validations(self) -> None:
+        """Test that all real contracts pass with dependency and version validation."""
+        nodes_dir = Path("src/omnibase_infra/nodes")
+
+        if not nodes_dir.exists():
+            pytest.skip("Nodes directory not found")
+
+        # Run with all new validation features enabled but without import checking
+        # and unknown field checking (real contracts may have domain-specific fields)
+        result = lint_contracts_in_directory(
+            nodes_dir,
+            check_imports=False,
+            check_unknown_fields=False,
+            check_dependencies=True,
+            check_version_compatibility=True,
+        )
+
+        # All contracts should be valid (no ERROR-level violations)
+        error_violations = [
+            v
+            for v in result.violations
+            if v.severity == EnumContractViolationSeverity.ERROR
+        ]
+        assert len(error_violations) == 0, (
+            f"Real contracts have errors with new validations: "
+            f"{[str(v) for v in error_violations]}"
         )

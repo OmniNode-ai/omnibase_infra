@@ -20,6 +20,10 @@ from omnibase_infra.models.bindings.constants import (
     VALID_CONTEXT_PATHS,
     VALID_SOURCES,
 )
+from omnibase_infra.models.bindings.model_binding_resolution_metrics import (
+    BINDING_LATENCY_HISTOGRAM_BUCKETS,
+    ModelBindingResolutionMetrics,
+)
 from omnibase_infra.models.bindings.model_binding_resolution_result import (
     ModelBindingResolutionResult,
 )
@@ -51,7 +55,9 @@ __all__: list[str] = [
     "MIN_PATH_SEGMENTS",
     "VALID_CONTEXT_PATHS",
     "VALID_SOURCES",
+    "BINDING_LATENCY_HISTOGRAM_BUCKETS",
     # Models
+    "ModelBindingResolutionMetrics",
     "ModelBindingResolutionResult",
     "ModelOperationBinding",
     "ModelOperationBindingsSubcontract",

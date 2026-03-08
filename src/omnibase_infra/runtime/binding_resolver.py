@@ -53,6 +53,7 @@ and thread-safe. They can be shared across concurrent requests.
 from __future__ import annotations
 
 import logging
+import time
 from enum import Enum
 from typing import Final, Literal
 from uuid import UUID
@@ -68,6 +69,7 @@ from omnibase_infra.models.bindings import (
     MAX_PATH_SEGMENTS,
     VALID_CONTEXT_PATHS,
     VALID_SOURCES,
+    ModelBindingResolutionMetrics,
     ModelBindingResolutionResult,
     ModelOperationBindingsSubcontract,
     ModelParsedBinding,
@@ -498,8 +500,39 @@ class OperationBindingResolver:
     """
 
     def __init__(self) -> None:
-        """Initialize resolver with expression parser."""
+        """Initialize resolver with expression parser and metrics."""
         self._parser = BindingExpressionParser()
+        self._metrics = ModelBindingResolutionMetrics()
+
+    @property
+    def metrics(self) -> ModelBindingResolutionMetrics:
+        """Return current binding resolution metrics snapshot.
+
+        The returned instance is immutable. Subsequent resolutions will
+        update the internal reference but never mutate this snapshot.
+
+        Returns:
+            Current metrics snapshot.
+
+        Example:
+            >>> resolver = OperationBindingResolver()
+            >>> # ... resolve bindings ...
+            >>> m = resolver.metrics
+            >>> print(f"Total: {m.total_resolutions}, Avg: {m.avg_latency_ms:.2f}ms")
+
+        .. versionadded:: 0.2.8
+        """
+        return self._metrics
+
+    def reset_metrics(self) -> None:
+        """Reset metrics to empty state.
+
+        Useful for testing or periodic metrics export where counters
+        should be reset after export.
+
+        .. versionadded:: 0.2.8
+        """
+        self._metrics = ModelBindingResolutionMetrics()
 
     def resolve(
         self,
@@ -516,6 +549,10 @@ class OperationBindingResolver:
             2. Apply operation-specific bindings (overwrite globals)
             3. Validate required fields
             4. Return resolved parameters or fail fast
+
+        Metrics are recorded for each resolution attempt, including
+        duration, success/failure, bindings resolved count, and error
+        codes. Access via ``resolver.metrics``.
 
         Args:
             operation: Operation name (e.g., ``"db.query"``).
@@ -547,7 +584,11 @@ class OperationBindingResolver:
             ... )
             >>> result.resolved_parameters
             {'sql': 'SELECT 1', 'timestamp': '2025-01-01T00:00:00Z'}
+
+        .. versionchanged:: 0.2.8
+            Added metrics instrumentation (OMN-1644).
         """
+        start_time = time.monotonic()
         resolved_parameters: dict[str, JsonType] = {}
         resolved_from: dict[str, str] = {}
 
@@ -595,9 +636,32 @@ class OperationBindingResolver:
                 resolved_from[binding.parameter_name] = binding.original_expression
 
             except BindingResolutionError:
+                # Record failure metrics before re-raising
+                duration_ms = (time.monotonic() - start_time) * 1000
+                self._metrics = self._metrics.record_resolution(
+                    duration_ms=duration_ms,
+                    success=False,
+                    operation=operation,
+                    bindings_resolved=len(resolved_parameters),
+                )
+                logger.debug(
+                    "Binding resolution failed for operation '%s' "
+                    "(%.2fms, %d bindings resolved before failure)",
+                    operation,
+                    duration_ms,
+                    len(resolved_parameters),
+                )
                 # Re-raise BindingResolutionError without wrapping
                 raise
             except Exception as e:
+                # Record failure metrics before wrapping
+                duration_ms = (time.monotonic() - start_time) * 1000
+                self._metrics = self._metrics.record_resolution(
+                    duration_ms=duration_ms,
+                    success=False,
+                    operation=operation,
+                    bindings_resolved=len(resolved_parameters),
+                )
                 # Wrap unexpected errors with diagnostic context
                 raise BindingResolutionError(
                     f"Failed to resolve binding: {e}",
@@ -606,6 +670,22 @@ class OperationBindingResolver:
                     expression=binding.original_expression,
                     correlation_id=correlation_id,
                 ) from e
+
+        # Record success metrics
+        duration_ms = (time.monotonic() - start_time) * 1000
+        self._metrics = self._metrics.record_resolution(
+            duration_ms=duration_ms,
+            success=True,
+            operation=operation,
+            bindings_resolved=len(resolved_parameters),
+        )
+        logger.debug(
+            "Binding resolution succeeded for operation '%s' "
+            "(%.2fms, %d bindings resolved)",
+            operation,
+            duration_ms,
+            len(resolved_parameters),
+        )
 
         return ModelBindingResolutionResult(
             operation_name=operation,

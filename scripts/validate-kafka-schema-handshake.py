@@ -68,14 +68,14 @@ except ImportError as exc:
 # is not running.  We load it directly with importlib so the pytest calls are
 # visible but we skip the xfail markers at test-parametrize time.
 import importlib.util
-import os
+from pathlib import Path
 
-_TEST_MODULE_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "tests",
-    "integration",
-    "event_bus",
-    "test_kafka_boundary_compat.py",
+_TEST_MODULE_PATH = str(
+    Path(__file__).resolve().parent.parent
+    / "tests"
+    / "integration"
+    / "event_bus"
+    / "test_kafka_boundary_compat.py"
 )
 
 
