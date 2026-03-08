@@ -722,6 +722,10 @@ class RuntimeHostProcess:
         # Handler discovery service (lazy-created if contract_paths provided)
         self._handler_discovery: ContractHandlerDiscovery | None = None
 
+        # Config prefetch status (OMN-3893): tracks Infisical prefetch outcome.
+        # Vocabulary: pending | skipped | ok | degraded_no_requirements | degraded_error
+        self._config_prefetch_status: str = "pending"
+
         # Kafka contract source (created if KAFKA_EVENTS mode, wired separately)
         self._kafka_contract_source: KafkaContractSource | None = None
 
@@ -2931,19 +2935,28 @@ class RuntimeHostProcess:
         infisical_addr = os.environ.get("INFISICAL_ADDR", "")
         if not infisical_addr:
             logger.debug("INFISICAL_ADDR not set, skipping config prefetch")
+            self._config_prefetch_status = "skipped"
             return
 
-        # Resolve which contract paths to scan.  When the caller did not
-        # provide explicit paths, fall back to auto-discovery: scan the
-        # entire ``omnibase_infra`` package tree for ``contract.yaml``
-        # files.  This fallback is gated strictly on ``INFISICAL_ADDR``
-        # being set (already checked above) so local development without
-        # Infisical is never affected.
-        effective_contract_paths: list[Path] = list(self._contract_paths)
-        if not effective_contract_paths:
-            package_root = Path(__file__).parent.parent
+        # OMN-3893: Decouple prefetch contract scan from handler contract paths.
+        # Previously this used self._contract_paths which points at handler
+        # contracts (e.g. /app/contracts) — those have no transport_type and
+        # the extractor finds nothing.  Now we always scan the installed
+        # omnibase_infra package tree for node contracts, with an env var
+        # escape hatch for custom deployments.
+        env_override = os.environ.get("ONEX_NODE_CONTRACTS_DIR", "")
+        if env_override:
+            effective_contract_paths: list[Path] = [Path(env_override)]
             logger.debug(
-                "No contract_paths configured; auto-discovering contracts under %s",
+                "Using ONEX_NODE_CONTRACTS_DIR override for prefetch: %s",
+                env_override,
+            )
+        else:
+            import omnibase_infra as _pkg
+
+            package_root = Path(_pkg.__file__).parent
+            logger.debug(
+                "Auto-discovering node contracts under package root: %s",
                 package_root,
             )
             effective_contract_paths = [package_root]
@@ -2961,9 +2974,14 @@ class RuntimeHostProcess:
             requirements = extractor.extract_from_paths(effective_contract_paths)
 
             if not requirements.requirements:
-                logger.info(
-                    "No config requirements found in contracts, skipping prefetch"
+                logger.warning(
+                    "No config requirements found in node contracts — prefetch "
+                    "will be a no-op.  Scanned paths: %s.  This usually means "
+                    "node contract YAML files are missing transport_type or "
+                    "config_requirements sections.",
+                    [str(p) for p in effective_contract_paths],
                 )
+                self._config_prefetch_status = "degraded_no_requirements"
                 return
 
             # Step 2: Get or create a ProtocolSecretResolver
@@ -3015,6 +3033,7 @@ class RuntimeHostProcess:
                         "(INFISICAL_CLIENT_ID, INFISICAL_CLIENT_SECRET, "
                         "INFISICAL_PROJECT_ID required), skipping config prefetch"
                     )
+                    self._config_prefetch_status = "skipped"
                     return
 
                 from omnibase_core.container import ModelONEXContainer as _Container
@@ -3066,6 +3085,7 @@ class RuntimeHostProcess:
                 # Step 4: Apply to environment
                 applied = prefetcher.apply_to_environment(result)
 
+                self._config_prefetch_status = "ok"
                 logger.info(
                     "Config prefetch complete",
                     extra={
@@ -3096,6 +3116,7 @@ class RuntimeHostProcess:
             # strings embedded in exception messages).  Do NOT use
             # exc_info=True here because the full traceback may contain
             # locals with secret values.
+            self._config_prefetch_status = "degraded_error"
             logger.warning(
                 "Config prefetch failed (non-fatal): %s",
                 sanitize_error_message(exc),
