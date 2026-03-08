@@ -24,7 +24,6 @@ import pytest
 
 from omnibase_infra.errors import BindingResolutionError
 from omnibase_infra.models.bindings import (
-    ModelBindingResolutionMetrics,
     ModelOperationBindingsSubcontract,
     ModelParsedBinding,
 )
@@ -134,12 +133,8 @@ class TestBindingResolutionMetricsEmission:
         assert m.total_resolutions == 1, (
             "total_resolutions should be 1 after one resolution"
         )
-        assert m.successful_resolutions == 1, (
-            "successful_resolutions should be 1"
-        )
-        assert m.failed_resolutions == 0, (
-            "failed_resolutions should be 0 after success"
-        )
+        assert m.successful_resolutions == 1, "successful_resolutions should be 1"
+        assert m.failed_resolutions == 0, "failed_resolutions should be 0 after success"
         assert m.bindings_resolved_count > 0, (
             "bindings_resolved_count should reflect resolved parameters"
         )
@@ -250,9 +245,7 @@ class TestBindingResolutionMetricsEmission:
         assert m.total_resolutions == 1, (
             "total_resolutions should count failed attempts"
         )
-        assert m.failed_resolutions == 1, (
-            "failed_resolutions should be 1"
-        )
+        assert m.failed_resolutions == 1, "failed_resolutions should be 1"
         assert m.successful_resolutions == 0
         assert "db.query" in m.per_operation_errors, (
             "per_operation_errors should track the failed operation"
