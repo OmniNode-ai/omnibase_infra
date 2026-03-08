@@ -318,6 +318,11 @@ COPY --chown=omniinfra:omniinfra LICENSE /app/LICENSE
 # Copy contracts directory (must exist in build context)
 COPY --chown=omniinfra:omniinfra contracts/ /app/contracts/
 
+# Copy node contracts (contract.yaml with metadata.transport_type) into contracts dir
+# These are required by ContractConfigExtractor for Infisical config prefetch
+# and ProtocolEventBusPublisher wiring. Without them, no events are published.
+COPY --chown=omniinfra:omniinfra src/omnibase_infra/nodes/ /app/contracts/nodes/
+
 # Copy entrypoint script that stamps schema fingerprint before kernel start
 COPY --chown=omniinfra:omniinfra docker/entrypoint-runtime.sh /app/entrypoint-runtime.sh
 RUN chmod +x /app/entrypoint-runtime.sh

@@ -179,6 +179,8 @@ x-runtime-env: &runtime-env
   # Auto-ACK local/internal nodes after introspection. Never set in production —
   # external nodes send their own ack. Default empty = disabled.
   ONEX_REGISTRATION_AUTO_ACK: ${ONEX_REGISTRATION_AUTO_ACK:-}
+  # --- Event routing ---
+  USE_EVENT_ROUTING: ${USE_EVENT_ROUTING:-}
   # --- OpenTelemetry / Phoenix tracing (OMN-3811) ---
   # Opt-in: tracing only activates when OTEL_EXPORTER_OTLP_ENDPOINT is non-empty.
   # Inside Docker, point to phoenix:6006 (OTLP HTTP). On host, use localhost:6006.
@@ -218,7 +220,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations/forward:/docker-entrypoint-initdb.d:ro
-      - ./postgres/init/02-keycloak-db.sql:/docker-entrypoint-initdb.d/02-keycloak-db.sql:ro
     networks:
       - omnibase-infra-network
     healthcheck:
@@ -487,6 +488,7 @@ services:
       - runtime_logs:/app/logs
       - runtime_data:/app/data
       - ../contracts:/app/contracts:ro
+      - ../src/omnibase_infra/nodes:/app/contracts/nodes:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
@@ -525,6 +527,7 @@ services:
       - effects_logs:/app/logs
       - effects_data:/app/data
       - ../contracts:/app/contracts:ro
+      - ../src/omnibase_infra/nodes:/app/contracts/nodes:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
@@ -559,6 +562,7 @@ services:
     volumes:
       - worker_logs:/app/logs
       - ../contracts:/app/contracts:ro
+      - ../src/omnibase_infra/nodes:/app/contracts/nodes:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
@@ -772,6 +776,7 @@ services:
     volumes:
       - contract_resolver_logs:/app/logs
       - ../contracts:/app/contracts:ro
+      - ../src/omnibase_infra/nodes:/app/contracts/nodes:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8091/health"]
       interval: 30s
