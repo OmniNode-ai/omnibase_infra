@@ -2,7 +2,6 @@
 # Copyright (c) 2025 OmniNode Team
 """Unit tests for architecture validation handler and declarative node.
 
-This module provides comprehensive tests for the architecture validation system,
 including the declarative node and its handler implementation.
 
 The tests use mock rules implementing ProtocolArchitectureRule to avoid dependencies

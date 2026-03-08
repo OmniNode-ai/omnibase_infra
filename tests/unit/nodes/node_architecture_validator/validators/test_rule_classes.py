@@ -2,7 +2,6 @@
 # Copyright (c) 2025 OmniNode Team
 """Unit tests for protocol-compliant Rule classes.
 
-This module provides comprehensive test coverage for the three Rule classes
 introduced in PR #124:
     - RuleNoDirectDispatch (ARCH-001 wrapper)
     - RuleNoHandlerPublishing (ARCH-002 wrapper)

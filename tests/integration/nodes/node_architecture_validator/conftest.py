@@ -2,7 +2,6 @@
 # Copyright (c) 2025 OmniNode Team
 """Shared pytest fixtures for architecture validator integration tests.
 
-This module provides common fixtures used across architecture validator
 integration tests.
 
 Fixtures Provided:

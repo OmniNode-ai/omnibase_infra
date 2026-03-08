@@ -2,7 +2,6 @@
 # Copyright (c) 2025 OmniNode Team
 """Property-based and edge case tests for architecture validator Rule classes.
 
-This module provides comprehensive edge case testing for the AST-based architecture
 validators to ensure they handle unusual inputs gracefully without crashing.
 
 Test Coverage:

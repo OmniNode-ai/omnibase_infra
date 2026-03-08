@@ -2,7 +2,6 @@
 # Copyright (c) 2025 OmniNode Team
 """Integration tests for Rule classes with NodeArchitectureValidator.
 
-This module provides comprehensive integration testing for the three Rule classes
 introduced in PR #124:
     - RuleNoDirectDispatch (ARCH-001)
     - RuleNoHandlerPublishing (ARCH-002)

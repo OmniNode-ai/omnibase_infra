@@ -2,7 +2,6 @@
 # Copyright (c) 2025 OmniNode Team
 """Shared pytest fixtures for architecture validator tests.
 
-This module provides common fixtures used across multiple architecture validator
 test files, including helpers for creating temporary Python files with specific
 code patterns.
 
