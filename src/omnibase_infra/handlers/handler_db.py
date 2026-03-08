@@ -104,6 +104,40 @@ from omnibase_infra.utils.util_env_parsing import parse_env_float, parse_env_int
 
 logger = logging.getLogger(__name__)
 
+# --- Prometheus metrics for unknown SQLSTATE class monitoring (OMN-1366) ---
+# These counters enable production monitoring of SQLSTATE classes that are not
+# yet explicitly classified as transient or permanent. High counts for a specific
+# class may indicate that it should be added to _TRANSIENT_SQLSTATE_CLASSES or
+# _PERMANENT_SQLSTATE_CLASSES for more accurate circuit breaker behavior.
+#
+# Metric: onex_db_unknown_sqlstate_class_total
+#   Labels: sqlstate_class (2-char class code), error_type (exception class name)
+#   Purpose: Count occurrences of unknown SQLSTATE classes to identify patterns
+#            that may warrant explicit classification.
+#
+# Metric: onex_db_sqlstate_classification_total
+#   Labels: sqlstate_class, classification (transient|permanent|unknown)
+#   Purpose: Distribution of all SQLSTATE classifications for observability.
+try:
+    from prometheus_client import Counter
+
+    _UNKNOWN_SQLSTATE_CLASS_COUNTER: Counter | None = Counter(
+        "onex_db_unknown_sqlstate_class_total",
+        "Count of PostgreSQL errors with unrecognized SQLSTATE classes "
+        "(defaulted to permanent classification)",
+        ["sqlstate_class", "error_type"],
+    )
+    _SQLSTATE_CLASSIFICATION_COUNTER: Counter | None = Counter(
+        "onex_db_sqlstate_classification_total",
+        "Count of all PostgreSQL SQLSTATE error classifications",
+        ["sqlstate_class", "classification"],
+    )
+except (ImportError, ValueError):
+    # ImportError: prometheus_client not installed (graceful degradation)
+    # ValueError: duplicate metric registration in tests (idempotent fallback)
+    _UNKNOWN_SQLSTATE_CLASS_COUNTER = None
+    _SQLSTATE_CLASSIFICATION_COUNTER = None
+
 # MVP pool size fixed at 5 connections.
 # Note: Recommended range is 10-20 for production workloads.
 # Configurable pool size deferred to Beta release.
@@ -672,6 +706,10 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                     "error_type": type(error).__name__,
                 },
             )
+            if _SQLSTATE_CLASSIFICATION_COUNTER is not None:
+                _SQLSTATE_CLASSIFICATION_COUNTER.labels(
+                    sqlstate_class=sqlstate_class, classification="transient"
+                ).inc()
             return True
 
         # Check if class is explicitly permanent
@@ -684,10 +722,16 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                     "error_type": type(error).__name__,
                 },
             )
+            if _SQLSTATE_CLASSIFICATION_COUNTER is not None:
+                _SQLSTATE_CLASSIFICATION_COUNTER.labels(
+                    sqlstate_class=sqlstate_class, classification="permanent"
+                ).inc()
             return False
 
-        # Unknown class - log warning and default to permanent (conservative)
-        # Unknown errors are more likely to be application bugs than infrastructure issues
+        # Unknown class - log warning, record metric, and default to permanent
+        # (conservative). Unknown errors are more likely to be application bugs
+        # than infrastructure issues. The metrics counter enables monitoring to
+        # identify patterns that warrant explicit classification (OMN-1366).
         logger.warning(
             "Unknown PostgreSQL SQLSTATE class, defaulting to permanent classification",
             extra={
@@ -696,6 +740,14 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 "error_type": type(error).__name__,
             },
         )
+        if _UNKNOWN_SQLSTATE_CLASS_COUNTER is not None:
+            _UNKNOWN_SQLSTATE_CLASS_COUNTER.labels(
+                sqlstate_class=sqlstate_class, error_type=type(error).__name__
+            ).inc()
+        if _SQLSTATE_CLASSIFICATION_COUNTER is not None:
+            _SQLSTATE_CLASSIFICATION_COUNTER.labels(
+                sqlstate_class=sqlstate_class, classification="unknown"
+            ).inc()
         return False
 
     async def _execute_query(

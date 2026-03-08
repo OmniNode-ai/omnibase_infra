@@ -1959,6 +1959,200 @@ class TestHandlerDbCircuitBreakerErrorClassification:
             await handler.shutdown()
 
 
+class TestHandlerDbSqlstateMetrics:
+    """Test suite for Prometheus metrics on SQLSTATE classification (OMN-1366).
+
+    Verifies that Prometheus counters are incremented correctly when
+    _is_transient_error classifies SQLSTATE codes as transient, permanent,
+    or unknown.
+    """
+
+    @pytest.fixture
+    def handler(self, mock_container: MagicMock) -> HandlerDb:
+        """Create HandlerDb fixture."""
+        return HandlerDb(mock_container)
+
+    def test_unknown_sqlstate_class_increments_unknown_counter(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test unknown SQLSTATE class increments the unknown counter."""
+        import omnibase_infra.handlers.handler_db as handler_module
+
+        mock_unknown_counter = MagicMock()
+        mock_classification_counter = MagicMock()
+
+        with (
+            patch.object(
+                handler_module,
+                "_UNKNOWN_SQLSTATE_CLASS_COUNTER",
+                mock_unknown_counter,
+            ),
+            patch.object(
+                handler_module,
+                "_SQLSTATE_CLASSIFICATION_COUNTER",
+                mock_classification_counter,
+            ),
+        ):
+            error = asyncpg.PostgresError("unknown error")
+            error.sqlstate = "XX123"
+            result = handler._is_transient_error(error)
+
+            assert result is False
+            mock_unknown_counter.labels.assert_called_once_with(
+                sqlstate_class="XX", error_type="PostgresError"
+            )
+            mock_unknown_counter.labels.return_value.inc.assert_called_once()
+            mock_classification_counter.labels.assert_called_once_with(
+                sqlstate_class="XX", classification="unknown"
+            )
+            mock_classification_counter.labels.return_value.inc.assert_called_once()
+
+    def test_transient_sqlstate_increments_classification_counter(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test transient SQLSTATE class increments classification counter."""
+        import omnibase_infra.handlers.handler_db as handler_module
+
+        mock_classification_counter = MagicMock()
+
+        with patch.object(
+            handler_module,
+            "_SQLSTATE_CLASSIFICATION_COUNTER",
+            mock_classification_counter,
+        ):
+            error = asyncpg.PostgresError("connection exception")
+            error.sqlstate = "08000"
+            result = handler._is_transient_error(error)
+
+            assert result is True
+            mock_classification_counter.labels.assert_called_once_with(
+                sqlstate_class="08", classification="transient"
+            )
+            mock_classification_counter.labels.return_value.inc.assert_called_once()
+
+    def test_permanent_sqlstate_increments_classification_counter(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test permanent SQLSTATE class increments classification counter."""
+        import omnibase_infra.handlers.handler_db as handler_module
+
+        mock_classification_counter = MagicMock()
+
+        with patch.object(
+            handler_module,
+            "_SQLSTATE_CLASSIFICATION_COUNTER",
+            mock_classification_counter,
+        ):
+            error = asyncpg.PostgresError("constraint violation")
+            error.sqlstate = "23503"
+            result = handler._is_transient_error(error)
+
+            assert result is False
+            mock_classification_counter.labels.assert_called_once_with(
+                sqlstate_class="23", classification="permanent"
+            )
+            mock_classification_counter.labels.return_value.inc.assert_called_once()
+
+    def test_no_sqlstate_does_not_increment_counters(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test errors without SQLSTATE do not increment SQLSTATE counters."""
+        import omnibase_infra.handlers.handler_db as handler_module
+
+        mock_unknown_counter = MagicMock()
+        mock_classification_counter = MagicMock()
+
+        with (
+            patch.object(
+                handler_module,
+                "_UNKNOWN_SQLSTATE_CLASS_COUNTER",
+                mock_unknown_counter,
+            ),
+            patch.object(
+                handler_module,
+                "_SQLSTATE_CLASSIFICATION_COUNTER",
+                mock_classification_counter,
+            ),
+        ):
+            error = asyncpg.PostgresError("no sqlstate")
+            result = handler._is_transient_error(error)
+
+            assert result is False
+            mock_unknown_counter.labels.assert_not_called()
+            mock_classification_counter.labels.assert_not_called()
+
+    def test_counters_none_does_not_raise(self, handler: HandlerDb) -> None:
+        """Test graceful degradation when counters are None (prometheus not available)."""
+        import omnibase_infra.handlers.handler_db as handler_module
+
+        with (
+            patch.object(
+                handler_module, "_UNKNOWN_SQLSTATE_CLASS_COUNTER", None
+            ),
+            patch.object(
+                handler_module, "_SQLSTATE_CLASSIFICATION_COUNTER", None
+            ),
+        ):
+            # Unknown class - should not raise even with None counters
+            error = asyncpg.PostgresError("unknown error")
+            error.sqlstate = "XX123"
+            result = handler._is_transient_error(error)
+            assert result is False
+
+            # Transient class - should not raise even with None counters
+            error.sqlstate = "08000"
+            result = handler._is_transient_error(error)
+            assert result is True
+
+            # Permanent class - should not raise even with None counters
+            error.sqlstate = "23503"
+            result = handler._is_transient_error(error)
+            assert result is False
+
+    def test_multiple_unknown_classes_tracked_separately(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test that different unknown SQLSTATE classes are tracked as separate labels."""
+        import omnibase_infra.handlers.handler_db as handler_module
+
+        mock_unknown_counter = MagicMock()
+        mock_classification_counter = MagicMock()
+
+        with (
+            patch.object(
+                handler_module,
+                "_UNKNOWN_SQLSTATE_CLASS_COUNTER",
+                mock_unknown_counter,
+            ),
+            patch.object(
+                handler_module,
+                "_SQLSTATE_CLASSIFICATION_COUNTER",
+                mock_classification_counter,
+            ),
+        ):
+            # First unknown class
+            error1 = asyncpg.PostgresError("error 1")
+            error1.sqlstate = "XX123"
+            handler._is_transient_error(error1)
+
+            # Second unknown class
+            error2 = asyncpg.PostgresError("error 2")
+            error2.sqlstate = "YY456"
+            handler._is_transient_error(error2)
+
+            # Verify both classes were tracked
+            assert mock_unknown_counter.labels.call_count == 2
+            calls = mock_unknown_counter.labels.call_args_list
+            assert calls[0].kwargs == {
+                "sqlstate_class": "XX",
+                "error_type": "PostgresError",
+            }
+            assert calls[1].kwargs == {
+                "sqlstate_class": "YY",
+                "error_type": "PostgresError",
+            }
+
+
 __all__: list[str] = [
     "TestHandlerDbInitialization",
     "TestHandlerDbQueryOperations",
@@ -1973,4 +2167,5 @@ __all__: list[str] = [
     "TestHandlerDbHandlePostgresError",
     "TestHandlerDbTransientErrorClassification",
     "TestHandlerDbCircuitBreakerErrorClassification",
+    "TestHandlerDbSqlstateMetrics",
 ]
