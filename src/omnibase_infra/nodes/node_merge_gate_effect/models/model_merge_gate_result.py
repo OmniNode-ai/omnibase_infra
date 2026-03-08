@@ -44,9 +44,7 @@ class ModelMergeGateResult(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    gate_id: UUID = Field(
-        ..., description="Unique identifier for this gate evaluation."
-    )
+    gate_id: UUID = Field(..., description="Unique identifier for this gate evaluation.")
     pr_ref: str = Field(
         ...,
         description="Pull request reference (e.g. 'OmniNode-ai/omnibase_infra#42').",
