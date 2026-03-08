@@ -359,9 +359,9 @@ If OMN-3989 migration destabilizes packaging or discovery:
 
 ---
 
-## 11. Explicit Migration Steps for OMN-3989
+## 11. Explicit Migration Plan for OMN-3989
 
-### Step 1: Migrate `nodes/effects/models/` LLM models → `models/llm/`
+### 11.1 Migrate `nodes/effects/models/` LLM models → `models/llm/`
 
 1. Create `src/omnibase_infra/models/llm/__init__.py` with re-exports
 2. Move all `model_llm_*.py` and `adapter_llm_usage_to_contract.py` files
@@ -369,7 +369,7 @@ If OMN-3989 migration destabilizes packaging or discovery:
 4. Update 38 test files
 5. Add temporary re-export shim in `nodes/effects/models/` pointing to new locations (preserve backward compat for 1 release cycle)
 
-### Step 2: Migrate `nodes/effects/` registry content → `node_registry_effect/`
+### 11.2 Migrate `nodes/effects/` registry content → `node_registry_effect/`
 
 1. Move `protocol_postgres_adapter.py` → `node_registry_effect/protocols/`
 2. Move `protocol_effect_idempotency_store.py` → `node_registry_effect/protocols/`
@@ -382,7 +382,7 @@ If OMN-3989 migration destabilizes packaging or discovery:
 9. Update `nodes/__init__.py`
 10. Update all test files (integration/unit/performance)
 
-### Step 3: Migrate `nodes/handlers/` → `contracts/handlers/`
+### 11.3 Migrate `nodes/handlers/` → `contracts/handlers/`
 
 1. Create `src/omnibase_infra/contracts/handlers/` directory tree
 2. Move all 5 `contract.yaml` files
@@ -390,7 +390,7 @@ If OMN-3989 migration destabilizes packaging or discovery:
 4. Update `seed-infisical.py` default `--contracts-dir` value or add second default path
 5. Verify `ContractConfigExtractor` scans the new location
 
-### Step 4: Migrate `nodes/reducers/` → `node_registration_reducer/`
+### 11.4 Migrate `nodes/reducers/` → `node_registration_reducer/`
 
 1. Move `registration_reducer.py` → `node_registration_reducer/registration_reducer.py`
 2. Move all `models/model_*.py` → `node_registration_reducer/models/`
@@ -399,14 +399,14 @@ If OMN-3989 migration destabilizes packaging or discovery:
 5. Update 31 test files
 6. Add re-export shim in `nodes/reducers/__init__.py` pointing to new location
 
-### Step 5: Remove `nodes/effects/`, `nodes/handlers/`, `nodes/reducers/`
+### 11.5 Remove `nodes/effects/`, `nodes/handlers/`, `nodes/reducers/`
 
 1. After all import updates verified passing: delete the three dirs
 2. Run full test suite: `uv run pytest -m "not slow"`
 3. Run type checking: `uv run mypy src/ --strict`
 4. Run `pre-commit run --all-files`
 
-### Step 6: Update `nodes/__init__.py`
+### 11.6 Update `nodes/__init__.py`
 
 Remove imports from `nodes.effects` and `nodes.reducers`. Replace with direct imports from canonical locations.
 
