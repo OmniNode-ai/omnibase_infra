@@ -19,7 +19,6 @@ from omnibase_infra.tools.contract_topic_extractor import (
     ModelContractTopicEntry,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -52,12 +51,12 @@ def test_extract_topics_from_python_source(tmp_path: Path) -> None:
     source = write_python_source(
         tmp_path,
         "topics.py",
-        '''\
+        """\
         from typing import Final
 
         TOPIC_A: Final[str] = "onex.evt.omniclaude.session-outcome.v1"
         TOPIC_B: Final[str] = "onex.cmd.omniintelligence.session-outcome.v1"
-        ''',
+        """,
     )
 
     extractor = ContractTopicExtractor()
@@ -75,14 +74,14 @@ def test_extract_skips_non_topic_strings(tmp_path: Path) -> None:
     source = write_python_source(
         tmp_path,
         "mixed.py",
-        '''\
+        """\
         from typing import Final
 
         TOPIC_A: Final[str] = "onex.evt.platform.my-event.v1"
         NOT_A_TOPIC: Final[str] = "some-random-string"
         DLQ_DOMAIN: Final[str] = "dlq"
         REGEX_PATTERN = r"^onex\\.evt\\..*$"
-        ''',
+        """,
     )
 
     extractor = ContractTopicExtractor()
@@ -98,12 +97,12 @@ def test_extract_deduplicates_within_file(tmp_path: Path) -> None:
     source = write_python_source(
         tmp_path,
         "dupes.py",
-        '''\
+        """\
         from typing import Final
 
         TOPIC_A: Final[str] = "onex.evt.platform.my-event.v1"
         TOPIC_B: Final[str] = "onex.evt.platform.my-event.v1"
-        ''',
+        """,
     )
 
     extractor = ContractTopicExtractor()
@@ -118,13 +117,13 @@ def test_extract_multiline_assignment(tmp_path: Path) -> None:
     source = write_python_source(
         tmp_path,
         "multiline.py",
-        '''\
+        """\
         from typing import Final
 
         TOPIC_SESSION: Final[str] = (
             "onex.cmd.omniintelligence.session-outcome.v1"
         )
-        ''',
+        """,
     )
 
     extractor = ContractTopicExtractor()
@@ -186,11 +185,11 @@ def test_extract_correct_parsed_fields(tmp_path: Path) -> None:
     source = write_python_source(
         tmp_path,
         "fields.py",
-        '''\
+        """\
         from typing import Final
 
         TOPIC: Final[str] = "onex.evt.omnibase-infra.effectiveness-data-changed.v1"
-        ''',
+        """,
     )
 
     extractor = ContractTopicExtractor()
@@ -227,11 +226,11 @@ def test_extract_all_merges_contract_and_python_sources(tmp_path: Path) -> None:
     source = write_python_source(
         tmp_path,
         "topic_constants.py",
-        '''\
+        """\
         from typing import Final
 
         TOPIC_STATUS: Final[str] = "onex.evt.omniclaude.agent-status.v1"
-        ''',
+        """,
     )
 
     extractor = ContractTopicExtractor()
@@ -263,11 +262,11 @@ def test_extract_all_deduplicates_shared_topics(tmp_path: Path) -> None:
     source = write_python_source(
         tmp_path,
         "topic_constants.py",
-        '''\
+        """\
         from typing import Final
 
         TOPIC_REWARD: Final[str] = "onex.evt.omnimemory.reward-assigned.v1"
-        ''',
+        """,
     )
 
     extractor = ContractTopicExtractor()
@@ -302,9 +301,7 @@ def test_extract_all_without_supplementary_equals_extract(tmp_path: Path) -> Non
     entries_extract_all = extractor.extract_all(contracts_dir)
 
     assert len(entries_extract) == len(entries_extract_all)
-    assert [e.topic for e in entries_extract] == [
-        e.topic for e in entries_extract_all
-    ]
+    assert [e.topic for e in entries_extract] == [e.topic for e in entries_extract_all]
 
 
 # ---------------------------------------------------------------------------
