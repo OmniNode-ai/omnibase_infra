@@ -24,10 +24,11 @@ from uuid import uuid4
 import click
 from rich.console import Console
 
+from omnibase_infra.enums.generated.enum_artifact_topic import EnumArtifactTopic
+
 logger = logging.getLogger(__name__)
 console = Console()
 
-TOPIC = "onex.cmd.artifact.reconcile.v1"
 DEFAULT_BOOTSTRAP_SERVERS = "localhost:19092"
 
 
@@ -117,7 +118,7 @@ def artifact_reconcile_cmd(
     _publish_command(command, bootstrap_servers)
 
     console.print(
-        f"[bold green]Published to {TOPIC}[/bold green] — "
+        f"[bold green]Published to {EnumArtifactTopic.CMD_RECONCILE_V1.value}[/bold green] — "
         f"command_id={command_id}"
     )
 
@@ -155,9 +156,7 @@ def _publish_command(
 
     def _on_delivery(err: object, msg: object) -> None:
         if err is not None:
-            delivery_error.append(
-                click.ClickException(f"Kafka delivery failed: {err}")
-            )
+            delivery_error.append(click.ClickException(f"Kafka delivery failed: {err}"))
 
     try:
         producer = Producer({"bootstrap.servers": bootstrap_servers})
@@ -168,7 +167,7 @@ def _publish_command(
 
     try:
         producer.produce(
-            topic=TOPIC,
+            topic=EnumArtifactTopic.CMD_RECONCILE_V1.value,
             key=key,
             value=payload,
             on_delivery=_on_delivery,
