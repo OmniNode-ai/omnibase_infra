@@ -62,6 +62,13 @@ kubectl --kubeconfig "$KUBECONFIG" -n data-plane \
 echo "[cloud-bus-tunnel] All tunnels started. Waiting..."
 
 # Wait for any child to exit (triggers launchd restart)
-wait -n
-echo "[cloud-bus-tunnel] A tunnel process exited. Cleaning up for restart..."
-exit 1
+# macOS ships bash 3.2 which lacks `wait -n`, so poll background PIDs
+while true; do
+    for pid in $SSM_PID $(jobs -p); do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            echo "[cloud-bus-tunnel] Process $pid exited. Cleaning up for restart..."
+            exit 1
+        fi
+    done
+    sleep 5
+done

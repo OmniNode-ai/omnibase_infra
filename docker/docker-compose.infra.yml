@@ -164,7 +164,10 @@ x-runtime-env: &runtime-env
   # OmniMemory domain plugin
   OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-}
   # OmniClaude domain plugin (OMN-3182): required by PluginClaude.wire_dispatchers()
-  OMNICLAUDE_CONTRACTS_ROOT: ${OMNICLAUDE_CONTRACTS_ROOT:-}
+  # Hardcoded to venv path — host OMNICLAUDE_CONTRACTS_ROOT points at /Volumes/...
+  # which doesn't exist inside the container. The pip-installed package has its
+  # nodes at the site-packages path below.
+  OMNICLAUDE_CONTRACTS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/nodes
   # --- Keycloak / Auth (auth profile, OMN-3361) ---
   # KEYCLOAK_ADMIN_URL: internal container DNS — NEVER set to localhost here.
   # KEYCLOAK_ISSUER: external browser-visible URL — must match token iss claim.
