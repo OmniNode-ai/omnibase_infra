@@ -89,6 +89,24 @@ skip_directories:
 # These handle method count, parameter count, naming, and style violations
 pattern_exemptions:
   # ==========================================================================
+  # ContractLinter Exemptions (OMN-517)
+  # ==========================================================================
+  # Contract linter with cohesive validation methods, each validating a
+  # different aspect of the contract schema: required fields, node_type,
+  # contract_version, model references, naming, unknown fields, dependencies,
+  # version compatibility, recommended fields, and import checking.
+  # All methods operate on the same (file_path, content, line_map) inputs.
+  # Splitting would break cohesion of the validation pipeline.
+  - file_pattern: 'linter_contract\.py'
+    class_pattern: "Class 'ContractLinter'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      ContractLinter has cohesive validation methods for different contract schema aspects: required fields, node_type, contract_version, model references, naming conventions, unknown fields (OMN-517), dependencies (OMN-517), version compatibility (OMN-517), recommended fields, and import checking. All methods share the same (file_path, content, line_map) parameter pattern. Breaking into smaller classes would reduce cohesion.
+
+    documentation:
+      - CLAUDE.md (Contract Validation)
+    ticket: OMN-517
+  # ==========================================================================
   # EventRegistry Exemptions (OMN-2088)
   # ==========================================================================
   # Event registry with cohesive methods for event type management.
