@@ -233,6 +233,12 @@ def run_contracts(verbose: bool = False) -> bool:
             "src/omnibase_infra/nodes/",
             check_imports=True,
             strict_mode=False,
+            # OMN-517: Dependency structure is validated but dependency module
+            # imports are not checked here because some contracts reference
+            # modules that may not be available in the current environment.
+            # Dependency import checking is available via check_imports=True
+            # and check_dependencies=True for targeted validation.
+            check_dependencies=False,
         )
 
         if verbose or not lint_result.is_valid:
