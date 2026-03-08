@@ -50,6 +50,11 @@ from pathlib import Path
 
 import pytest
 
+# Default Postgres probe target (host port exposed by local Docker infra)
+_POSTGRES_PROBE_HOST = "localhost"
+_POSTGRES_PROBE_PORT = 5436
+_POSTGRES_PROBE_TIMEOUT = 2  # seconds
+
 # Project root and Docker directory paths.
 # Navigate from this file's location to project root:
 # Path traversal: tests/integration/docker/conftest.py
@@ -63,6 +68,32 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 DOCKER_DIR = PROJECT_ROOT / "docker"
 DOCKERFILE_PATH = DOCKER_DIR / "Dockerfile.runtime"
 COMPOSE_FILE_PATH = DOCKER_DIR / "docker-compose.infra.yml"
+
+
+def _is_postgres_available(
+    host: str = _POSTGRES_PROBE_HOST,
+    port: int = _POSTGRES_PROBE_PORT,
+    timeout: float = _POSTGRES_PROBE_TIMEOUT,
+) -> bool:
+    """Probe whether Postgres is reachable at the given host/port.
+
+    This is a TCP-level probe only — it does not authenticate or run any SQL.
+    Used to skip tests that require an active Postgres instance (e.g. on CI
+    runners that don't have Docker infra running).
+
+    Args:
+        host: Hostname to probe.
+        port: Port to probe.
+        timeout: Connection timeout in seconds.
+
+    Returns:
+        bool: True if a TCP connection could be established, False otherwise.
+    """
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except (OSError, ConnectionRefusedError, TimeoutError):
+        return False
 
 
 def _is_docker_available() -> bool:
@@ -163,6 +194,38 @@ def skip_if_no_docker(docker_available: bool) -> None:
     """
     if not docker_available:
         pytest.skip("Docker daemon not available")
+
+
+@pytest.fixture(scope="session")
+def postgres_available() -> bool:
+    """Session-scoped fixture indicating Postgres availability via TCP probe.
+
+    Probes localhost:5436 (the external port exposed by omnibase-infra-postgres
+    in local Docker).  This port is not available on standard ubuntu-latest CI
+    runners — only on self-hosted runners that run the local Docker infra stack.
+
+    Returns:
+        bool: True if a TCP connection to Postgres could be established.
+    """
+    return _is_postgres_available()
+
+
+@pytest.fixture(scope="session")
+def skip_if_no_postgres(postgres_available: bool) -> None:
+    """Skip test if Postgres is not reachable.
+
+    Intended for tests that start a runtime container which connects to Postgres
+    during startup.  Without a live Postgres instance the container will fail to
+    initialise regardless of ONEX_EVENT_BUS_TYPE, causing spurious CI failures
+    on ubuntu-latest runners.
+
+    Args:
+        postgres_available: Whether Postgres is reachable.
+    """
+    if not postgres_available:
+        pytest.skip(
+            "Postgres not available in this CI environment (localhost:5436 unreachable)"
+        )
 
 
 @pytest.fixture(scope="session")
