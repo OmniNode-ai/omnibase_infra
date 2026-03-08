@@ -74,6 +74,11 @@ OMNINODE_CLOUD_DB_URL=postgresql://role_omninode_cloud:__REPLACE_WITH_SECURE_PAS
 #   KAFKA_BOOTSTRAP_SERVERS=<your-server-ip>:19092
 KAFKA_BOOTSTRAP_SERVERS=your-kafka-host:19092
 
+# Enable event-based agent routing via Kafka (OMN-3894).
+# When true, ProtocolEventBusPublisher registers and routing flows through Kafka.
+# Docker containers default to true via compose; host scripts should set explicitly.
+USE_EVENT_ROUTING=true
+
 # Kafka advanced settings (optional - defaults shown)
 #
 # Environment and group identification
