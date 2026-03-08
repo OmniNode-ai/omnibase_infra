@@ -86,8 +86,38 @@ def _build_event(
     merged: bool,
 ) -> dict[str, object]:
     """Validate and serialise the event via ModelPRWebhookEvent."""
-    # Import here so the script can be tested without installing omnibase_infra
-    # in environments where only confluent-kafka + pydantic + click are available.
+    import pathlib
+    import sys
+    import types
+
+    src_dir = pathlib.Path(__file__).parent.parent / "src"
+
+    # Register lightweight namespace stubs for each intermediate package so
+    # that Python's import system can locate model_pr_webhook_event.py without
+    # executing any __init__.py that would pull in omnibase_core (not installed
+    # in the GitHub Actions environment).  Each stub must expose __path__ so
+    # the import machinery treats it as a package and can descend into it.
+    node_pkg = "node_artifact_change_detector_effect"
+    pkg_paths: dict[str, pathlib.Path] = {
+        "omnibase_infra": src_dir / "omnibase_infra",
+        "omnibase_infra.nodes": src_dir / "omnibase_infra" / "nodes",
+        f"omnibase_infra.nodes.{node_pkg}": (
+            src_dir / "omnibase_infra" / "nodes" / node_pkg
+        ),
+        f"omnibase_infra.nodes.{node_pkg}.models": (
+            src_dir / "omnibase_infra" / "nodes" / node_pkg / "models"
+        ),
+    }
+    for pkg, pkg_path in pkg_paths.items():
+        if pkg not in sys.modules:
+            stub = types.ModuleType(pkg)
+            stub.__path__ = [str(pkg_path)]  # type: ignore[attr-defined]
+            stub.__package__ = pkg
+            sys.modules[pkg] = stub
+
+    if str(src_dir) not in sys.path:
+        sys.path.insert(0, str(src_dir))
+
     from omnibase_infra.nodes.node_artifact_change_detector_effect.models.model_pr_webhook_event import (
         ModelPRWebhookEvent,
     )
