@@ -232,19 +232,24 @@ def _version_in_range(
 def _get_installed_version(package_name: str) -> str | None:
     """Get the installed version of a package.
 
+    Uses ``importlib.metadata.version`` which reads the version from the
+    installed package metadata (set by pyproject.toml at build time), rather
+    than ``__version__`` attributes which may be out of sync.
+
     Args:
-        package_name: Package name (using underscores, e.g., "omnibase_core").
+        package_name: Package name (using underscores or hyphens,
+            e.g., "omnibase_core" or "omnibase-core").
 
     Returns:
         Version string, or None if the package is not installed.
     """
-    try:
-        import importlib
+    from importlib.metadata import PackageNotFoundError, version
 
-        mod = importlib.import_module(package_name)
-        version: str | None = getattr(mod, "__version__", None)
-        return version
-    except ImportError:
+    # importlib.metadata uses distribution names (hyphens), not import names
+    dist_name = package_name.replace("_", "-")
+    try:
+        return version(dist_name)
+    except PackageNotFoundError:
         return None
 
 
