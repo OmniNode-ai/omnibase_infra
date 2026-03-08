@@ -11,12 +11,10 @@
 from enum import Enum
 
 
-class EnumArtifactTopic(str, Enum):
-    """Kafka topic enum for producer: artifact.
+class EnumGithubTopic(str, Enum):
+    """Kafka topic enum for producer: github.
 
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-    CMD_RECONCILE_V1 = "onex.cmd.artifact.reconcile.v1"  # onex.cmd.artifact.reconcile.v1
-    EVT_CHANGE_DETECTED_V1 = "onex.evt.artifact.change-detected.v1"  # onex.evt.artifact.change-detected.v1
-    EVT_IMPACT_ANALYZED_V1 = "onex.evt.artifact.impact-analyzed.v1"  # onex.evt.artifact.impact-analyzed.v1
+    EVT_PR_WEBHOOK_V1 = "onex.evt.github.pr-webhook.v1"  # onex.evt.github.pr-webhook.v1

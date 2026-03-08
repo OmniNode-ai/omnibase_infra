@@ -26,7 +26,7 @@ Handler Purity:
         4. ``await handler.stop()`` on shutdown
 
 Dependencies:
-    ``watchdog>=4.0.0`` must be installed. Import errors surface as
+    ``watchdog`` must be installed. Import errors surface as
     ``ImportError`` with a descriptive message.
 
 Related Tickets:
@@ -41,7 +41,6 @@ import logging
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 try:
@@ -53,7 +52,7 @@ except ImportError:
     _WATCHDOG_AVAILABLE = False
     FileSystemEventHandler = object  # type: ignore[assignment,misc]
     WatchdogObserver = None  # type: ignore[assignment]
-    FileSystemEvent = Any  # type: ignore[assignment,misc]
+    FileSystemEvent = object  # type: ignore[assignment,misc]
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_artifact_change_detector_effect.models.model_update_trigger import (
@@ -79,7 +78,7 @@ def _md5_of_file(path: Path) -> str | None:
         return None
 
 
-class _ContractEventHandler(FileSystemEventHandler):
+class ContractEventHandler(FileSystemEventHandler):
     """Internal watchdog event handler that enqueues changed contract paths."""
 
     def __init__(
@@ -99,20 +98,26 @@ class _ContractEventHandler(FileSystemEventHandler):
         path = Path(src_path)
         return path.name == self._contract_glob
 
-    def on_modified(self, event: Any) -> None:
-        if not event.is_directory and self._is_contract_file(str(event.src_path)):
+    def on_modified(self, event: object) -> None:
+        if not getattr(event, "is_directory", True) and self._is_contract_file(
+            str(getattr(event, "src_path", ""))
+        ):
             with self._lock:
-                self._pending.append(Path(str(event.src_path)))
+                self._pending.append(Path(str(getattr(event, "src_path", ""))))
 
-    def on_created(self, event: Any) -> None:
-        if not event.is_directory and self._is_contract_file(str(event.src_path)):
+    def on_created(self, event: object) -> None:
+        if not getattr(event, "is_directory", True) and self._is_contract_file(
+            str(getattr(event, "src_path", ""))
+        ):
             with self._lock:
-                self._pending.append(Path(str(event.src_path)))
+                self._pending.append(Path(str(getattr(event, "src_path", ""))))
 
-    def on_moved(self, event: Any) -> None:
+    def on_moved(self, event: object) -> None:
         # Handle renames — treat as a creation of the dest path
         dest_path = getattr(event, "dest_path", "")
-        if not event.is_directory and self._is_contract_file(str(dest_path)):
+        if not getattr(event, "is_directory", True) and self._is_contract_file(
+            str(dest_path)
+        ):
             with self._lock:
                 self._pending.append(Path(str(dest_path)))
 
@@ -159,7 +164,7 @@ class HandlerContractFileWatcher:
         if not _WATCHDOG_AVAILABLE:
             raise ImportError(
                 "watchdog is required for HandlerContractFileWatcher. "
-                "Install it with: uv add 'watchdog>=4.0.0'"
+                "Install it with: uv add 'watchdog'"
             )
         self._watch_root = watch_root
         self._source_repo = source_repo
@@ -174,7 +179,7 @@ class HandlerContractFileWatcher:
         # Trigger queue: populated by _process_pending, consumed by get_pending_triggers
         self._trigger_queue: asyncio.Queue[ModelUpdateTrigger] = asyncio.Queue()
         # Internal state
-        self._observer: Any = None  # WatchdogObserver | None at runtime
+        self._observer: WatchdogObserver | None = None
         self._running = False
         self._debounce_task: asyncio.Task[None] | None = None
 
@@ -283,7 +288,7 @@ class HandlerContractFileWatcher:
         self._loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
         self._seed_hashes()
 
-        event_handler = _ContractEventHandler(
+        event_handler = ContractEventHandler(
             watch_root=self._watch_root,
             contract_glob=self._contract_glob,
             pending=self._pending_paths,
