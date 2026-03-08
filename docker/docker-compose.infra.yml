@@ -165,6 +165,9 @@ x-runtime-env: &runtime-env
   OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-}
   # OmniClaude domain plugin (OMN-3182): required by PluginClaude.wire_dispatchers()
   OMNICLAUDE_CONTRACTS_ROOT: ${OMNICLAUDE_CONTRACTS_ROOT:-}
+  # OMN-3894: Enable event-based agent routing in containers. App defaults to false;
+  # compose ensures containers always enable it via :-true default.
+  USE_EVENT_ROUTING: ${USE_EVENT_ROUTING:-true}
   # --- Keycloak / Auth (auth profile, OMN-3361) ---
   # KEYCLOAK_ADMIN_URL: internal container DNS — NEVER set to localhost here.
   # KEYCLOAK_ISSUER: external browser-visible URL — must match token iss claim.
