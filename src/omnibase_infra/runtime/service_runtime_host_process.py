@@ -2972,6 +2972,14 @@ class RuntimeHostProcess:
             # Step 1: Extract config requirements from contracts
             extractor = ContractConfigExtractor()
             requirements = extractor.extract_from_paths(effective_contract_paths)
+            extraction_had_errors = bool(requirements.errors)
+
+            if extraction_had_errors:
+                for err in requirements.errors:
+                    logger.warning(
+                        "Config extraction error: %s",
+                        sanitize_error_string(err),
+                    )
 
             if not requirements.requirements:
                 logger.warning(
@@ -2981,7 +2989,11 @@ class RuntimeHostProcess:
                     "config_requirements sections.",
                     [str(p) for p in effective_contract_paths],
                 )
-                self._config_prefetch_status = "degraded_no_requirements"
+                self._config_prefetch_status = (
+                    "degraded_error"
+                    if extraction_had_errors
+                    else "degraded_no_requirements"
+                )
                 return
 
             # Step 2: Get or create a ProtocolSecretResolver
@@ -3086,7 +3098,7 @@ class RuntimeHostProcess:
                 applied = prefetcher.apply_to_environment(result)
 
                 self._config_prefetch_status = (
-                    "degraded_error" if result.errors else "ok"
+                    "degraded_error" if extraction_had_errors or result.errors else "ok"
                 )
                 logger.info(
                     "Config prefetch complete",
@@ -3113,6 +3125,10 @@ class RuntimeHostProcess:
                     await _inline_handler.shutdown()
 
         except Exception as exc:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="prefetch_config_from_infisical",
+            )
             # Prefetch failures are non-fatal.
             # Sanitize the error to avoid leaking secrets (e.g. connection
             # strings embedded in exception messages).  Do NOT use
@@ -3120,8 +3136,11 @@ class RuntimeHostProcess:
             # locals with secret values.
             self._config_prefetch_status = "degraded_error"
             logger.warning(
-                "Config prefetch failed (non-fatal): %s",
-                sanitize_error_message(exc),
+                "Config prefetch failed (non-fatal)",
+                extra={
+                    "error": sanitize_error_message(exc),
+                    "correlation_id": str(context.correlation_id),
+                },
             )
 
     async def _resolve_handler_dependencies(

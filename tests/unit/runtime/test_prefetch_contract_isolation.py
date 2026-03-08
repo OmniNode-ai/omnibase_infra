@@ -139,6 +139,7 @@ class TestPrefetchStatusTransitions:
 
         mock_requirements = MagicMock()
         mock_requirements.requirements = []
+        mock_requirements.errors = ()  # no extraction errors → degraded_no_requirements
 
         mock_extractor = MagicMock()
         mock_extractor.extract_from_paths.return_value = mock_requirements
@@ -172,6 +173,7 @@ class TestPrefetchStatusTransitions:
 
         mock_requirements = MagicMock()
         mock_requirements.requirements = [MagicMock()]
+        mock_requirements.errors = ()
 
         mock_extractor = MagicMock()
         mock_extractor.extract_from_paths.return_value = mock_requirements
@@ -193,6 +195,7 @@ class TestPrefetchStatusTransitions:
 
         mock_requirements = MagicMock()
         mock_requirements.requirements = [MagicMock()]
+        mock_requirements.errors = ()
 
         mock_extractor = MagicMock()
         mock_extractor.extract_from_paths.return_value = mock_requirements
