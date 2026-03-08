@@ -252,8 +252,8 @@ def main(
     password = os.environ.get("KAFKA_SASL_PASSWORD", "")
 
     if not bootstrap_servers:
-        click.echo("KAFKA_BOOTSTRAP_SERVERS is not set", err=True)
-        sys.exit(1)
+        click.echo("KAFKA_BOOTSTRAP_SERVERS is not set — skipping publish")
+        sys.exit(0)
     if not username or not password:
         click.echo("KAFKA_SASL_USERNAME and KAFKA_SASL_PASSWORD must be set", err=True)
         sys.exit(1)

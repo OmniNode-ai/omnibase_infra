@@ -45,6 +45,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --quiet confluent-kafka pydantic click
+          pip install --quiet -e .
 
       - name: Publish PR webhook event
         # All potentially attacker-controlled inputs (head_ref, actor) are passed
