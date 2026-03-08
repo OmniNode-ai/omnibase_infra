@@ -4,6 +4,7 @@
 Usage: python scripts/check_shared_enum_ownership.py [src_root]
 Exit 0: clean. Exit 1: duplicate found.
 """
+
 import ast
 import sys
 from pathlib import Path

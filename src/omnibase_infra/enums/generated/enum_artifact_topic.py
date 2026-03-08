@@ -20,4 +20,6 @@ class EnumArtifactTopic(str, Enum):
     CMD_RECONCILE_V1 = "onex.cmd.artifact.reconcile.v1"  # onex.cmd.artifact.reconcile.v1
     EVT_CHANGE_DETECTED_V1 = "onex.evt.artifact.change-detected.v1"  # onex.evt.artifact.change-detected.v1
     EVT_IMPACT_ANALYZED_V1 = "onex.evt.artifact.impact-analyzed.v1"  # onex.evt.artifact.impact-analyzed.v1
+    EVT_PR_COMMENT_POSTED_V1 = "onex.evt.artifact.pr-comment-posted.v1"  # onex.evt.artifact.pr-comment-posted.v1
     EVT_UPDATE_PLAN_CREATED_V1 = "onex.evt.artifact.update-plan-created.v1"  # onex.evt.artifact.update-plan-created.v1
+    EVT_UPDATE_PLAN_EMITTED_V1 = "onex.evt.artifact.update-plan-emitted.v1"  # onex.evt.artifact.update-plan-emitted.v1
