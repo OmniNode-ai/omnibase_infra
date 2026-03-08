@@ -258,6 +258,10 @@ class OrchestratorPipeline:
         # Sequence counter for ordering guarantees across multiple events.
         # Starts at 0 and increments for each processed event.
         self._sequence_counter: int = 0
+        # Total messages received (including rejected/malformed).
+        # Used for deterministic wait in tests (OMN-1327).
+        self._total_messages_received: int = 0
+        self._message_received_event = asyncio.Event()
 
     @property
     def processed_events(self) -> list[UUID]:
@@ -268,6 +272,53 @@ class OrchestratorPipeline:
     def processing_errors(self) -> list[Exception]:
         """Get list of processing errors."""
         return list(self._processing_errors)
+
+    @property
+    def total_messages_received(self) -> int:
+        """Get total number of messages received (including rejected ones)."""
+        return self._total_messages_received
+
+    async def wait_for_message_count(
+        self, count: int, *, timeout: float = 10.0
+    ) -> None:
+        """Wait until at least `count` messages have been received.
+
+        This provides a deterministic alternative to sleep-based waits.
+        It covers all message outcomes: successful processing, deserialization
+        failures, and processing errors.
+
+        Args:
+            count: Minimum number of messages to wait for.
+            timeout: Maximum seconds to wait before raising TimeoutError.
+
+        Raises:
+            TimeoutError: If the target count is not reached within timeout.
+        """
+        deadline = asyncio.get_event_loop().time() + timeout
+        while self._total_messages_received < count:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                msg = (
+                    f"Timed out waiting for message count {count}. "
+                    f"Received: {self._total_messages_received}"
+                )
+                raise TimeoutError(msg)
+            self._message_received_event.clear()
+            # Re-check after clearing to avoid race condition
+            if self._total_messages_received >= count:
+                break
+            try:
+                await asyncio.wait_for(
+                    self._message_received_event.wait(), timeout=remaining
+                )
+            except TimeoutError:
+                if self._total_messages_received >= count:
+                    break
+                msg = (
+                    f"Timed out waiting for message count {count}. "
+                    f"Received: {self._total_messages_received}"
+                )
+                raise
 
     async def process_message(self, message: ModelEventMessage) -> None:
         """Process a Kafka message through the full pipeline.
@@ -288,6 +339,10 @@ class OrchestratorPipeline:
         async with self._processing_lock:
             correlation_id: UUID | None = None
             try:
+                # Increment total message counter (OMN-1327: deterministic wait).
+                # This fires in the try block so it runs for every message,
+                # and the finally block signals the event for waiters.
+
                 # =============================================================
                 # ORCHESTRATOR PIPELINE: Processing Message
                 # =============================================================
@@ -487,6 +542,12 @@ class OrchestratorPipeline:
                     _LOG_ERROR_SEPARATOR,
                 )
                 self._processing_errors.append(e)
+            finally:
+                # OMN-1327: Always increment total message counter and signal
+                # waiters, regardless of whether processing succeeded, failed
+                # deserialization, or raised an exception.
+                self._total_messages_received += 1
+                self._message_received_event.set()
 
     def _deserialize_introspection_event(
         self, message: ModelEventMessage
@@ -1298,15 +1359,12 @@ class TestFullOrchestratorFlow:
             headers=headers,
         )
 
-        # Allow time for pipeline to process and reject the malformed message.
-        # This ensures the pipeline is ready for the next valid message.
-        #
-        # TODO(OMN-1327): Replace with deterministic wait once pipeline exposes
-        # a "message processed" signal or callback. Options:
-        # 1. Pipeline.wait_until_idle() method that tracks in-flight messages
-        # 2. Counter-based approach: wait until processed_count increments
-        # 3. Expose processing completion via asyncio.Event per message
-        await asyncio.sleep(2.0)
+        # Wait deterministically for the malformed message to be received and
+        # rejected before publishing the valid message. The pipeline increments
+        # total_messages_received for every message (including rejected ones)
+        # and signals an asyncio.Event so we can wait without sleeping.
+        initial_count = pipeline.total_messages_received
+        await pipeline.wait_for_message_count(initial_count + 1, timeout=10.0)
 
         # Publish a valid message after the malformed one
         # Note: node_version must be ModelSemVer for ModelNodeIntrospectionEvent
