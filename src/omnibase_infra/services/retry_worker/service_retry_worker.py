@@ -206,7 +206,7 @@ class ServiceRetryWorker(MixinAsyncCircuitBreaker):
             Datetime for the next retry attempt.
         """
         delay = self._config.backoff_base_seconds * (
-            self._config.backoff_multiplier ** attempt_count
+            self._config.backoff_multiplier**attempt_count
         )
         capped_delay = min(delay, self._config.backoff_max_seconds)
         return datetime.now(UTC) + timedelta(seconds=capped_delay)

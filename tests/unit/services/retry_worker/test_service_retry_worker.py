@@ -286,7 +286,9 @@ class TestBackoffCalculation:
 class TestPollAndRetry:
     """Tests for the poll_and_retry cycle."""
 
-    async def test_no_pending_retries(self, worker: ServiceRetryWorker, mock_pool: MagicMock) -> None:
+    async def test_no_pending_retries(
+        self, worker: ServiceRetryWorker, mock_pool: MagicMock
+    ) -> None:
         """Returns empty result when no pending retries found."""
         conn = AsyncMock()
         conn.fetch = AsyncMock(return_value=[])

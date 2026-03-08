@@ -12,26 +12,13 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
-class EnumDeliveryStatus(str, Enum):
-    """Status of a notification delivery attempt.
-
-    Attributes:
-        PENDING: Initial state, delivery not yet attempted.
-        FAILED: Delivery failed, eligible for retry.
-        SUCCEEDED: Delivery completed successfully.
-        DLQ: Maximum retries exceeded, moved to dead letter queue.
-    """
-
-    PENDING = "pending"
-    FAILED = "failed"
-    SUCCEEDED = "succeeded"
-    DLQ = "dlq"
+from omnibase_infra.services.retry_worker.models.enum_delivery_status import (
+    EnumDeliveryStatus,
+)
 
 
 class ModelDeliveryAttempt(BaseModel):
@@ -66,9 +53,7 @@ class ModelDeliveryAttempt(BaseModel):
     notification_payload: str = Field(
         ..., description="JSON-serialized notification content."
     )
-    status: EnumDeliveryStatus = Field(
-        ..., description="Current delivery status."
-    )
+    status: EnumDeliveryStatus = Field(..., description="Current delivery status.")
     attempt_count: int = Field(
         default=0,
         ge=0,
@@ -96,4 +81,4 @@ class ModelDeliveryAttempt(BaseModel):
     )
 
 
-__all__ = ["EnumDeliveryStatus", "ModelDeliveryAttempt"]
+__all__ = ["ModelDeliveryAttempt"]
