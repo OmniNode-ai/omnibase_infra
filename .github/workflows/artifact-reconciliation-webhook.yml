@@ -45,13 +45,13 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --quiet confluent-kafka pydantic click
-          pip install --quiet -e .
 
       - name: Publish PR webhook event
         # All potentially attacker-controlled inputs (head_ref, actor) are passed
         # through environment variables, not interpolated directly into the run
         # command, to prevent shell injection.
         env:
+          PYTHONPATH: ${{ github.workspace }}/src
           KAFKA_BOOTSTRAP_SERVERS: ${{ secrets.KAFKA_BOOTSTRAP_SERVERS }}
           KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
           KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
