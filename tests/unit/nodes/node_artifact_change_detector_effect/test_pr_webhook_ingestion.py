@@ -36,49 +36,49 @@ class TestHandlerPRWebhookIngestion:
     def test_opened_maps_to_pr_opened(self) -> None:
         handler = HandlerPRWebhookIngestion()
         event = self._make_event(action="opened")
-        trigger = handler.handle(event)
+        trigger = handler.ingest_pr_webhook_event(event)
         assert trigger.trigger_type == "pr_opened"
 
     def test_synchronize_maps_to_pr_updated(self) -> None:
         handler = HandlerPRWebhookIngestion()
         event = self._make_event(action="synchronize")
-        trigger = handler.handle(event)
+        trigger = handler.ingest_pr_webhook_event(event)
         assert trigger.trigger_type == "pr_updated"
 
     def test_reopened_maps_to_pr_updated(self) -> None:
         handler = HandlerPRWebhookIngestion()
         event = self._make_event(action="reopened")
-        trigger = handler.handle(event)
+        trigger = handler.ingest_pr_webhook_event(event)
         assert trigger.trigger_type == "pr_updated"
 
     def test_edited_maps_to_pr_updated(self) -> None:
         handler = HandlerPRWebhookIngestion()
         event = self._make_event(action="edited")
-        trigger = handler.handle(event)
+        trigger = handler.ingest_pr_webhook_event(event)
         assert trigger.trigger_type == "pr_updated"
 
     def test_closed_merged_maps_to_pr_merged(self) -> None:
         handler = HandlerPRWebhookIngestion()
         event = self._make_event(action="closed", merged=True)
-        trigger = handler.handle(event)
+        trigger = handler.ingest_pr_webhook_event(event)
         assert trigger.trigger_type == "pr_merged"
 
     def test_closed_not_merged_maps_to_pr_updated(self) -> None:
         handler = HandlerPRWebhookIngestion()
         event = self._make_event(action="closed", merged=False)
-        trigger = handler.handle(event)
+        trigger = handler.ingest_pr_webhook_event(event)
         assert trigger.trigger_type == "pr_updated"
 
     def test_trigger_preserves_source_repo(self) -> None:
         handler = HandlerPRWebhookIngestion()
         event = self._make_event(repo="OmniNode-ai/omnibase_infra")
-        trigger = handler.handle(event)
+        trigger = handler.ingest_pr_webhook_event(event)
         assert trigger.source_repo == "OmniNode-ai/omnibase_infra"
 
     def test_trigger_source_ref_is_pr_ref(self) -> None:
         handler = HandlerPRWebhookIngestion()
         event = self._make_event(pr_number=99)
-        trigger = handler.handle(event)
+        trigger = handler.ingest_pr_webhook_event(event)
         assert trigger.source_ref == "refs/pull/99/head"
 
     def test_trigger_preserves_changed_files(self) -> None:
@@ -88,38 +88,38 @@ class TestHandlerPRWebhookIngestion:
         ]
         handler = HandlerPRWebhookIngestion()
         event = self._make_event(changed_files=files)
-        trigger = handler.handle(event)
+        trigger = handler.ingest_pr_webhook_event(event)
         assert list(trigger.changed_files) == files
 
     def test_trigger_preserves_ticket_ids(self) -> None:
         handler = HandlerPRWebhookIngestion()
         event = self._make_event(ticket_ids=["OMN-1234", "OMN-5678"])
-        trigger = handler.handle(event)
+        trigger = handler.ingest_pr_webhook_event(event)
         assert list(trigger.ticket_ids) == ["OMN-1234", "OMN-5678"]
 
     def test_trigger_preserves_actor(self) -> None:
         handler = HandlerPRWebhookIngestion()
         event = self._make_event(actor="dev-bot")
-        trigger = handler.handle(event)
+        trigger = handler.ingest_pr_webhook_event(event)
         assert trigger.actor == "dev-bot"
 
     def test_trigger_has_unique_id_per_call(self) -> None:
         handler = HandlerPRWebhookIngestion()
         event = self._make_event()
-        t1 = handler.handle(event)
-        t2 = handler.handle(event)
+        t1 = handler.ingest_pr_webhook_event(event)
+        t2 = handler.ingest_pr_webhook_event(event)
         assert t1.trigger_id != t2.trigger_id
 
     def test_trigger_has_timestamp(self) -> None:
         handler = HandlerPRWebhookIngestion()
         event = self._make_event()
-        trigger = handler.handle(event)
+        trigger = handler.ingest_pr_webhook_event(event)
         assert trigger.timestamp is not None
 
     def test_empty_changed_files_passes_through(self) -> None:
         handler = HandlerPRWebhookIngestion()
         event = self._make_event(changed_files=[])
-        trigger = handler.handle(event)
+        trigger = handler.ingest_pr_webhook_event(event)
         assert trigger.changed_files == []
 
     def test_handler_type_and_category(self) -> None:

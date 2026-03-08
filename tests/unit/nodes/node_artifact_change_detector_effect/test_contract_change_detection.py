@@ -5,10 +5,12 @@
 from __future__ import annotations
 
 import asyncio
-import tempfile
 from pathlib import Path
+from uuid import UUID
 
 import pytest
+
+_CMD_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 from omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_manual_trigger import (
     HandlerManualTrigger,
@@ -28,7 +30,7 @@ class TestHandlerManualTrigger:
 
     def _make_command(self, **kwargs: object) -> ModelManualReconcileCommand:
         defaults: dict[str, object] = {
-            "command_id": "cmd-001",
+            "command_id": _CMD_ID,
             "source_repo": "omnibase_infra",
             "changed_files": [],
             "actor": "jonah",
@@ -40,69 +42,70 @@ class TestHandlerManualTrigger:
     def test_trigger_type_is_manual_plan_request(self) -> None:
         handler = HandlerManualTrigger()
         cmd = self._make_command()
-        trigger = handler.handle(cmd)
+        trigger = handler.build_reconcile_trigger(cmd)
         assert trigger.trigger_type == "manual_plan_request"
 
     def test_source_repo_preserved(self) -> None:
         handler = HandlerManualTrigger()
         cmd = self._make_command(source_repo="omnibase_infra")
-        trigger = handler.handle(cmd)
+        trigger = handler.build_reconcile_trigger(cmd)
         assert trigger.source_repo == "omnibase_infra"
 
     def test_empty_changed_files(self) -> None:
         handler = HandlerManualTrigger()
         cmd = self._make_command(changed_files=[])
-        trigger = handler.handle(cmd)
+        trigger = handler.build_reconcile_trigger(cmd)
         assert trigger.changed_files == []
 
     def test_changed_files_with_paths(self) -> None:
         files = ["src/omnibase_infra/nodes/foo/contract.yaml"]
         handler = HandlerManualTrigger()
         cmd = self._make_command(changed_files=files)
-        trigger = handler.handle(cmd)
+        trigger = handler.build_reconcile_trigger(cmd)
         assert list(trigger.changed_files) == files
 
     def test_reason_preserved(self) -> None:
         handler = HandlerManualTrigger()
         cmd = self._make_command(reason="Post-migration check")
-        trigger = handler.handle(cmd)
+        trigger = handler.build_reconcile_trigger(cmd)
         assert "Post-migration check" in trigger.reason
 
     def test_default_reason_includes_command_id(self) -> None:
         handler = HandlerManualTrigger()
-        cmd = self._make_command(command_id="cmd-xyz", reason="")
-        trigger = handler.handle(cmd)
-        assert "cmd-xyz" in trigger.reason
+        specific_id = UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        cmd = self._make_command(command_id=specific_id, reason="")
+        trigger = handler.build_reconcile_trigger(cmd)
+        assert str(specific_id) in trigger.reason
 
     def test_actor_preserved(self) -> None:
         handler = HandlerManualTrigger()
         cmd = self._make_command(actor="dev-agent")
-        trigger = handler.handle(cmd)
+        trigger = handler.build_reconcile_trigger(cmd)
         assert trigger.actor == "dev-agent"
 
     def test_source_ref_is_none(self) -> None:
         handler = HandlerManualTrigger()
         cmd = self._make_command()
-        trigger = handler.handle(cmd)
+        trigger = handler.build_reconcile_trigger(cmd)
         assert trigger.source_ref is None
 
     def test_ticket_ids_is_empty(self) -> None:
         handler = HandlerManualTrigger()
         cmd = self._make_command()
-        trigger = handler.handle(cmd)
+        trigger = handler.build_reconcile_trigger(cmd)
         assert trigger.ticket_ids == []
 
     def test_unique_trigger_id_per_call(self) -> None:
         handler = HandlerManualTrigger()
         cmd = self._make_command()
-        t1 = handler.handle(cmd)
-        t2 = handler.handle(cmd)
+        t1 = handler.build_reconcile_trigger(cmd)
+        t2 = handler.build_reconcile_trigger(cmd)
         assert t1.trigger_id != t2.trigger_id
 
     def test_timestamp_is_set(self) -> None:
         handler = HandlerManualTrigger()
         cmd = self._make_command()
-        trigger = handler.handle(cmd)
+        trigger = handler.build_reconcile_trigger(cmd)
         assert trigger.timestamp is not None
 
     def test_handler_type_and_category(self) -> None:
@@ -119,7 +122,7 @@ class TestModelManualReconcileCommand:
 
     def test_valid_minimal(self) -> None:
         cmd = ModelManualReconcileCommand(
-            command_id="cmd-001",
+            command_id=_CMD_ID,
             source_repo="omnibase_infra",
         )
         assert cmd.changed_files == []
@@ -129,14 +132,14 @@ class TestModelManualReconcileCommand:
     def test_extra_fields_forbidden(self) -> None:
         with pytest.raises(Exception):
             ModelManualReconcileCommand(
-                command_id="cmd-001",
+                command_id=_CMD_ID,
                 source_repo="omnibase_infra",
                 bogus_field="nope",  # type: ignore[call-arg]
             )
 
     def test_model_is_frozen(self) -> None:
         cmd = ModelManualReconcileCommand(
-            command_id="cmd-001",
+            command_id=_CMD_ID,
             source_repo="omnibase_infra",
         )
         with pytest.raises(Exception):

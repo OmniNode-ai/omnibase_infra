@@ -41,6 +41,7 @@ import logging
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 try:
@@ -179,7 +180,7 @@ class HandlerContractFileWatcher:
         # Trigger queue: populated by _process_pending, consumed by get_pending_triggers
         self._trigger_queue: asyncio.Queue[ModelUpdateTrigger] = asyncio.Queue()
         # Internal state
-        self._observer: WatchdogObserver | None = None
+        self._observer: Any = None
         self._running = False
         self._debounce_task: asyncio.Task[None] | None = None
 

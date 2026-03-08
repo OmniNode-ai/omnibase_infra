@@ -74,7 +74,7 @@ class HandlerPRWebhookIngestion:
         """Return the behavioral classification: EFFECT (external event ingestion)."""
         return EnumHandlerTypeCategory.EFFECT
 
-    def handle(self, event: ModelPRWebhookEvent) -> ModelUpdateTrigger:
+    def ingest_pr_webhook_event(self, event: ModelPRWebhookEvent) -> ModelUpdateTrigger:
         """Map a PR webhook event to a ModelUpdateTrigger.
 
         Args:

@@ -58,7 +58,9 @@ class HandlerManualTrigger:
         """Return the behavioral classification: EFFECT (command ingestion)."""
         return EnumHandlerTypeCategory.EFFECT
 
-    def handle(self, command: ModelManualReconcileCommand) -> ModelUpdateTrigger:
+    def build_reconcile_trigger(
+        self, command: ModelManualReconcileCommand
+    ) -> ModelUpdateTrigger:
         """Convert a manual reconcile command to a ModelUpdateTrigger.
 
         Args:

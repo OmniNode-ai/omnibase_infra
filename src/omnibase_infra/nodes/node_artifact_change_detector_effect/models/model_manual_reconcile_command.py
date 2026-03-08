@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -24,7 +26,7 @@ class ModelManualReconcileCommand(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    command_id: str = Field(description="Unique command identifier (UUID string)")
+    command_id: UUID = Field(description="Unique command identifier")
     source_repo: str = Field(
         description="Repository to reconcile, e.g. 'omnibase_infra'"
     )
