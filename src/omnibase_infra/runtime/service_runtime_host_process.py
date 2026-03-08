@@ -722,7 +722,7 @@ class RuntimeHostProcess:
         # Handler discovery service (lazy-created if contract_paths provided)
         self._handler_discovery: ContractHandlerDiscovery | None = None
 
-        # Config prefetch status (OMN-3893): tracks Infisical prefetch outcome.
+        # Config prefetch status (OMN-3902): tracks Infisical prefetch outcome.
         # Vocabulary: pending | skipped | ok | degraded_no_requirements | degraded_error
         self._config_prefetch_status: str = "pending"
 
@@ -3085,7 +3085,9 @@ class RuntimeHostProcess:
                 # Step 4: Apply to environment
                 applied = prefetcher.apply_to_environment(result)
 
-                self._config_prefetch_status = "ok"
+                self._config_prefetch_status = (
+                    "degraded_error" if result.errors else "ok"
+                )
                 logger.info(
                     "Config prefetch complete",
                     extra={
@@ -4172,6 +4174,12 @@ class RuntimeHostProcess:
                 - no_handlers_registered: True if no handlers are registered.
                   This indicates a critical configuration issue - the runtime
                   cannot process any events without handlers (OMN-1317).
+                - config_prefetch_status: Infisical config prefetch outcome
+                  (OMN-3902). Values: "pending" (startup), "skipped" (no
+                  INFISICAL_ADDR or missing credentials), "ok" (prefetch
+                  succeeded), "degraded_no_requirements" (INFISICAL_ADDR set
+                  but zero contract requirements found),
+                  "degraded_error" (prefetch raised an exception).
 
         Health State Matrix:
             - healthy=True, degraded=False: Fully operational
@@ -4310,6 +4318,7 @@ class RuntimeHostProcess:
             "handlers": handler_health_results,
             "handler_pools": pool_metrics,
             "no_handlers_registered": no_handlers_registered,
+            "config_prefetch_status": self._config_prefetch_status,
         }
 
     async def readiness_check(
