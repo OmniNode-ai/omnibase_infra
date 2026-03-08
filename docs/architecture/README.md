@@ -29,6 +29,7 @@ Start here to understand the ONEX architecture:
 | Document | Description |
 |----------|-------------|
 | [Handler Protocol-Driven Architecture](HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md) | Handler system design |
+| [Handler Classification Rules](HANDLER_CLASSIFICATION_RULES.md) | Classification rubric for mixin/service → handler refactoring (Epic 3, OMN-4004) |
 | [Snapshot Publishing](SNAPSHOT_PUBLISHING.md) | Snapshot publication patterns |
 
 ## Registration System
