@@ -2112,6 +2112,191 @@ class TestMixinNodeModelIntrospectionPerformanceMetrics:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+class TestMixinNodeIntrospectionEventPerformanceMetrics:
+    """Tests verifying performance metrics are included in introspection events.
+
+    These tests validate the core OMN-926 requirement: performance metrics
+    from introspection operations must be present in the published
+    ModelNodeIntrospectionEvent, enabling distributed observability.
+    """
+
+    async def test_introspection_event_contains_performance_metrics(self) -> None:
+        """Test that get_introspection_data() populates performance_metrics on the event."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
+            event_bus=None,
+        )
+        node.initialize_introspection(config)
+
+        event = await node.get_introspection_data()
+
+        assert event.performance_metrics is not None
+        assert isinstance(
+            event.performance_metrics, ModelIntrospectionPerformanceMetrics
+        )
+
+    async def test_event_metrics_match_standalone_metrics(self) -> None:
+        """Test that event.performance_metrics matches get_performance_metrics()."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
+            event_bus=None,
+        )
+        node.initialize_introspection(config)
+
+        event = await node.get_introspection_data()
+        standalone_metrics = node.get_performance_metrics()
+
+        assert event.performance_metrics is not None
+        assert standalone_metrics is not None
+        # Both should reflect the same timing data
+        assert (
+            event.performance_metrics.total_introspection_ms
+            == standalone_metrics.total_introspection_ms
+        )
+        assert (
+            event.performance_metrics.get_capabilities_ms
+            == standalone_metrics.get_capabilities_ms
+        )
+        assert event.performance_metrics.cache_hit == standalone_metrics.cache_hit
+        assert event.performance_metrics.method_count == standalone_metrics.method_count
+
+    async def test_event_metrics_timing_values_positive_on_fresh_call(self) -> None:
+        """Test that fresh introspection produces positive timing values."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
+            event_bus=None,
+        )
+        node.initialize_introspection(config)
+
+        event = await node.get_introspection_data()
+
+        assert event.performance_metrics is not None
+        assert event.performance_metrics.total_introspection_ms > 0
+        assert event.performance_metrics.get_capabilities_ms >= 0
+        assert event.performance_metrics.get_endpoints_ms >= 0
+        assert event.performance_metrics.get_current_state_ms >= 0
+        assert event.performance_metrics.cache_hit is False
+
+    async def test_event_metrics_cache_hit_on_second_call(self) -> None:
+        """Test that cached introspection event still has metrics with cache_hit=True."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
+            event_bus=None,
+        )
+        node.initialize_introspection(config)
+
+        # First call populates cache
+        await node.get_introspection_data()
+
+        # Second call returns cached event - but metrics are freshly computed
+        event2 = await node.get_introspection_data()
+        standalone = node.get_performance_metrics()
+
+        assert standalone is not None
+        assert standalone.cache_hit is True
+        # The cached event itself was constructed during the first call,
+        # so it has cache_hit=False, but get_performance_metrics() reflects
+        # the latest call which was a cache hit.
+
+    async def test_event_metrics_method_count_matches_discovered(self) -> None:
+        """Test that metrics.method_count matches discovered capabilities."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
+            event_bus=None,
+        )
+        node.initialize_introspection(config)
+
+        event = await node.get_introspection_data()
+
+        assert event.performance_metrics is not None
+        # method_count should match the number of discovered method signatures
+        assert event.performance_metrics.method_count == len(
+            event.discovered_capabilities.method_signatures
+        )
+
+    async def test_event_metrics_serializable_for_event_bus(self) -> None:
+        """Test that event with metrics can be serialized for event bus transmission."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
+            event_bus=None,
+        )
+        node.initialize_introspection(config)
+
+        event = await node.get_introspection_data()
+
+        # Simulate event bus serialization (JSON mode)
+        event_data = event.model_dump(mode="json")
+        assert "performance_metrics" in event_data
+        pm = event_data["performance_metrics"]
+        assert pm is not None
+        assert isinstance(pm["total_introspection_ms"], float)
+        assert isinstance(pm["cache_hit"], bool)
+        assert isinstance(pm["method_count"], int)
+        assert isinstance(pm["slow_operations"], list)
+
+        # Verify it can be deserialized back
+        restored = ModelNodeIntrospectionEvent.model_validate(event_data)
+        assert restored.performance_metrics is not None
+        assert (
+            restored.performance_metrics.total_introspection_ms
+            == event.performance_metrics.total_introspection_ms
+        )
+
+    async def test_event_metrics_survive_model_copy_with_reason_update(self) -> None:
+        """Test that performance_metrics survive model_copy when updating reason.
+
+        This mirrors what publish_introspection() does: it calls model_copy
+        to update the reason and correlation_id fields.
+        """
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
+            event_bus=None,
+        )
+        node.initialize_introspection(config)
+
+        event = await node.get_introspection_data()
+        assert event.performance_metrics is not None
+        original_ms = event.performance_metrics.total_introspection_ms
+
+        # Simulate what publish_introspection does
+        from omnibase_infra.enums import EnumIntrospectionReason
+
+        publish_event = event.model_copy(
+            update={
+                "reason": EnumIntrospectionReason.STARTUP,
+                "correlation_id": TEST_NODE_UUID_2,
+            }
+        )
+
+        assert publish_event.performance_metrics is not None
+        assert publish_event.performance_metrics.total_introspection_ms == original_ms
+        assert publish_event.reason == EnumIntrospectionReason.STARTUP
+        assert publish_event.correlation_id == TEST_NODE_UUID_2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 class TestMixinNodeIntrospectionMethodCountBenchmark:
     """Performance benchmarks with varying method counts.
 

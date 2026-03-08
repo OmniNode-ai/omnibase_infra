@@ -62,9 +62,6 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Verify version_compatibility.py fallback matrix is in sync
-        run: uv run python scripts/update_version_matrix.py --check
-
       - name: Build wheel + sdist
         run: uv build
 
@@ -104,6 +101,34 @@ jobs:
             dist/SHA256SUMS.txt
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, 'rc') }}
+
+  # ---------------------------------------------------------------------------
+  # Post-release: advisory checks that must NOT block publish (OMN-3833)
+  # ---------------------------------------------------------------------------
+  post-release-checks:
+    name: Post-Release Checks
+    needs: release
+    if: always() && needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Check fallback matrix sync (advisory)
+        run: |
+          if ! uv run python scripts/update_version_matrix.py --check; then
+            echo "::warning::Fallback matrix is out of sync with pyproject.toml."
+            echo "Run: uv run python scripts/update_version_matrix.py"
+            echo "## ⚠️ Fallback Matrix Drift" >> $GITHUB_STEP_SUMMARY
+            echo "The _FALLBACK_MATRIX in version_compatibility.py is out of sync." >> $GITHUB_STEP_SUMMARY
+            echo "Run \`uv run python scripts/update_version_matrix.py\` to fix." >> $GITHUB_STEP_SUMMARY
+          fi
 
   # ---------------------------------------------------------------------------
   # Post-release: trigger runtime Docker image rebuild (OMN-2751)

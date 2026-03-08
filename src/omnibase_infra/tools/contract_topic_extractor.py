@@ -236,7 +236,7 @@ def _extract_topics_from_python_ast(source_path: Path) -> list[str]:
         if (isinstance(node, ast.AnnAssign) and node.value is not None) or (
             isinstance(node, ast.Assign) and node.value is not None
         ):
-            value_node = node.value
+            value_node: ast.expr = node.value
         else:
             continue
 
