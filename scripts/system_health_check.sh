@@ -30,8 +30,9 @@
 #   9.  env_audit         - No rogue .env files (--cross-repo only)
 #  10.  cloud_bus_refs    - No unsuppressed 29092 references (--cross-repo only)
 #  11.  bus_endpoint      - KAFKA_BOOTSTRAP_SERVERS must not contain 29092
+#  12.  infisical_folders - /shared/<transport>/ folders exist in Infisical (when INFISICAL_ADDR is set)
 #
-# OMN-3772
+# OMN-3772 OMN-3903
 
 set -euo pipefail
 
@@ -377,6 +378,91 @@ check_bus_endpoint() {
     fi
 }
 
+check_infisical_folders() {
+    local name="infisical_folders"
+
+    # Skip entirely when INFISICAL_ADDR is not configured (secrets profile not active)
+    local infisical_addr="${INFISICAL_ADDR:-}"
+    if [[ -z "$infisical_addr" ]]; then
+        log_check "$name" "skip" "INFISICAL_ADDR not set (secrets profile not active)"
+        return
+    fi
+
+    # Probe reachability with a 5-second timeout (matches existing check timeouts)
+    if ! curl -sf --max-time 5 "${infisical_addr}/api/status" >/dev/null 2>&1; then
+        log_check "$name" "yellow" "Infisical not reachable at ${infisical_addr}"
+        return
+    fi
+
+    # Obtain a short-lived access token via universal-auth login
+    local client_id="${INFISICAL_CLIENT_ID:-}"
+    local client_secret="${INFISICAL_CLIENT_SECRET:-}"
+    local project_id="${INFISICAL_PROJECT_ID:-}"
+
+    if [[ -z "$client_id" || -z "$client_secret" || -z "$project_id" ]]; then
+        log_check "$name" "yellow" "INFISICAL_CLIENT_ID/SECRET/PROJECT_ID not set; cannot verify folders"
+        return
+    fi
+
+    local token_response
+    token_response=$(curl -sf --max-time 5 \
+        -X POST "${infisical_addr}/api/v1/auth/universal-auth/login" \
+        -H "Content-Type: application/json" \
+        -d "{\"clientId\":\"${client_id}\",\"clientSecret\":\"${client_secret}\"}" 2>&1) || true
+
+    local access_token
+    access_token=$(printf '%s' "$token_response" | grep -o '"accessToken":"[^"]*"' | sed 's/"accessToken":"//;s/"//') || true
+
+    if [[ -z "$access_token" ]]; then
+        log_check "$name" "yellow" "could not obtain Infisical access token (auth failed or API changed)"
+        return
+    fi
+
+    # Query /shared/ folders for the prod environment
+    local folder_response
+    folder_response=$(curl -sf --max-time 5 \
+        -H "Authorization: Bearer ${access_token}" \
+        "${infisical_addr}/api/v1/folders?workspaceId=${project_id}&environment=prod&path=%2Fshared%2F" 2>&1) || true
+
+    # Extract folder names from the response (simple grep-based parse — no jq dependency)
+    local existing_folders
+    existing_folders=$(printf '%s' "$folder_response" | grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"//g') || true
+
+    # Core folder: RED if missing while Infisical is running
+    local core_folders=("db")
+
+    # Advisory folders: YELLOW if missing (optional transport types)
+    local advisory_folders=("kafka" "http" "filesystem" "graph" "mcp")
+
+    local missing_core=()
+    local missing_advisory=()
+
+    for folder in "${core_folders[@]}"; do
+        if ! printf '%s\n' "$existing_folders" | grep -qx "$folder"; then
+            missing_core+=("$folder")
+        fi
+    done
+
+    for folder in "${advisory_folders[@]}"; do
+        if ! printf '%s\n' "$existing_folders" | grep -qx "$folder"; then
+            missing_advisory+=("$folder")
+        fi
+    done
+
+    if [[ ${#missing_core[@]} -gt 0 ]]; then
+        log_check "$name" "red" "core /shared/ folder(s) missing: ${missing_core[*]} (re-run seed-infisical.py)"
+        return
+    fi
+
+    if [[ ${#missing_advisory[@]} -gt 0 ]]; then
+        log_check "$name" "yellow" "advisory /shared/ folder(s) missing: ${missing_advisory[*]} (run seed-infisical.py to populate)"
+        return
+    fi
+
+    local total=$(( ${#core_folders[@]} + ${#advisory_folders[@]} ))
+    log_check "$name" "green" "all /shared/<transport>/ folders present (${total}/${total})"
+}
+
 # =====================================================================
 # Run all checks
 # =====================================================================
@@ -399,6 +485,7 @@ check_migration_parity
 check_env_audit
 check_cloud_bus_refs
 check_bus_endpoint
+check_infisical_folders
 
 # =====================================================================
 # Output
