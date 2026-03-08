@@ -1,0 +1,174 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeArtifactChangeDetectorEffect
+#
+# Detects artifact-relevant changes from three surfaces:
+#   1. GitHub PR webhook events (via onex.evt.github.pr-webhook.v1)
+#   2. Contract file system events (watchdog, local dev)
+#   3. Manual reconcile commands (via onex.cmd.artifact.reconcile.v1)
+#
+# Publishes ModelUpdateTrigger to onex.evt.artifact.change-detected.v1.
+#
+# Related Tickets:
+#   - OMN-3940: Task 5 — Change Detector EFFECT Node
+#   - OMN-3925: Epic — Artifact Reconciliation + Update Planning MVP
+name: "node_artifact_change_detector_effect"
+contract_name: "node_artifact_change_detector_effect"
+node_name: "node_artifact_change_detector_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  Effect node that detects artifact-relevant code changes from three surfaces:
+  GitHub PR webhook events, watchdog-based contract file system events, and
+  manual reconcile commands from the CLI. Emits ModelUpdateTrigger events to
+  onex.evt.artifact.change-detected.v1 for downstream impact analysis.
+
+# Input topics: PR webhooks and manual commands
+input_subscriptions:
+  - topic: "onex.evt.github.pr-webhook.v1"
+    operation: "artifact.ingest_pr_webhook"
+  - topic: "onex.cmd.artifact.reconcile.v1"
+    operation: "artifact.manual_trigger"
+
+event_bus:
+  subscribe_topics:
+    - "onex.evt.github.pr-webhook.v1"
+    - "onex.cmd.artifact.reconcile.v1"
+  publish_topics:
+    - "onex.evt.artifact.change-detected.v1"
+
+input_model:
+  name: "ModelPRWebhookEvent"
+  module: "omnibase_infra.nodes.node_artifact_change_detector_effect.models.model_pr_webhook_event"
+  description: "GitHub PR webhook event (primary input for PR-triggered detection)."
+output_model:
+  name: "ModelUpdateTrigger"
+  module: "omnibase_infra.nodes.node_artifact_change_detector_effect.models.model_update_trigger"
+  description: "Trigger event emitted to onex.evt.artifact.change-detected.v1."
+
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "artifact.ingest_pr_webhook"
+      handler:
+        name: "HandlerPRWebhookIngestion"
+        module: "omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_pr_webhook_ingestion"
+      description: "Map GitHub PR webhook events to ModelUpdateTrigger"
+      output_fields:
+        - trigger_id
+        - trigger_type
+        - changed_files
+    - operation: "artifact.watch_contracts"
+      handler:
+        name: "HandlerContractFileWatcher"
+        module: "omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_contract_file_watcher"
+      description: "Watchdog-based contract.yaml file watcher with MD5 hash tracking"
+      output_fields:
+        - trigger_id
+        - trigger_type
+        - changed_files
+    - operation: "artifact.manual_trigger"
+      handler:
+        name: "HandlerManualTrigger"
+        module: "omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_manual_trigger"
+      description: "Convert ModelManualReconcileCommand to ModelUpdateTrigger"
+      output_fields:
+        - trigger_id
+        - trigger_type
+        - changed_files
+
+error_handling:
+  retry_policy:
+    max_retries: 0
+  error_types:
+    - name: "WATCHDOG_UNAVAILABLE"
+      description: "watchdog library not installed"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "WATCH_ROOT_NOT_FOUND"
+      description: "Configured watch_root directory does not exist"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "WEBHOOK_PARSE_ERROR"
+      description: "PR webhook event failed validation"
+      recoverable: true
+      retry_strategy: "none"
+
+io_operations:
+  - operation: "artifact.ingest_pr_webhook"
+    description: "Ingest GitHub PR webhook and emit change trigger"
+    input_fields:
+      - action
+      - repo
+      - pr_number
+      - changed_files
+    output_fields:
+      - trigger_id
+      - trigger_type
+  - operation: "artifact.watch_contracts"
+    description: "Watch contract.yaml files for content changes via MD5 hash"
+    input_fields:
+      - watch_root
+      - debounce_seconds
+    output_fields:
+      - trigger_id
+      - trigger_type
+      - changed_files
+  - operation: "artifact.manual_trigger"
+    description: "Convert manual reconcile command to change trigger"
+    input_fields:
+      - command_id
+      - source_repo
+      - changed_files
+    output_fields:
+      - trigger_id
+      - trigger_type
+
+config:
+  watch_root: "src/omnibase_infra/nodes"
+  debounce_seconds: 1.0
+  contract_glob: "contract.yaml"
+  source_repo: "omnibase_infra"
+
+dependencies:
+  - name: "watchdog"
+    type: "library"
+    library: "watchdog"
+    description: "Filesystem event monitoring (required for HandlerContractFileWatcher)"
+    required: true
+  - name: "event_publisher"
+    type: "protocol"
+    protocol: "ProtocolEventPublisher"
+    description: "Event publisher for onex.evt.artifact.change-detected.v1"
+
+capabilities:
+  - name: "pr_webhook_ingestion"
+    description: "Ingest GitHub PR webhook events and map to change triggers"
+  - name: "contract_file_watching"
+    description: "Watch contract.yaml files for content changes using watchdog + MD5"
+  - name: "manual_trigger_ingestion"
+    description: "Convert manual reconcile CLI commands to change triggers"
+  - name: "kafka_event_production"
+    description: "Publish ModelUpdateTrigger to onex.evt.artifact.change-detected.v1"
+
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-03-08"
+  updated: "2026-03-08"
+  tags:
+    - effect
+    - artifact-reconciliation
+    - change-detector
+    - pr-webhook
+    - file-watcher
+    - kafka-producer
