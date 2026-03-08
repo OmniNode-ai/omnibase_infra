@@ -98,10 +98,39 @@ class TestHandlerUpsertMergeGateSuccess:
 
         assert result.success is True
         assert result.backend_id == "postgres"
-        assert result.correlation_id == correlation_id
+        # effective_cid = payload.correlation_id or correlation_id
+        # payload has its own correlation_id, so that takes precedence
+        assert result.correlation_id == payload.correlation_id
         assert result.error is None
         assert result.error_code is None
         assert result.duration_ms >= 0
+
+    @pytest.mark.asyncio
+    async def test_insert_uses_handler_correlation_id_when_payload_has_none(
+        self,
+    ) -> None:
+        """When payload.correlation_id is None, handler's correlation_id is used."""
+        conn = AsyncMock()
+        conn.fetchrow = AsyncMock(return_value={"was_insert": True})
+        pool = create_mock_pool_with_conn(conn)
+
+        handler = HandlerUpsertMergeGate(pool)
+        payload = ModelMergeGateResult(
+            gate_id=uuid4(),
+            pr_ref="test/repo#1",
+            head_sha="abc123",
+            base_sha="def456",
+            decision="PASS",
+            tier="tier-a",
+            decided_at=datetime.now(tz=UTC),
+            correlation_id=None,
+        )
+        handler_cid = uuid4()
+
+        result = await handler.handle(payload, handler_cid)
+
+        assert result.success is True
+        assert result.correlation_id == handler_cid
 
     @pytest.mark.asyncio
     async def test_idempotent_update_returns_success(self) -> None:
@@ -201,6 +230,27 @@ class TestHandlerUpsertMergeGateQuarantine:
             result = await handler.handle(payload, uuid4())
 
         assert result.success is True
+        mock_client_cls.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_quarantine_update_does_not_open_linear_ticket(self) -> None:
+        """QUARANTINE re-evaluation (was_insert=False) skips Linear ticket (idempotent)."""
+        conn = AsyncMock()
+        # was_insert = False -> this is an update, not a fresh insert
+        conn.fetchrow = AsyncMock(return_value={"was_insert": False})
+        pool = create_mock_pool_with_conn(conn)
+
+        payload = make_gate_payload(decision="QUARANTINE")
+
+        with patch(
+            "omnibase_infra.nodes.node_merge_gate_effect.handlers."
+            "handler_upsert_merge_gate.httpx.AsyncClient"
+        ) as mock_client_cls:
+            handler = HandlerUpsertMergeGate(pool)
+            result = await handler.handle(payload, uuid4())
+
+        assert result.success is True
+        # Linear should NOT have been called on update
         mock_client_cls.assert_not_called()
 
     @pytest.mark.asyncio
