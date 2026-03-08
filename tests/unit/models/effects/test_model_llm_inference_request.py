@@ -41,17 +41,17 @@ import pytest
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumLlmOperationType
-from omnibase_infra.nodes.effects.models.model_llm_function_def import (
+from omnibase_infra.models.llm.model_llm_function_def import (
     ModelLlmFunctionDef,
 )
-from omnibase_infra.nodes.effects.models.model_llm_inference_request import (
+from omnibase_infra.models.llm.model_llm_inference_request import (
     ModelLlmInferenceRequest,
 )
-from omnibase_infra.nodes.effects.models.model_llm_message import ModelLlmMessage
-from omnibase_infra.nodes.effects.models.model_llm_tool_choice import (
+from omnibase_infra.models.llm.model_llm_message import ModelLlmMessage
+from omnibase_infra.models.llm.model_llm_tool_choice import (
     ModelLlmToolChoice,
 )
-from omnibase_infra.nodes.effects.models.model_llm_tool_definition import (
+from omnibase_infra.models.llm.model_llm_tool_definition import (
     ModelLlmToolDefinition,
 )
 

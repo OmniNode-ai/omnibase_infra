@@ -68,12 +68,12 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_co
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_decision import (
     ModelReducerDecision,
 )
-from omnibase_infra.nodes.reducers.models.model_payload_postgres_update_registration import (
+from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_update_registration import (
     ModelPayloadPostgresUpdateRegistration,
     ModelRegistrationAckUpdate,
     ModelRegistrationHeartbeatUpdate,
 )
-from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
+from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_upsert_registration import (
     ModelPayloadPostgresUpsertRegistration,
 )
 

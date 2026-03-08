@@ -48,7 +48,7 @@ from omnibase_infra.errors import (
 from omnibase_infra.models.errors.model_timeout_error_context import (
     ModelTimeoutErrorContext,
 )
-from omnibase_infra.nodes.effects.models import (
+from omnibase_infra.models.llm import (
     ModelLlmInferenceRequest,
     ModelLlmMessage,
 )

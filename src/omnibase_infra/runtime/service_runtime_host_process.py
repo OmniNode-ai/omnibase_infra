@@ -2938,17 +2938,25 @@ class RuntimeHostProcess:
             self._config_prefetch_status = "skipped"
             return
 
-        # Resolve which contract paths to scan.  When the caller did not
-        # provide explicit paths, fall back to auto-discovery: scan the
-        # entire ``omnibase_infra`` package tree for ``contract.yaml``
-        # files.  This fallback is gated strictly on ``INFISICAL_ADDR``
-        # being set (already checked above) so local development without
-        # Infisical is never affected.
-        effective_contract_paths: list[Path] = list(self._contract_paths)
-        if not effective_contract_paths:
-            package_root = Path(__file__).parent.parent
+        # OMN-3893: Decouple prefetch contract scan from handler contract paths.
+        # Previously this used self._contract_paths which points at handler
+        # contracts (e.g. /app/contracts) — those have no transport_type and
+        # the extractor finds nothing.  Now we always scan the installed
+        # omnibase_infra package tree for node contracts, with an env var
+        # escape hatch for custom deployments.
+        env_override = os.environ.get("ONEX_NODE_CONTRACTS_DIR", "")
+        if env_override:
+            effective_contract_paths: list[Path] = [Path(env_override)]
             logger.debug(
-                "No contract_paths configured; auto-discovering contracts under %s",
+                "Using ONEX_NODE_CONTRACTS_DIR override for prefetch: %s",
+                env_override,
+            )
+        else:
+            import omnibase_infra as _pkg
+
+            package_root = Path(_pkg.__file__).parent
+            logger.debug(
+                "Auto-discovering node contracts under package root: %s",
                 package_root,
             )
             effective_contract_paths = [package_root]
@@ -2964,12 +2972,28 @@ class RuntimeHostProcess:
             # Step 1: Extract config requirements from contracts
             extractor = ContractConfigExtractor()
             requirements = extractor.extract_from_paths(effective_contract_paths)
+            extraction_had_errors = bool(requirements.errors)
+
+            if extraction_had_errors:
+                for err in requirements.errors:
+                    logger.warning(
+                        "Config extraction error: %s",
+                        sanitize_error_string(err),
+                    )
 
             if not requirements.requirements:
-                logger.info(
-                    "No config requirements found in contracts, skipping prefetch"
+                logger.warning(
+                    "No config requirements found in node contracts — prefetch "
+                    "will be a no-op.  Scanned paths: %s.  This usually means "
+                    "node contract YAML files are missing transport_type or "
+                    "config_requirements sections.",
+                    [str(p) for p in effective_contract_paths],
                 )
-                self._config_prefetch_status = "degraded_no_requirements"
+                self._config_prefetch_status = (
+                    "degraded_error"
+                    if extraction_had_errors
+                    else "degraded_no_requirements"
+                )
                 return
 
             # Step 2: Get or create a ProtocolSecretResolver
@@ -3074,7 +3098,7 @@ class RuntimeHostProcess:
                 applied = prefetcher.apply_to_environment(result)
 
                 self._config_prefetch_status = (
-                    "degraded_error" if result.errors else "ok"
+                    "degraded_error" if extraction_had_errors or result.errors else "ok"
                 )
                 logger.info(
                     "Config prefetch complete",
@@ -3101,6 +3125,10 @@ class RuntimeHostProcess:
                     await _inline_handler.shutdown()
 
         except Exception as exc:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="prefetch_config_from_infisical",
+            )
             # Prefetch failures are non-fatal.
             # Sanitize the error to avoid leaking secrets (e.g. connection
             # strings embedded in exception messages).  Do NOT use
@@ -3108,8 +3136,11 @@ class RuntimeHostProcess:
             # locals with secret values.
             self._config_prefetch_status = "degraded_error"
             logger.warning(
-                "Config prefetch failed (non-fatal): %s",
-                sanitize_error_message(exc),
+                "Config prefetch failed (non-fatal)",
+                extra={
+                    "error": sanitize_error_message(exc),
+                    "correlation_id": str(context.correlation_id),
+                },
             )
 
     async def _resolve_handler_dependencies(

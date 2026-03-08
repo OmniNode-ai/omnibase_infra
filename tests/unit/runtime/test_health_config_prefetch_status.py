@@ -103,6 +103,7 @@ class TestHealthCheckIncludesConfigPrefetchStatus:
         mock_extractor = MagicMock()
         mock_requirements = MagicMock()
         mock_requirements.requirements = []  # empty
+        mock_requirements.errors = ()  # no extraction errors → degraded_no_requirements
         mock_extractor.return_value.extract_from_paths.return_value = mock_requirements
 
         with patch(_EXTRACTOR_PATH, mock_extractor):
@@ -125,6 +126,7 @@ class TestHealthCheckIncludesConfigPrefetchStatus:
         mock_extractor = MagicMock()
         mock_requirements = MagicMock()
         mock_requirements.requirements = [MagicMock()]
+        mock_requirements.errors = ()  # no extraction errors
         mock_extractor.return_value.extract_from_paths.return_value = mock_requirements
 
         mock_result = MagicMock()

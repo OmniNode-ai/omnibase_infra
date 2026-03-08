@@ -2,13 +2,9 @@
 # Copyright (c) 2026 OmniNode Team
 """Pytest fixtures for Event Ledger integration tests.
 
-This module provides fixtures for testing:
-- HandlerLedgerAppend idempotent writes
-- HandlerLedgerQuery correlation_id lookups
-- E2E pipeline from event to database
-
-Fixtures connect to real PostgreSQL (configured via environment variables)
-and provide cleanup of test data after each test.
+Covers HandlerLedgerAppend idempotent writes, HandlerLedgerQuery
+correlation_id lookups, and E2E pipeline from event to database.
+Connects to real PostgreSQL and cleans up test data after each test.
 """
 
 from __future__ import annotations
@@ -194,7 +190,7 @@ def sample_ledger_payload() -> ModelPayloadLedgerAppend:
     Returns:
         A valid payload with unique Kafka position and test data.
     """
-    from omnibase_infra.nodes.reducers.models.model_payload_ledger_append import (
+    from omnibase_infra.nodes.node_registration_reducer.models.model_payload_ledger_append import (
         ModelPayloadLedgerAppend,
     )
 
@@ -232,7 +228,7 @@ def make_ledger_payload() -> Callable[..., ModelPayloadLedgerAppend]:
                 correlation_id=my_correlation_id,
             )
     """
-    from omnibase_infra.nodes.reducers.models.model_payload_ledger_append import (
+    from omnibase_infra.nodes.node_registration_reducer.models.model_payload_ledger_append import (
         ModelPayloadLedgerAppend,
     )
 
@@ -271,6 +267,6 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_query import (
         HandlerLedgerQuery,
     )
-    from omnibase_infra.nodes.reducers.models.model_payload_ledger_append import (
+    from omnibase_infra.nodes.node_registration_reducer.models.model_payload_ledger_append import (
         ModelPayloadLedgerAppend,
     )

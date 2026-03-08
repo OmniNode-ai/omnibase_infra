@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# artifact-reconciliation-webhook.yml
+#
+# Publishes a slim PR event to onex.evt.github.pr-webhook.v1 on every
+# pull_request lifecycle event.  The downstream EFFECT node
+# (node_artifact_change_detector_effect) consumes the event and triggers
+# the artifact reconciliation pipeline.
+#
+# Ticket: OMN-3946
+#
+# Required GitHub Secrets:
+#   KAFKA_BOOTSTRAP_SERVERS  — e.g. pkc-xxx.us-east-1.aws.confluent.cloud:9092
+#   KAFKA_SASL_USERNAME      — Confluent Cloud API key (or SASL username)
+#   KAFKA_SASL_PASSWORD      — Confluent Cloud API secret (or SASL password)
+
+name: Artifact Reconciliation Webhook
+
+on:
+  pull_request:
+    types: [opened, synchronize, closed, reopened]
+
+jobs:
+  publish-pr-webhook:
+    name: Publish PR Webhook Event
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v45
+        with:
+          separator: ","
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install --quiet confluent-kafka pydantic click
+
+      - name: Publish PR webhook event
+        # All potentially attacker-controlled inputs (head_ref, actor) are passed
+        # through environment variables, not interpolated directly into the run
+        # command, to prevent shell injection.
+        env:
+          KAFKA_BOOTSTRAP_SERVERS: ${{ secrets.KAFKA_BOOTSTRAP_SERVERS }}
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
+          PR_ACTION: ${{ github.event.action }}
+          PR_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_REF: ${{ github.head_ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_ACTOR: ${{ github.actor }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          PR_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
+        run: |
+          python scripts/publish_pr_webhook_event.py \
+            --action "$PR_ACTION" \
+            --repo "$PR_REPO" \
+            --pr-number "$PR_NUMBER" \
+            --head-ref "$PR_HEAD_REF" \
+            --head-sha "$PR_HEAD_SHA" \
+            --actor "$PR_ACTOR" \
+            --merged "$PR_MERGED" \
+            --changed-files "$PR_CHANGED_FILES"

@@ -24,7 +24,9 @@ if TYPE_CHECKING:
         ModelLedgerAppendResult,
         ModelLedgerEntry,
     )
-    from omnibase_infra.nodes.reducers.models import ModelPayloadLedgerAppend
+    from omnibase_infra.nodes.node_registration_reducer.models import (
+        ModelPayloadLedgerAppend,
+    )
 
 
 @runtime_checkable

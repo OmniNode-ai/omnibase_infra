@@ -22,7 +22,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 
 from omnibase_infra.errors import ContainerWiringError, RuntimeHostError
-from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
+from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_upsert_registration import (
     ModelPayloadPostgresUpsertRegistration,
 )
 from omnibase_infra.runtime.intent_effects.intent_effect_postgres_upsert import (

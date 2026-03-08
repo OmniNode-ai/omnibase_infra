@@ -17,6 +17,7 @@ with the expected keys. It is designed to be safe by default:
 
 Usage:
     # Dry run (default) -- show what would happen
+    # Scans nodes/ (default) + contracts/ automatically
     uv run python scripts/seed-infisical.py \\
         --contracts-dir src/omnibase_infra/nodes
 
@@ -32,6 +33,11 @@ Usage:
         --import-env .env \\
         --set-values \\
         --execute
+
+Note:
+    The script automatically also scans src/omnibase_infra/contracts/ when it
+    exists (OMN-3989: handler plugin contracts moved from nodes/handlers/ to
+    contracts/handlers/).
 
     # Export current Infisical keys (values masked)
     uv run python scripts/seed-infisical.py --export
@@ -69,8 +75,13 @@ from _infisical_util import _parse_env_file
 
 def _extract_requirements(
     contracts_dir: Path,
+    extra_contracts_dirs: list[Path] | None = None,
 ) -> tuple[list[dict[str, str]], tuple[str, ...]]:
     """Extract config requirements from contracts.
+
+    Args:
+        contracts_dir: Primary directory to scan for contract.yaml files.
+        extra_contracts_dirs: Additional directories to scan (e.g. contracts/).
 
     Returns:
         Tuple of (requirements_list, errors_tuple) where each requirement
@@ -83,8 +94,12 @@ def _extract_requirements(
         TransportConfigMap,
     )
 
+    search_paths = [contracts_dir]
+    if extra_contracts_dirs:
+        search_paths.extend(extra_contracts_dirs)
+
     extractor = ContractConfigExtractor()
-    reqs = extractor.extract_from_paths([contracts_dir])
+    reqs = extractor.extract_from_paths(search_paths)
 
     transport_map = TransportConfigMap()
     result: list[dict[str, str]] = []
@@ -561,10 +576,12 @@ def main() -> int:
             return 1
         return 0 if ok else 1
 
-    # Extract requirements from contracts
-    logger.info("Scanning contracts in %s", args.contracts_dir)
+    # Extract requirements from contracts (nodes/ + contracts/ for handler plugin contracts)
+    contracts_base = _PROJECT_ROOT / "src" / "omnibase_infra" / "contracts"
+    extra_dirs = [contracts_base] if contracts_base.is_dir() else []
+    logger.info("Scanning contracts in %s (extra: %s)", args.contracts_dir, extra_dirs)
     try:
-        requirements, errors = _extract_requirements(args.contracts_dir)
+        requirements, errors = _extract_requirements(args.contracts_dir, extra_dirs)
     except Exception as exc:
         logger.exception(
             "Failed to extract config requirements from contracts: %s",

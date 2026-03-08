@@ -38,8 +38,8 @@ from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-from omnibase_infra.nodes.reducers import RegistrationReducer
-from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+from omnibase_infra.nodes.node_registration_reducer.models import ModelRegistrationState
 
 
 def _make_workflow_identity(name: str) -> ModelNodeIdentity:
@@ -170,7 +170,9 @@ class TestA0PurityGate:
             3. Verify PostgreSQL adapter received a call
             4. Verify call order is tracked
         """
-        from omnibase_infra.nodes.effects.models import ModelRegistryRequest
+        from omnibase_infra.nodes.node_registry_effect.models import (
+            ModelRegistryRequest,
+        )
 
         # Arrange
         request = ModelRegistryRequest(
@@ -225,7 +227,9 @@ class TestA0PurityGate:
         2. Effect executes registration and performs I/O
         3. Call order shows reducer is called before effect
         """
-        from omnibase_infra.nodes.effects.models import ModelRegistryRequest
+        from omnibase_infra.nodes.node_registry_effect.models import (
+            ModelRegistryRequest,
+        )
 
         # Arrange
         correlation_id = uuid4()
@@ -725,7 +729,9 @@ class TestWorkflowIntegration:
 
         All with ZERO real infrastructure.
         """
-        from omnibase_infra.nodes.effects.models import ModelRegistryRequest
+        from omnibase_infra.nodes.node_registry_effect.models import (
+            ModelRegistryRequest,
+        )
 
         # Step 1: Node emits introspection (A1)
         await test_node.publish_introspection()

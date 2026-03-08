@@ -25,7 +25,7 @@ import pytest
 
 from omnibase_infra.enums import EnumLlmFinishReason, EnumLlmOperationType
 from omnibase_infra.errors import ProtocolConfigurationError
-from omnibase_infra.nodes.effects.models import (
+from omnibase_infra.models.llm import (
     ModelLlmInferenceRequest,
     ModelLlmMessage,
 )

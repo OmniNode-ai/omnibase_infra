@@ -9,9 +9,8 @@ Node implementations for the ONEX 4-node architecture:
 - ORCHESTRATOR_GENERIC: Workflow coordination across nodes
 
 Available Submodules:
-- effects: Effect nodes for external I/O operations
-- reducers: Reducer nodes for state aggregation
-- node_registration_reducer: Declarative FSM-driven registration reducer
+- node_registry_effect: NodeRegistryEffect + registry models + protocols
+- node_registration_reducer: Declarative FSM-driven registration reducer + RegistrationReducer
 - node_registration_orchestrator: Registration workflow orchestrator
 - node_auth_gate_compute: Work authorization decision compute node
 - node_ledger_projection_compute: Event ledger projection compute node
@@ -27,12 +26,7 @@ Available Classes:
 - RegistryInfraLedgerProjection: Registry for ledger projection node
 """
 
-from omnibase_infra.nodes.effects import (
-    ModelBackendResult,
-    ModelRegistryRequest,
-    ModelRegistryResponse,
-    NodeRegistryEffect,
-)
+from omnibase_infra.models import ModelBackendResult
 from omnibase_infra.nodes.node_auth_gate_compute import (
     NodeAuthGateCompute,
     RegistryInfraAuthGateCompute,
@@ -46,7 +40,13 @@ from omnibase_infra.nodes.node_registration_orchestrator import (
 )
 from omnibase_infra.nodes.node_registration_reducer import (
     NodeRegistrationReducer,
+    RegistrationReducer,
     RegistryInfraNodeRegistrationReducer,
+)
+from omnibase_infra.nodes.node_registry_effect import NodeRegistryEffect
+from omnibase_infra.nodes.node_registry_effect.models import (
+    ModelRegistryRequest,
+    ModelRegistryResponse,
 )
 from omnibase_infra.nodes.node_session_lifecycle_reducer import (
     ModelSessionLifecycleState,
@@ -60,7 +60,6 @@ from omnibase_infra.nodes.node_session_state_effect import (
     NodeSessionStateEffect,
     RegistryInfraSessionState,
 )
-from omnibase_infra.nodes.reducers import RegistrationReducer
 
 __all__: list[str] = [
     "ModelBackendResult",

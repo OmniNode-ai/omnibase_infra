@@ -26,7 +26,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from omnibase_infra.nodes.reducers.models.model_payload_ledger_append import (
+from omnibase_infra.nodes.node_registration_reducer.models.model_payload_ledger_append import (
     ModelPayloadLedgerAppend,
 )
 

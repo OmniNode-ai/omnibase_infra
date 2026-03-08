@@ -46,7 +46,9 @@ from omnibase_infra.nodes.node_ledger_write_effect.models import ModelLedgerAppe
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
     from omnibase_infra.handlers.handler_db import HandlerDb
-    from omnibase_infra.nodes.reducers.models import ModelPayloadLedgerAppend
+    from omnibase_infra.nodes.node_registration_reducer.models import (
+        ModelPayloadLedgerAppend,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -335,7 +337,9 @@ class HandlerLedgerAppend:
         Returns:
             ModelHandlerOutput wrapping ModelLedgerAppendResult.
         """
-        from omnibase_infra.nodes.reducers.models import ModelPayloadLedgerAppend
+        from omnibase_infra.nodes.node_registration_reducer.models import (
+            ModelPayloadLedgerAppend,
+        )
 
         correlation_id_raw = envelope.get("correlation_id")
         correlation_id = (
