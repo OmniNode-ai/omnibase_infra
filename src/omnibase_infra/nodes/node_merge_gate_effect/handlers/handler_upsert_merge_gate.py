@@ -170,15 +170,17 @@ class HandlerUpsertMergeGate(MixinPostgresOpExecutor):
             ModelBackendResult with success=True when upsert committed.
             Linear ticket failures are logged but do not cause success=False.
         """
+        # Resolve a single effective correlation ID used end-to-end
+        effective_cid = payload.correlation_id or correlation_id
         return await self._execute_postgres_op(
             op_error_code=EnumPostgresErrorCode.UPSERT_ERROR,
-            correlation_id=correlation_id,
+            correlation_id=effective_cid,
             log_context={
                 "pr_ref": payload.pr_ref,
                 "head_sha": payload.head_sha,
                 "decision": payload.decision,
             },
-            fn=lambda: self._upsert_and_quarantine(payload, correlation_id),
+            fn=lambda: self._upsert_and_quarantine(payload, effective_cid),
         )
 
     async def _upsert_and_quarantine(
@@ -193,9 +195,7 @@ class HandlerUpsertMergeGate(MixinPostgresOpExecutor):
             correlation_id: Correlation ID for tracing.
         """
         # Serialize violations to JSON
-        violations_json = json.dumps(
-            [v.model_dump() for v in payload.violations]
-        )
+        violations_json = json.dumps([v.model_dump() for v in payload.violations])
 
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -208,7 +208,7 @@ class HandlerUpsertMergeGate(MixinPostgresOpExecutor):
                 payload.tier,
                 violations_json,
                 payload.run_id,
-                payload.correlation_id or correlation_id,
+                correlation_id,
                 payload.run_fingerprint,
                 payload.decided_at,
             )
@@ -226,8 +226,10 @@ class HandlerUpsertMergeGate(MixinPostgresOpExecutor):
             },
         )
 
-        # Open Linear quarantine ticket if decision is QUARANTINE
-        if payload.decision == "QUARANTINE":
+        # Open Linear quarantine ticket only on first insert (idempotent).
+        # Re-evaluations for the same (pr_ref, head_sha) are updates and
+        # must not create duplicate tickets.
+        if payload.decision == "QUARANTINE" and was_insert:
             await self._open_quarantine_ticket(payload, correlation_id)
 
     async def _open_quarantine_ticket(
@@ -315,15 +317,21 @@ class HandlerUpsertMergeGate(MixinPostgresOpExecutor):
                     },
                 )
             else:
+                # Log only the top-level success flag and errors array (if any)
+                # to avoid leaking raw Linear response payloads.
+                errors = data.get("errors", [])
                 logger.warning(
                     "Linear issueCreate returned success=false",
                     extra={
                         "pr_ref": payload.pr_ref,
-                        "response": data,
+                        "error_count": len(errors),
+                        "error_messages": [e.get("message", "") for e in errors][:3],
                         "correlation_id": str(correlation_id),
                     },
                 )
-        except Exception as exc:  # ONEX: broad catch — ticket failure must not fail upsert
+        except (
+            Exception
+        ) as exc:  # ONEX: broad catch — ticket failure must not fail upsert
             logger.warning(
                 "Failed to create quarantine Linear ticket (upsert still succeeded)",
                 extra={

@@ -67,91 +67,91 @@ x-runner-base: &runner-base
       max-file: "3"
 services:
   omninode-runner-1:
-    !!merge <<: *runner-base
+    <<: *runner-base
     container_name: omninode-runner-1
     environment:
-      !!merge <<: *runner-env
+      <<: *runner-env
       RUNNER_NAME: omninode-runner-1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - runner-1-creds:/home/runner/.runner-creds
   omninode-runner-2:
-    !!merge <<: *runner-base
+    <<: *runner-base
     container_name: omninode-runner-2
     environment:
-      !!merge <<: *runner-env
+      <<: *runner-env
       RUNNER_NAME: omninode-runner-2
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - runner-2-creds:/home/runner/.runner-creds
   omninode-runner-3:
-    !!merge <<: *runner-base
+    <<: *runner-base
     container_name: omninode-runner-3
     environment:
-      !!merge <<: *runner-env
+      <<: *runner-env
       RUNNER_NAME: omninode-runner-3
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - runner-3-creds:/home/runner/.runner-creds
   omninode-runner-4:
-    !!merge <<: *runner-base
+    <<: *runner-base
     container_name: omninode-runner-4
     environment:
-      !!merge <<: *runner-env
+      <<: *runner-env
       RUNNER_NAME: omninode-runner-4
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - runner-4-creds:/home/runner/.runner-creds
   omninode-runner-5:
-    !!merge <<: *runner-base
+    <<: *runner-base
     container_name: omninode-runner-5
     environment:
-      !!merge <<: *runner-env
+      <<: *runner-env
       RUNNER_NAME: omninode-runner-5
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - runner-5-creds:/home/runner/.runner-creds
   omninode-runner-6:
-    !!merge <<: *runner-base
+    <<: *runner-base
     container_name: omninode-runner-6
     environment:
-      !!merge <<: *runner-env
+      <<: *runner-env
       RUNNER_NAME: omninode-runner-6
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - runner-6-creds:/home/runner/.runner-creds
   omninode-runner-7:
-    !!merge <<: *runner-base
+    <<: *runner-base
     container_name: omninode-runner-7
     environment:
-      !!merge <<: *runner-env
+      <<: *runner-env
       RUNNER_NAME: omninode-runner-7
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - runner-7-creds:/home/runner/.runner-creds
   omninode-runner-8:
-    !!merge <<: *runner-base
+    <<: *runner-base
     container_name: omninode-runner-8
     environment:
-      !!merge <<: *runner-env
+      <<: *runner-env
       RUNNER_NAME: omninode-runner-8
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - runner-8-creds:/home/runner/.runner-creds
   omninode-runner-9:
-    !!merge <<: *runner-base
+    <<: *runner-base
     container_name: omninode-runner-9
     environment:
-      !!merge <<: *runner-env
+      <<: *runner-env
       RUNNER_NAME: omninode-runner-9
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - runner-9-creds:/home/runner/.runner-creds
   omninode-runner-10:
-    !!merge <<: *runner-base
+    <<: *runner-base
     container_name: omninode-runner-10
     environment:
-      !!merge <<: *runner-env
+      <<: *runner-env
       RUNNER_NAME: omninode-runner-10
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

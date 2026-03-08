@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS public.merge_gate_decisions (
     base_sha          TEXT        NOT NULL,
     decision          TEXT        NOT NULL CHECK (decision IN ('PASS', 'WARN', 'QUARANTINE')),
     tier              TEXT        NOT NULL CHECK (tier IN ('tier-a', 'tier-b')),
-    violations        JSONB       NOT NULL DEFAULT '[]',
+    violations        JSONB       NOT NULL DEFAULT '[]'
+                      CHECK (jsonb_typeof(violations) = 'array'),
     run_id            UUID,
     correlation_id    UUID,
     run_fingerprint   TEXT,

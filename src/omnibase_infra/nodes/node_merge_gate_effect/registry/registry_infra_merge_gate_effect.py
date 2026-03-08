@@ -160,7 +160,7 @@ class RegistryInfraMergeGateEffect:
 
         .. versionadded:: 0.8.0
         """
-        return ["postgres"]
+        return ["postgres", "linear"]
 
 
 __all__ = ["RegistryInfraMergeGateEffect"]

@@ -73,6 +73,7 @@ handler_routing:
         - error_code
         - duration_ms
         - correlation_id
+        - backend_id
   execution_mode: "sequential"
   partial_failure_handling: false
   aggregation_strategy: "first_match"
@@ -178,6 +179,7 @@ io_operations:
       - error_code
       - duration_ms
       - correlation_id
+      - backend_id
 # Dependencies (protocols this node requires)
 dependencies:
   - name: "protocol_postgres_adapter"

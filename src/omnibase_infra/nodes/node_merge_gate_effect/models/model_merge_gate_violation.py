@@ -20,7 +20,7 @@ class ModelMergeGateViolation(BaseModel):
         message: Human-readable description of the violation.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     rule_code: str = Field(..., description="Identifier of the violated rule.")
     severity: str = Field(..., description="Severity level (FAIL, WARN).")
