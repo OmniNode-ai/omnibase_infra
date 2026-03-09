@@ -26,6 +26,10 @@ inputs:
     description: 'Extra arguments passed to uv sync (e.g., --frozen)'
     required: false
     default: '--reinstall-package omnibase-core --reinstall-package omnibase-spi'
+  working-directory:
+    description: 'Working directory for uv sync (useful when the repo is checked out into a subdirectory)'
+    required: false
+    default: '.'
   skip-install:
     description: 'Set to "true" to skip the uv sync step (useful for multi-repo setups that install manually)'
     required: false
@@ -51,4 +55,5 @@ runs:
     - name: Install dependencies
       if: inputs.skip-install != 'true'
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: uv sync ${{ inputs.install-args }}
