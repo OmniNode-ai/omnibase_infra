@@ -311,6 +311,7 @@ markers = [
     "real_mcp: Tests using real MCP SDK server and client (requires available port)",
     "mcp_protocol: Mock-based MCP JSON-RPC protocol tests (not real SDK integration)",
     "llm: Tests requiring real LLM inference endpoints (local GPU/Apple Silicon servers)",
+    "consul: Tests requiring a live Consul instance (legacy marker retained for existing tests — Consul removed in OMN-3995)",
 ]
 addopts = [
     "--strict-markers",
