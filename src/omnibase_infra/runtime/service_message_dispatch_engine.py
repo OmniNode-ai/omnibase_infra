@@ -179,6 +179,7 @@ from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
 from omnibase_infra.models.dispatch.model_materialized_dispatch import (
     ModelMaterializedDispatch,
 )
+from omnibase_infra.runtime._enum_coercion import coerce_message_category
 from omnibase_infra.runtime.binding_resolver import OperationBindingResolver
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.utils import sanitize_error_message
@@ -188,33 +189,6 @@ if TYPE_CHECKING:
 
     from omnibase_core.enums.enum_node_kind import EnumNodeKind
     from omnibase_core.models.reducer.model_intent import ModelIntent
-
-
-def coerce_message_category(value: object) -> EnumMessageCategory:
-    """Normalize any category input to the canonical EnumMessageCategory.
-
-    Accepts:
-    - A canonical ``EnumMessageCategory`` instance (pass-through).
-    - A string matching a valid enum value (e.g. ``"EVENT"``).
-    - A foreign enum instance whose ``.value`` matches a valid enum value.
-
-    Raises:
-        ValueError: When ``value`` cannot be resolved to a valid enum member.
-            The error message lists all valid values.
-
-    .. versionadded:: 0.8.0
-        Added for boundary coercion at dispatcher registration entry points (OMN-4034).
-    """
-    if isinstance(value, EnumMessageCategory):
-        return value
-    raw: object = value.value if hasattr(value, "value") else value  # type: ignore[union-attr]
-    try:
-        return EnumMessageCategory(raw)
-    except ValueError:
-        raise ValueError(
-            f"Invalid message category: {value!r}. "
-            f"Expected one of: {[e.value for e in EnumMessageCategory]}"
-        )
 
 
 def _derive_dlq_topic(

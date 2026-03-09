@@ -246,7 +246,9 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.projectors import ProjectionReaderRegistration
     from omnibase_infra.runtime import ProjectorShell
-    from omnibase_infra.services.service_topic_catalog import ServiceTopicCatalog
+    from omnibase_infra.services.protocol_topic_catalog_service import (
+        ProtocolTopicCatalogService,
+    )
 
 
 class RegistryInfraNodeRegistrationOrchestrator:
@@ -282,7 +284,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
         projection_reader: ProjectionReaderRegistration,
         reducer: RegistrationReducerService,
         projector: ProjectorShell | None = None,
-        catalog_service: ServiceTopicCatalog | None = None,
+        catalog_service: ProtocolTopicCatalogService | None = None,
         *,
         require_heartbeat_handler: bool = True,
     ) -> ServiceHandlerRegistry:
@@ -322,9 +324,11 @@ class RegistryInfraNodeRegistrationOrchestrator:
                 not duplicated in the registry.
             projector: Projector for state persistence. Required for
                 HandlerNodeHeartbeat to persist heartbeat timestamps.
-            catalog_service: Optional ServiceTopicCatalog for topic catalog queries.
-                Required for HandlerTopicCatalogQuery. When absent, the handler is
-                not registered and topic catalog queries will not be handled.
+            catalog_service: Optional ProtocolTopicCatalogService for topic catalog queries.
+                Accepts ``HandlerTopicCatalogPostgres`` (PostgreSQL-backed, OMN-4011) or
+                ``ServiceTopicCatalog`` (Consul-backed, legacy). Required for
+                HandlerTopicCatalogQuery. When absent, the handler is not registered
+                and topic catalog queries will not be handled.
             require_heartbeat_handler: If True (default), raises ProtocolConfigurationError
                 when projector is None. Set to False only for testing scenarios where
                 heartbeat functionality is intentionally disabled. This creates a

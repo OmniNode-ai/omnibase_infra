@@ -787,8 +787,9 @@ async def wire_registration_handlers(
                 "Skipping HandlerNodeHeartbeat registration (projector not available)"
             )
 
-        # Register HandlerTopicCatalogQuery (optional - requires ServiceTopicCatalog)
-        # Resolve ServiceTopicCatalog from the container if available.
+        # Register HandlerTopicCatalogQuery (optional - requires catalog service).
+        # Resolve HandlerTopicCatalogPostgres from the container first (preferred,
+        # OMN-4011), then fall back to legacy ServiceTopicCatalog (Consul-backed).
         #
         # NOTE: These imports are intentionally inside the outer try/except block.
         # If either import raises ImportError (e.g. omnibase_infra not installed
@@ -797,25 +798,42 @@ async def wire_registration_handlers(
         # behavior: a missing module is a wiring failure, not a soft skip.
         # The soft-skip only applies to the runtime resolve_service call below,
         # which catches its own exception and logs a warning instead of raising.
+        from omnibase_infra.handlers.handler_topic_catalog_postgres import (
+            HandlerTopicCatalogPostgres,
+        )
         from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerTopicCatalogQuery,
         )
+        from omnibase_infra.services.protocol_topic_catalog_service import (
+            ProtocolTopicCatalogService,
+        )
         from omnibase_infra.services.service_topic_catalog import ServiceTopicCatalog
 
-        catalog_service: ServiceTopicCatalog | None = None
+        catalog_service: ProtocolTopicCatalogService | None = None
+
+        # Prefer HandlerTopicCatalogPostgres (OMN-4011)
         try:
             catalog_service = await container.service_registry.resolve_service(
-                ServiceTopicCatalog
+                HandlerTopicCatalogPostgres
             )
-        except Exception as e:
-            logger.info(
-                "ServiceTopicCatalog not registered in container, "
-                "HandlerTopicCatalogQuery will not be registered",
-                extra={
-                    "error": sanitize_error_message(e),
-                    "error_type": type(e).__name__,
-                },
-            )
+        except Exception:
+            pass
+
+        # Fall back to legacy ServiceTopicCatalog (Consul-backed)
+        if catalog_service is None:
+            try:
+                catalog_service = await container.service_registry.resolve_service(
+                    ServiceTopicCatalog
+                )
+            except Exception as e:
+                logger.info(
+                    "Neither HandlerTopicCatalogPostgres nor ServiceTopicCatalog "
+                    "registered in container, HandlerTopicCatalogQuery will not be registered",
+                    extra={
+                        "error": sanitize_error_message(e),
+                        "error_type": type(e).__name__,
+                    },
+                )
 
         if catalog_service is not None:
             handler_topic_catalog_query = HandlerTopicCatalogQuery(
@@ -1131,8 +1149,8 @@ async def get_handler_topic_catalog_query_from_container(
 ) -> HandlerTopicCatalogQuery | None:
     """Get HandlerTopicCatalogQuery from container.
 
-    Returns None if the handler was not registered (e.g., ServiceTopicCatalog
-    unavailable).
+    Returns None if the handler was not registered (e.g., no catalog service
+    registered — neither HandlerTopicCatalogPostgres nor ServiceTopicCatalog available).
 
     Args:
         container: ONEX container with registered services.
@@ -1153,7 +1171,7 @@ async def get_handler_topic_catalog_query_from_container(
         )
     except Exception:
         logger.debug(
-            "HandlerTopicCatalogQuery not registered (ServiceTopicCatalog may be unavailable)"
+            "HandlerTopicCatalogQuery not registered (no catalog service available)"
         )
         return None
 

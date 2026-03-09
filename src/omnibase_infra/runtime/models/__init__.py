@@ -39,6 +39,8 @@ Exports:
     ModelHandshakeResult: Aggregated result of plugin handshake validation
     ModelHealthCheckResult: Result of component health check operation
     ModelHealthCheckResponse: HTTP response model for health check endpoints
+    ModelComponentHealth: Per-component health status for detailed diagnostics (OMN-519)
+    ModelDetailedHealthResponse: Extended response for /health/detailed endpoint (OMN-519)
     ModelProjectorPluginLoaderConfig: Projector plugin loader configuration model
     ModelSecretSourceSpec: Source specification for a single secret
     SecretSourceType: Type alias for secret source types (env, vault, file)
@@ -78,6 +80,7 @@ from omnibase_infra.runtime.models.model_binding_config_resolver_config import (
     ModelBindingConfigResolverConfig,
 )
 from omnibase_infra.runtime.models.model_cached_secret import ModelCachedSecret
+from omnibase_infra.runtime.models.model_component_health import ModelComponentHealth
 from omnibase_infra.runtime.models.model_compute_key import ModelComputeKey
 from omnibase_infra.runtime.models.model_compute_registration import (
     ModelComputeRegistration,
@@ -89,6 +92,9 @@ from omnibase_infra.runtime.models.model_config_ref_parse_result import (
 )
 from omnibase_infra.runtime.models.model_contract_load_result import (
     ModelContractLoadResult,
+)
+from omnibase_infra.runtime.models.model_detailed_health_response import (
+    ModelDetailedHealthResponse,
 )
 from omnibase_infra.runtime.models.model_domain_plugin_config import (
     ModelDomainPluginConfig,
@@ -215,11 +221,13 @@ __all__: list[str] = [
     "ModelBindingConfigCacheStats",
     "ModelBindingConfigResolverConfig",
     "ModelCachedSecret",
+    "ModelComponentHealth",
     "ModelComputeKey",
     "ModelComputeRegistration",
     "ModelConfigCacheEntry",
     "ModelConfigRef",
     "ModelConfigRefParseResult",
+    "ModelDetailedHealthResponse",
     "ModelDomainPluginConfig",
     "ModelDomainPluginResult",
     "ModelDuplicateResponse",

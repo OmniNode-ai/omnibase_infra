@@ -1,34 +1,46 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""PostgreSQL-backed Topic Catalog Service.
+"""PostgreSQL-backed Topic Catalog Handler.
 
-Replaces ``ServiceTopicCatalog`` (Consul KV) with a PostgreSQL implementation
-that reads ``subscribe_topics`` and ``publish_topics`` JSONB columns from the
-``node_registrations`` table.
+Replaces ``ServiceTopicCatalogPostgres`` with an ONEX handler that owns the
+PostgreSQL I/O boundary for topic catalog reads.  Reads ``subscribe_topics``
+and ``publish_topics`` JSONB columns from the ``node_registrations`` table and
+satisfies the ``ProtocolTopicCatalogService`` interface.
 
 Design Principles:
+    - Implements ``ProtocolTopicCatalogService`` — drop-in replacement for the
+      old service class, no changes required in ``HandlerTopicCatalogQuery``
+    - Explicit lifecycle: ``initialize()`` / ``shutdown()`` called by the
+      container; avoids silent resource leaks
     - Same ``ModelTopicCatalogResponse`` interface as ``ServiceTopicCatalog``
     - Version key = truncated MD5 hash of ``MAX(updated_at)`` across all rows
     - In-process cache keyed by ``catalog_version`` (same eviction logic)
     - No Consul dependency — PostgreSQL is the single source of truth
     - Partial success: empty response on DB error with ``DB_UNAVAILABLE`` warning
 
-Version Strategy:
-    The ``catalog_version`` integer is derived from the last 8 hex digits of
-    ``md5(MAX(updated_at)::text)`` (interpreted as unsigned 32-bit integer).
-    This is deterministic for a given snapshot, cheap to compute, and monotonically
-    increases whenever any registration row is updated.
+Handler vs. Service classification (OMN-4011):
+    ``ServiceTopicCatalogPostgres`` scored 4/5 on the OMN-4004 classification
+    rubric — it owns a direct Postgres I/O connection, has a lifecycle (cache +
+    pool), exposes a single dispatch entry point, and is already injectable.
+    Converting to ``HandlerTopicCatalogPostgres`` makes the I/O boundary
+    explicit and enables container-managed lifecycle.
+
+Ambiguity signals satisfied (OMN-4004 Section 5):
+    - S2: Dispatch ownership clarified — ``build_catalog()`` is the single
+      entry point, replacing the service-layer indirection.
+    - S3: Lifecycle enforced — ``initialize()`` / ``shutdown()`` are now
+      explicit handler lifecycle hooks managed by the container.
 
 Related Tickets:
     - OMN-2746: Replace ServiceTopicCatalog Consul KV backend with PostgreSQL
+    - OMN-4011: ServiceTopicCatalogPostgres -> handler (this ticket)
 
-.. versionadded:: 0.10.0
+.. versionadded:: 0.11.0
 """
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 from datetime import UTC, datetime
@@ -37,6 +49,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from omnibase_core.container import ModelONEXContainer
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.catalog.model_topic_catalog_entry import (
     ModelTopicCatalogEntry,
 )
@@ -50,7 +63,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Warning codes — DB-specific (no Consul codes used by this service)
+# Warning codes — DB-specific (no Consul codes used by this handler)
 DB_UNAVAILABLE: str = "db_unavailable"
 
 # Default partitions when unknown
@@ -74,12 +87,16 @@ FROM node_registrations
 """
 
 
-class ServiceTopicCatalogPostgres:
-    """Topic catalog service backed by PostgreSQL ``node_registrations`` table.
+class HandlerTopicCatalogPostgres:
+    """PostgreSQL-backed topic catalog handler.
 
-    Provides the same ``build_catalog`` interface as ``ServiceTopicCatalog``
-    but reads ``subscribe_topics`` / ``publish_topics`` JSONB columns from
-    the database instead of Consul KV.
+    Provides the ``build_catalog`` interface matching ``ProtocolTopicCatalogService``
+    and reads ``subscribe_topics`` / ``publish_topics`` JSONB columns from the
+    ``node_registrations`` table.
+
+    Lifecycle:
+        Call ``initialize()`` after construction and ``shutdown()`` when the
+        handler is no longer needed. The container manages this lifecycle.
 
     Cache Behaviour:
         Results are cached in-process by ``catalog_version``. The version is
@@ -96,11 +113,12 @@ class ServiceTopicCatalogPostgres:
         for protection under a single asyncio event loop.
 
     Example:
-        >>> service = ServiceTopicCatalogPostgres(
+        >>> handler = HandlerTopicCatalogPostgres(
         ...     container=container,
         ...     pool=pool,
         ... )
-        >>> response = await service.build_catalog(correlation_id=uuid4())
+        >>> await handler.initialize()
+        >>> response = await handler.build_catalog(correlation_id=uuid4())
         >>> print(response.catalog_version, len(response.topics))
     """
 
@@ -111,7 +129,7 @@ class ServiceTopicCatalogPostgres:
         topic_resolver: TopicResolver | None = None,
         query_timeout_seconds: float = 5.0,
     ) -> None:
-        """Initialise the PostgreSQL topic catalog service.
+        """Initialise the PostgreSQL topic catalog handler.
 
         Args:
             container: ONEX container for dependency injection.
@@ -132,7 +150,7 @@ class ServiceTopicCatalogPostgres:
         self._cache: dict[int, ModelTopicCatalogResponse] = {}
 
         logger.info(
-            "ServiceTopicCatalogPostgres initialised",
+            "HandlerTopicCatalogPostgres initialised",
             extra={
                 "has_pool": pool is not None,
                 "query_timeout_seconds": query_timeout_seconds,
@@ -140,7 +158,59 @@ class ServiceTopicCatalogPostgres:
         )
 
     # ------------------------------------------------------------------
-    # Public API (mirrors ServiceTopicCatalog interface)
+    # Handler classification (OMN-4004: required handler metadata)
+    # ------------------------------------------------------------------
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Return the architectural role of this handler.
+
+        Returns:
+            EnumHandlerType.INFRA_HANDLER — This is an infrastructure-layer
+            handler that owns a PostgreSQL I/O boundary for topic catalog reads.
+        """
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification of this handler.
+
+        Returns:
+            EnumHandlerTypeCategory.EFFECT — This handler performs side-effecting
+            database I/O operations. EFFECT handlers are not deterministic and
+            interact with external systems (PostgreSQL).
+        """
+        return EnumHandlerTypeCategory.EFFECT
+
+    # ------------------------------------------------------------------
+    # Handler lifecycle (OMN-4011: explicit lifecycle enforcement)
+    # ------------------------------------------------------------------
+
+    async def initialize(self) -> None:
+        """Lifecycle hook — called by the container after construction.
+
+        Validates the pool connection is reachable. Logs a warning when no
+        pool is configured (all catalog reads will return ``DB_UNAVAILABLE``).
+        """
+        if self._pool is None:
+            logger.warning(
+                "HandlerTopicCatalogPostgres: no pool configured — "
+                "all catalog reads will return DB_UNAVAILABLE"
+            )
+        else:
+            logger.debug("HandlerTopicCatalogPostgres initialized with pool")
+
+    async def shutdown(self) -> None:
+        """Lifecycle hook — called by the container on teardown.
+
+        Clears the in-process cache. The pool itself is owned externally
+        (passed in at construction), so it is not closed here.
+        """
+        self._cache.clear()
+        logger.debug("HandlerTopicCatalogPostgres shut down — cache cleared")
+
+    # ------------------------------------------------------------------
+    # Public API (satisfies ProtocolTopicCatalogService)
     # ------------------------------------------------------------------
 
     async def build_catalog(
@@ -440,7 +510,6 @@ class ModelTopicInfoPostgres:
 
 
 __all__: list[str] = [
-    "ServiceTopicCatalogPostgres",
-    "ModelTopicInfoPostgres",
+    "HandlerTopicCatalogPostgres",
     "DB_UNAVAILABLE",
 ]

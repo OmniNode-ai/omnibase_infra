@@ -92,11 +92,11 @@ class HandlerTopicCatalogQuery:
         responses (modulo timestamp differences).
 
     Attributes:
-        _catalog_service: ServiceTopicCatalog for building catalog snapshots.
+        _catalog_service: ProtocolTopicCatalogService implementation for building catalog snapshots.
 
     Example:
-        >>> service = ServiceTopicCatalogPostgres(container=container, pool=pool)
-        >>> handler = HandlerTopicCatalogQuery(catalog_service=service)
+        >>> pg_handler = HandlerTopicCatalogPostgres(container=container, pool=pool)
+        >>> handler = HandlerTopicCatalogQuery(catalog_service=pg_handler)
         >>> output = await handler.handle(envelope)
         >>> assert len(output.events) == 1
         >>> response = output.events[0]
@@ -113,7 +113,7 @@ class HandlerTopicCatalogQuery:
         Args:
             catalog_service: Any implementation of ``ProtocolTopicCatalogService``:
                 either ``ServiceTopicCatalog`` (Consul-backed, legacy) or
-                ``ServiceTopicCatalogPostgres`` (PostgreSQL-backed, OMN-2746).
+                ``HandlerTopicCatalogPostgres`` (PostgreSQL-backed, OMN-2746, OMN-4011).
                 Wired via registry ``handler_dependencies``.
         """
         self._catalog_service = catalog_service
