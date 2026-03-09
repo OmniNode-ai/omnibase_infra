@@ -358,10 +358,6 @@ omit = [
 branch = true
 parallel = true
 
-[tool.uv.sources]
-omnibase-core = { path = "/Volumes/PRO-G40/Code/omni_worktrees/OMN-CHUNK/omnibase_core", editable = true }
-omnibase-spi = { path = "/Volumes/PRO-G40/Code/omni_worktrees/OMN-CHUNK/omnibase_spi", editable = true }
-
 [tool.coverage.report]
 precision = 2
 show_missing = true
