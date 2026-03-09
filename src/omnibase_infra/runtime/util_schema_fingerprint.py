@@ -659,7 +659,10 @@ def _main() -> None:
     db_url = os.environ.get("OMNIBASE_INFRA_DB_URL")
     if not db_url:
         print(
-            "ERROR: OMNIBASE_INFRA_DB_URL environment variable is required.",
+            "ERROR: OMNIBASE_INFRA_DB_URL environment variable is required. "
+            "For host-side scripts set: "
+            "OMNIBASE_INFRA_DB_URL=postgresql://postgres:PASSWORD@localhost:5436/omnibase_infra "
+            "(use localhost:5436 — the Docker-exposed port, not postgres:5432 which is Docker-internal only).",
             file=sys.stderr,
         )
         sys.exit(1)

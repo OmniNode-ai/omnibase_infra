@@ -224,8 +224,10 @@ def _get_db_dsn() -> str:
         raise click.ClickException(
             f"OMNIBASE_INFRA_DB_URL is required but not set "
             f"(correlation_id={correlation_id}). "
-            "Set it to a PostgreSQL DSN, e.g. "
-            "postgresql://user:pass@host:5432/omnibase_infra"
+            "Set it to a PostgreSQL DSN using the host-accessible port, e.g. "
+            "postgresql://postgres:password@localhost:5436/omnibase_infra. "
+            "Note: use localhost:5436 for host-side scripts (Docker exposes port 5436). "
+            "Docker containers use postgres:5432 (internal hostname, set automatically by compose)."
         )
 
     try:

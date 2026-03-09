@@ -128,7 +128,11 @@ x-runtime-env: &runtime-env
   # --- Bootstrap essentials (always needed) ---
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
-  OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:?OMNIBASE_INFRA_DB_URL must be set in ~/.omnibase/.env}
+  # OMN-4084: Containers always use the Docker-internal hostname postgres:5432 regardless
+  # of what ~/.omnibase/.env sets for OMNIBASE_INFRA_DB_URL. The host-side value uses
+  # localhost:5436 (external port); the container-side value must use postgres:5432.
+  # This override ensures containers are never broken by a host-side localhost:5436 URL.
+  OMNIBASE_INFRA_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
   # OMN-3431: Local Docker Redpanda — containers use Docker-internal redpanda:9092
   KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
   # Allowlist lets service_kernel.py's denylist accept Docker-internal redpanda: hostname
