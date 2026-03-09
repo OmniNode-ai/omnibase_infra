@@ -86,6 +86,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_fsm_state_updated_at ON fsm_state;
 CREATE TRIGGER trigger_fsm_state_updated_at
     BEFORE UPDATE ON fsm_state
     FOR EACH ROW

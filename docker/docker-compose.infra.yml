@@ -420,6 +420,48 @@ services:
       - "com.omninode.layer=infrastructure"
       - "com.omninode.ticket=OMN-3361"
   # ==========================================================================
+  # Forward Migration Runner - Apply pending forward migrations (Runtime Profile) [OMN-4175]
+  # ==========================================================================
+  # One-shot service that applies any pending SQL files from
+  # docker/migrations/forward/ to an existing (warm) Postgres volume.
+  # docker-entrypoint-initdb.d only fires on fresh volume init; this service
+  # closes the gap by running on every compose up via run-forward-migrations.sh.
+  #
+  # Migrations are tracked in public.schema_migrations. Already-applied files
+  # are skipped (idempotent). migration-gate depends on this service completing
+  # successfully before checking the sentinel flag.
+  forward-migration:
+    image: postgres:16-alpine
+    container_name: omnibase-forward-migration
+    profiles: ["runtime", "full"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: omnibase_infra
+      MIGRATIONS_DIR: /migrations/forward
+    volumes:
+      - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
+      - ../docker/migrations/forward:/migrations/forward:ro
+    entrypoint: ["sh", "/run-forward-migrations.sh"]
+    networks:
+      - omnibase-infra-network
+    restart: "no"
+    logging: *logging-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 64M
+    labels:
+      - "com.omninode.service=forward-migration"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.ticket=OMN-4175"
+  # ==========================================================================
   # Migration Gate - Boot-Order Sentinel (Runtime Profile) [OMN-3737]
   # ==========================================================================
   # Lightweight healthcheck-only service that gates runtime service startup
@@ -437,6 +479,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}

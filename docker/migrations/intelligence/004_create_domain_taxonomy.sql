@@ -67,6 +67,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_domain_taxonomy_updated_at ON domain_taxonomy;
 CREATE TRIGGER trigger_domain_taxonomy_updated_at
     BEFORE UPDATE ON domain_taxonomy
     FOR EACH ROW

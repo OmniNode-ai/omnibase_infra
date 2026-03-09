@@ -88,6 +88,7 @@ CREATE INDEX IF NOT EXISTS idx_workflow_exec_completed_steps
 -- Trigger for updated_at
 -- ============================================================================
 
+DROP TRIGGER IF EXISTS trigger_workflow_exec_updated_at ON workflow_executions;
 CREATE TRIGGER trigger_workflow_exec_updated_at
     BEFORE UPDATE ON workflow_executions
     FOR EACH ROW
@@ -107,6 +108,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_calculate_duration ON workflow_executions;
 CREATE TRIGGER trigger_calculate_duration
     BEFORE UPDATE ON workflow_executions
     FOR EACH ROW

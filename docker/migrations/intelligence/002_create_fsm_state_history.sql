@@ -108,6 +108,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_record_fsm_history ON fsm_state;
 CREATE TRIGGER trigger_record_fsm_history
     AFTER INSERT OR UPDATE ON fsm_state
     FOR EACH ROW
