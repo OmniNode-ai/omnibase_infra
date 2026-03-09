@@ -593,7 +593,7 @@ class MessageDispatchEngine:
                 route.route_id,
                 route.topic_pattern,
                 route.message_category,
-                _get_route_dispatcher_id(route),
+                route.dispatcher_id,
             )
 
     # --- @overload stubs for static type safety ---
@@ -840,7 +840,7 @@ class MessageDispatchEngine:
 
             # Validate all routes reference existing dispatchers
             for route in self._routes.values():
-                rid = _get_route_dispatcher_id(route)
+                rid = route.dispatcher_id
                 if rid not in self._dispatchers:
                     raise ModelOnexError(
                         message=f"Route '{route.route_id}' references dispatcher "
@@ -1681,7 +1681,7 @@ class MessageDispatchEngine:
                 continue
 
             # Get the dispatcher for this route
-            dispatcher_id = _get_route_dispatcher_id(route)
+            dispatcher_id = route.dispatcher_id
             if dispatcher_id in seen_dispatcher_ids:
                 # Avoid duplicate dispatcher execution
                 continue
