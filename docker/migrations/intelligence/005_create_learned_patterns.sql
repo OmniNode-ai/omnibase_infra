@@ -164,6 +164,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_learned_patterns_updated_at ON learned_patterns;
 CREATE TRIGGER trigger_learned_patterns_updated_at
     BEFORE UPDATE ON learned_patterns
     FOR EACH ROW

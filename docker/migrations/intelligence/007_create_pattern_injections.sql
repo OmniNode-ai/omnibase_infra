@@ -98,6 +98,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_pattern_injections_updated_at ON pattern_injections;
 CREATE TRIGGER trigger_pattern_injections_updated_at
     BEFORE UPDATE ON pattern_injections
     FOR EACH ROW
