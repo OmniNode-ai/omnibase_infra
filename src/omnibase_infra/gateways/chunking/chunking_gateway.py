@@ -4,11 +4,10 @@
 
 from omnibase_core.models.chunking.model_chunk_policy import ModelChunkPolicy
 from omnibase_core.models.chunking.model_chunked_envelope import ModelChunkedEnvelope
+from omnibase_infra.gateways.chunking.default_chunker import DefaultEnvelopeChunker
 from omnibase_spi.protocols.chunking.protocol_chunkable_envelope import (
     ProtocolChunkableEnvelope,
 )
-
-from omnibase_infra.gateways.chunking.default_chunker import DefaultEnvelopeChunker
 
 
 class ChunkingGateway:

@@ -6,7 +6,6 @@ import pytest
 
 from omnibase_core.models.chunking.model_chunk_policy import ModelChunkPolicy
 from omnibase_core.models.chunking.model_chunked_envelope import ModelChunkedEnvelope
-
 from omnibase_infra.gateways.chunking.chunking_gateway import ChunkingGateway
 from omnibase_infra.gateways.chunking.default_chunker import DefaultEnvelopeChunker
 
@@ -58,9 +57,7 @@ class TestChunkingGateway:
 
     def test_disabled_policy_always_returns_empty(self) -> None:
         """When chunking disabled, always pass-through regardless of payload size."""
-        gateway = self._make_gateway(
-            max_payload_size_bytes=10, enabled=False
-        )
+        gateway = self._make_gateway(max_payload_size_bytes=10, enabled=False)
         envelope = _FakeEnvelope(b"very large payload that would normally chunk " * 100)
         result = gateway.evaluate_and_chunk(envelope)
         assert result == []

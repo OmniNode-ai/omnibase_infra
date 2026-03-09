@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """ReassemblyGateway — consumer-side: buffers chunks and reassembles envelopes."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from uuid import UUID
 
 from omnibase_core.models.chunking.model_chunk_series_failed import (
@@ -10,11 +10,10 @@ from omnibase_core.models.chunking.model_chunk_series_failed import (
     ModelChunkSeriesFailed,
 )
 from omnibase_core.models.chunking.model_chunked_envelope import ModelChunkedEnvelope
+from omnibase_infra.gateways.chunking.default_chunker import DefaultEnvelopeChunker
 from omnibase_spi.protocols.chunking.protocol_chunkable_envelope import (
     ProtocolChunkableEnvelope,
 )
-
-from omnibase_infra.gateways.chunking.default_chunker import DefaultEnvelopeChunker
 
 
 class ReassemblyGateway:
@@ -58,7 +57,7 @@ class ReassemblyGateway:
 
         # Check expiry on each chunk arrival
         if meta.expiry_timestamp is not None:
-            now = datetime.now(tz=timezone.utc)
+            now = datetime.now(tz=UTC)
             if now > meta.expiry_timestamp:
                 self._buffer.pop(series_id, None)
                 return ModelChunkSeriesFailed(
@@ -88,7 +87,7 @@ class ReassemblyGateway:
                 reason=EnumChunkFailureReason.CHECKSUM_MISMATCH,
                 received_chunk_count=len(all_chunks),
                 expected_chunk_count=meta.chunk_count,
-                failed_at=datetime.now(tz=timezone.utc),
+                failed_at=datetime.now(tz=UTC),
                 detail=str(exc),
             )
         return result

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Unit tests for ReassemblyGateway."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -13,7 +13,6 @@ from omnibase_core.models.chunking.model_chunk_series_failed import (
     ModelChunkSeriesFailed,
 )
 from omnibase_core.models.chunking.model_chunked_envelope import ModelChunkedEnvelope
-
 from omnibase_infra.gateways.chunking.default_chunker import DefaultEnvelopeChunker
 from omnibase_infra.gateways.chunking.reassembly_gateway import ReassemblyGateway
 
@@ -99,7 +98,7 @@ class TestReassemblyGateway:
         payload = b"expired series " * 50
         chunks = self._make_chunks(payload, chunk_size=200)
         # Rewrite chunk_metadata with a past expiry timestamp
-        past = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        past = datetime(2000, 1, 1, tzinfo=UTC)
         expired_chunks: list[ModelChunkedEnvelope] = []
         for chunk in chunks:
             new_meta = chunk.chunk_metadata.model_copy(
@@ -123,12 +122,12 @@ class TestReassemblyGateway:
 
         # Interleave chunks from both series
         interleaved = []
-        for a, b in zip(chunks_a, chunks_b):
+        for a, b in zip(chunks_a, chunks_b, strict=False):
             interleaved.extend([a, b])
         # Append any remainder
-        for extra in chunks_a[len(chunks_b):]:
+        for extra in chunks_a[len(chunks_b) :]:
             interleaved.append(extra)
-        for extra in chunks_b[len(chunks_a):]:
+        for extra in chunks_b[len(chunks_a) :]:
             interleaved.append(extra)
 
         results = []

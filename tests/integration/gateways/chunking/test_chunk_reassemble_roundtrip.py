@@ -5,8 +5,9 @@
 import pytest
 
 from omnibase_core.models.chunking.model_chunk_policy import ModelChunkPolicy
-from omnibase_core.models.chunking.model_chunk_series_failed import ModelChunkSeriesFailed
-
+from omnibase_core.models.chunking.model_chunk_series_failed import (
+    ModelChunkSeriesFailed,
+)
 from omnibase_infra.gateways.chunking.chunking_gateway import ChunkingGateway
 from omnibase_infra.gateways.chunking.default_chunker import DefaultEnvelopeChunker
 from omnibase_infra.gateways.chunking.reassembly_gateway import ReassemblyGateway
@@ -64,7 +65,7 @@ class TestChunkReassembleRoundtrip:
     def test_small_envelope_passthrough(self) -> None:
         """Small envelope below threshold is not chunked (empty list from gateway)."""
         payload = b"tiny payload"
-        chunking_gw, reassembly_gw = self._make_pipeline(
+        chunking_gw, _reassembly_gw = self._make_pipeline(
             max_payload_size_bytes=10_000, chunk_target_size_bytes=5_000
         )
         envelope = _RoundtripEnvelope(payload)

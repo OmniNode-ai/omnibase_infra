@@ -122,8 +122,6 @@ class DefaultEnvelopeChunker:
         # Validate full payload checksum using the first chunk's metadata
         expected_payload_checksum = sorted_chunks[0].chunk_metadata.payload_checksum
         if _sha256_hex(full_payload) != expected_payload_checksum:
-            raise ValueError(
-                "Full payload checksum mismatch after reassembly."
-            )
+            raise ValueError("Full payload checksum mismatch after reassembly.")
 
         return envelope_factory.from_bytes(full_payload)
