@@ -260,7 +260,9 @@ class TestIntelligenceTopicSuffixes:
 
     def test_routing_decision_cmd_topic_registered(self) -> None:
         """Routing decision CMD topic must be registered in ALL_PROVISIONED_SUFFIXES (OMN-4299)."""
-        assert "onex.cmd.omniintelligence.routing-decision.v1" in ALL_PROVISIONED_SUFFIXES
+        assert (
+            "onex.cmd.omniintelligence.routing-decision.v1" in ALL_PROVISIONED_SUFFIXES
+        )
 
     def test_routing_decision_cmd_suffix_value(self) -> None:
         """SUFFIX_OMNIINTELLIGENCE_ROUTING_DECISION_CMD must have correct value."""

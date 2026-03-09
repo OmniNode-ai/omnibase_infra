@@ -820,7 +820,9 @@ ALL_INTELLIGENCE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(
         suffix=SUFFIX_OMNIINTELLIGENCE_ROUTING_DECISION_CMD,
         partitions=1,
-        kafka_config={"retention.ms": "86400000"},  # 1 day — command topics are short-lived
+        kafka_config={
+            "retention.ms": "86400000"
+        },  # 1 day — command topics are short-lived
     ),
 )
 """Intelligence domain topic specs provisioned for PluginIntelligence."""
