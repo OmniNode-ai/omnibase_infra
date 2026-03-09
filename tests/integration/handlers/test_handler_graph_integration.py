@@ -6,8 +6,7 @@ These tests validate HandlerGraph behavior against an actual Memgraph or Neo4j
 instance via Bolt protocol. They require a running graph database server and
 will be skipped gracefully if the server is not available.
 
-CI/CD Graceful Skip Behavior
-============================
+CI/CD Graceful Skip Behavior:
 
 These tests skip gracefully in CI/CD environments without graph database access:
 
@@ -25,8 +24,7 @@ Run with infrastructure::
 
     $ MEMGRAPH_BOLT_URL=bolt://localhost:7687 uv run pytest tests/integration/handlers/test_handler_graph_integration.py -v
 
-Test Categories
-===============
+Test Categories:
 
 - Handler Metadata Tests: Validate describe functionality and capabilities
 - Query Tests: Execute Cypher queries returning results
@@ -34,8 +32,7 @@ Test Categories
 - Full Workflow Tests: End-to-end graph database operations
 - Security Tests: Validate parameterized queries prevent injection
 
-Environment Variables
-=====================
+Environment Variables:
 
     MEMGRAPH_BOLT_URL: Memgraph/Neo4j Bolt URL (required - skip if not set)
         Example: bolt://localhost:7687 or bolt://your-server-ip:7687

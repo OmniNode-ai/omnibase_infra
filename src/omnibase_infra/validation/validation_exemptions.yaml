@@ -2585,6 +2585,37 @@ pattern_exemptions:
     documentation:
       - OMN-2963 (ContractTopicExtractor implementation)
     ticket: OMN-2963
+  # ==========================================================================
+  # ModelComponentHealth.degraded Factory Exemption (OMN-519)
+  # ==========================================================================
+  # degraded() classmethod takes 5 parameters (name, error, last_healthy,
+  # latency_ms, details). These are distinct required fields for degraded state
+  # reporting. Using a sub-model wrapper would add indirection without reducing
+  # conceptual complexity for callers.
+  - file_pattern: 'model_component_health\.py'
+    method_pattern: "Function 'degraded'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Health component factory method. The degraded() classmethod takes name, error, last_healthy, latency_ms, and details — distinct required fields for degraded state reporting in health check diagnostics. Per CLAUDE.md factory method convention for domain models with known fixed parameter sets.
+
+    documentation:
+      - CLAUDE.md (Factory Method Conventions)
+    ticket: OMN-519
+  # ==========================================================================
+  # ModelDetailedHealthResponse.success Factory Exemption (OMN-519)
+  # ==========================================================================
+  # success() classmethod takes 5 parameters (status, version, checked_at,
+  # components, details). These represent the complete set of required health
+  # check result fields — all are distinct, required context.
+  - file_pattern: 'model_detailed_health_response\.py'
+    method_pattern: "Function 'success'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Health response factory method. The success() classmethod takes status, version, checked_at, components, and details — the complete set of required fields for a health check response. These are distinct required context fields; a sub-model would add indirection without clarity benefit.
+
+    documentation:
+      - CLAUDE.md (Factory Method Conventions)
+    ticket: OMN-519
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

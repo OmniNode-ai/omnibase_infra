@@ -130,11 +130,11 @@ class ModelRegistrationRecord(BaseModel):
     )
     subscribe_topics: tuple[str, ...] = Field(
         default_factory=tuple,
-        description="Topic suffixes this node subscribes to (written to PostgreSQL for ServiceTopicCatalogPostgres).",
+        description="Topic suffixes this node subscribes to (written to PostgreSQL for HandlerTopicCatalogPostgres).",
     )
     publish_topics: tuple[str, ...] = Field(
         default_factory=tuple,
-        description="Topic suffixes this node publishes to (written to PostgreSQL for ServiceTopicCatalogPostgres).",
+        description="Topic suffixes this node publishes to (written to PostgreSQL for HandlerTopicCatalogPostgres).",
     )
 
     @field_validator("capabilities", mode="before")

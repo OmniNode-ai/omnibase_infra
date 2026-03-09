@@ -3,12 +3,13 @@
 """Protocol for topic catalog service implementations.
 
 Defines ``ProtocolTopicCatalogService`` — the structural interface shared by
-``ServiceTopicCatalog`` (Consul KV) and ``ServiceTopicCatalogPostgres``
+``ServiceTopicCatalog`` (Consul KV) and ``HandlerTopicCatalogPostgres``
 (PostgreSQL). Any object that implements ``build_catalog`` with the correct
 signature satisfies this protocol.
 
 Related Tickets:
     - OMN-2746: Replace ServiceTopicCatalog Consul KV backend with PostgreSQL
+    - OMN-4011: ServiceTopicCatalogPostgres -> HandlerTopicCatalogPostgres
 
 .. versionadded:: 0.10.0
 """
@@ -32,7 +33,7 @@ class ProtocolTopicCatalogService(Protocol):
 
     Implementations:
         - ``ServiceTopicCatalog``: Consul KV backend (legacy)
-        - ``ServiceTopicCatalogPostgres``: PostgreSQL backend (OMN-2746)
+        - ``HandlerTopicCatalogPostgres``: PostgreSQL backend (OMN-2746, OMN-4011)
 
     Example:
         >>> def make_handler(svc: ProtocolTopicCatalogService) -> HandlerTopicCatalogQuery:

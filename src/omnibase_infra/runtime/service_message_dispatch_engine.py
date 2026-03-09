@@ -179,6 +179,7 @@ from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
 from omnibase_infra.models.dispatch.model_materialized_dispatch import (
     ModelMaterializedDispatch,
 )
+from omnibase_infra.runtime._enum_coercion import coerce_message_category
 from omnibase_infra.runtime.binding_resolver import OperationBindingResolver
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.utils import sanitize_error_message
@@ -188,54 +189,6 @@ if TYPE_CHECKING:
 
     from omnibase_core.enums.enum_node_kind import EnumNodeKind
     from omnibase_core.models.reducer.model_intent import ModelIntent
-
-
-def coerce_message_category(value: object) -> EnumMessageCategory:
-    """Normalize any category input to the canonical EnumMessageCategory.
-
-    Accepts:
-    - A canonical ``EnumMessageCategory`` instance (pass-through).
-    - A string matching a valid enum value (e.g. ``"EVENT"``).
-    - A foreign enum instance whose ``.value`` matches a valid enum value.
-
-    Raises:
-        ValueError: When ``value`` cannot be resolved to a valid enum member.
-            The error message lists all valid values.
-
-    .. versionadded:: 0.8.0
-        Added for boundary coercion at dispatcher registration entry points (OMN-4034).
-    """
-    if isinstance(value, EnumMessageCategory):
-        return value
-    raw: object = value.value if hasattr(value, "value") else value  # type: ignore[union-attr]
-    try:
-        return EnumMessageCategory(raw)
-    except ValueError:
-        raise ValueError(
-            f"Invalid message category: {value!r}. "
-            f"Expected one of: {[e.value for e in EnumMessageCategory]}"
-        )
-
-
-def _get_route_dispatcher_id(route: ModelDispatchRoute) -> str:
-    """Extract the dispatcher/handler identifier from a route.
-
-    OMN-4057: omnibase_core's ``ModelDispatchRoute`` uses ``handler_id`` while
-    omnibase_infra's uses ``dispatcher_id``.  This helper resolves either field
-    so the engine works regardless of which model created the route instance.
-
-    Once omnibase_core publishes a release with a ``dispatcher_id`` property
-    (>= 0.24.2), this shim can be removed.
-    """
-    # Prefer dispatcher_id (infra model), fall back to handler_id (core model)
-    dispatcher_id: str | None = getattr(route, "dispatcher_id", None)
-    if dispatcher_id is not None:
-        return dispatcher_id
-    handler_id: str | None = getattr(route, "handler_id", None)
-    if handler_id is not None:
-        return handler_id
-    msg = f"Route '{route.route_id}' has neither dispatcher_id nor handler_id"
-    raise AttributeError(msg)
 
 
 def _derive_dlq_topic(

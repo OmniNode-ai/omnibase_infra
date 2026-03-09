@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Unit tests for ServiceTopicCatalogPostgres.
+"""Unit tests for HandlerTopicCatalogPostgres.
 
 Tests cover:
     - build_catalog: happy path, no pool, DB timeout, empty table
@@ -9,9 +9,11 @@ Tests cover:
     - Filtering: topic_pattern, include_inactive
     - Cache: hit on same version, eviction on version advance
     - _parse_json_list: list passthrough, JSON string decoding, invalid JSON
+    - Lifecycle: initialize() and shutdown() hooks
 
 Related Tickets:
     - OMN-2746: Replace ServiceTopicCatalog Consul KV backend with PostgreSQL
+    - OMN-4011: ServiceTopicCatalogPostgres -> HandlerTopicCatalogPostgres
 """
 
 from __future__ import annotations
@@ -23,12 +25,12 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_infra.handlers.handler_topic_catalog_postgres import (
+    DB_UNAVAILABLE,
+    HandlerTopicCatalogPostgres,
+)
 from omnibase_infra.models.catalog.model_topic_catalog_response import (
     ModelTopicCatalogResponse,
-)
-from omnibase_infra.services.service_topic_catalog_postgres import (
-    DB_UNAVAILABLE,
-    ServiceTopicCatalogPostgres,
 )
 
 # ---------------------------------------------------------------------------
@@ -41,13 +43,13 @@ _NODE_1 = str(uuid4())
 _NODE_2 = str(uuid4())
 
 
-def _make_service(
+def _make_handler(
     pool: object | None = None,
     query_timeout_seconds: float = 5.0,
-) -> ServiceTopicCatalogPostgres:
-    """Create a ServiceTopicCatalogPostgres with a mock container."""
+) -> HandlerTopicCatalogPostgres:
+    """Create a HandlerTopicCatalogPostgres with a mock container."""
     container = MagicMock()
-    return ServiceTopicCatalogPostgres(
+    return HandlerTopicCatalogPostgres(
         container=container,
         pool=pool,  # type: ignore[arg-type]
         query_timeout_seconds=query_timeout_seconds,
@@ -108,20 +110,64 @@ def _make_pool_rows(rows: list[dict[str, object]]) -> MagicMock:
 
 
 # ---------------------------------------------------------------------------
+# Test: lifecycle hooks
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestHandlerTopicCatalogPostgresLifecycle:
+    """Tests for initialize() and shutdown() lifecycle hooks."""
+
+    @pytest.mark.asyncio
+    async def test_initialize_with_pool_does_not_raise(self) -> None:
+        """initialize() with a pool configured should complete without error."""
+        handler = _make_handler(pool=MagicMock())
+        await handler.initialize()  # Should not raise
+
+    @pytest.mark.asyncio
+    async def test_initialize_without_pool_does_not_raise(self) -> None:
+        """initialize() without a pool should log a warning but not raise."""
+        handler = _make_handler(pool=None)
+        await handler.initialize()  # Should not raise
+
+    @pytest.mark.asyncio
+    async def test_shutdown_clears_cache(self) -> None:
+        """shutdown() should clear the in-process cache."""
+        rows = [
+            {
+                "node_id": _NODE_1,
+                "node_type": "effect",
+                "subscribe_topics": [_SUFFIX_A],
+                "publish_topics": [],
+            }
+        ]
+        pool = _make_pool_rows(rows)
+        handler = _make_handler(pool=pool)
+
+        # Populate the cache
+        await handler.build_catalog(correlation_id=uuid4())
+        assert len(handler._cache) > 0
+
+        # Shutdown clears it
+        await handler.shutdown()
+        assert handler._cache == {}
+
+
+# ---------------------------------------------------------------------------
 # Test: no pool configured
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-class TestServiceTopicCatalogPostgresNoPool:
+class TestHandlerTopicCatalogPostgresNoPool:
     """Tests when no pool is provided."""
 
     @pytest.mark.asyncio
     async def test_build_catalog_no_pool_returns_empty_with_warning(self) -> None:
         """build_catalog should return empty topics with db_unavailable warning."""
-        service = _make_service(pool=None)
+        handler = _make_handler(pool=None)
 
-        response = await service.build_catalog(correlation_id=uuid4())
+        response = await handler.build_catalog(correlation_id=uuid4())
 
         assert isinstance(response, ModelTopicCatalogResponse)
         assert response.topics == ()
@@ -131,15 +177,15 @@ class TestServiceTopicCatalogPostgresNoPool:
     @pytest.mark.asyncio
     async def test_get_catalog_version_no_pool_returns_minus_one(self) -> None:
         """_get_catalog_version returns -1 when no pool configured."""
-        service = _make_service(pool=None)
-        version = await service._get_catalog_version(uuid4())
+        handler = _make_handler(pool=None)
+        version = await handler._get_catalog_version(uuid4())
         assert version == -1
 
     @pytest.mark.asyncio
     async def test_fetch_topic_rows_no_pool_returns_empty(self) -> None:
         """_fetch_topic_rows returns empty list when no pool configured."""
-        service = _make_service(pool=None)
-        rows = await service._fetch_topic_rows(uuid4())
+        handler = _make_handler(pool=None)
+        rows = await handler._fetch_topic_rows(uuid4())
         assert rows == []
 
 
@@ -149,16 +195,16 @@ class TestServiceTopicCatalogPostgresNoPool:
 
 
 @pytest.mark.unit
-class TestServiceTopicCatalogPostgresBuildCatalog:
+class TestHandlerTopicCatalogPostgresBuildCatalog:
     """Tests for build_catalog with a live pool mock."""
 
     @pytest.mark.asyncio
     async def test_build_catalog_empty_table_returns_empty_response(self) -> None:
         """build_catalog with no rows should return empty topics, no warnings."""
         pool = _make_pool(version_hash=None, rows=[])
-        service = _make_service(pool=pool)
+        handler = _make_handler(pool=pool)
 
-        response = await service.build_catalog(correlation_id=uuid4())
+        response = await handler.build_catalog(correlation_id=uuid4())
 
         assert isinstance(response, ModelTopicCatalogResponse)
         assert response.topics == ()
@@ -177,9 +223,9 @@ class TestServiceTopicCatalogPostgresBuildCatalog:
             }
         ]
         pool = _make_pool_rows(rows)
-        service = _make_service(pool=pool)
+        handler = _make_handler(pool=pool)
 
-        response = await service.build_catalog(correlation_id=uuid4())
+        response = await handler.build_catalog(correlation_id=uuid4())
 
         assert isinstance(response, ModelTopicCatalogResponse)
         suffixes = {e.topic_suffix for e in response.topics}
@@ -204,9 +250,9 @@ class TestServiceTopicCatalogPostgresBuildCatalog:
             },
         ]
         pool = _make_pool_rows(rows)
-        service = _make_service(pool=pool)
+        handler = _make_handler(pool=pool)
 
-        response = await service.build_catalog(correlation_id=uuid4())
+        response = await handler.build_catalog(correlation_id=uuid4())
 
         entry = next(e for e in response.topics if e.topic_suffix == _SUFFIX_A)
         assert entry.subscriber_count == 2
@@ -230,9 +276,9 @@ class TestServiceTopicCatalogPostgresBuildCatalog:
             },
         ]
         pool = _make_pool_rows(rows)
-        service = _make_service(pool=pool)
+        handler = _make_handler(pool=pool)
 
-        response = await service.build_catalog(correlation_id=uuid4())
+        response = await handler.build_catalog(correlation_id=uuid4())
 
         entry = next(e for e in response.topics if e.topic_suffix == _SUFFIX_B)
         assert entry.publisher_count == 2
@@ -250,9 +296,9 @@ class TestServiceTopicCatalogPostgresBuildCatalog:
             }
         ]
         pool = _make_pool_rows(rows)
-        service = _make_service(pool=pool)
+        handler = _make_handler(pool=pool)
 
-        response = await service.build_catalog(correlation_id=uuid4())
+        response = await handler.build_catalog(correlation_id=uuid4())
 
         suffixes = [e.topic_suffix for e in response.topics]
         assert suffixes == sorted(suffixes)
@@ -275,9 +321,9 @@ class TestServiceTopicCatalogPostgresBuildCatalog:
             },
         ]
         pool = _make_pool_rows(rows)
-        service = _make_service(pool=pool)
+        handler = _make_handler(pool=pool)
 
-        response = await service.build_catalog(correlation_id=uuid4())
+        response = await handler.build_catalog(correlation_id=uuid4())
 
         assert response.node_count == 2
 
@@ -293,9 +339,9 @@ class TestServiceTopicCatalogPostgresBuildCatalog:
             }
         ]
         pool = _make_pool_rows(rows)
-        service = _make_service(pool=pool)
+        handler = _make_handler(pool=pool)
 
-        response = await service.build_catalog(correlation_id=uuid4())
+        response = await handler.build_catalog(correlation_id=uuid4())
 
         assert response.warnings == ()
 
@@ -306,7 +352,7 @@ class TestServiceTopicCatalogPostgresBuildCatalog:
 
 
 @pytest.mark.unit
-class TestServiceTopicCatalogPostgresFiltering:
+class TestHandlerTopicCatalogPostgresFiltering:
     """Tests for topic_pattern and include_inactive filtering."""
 
     @pytest.mark.asyncio
@@ -321,9 +367,9 @@ class TestServiceTopicCatalogPostgresFiltering:
             }
         ]
         pool = _make_pool_rows(rows)
-        service = _make_service(pool=pool)
+        handler = _make_handler(pool=pool)
 
-        response = await service.build_catalog(
+        response = await handler.build_catalog(
             correlation_id=uuid4(),
             topic_pattern="*node-registration*",
         )
@@ -348,13 +394,13 @@ class TestServiceTopicCatalogPostgresFiltering:
             }
         ]
         pool = _make_pool_rows(rows)
-        service = _make_service(pool=pool)
+        handler = _make_handler(pool=pool)
 
-        response_default = await service.build_catalog(
+        response_default = await handler.build_catalog(
             correlation_id=uuid4(),
             include_inactive=False,
         )
-        response_all = await service.build_catalog(
+        response_all = await handler.build_catalog(
             correlation_id=uuid4(),
             include_inactive=True,
         )
@@ -370,20 +416,20 @@ class TestServiceTopicCatalogPostgresFiltering:
 
 
 @pytest.mark.unit
-class TestServiceTopicCatalogPostgresDBUnavailable:
+class TestHandlerTopicCatalogPostgresDBUnavailable:
     """Tests for DB connection failures."""
 
     @pytest.mark.asyncio
     async def test_build_catalog_db_timeout_returns_empty_with_warning(self) -> None:
         """When _fetch_topic_rows times out, DB_UNAVAILABLE is emitted."""
-        service = _make_service(pool=MagicMock(), query_timeout_seconds=0.001)
+        handler = _make_handler(pool=MagicMock(), query_timeout_seconds=0.001)
 
         async def _slow_fetch(cid: object) -> list[object]:
             await asyncio.sleep(1)
             return []
 
-        with patch.object(service, "_fetch_topic_rows", side_effect=_slow_fetch):
-            response = await service.build_catalog(correlation_id=uuid4())
+        with patch.object(handler, "_fetch_topic_rows", side_effect=_slow_fetch):
+            response = await handler.build_catalog(correlation_id=uuid4())
 
         assert DB_UNAVAILABLE in response.warnings
         assert response.topics == ()
@@ -391,13 +437,13 @@ class TestServiceTopicCatalogPostgresDBUnavailable:
     @pytest.mark.asyncio
     async def test_build_catalog_db_exception_returns_empty_with_warning(self) -> None:
         """When _fetch_topic_rows raises, DB_UNAVAILABLE is emitted."""
-        service = _make_service(pool=MagicMock())
+        handler = _make_handler(pool=MagicMock())
 
         async def _fail_fetch(cid: object) -> list[object]:
             raise RuntimeError("connection refused")
 
-        with patch.object(service, "_fetch_topic_rows", side_effect=_fail_fetch):
-            response = await service.build_catalog(correlation_id=uuid4())
+        with patch.object(handler, "_fetch_topic_rows", side_effect=_fail_fetch):
+            response = await handler.build_catalog(correlation_id=uuid4())
 
         assert DB_UNAVAILABLE in response.warnings
         assert response.topics == ()
@@ -409,7 +455,7 @@ class TestServiceTopicCatalogPostgresDBUnavailable:
 
 
 @pytest.mark.unit
-class TestServiceTopicCatalogPostgresVersionAndCache:
+class TestHandlerTopicCatalogPostgresVersionAndCache:
     """Tests for version derivation and in-process caching."""
 
     @pytest.mark.asyncio
@@ -424,9 +470,9 @@ class TestServiceTopicCatalogPostgresVersionAndCache:
             }
         ]
         pool = _make_pool(version_hash="00000000000000ff", rows=rows)
-        service = _make_service(pool=pool)
+        handler = _make_handler(pool=pool)
 
-        response = await service.build_catalog(correlation_id=uuid4())
+        response = await handler.build_catalog(correlation_id=uuid4())
 
         # version_hash[-8:] = "000000ff" → int("000000ff", 16) = 255
         assert response.catalog_version == 255
@@ -443,10 +489,10 @@ class TestServiceTopicCatalogPostgresVersionAndCache:
             }
         ]
         pool = _make_pool(version_hash="abcdef1234567890", rows=rows)
-        service = _make_service(pool=pool)
+        handler = _make_handler(pool=pool)
 
-        response1 = await service.build_catalog(correlation_id=uuid4())
-        response2 = await service.build_catalog(correlation_id=uuid4())
+        response1 = await handler.build_catalog(correlation_id=uuid4())
+        response2 = await handler.build_catalog(correlation_id=uuid4())
 
         assert response1.catalog_version == response2.catalog_version
         assert len(response1.topics) == len(response2.topics)
@@ -459,35 +505,35 @@ class TestServiceTopicCatalogPostgresVersionAndCache:
 
 @pytest.mark.unit
 class TestParseJsonList:
-    """Tests for ServiceTopicCatalogPostgres._parse_json_list."""
+    """Tests for HandlerTopicCatalogPostgres._parse_json_list."""
 
-    def _make_service_for_parse(self) -> ServiceTopicCatalogPostgres:
-        return _make_service(pool=None)
+    def _make_handler_for_parse(self) -> HandlerTopicCatalogPostgres:
+        return _make_handler(pool=None)
 
     def test_list_passthrough(self) -> None:
         """Already-decoded list is returned as-is."""
-        service = self._make_service_for_parse()
-        result = service._parse_json_list(["a", "b"], uuid4())
+        handler = self._make_handler_for_parse()
+        result = handler._parse_json_list(["a", "b"], uuid4())
         assert result == ["a", "b"]
 
     def test_json_string_decoded(self) -> None:
         """JSON string encoding of a list is decoded correctly."""
-        service = self._make_service_for_parse()
+        handler = self._make_handler_for_parse()
         value = json.dumps(["x", "y"])
-        result = service._parse_json_list(value, uuid4())
+        result = handler._parse_json_list(value, uuid4())
         assert result == ["x", "y"]
 
     def test_none_returns_empty(self) -> None:
         """None value returns empty list."""
-        service = self._make_service_for_parse()
-        assert service._parse_json_list(None, uuid4()) == []
+        handler = self._make_handler_for_parse()
+        assert handler._parse_json_list(None, uuid4()) == []
 
     def test_invalid_json_string_returns_empty(self) -> None:
         """Invalid JSON string returns empty list."""
-        service = self._make_service_for_parse()
-        assert service._parse_json_list("not-json{{{", uuid4()) == []
+        handler = self._make_handler_for_parse()
+        assert handler._parse_json_list("not-json{{{", uuid4()) == []
 
     def test_json_object_string_returns_empty(self) -> None:
         """JSON string that is an object (not list) returns empty list."""
-        service = self._make_service_for_parse()
-        assert service._parse_json_list('{"key": "value"}', uuid4()) == []
+        handler = self._make_handler_for_parse()
+        assert handler._parse_json_list('{"key": "value"}', uuid4()) == []
