@@ -198,7 +198,7 @@ All four abort conditions would trigger. This confirms the KEEP AS MIXIN decisio
 ## References
 
 - [Handler Classification Rules](HANDLER_CLASSIFICATION_RULES.md) — OMN-4004 rubric
-- [Handler Classification POC 3.1](HANDLER_CLASSIFICATION_POC_3_1.md) — postgres mixins (OMN-4005, PR #706)
+- Handler Classification POC 3.1 — postgres mixins (OMN-4005, PR #706; doc pending merge)
 - `src/omnibase_infra/runtime/mixins/mixin_projector_sql_operations.py`
 - `src/omnibase_infra/runtime/mixins/mixin_projector_notification_publishing.py`
 - `src/omnibase_infra/runtime/projector_shell.py`
