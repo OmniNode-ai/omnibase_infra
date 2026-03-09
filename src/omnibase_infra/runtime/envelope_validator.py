@@ -82,8 +82,6 @@ PAYLOAD_REQUIRED_OPERATIONS: frozenset[str] = frozenset(
         "http.patch",
         # Kafka operations
         "kafka.produce",
-        # Generic KV operations (consul.kv_put retained for non-registration KV use)
-        "consul.kv_put",
     }
 )
 

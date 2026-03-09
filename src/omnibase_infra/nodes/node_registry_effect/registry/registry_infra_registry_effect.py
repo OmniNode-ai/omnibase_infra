@@ -187,7 +187,7 @@ class RegistryInfraRegistryEffect:
 
         .. versionadded:: 0.5.0
         """
-        return ["consul", "postgres"]
+        return ["postgres"]
 
 
 __all__ = ["RegistryInfraRegistryEffect"]

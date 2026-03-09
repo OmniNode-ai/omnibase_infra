@@ -18,6 +18,7 @@ Related:
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from enum import Enum
 from unittest.mock import MagicMock
 
 import pytest
@@ -34,6 +35,18 @@ from omnibase_infra.runtime.registry_dispatcher import (
 
 # Import shared conformance helper
 from tests.conftest import assert_dispatcher_protocol_interface
+
+# ---------------------------------------------------------------------------
+# Foreign enum helpers (shared across coercion tests in this module)
+# ---------------------------------------------------------------------------
+
+
+class ForeignCategory(Enum):
+    """Foreign enum that mirrors EnumMessageCategory values but is a different class."""
+
+    EVENT = "event"
+    COMMAND = "command"
+    INTENT = "intent"
 
 
 class MockMessageDispatcher:
@@ -746,3 +759,133 @@ class TestStringRepresentation:
         assert "dispatchers=" in result
         assert "categories=" in result
         assert "event-reducer-dispatcher" in result
+
+
+# =============================================================================
+# Foreign-Enum Coercion Tests for get_dispatchers() (OMN-4089)
+# =============================================================================
+
+
+class ForeignCategoryDispatcher(MockMessageDispatcher):
+    """Dispatcher whose .category returns a ForeignCategory (not EnumMessageCategory)."""
+
+    def __init__(self, dispatcher_id: str) -> None:
+        # We bypass the parent's type annotation intentionally for testing
+        super().__init__(
+            dispatcher_id=dispatcher_id,
+            # Use canonical category here — replaced below via property override
+            category=EnumMessageCategory.EVENT,
+            node_kind=EnumNodeKind.REDUCER,
+        )
+        self._foreign_category = ForeignCategory.EVENT
+
+    @property
+    def category(self) -> ForeignCategory:  # type: ignore[override]
+        return self._foreign_category
+
+
+class TestGetDispatchersForeignEnumCoercion:
+    """Tests that get_dispatchers() coerces foreign-enum category inputs (OMN-4089).
+
+    OMN-4087 hardened register_dispatcher and unregister_dispatcher.
+    OMN-4089 closes the lookup gap: a caller passing a foreign enum to
+    get_dispatchers() must still receive the registered dispatchers.
+    """
+
+    @pytest.mark.unit
+    def test_get_dispatchers_with_foreign_enum_category_returns_registered_dispatcher(
+        self,
+    ) -> None:
+        """Register under canonical category; lookup with foreign enum must find it.
+
+        Before the OMN-4089 fix, get_dispatchers(ForeignCategory.EVENT) returned
+        an empty list because the dict key was EnumMessageCategory.EVENT (canonical)
+        and ForeignCategory.EVENT (foreign) never matched it.
+        """
+        registry = RegistryDispatcher()
+        # Register a dispatcher whose category coerces to EnumMessageCategory.EVENT
+        dispatcher = ForeignCategoryDispatcher("foreign-event-reducer")
+        registry.register_dispatcher(dispatcher)
+        registry.freeze()
+
+        # Lookup using the same foreign enum — must return the dispatcher, not []
+        result = registry.get_dispatchers(ForeignCategory.EVENT)  # type: ignore[arg-type]
+        assert len(result) == 1, (
+            f"Expected 1 dispatcher, got {len(result)}. "
+            "get_dispatchers() must coerce foreign-enum category input (OMN-4089)."
+        )
+        assert result[0].dispatcher_id == "foreign-event-reducer"
+
+    @pytest.mark.unit
+    def test_get_dispatchers_canonical_and_foreign_enum_are_equivalent(
+        self,
+        dispatcher_registry: RegistryDispatcher,
+        event_reducer_dispatcher: MockMessageDispatcher,
+    ) -> None:
+        """Canonical and foreign-enum lookups for the same category must return equal results."""
+        dispatcher_registry.register_dispatcher(event_reducer_dispatcher)
+        dispatcher_registry.freeze()
+
+        canonical_result = dispatcher_registry.get_dispatchers(
+            EnumMessageCategory.EVENT
+        )
+        foreign_result = dispatcher_registry.get_dispatchers(ForeignCategory.EVENT)  # type: ignore[arg-type]
+
+        assert len(canonical_result) == len(foreign_result), (
+            "get_dispatchers() must return the same count for canonical vs. foreign enum "
+            f"(canonical={len(canonical_result)}, foreign={len(foreign_result)})"
+        )
+        canonical_ids = {d.dispatcher_id for d in canonical_result}
+        foreign_ids = {d.dispatcher_id for d in foreign_result}
+        assert canonical_ids == foreign_ids
+
+    @pytest.mark.unit
+    def test_get_dispatchers_foreign_enum_with_message_type_filter(
+        self,
+    ) -> None:
+        """Foreign-enum lookup with message_type filter must also work correctly."""
+        registry = RegistryDispatcher()
+        dispatcher = MockMessageDispatcher(
+            dispatcher_id="typed-event-reducer",
+            category=EnumMessageCategory.EVENT,
+            node_kind=EnumNodeKind.REDUCER,
+            message_types={"OrderCreated"},
+        )
+        registry.register_dispatcher(dispatcher)
+        registry.freeze()
+
+        # Foreign enum + matching message type
+        result = registry.get_dispatchers(
+            ForeignCategory.EVENT,  # type: ignore[arg-type]
+            message_type="OrderCreated",
+        )
+        assert len(result) == 1
+        assert result[0].dispatcher_id == "typed-event-reducer"
+
+        # Foreign enum + non-matching message type (dispatcher only accepts OrderCreated)
+        result_miss = registry.get_dispatchers(
+            ForeignCategory.EVENT,  # type: ignore[arg-type]
+            message_type="UnknownEvent",
+        )
+        assert len(result_miss) == 0
+
+    @pytest.mark.unit
+    def test_get_dispatchers_unrecognised_category_raises_model_onex_error(
+        self,
+        dispatcher_registry: RegistryDispatcher,
+    ) -> None:
+        """An unrecognisable category value must raise ModelOnexError with INVALID_PARAMETER.
+
+        coerce_message_category raises ValueError for unknown values; get_dispatchers()
+        must convert that into a typed ModelOnexError so callers can rely on
+        ModelOnexError.error_code handling instead of catching bare ValueError.
+        """
+        import enum
+
+        class BogusCategory(str, enum.Enum):
+            UNKNOWN = "not_a_real_category_value"
+
+        dispatcher_registry.freeze()
+        with pytest.raises(ModelOnexError) as exc_info:
+            dispatcher_registry.get_dispatchers(BogusCategory.UNKNOWN)  # type: ignore[arg-type]
+        assert exc_info.value.error_code == EnumCoreErrorCode.INVALID_PARAMETER
