@@ -221,8 +221,12 @@ def test_unregister_dispatcher_with_foreign_enum_category() -> None:
 
     # Unregister — must coerce category to canonical key before lookup
     removed = registry.unregister_dispatcher("foreign-enum-dispatcher")
-    assert removed is True, "unregister_dispatcher should return True for a registered dispatcher"
-    assert registry.dispatcher_count == 0, "dispatcher count should be 0 after unregister"
+    assert removed is True, (
+        "unregister_dispatcher should return True for a registered dispatcher"
+    )
+    assert registry.dispatcher_count == 0, (
+        "dispatcher count should be 0 after unregister"
+    )
 
     # Freeze and verify no ghost entry remains in the category index
     registry.freeze()

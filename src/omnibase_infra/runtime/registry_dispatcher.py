@@ -578,7 +578,9 @@ class RegistryDispatcher:
         # circular import chain: registry_dispatcher → service_message_dispatch_engine
         # → dispatch_context_enforcer → registry_dispatcher.
         try:
-            _canonical_category = coerce_message_category(dispatcher.category)  # raises on invalid
+            _canonical_category = coerce_message_category(
+                dispatcher.category
+            )  # raises on invalid
         except ValueError:
             raise ModelOnexError(
                 message=f"Dispatcher category must be EnumMessageCategory, got {type(dispatcher.category).__name__}",
