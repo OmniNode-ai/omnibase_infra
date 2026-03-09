@@ -36,7 +36,7 @@ def _looks_like_docker_service_name(value: str) -> bool:
     """True if value looks like a Docker service name (no dots, not localhost/127.x)."""
     if not value:
         return False
-    if value in ("localhost", "127.0.0.1", "0.0.0.0"):
+    if value in ("localhost", "127.0.0.1", "0.0.0.0"):  # noqa: S104
         return False
     if "." in value or ":" in value or "/" in value:
         return False
