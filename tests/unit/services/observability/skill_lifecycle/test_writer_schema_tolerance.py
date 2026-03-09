@@ -24,7 +24,6 @@ from omnibase_infra.services.observability.skill_lifecycle.writer_postgres impor
     _validate_event_fields,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
