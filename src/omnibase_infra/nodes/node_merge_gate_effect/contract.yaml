@@ -1,0 +1,232 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeMergeGateEffect
+#
+# Persists merge gate decisions from the pr-queue-pipeline and opens
+# Linear quarantine tickets when a QUARANTINE decision is issued.
+# Subscribes to onex.evt.platform.merge-gate-decision.v1 via Kafka.
+#
+# Related Tickets:
+#   - OMN-3140: NodeMergeGateEffect + migration
+# Contract identifiers
+name: "node_merge_gate_effect"
+contract_name: "node_merge_gate_effect"
+node_name: "node_merge_gate_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+# Node type
+node_type: "EFFECT_GENERIC"
+# Description
+description: >
+  Effect node that subscribes to onex.evt.platform.merge-gate-decision.v1 events
+  and upserts merge gate decisions into the merge_gate_decisions PostgreSQL table.
+  Uses ON CONFLICT (pr_ref, head_sha) DO UPDATE for idempotent upserts.
+  When decision is QUARANTINE, opens a Linear ticket with violation details.
+  Emits no outbound events (side-effect only).
+
+# =============================================================================
+# EVENT BUS SUBSCRIPTION (Kafka topic wiring)
+# =============================================================================
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.evt.platform.merge-gate-decision.v1"
+  publish_topics: []
+# Strongly typed I/O models
+input_model:
+  name: "ModelMergeGateResult"
+  module: "omnibase_infra.nodes.node_merge_gate_effect.models.model_merge_gate_result"
+  description: "Merge gate decision payload from Kafka event."
+output_model:
+  name: "ModelBackendResult"
+  module: "omnibase_infra.models.model_backend_result"
+  description: "Output model containing PostgreSQL operation result."
+# =============================================================================
+# HANDLER ROUTING (Declarative Handler Dispatch)
+# =============================================================================
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "upsert_merge_gate"
+      handler:
+        name: "HandlerUpsertMergeGate"
+        module: "omnibase_infra.nodes.node_merge_gate_effect.handlers.handler_upsert_merge_gate"
+      backend: "postgres"
+      description: "Upsert merge gate decision into merge_gate_decisions, open Linear ticket on QUARANTINE."
+      input_model:
+        name: "ModelMergeGateResult"
+        module: "omnibase_infra.nodes.node_merge_gate_effect.models.model_merge_gate_result"
+      output_fields:
+        - success
+        - error
+        - error_code
+        - duration_ms
+        - correlation_id
+        - backend_id
+  execution_mode: "sequential"
+  partial_failure_handling: false
+  aggregation_strategy: "first_match"
+# =============================================================================
+# ERROR HANDLING (Circuit Breaker + Retry + Sanitization)
+# =============================================================================
+error_handling:
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+    half_open_max_requests: 3
+    per_backend: false
+    backends:
+      - name: "postgres"
+        failure_threshold: 5
+        reset_timeout_ms: 60000
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+      - "InfraUnavailableError"
+      - "RepositoryExecutionError"
+  error_sanitization:
+    enabled: true
+    utility: "omnibase_infra.utils.util_error_sanitization"
+    sanitize_patterns:
+      - "password"
+      - "secret"
+      - "token"
+      - "api_key"
+      - "connection_string"
+  error_types:
+    - name: "InfraConnectionError"
+      description: "Failed to connect to PostgreSQL"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "InfraTimeoutError"
+      description: "PostgreSQL operation timed out"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "InfraAuthenticationError"
+      description: "Authentication failed with PostgreSQL"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "InfraUnavailableError"
+      description: "PostgreSQL is unavailable (circuit open)"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "RepositoryExecutionError"
+      description: "PostgreSQL query execution failed"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+  error_codes:
+    - code: "POSTGRES_CONNECTION_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "Connection to PostgreSQL server failed"
+      retriable: true
+    - code: "POSTGRES_TIMEOUT_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "PostgreSQL operation exceeded timeout"
+      retriable: true
+    - code: "POSTGRES_AUTH_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "Authentication with PostgreSQL server failed"
+      retriable: false
+    - code: "POSTGRES_UPSERT_ERROR"
+      backend: "postgres"
+      operation: "upsert_merge_gate"
+      description: "PostgreSQL merge gate upsert failed"
+      retriable: false
+    - code: "POSTGRES_UNKNOWN_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "Unknown error during PostgreSQL operation"
+      retriable: false
+# IO operations (EFFECT node specific)
+io_operations:
+  - operation: "upsert_merge_gate"
+    description: "Upsert merge gate decision into merge_gate_decisions with idempotent ON CONFLICT (pr_ref, head_sha)"
+    input_fields:
+      - gate_id
+      - pr_ref
+      - head_sha
+      - base_sha
+      - decision
+      - tier
+      - violations
+      - run_id
+      - correlation_id
+      - run_fingerprint
+      - decided_at
+    output_fields:
+      - success
+      - error
+      - error_code
+      - duration_ms
+      - correlation_id
+      - backend_id
+# Dependencies (protocols this node requires)
+dependencies:
+  - name: "protocol_postgres_adapter"
+    type: "protocol"
+    class_name: "ProtocolPostgresAdapter"
+    module: "omnibase_infra.adapters.protocol_postgres_adapter"
+    description: "PostgreSQL database operations"
+  - name: "linear_api_key"
+    type: "environment"
+    env_var: "LINEAR_API_KEY"
+    description: "Linear API key for quarantine ticket creation (optional)"
+    required: false
+  - name: "linear_team_id"
+    type: "environment"
+    env_var: "LINEAR_TEAM_ID"
+    description: "Linear team ID for quarantine ticket creation (optional)"
+    required: false
+# Capabilities provided by this node
+capabilities:
+  - name: "merge_gate_persistence"
+    description: "Persist merge gate decisions to PostgreSQL merge_gate_decisions table"
+  - name: "idempotent_upsert"
+    description: "ON CONFLICT (pr_ref, head_sha) DO UPDATE for idempotent upserts"
+  - name: "quarantine_ticket_creation"
+    description: "Open Linear tickets for QUARANTINE decisions with violation details"
+# Health check configuration
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  backends:
+    - name: "postgres"
+      check_type: "connection"
+      timeout_ms: 5000
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-03-07"
+  updated: "2026-03-07"
+  tags:
+    - effect
+    - merge-gate
+    - postgresql
+    - persistence
+    - linear
+    - quarantine
+    - kafka-consumer
+  related_tickets:
+    - "OMN-3140"

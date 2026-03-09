@@ -439,7 +439,9 @@ class TestNoDirectEnvAccessInHandlers:
         #   handler_node_registration_acked.py:141 - os.getenv for liveness interval
         #   handler_github_api_poll.py:233 - os.environ.get for GitHub token
         #   handler_runtime_target_collect.py:54-57 - 3x os.environ.get for env/kafka/kubeconfig
-        max_allowed = 5
+        #   handler_upsert_merge_gate.py:250 - LINEAR_API_KEY, no config injection path (OMN-3140)
+        #   handler_upsert_merge_gate.py:253 - LINEAR_TEAM_ID, no config injection path (OMN-3140)
+        max_allowed = 7
         if len(violations) > max_allowed:
             assert False, (
                 f"Found {len(violations)} env access violations in node handlers "
