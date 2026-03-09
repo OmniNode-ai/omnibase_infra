@@ -21,6 +21,7 @@ Available Handlers:
 - HandlerQdrant: Qdrant vector database handler (MVP: create, upsert, search, delete)
 - HandlerSlackWebhook: Slack webhook handler for infrastructure alerting
 - HandlerGmailApi: Gmail API handler with OAuth2 token management (OMN-2729)
+- HandlerTopicCatalogPostgres: PostgreSQL-backed topic catalog handler (OMN-4011)
 
 Response Models:
 - ModelDbQueryPayload: Database query result payload
@@ -49,6 +50,9 @@ from omnibase_infra.handlers.handler_manifest_persistence import (
 from omnibase_infra.handlers.handler_mcp import HandlerMCP
 from omnibase_infra.handlers.handler_qdrant import HandlerQdrant
 from omnibase_infra.handlers.handler_slack_webhook import HandlerSlackWebhook
+from omnibase_infra.handlers.handler_topic_catalog_postgres import (
+    HandlerTopicCatalogPostgres,
+)
 from omnibase_infra.handlers.models import (
     ModelDbDescribeResponse,
     ModelDbQueryPayload,
@@ -67,6 +71,7 @@ __all__: list[str] = [
     "HANDLER_ID_INTENT",
     "HandlerGmailApi",
     "HandlerDb",
+    "HandlerTopicCatalogPostgres",
     "HandlerFileSystem",
     "HandlerGraph",
     "HandlerHttpRest",
