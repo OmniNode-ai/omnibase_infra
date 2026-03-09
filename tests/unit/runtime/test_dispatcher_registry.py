@@ -868,3 +868,24 @@ class TestGetDispatchersForeignEnumCoercion:
             message_type="UnknownEvent",
         )
         assert len(result_miss) == 0
+
+    @pytest.mark.unit
+    def test_get_dispatchers_unrecognised_category_raises_model_onex_error(
+        self,
+        dispatcher_registry: RegistryDispatcher,
+    ) -> None:
+        """An unrecognisable category value must raise ModelOnexError with INVALID_PARAMETER.
+
+        coerce_message_category raises ValueError for unknown values; get_dispatchers()
+        must convert that into a typed ModelOnexError so callers can rely on
+        ModelOnexError.error_code handling instead of catching bare ValueError.
+        """
+        import enum
+
+        class BogusCategory(str, enum.Enum):
+            UNKNOWN = "not_a_real_category_value"
+
+        dispatcher_registry.freeze()
+        with pytest.raises(ModelOnexError) as exc_info:
+            dispatcher_registry.get_dispatchers(BogusCategory.UNKNOWN)  # type: ignore[arg-type]
+        assert exc_info.value.error_code == EnumCoreErrorCode.INVALID_PARAMETER
