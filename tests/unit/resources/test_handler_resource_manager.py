@@ -137,3 +137,27 @@ async def test_shutdown_all_is_idempotent() -> None:
     await manager.shutdown_all()  # second call — no error, no double-close
 
     mock_client.aclose.assert_awaited_once()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_shutdown_all_continues_after_close_error() -> None:
+    """shutdown_all closes remaining clients even if one raises during aclose()."""
+    manager = HandlerResourceManager()
+    client_fail = AsyncMock()
+    client_fail.aclose.side_effect = Exception("close failed")
+    client_ok = AsyncMock()
+
+    with patch(
+        "omnibase_infra.resources.handler_resource_manager.httpx.AsyncClient",
+        side_effect=[client_fail, client_ok],
+    ):
+        await manager.get_or_create_client("handler-fail")
+        await manager.get_or_create_client("handler-ok")
+
+    # Should not raise — errors are logged and remaining clients are still closed
+    await manager.shutdown_all()
+
+    client_fail.aclose.assert_awaited_once()
+    client_ok.aclose.assert_awaited_once()
+    assert manager._clients == {}

@@ -72,14 +72,24 @@ class HandlerResourceManager:
         """Close all open clients.
 
         Safe to call multiple times; subsequent calls are no-ops.
+        Errors from individual aclose() calls are logged and do not interrupt
+        shutdown of remaining clients.
         """
         handler_ids = list(self._clients.keys())
+        closed = 0
         for handler_id in handler_ids:
             client = self._clients.pop(handler_id, None)
             if client is not None:
-                await client.aclose()
-                logger.debug("Shutdown httpx client for handler_id=%s", handler_id)
+                try:
+                    await client.aclose()
+                    closed += 1
+                    logger.debug("Shutdown httpx client for handler_id=%s", handler_id)
+                except Exception:
+                    logger.exception(
+                        "Error closing httpx client for handler_id=%s", handler_id
+                    )
         logger.debug(
-            "HandlerResourceManager shutdown complete (%d clients closed)",
+            "HandlerResourceManager shutdown complete (%d/%d clients closed)",
+            closed,
             len(handler_ids),
         )
