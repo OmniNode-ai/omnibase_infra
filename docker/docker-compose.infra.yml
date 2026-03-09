@@ -687,6 +687,50 @@ services:
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
       - "autoheal=true"
   # ==========================================================================
+  # OmniIntelligence Migration Runner (Runtime Profile) — OMN-4082
+  # ==========================================================================
+  # One-shot init container that creates the omniintelligence database (if
+  # absent) and applies all pending SQL migrations before intelligence-api
+  # starts. Uses the bundled SQL files at docker/migrations/intelligence/.
+  #
+  # Why a separate service: intelligence-api runs uvicorn and has no built-in
+  # migration entrypoint. PluginIntelligence.validate_handshake() auto-stamps
+  # a schema fingerprint on first boot — if tables are missing the fingerprint
+  # is wrong and all subsequent boots fail (Audit Gap #7).
+  #
+  # This service exits 0 on success; intelligence-api depends on
+  # service_completed_successfully so it will not start if migration fails.
+  intelligence-migration:
+    image: postgres:16-alpine
+    container_name: omnibase-intelligence-migration
+    profiles: ["runtime", "full"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      MIGRATIONS_DIR: /migrations/intelligence
+    volumes:
+      - ../scripts/run-intelligence-migrations.sh:/run-intelligence-migrations.sh:ro
+      - ../docker/migrations/intelligence:/migrations/intelligence:ro
+    entrypoint: ["sh", "/run-intelligence-migrations.sh"]
+    networks:
+      - omnibase-infra-network
+    restart: "no"
+    logging: *logging-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 64M
+    labels:
+      - "com.omninode.service=intelligence-migration"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.ticket=OMN-4082"
+  # ==========================================================================
   # OmniIntelligence HTTP API - Pattern Query Service (Runtime Profile)
   # ==========================================================================
   # Serves GET /api/v1/patterns for runtime enforcement nodes.
@@ -698,6 +742,8 @@ services:
     depends_on:
       migration-gate:
         condition: service_healthy
+      intelligence-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
     command:
