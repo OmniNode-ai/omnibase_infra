@@ -716,6 +716,8 @@ services:
     ports:
       - "${SKILL_LIFECYCLE_CONSUMER_PORT:-8092}:8092"
     stop_grace_period: 60s
+    volumes:
+      - skill_lifecycle_logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8092/health"]
       interval: 30s
@@ -993,6 +995,8 @@ volumes:
     name: omninode-worker-logs
   agent_actions_logs:
     name: omninode-agent-actions-logs
+  skill_lifecycle_logs:
+    name: omninode-skill-lifecycle-logs
   contract_resolver_logs:
     name: omninode-contract-resolver-logs
   phoenix_data:
