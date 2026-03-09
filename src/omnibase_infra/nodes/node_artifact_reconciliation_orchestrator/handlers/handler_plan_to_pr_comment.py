@@ -132,20 +132,26 @@ class HandlerPlanToPRComment:
 
     Attributes:
         _github_api_base: Base URL for GitHub API (injectable for testing).
+        _github_token: Bearer token for GitHub API authentication.
     """
 
     def __init__(
         self,
         github_api_base: str = _GITHUB_API_BASE,
+        github_token: str | None = None,
     ) -> None:
-        """Initialize with optional API base override.
+        """Initialize with optional API base override and token.
 
         Args:
             github_api_base: Base URL for GitHub API. Defaults to
                 https://api.github.com. Override in tests to point at a
                 mock server.
+            github_token: Bearer token for GitHub API. When None, falls back
+                to the GITHUB_TOKEN environment variable at construction time.
         """
         self._github_api_base = github_api_base
+        _env_token = os.environ.get("GITHUB_TOKEN", "")  # ONEX_EXCLUDE: constructor injection fallback  # fmt: skip
+        self._github_token: str = github_token if github_token is not None else _env_token  # fmt: skip
 
     @property
     def handler_id(self) -> str:
@@ -210,13 +216,12 @@ class HandlerPlanToPRComment:
         markdown_body = _build_markdown_table(plan)
         comment_body = f"{anchor}\n\n{markdown_body}"
 
-        token = os.environ.get("GITHUB_TOKEN", "")
-        headers = {
+        headers: dict[str, str] = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+        if self._github_token:
+            headers["Authorization"] = f"Bearer {self._github_token}"
 
         async with httpx.AsyncClient(base_url=self._github_api_base) as client:
             # Fetch existing comments and search for our anchor
