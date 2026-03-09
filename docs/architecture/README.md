@@ -64,6 +64,12 @@ Start here to understand the ONEX architecture:
 |----------|-------------|
 | [MCP Service Architecture](MCP_SERVICE_ARCHITECTURE.md) | MCP (Model Context Protocol) service layer: tool registration, schema generation, skip_server testing |
 
+## Shared Enums
+
+| Document | Description |
+|----------|-------------|
+| [Shared Enum Ownership Rule](SHARED_ENUM_OWNERSHIP.md) | Canonical rule: enums defined once in `omnibase_core`, imported downstream, coercion at boundaries |
+
 ## Resilience
 
 | Document | Description |
