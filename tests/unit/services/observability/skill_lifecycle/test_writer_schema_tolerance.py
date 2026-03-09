@@ -91,7 +91,9 @@ def test_validate_event_fields_missing_key(caplog: pytest.LogCaptureFixture) -> 
     del event["run_id"]
 
     with caplog.at_level(logging.WARNING):
-        result = _validate_event_fields(event, _REQUIRED_STARTED_FIELDS, "write_started")
+        result = _validate_event_fields(
+            event, _REQUIRED_STARTED_FIELDS, "write_started"
+        )
 
     assert result is False
     # The WARNING message should be emitted; check the log record's extra data
@@ -103,14 +105,18 @@ def test_validate_event_fields_missing_key(caplog: pytest.LogCaptureFixture) -> 
 
 
 @pytest.mark.unit
-def test_validate_event_fields_multiple_missing(caplog: pytest.LogCaptureFixture) -> None:
+def test_validate_event_fields_multiple_missing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Event missing multiple required fields returns False; missing_fields logged."""
     import logging
 
     event: dict[str, object] = {"skill_name": "only-this"}
 
     with caplog.at_level(logging.WARNING):
-        result = _validate_event_fields(event, _REQUIRED_STARTED_FIELDS, "write_started")
+        result = _validate_event_fields(
+            event, _REQUIRED_STARTED_FIELDS, "write_started"
+        )
 
     assert result is False
     warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
@@ -138,7 +144,10 @@ async def test_write_started_all_valid() -> None:
     pool = _make_pool()
     writer = WriterSkillLifecyclePostgres(pool)
 
-    events = [_make_started_event(event_id=f"evt-{i:03d}", run_id=f"run-{i:03d}") for i in range(3)]
+    events = [
+        _make_started_event(event_id=f"evt-{i:03d}", run_id=f"run-{i:03d}")
+        for i in range(3)
+    ]
     count = await writer.write_started(events)
 
     assert count == 3
@@ -160,7 +169,9 @@ async def test_write_started_one_invalid_skipped() -> None:
     writer = WriterSkillLifecyclePostgres(pool)
 
     valid_event = _make_started_event(event_id="evt-valid")
-    invalid_event: dict[str, object] = {"skill_name": "old-schema-only"}  # missing required keys
+    invalid_event: dict[str, object] = {
+        "skill_name": "old-schema-only"
+    }  # missing required keys
 
     count = await writer.write_started([valid_event, invalid_event])
 
@@ -203,7 +214,8 @@ async def test_write_completed_all_valid() -> None:
     writer = WriterSkillLifecyclePostgres(pool)
 
     events = [
-        _make_completed_event(event_id=f"evt-{i:03d}", run_id=f"run-{i:03d}") for i in range(2)
+        _make_completed_event(event_id=f"evt-{i:03d}", run_id=f"run-{i:03d}")
+        for i in range(2)
     ]
     count = await writer.write_completed(events)
 
