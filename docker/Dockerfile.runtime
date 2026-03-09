@@ -172,7 +172,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # in a separate step so plugins have their required third-party libraries.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps \
-    "omninode-claude==0.5.0" \
+    "omninode-claude==0.5.1" \
     "omninode-memory==0.6.4" \
     "omninode-intelligence==0.10.0"
 
@@ -201,7 +201,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "asyncio-mqtt>=0.16.0,<1.0.0" \
     "alembic>=1.13.0,<2.0.0" \
     "psycopg2-binary>=2.9.10,<3.0.0" \
-    "mcp>=1.8.0,<2.0.0"
+    "mcp>=1.8.0,<2.0.0" \
+    "python-snappy>=0.7.0,<1.0.0"
 
 # Security: upgrade protobuf to clear CVE-2026-0994 (HIGH, DoS, fixed in >=5.29.6).
 # protobuf 4.25.8 (from transitive deps) is flagged by Trivy scan (ignore-unfixed: true).
@@ -260,7 +261,7 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH" \
     # Python path for module resolution
     PYTHONPATH=/app/src \
-    # Runtime profile selection (all | minimal | kafka | consul | secrets)
+    # Runtime profile selection (all | minimal | kafka | secrets)
     RUNTIME_PROFILE=all \
     # Contract configuration directory
     ONEX_CONTRACTS_DIR=/app/contracts \
@@ -317,6 +318,11 @@ COPY --chown=omniinfra:omniinfra LICENSE /app/LICENSE
 
 # Copy contracts directory (must exist in build context)
 COPY --chown=omniinfra:omniinfra contracts/ /app/contracts/
+
+# Copy node contracts (contract.yaml with metadata.transport_type) into contracts dir
+# These are required by ContractConfigExtractor for Infisical config prefetch
+# and ProtocolEventBusPublisher wiring. Without them, no events are published.
+COPY --chown=omniinfra:omniinfra src/omnibase_infra/nodes/ /app/contracts/nodes/
 
 # Copy entrypoint script that stamps schema fingerprint before kernel start
 COPY --chown=omniinfra:omniinfra docker/entrypoint-runtime.sh /app/entrypoint-runtime.sh

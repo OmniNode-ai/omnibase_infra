@@ -65,11 +65,6 @@ if TYPE_CHECKING:
     from concurrent.futures import ThreadPoolExecutor
 
     from omnibase_infra.handlers.models import ModelOperationContext, ModelRetryState
-    from omnibase_infra.handlers.models.model_consul_retry_config import (
-        ModelConsulRetryConfig,
-    )
-
-    RetryConfigType = ModelConsulRetryConfig
 
 T = TypeVar("T")
 

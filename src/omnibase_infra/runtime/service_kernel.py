@@ -66,6 +66,7 @@ import yaml
 from pydantic import ValidationError
 
 from omnibase_core.container import ModelONEXContainer
+from omnibase_core.protocols.event_bus import ProtocolEventBusPublisher
 from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportType
 from omnibase_infra.errors import (
     DbOwnershipMismatchError,
@@ -960,6 +961,29 @@ async def bootstrap() -> int:
                 "services": wire_summary["services"],
             },
         )
+
+        # 4.1. Register event bus as ProtocolEventBusPublisher in service registry
+        # Domain plugins (e.g., claude) resolve ProtocolEventBusPublisher from the
+        # registry during wire_dispatchers(). Without this registration, plugin
+        # handler wiring fails and no event consumers are started.
+        if container.service_registry is not None:
+            try:
+                await container.service_registry.register_instance(
+                    ProtocolEventBusPublisher,
+                    event_bus,  # type: ignore[arg-type]  # EventBusKafka/Inmemory implements ProtocolEventBusPublisher via ProtocolEventBus
+                )
+                logger.info(
+                    "Registered %s as ProtocolEventBusPublisher (correlation_id=%s)",
+                    event_bus_type,
+                    correlation_id,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to register event bus as ProtocolEventBusPublisher "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
 
         # 4.5. Activate domain plugins via RegistryDomainPlugin (OMN-1992)
         #

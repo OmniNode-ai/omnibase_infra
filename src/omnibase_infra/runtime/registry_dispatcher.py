@@ -375,6 +375,19 @@ class RegistryDispatcher:
                 error_code=EnumCoreErrorCode.INVALID_STATE,
             )
 
+        # Coerce to canonical key for foreign-enum safety (OMN-4089 follow-up to OMN-4087).
+        # Registration stores EnumMessageCategory as the dict key; a caller passing a
+        # foreign enum instance with a matching .value would otherwise miss the entry and
+        # silently receive an empty list.
+        try:
+            category = coerce_message_category(category)
+        except ValueError as exc:
+            raise ModelOnexError(
+                message=f"get_dispatchers() received an unrecognised category value: {category!r}. "
+                "Provide a valid EnumMessageCategory member or a string matching one of its values.",
+                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
+            ) from exc
+
         entries = self._dispatchers_by_category.get(category, [])
         result: list[ProtocolMessageDispatcher] = []
 

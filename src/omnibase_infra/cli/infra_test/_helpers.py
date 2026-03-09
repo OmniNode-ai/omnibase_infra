@@ -39,8 +39,9 @@ def get_postgres_dsn() -> str:
     if not db_url:
         msg = (
             "OMNIBASE_INFRA_DB_URL is required but not set. "
-            "Set it to a PostgreSQL DSN, e.g. "
-            "postgresql://user:pass@host:5432/omnibase_infra"
+            "For host-side integration tests set: "
+            "OMNIBASE_INFRA_DB_URL=postgresql://postgres:PASSWORD@localhost:5436/omnibase_infra "
+            "(use localhost:5436 — the Docker-exposed port, not postgres:5432 which is Docker-internal only)."
         )
         raise ValueError(msg)
 

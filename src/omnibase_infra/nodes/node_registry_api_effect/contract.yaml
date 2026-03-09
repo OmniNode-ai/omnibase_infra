@@ -58,7 +58,6 @@ config:
   cors_allow_headers:
     - "*"
   # Backend connection settings
-  consul_connection_timeout_seconds: 10
   postgres_query_timeout_seconds: 30
   # Widget mapping cache behaviour
   widget_mapping_cache_enabled: true
@@ -225,12 +224,6 @@ dependencies:
     module: "omnibase_infra.projectors"
     description: "Reads node registration projections from PostgreSQL."
     optional: true
-  - name: "protocol_handler_service_discovery_consul"
-    type: "protocol"
-    class_name: "HandlerServiceDiscoveryConsul"
-    module: "omnibase_infra.handlers.service_discovery"
-    description: "Queries live service instances from Consul."
-    optional: true
   - name: "protocol_projection_reader_contract"
     type: "protocol"
     class_name: "ProjectionReaderContract"
@@ -248,9 +241,6 @@ health_check:
     - name: "postgres"
       check_type: "connection"
       timeout_ms: 5000
-    - name: "consul"
-      check_type: "http"
-      endpoint: "/v1/status/leader"
 # ---------------------------------------------------------------------------
 # Metadata
 # ---------------------------------------------------------------------------

@@ -128,7 +128,11 @@ x-runtime-env: &runtime-env
   # --- Bootstrap essentials (always needed) ---
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
-  OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:?OMNIBASE_INFRA_DB_URL must be set in ~/.omnibase/.env}
+  # OMN-4084: Containers always use the Docker-internal hostname postgres:5432 regardless
+  # of what ~/.omnibase/.env sets for OMNIBASE_INFRA_DB_URL. The host-side value uses
+  # localhost:5436 (external port); the container-side value must use postgres:5432.
+  # This override ensures containers are never broken by a host-side localhost:5436 URL.
+  OMNIBASE_INFRA_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
   # OMN-3431: Local Docker Redpanda — containers use Docker-internal redpanda:9092
   KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
   # Allowlist lets service_kernel.py's denylist accept Docker-internal redpanda: hostname
@@ -164,7 +168,10 @@ x-runtime-env: &runtime-env
   # OmniMemory domain plugin
   OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-}
   # OmniClaude domain plugin (OMN-3182): required by PluginClaude.wire_dispatchers()
-  OMNICLAUDE_CONTRACTS_ROOT: ${OMNICLAUDE_CONTRACTS_ROOT:-}
+  # Hardcoded to venv path — host OMNICLAUDE_CONTRACTS_ROOT points at /Volumes/...
+  # which doesn't exist inside the container. The pip-installed package has its
+  # nodes at the site-packages path below.
+  OMNICLAUDE_CONTRACTS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/nodes
   # OMN-3894: Enable event-based agent routing in containers. App defaults to false;
   # compose ensures containers always enable it via :-true default.
   USE_EVENT_ROUTING: ${USE_EVENT_ROUTING:-true}
@@ -182,6 +189,8 @@ x-runtime-env: &runtime-env
   # Auto-ACK local/internal nodes after introspection. Never set in production —
   # external nodes send their own ack. Default empty = disabled.
   ONEX_REGISTRATION_AUTO_ACK: ${ONEX_REGISTRATION_AUTO_ACK:-}
+  # --- Event routing ---
+  USE_EVENT_ROUTING: ${USE_EVENT_ROUTING:-}
   # --- OpenTelemetry / Phoenix tracing (OMN-3811) ---
   # Opt-in: tracing only activates when OTEL_EXPORTER_OTLP_ENDPOINT is non-empty.
   # Inside Docker, point to phoenix:6006 (OTLP HTTP). On host, use localhost:6006.
@@ -221,7 +230,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations/forward:/docker-entrypoint-initdb.d:ro
-      - ./postgres/init/02-keycloak-db.sql:/docker-entrypoint-initdb.d/02-keycloak-db.sql:ro
     networks:
       - omnibase-infra-network
     healthcheck:
@@ -490,6 +498,7 @@ services:
       - runtime_logs:/app/logs
       - runtime_data:/app/data
       - ../contracts:/app/contracts:ro
+      - ../src/omnibase_infra/nodes:/app/contracts/nodes:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
@@ -528,6 +537,7 @@ services:
       - effects_logs:/app/logs
       - effects_data:/app/data
       - ../contracts:/app/contracts:ro
+      - ../src/omnibase_infra/nodes:/app/contracts/nodes:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
@@ -562,6 +572,7 @@ services:
     volumes:
       - worker_logs:/app/logs
       - ../contracts:/app/contracts:ro
+      - ../src/omnibase_infra/nodes:/app/contracts/nodes:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
@@ -683,6 +694,50 @@ services:
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
       - "autoheal=true"
   # ==========================================================================
+  # OmniIntelligence Migration Runner (Runtime Profile) — OMN-4082
+  # ==========================================================================
+  # One-shot init container that creates the omniintelligence database (if
+  # absent) and applies all pending SQL migrations before intelligence-api
+  # starts. Uses the bundled SQL files at docker/migrations/intelligence/.
+  #
+  # Why a separate service: intelligence-api runs uvicorn and has no built-in
+  # migration entrypoint. PluginIntelligence.validate_handshake() auto-stamps
+  # a schema fingerprint on first boot — if tables are missing the fingerprint
+  # is wrong and all subsequent boots fail (Audit Gap #7).
+  #
+  # This service exits 0 on success; intelligence-api depends on
+  # service_completed_successfully so it will not start if migration fails.
+  intelligence-migration:
+    image: postgres:16-alpine
+    container_name: omnibase-intelligence-migration
+    profiles: ["runtime", "full"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      MIGRATIONS_DIR: /migrations/intelligence
+    volumes:
+      - ../scripts/run-intelligence-migrations.sh:/run-intelligence-migrations.sh:ro
+      - ../docker/migrations/intelligence:/migrations/intelligence:ro
+    entrypoint: ["sh", "/run-intelligence-migrations.sh"]
+    networks:
+      - omnibase-infra-network
+    restart: "no"
+    logging: *logging-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 64M
+    labels:
+      - "com.omninode.service=intelligence-migration"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.ticket=OMN-4082"
+  # ==========================================================================
   # OmniIntelligence HTTP API - Pattern Query Service (Runtime Profile)
   # ==========================================================================
   # Serves GET /api/v1/patterns for runtime enforcement nodes.
@@ -694,6 +749,8 @@ services:
     depends_on:
       migration-gate:
         condition: service_healthy
+      intelligence-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
     command:
@@ -775,6 +832,7 @@ services:
     volumes:
       - contract_resolver_logs:/app/logs
       - ../contracts:/app/contracts:ro
+      - ../src/omnibase_infra/nodes:/app/contracts/nodes:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8091/health"]
       interval: 30s

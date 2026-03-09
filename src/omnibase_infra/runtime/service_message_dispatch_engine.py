@@ -267,6 +267,29 @@ DispatcherOutput = str | list[str] | None | ModelDispatchResult
 # Module-level logger for fallback when no custom logger is provided
 _module_logger = logging.getLogger(__name__)
 
+
+def _get_route_dispatcher_id(route: object) -> str:
+    """Return the dispatcher/handler ID from a route model.
+
+    OMN-4057: omnibase_core's ``ModelDispatchRoute`` uses ``handler_id`` while
+    omnibase_infra's uses ``dispatcher_id``.  This helper resolves either field
+    so that both old and new omniclaude plugin releases work correctly.
+
+    Once omnibase_core publishes a release with a ``dispatcher_id`` property
+    this shim can be removed.
+    """
+    # Prefer dispatcher_id (infra model), fall back to handler_id (core model)
+    dispatcher_id: str | None = getattr(route, "dispatcher_id", None)
+    if dispatcher_id is not None:
+        return dispatcher_id
+    handler_id: str | None = getattr(route, "handler_id", None)
+    if handler_id is not None:
+        return handler_id
+    route_id: str = getattr(route, "route_id", "<unknown>")
+    msg = f"Route '{route_id}' has neither dispatcher_id nor handler_id"
+    raise AttributeError(msg)
+
+
 # Minimum number of parameters for a dispatcher to be considered context-aware.
 # Context-aware dispatchers have signature: (envelope, context, ...)
 # Non-context-aware dispatchers have signature: (envelope)
@@ -593,7 +616,7 @@ class MessageDispatchEngine:
                 route.route_id,
                 route.topic_pattern,
                 route.message_category,
-                route.dispatcher_id,
+                _get_route_dispatcher_id(route),
             )
 
     # --- @overload stubs for static type safety ---
@@ -840,10 +863,11 @@ class MessageDispatchEngine:
 
             # Validate all routes reference existing dispatchers
             for route in self._routes.values():
-                if route.dispatcher_id not in self._dispatchers:
+                rid = _get_route_dispatcher_id(route)
+                if rid not in self._dispatchers:
                     raise ModelOnexError(
                         message=f"Route '{route.route_id}' references dispatcher "
-                        f"'{route.dispatcher_id}' which is not registered. "
+                        f"'{rid}' which is not registered. "
                         "Register the dispatcher before freezing.",
                         error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED,
                     )
@@ -1680,7 +1704,7 @@ class MessageDispatchEngine:
                 continue
 
             # Get the dispatcher for this route
-            dispatcher_id = route.dispatcher_id
+            dispatcher_id = _get_route_dispatcher_id(route)
             if dispatcher_id in seen_dispatcher_ids:
                 # Avoid duplicate dispatcher execution
                 continue
