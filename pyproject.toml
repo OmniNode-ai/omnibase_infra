@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.16.2"
+version = "0.16.0"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{name = "OmniNode Team", email = "team@omninode.ai"}]
 license = {text = "MIT"}
@@ -29,8 +29,8 @@ dependencies = [
     #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
     # Remember to switch back to PyPI versions before merging to main.
     #
-    "omnibase-core==0.24.2",
-    "omnibase-spi==0.15.2",
+    "omnibase-core>=0.24.1",
+    "omnibase-spi==0.15.1",
     # ============================================================================
     # External Dependency Security Guidance
     # ============================================================================
@@ -49,22 +49,22 @@ dependencies = [
     #   - SHAs provide audit trail and tamper-evidence
     # Core dependencies
     "pydantic>=2.11.7,<3.0.0",
-    "fastapi>=0.120.1,<0.136.0",
+    "fastapi>=0.120.1,<0.121.0",
     "uvicorn>=0.32.0,<0.42.0",
     "pyyaml>=6.0.2,<7.0.0",
     "aiohttp>=3.9.0,<4.0.0",
     # Database dependencies (for PostgreSQL connection manager)
-    "asyncpg>=0.29.0,<0.32.0",
+    "asyncpg>=0.29.0,<0.30.0",
     "psycopg2-binary>=2.9.10,<3.0.0",
     # Service integration dependencies (for the actual tools we're migrating)
     "redis>=6.0.0,<7.0.0", # For Redis/Valkey integration (redis-py 6.x required by omnibase_core)
-    "aiokafka>=0.11.0,<0.14.0", # For Kafka tools (async Python client)
+    "aiokafka>=0.11.0,<0.12.0", # For Kafka tools (async Python client)
     "confluent-kafka>=2.12.0,<3.0.0", # For Kafka integration (C-based high-performance client)
     "infisicalsdk>=1.0.15,<2.0.0", # For Infisical secret management (OMN-2286)
     # Vector and graph database dependencies (for Qdrant and Memgraph handlers)
     "qdrant-client>=1.16.0,<2.0.0", # Vector database client for semantic search
     "grpcio>=1.62.0,<2.0.0", # Explicit lower bound: fixes EnumTypeWrapper|None runtime error [OMN-3548]
-    "neo4j>=5.15.0,<7.0.0", # Bolt/Cypher client for Memgraph graph database
+    "neo4j>=5.15.0,<6.0.0", # Bolt/Cypher client for Memgraph graph database
     # CLI Dependencies
     "click>=8.1.0,<9.0.0",
     "rich>=13.7.0,<14.0.0",
@@ -82,7 +82,7 @@ dependencies = [
     # Tracing and observability dependencies
     "sqlparse>=0.4.4,<0.6.0", # For secure SQL query sanitization in tracing
     "structlog>=23.2.0,<24.0.0", # Structured logging
-    "prometheus-client>=0.19.0,<0.25.0", # Metrics collection
+    "prometheus-client>=0.19.0,<0.20.0", # Metrics collection
     "opentelemetry-api>=1.27.0,<2.0.0", # OpenTelemetry API
     "opentelemetry-sdk>=1.27.0,<2.0.0", # OpenTelemetry SDK
     "opentelemetry-exporter-otlp-proto-http>=1.27.0,<2.0.0", # OTLP HTTP exporter (Phoenix uses HTTP, not gRPC)
@@ -374,3 +374,10 @@ exclude_lines = [
     "@abstractmethod",
     "@abc.abstractmethod"
 ]
+
+[tool.uv.sources]
+# PRE-RELEASE: omnibase-core chunking models (models.chunking.*) are on main but
+# not yet in a published PyPI release. Pin to the SHA that includes these models.
+# Switch back to a PyPI version pin once omnibase-core >=0.25.0 is released.
+# See: https://github.com/OmniNode-ai/omnibase_core/commit/c62c5c20
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "c62c5c20f737c3553d077c51f10681ec552c17c8" }
