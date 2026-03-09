@@ -5,6 +5,76 @@ All notable changes to the ONEX Infrastructure (omnibase_infra) will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.1] - 2026-03-09
+
+### Added
+- HandlerResourceManager stub for httpx client lifecycle (OMN-4225, #730)
+- NodeMergeGateEffect + migration (OMN-3140, #659)
+- Full consul removal (OMN-3995, #723)
+- Degraded status detailed diagnostics in /health endpoint (OMN-519, #664)
+- Artifact reconciliation ORCHESTRATOR node (OMN-3944, #710)
+- coerce_message_category boundary normalization helper (OMN-4034, #708)
+- Artifact reconcile CLI command (OMN-3947, #703)
+- CI guard against duplicate shared enum definitions (OMN-4036, #707)
+- ONEX handler classification rules design doc (OMN-4004, #705)
+- Structural move of non-node dirs out of nodes/ (OMN-3989, #700)
+- Update Plan REDUCER Node — FSM + HandlerCreatePlan (OMN-3943, #704)
+- GitHub Action workflow and PR webhook publisher script (OMN-3946, #702)
+- Change Detector EFFECT node with three handlers (OMN-3940, #692)
+- Domain event models for artifact reconciliation (OMN-3931, #688)
+- Artifact Registry Models + Loader (OMN-3927, #687)
+- NodeDeltaBundleEffect + NodeDeltaMetricsEffect + migrations (OMN-3142, #660)
+- Comprehensive contract schema validation (OMN-517, #667)
+- Impact Analyzer COMPUTE Node (OMN-3935, #691)
+- RetryWorker for subscription notification delivery (OMN-1454, #669)
+- ServiceEffectMockRegistry with thread-local utility (OMN-1336, #670)
+- Seed artifact registry with 15 real omnibase_infra artifacts (OMN-3938, #690)
+- Shared Enum Ownership Rule architecture docs (OMN-4038, #714)
+- Regression tests for enum class-identity split (OMN-4035, #715)
+- config_prefetch_status exposed in /health endpoint (OMN-3902, #686)
+- CI check for x-runtime-env completeness (OMN-3901, #684)
+- CI invariant for node contract discoverability (OMN-3900, #685)
+- Observability and documentation for operation bindings (OMN-1644, #671)
+- Parameterize reducer purity tests for all reducers (OMN-1005, #674)
+- Observability tests for performance metrics (OMN-926, #668)
+- Decouple prefetch contract scan from handler contract paths (OMN-3893, #683)
+- USE_EVENT_ROUTING added to docker-compose passthrough (OMN-3894, #682)
+- Close topic-constants-vs-generated-enums contract drift (OMN-3254, #676)
+- add infisical_folders check to system_health_check.sh (OMN-3902, #694)
+
+### Fixed
+- schema-tolerant parsing for legacy fixture messages in skill-lifecycle-consumer (OMN-4064, #729)
+- Trigger idempotency and forward migration runner for warm Postgres volumes (OMN-4173, #728)
+- Restore _get_route_dispatcher_id shim for handler_id compat (OMN-4057, #727)
+- Cloud env runtime fixes: contracts in Docker, ProtocolEventBusPublisher, snappy, dispatch shim (OMN-4072, #718)
+- Create 041_create_agent_trace_tables.sql, fix sequence validator (OMN-4080, #725)
+- Wire omniintelligence migration runner to docker-compose (OMN-4082, #724)
+- Add 038_placeholder.sql to document intentional gap (OMN-4086, #722)
+- Override OMNIBASE_INFRA_DB_URL to Docker-internal hostname for containers (OMN-4084, #721)
+- Coerce category input in get_dispatchers() for foreign-enum safety (OMN-4089, #720)
+- Skip test_health_endpoint_accessible when Postgres unavailable in CI (OMN-4046, #697)
+- make provision-infisical.py folder creation idempotent (OMN-4044, #698)
+- Remove duplicate EnumMessageCategory from omnibase_infra (OMN-4033, #701)
+- Replace sleep-based wait with deterministic signal in E2E tests (OMN-1327, #673)
+- Replace hardcoded __version__ with importlib.metadata (OMN-3831, #679)
+
+### Changed
+- Extract coerce_message_category to _enum_coercion to break circular import (OMN-4087, #719)
+- Coerce EnumMessageCategory at RegistryDispatcher boundary call sites (OMN-4037, #716)
+- ServiceTopicCatalogPostgres renamed to HandlerTopicCatalogPostgres (OMN-4011, #717)
+- 3.2b classification: projector mixins KEEP AS MIXIN (OMN-4009, #712)
+- 3.3 classification: MixinLlmHttpTransport scores 5/5, deferred (OMN-4008, #711)
+- 3.2a classification: MixinAsyncCircuitBreaker + MixinRetryExecution KEEP AS MIXIN (OMN-4006, #709)
+- Rename architecture_validator and contract_registry_reducer to node_ prefix (OMN-3987, #695)
+- Wire contract validation gate into omnibase_infra CI (OMN-4041, #699)
+- Mark docker-integration-tests as continue-on-error in CI (#696)
+- Split release.yml into critical publish + advisory post-release checks (OMN-3833, #677)
+- Refactor CI workflow to use composite action for Python/uv setup (OMN-1430, #675)
+- Add validate-string-versions pre-commit hook (OMN-3832, #680)
+- Investigate non-node dirs under nodes/ (OMN-3988, #693)
+- POC 3.1 outcome: postgres mixins classified as KEEP AS MIXIN (OMN-4005, #706)
+- skill lifecycle writer: tolerate old-schema messages (OMN-4076, #713)
+
 ## [0.16.0] - 2026-03-07
 
 ### Added

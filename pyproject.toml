@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.16.0"
+version = "0.16.1"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{name = "OmniNode Team", email = "team@omninode.ai"}]
 license = {text = "MIT"}
@@ -312,6 +312,7 @@ markers = [
     "mcp_protocol: Mock-based MCP JSON-RPC protocol tests (not real SDK integration)",
     "llm: Tests requiring real LLM inference endpoints (local GPU/Apple Silicon servers)",
     "consul: Tests requiring a live Consul instance (legacy marker retained for existing tests — Consul removed in OMN-3995)",
+    "ci: CI/CD parity and configuration tests that run without infrastructure (OMN-4307)",
 ]
 addopts = [
     "--strict-markers",

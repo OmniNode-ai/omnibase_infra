@@ -1,0 +1,72 @@
+name: Env Parity Check (OMN-4307)
+
+# Runs on every PR that touches docker-compose or the k8s ConfigMap.
+# Also runs on pushes to main so the gate stays green on the default branch.
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "docker/docker-compose*.yml"
+      - "tests/ci/test_env_parity.py"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "docker/docker-compose*.yml"
+      - "tests/ci/test_env_parity.py"
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  UV_VERSION: "0.6.14"
+  PYTHON_VERSION: "3.12"
+  CACHE_VERSION: "0.6.0"
+
+jobs:
+  env-parity:
+    name: Env Parity (docker-compose vs k8s ConfigMap)
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@v4
+        with:
+          path: omnibase_infra
+
+      - name: Checkout omninode_infra (sibling — provides k8s ConfigMap)
+        uses: actions/checkout@v4
+        with:
+          repository: OmniNode-ai/omninode_infra
+          path: omninode_infra
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python and uv
+        uses: ./omnibase_infra/.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+
+      - name: Run env parity test
+        working-directory: omnibase_infra
+        env:
+          OMNINODE_INFRA_DIR: ${{ github.workspace }}/omninode_infra
+        run: |
+          echo "================================================================"
+          echo "Env Parity Check — docker-compose x-runtime-env vs k8s ConfigMap"
+          echo "Ticket: OMN-4307"
+          echo "================================================================"
+          uv run pytest tests/ci/test_env_parity.py -v --tb=short
