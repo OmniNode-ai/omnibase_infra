@@ -40,7 +40,7 @@ Node Responsibilities:
 Related Modules:
     - contract.yaml: Handler routing and I/O model definitions
     - handlers/: PostgreSQL operation handlers
-    - contract_registry_reducer/: Source of intents
+    - node_contract_registry_reducer/: Source of intents
     - models/model_payload_*.py: Intent payload types
 
 Related Tickets:

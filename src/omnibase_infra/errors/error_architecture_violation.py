@@ -12,7 +12,7 @@ Related:
 
 Example:
     >>> from omnibase_infra.errors import ArchitectureViolationError
-    >>> from omnibase_infra.nodes.architecture_validator import ModelArchitectureViolation
+    >>> from omnibase_infra.nodes.node_architecture_validator import ModelArchitectureViolation
     >>>
     >>> violations = (
     ...     ModelArchitectureViolation(
@@ -43,7 +43,9 @@ from omnibase_infra.models.errors.model_infra_error_context import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_infra.nodes.architecture_validator import ModelArchitectureViolation
+    from omnibase_infra.nodes.node_architecture_validator import (
+        ModelArchitectureViolation,
+    )
 
 
 class ArchitectureViolationError(RuntimeHostError):

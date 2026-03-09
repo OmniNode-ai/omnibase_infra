@@ -37,7 +37,7 @@ from omnibase_core.models.events import (
 from omnibase_core.nodes import ModelReducerOutput
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
-from omnibase_infra.nodes.contract_registry_reducer.models.model_contract_registry_state import (
+from omnibase_infra.nodes.node_contract_registry_reducer.models.model_contract_registry_state import (
     ModelContractRegistryState,
 )
 from omnibase_infra.runtime.contract_registration_event_router import (

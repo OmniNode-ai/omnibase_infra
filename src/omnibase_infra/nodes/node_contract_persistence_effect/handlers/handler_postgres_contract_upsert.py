@@ -54,7 +54,7 @@ from omnibase_infra.models.model_backend_result import ModelBackendResult
 if TYPE_CHECKING:
     import asyncpg
 
-    from omnibase_infra.nodes.contract_registry_reducer.models import (
+    from omnibase_infra.nodes.node_contract_registry_reducer.models import (
         ModelPayloadUpsertContract,
     )
 

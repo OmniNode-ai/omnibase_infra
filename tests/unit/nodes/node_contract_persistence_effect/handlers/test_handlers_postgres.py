@@ -35,14 +35,6 @@ from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
 )
-from omnibase_infra.nodes.contract_registry_reducer.models import (
-    ModelPayloadCleanupTopicReferences,
-    ModelPayloadDeactivateContract,
-    ModelPayloadMarkStale,
-    ModelPayloadUpdateHeartbeat,
-    ModelPayloadUpdateTopic,
-    ModelPayloadUpsertContract,
-)
 from omnibase_infra.nodes.node_contract_persistence_effect.handlers.handler_postgres_cleanup_topics import (
     HandlerPostgresCleanupTopics,
 )
@@ -60,6 +52,14 @@ from omnibase_infra.nodes.node_contract_persistence_effect.handlers.handler_post
 )
 from omnibase_infra.nodes.node_contract_persistence_effect.handlers.handler_postgres_topic_update import (
     HandlerPostgresTopicUpdate,
+)
+from omnibase_infra.nodes.node_contract_registry_reducer.models import (
+    ModelPayloadCleanupTopicReferences,
+    ModelPayloadDeactivateContract,
+    ModelPayloadMarkStale,
+    ModelPayloadUpdateHeartbeat,
+    ModelPayloadUpdateTopic,
+    ModelPayloadUpsertContract,
 )
 
 # Fixed test time for deterministic testing

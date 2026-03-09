@@ -26,7 +26,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from omnibase_infra.nodes.effects.models.model_llm_function_def import (
+from omnibase_infra.models.llm.model_llm_function_def import (
     ModelLlmFunctionDef,
 )
 

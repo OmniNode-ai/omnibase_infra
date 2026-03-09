@@ -27,10 +27,7 @@ node_version:
 node_type: "EFFECT_GENERIC"
 # Description
 description: >
-  Effect node for per-model performance metrics rollup. Subscribes to bundle
-  completion signals from NodeDeltaBundleEffect and upserts aggregated counters
-  into delta_metrics_by_model using ON CONFLICT DO UPDATE with incremented
-  counters. Supports period-based rollups for dashboard visualization.
+  Effect node for per-model performance metrics rollup. Subscribes to bundle completion signals from NodeDeltaBundleEffect and upserts aggregated counters into delta_metrics_by_model using ON CONFLICT DO UPDATE with incremented counters. Supports period-based rollups for dashboard visualization.
 
 # Strongly typed I/O models
 input_model:

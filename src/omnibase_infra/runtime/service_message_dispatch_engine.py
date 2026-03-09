@@ -129,7 +129,7 @@ Category Support:
 
 from __future__ import annotations
 
-__all__ = ["MessageDispatchEngine"]
+__all__ = ["MessageDispatchEngine", "coerce_message_category"]
 
 import asyncio
 import inspect
@@ -188,6 +188,33 @@ if TYPE_CHECKING:
 
     from omnibase_core.enums.enum_node_kind import EnumNodeKind
     from omnibase_core.models.reducer.model_intent import ModelIntent
+
+
+def coerce_message_category(value: object) -> EnumMessageCategory:
+    """Normalize any category input to the canonical EnumMessageCategory.
+
+    Accepts:
+    - A canonical ``EnumMessageCategory`` instance (pass-through).
+    - A string matching a valid enum value (e.g. ``"EVENT"``).
+    - A foreign enum instance whose ``.value`` matches a valid enum value.
+
+    Raises:
+        ValueError: When ``value`` cannot be resolved to a valid enum member.
+            The error message lists all valid values.
+
+    .. versionadded:: 0.8.0
+        Added for boundary coercion at dispatcher registration entry points (OMN-4034).
+    """
+    if isinstance(value, EnumMessageCategory):
+        return value
+    raw: object = value.value if hasattr(value, "value") else value  # type: ignore[union-attr]
+    try:
+        return EnumMessageCategory(raw)
+    except ValueError:
+        raise ValueError(
+            f"Invalid message category: {value!r}. "
+            f"Expected one of: {[e.value for e in EnumMessageCategory]}"
+        )
 
 
 def _derive_dlq_topic(
@@ -721,11 +748,16 @@ class MessageDispatchEngine:
                 error_code=EnumCoreErrorCode.INVALID_PARAMETER,
             )
 
-        if not isinstance(category, EnumMessageCategory):
+        # Normalize category to canonical EnumMessageCategory at the boundary.
+        # Accepts: canonical instance (pass-through), valid string, foreign enum with matching .value.
+        # Raises ValueError (not ModelOnexError) listing valid values for invalid input.
+        try:
+            category = coerce_message_category(category)
+        except ValueError as exc:
             raise ModelOnexError(
-                message=f"Category must be EnumMessageCategory, got {type(category).__name__}.",
+                message=str(exc),
                 error_code=EnumCoreErrorCode.INVALID_PARAMETER,
-            )
+            ) from exc
 
         # Runtime validation for node_kind to catch dynamic dispatch issues
         # where type checkers can't help (e.g., dynamically constructed arguments)

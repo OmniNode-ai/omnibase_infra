@@ -35,7 +35,7 @@ description: >
 # Strongly typed I/O models
 input_model:
   name: "ModelPayloadLedgerAppend"
-  module: "omnibase_infra.nodes.reducers.models"
+  module: "omnibase_infra.nodes.node_registration_reducer.models"
   description: "Input model for ledger append operations (event payload with Kafka position)."
 output_model:
   name: "ModelLedgerAppendResult"

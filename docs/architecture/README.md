@@ -29,6 +29,8 @@ Start here to understand the ONEX architecture:
 | Document | Description |
 |----------|-------------|
 | [Handler Protocol-Driven Architecture](HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md) | Handler system design |
+| [Handler Classification Rules](HANDLER_CLASSIFICATION_RULES.md) | Classification rubric for mixin/service → handler refactoring (Epic 3, OMN-4004) |
+| [Handler Classification 3.2a — Circuit Breaker + Retry](HANDLER_CLASSIFICATION_3_2A_CIRCUIT_BREAKER_RETRY.md) | Classification of MixinAsyncCircuitBreaker + MixinRetryExecution: KEEP AS MIXIN (OMN-4006) |
 | [Snapshot Publishing](SNAPSHOT_PUBLISHING.md) | Snapshot publication patterns |
 
 ## Registration System
@@ -61,6 +63,12 @@ Start here to understand the ONEX architecture:
 | Document | Description |
 |----------|-------------|
 | [MCP Service Architecture](MCP_SERVICE_ARCHITECTURE.md) | MCP (Model Context Protocol) service layer: tool registration, schema generation, skip_server testing |
+
+## Shared Enums
+
+| Document | Description |
+|----------|-------------|
+| [Shared Enum Ownership Rule](SHARED_ENUM_OWNERSHIP.md) | Canonical rule: enums defined once in `omnibase_core`, imported downstream, coercion at boundaries |
 
 ## Resilience
 

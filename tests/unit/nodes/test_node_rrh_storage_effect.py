@@ -23,7 +23,7 @@ import yaml
 from omnibase_infra.diagnostics.enum_verdict import EnumVerdict
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.rrh.model_rrh_result import ModelRRHResult
-from omnibase_infra.nodes.architecture_validator.models.model_rule_check_result import (
+from omnibase_infra.nodes.node_architecture_validator.models.model_rule_check_result import (
     ModelRuleCheckResult,
 )
 from omnibase_infra.nodes.node_rrh_storage_effect.handlers.handler_rrh_storage_write import (

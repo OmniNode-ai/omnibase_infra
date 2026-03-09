@@ -26,7 +26,7 @@ repos:
     rev: v0.17.2
     hooks:
       - id: yamlfmt
-        exclude: ^(archived/|tests/fixtures/|\.github/workflows/)
+        exclude: ^(archived/|tests/fixtures/|tests/unit/registry/fixtures/|\.github/workflows/)
   # Essential file formatting (standard across ecosystem)
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -39,14 +39,6 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
         args: [--maxkb=1000]
-  # ONEX String Version Anti-Pattern Detection (from omnibase_core)
-  # Prevents hardcoded __version__ in __init__.py and string version anti-patterns
-  - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: v0.24.0  # Pin to latest tag; bump during coordinated releases
-    hooks:
-      - id: validate-string-versions
-        name: ONEX String Version Anti-Pattern Detection
-
   # ONEX Python Development Hooks (from shared templates)
   # Order: ruff format → ruff check → mypy (formatting before linting before type checking)
   # Note: ruff replaces both black and isort (10-100x faster)

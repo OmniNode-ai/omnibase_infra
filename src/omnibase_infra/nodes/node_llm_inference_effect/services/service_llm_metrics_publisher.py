@@ -45,7 +45,7 @@ from omnibase_infra.nodes.node_llm_inference_effect.services.protocol_llm_handle
 )
 
 if TYPE_CHECKING:
-    from omnibase_infra.nodes.effects.models.model_llm_inference_response import (
+    from omnibase_infra.models.llm.model_llm_inference_response import (
         ModelLlmInferenceResponse,
     )
     from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request import (

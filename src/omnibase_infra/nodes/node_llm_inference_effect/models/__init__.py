@@ -30,7 +30,7 @@ Re-exported from shared effect models:
 from __future__ import annotations
 
 from omnibase_infra.models import ModelBackendResult
-from omnibase_infra.nodes.effects.models import (
+from omnibase_infra.models.llm import (
     ModelLlmFunctionCall,
     ModelLlmFunctionDef,
     ModelLlmInferenceResponse,

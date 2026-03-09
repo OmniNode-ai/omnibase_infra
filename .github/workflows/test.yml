@@ -65,6 +65,9 @@ jobs:
       - name: Check ruff linting (includes import sorting)
         run: uv run ruff check src/ tests/
 
+      - name: Check shared enum ownership
+        run: python scripts/check_shared_enum_ownership.py src/
+
       - name: Run mypy type checking
         run: uv run mypy src/omnibase_infra
 

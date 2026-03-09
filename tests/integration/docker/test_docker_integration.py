@@ -696,6 +696,7 @@ class TestDockerHealthCheck:
     def test_health_endpoint_accessible(
         self,
         docker_available: bool,
+        skip_if_no_postgres: None,
         built_test_image: str,
         available_port: int,
     ) -> None:
@@ -703,6 +704,12 @@ class TestDockerHealthCheck:
 
         The container exposes port 8085 with a /health endpoint
         that should respond to HTTP requests.
+
+        Requires Postgres to be reachable at localhost:5436 — the runtime
+        kernel attempts a Postgres connection during startup regardless of
+        ONEX_EVENT_BUS_TYPE.  On CI runners without local Docker infra (e.g.
+        ubuntu-latest), this test is skipped gracefully via the
+        skip_if_no_postgres fixture.
         """
         if not docker_available:
             pytest.skip("Docker daemon not available")

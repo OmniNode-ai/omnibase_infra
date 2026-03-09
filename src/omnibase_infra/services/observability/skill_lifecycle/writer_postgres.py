@@ -52,6 +52,58 @@ from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 
 logger = logging.getLogger(__name__)
 
+# OMN-4076: Required fields for schema validation pre-filter.
+# Old-schema messages on the skill-started/completed topics may be missing one or more
+# of these keys. Bare dict access (e["key"]) raises KeyError, failing the entire batch
+# and blocking the consumer group from committing offsets. The pre-filter skips invalid
+# messages and logs a WARNING so they can be investigated without stalling the consumer.
+_REQUIRED_STARTED_FIELDS: frozenset[str] = frozenset(
+    {"event_id", "run_id", "skill_name", "repo_id", "correlation_id", "emitted_at"}
+)
+_REQUIRED_COMPLETED_FIELDS: frozenset[str] = frozenset(
+    {
+        "event_id",
+        "run_id",
+        "skill_name",
+        "repo_id",
+        "correlation_id",
+        "status",
+        "emitted_at",
+    }
+)
+
+
+def _validate_event_fields(
+    event: dict[str, object],
+    required: frozenset[str],
+    context: str,
+) -> bool:
+    """Return True if all required fields are present in the event dict.
+
+    Logs a WARNING with missing keys and context string on failure, returns False.
+    Old-schema messages missing required keys are skipped rather than crashing the batch.
+
+    Args:
+        event: The event dict to validate.
+        required: Frozenset of required field names.
+        context: Human-readable context string for the log message (e.g. "write_started").
+
+    Returns:
+        True if all required fields are present, False otherwise.
+    """
+    missing = required - event.keys()
+    if missing:
+        logger.warning(
+            "Skipping event with missing required fields",
+            extra={
+                "context": context,
+                "missing_fields": sorted(missing),
+                "event_keys": sorted(event.keys()),
+            },
+        )
+        return False
+    return True
+
 
 def _parse_emitted_at(value: object) -> datetime:
     """Parse an ISO-format timestamp string into a datetime.
@@ -185,6 +237,23 @@ class WriterSkillLifecyclePostgres(MixinAsyncCircuitBreaker):
             ON CONFLICT (event_id) DO NOTHING
         """
 
+        # OMN-4076: Pre-filter old-schema messages that are missing required keys.
+        # Invalid events are skipped with a WARNING; valid events proceed to executemany.
+        valid_events = [
+            e
+            for e in events
+            if _validate_event_fields(e, _REQUIRED_STARTED_FIELDS, "write_started")
+        ]
+        if not valid_events:
+            logger.warning(
+                "write_started: entire batch skipped — no valid events after schema filter",
+                extra={
+                    "batch_size": len(events),
+                    "correlation_id": str(op_correlation_id),
+                },
+            )
+            return 0
+
         try:
             async with self._pool.acquire() as conn:
                 await conn.executemany(
@@ -201,7 +270,7 @@ class WriterSkillLifecyclePostgres(MixinAsyncCircuitBreaker):
                             e.get("session_id"),
                             _parse_emitted_at(e["emitted_at"]),
                         )
-                        for e in events
+                        for e in valid_events
                     ],
                 )
 
@@ -211,11 +280,12 @@ class WriterSkillLifecyclePostgres(MixinAsyncCircuitBreaker):
             logger.debug(
                 "Wrote skill-started batch",
                 extra={
-                    "count": len(events),
+                    "count": len(valid_events),
+                    "skipped": len(events) - len(valid_events),
                     "correlation_id": str(op_correlation_id),
                 },
             )
-            return len(events)
+            return len(valid_events)
 
         except asyncpg.QueryCanceledError as e:
             async with self._circuit_breaker_lock:
@@ -308,6 +378,23 @@ class WriterSkillLifecyclePostgres(MixinAsyncCircuitBreaker):
             ON CONFLICT (event_id) DO NOTHING
         """
 
+        # OMN-4076: Pre-filter old-schema messages that are missing required keys.
+        # Invalid events are skipped with a WARNING; valid events proceed to executemany.
+        valid_events = [
+            e
+            for e in events
+            if _validate_event_fields(e, _REQUIRED_COMPLETED_FIELDS, "write_completed")
+        ]
+        if not valid_events:
+            logger.warning(
+                "write_completed: entire batch skipped — no valid events after schema filter",
+                extra={
+                    "batch_size": len(events),
+                    "correlation_id": str(op_correlation_id),
+                },
+            )
+            return 0
+
         try:
             async with self._pool.acquire() as conn:
                 await conn.executemany(
@@ -326,7 +413,7 @@ class WriterSkillLifecyclePostgres(MixinAsyncCircuitBreaker):
                             e.get("session_id"),
                             _parse_emitted_at(e["emitted_at"]),
                         )
-                        for e in events
+                        for e in valid_events
                     ],
                 )
 
@@ -336,11 +423,12 @@ class WriterSkillLifecyclePostgres(MixinAsyncCircuitBreaker):
             logger.debug(
                 "Wrote skill-completed batch",
                 extra={
-                    "count": len(events),
+                    "count": len(valid_events),
+                    "skipped": len(events) - len(valid_events),
                     "correlation_id": str(op_correlation_id),
                 },
             )
-            return len(events)
+            return len(valid_events)
 
         except asyncpg.QueryCanceledError as e:
             async with self._circuit_breaker_lock:

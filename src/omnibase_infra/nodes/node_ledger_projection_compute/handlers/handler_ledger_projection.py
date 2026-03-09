@@ -40,7 +40,7 @@ from omnibase_infra.enums import (
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
-from omnibase_infra.nodes.reducers.models.model_payload_ledger_append import (
+from omnibase_infra.nodes.node_registration_reducer.models.model_payload_ledger_append import (
     ModelPayloadLedgerAppend,
 )
 

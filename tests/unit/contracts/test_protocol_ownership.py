@@ -68,8 +68,8 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolValidationLedgerRepository": "protocols/protocol_validation_ledger_repository.py",
     # === [DI] Dependency injection boundaries ===
     # ProtocolConsulClient removed in OMN-3540 (Consul removal)
-    "ProtocolEffectIdempotencyStore": "nodes/effects/protocol_effect_idempotency_store.py",
-    "ProtocolPostgresAdapter": "nodes/effects/protocol_postgres_adapter.py",
+    "ProtocolEffectIdempotencyStore": "nodes/node_registry_effect/protocols/protocol_effect_idempotency_store.py",
+    "ProtocolPostgresAdapter": "nodes/node_registry_effect/protocols/protocol_postgres_adapter.py",
     "ProtocolToolExecutor": "handlers/mcp/protocols.py",
     "ProtocolLlmHandler": "nodes/node_llm_inference_effect/services/protocol_llm_handler.py",
     "ProtocolContractPublisherSource": "services/contract_publisher/sources/protocol.py",
@@ -86,7 +86,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolProjectorNotificationContext": "runtime/mixins/mixin_projector_notification_publishing.py",
     "ProtocolProjectorContext": "runtime/mixins/mixin_projector_sql_operations.py",
     # === [NODE] Node-internal protocols ===
-    "ProtocolArchitectureRule": "nodes/architecture_validator/protocols/protocol_architecture_rule.py",
+    "ProtocolArchitectureRule": "nodes/node_architecture_validator/protocols/protocol_architecture_rule.py",
     "ProtocolRegistrationIntent": "nodes/node_registration_orchestrator/protocols.py",
     "ProtocolReducer": "nodes/node_registration_orchestrator/protocols.py",
     "ProtocolEffect": "nodes/node_registration_orchestrator/protocols.py",
@@ -133,7 +133,7 @@ KNOWN_DUPLICATE_LOCATIONS: dict[str, list[str]] = {
         "handlers/service_discovery/protocol_discovery_operations.py",
     ],
     "ProtocolIntentEffect": [
-        "nodes/contract_registry_reducer/contract_registration_event_router.py",
+        "nodes/node_contract_registry_reducer/contract_registration_event_router.py",
     ],
 }
 

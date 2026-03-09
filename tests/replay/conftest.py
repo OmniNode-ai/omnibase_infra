@@ -2,14 +2,10 @@
 # Copyright (c) 2025 OmniNode Team
 """Replay-specific test fixtures for OMN-955.
 
-This module provides fixtures for event replay verification testing, including:
-- Deterministic ID and timestamp generators
-- Event sequence builders
-- State factory functions
-- Replay orchestration helpers
-
-The fixtures ensure reproducible test behavior by using deterministic
-generators instead of random UUIDs and real timestamps.
+Fixtures for event replay verification: deterministic ID and timestamp
+generators, event sequence builders, state factory functions, and replay
+orchestration helpers. Uses deterministic generators instead of random
+UUIDs and real timestamps for reproducible test behavior.
 
 Note:
     The core models (EventFactory, EventSequenceLog, EventSequenceEntry) are
@@ -25,8 +21,8 @@ from uuid import UUID
 import pytest
 
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-from omnibase_infra.nodes.reducers import RegistrationReducer
-from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+from omnibase_infra.nodes.node_registration_reducer.models import ModelRegistrationState
 
 # =============================================================================
 # Cross-Module Fixture Imports

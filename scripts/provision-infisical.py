@@ -307,8 +307,12 @@ def _create_infisical_folders(
                 "path": "/",
             },
         )
-        if resp.status_code not in (200, 201, 400, 409):
+        if resp.status_code in (400, 409):
+            logger.info("[idempotent] folder /%s/shared already exists — skipping", env)
+        elif resp.status_code not in (200, 201):
             resp.raise_for_status()
+        else:
+            logger.info("[created] /%s/shared", env)
         for folder in transport_folders:
             resp = client.post(  # type: ignore[attr-defined]
                 f"{addr}/api/v1/folders",
@@ -320,9 +324,17 @@ def _create_infisical_folders(
                     "path": "/shared",
                 },
             )
-            if resp.status_code not in (200, 201, 400, 409):
+            if resp.status_code in (400, 409):
+                logger.info(
+                    "[idempotent] folder /%s/shared/%s already exists — skipping",
+                    env,
+                    folder,
+                )
+            elif resp.status_code not in (200, 201):
                 resp.raise_for_status()
-    logger.info("Folder structure created in environments: %s", list(environments))
+            else:
+                logger.info("[created] /%s/shared/%s", env, folder)
+    logger.info("Folder structure ensured in environments: %s", list(environments))
 
 
 def _add_identity_to_project(
@@ -424,16 +436,112 @@ def main() -> int:
         "INFISICAL_CLIENT_SECRET",
         "INFISICAL_PROJECT_ID",
     )
-    if all(existing_env.get(k) for k in _provision_keys):
+    _already_provisioned = all(existing_env.get(k) for k in _provision_keys)
+    if _already_provisioned:
         logger.info(
             "Already provisioned: INFISICAL_CLIENT_ID/SECRET/PROJECT_ID are set in %s",
             args.env_file,
         )
-        logger.info("To re-provision, remove those keys from .env first.")
+        logger.info("To re-provision credentials, remove those keys from .env first.")
         logger.warning(
             "INFISICAL_ADDR in env file may differ from --addr %s — verify before use",
             args.addr,
         )
+        # Credentials exist but folder structure may be absent (e.g. first run
+        # short-circuited before folder creation, or prod/staging were added
+        # later).  Run folder creation only (idempotent) and return early.
+        if args.dry_run:
+            logger.info(
+                "[DRY RUN] Would ensure /shared/<transport> folder structure "
+                "in all environments (credentials already provisioned)"
+            )
+            return 0
+
+        # Connectivity check (same as full-provision path).
+        try:
+            with httpx.Client(timeout=10) as probe:
+                resp = probe.get(f"{args.addr}/api/status")
+                resp.raise_for_status()
+                try:
+                    body = resp.json()
+                    if body.get("status") != "ok":
+                        logger.error(
+                            "Infisical at %s returned HTTP 200 but status field is %r "
+                            "(expected 'ok'). The server may still be initialising.",
+                            args.addr,
+                            body.get("status"),
+                        )
+                        return 1
+                except (ValueError, KeyError):
+                    logger.warning(
+                        "Infisical at %s returned a non-JSON /api/status response. "
+                        "The server may still be initialising.",
+                        args.addr,
+                    )
+                    return 1
+            logger.info("Infisical is reachable and ready at %s", args.addr)
+        except (httpx.HTTPError, OSError):
+            logger.exception("Cannot reach Infisical at %s", args.addr)
+            logger.info(
+                "Start it with: docker compose -p omnibase-infra-runtime"
+                " -f docker/docker-compose.infra.yml --profile secrets up -d infisical"
+            )
+            return 1
+
+        if not _ADMIN_TOKEN_FILE.is_file():
+            logger.error(
+                "No admin token found at %s. Cannot ensure folder structure. "
+                "To recover: remove INFISICAL_CLIENT_ID/SECRET/PROJECT_ID from .env "
+                "and re-run to perform a full re-provision.",
+                _ADMIN_TOKEN_FILE,
+            )
+            return 1
+        with _ADMIN_TOKEN_FILE.open() as _f:
+            _admin_token_for_folders = _f.readline().strip()
+        if not _admin_token_for_folders:
+            logger.error(
+                "Admin token file at %s exists but is empty. Cannot ensure folder "
+                "structure. Delete the file and re-run to re-provision.",
+                _ADMIN_TOKEN_FILE,
+            )
+            return 1
+
+        project_id_for_folders = existing_env.get("INFISICAL_PROJECT_ID", "")
+        if not project_id_for_folders:
+            logger.error(
+                "INFISICAL_PROJECT_ID not found in %s. Cannot ensure folder structure.",
+                args.env_file,
+            )
+            return 1
+
+        try:
+            with httpx.Client(timeout=30) as _folder_client:
+                logger.info(
+                    "Ensuring /shared/<transport> folder structure "
+                    "(credentials already provisioned)..."
+                )
+                _create_infisical_folders(
+                    _folder_client,
+                    args.addr,
+                    _admin_token_for_folders,
+                    project_id_for_folders,
+                )
+        except httpx.HTTPStatusError as exc:
+            logger.exception(
+                "HTTP error while ensuring folder structure: %s %s returned status %d.",
+                exc.request.method,
+                exc.request.url,
+                exc.response.status_code,
+            )
+            return 1
+        except httpx.RequestError as exc:
+            logger.exception(
+                "Network error while ensuring folder structure: %s.",
+                exc,
+            )
+            return 1
+
+        logger.info("Folder structure ensured. Provisioning already complete.")
         return 0
 
     # Resolve admin password: priority: env var (highest) > CLI arg > auto-generate (lowest).

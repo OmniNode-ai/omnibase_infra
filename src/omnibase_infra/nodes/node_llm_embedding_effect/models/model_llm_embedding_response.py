@@ -22,8 +22,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_core.models.vector import ModelEmbedding
+from omnibase_infra.models.llm.model_llm_usage import ModelLlmUsage
 from omnibase_infra.models.model_backend_result import ModelBackendResult
-from omnibase_infra.nodes.effects.models.model_llm_usage import ModelLlmUsage
 from omnibase_infra.utils import validate_timezone_aware_datetime
 
 
@@ -60,7 +60,7 @@ class ModelLlmEmbeddingResponse(BaseModel):
         >>> from uuid import uuid4
         >>> from omnibase_core.models.vector import ModelEmbedding
         >>> from omnibase_infra.models.model_backend_result import ModelBackendResult
-        >>> from omnibase_infra.nodes.effects.models.model_llm_usage import ModelLlmUsage
+        >>> from omnibase_infra.models.llm.model_llm_usage import ModelLlmUsage
         >>> resp = ModelLlmEmbeddingResponse(
         ...     embeddings=(
         ...         ModelEmbedding(id="0", vector=[0.1, 0.2, 0.3]),
