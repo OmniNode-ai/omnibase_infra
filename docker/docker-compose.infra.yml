@@ -950,7 +950,7 @@ services:
   # Host browsers access the UI at http://localhost:6006.
   # OMN-3542: Added as a runtime-profile service alongside intelligence-api.
   phoenix:
-    image: arizephoenix/phoenix:latest
+    image: arizephoenix/phoenix:13.11.0 # Pinned; update via PR when bumping (OMN-4303)
     container_name: omnibase-infra-phoenix
     profiles: ["runtime", "full"]
     environment:
