@@ -400,7 +400,26 @@ class SkillLifecycleConsumer:
         """
         try:
             raw = json.loads(record.value.decode("utf-8"))
-            return dict(raw) if isinstance(raw, dict) else None
+            if isinstance(raw, dict):
+                payload: dict[str, object] = dict(raw)
+            elif isinstance(raw, list) and len(raw) == 1 and isinstance(raw[0], dict):
+                # Legacy fixture format: array-wrapped single event
+                logger.warning(
+                    "Unwrapping array-wrapped legacy message",
+                    extra={"topic": record.topic, "offset": record.offset},
+                )
+                payload = dict(raw[0])
+            else:
+                return None
+            # Forward-compat: rename deprecated field skill_event_type -> event_type
+            if "skill_event_type" in payload and "event_type" not in payload:
+                logger.warning(
+                    "Migrating deprecated skill_event_type field to event_type",
+                    extra={"topic": record.topic, "offset": record.offset},
+                )
+                payload = dict(payload)
+                payload["event_type"] = payload.pop("skill_event_type")
+            return payload
         except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
             logger.warning(
                 "Failed to parse Kafka message",
