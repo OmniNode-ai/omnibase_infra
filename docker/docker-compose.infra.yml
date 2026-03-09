@@ -331,6 +331,43 @@ services:
       - "com.omninode.service=valkey"
       - "com.omninode.layer=infrastructure"
   # ==========================================================================
+  # Memgraph - Graph Database (Optional, omnimemory profile)
+  # ==========================================================================
+  # Added: OMN-4310 — Memgraph must share omnibase-infra-network so that
+  # omninode-runtime (PluginMemory) can reach it. It CANNOT run only in
+  # omnimemory/docker-compose.yml (separate network, unreachable from runtime).
+  omnibase-infra-memgraph:
+    image: "memgraph/memgraph:${MEMGRAPH_VERSION:-2.18.1}"
+    container_name: "omnibase-infra-memgraph"
+    profiles: ["omnimemory", "full"]
+    restart: unless-stopped
+    ports:
+      - "${MEMGRAPH_BOLT_PORT:-7687}:7687"
+      - "${MEMGRAPH_HTTP_PORT:-7444}:7444"
+    networks:
+      - omnibase-infra-network
+    volumes:
+      - omnibase-infra-memgraph-data:/var/lib/memgraph
+      - omnibase-infra-memgraph-logs:/var/log/memgraph
+    environment:
+      MEMGRAPH_BOLT_PORT: "${MEMGRAPH_BOLT_PORT:-7687}"
+      MEMGRAPH_HTTP_PORT: "${MEMGRAPH_HTTP_PORT:-7444}"
+    command: >
+      --storage-snapshot-retention-count=2 --storage-wal-enabled=true --storage-snapshot-interval-sec=3600 --log-level=WARNING
+
+    healthcheck:
+      # Note: nc (netcat) is available in the official memgraph image.
+      # If using a stripped image, fall back to: bash -c 'echo > /dev/tcp/localhost/7687'
+      test: ["CMD-SHELL", "nc -z localhost 7687 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    mem_limit: "${MEMGRAPH_MEMORY_LIMIT_MB:-4096}m"
+    labels:
+      - "com.omninode.service=memgraph"
+      - "com.omninode.layer=infrastructure"
+  # ==========================================================================
   # Infisical - Secrets Management (Optional)
   # ==========================================================================
   infisical:
@@ -997,3 +1034,8 @@ volumes:
     name: omninode-contract-resolver-logs
   phoenix_data:
     name: omnibase-infra-phoenix-data
+  # Memgraph volumes (omnimemory profile, OMN-4310)
+  omnibase-infra-memgraph-data:
+    name: "omnibase-infra-memgraph-data"
+  omnibase-infra-memgraph-logs:
+    name: "omnibase-infra-memgraph-logs"
