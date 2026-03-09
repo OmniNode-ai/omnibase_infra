@@ -31,6 +31,7 @@ from omnibase_infra.topics import (
     SUFFIX_NODE_INTROSPECTION,
     SUFFIX_NODE_REGISTRATION,
     SUFFIX_NODE_REGISTRATION_ACKED,
+    SUFFIX_OMNIINTELLIGENCE_ROUTING_DECISION_CMD,
     SUFFIX_OMNIMEMORY_CRAWL_REQUESTED,
     SUFFIX_OMNIMEMORY_CRAWL_TICK,
     SUFFIX_OMNIMEMORY_DOCUMENT_CHANGED,
@@ -200,8 +201,8 @@ class TestIntelligenceTopicSuffixes:
             )
 
     def test_intelligence_topic_count(self) -> None:
-        """Intelligence spec registry should have 12 topics (10 original + 2 decision-recorded added in OMN-2943)."""
-        assert len(ALL_INTELLIGENCE_TOPIC_SPECS) == 12
+        """Intelligence spec registry should have 13 topics (10 original + 2 decision-recorded added in OMN-2943 + 1 routing-decision CMD added in OMN-4299)."""
+        assert len(ALL_INTELLIGENCE_TOPIC_SPECS) == 13
 
     def test_intelligence_command_topics(self) -> None:
         """Intelligence command topics should be defined."""
@@ -245,11 +246,28 @@ class TestIntelligenceTopicSuffixes:
         )
 
     def test_intelligence_topics_use_3_partitions(self) -> None:
-        """All intelligence topics should use 3 partitions."""
+        """Most intelligence topics should use 3 partitions; routing-decision CMD uses 1 (short-lived command)."""
+        one_partition_topics = {SUFFIX_OMNIINTELLIGENCE_ROUTING_DECISION_CMD}
         for spec in ALL_INTELLIGENCE_TOPIC_SPECS:
-            assert spec.partitions == 3, (
-                f"Expected 3 partitions for {spec.suffix}, got {spec.partitions}"
-            )
+            if spec.suffix in one_partition_topics:
+                assert spec.partitions == 1, (
+                    f"Expected 1 partition for {spec.suffix}, got {spec.partitions}"
+                )
+            else:
+                assert spec.partitions == 3, (
+                    f"Expected 3 partitions for {spec.suffix}, got {spec.partitions}"
+                )
+
+    def test_routing_decision_cmd_topic_registered(self) -> None:
+        """Routing decision CMD topic must be registered in ALL_PROVISIONED_SUFFIXES (OMN-4299)."""
+        assert "onex.cmd.omniintelligence.routing-decision.v1" in ALL_PROVISIONED_SUFFIXES
+
+    def test_routing_decision_cmd_suffix_value(self) -> None:
+        """SUFFIX_OMNIINTELLIGENCE_ROUTING_DECISION_CMD must have correct value."""
+        assert (
+            SUFFIX_OMNIINTELLIGENCE_ROUTING_DECISION_CMD
+            == "onex.cmd.omniintelligence.routing-decision.v1"
+        )
 
     def test_no_duplicate_intelligence_suffixes(self) -> None:
         """Intelligence topic specs should not contain duplicates."""

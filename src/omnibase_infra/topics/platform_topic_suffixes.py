@@ -237,6 +237,17 @@ Producer: omniintelligence decision_emitter
 Consumer: Intelligence coordination, replay infrastructure
 """
 
+SUFFIX_OMNIINTELLIGENCE_ROUTING_DECISION_CMD: str = (
+    "onex.cmd.omniintelligence.routing-decision.v1"
+)
+"""Internal control plane routing decision command topic.
+
+Producer: omniclaude (cross-domain CMD — see hooks/topics.py ROUTING_DECISION_CMD)
+Consumer: omniintelligence routing decision handler
+Lifecycle: internal_control (OMN-3294)
+Governance: topic_allowlist.yaml (not a contract topic_base)
+"""
+
 # =============================================================================
 # OMNIMEMORY DOMAIN TOPIC SUFFIXES (omnimemory plugin)
 # =============================================================================
@@ -805,6 +816,12 @@ ALL_INTELLIGENCE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     # Decision recording topics (OMN-2943 — previously unprovisioned gap)
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_DECISION_RECORDED_EVT, partitions=3),
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_DECISION_RECORDED_CMD, partitions=3),
+    # Routing decision CMD topic (OMN-4299 — cross-domain cmd from omniclaude)
+    ModelTopicSpec(
+        suffix=SUFFIX_OMNIINTELLIGENCE_ROUTING_DECISION_CMD,
+        partitions=1,
+        kafka_config={"retention.ms": "86400000"},  # 1 day — command topics are short-lived
+    ),
 )
 """Intelligence domain topic specs provisioned for PluginIntelligence."""
 
