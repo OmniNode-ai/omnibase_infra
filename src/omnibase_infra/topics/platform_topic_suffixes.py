@@ -375,6 +375,17 @@ Producer: NodeGmailArchiveCleanupEffect / HandlerGmailArchiveCleanup
 Consumer: None (intentionally fire-and-forget; see OMN-2937)
 """
 
+SUFFIX_BASELINES_COMPUTED: str = "onex.evt.omnibase-infra.baselines-computed.v1"
+"""Emitted after baseline ROI computation completes for a pattern cohort.
+
+Published by the omnibase_infra baselines compute node after each baseline
+ROI computation cycle completes. The omnidash /baselines route subscribes to
+this topic to display baseline metrics in real time.
+
+Producer: omnibase_infra baselines compute node (TODO: implement — OMN-4296)
+Consumer: omnidash /baselines dashboard
+"""
+
 # Full topic name (not a suffix) — named as such to be unambiguous.
 # Used by monitor_logs.py postgres error emitter and downstream consumers.
 TOPIC_DB_ERROR_V1: str = "onex.evt.omnibase-infra.db-error.v1"
@@ -401,6 +412,15 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_GMAIL_ARCHIVE_PURGED, partitions=3),
     # PostgreSQL error events (3 partitions — low-throughput, error-driven)
     ModelTopicSpec(suffix=TOPIC_DB_ERROR_V1, partitions=3),
+    # Baselines ROI computation results (1 partition — low-throughput, per-cohort)
+    ModelTopicSpec(
+        suffix=SUFFIX_BASELINES_COMPUTED,
+        partitions=1,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
 )
 """Omnibase_infra domain topic specs for internal effect nodes.
 
