@@ -59,6 +59,13 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          # skip-install because the repo is checked out into a subdirectory;
+          # uv sync must run from the correct working-directory below.
+          skip-install: "true"
+
+      - name: Install dependencies
+        working-directory: omnibase_infra
+        run: uv sync --reinstall-package omnibase-core --reinstall-package omnibase-spi
 
       - name: Run env parity test
         working-directory: omnibase_infra
