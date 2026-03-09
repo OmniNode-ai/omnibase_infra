@@ -308,8 +308,12 @@ class RegistryDispatcher:
 
             entry = self._dispatchers_by_id.pop(dispatcher_id)
 
-            # Remove from category index
-            category = entry.dispatcher.category
+            # Remove from category index.
+            # Coerce to canonical EnumMessageCategory — registration stored the
+            # canonical key (via coerce_message_category), so looking up by the
+            # raw dispatcher.category (which may be a foreign enum) would miss
+            # the entry and leave a ghost (OMN-4087).
+            category = coerce_message_category(entry.dispatcher.category)
             category_list = self._dispatchers_by_category[category]
             self._dispatchers_by_category[category] = [
                 e for e in category_list if e.registration_id != entry.registration_id
@@ -574,7 +578,7 @@ class RegistryDispatcher:
         # circular import chain: registry_dispatcher → service_message_dispatch_engine
         # → dispatch_context_enforcer → registry_dispatcher.
         try:
-            coerce_message_category(dispatcher.category)
+            _canonical_category = coerce_message_category(dispatcher.category)  # raises on invalid
         except ValueError:
             raise ModelOnexError(
                 message=f"Dispatcher category must be EnumMessageCategory, got {type(dispatcher.category).__name__}",

@@ -149,3 +149,85 @@ def test_registry_dispatcher_imports_without_circular_error() -> None:
     assert hasattr(module, "RegistryDispatcher"), (
         "RegistryDispatcher not found in registry_dispatcher module"
     )
+
+
+# ---------------------------------------------------------------------------
+# Tests — unregister ghost entry fix (OMN-4087)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_unregister_dispatcher_with_foreign_enum_category() -> None:
+    """Unregister with a foreign-enum category must not leave a ghost entry.
+
+    Before the OMN-4087 fix, unregister_dispatcher() looked up the category
+    key using the *raw* dispatcher.category value. When the dispatcher was
+    registered with a foreign enum (e.g. ForeignCategory.EVENT), the canonical
+    key EnumMessageCategory.EVENT was stored at registration time — but the
+    unregister path used ForeignCategory.EVENT as the key, which was never a
+    key, so the entry was silently left behind (ghost entry).
+
+    After the fix, unregister coerces the category the same way registration
+    does, so the lookup always uses the canonical key.
+    """
+    from datetime import UTC, datetime
+
+    from omnibase_core.enums import EnumNodeKind
+    from omnibase_infra.enums import EnumMessageCategory as InfraEnumMessageCategory
+    from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
+    from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+    from omnibase_infra.runtime.registry_dispatcher import RegistryDispatcher
+
+    class ForeignEnumDispatcher:
+        """Dispatcher whose .category is a foreign enum with a matching value."""
+
+        def __init__(self) -> None:
+            self._dispatcher_id = "foreign-enum-dispatcher"
+            # ForeignCategory is defined at module level in this test file
+            self._category = ForeignCategory.EVENT
+            self._node_kind = EnumNodeKind.REDUCER
+            self._message_types: set[str] = set()
+
+        @property
+        def dispatcher_id(self) -> str:
+            return self._dispatcher_id
+
+        @property
+        def category(self) -> ForeignCategory:  # type: ignore[override]
+            return self._category
+
+        @property
+        def message_types(self) -> set[str]:
+            return self._message_types
+
+        @property
+        def node_kind(self) -> EnumNodeKind:
+            return self._node_kind
+
+        async def handle(self, envelope: object) -> ModelDispatchResult:
+            return ModelDispatchResult(
+                status=EnumDispatchStatus.SUCCESS,
+                topic="test.events",
+                dispatcher_id=self._dispatcher_id,
+                started_at=datetime(2025, 1, 1, tzinfo=UTC),
+            )
+
+    registry = RegistryDispatcher()
+    dispatcher = ForeignEnumDispatcher()
+
+    # Register — canonical key EnumMessageCategory.EVENT is stored
+    registry.register_dispatcher(dispatcher)
+    assert registry.dispatcher_count == 1
+
+    # Unregister — must coerce category to canonical key before lookup
+    removed = registry.unregister_dispatcher("foreign-enum-dispatcher")
+    assert removed is True, "unregister_dispatcher should return True for a registered dispatcher"
+    assert registry.dispatcher_count == 0, "dispatcher count should be 0 after unregister"
+
+    # Freeze and verify no ghost entry remains in the category index
+    registry.freeze()
+    result = registry.get_dispatchers(InfraEnumMessageCategory.EVENT)
+    assert result == [], (
+        f"Ghost entry detected: get_dispatchers(EVENT) returned {result!r} "
+        "after unregister — unregister did not coerce the foreign enum category key"
+    )
