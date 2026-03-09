@@ -47,7 +47,7 @@ def coerce_message_category(value: object) -> EnumMessageCategory:
     """
     if isinstance(value, EnumMessageCategory):
         return value
-    raw: object = value.value if hasattr(value, "value") else value  # type: ignore[union-attr]
+    raw: object = value.value if hasattr(value, "value") else value
     try:
         return EnumMessageCategory(raw)
     except ValueError:
