@@ -10,7 +10,7 @@
 --   re-evaluations for the same PR + SHA upsert rather than duplicate.
 --
 -- ROLLBACK:
---   See rollback/rollback_038_create_merge_gate_decisions.sql
+--   See rollback/rollback_043_create_merge_gate_decisions.sql
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.merge_gate_decisions (
