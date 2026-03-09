@@ -321,6 +321,39 @@ class TestOmniMemoryTopicSuffixes:
         assert len(suffixes) == len(set(suffixes))
 
 
+class TestOmnibaseInfraTopicSuffixes:
+    """Tests for omnibase_infra domain topic suffix constants."""
+
+    @pytest.mark.unit
+    def test_baselines_computed_topic_registered(self) -> None:
+        """baselines-computed suffix must be present in ALL_PROVISIONED_SUFFIXES."""
+        from omnibase_infra.topics import ALL_PROVISIONED_SUFFIXES
+
+        assert (
+            "onex.evt.omnibase-infra.baselines-computed.v1" in ALL_PROVISIONED_SUFFIXES
+        )
+
+    @pytest.mark.unit
+    def test_baselines_computed_suffix_constant_defined(self) -> None:
+        """SUFFIX_BASELINES_COMPUTED constant must be exported from topics package."""
+        from omnibase_infra.topics import SUFFIX_BASELINES_COMPUTED
+
+        assert (
+            SUFFIX_BASELINES_COMPUTED == "onex.evt.omnibase-infra.baselines-computed.v1"
+        )
+
+    @pytest.mark.unit
+    def test_baselines_computed_in_omnibase_infra_specs(self) -> None:
+        """baselines-computed spec must be in ALL_OMNIBASE_INFRA_TOPIC_SPECS."""
+        from omnibase_infra.topics import (
+            ALL_OMNIBASE_INFRA_TOPIC_SPECS,
+            SUFFIX_BASELINES_COMPUTED,
+        )
+
+        suffixes = {spec.suffix for spec in ALL_OMNIBASE_INFRA_TOPIC_SPECS}
+        assert SUFFIX_BASELINES_COMPUTED in suffixes
+
+
 class TestProvisionedTopicSpecs:
     """Tests for the combined provisioned topic spec registry."""
 
