@@ -26,11 +26,7 @@ node_version:
 node_type: "EFFECT_GENERIC"
 # Description
 description: >
-  Effect node that subscribes to onex.evt.platform.merge-gate-decision.v1 events
-  and upserts merge gate decisions into the merge_gate_decisions PostgreSQL table.
-  Uses ON CONFLICT (pr_ref, head_sha) DO UPDATE for idempotent upserts.
-  When decision is QUARANTINE, opens a Linear ticket with violation details.
-  Emits no outbound events (side-effect only).
+  Effect node that subscribes to onex.evt.platform.merge-gate-decision.v1 events and upserts merge gate decisions into the merge_gate_decisions PostgreSQL table. Uses ON CONFLICT (pr_ref, head_sha) DO UPDATE for idempotent upserts. When decision is QUARANTINE, opens a Linear ticket with violation details. Emits no outbound events (side-effect only).
 
 # =============================================================================
 # EVENT BUS SUBSCRIPTION (Kafka topic wiring)

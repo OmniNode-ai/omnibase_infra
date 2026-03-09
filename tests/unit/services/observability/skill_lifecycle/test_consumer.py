@@ -254,13 +254,81 @@ class TestParseMessage:
 
     @pytest.mark.unit
     def test_json_array_returns_none(self) -> None:
-        """JSON array (not dict) returns None."""
+        """JSON array of non-dicts (e.g. strings) returns None."""
         consumer = _make_consumer()
         record = _make_mock_record(value=b'["a", "b"]')
 
         result = consumer._parse_message(record)
 
         assert result is None
+
+    @pytest.mark.unit
+    def test_array_wrapped_single_dict_unwrapped(self) -> None:
+        """Legacy array-wrapped single-event format is unwrapped and returned as dict."""
+        consumer = _make_consumer()
+        payload = {"event_id": "abc", "run_id": "xyz", "skill_name": "pr-review"}
+        record = _make_mock_record(value=json.dumps([payload]).encode())
+
+        result = consumer._parse_message(record)
+
+        assert result is not None
+        assert result["event_id"] == "abc"
+        assert result["skill_name"] == "pr-review"
+
+    @pytest.mark.unit
+    def test_array_wrapped_multi_element_returns_none(self) -> None:
+        """Array with more than one element is not a known legacy format and returns None."""
+        consumer = _make_consumer()
+        payload1 = {"event_id": "abc"}
+        payload2 = {"event_id": "def"}
+        record = _make_mock_record(value=json.dumps([payload1, payload2]).encode())
+
+        result = consumer._parse_message(record)
+
+        assert result is None
+
+    @pytest.mark.unit
+    def test_deprecated_skill_event_type_migrated(self) -> None:
+        """skill_event_type is renamed to event_type when event_type is absent."""
+        consumer = _make_consumer()
+        record = _make_mock_record(
+            value=b'{"skill_event_type": "started", "run_id": "xyz"}'
+        )
+
+        result = consumer._parse_message(record)
+
+        assert result is not None
+        assert result["event_type"] == "started"
+        assert "skill_event_type" not in result
+        assert result["run_id"] == "xyz"
+
+    @pytest.mark.unit
+    def test_skill_event_type_not_migrated_when_event_type_present(self) -> None:
+        """skill_event_type is left alone when event_type is already present."""
+        consumer = _make_consumer()
+        record = _make_mock_record(
+            value=b'{"skill_event_type": "old_value", "event_type": "started", "run_id": "xyz"}'
+        )
+
+        result = consumer._parse_message(record)
+
+        assert result is not None
+        assert result["event_type"] == "started"
+        # skill_event_type preserved since event_type already present
+        assert result["skill_event_type"] == "old_value"
+
+    @pytest.mark.unit
+    def test_array_wrapped_with_skill_event_type_migration(self) -> None:
+        """Array-wrapped legacy message with deprecated field is unwrapped and migrated."""
+        consumer = _make_consumer()
+        payload = {"skill_event_type": "completed", "run_id": "xyz"}
+        record = _make_mock_record(value=json.dumps([payload]).encode())
+
+        result = consumer._parse_message(record)
+
+        assert result is not None
+        assert result["event_type"] == "completed"
+        assert "skill_event_type" not in result
 
     @pytest.mark.unit
     def test_non_utf8_bytes_returns_none(self) -> None:
