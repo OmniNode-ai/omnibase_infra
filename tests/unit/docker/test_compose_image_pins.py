@@ -74,4 +74,6 @@ def test_phoenix_image_is_pinned(compose_file_content: str) -> None:
             f"Phoenix image '{img}' must be pinned to a specific tag, not ':latest'."
         )
         tag = img.split(":")[-1] if ":" in img else ""
-        assert tag, f"Phoenix image '{img}' has no tag — must be pinned (e.g. :13.11.0)."
+        assert tag, (
+            f"Phoenix image '{img}' has no tag — must be pinned (e.g. :13.11.0)."
+        )
