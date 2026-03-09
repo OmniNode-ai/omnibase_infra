@@ -118,6 +118,10 @@ CONFIGMAP_DEBT_KEYS: frozenset[str] = frozenset(
         "ONEX_SERVICE_CLIENT_ID",
         # Plugin / runtime settings
         "OMNIMEMORY_ENABLED",
+        # omnimemory Memgraph integration — not yet in k8s ConfigMap (tracked: OMN-4307)
+        "OMNIMEMORY_DB_URL",
+        "OMNIMEMORY_MEMGRAPH_HOST",
+        "OMNIMEMORY_MEMGRAPH_PORT",
         "OMNICLAUDE_CONTRACTS_ROOT",  # container-internal path — may be k8s-specific
         "ONEX_REGISTRATION_AUTO_ACK",
         "USE_EVENT_ROUTING",
