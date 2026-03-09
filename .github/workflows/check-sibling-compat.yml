@@ -1,0 +1,79 @@
+name: Sibling Compat Check (OMN-4315)
+
+# Permanent prevention for the --no-deps cascade window issue.
+# Runs when pyproject.toml changes on any PR to catch dependency conflicts
+# that would manifest as ImportError in the Kafka CI jobs.
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'pyproject.toml'
+      - 'uv.lock'
+  merge_group:
+  workflow_dispatch:
+
+env:
+  UV_VERSION: "0.6.14"
+  PYTHON_VERSION: "3.12"
+  CACHE_VERSION: "0.6.0"
+
+jobs:
+  sibling-compat:
+    name: Sibling Compat Check (OMN-4315)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@v4
+        with:
+          path: omnibase_infra
+
+      - name: Checkout omniintelligence (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: OmniNode-ai/omniintelligence
+          path: omniintelligence
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout omnimemory (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: OmniNode-ai/omnimemory
+          path: omnimemory
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python and uv
+        uses: ./omnibase_infra/.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-key-prefix: uv-sibling-compat
+          lock-file-path: 'omnibase_infra/**/uv.lock'
+          skip-install: 'true'
+
+      - name: Install omnibase_infra dev dependencies
+        working-directory: omnibase_infra
+        run: uv sync
+
+      - name: Validate sibling repo compatibility (OMN-4315)
+        working-directory: omnibase_infra
+        run: |
+          echo "================================================================"
+          echo "Sibling Compat Check (OMN-4315 permanent prevention)"
+          echo "Validates: uv pip install --overrides succeeds for siblings"
+          echo "Prevents: --no-deps workaround that hides transitive dep failures"
+          echo "================================================================"
+          INFRA_VERSION=$(python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")
+          echo "omnibase-infra==${INFRA_VERSION}" > /tmp/sibling-overrides.txt
+          echo "Override: omnibase-infra==${INFRA_VERSION}"
+          echo ""
+          echo "Dry-run install of siblings with full transitive deps..."
+          uv pip install --overrides /tmp/sibling-overrides.txt \
+            -e ../omniintelligence \
+            -e ../omnimemory \
+            --dry-run
+          echo ""
+          echo "PASS: Sibling repos are compatible with current omnibase_infra."
