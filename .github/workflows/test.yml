@@ -345,7 +345,12 @@ jobs:
 
       - name: Install sibling repos as editable (boundary pair deps)
         working-directory: omnibase_infra
-        run: uv pip install -e ../omniintelligence -e ../omnimemory
+        # --no-deps: omnibase_infra is already installed via uv sync above.
+        # Sibling repos pin omnibase-infra to their last-released version, which may
+        # temporarily lag behind the current PR (e.g., during a cascade window).
+        # Installing without dep resolution avoids an unsatisfiable constraint error
+        # while still making the sibling source importable for the handshake test.
+        run: uv pip install --no-deps -e ../omniintelligence -e ../omnimemory
 
       - name: Run schema handshake validation (changed-only)
         working-directory: omnibase_infra
@@ -606,7 +611,10 @@ jobs:
 
       - name: Install sibling repos as editable (boundary test deps)
         working-directory: omnibase_infra
-        run: uv pip install -e ../omniintelligence -e ../omnimemory
+        # --no-deps: same rationale as schema-handshake job above.
+        # Sibling dep pins may lag during cascade windows; --no-deps skips resolution
+        # while keeping the sibling source importable for the boundary compat tests.
+        run: uv pip install --no-deps -e ../omniintelligence -e ../omnimemory
 
       - name: Run Kafka boundary compatibility tests
         working-directory: omnibase_infra
