@@ -247,8 +247,12 @@ class HandlerUpsertMergeGate(MixinPostgresOpExecutor):
             payload: Merge gate decision payload.
             correlation_id: Correlation ID for tracing.
         """
-        api_key = os.environ.get("LINEAR_API_KEY")  # ONEX_EXCLUDE: Linear API key has no config injection path
-        team_id = os.environ.get("LINEAR_TEAM_ID")  # ONEX_EXCLUDE: Linear team ID has no config injection path
+        api_key = os.environ.get(
+            "LINEAR_API_KEY"
+        )  # ONEX_EXCLUDE: Linear API key has no config injection path
+        team_id = os.environ.get(
+            "LINEAR_TEAM_ID"
+        )  # ONEX_EXCLUDE: Linear team ID has no config injection path
 
         if not api_key or not team_id:
             logger.warning(
