@@ -2616,6 +2616,32 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Factory Method Conventions)
     ticket: OMN-519
+  # ==========================================================================
+  # HandlerResourceManager Exemptions (OMN-4225)
+  # ==========================================================================
+  # handler_resource_manager.py is an infrastructure-layer resource lifecycle
+  # class that manages httpx.AsyncClient instances keyed by handler_id.
+  # The name is prescribed by the OMN-4225 ticket spec. It lives outside the
+  # ONEX graph and is not a generic utility — it is a purpose-built lifecycle
+  # manager for handler-layer runtime resources.
+  - file_pattern: 'handler_resource_manager\.py'
+    class_pattern: "Class name 'HandlerResourceManager'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      HandlerResourceManager is an infrastructure-layer resource lifecycle class that manages httpx.AsyncClient instances per handler_id. The "Handler" prefix refers to ONEX handler-layer runtime resources, consistent with HandlerContractSource/HandlerBootstrapSource conventions. Name prescribed by OMN-4225 ticket spec.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    ticket: OMN-4225
+  - file_pattern: 'handler_resource_manager\.py'
+    class_pattern: "Class name 'HandlerResourceManager'"
+    violation_pattern: "contains anti-pattern 'Manager'"
+    reason: >
+      HandlerResourceManager is a purpose-built infrastructure lifecycle class, not a generic "Manager" utility. It encapsulates httpx.AsyncClient pooling per handler_id with explicit create/release/shutdown lifecycle — a specific domain responsibility. Name prescribed by OMN-4225 ticket spec.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    ticket: OMN-4225
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
