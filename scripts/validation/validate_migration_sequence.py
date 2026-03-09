@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """Pre-commit validator: block duplicate migration sequence numbers.
 
-Checks each migration directory independently for duplicate leading-integer
-sequence numbers. docker/migrations/forward/ and src/omnibase_infra/migrations/
-forward/ use separate sequence namespaces because run-migrations.py tracks
-them with distinct migration_id keys (source_set/filename). Cross-directory
-sequence collisions are intentionally allowed.
+Scans docker/migrations/forward/ and src/omnibase_infra/migrations/forward/
+as a single shared sequence namespace and exits 1 if any two .sql files
+share the same leading-integer sequence number.
 
 Exit Codes:
-    0 - All sequence numbers are unique within each directory (or no files staged)
-    1 - Duplicate sequence number detected within the same directory
+    0 - All sequence numbers are unique (or no migration files staged)
+    1 - Duplicate sequence number detected; message names conflicting files
     2 - Script error (git unavailable, not a repo, unexpected exception)
 
 Ticket: OMN-3570
@@ -22,9 +20,9 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Directories to validate independently for intra-directory duplicate sequences.
-# Each directory forms its own sequence namespace — run-migrations.py tracks
-# migrations as "{source_set}/{filename}" so cross-directory collisions are safe.
+# Directories that form the shared migration sequence namespace.
+# Relative to repo root — both sets are applied together by run-migrations.py
+# so cross-set duplicates are equally dangerous.
 MIGRATION_DIRS: tuple[str, ...] = (
     "docker/migrations/forward",
     "src/omnibase_infra/migrations/forward",
@@ -126,11 +124,7 @@ def validate_migration_sequence(
 ) -> SequenceValidationResult:
     """Validate that all migration .sql files have unique sequence numbers.
 
-    Each migration directory is checked independently — docker/ and src/ sets
-    have separate sequence namespaces because run-migrations.py tracks them
-    with distinct migration_id keys ({source_set}/{filename}). Only intra-
-    directory duplicates are reported.
-
+    Treats docker/ and src/ migration sets as one shared namespace.
     Staged paths are included in the scan so newly added files are caught
     before they are committed.
 
@@ -147,6 +141,7 @@ def validate_migration_sequence(
 
     # Collect staged paths to determine whether any migration was staged
     staged_paths = _get_staged_paths(repo_path)
+    staged_set = set(staged_paths)
 
     # Check whether any staged file is a migration file
     staged_migration_rel: set[str] = set()
@@ -164,41 +159,38 @@ def validate_migration_sequence(
     if not result.has_staged_migrations:
         return result
 
-    # Check each migration directory independently for intra-directory duplicates
-    total_scanned = 0
-    for mdir in MIGRATION_DIRS:
-        seen: dict[int, str] = {}  # seq -> relative path string
+    # Build the full scan: all existing .sql files in both dirs + staged paths
+    # (staged files may not yet exist on disk if they were just added)
+    seen: dict[int, str] = {}  # seq -> relative path string
 
-        # Gather all .sql files from this directory (filesystem scan)
-        dir_files: list[str] = []
+    # Gather all .sql files from both migration dirs (filesystem scan)
+    all_files: list[str] = []
+    for mdir in MIGRATION_DIRS:
         for f in _scan_migration_dir(repo_path, mdir):
             rel = str(f.relative_to(repo_path))
-            dir_files.append(rel)
+            all_files.append(rel)
 
-        # Also include staged paths in this directory that may not be on disk yet
-        for sp in staged_migration_rel:
-            if sp.startswith((mdir + "/", mdir.replace("/", "\\") + "\\")):
-                if sp not in dir_files:
-                    dir_files.append(sp)
+    # Also include staged paths that are migrations but may not be on disk yet
+    for sp in staged_migration_rel:
+        if sp not in all_files:
+            all_files.append(sp)
 
-        total_scanned += len(dir_files)
+    result.files_scanned = len(all_files)
 
-        for rel in sorted(dir_files):
-            seq = extract_sequence_number(Path(rel).name)
-            if seq is None:
-                continue
-            if seq in seen:
-                result.conflicts.append(
-                    DuplicateConflict(
-                        sequence=seq,
-                        file_a=seen[seq],
-                        file_b=rel,
-                    )
+    for rel in sorted(all_files):
+        seq = extract_sequence_number(Path(rel).name)
+        if seq is None:
+            continue
+        if seq in seen:
+            result.conflicts.append(
+                DuplicateConflict(
+                    sequence=seq,
+                    file_a=seen[seq],
+                    file_b=rel,
                 )
-            else:
-                seen[seq] = rel
-
-    result.files_scanned = total_scanned
+            )
+        else:
+            seen[seq] = rel
 
     return result
 
@@ -227,11 +219,10 @@ def generate_report(result: SequenceValidationResult) -> str:
         [
             "",
             "=" * 60,
-            "Each migration file must have a unique leading sequence number",
-            "within its directory (docker/ and src/ are checked independently).",
+            "Each migration file must have a unique leading sequence number.",
+            "docker/ and src/ migration sets share the same namespace.",
             "",
-            "To fix: renumber the new migration to use the next available sequence",
-            "within its directory.",
+            "To fix: renumber the new migration to use the next available sequence.",
             "",
         ]
     )
