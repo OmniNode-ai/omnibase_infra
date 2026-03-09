@@ -20,7 +20,6 @@ ProtocolName = Literal[
     "http",
     "db",
     "kafka",
-    "consul",
     "valkey",
     "grpc",
 ]

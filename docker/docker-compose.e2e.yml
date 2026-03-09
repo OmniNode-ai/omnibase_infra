@@ -188,28 +188,6 @@ services:
       - "com.omninode.service=topic-manager"
       - "com.omninode.role=infrastructure"
   # ==========================================================================
-  # Consul (Service Discovery)
-  # ==========================================================================
-  consul:
-    image: hashicorp/consul:1.18
-    container_name: omnibase-infra-consul
-    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0 -datacenter=omnibase-infra
-    ports:
-      - "${CONSUL_PORT:-8500}:8500"
-      - "8600:8600/udp"
-    networks:
-      - omnibase-infra-network
-    volumes:
-      - consul_data:/consul/data
-    environment:
-      CONSUL_BIND_INTERFACE: eth0
-    healthcheck:
-      !!merge <<: *healthcheck-defaults
-      test: ["CMD", "consul", "members"]
-    labels:
-      - "com.omninode.service=consul"
-      - "com.omninode.role=infrastructure"
-  # ==========================================================================
   # Valkey (Redis-compatible Key-Value Store)
   # Check for updates: https://hub.docker.com/r/valkey/valkey/tags
   # ==========================================================================
@@ -277,8 +255,6 @@ services:
         condition: service_healthy
       redpanda:
         condition: service_healthy
-      consul:
-        condition: service_healthy
       infisical:
         condition: service_healthy
       valkey:
@@ -297,10 +273,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test-password}
       # Kafka (internal address)
       KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
-      # Consul (internal address)
-      CONSUL_HOST: consul
-      CONSUL_PORT: 8500
-      CONSUL_SCHEME: http
       # Infisical (internal address)
       INFISICAL_ADDR: http://infisical:8080
       # Valkey (internal address)
@@ -342,8 +314,6 @@ volumes:
     name: omnibase-infra-postgres-data
   redpanda_data:
     name: omnibase-infra-redpanda-data
-  consul_data:
-    name: omnibase-infra-consul-data
   valkey_data:
     name: omnibase-infra-valkey-data
   runtime_logs:

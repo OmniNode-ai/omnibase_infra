@@ -194,7 +194,6 @@ class TestPayloadValidation:
             "http.put",
             "http.patch",
             "kafka.produce",
-            "consul.kv_put",
         ],
     )
     def test_payload_required_operations_without_payload_raises_error(
@@ -218,7 +217,6 @@ class TestPayloadValidation:
             "http.put",
             "http.patch",
             "kafka.produce",
-            "consul.kv_put",
         ],
     )
     def test_payload_required_operations_with_empty_dict_raises_error(
@@ -241,7 +239,6 @@ class TestPayloadValidation:
             "http.put",
             "http.patch",
             "kafka.produce",
-            "consul.kv_put",
         ],
     )
     def test_payload_required_operations_with_payload_passes(
@@ -261,7 +258,6 @@ class TestPayloadValidation:
             "http.get",
             "http.delete",
             "kafka.consume",
-            "consul.kv_get",
         ],
     )
     def test_operations_without_payload_requirement_pass(
@@ -281,7 +277,6 @@ class TestPayloadValidation:
             "http.put",
             "http.patch",
             "kafka.produce",
-            "consul.kv_put",
         }
         assert expected == PAYLOAD_REQUIRED_OPERATIONS
 

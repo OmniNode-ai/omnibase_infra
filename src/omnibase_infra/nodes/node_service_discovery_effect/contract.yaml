@@ -4,7 +4,7 @@
 # ONEX Node Contract - Service Discovery Effect Node
 #
 # Capability-Oriented Design: "I'm interested in what you do, not what you are"
-# This node is named by capability (service.discovery) not vendor (consul/k8s/etcd).
+# This node is named by capability (service.discovery) not vendor (k8s/etcd).
 # Supports pluggable backends through ProtocolDiscoveryOperations.
 #
 contract_version:
@@ -240,7 +240,6 @@ metadata:
     - effect
     - service-discovery
     - capability-oriented
-    - consul
     - kubernetes
     - etcd
     - pluggable
