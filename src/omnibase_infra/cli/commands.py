@@ -17,6 +17,8 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from omnibase_infra.cli.artifact_reconcile import artifact_reconcile_cmd
+
 logger = logging.getLogger(__name__)
 console = Console()
 
@@ -699,6 +701,13 @@ def _print_result(name: str, result: object) -> None:
             if hasattr(result, "errors") and result.errors:
                 for error in result.errors:
                     console.print(f"  [red]{error}[/red]")
+
+
+# =============================================================================
+# Artifact Reconciliation Commands (OMN-3947)
+# =============================================================================
+
+cli.add_command(artifact_reconcile_cmd)
 
 
 if __name__ == "__main__":

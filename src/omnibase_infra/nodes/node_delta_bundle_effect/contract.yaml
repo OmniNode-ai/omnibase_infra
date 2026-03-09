@@ -28,11 +28,7 @@ node_version:
 node_type: "EFFECT_GENERIC"
 # Description
 description: >
-  Effect node for delta bundle lifecycle tracking. Receives merge-gate-decision
-  events (idempotent INSERT ON CONFLICT DO NOTHING) and pr-outcome events
-  (UPDATE with outcome, merged_at, bundle_completed_at). Detects fix-PRs via
-  the stabilizes:<pr_ref> label convention and populates is_fix_pr and
-  stabilizes_pr_ref fields accordingly.
+  Effect node for delta bundle lifecycle tracking. Receives merge-gate-decision events (idempotent INSERT ON CONFLICT DO NOTHING) and pr-outcome events (UPDATE with outcome, merged_at, bundle_completed_at). Detects fix-PRs via the stabilizes:<pr_ref> label convention and populates is_fix_pr and stabilizes_pr_ref fields accordingly.
 
 # Strongly typed I/O models
 input_model:

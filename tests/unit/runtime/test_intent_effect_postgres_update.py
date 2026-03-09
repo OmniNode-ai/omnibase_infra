@@ -24,7 +24,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_infra.errors import ContainerWiringError, RuntimeHostError
-from omnibase_infra.nodes.reducers.models.model_payload_postgres_update_registration import (
+from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_update_registration import (
     ModelPayloadPostgresUpdateRegistration,
     ModelRegistrationAckUpdate,
     ModelRegistrationHeartbeatUpdate,

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_append import (
         HandlerLedgerAppend,
     )
-    from omnibase_infra.nodes.reducers.models.model_payload_ledger_append import (
+    from omnibase_infra.nodes.node_registration_reducer.models.model_payload_ledger_append import (
         ModelPayloadLedgerAppend,
     )
 

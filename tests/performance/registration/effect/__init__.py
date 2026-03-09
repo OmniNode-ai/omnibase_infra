@@ -12,6 +12,6 @@ Test Suites:
 
 Related:
     - OMN-954: Effect node testing requirements
-    - InMemoryEffectIdempotencyStore: Primary store under test
+    - StoreEffectIdempotencyInmemory: Primary store under test
     - NodeRegistryEffect: Effect node implementation
 """

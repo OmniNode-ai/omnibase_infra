@@ -57,7 +57,7 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
 from omnibase_infra.nodes.node_registration_orchestrator.services import (
     RegistrationReducerService,
 )
-from omnibase_infra.nodes.reducers.models.model_payload_postgres_update_registration import (
+from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_update_registration import (
     ModelPayloadPostgresUpdateRegistration,
     ModelRegistrationHeartbeatUpdate,
 )

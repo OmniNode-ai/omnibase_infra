@@ -48,7 +48,9 @@ from omnibase_infra.nodes.node_ledger_write_effect.protocols import (
 )
 
 # Intent payload model (from reducers)
-from omnibase_infra.nodes.reducers.models import ModelPayloadLedgerAppend
+from omnibase_infra.nodes.node_registration_reducer.models import (
+    ModelPayloadLedgerAppend,
+)
 
 
 class RegistryInfraLedgerWrite:

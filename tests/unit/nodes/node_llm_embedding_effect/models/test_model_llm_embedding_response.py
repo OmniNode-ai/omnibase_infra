@@ -26,8 +26,8 @@ import pytest
 from pydantic import ValidationError
 
 from omnibase_core.models.vector import ModelEmbedding
+from omnibase_infra.models.llm.model_llm_usage import ModelLlmUsage
 from omnibase_infra.models.model_backend_result import ModelBackendResult
-from omnibase_infra.nodes.effects.models.model_llm_usage import ModelLlmUsage
 from omnibase_infra.nodes.node_llm_embedding_effect.models.model_llm_embedding_response import (
     ModelLlmEmbeddingResponse,
 )

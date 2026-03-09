@@ -20,7 +20,7 @@ from uuid import UUID, uuid4
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from omnibase_infra.diagnostics.enum_verdict import EnumVerdict
-from omnibase_infra.nodes.architecture_validator.models.model_rule_check_result import (
+from omnibase_infra.nodes.node_architecture_validator.models.model_rule_check_result import (
     ModelRuleCheckResult,
 )
 

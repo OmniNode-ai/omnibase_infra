@@ -48,8 +48,10 @@ if TYPE_CHECKING:
     from omnibase_core.models.reducer.model_intent import ModelIntent
 
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-from omnibase_infra.nodes.effects.models import ModelRegistryRequest
-from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+from omnibase_infra.nodes.node_registration_reducer.models import ModelRegistrationState
+from omnibase_infra.nodes.node_registry_effect.models import (
+    ModelRegistryRequest,
+)
 
 # Import test doubles
 from tests.integration.registration.effect.test_doubles import (

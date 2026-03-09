@@ -33,8 +33,8 @@ from omnibase_infra.enums import (
 )
 from omnibase_infra.errors import InfraProtocolError, ModelInfraErrorContext
 from omnibase_infra.mixins import MixinLlmHttpTransport
+from omnibase_infra.models.llm.model_llm_usage import ModelLlmUsage
 from omnibase_infra.models.model_backend_result import ModelBackendResult
-from omnibase_infra.nodes.effects.models.model_llm_usage import ModelLlmUsage
 from omnibase_infra.nodes.node_llm_embedding_effect.models.model_llm_embedding_request import (
     ModelLlmEmbeddingRequest,
 )

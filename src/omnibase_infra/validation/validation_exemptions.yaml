@@ -1942,7 +1942,7 @@ pattern_exemptions:
   # - state: immutable input state
   # - event: typed domain event
   # - topic/partition/offset: Kafka position for idempotency tracking
-  - file_pattern: 'nodes/contract_registry_reducer/reducer\.py'
+  - file_pattern: 'nodes/node_contract_registry_reducer/reducer\.py'
     method_pattern: '_on_contract_registered'
     violation_pattern: 'has 6 parameters'
     reason: >
@@ -1952,21 +1952,21 @@ pattern_exemptions:
       - CLAUDE.md (Node Archetypes - NodeReducer)
       - docs/patterns/reducer_pattern.md
     ticket: OMN-1653
-  - file_pattern: 'nodes/contract_registry_reducer/reducer\.py'
+  - file_pattern: 'nodes/node_contract_registry_reducer/reducer\.py'
     method_pattern: '_on_contract_deregistered'
     violation_pattern: 'has 6 parameters'
     reason: Same as _on_contract_registered - standard reducer handler signature.
     documentation:
       - CLAUDE.md (Node Archetypes - NodeReducer)
     ticket: OMN-1653
-  - file_pattern: 'nodes/contract_registry_reducer/reducer\.py'
+  - file_pattern: 'nodes/node_contract_registry_reducer/reducer\.py'
     method_pattern: '_on_heartbeat'
     violation_pattern: 'has 6 parameters'
     reason: Same as _on_contract_registered - standard reducer handler signature.
     documentation:
       - CLAUDE.md (Node Archetypes - NodeReducer)
     ticket: OMN-1653
-  - file_pattern: 'nodes/contract_registry_reducer/reducer\.py'
+  - file_pattern: 'nodes/node_contract_registry_reducer/reducer\.py'
     method_pattern: '_on_runtime_tick'
     violation_pattern: 'has 6 parameters'
     reason: Same as _on_contract_registered - standard reducer handler signature.
@@ -1976,7 +1976,7 @@ pattern_exemptions:
   # Contract ID is a derived natural key (node_name:major.minor.patch), not a UUID.
   # This is intentional per the contract registry design where contracts are identified
   # by their name and version, enabling human-readable queries and deduplication.
-  - file_pattern: 'nodes/contract_registry_reducer/models/model_payload_.*\.py'
+  - file_pattern: 'nodes/node_contract_registry_reducer/models/model_payload_.*\.py'
     violation_pattern: "Field 'contract_id' should use UUID"
     reason: >
       contract_id is a derived natural key (node_name:major.minor.patch), not a UUID. This design enables human-readable queries, version-based deduplication, and matches the contract.yaml identification pattern used throughout ONEX.
@@ -1985,7 +1985,7 @@ pattern_exemptions:
       - CLAUDE.md (Intent Model Architecture - Contract Identity)
     ticket: OMN-1653
   # node_name is the contract's semantic name, not an entity reference requiring ID + display_name.
-  - file_pattern: 'nodes/contract_registry_reducer/models/model_payload_.*\.py'
+  - file_pattern: 'nodes/node_contract_registry_reducer/models/model_payload_.*\.py'
     violation_pattern: "Field 'node_name' might reference an entity"
     reason: >
       node_name is the contract's semantic identifier from contract.yaml, not a reference to a separate entity. Contracts are identified by name, making this a primary attribute not a foreign key.
@@ -2298,7 +2298,7 @@ pattern_exemptions:
   - file_pattern: 'model_rrh_rule_severity\.py'
     violation_pattern: "Field 'rule_id' should use UUID"
     reason: >
-      rule_id is a human-readable RRH rule identifier (e.g. "RRH-1001"), not a UUID. This matches the ModelRuleCheckResult pattern in architecture_validator.
+      rule_id is a human-readable RRH rule identifier (e.g. "RRH-1001"), not a UUID. This matches the ModelRuleCheckResult pattern in node_architecture_validator.
 
     ticket: OMN-2136
   - file_pattern: 'handler_rrh_validate\.py'

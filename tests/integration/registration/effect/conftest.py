@@ -24,13 +24,13 @@ import pytest
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-from omnibase_infra.nodes.effects import NodeRegistryEffect
-from omnibase_infra.nodes.effects.models import (
+from omnibase_infra.nodes.node_registry_effect import NodeRegistryEffect
+from omnibase_infra.nodes.node_registry_effect.models import (
     ModelEffectIdempotencyConfig,
     ModelRegistryRequest,
 )
-from omnibase_infra.nodes.effects.store_effect_idempotency_inmemory import (
-    InMemoryEffectIdempotencyStore,
+from omnibase_infra.nodes.node_registry_effect.store_effect_idempotency_inmemory import (
+    StoreEffectIdempotencyInmemory,
 )
 
 from .test_doubles import StubPostgresAdapter
@@ -47,23 +47,23 @@ def postgres_adapter() -> StubPostgresAdapter:
 
 
 @pytest.fixture
-def idempotency_store() -> InMemoryEffectIdempotencyStore:
-    """Create a fresh InMemoryEffectIdempotencyStore.
+def idempotency_store() -> StoreEffectIdempotencyInmemory:
+    """Create a fresh StoreEffectIdempotencyInmemory.
 
     Returns:
-        InMemoryEffectIdempotencyStore with default configuration.
+        StoreEffectIdempotencyInmemory with default configuration.
     """
     config = ModelEffectIdempotencyConfig(
         max_cache_size=1000,
         cache_ttl_seconds=3600.0,
     )
-    return InMemoryEffectIdempotencyStore(config=config)
+    return StoreEffectIdempotencyInmemory(config=config)
 
 
 @pytest.fixture
 def registry_effect(
     postgres_adapter: StubPostgresAdapter,
-    idempotency_store: InMemoryEffectIdempotencyStore,
+    idempotency_store: StoreEffectIdempotencyInmemory,
 ) -> NodeRegistryEffect:
     """Create NodeRegistryEffect with test double backends.
 
