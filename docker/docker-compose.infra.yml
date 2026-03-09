@@ -182,9 +182,6 @@ x-runtime-env: &runtime-env
   # Auto-ACK local/internal nodes after introspection. Never set in production —
   # external nodes send their own ack. Default empty = disabled.
   ONEX_REGISTRATION_AUTO_ACK: ${ONEX_REGISTRATION_AUTO_ACK:-}
-  # --- Feature flags ---
-  # OMN-3894: Event-based routing toggle. Empty = disabled (legacy direct dispatch).
-  USE_EVENT_ROUTING: ${USE_EVENT_ROUTING:-}
   # --- OpenTelemetry / Phoenix tracing (OMN-3811) ---
   # Opt-in: tracing only activates when OTEL_EXPORTER_OTLP_ENDPOINT is non-empty.
   # Inside Docker, point to phoenix:6006 (OTLP HTTP). On host, use localhost:6006.
