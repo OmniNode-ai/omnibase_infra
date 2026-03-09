@@ -2,10 +2,9 @@
 # Copyright (c) 2025 OmniNode Team
 """Dedicated unit tests for ModelCategoryMatchResult factory methods.
 
-This module provides comprehensive tests for the factory methods of
-ModelCategoryMatchResult, ensuring each creates instances with the correct
-field values and state. This is separate from the __bool__ behavior tests
-in test_custom_bool_behavior.py.
+Covers factory methods of ModelCategoryMatchResult, verifying each creates
+instances with the correct field values and state. Separate from the __bool__
+behavior tests in test_custom_bool_behavior.py.
 
 Factory methods tested:
     - matched_with_category(category): Creates match with specific category

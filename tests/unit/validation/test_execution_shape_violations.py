@@ -2,9 +2,9 @@
 # Copyright (c) 2025 OmniNode Team
 """Tests for Execution Shape Violations (OMN-958).
 
-This module contains the 5 required "known bad" test cases that validate
-the execution shape validators correctly detect and reject handlers that
-violate ONEX 4-node architecture constraints.
+5 "known bad" test cases validating that execution shape validators
+correctly detect and reject handlers violating ONEX 4-node architecture
+constraints.
 
 Test Cases:
     1. test_reducer_returning_events_rejected - Reducer cannot return EVENT
