@@ -49,6 +49,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from omnibase_core.container import ModelONEXContainer
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.catalog.model_topic_catalog_entry import (
     ModelTopicCatalogEntry,
 )
@@ -155,6 +156,31 @@ class HandlerTopicCatalogPostgres:
                 "query_timeout_seconds": query_timeout_seconds,
             },
         )
+
+    # ------------------------------------------------------------------
+    # Handler classification (OMN-4004: required handler metadata)
+    # ------------------------------------------------------------------
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Return the architectural role of this handler.
+
+        Returns:
+            EnumHandlerType.INFRA_HANDLER — This is an infrastructure-layer
+            handler that owns a PostgreSQL I/O boundary for topic catalog reads.
+        """
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification of this handler.
+
+        Returns:
+            EnumHandlerTypeCategory.EFFECT — This handler performs side-effecting
+            database I/O operations. EFFECT handlers are not deterministic and
+            interact with external systems (PostgreSQL).
+        """
+        return EnumHandlerTypeCategory.EFFECT
 
     # ------------------------------------------------------------------
     # Handler lifecycle (OMN-4011: explicit lifecycle enforcement)
