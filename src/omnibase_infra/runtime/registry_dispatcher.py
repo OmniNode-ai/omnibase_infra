@@ -211,9 +211,18 @@ class RegistryDispatcher:
         # Validate dispatcher outside lock
         self._validate_dispatcher(dispatcher)
 
-        # Get dispatcher properties
+        # Get dispatcher properties — coerce category so the canonical enum instance
+        # is used for dict keying and execution-shape validation regardless of
+        # whether the dispatcher was constructed with a foreign enum copy (OMN-4037).
         dispatcher_id = dispatcher.dispatcher_id
-        category = dispatcher.category
+        raw_cat = dispatcher.category
+        category = (
+            raw_cat
+            if isinstance(raw_cat, EnumMessageCategory)
+            else EnumMessageCategory(
+                raw_cat.value if hasattr(raw_cat, "value") else raw_cat
+            )
+        )
         node_kind = dispatcher.node_kind
         effective_message_types = (
             message_types if message_types is not None else dispatcher.message_types
@@ -564,12 +573,28 @@ class RegistryDispatcher:
                 error_code=EnumCoreErrorCode.INVALID_PARAMETER,
             )
 
-        category = dispatcher.category
-        if not isinstance(category, EnumMessageCategory):
-            raise ModelOnexError(
-                message=f"Dispatcher category must be EnumMessageCategory, got {type(category).__name__}",
-                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
-            )
+        raw_category = dispatcher.category
+        # Coerce at the boundary before class-identity check (OMN-4037).
+        # Accepts the canonical EnumMessageCategory instance (pass-through), a valid
+        # string value, or a foreign enum instance whose .value matches a valid member.
+        # Note: coerce_message_category() lives in service_message_dispatch_engine which
+        # cannot be imported here due to a circular import through dispatch_context_enforcer.
+        # The same logic is inlined below to avoid that cycle.
+        if not isinstance(raw_category, EnumMessageCategory):
+            try:
+                raw: object = (
+                    raw_category.value
+                    if hasattr(raw_category, "value")
+                    else raw_category
+                )
+                category: EnumMessageCategory = EnumMessageCategory(raw)
+            except (ValueError, KeyError):
+                raise ModelOnexError(
+                    message=f"Dispatcher category must be EnumMessageCategory, got {type(raw_category).__name__}",
+                    error_code=EnumCoreErrorCode.INVALID_PARAMETER,
+                )
+        else:
+            category = raw_category
 
         # Validate node_kind property
         if not hasattr(dispatcher, "node_kind"):
