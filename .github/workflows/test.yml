@@ -345,12 +345,17 @@ jobs:
 
       - name: Install sibling repos as editable (boundary pair deps)
         working-directory: omnibase_infra
-        # --no-deps: omnibase_infra is already installed via uv sync above.
-        # Sibling repos pin omnibase-infra to their last-released version, which may
-        # temporarily lag behind the current PR (e.g., during a cascade window).
-        # Installing without dep resolution avoids an unsatisfiable constraint error
-        # while still making the sibling source importable for the handshake test.
-        run: uv pip install --no-deps -e ../omniintelligence -e ../omnimemory
+        # Use --overrides to install siblings with their full transitive deps while
+        # forcing omnibase-infra to the locally-installed editable version from uv sync.
+        # This avoids the cascade-window version conflict (siblings pin a released version
+        # of omnibase-infra that may lag behind the current PR) while ensuring transitive
+        # deps like adaptive-classifier are properly installed.
+        # Prior approach (--no-deps) skipped transitive deps entirely, causing
+        # ModuleNotFoundError for packages like adaptive_classifier at collection time.
+        run: |
+          INFRA_VERSION=$(python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")
+          echo "omnibase-infra==${INFRA_VERSION}" > /tmp/sibling-overrides.txt
+          uv pip install --overrides /tmp/sibling-overrides.txt -e ../omniintelligence -e ../omnimemory
 
       - name: Run schema handshake validation (changed-only)
         working-directory: omnibase_infra
@@ -611,10 +616,13 @@ jobs:
 
       - name: Install sibling repos as editable (boundary test deps)
         working-directory: omnibase_infra
-        # --no-deps: same rationale as schema-handshake job above.
-        # Sibling dep pins may lag during cascade windows; --no-deps skips resolution
-        # while keeping the sibling source importable for the boundary compat tests.
-        run: uv pip install --no-deps -e ../omniintelligence -e ../omnimemory
+        # Use --overrides to install siblings with their full transitive deps while
+        # forcing omnibase-infra to the locally-installed editable version from uv sync.
+        # Same rationale as schema-handshake job above.
+        run: |
+          INFRA_VERSION=$(python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")
+          echo "omnibase-infra==${INFRA_VERSION}" > /tmp/sibling-overrides.txt
+          uv pip install --overrides /tmp/sibling-overrides.txt -e ../omniintelligence -e ../omnimemory
 
       - name: Run Kafka boundary compatibility tests
         working-directory: omnibase_infra
