@@ -107,14 +107,6 @@ POSTGRES_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
 # OMNIDASH_ANALYTICS_DB_URL=postgresql://role_omnidash:${ROLE_OMNIDASH_PASSWORD}@postgres:5432/omnidash_analytics
 
 # =============================================================================
-# Consul Service Discovery Configuration
-# =============================================================================
-# Consul agent connection for service registration and discovery.
-# CONSUL_HOST=omninode-bridge-consul
-# CONSUL_PORT=8500
-# CONSUL_SCHEME=http
-
-# =============================================================================
 # Infisical Secret Management Configuration (Optional)
 # =============================================================================
 # Infisical is used for secrets management when running with --profile secrets
