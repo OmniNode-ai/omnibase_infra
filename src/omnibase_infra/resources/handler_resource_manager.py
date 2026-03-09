@@ -16,7 +16,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
-class HandlerResourceManager:  # ONEX_EXCLUDE: class_anti_pattern — infrastructure resource lifecycle class; name prescribed by OMN-4225 ticket spec
+class HandlerResourceManager:
     """Manages runtime resources (httpx async clients) keyed by handler_id.
 
     The ONEX graph operates on logical state while runtime resources (open
