@@ -84,6 +84,7 @@ class FileSpoolLedgerSink:
         "_lock",
         "_max_buffer_size",
         "_max_file_size",
+        "_not_full",
         "_spool_dir",
     )
 
@@ -112,6 +113,7 @@ class FileSpoolLedgerSink:
 
         self._buffer: deque[ModelLedgerEventBase] = deque(maxlen=max_buffer_size)
         self._lock = asyncio.Lock()
+        self._not_full = asyncio.Condition(self._lock)
         self._closed = False
 
         self._file_handle: IO[bytes] | None = None
@@ -145,7 +147,7 @@ class FileSpoolLedgerSink:
             detect when old events are dropped; use DROP_NEWEST or RAISE policies
             if drop notification is required.
         """
-        async with self._lock:
+        async with self._not_full:
             # Check closed INSIDE lock to prevent race with close()
             if self._closed:
                 raise LedgerSinkClosedError("Cannot emit to closed sink")
@@ -157,20 +159,22 @@ class FileSpoolLedgerSink:
                         f"Sink buffer full ({self._max_buffer_size} events)"
                     )
                 elif self._drop_policy == EnumLedgerSinkDropPolicy.BLOCK:
-                    # BLOCK policy requires proper condition variable implementation
-                    raise NotImplementedError(
-                        "BLOCK policy is not yet implemented in FileSpoolLedgerSink. "
-                        "Use DROP_OLDEST, DROP_NEWEST, or RAISE."
-                    )
+                    # Wait until space is available; flush() calls notify_all()
+                    while len(self._buffer) >= self._max_buffer_size:
+                        await self._not_full.wait()
+                    # Re-check closed after waking (flush may have closed the sink)
+                    if self._closed:
+                        raise LedgerSinkClosedError("Cannot emit to closed sink")
                 # DROP_OLDEST: deque with maxlen handles this automatically
 
             self._buffer.append(event)
 
             # Start background flush task if not running.
-            # Race safety: This check-and-create is protected by self._lock, which is
-            # held for the entire emit() operation. The lock prevents concurrent emit()
-            # calls from creating duplicate tasks. The background task also acquires
-            # the lock before checking _closed, ensuring clean shutdown coordination.
+            # Race safety: This check-and-create is protected by self._lock (via
+            # self._not_full), which is held for the entire emit() operation. The lock
+            # prevents concurrent emit() calls from creating duplicate tasks. The
+            # background task also acquires the lock before checking _closed, ensuring
+            # clean shutdown coordination.
             if self._flush_task is None or self._flush_task.done():
                 self._flush_task = asyncio.create_task(self._background_flush_loop())
 
@@ -179,13 +183,15 @@ class FileSpoolLedgerSink:
     async def flush(self) -> int:
         """Flush all buffered events to disk.
 
+        Wakes any BLOCK-policy emitters waiting for space.
+
         Returns:
             Number of events flushed.
 
         Raises:
             LedgerSinkError: If write fails.
         """
-        async with self._lock:
+        async with self._not_full:
             return await self._flush_buffer_locked()
 
     async def _flush_buffer_locked(self) -> int:
@@ -234,6 +240,9 @@ class FileSpoolLedgerSink:
             for _ in range(flushed):
                 self._buffer.popleft()
 
+            # Wake any BLOCK-policy emitters waiting for space
+            self._not_full.notify_all()
+
         except Exception as e:
             logger.exception(
                 f"Failed to flush ledger events (flushed {flushed} before error)"
@@ -281,7 +290,7 @@ class FileSpoolLedgerSink:
         while True:
             await asyncio.sleep(self._flush_interval)
             # Check closed state inside lock to prevent race with close()
-            async with self._lock:
+            async with self._not_full:
                 if self._closed:
                     return
                 if self._buffer:
@@ -309,7 +318,7 @@ class FileSpoolLedgerSink:
                 pass
 
         # Final flush
-        async with self._lock:
+        async with self._not_full:
             try:
                 await self._flush_buffer_locked()
             finally:
