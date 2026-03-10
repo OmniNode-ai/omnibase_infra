@@ -161,6 +161,54 @@ def test_skips_ecr_check_when_aws_missing(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.mark.unit
+def test_detects_schema_drift_cloud_ahead() -> None:
+    from compare_environments import check_db_schema_parity
+
+    findings = check_db_schema_parity(
+        local_migration="2026-02-01", cloud_migration="2026-03-10"
+    )
+    assert any(
+        f.severity == "CRITICAL" and "cloud ahead" in f.detail.lower() for f in findings
+    )
+
+
+@pytest.mark.unit
+def test_detects_schema_drift_local_ahead() -> None:
+    from compare_environments import check_db_schema_parity
+
+    findings = check_db_schema_parity(
+        local_migration="2026-03-10", cloud_migration="2026-02-01"
+    )
+    assert any(
+        f.severity == "WARNING" and "local ahead" in f.detail.lower() for f in findings
+    )
+
+
+@pytest.mark.unit
+def test_schema_parity_clean_when_equal() -> None:
+    from compare_environments import check_db_schema_parity
+
+    findings = check_db_schema_parity(
+        local_migration="2026-03-10", cloud_migration="2026-03-10"
+    )
+    assert findings == []
+
+
+@pytest.mark.unit
+def test_package_version_mismatch_is_warning() -> None:
+    from compare_environments import check_package_version_parity
+
+    findings = check_package_version_parity(
+        local_versions={"omnibase-core": "1.0.0", "omnibase-spi": "0.15.2"},
+        cloud_versions={"omnibase-core": "1.1.0", "omnibase-spi": "0.15.2"},
+    )
+    assert any(
+        f.severity == "WARNING" and "omnibase-core" in f.detail for f in findings
+    )
+    assert not any("omnibase-spi" in f.detail for f in findings)
+
+
+@pytest.mark.unit
 def test_infisical_path_missing(httpserver: object) -> None:
     from compare_environments import probe_infisical_paths
 
@@ -178,3 +226,152 @@ def test_infisical_path_missing(httpserver: object) -> None:
         f.severity == "CRITICAL" and "/dev/omniweb/" in f.title for f in findings
     )
     assert any(f.auto_fixable is True for f in findings)
+
+
+# ---------------------------------------------------------------------------
+# Task 6: Service deployment and feature flag parity
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_service_parity_local_only_is_warning() -> None:
+    from compare_environments import check_service_deployment_parity
+
+    findings = check_service_deployment_parity(
+        local_services={"omninode-runtime", "omnibase-intelligence-api"},
+        cloud_services={"omnibase-intelligence-api"},
+    )
+    assert any(
+        f.severity == "WARNING" and "omninode-runtime" in f.title for f in findings
+    )
+    assert not any(f.severity == "CRITICAL" for f in findings)
+
+
+@pytest.mark.unit
+def test_service_parity_cloud_only_is_info() -> None:
+    from compare_environments import check_service_deployment_parity
+
+    findings = check_service_deployment_parity(
+        local_services={"omninode-runtime"},
+        cloud_services={"omninode-runtime", "omnibase-intelligence-api"},
+    )
+    assert any(
+        f.severity == "INFO" and "omnibase-intelligence-api" in f.title
+        for f in findings
+    )
+
+
+@pytest.mark.unit
+def test_feature_flag_mismatch_is_warning() -> None:
+    from compare_environments import check_feature_flag_consistency
+
+    findings = check_feature_flag_consistency(
+        local_flags={"ENABLE_REAL_TIME_EVENTS": "true"},
+        cloud_flags={"ENABLE_REAL_TIME_EVENTS": "false"},
+    )
+    assert any(
+        f.severity == "WARNING" and "ENABLE_REAL_TIME_EVENTS" in f.title
+        for f in findings
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 7: Kafka topic parity
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_kafka_topic_local_only_is_warning() -> None:
+    from compare_environments import check_kafka_topic_parity
+
+    findings = check_kafka_topic_parity(
+        local_topics={"agent.routing.requested.v1", "agent-actions"},
+        cloud_topics={"agent-actions"},
+    )
+    assert any(
+        f.severity == "WARNING" and "agent.routing.requested.v1" in f.detail
+        for f in findings
+    )
+
+
+@pytest.mark.unit
+def test_kafka_internal_topics_filtered() -> None:
+    from compare_environments import check_kafka_topic_parity
+
+    findings = check_kafka_topic_parity(
+        local_topics={"__consumer_offsets", "agent-actions"},
+        cloud_topics={"agent-actions"},
+    )
+    assert not any("__consumer_offsets" in f.title for f in findings)
+
+
+# ---------------------------------------------------------------------------
+# Task 8: Preflight and fix mode restriction
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_fix_mode_only_fixes_infisical_paths() -> None:
+    from compare_environments import AUTO_FIXABLE_CHECKS
+
+    assert {"infisical_path_completeness"} == AUTO_FIXABLE_CHECKS
+
+
+@pytest.mark.unit
+def test_preflight_returns_none_when_ssm_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import shutil
+
+    from compare_environments import SsmRunner, preflight_namespace_check
+
+    monkeypatch.setattr(shutil, "which", lambda _x: None)
+    ssm = SsmRunner("i-test", "us-east-1", timeout=5)
+    result = preflight_namespace_check(ssm, "onex-dev")
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Task 9: End-to-end smoke test with mocked SSM
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_run_parity_check_end_to_end_with_mocked_ssm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Full pipeline: mocked SSM returning credential drift → CRITICAL finding in report."""
+    import shutil
+
+    from compare_environments import SsmResult, SsmRunner, run_parity_check
+
+    def mock_ssm_run(self: SsmRunner, _command: str) -> SsmResult:
+        payload = {
+            "onex_runtime_credentials": {
+                "OMNIINTELLIGENCE_DB_URL": "postgresql://role_omniintelligence:pass@host/db"
+            },
+            "omniintelligence_credentials": {
+                "POSTGRES_USER": "postgres",
+                "POSTGRES_PASSWORD": "bad",
+            },
+            "omnidash_credentials": {
+                "POSTGRES_USER": "role_omnidash",
+                "POSTGRES_PASSWORD": "ok",
+            },
+        }
+        return SsmResult(returncode=0, stdout=json.dumps(payload))
+
+    monkeypatch.setattr(shutil, "which", lambda _x: "/usr/bin/aws")
+    monkeypatch.setattr(SsmRunner, "run", mock_ssm_run)
+
+    report = run_parity_check(
+        mode="check",
+        checks=["credential"],
+        namespace="onex-dev",
+        instance_id="i-mock",
+        region="us-east-1",
+        timeout=5,
+    )
+    assert report.summary.critical_count >= 1
+    assert report.findings[0].check_id == "credential_parity"
+    assert report.findings[0].severity == "CRITICAL"

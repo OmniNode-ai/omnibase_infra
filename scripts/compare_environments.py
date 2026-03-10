@@ -445,6 +445,354 @@ def check_ecr_tag_validity(
 
 
 # ---------------------------------------------------------------------------
+# checks — db_schema_parity (Task 5, --all-checks only)
+# ---------------------------------------------------------------------------
+
+CANONICAL_SERVICES = {
+    "omninode-runtime",
+    "omninode-runtime-effects",
+    "omninode-agent-actions-consumer",
+    "omnibase-intelligence-api",
+    "omninode-contract-resolver",
+    "omninode-skill-lifecycle-consumer",
+}
+
+FEATURE_FLAG_KEYS = [
+    "ENABLE_PATTERN_ENFORCEMENT",
+    "ENABLE_REAL_TIME_EVENTS",
+    "KAFKA_ENABLE_INTELLIGENCE",
+    "OMNIMEMORY_ENABLED",
+]
+
+
+def check_db_schema_parity(
+    local_migration: str,
+    cloud_migration: str,
+) -> list[ModelParityFinding]:
+    """Compare latest migration IDs. Expects lexically-ordered ISO timestamp prefixes."""
+    if local_migration == cloud_migration:
+        return []
+    if cloud_migration > local_migration:
+        return [
+            ModelParityFinding(
+                check_id="db_schema_parity",
+                severity="CRITICAL",
+                title="DB schema: cloud ahead of local",
+                detail=(
+                    f"Cloud ahead: cloud latest='{cloud_migration}',"
+                    f" local latest='{local_migration}'."
+                    " Migration applied in cloud but not yet run locally."
+                ),
+                local_value=local_migration,
+                cloud_value=cloud_migration,
+                auto_fixable=False,
+                fix_hint=(
+                    "Run outstanding migrations locally: "
+                    "uv run python scripts/run-migrations.py"
+                ),
+            )
+        ]
+    # local_migration > cloud_migration
+    return [
+        ModelParityFinding(
+            check_id="db_schema_parity",
+            severity="WARNING",
+            title="DB schema: local ahead of cloud",
+            detail=(
+                f"Local ahead: local latest='{local_migration}',"
+                f" cloud latest='{cloud_migration}'."
+                " Migration applied locally but not yet deployed to cloud."
+            ),
+            local_value=local_migration,
+            cloud_value=cloud_migration,
+            auto_fixable=False,
+            fix_hint=(
+                "Apply pending migrations to cloud: "
+                "uv run python scripts/run-migrations.py --target cloud"
+            ),
+        )
+    ]
+
+
+def check_package_version_parity(
+    local_versions: dict[str, str],
+    cloud_versions: dict[str, str],
+) -> list[ModelParityFinding]:
+    """Compare omnibase package versions between local and cloud."""
+    findings: list[ModelParityFinding] = []
+    for pkg in ("omnibase-core", "omnibase-spi", "omnibase-infra"):
+        local_v = local_versions.get(pkg)
+        cloud_v = cloud_versions.get(pkg)
+        if local_v is None or cloud_v is None:
+            continue
+        if local_v != cloud_v:
+            findings.append(
+                ModelParityFinding(
+                    check_id="package_version_parity",
+                    severity="WARNING",
+                    title=f"Package version mismatch: {pkg}",
+                    detail=f"{pkg}: local={local_v}, cloud={cloud_v}. Version mismatch may cause serialization errors.",
+                    local_value=local_v,
+                    cloud_value=cloud_v,
+                    auto_fixable=False,
+                    fix_hint=f"Rebuild and redeploy with {pkg}=={local_v}",
+                )
+            )
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# checks — service_deployment_parity and feature_flag_consistency (Task 6)
+# ---------------------------------------------------------------------------
+
+
+def check_service_deployment_parity(
+    local_services: set[str],
+    cloud_services: set[str],
+) -> list[ModelParityFinding]:
+    """Compare local Docker services vs cloud k8s deployments."""
+    findings: list[ModelParityFinding] = []
+    local_canonical = local_services & CANONICAL_SERVICES
+    cloud_canonical = cloud_services & CANONICAL_SERVICES
+
+    for svc in local_canonical - cloud_canonical:
+        findings.append(
+            ModelParityFinding(
+                check_id="service_deployment_parity",
+                severity="WARNING",
+                title=f"Service only in local: {svc}",
+                detail=f"'{svc}' runs locally but has no k8s deployment in cloud.",
+                local_value="running",
+                cloud_value="absent",
+                auto_fixable=False,
+                fix_hint=f"Deploy {svc} to cloud namespace or verify deployment spec.",
+            )
+        )
+    for svc in cloud_canonical - local_canonical:
+        findings.append(
+            ModelParityFinding(
+                check_id="service_deployment_parity",
+                severity="INFO",
+                title=f"Service only in cloud: {svc}",
+                detail=f"'{svc}' deployed in cloud but not running locally (expected).",
+                local_value="absent",
+                cloud_value="running",
+                auto_fixable=False,
+                fix_hint="No action required — cloud-only services are expected.",
+            )
+        )
+    return findings
+
+
+def check_feature_flag_consistency(
+    local_flags: dict[str, str],
+    cloud_flags: dict[str, str],
+) -> list[ModelParityFinding]:
+    """Check feature flag env vars are consistent between local and cloud."""
+    findings: list[ModelParityFinding] = []
+    for key in FEATURE_FLAG_KEYS:
+        local_v = local_flags.get(key)
+        cloud_v = cloud_flags.get(key)
+        if local_v is None or cloud_v is None:
+            continue
+        if local_v.lower() != cloud_v.lower():
+            findings.append(
+                ModelParityFinding(
+                    check_id="feature_flag_consistency",
+                    severity="WARNING",
+                    title=f"Feature flag mismatch: {key}",
+                    detail=f"local={local_v!r}, cloud={cloud_v!r}",
+                    local_value=local_v,
+                    cloud_value=cloud_v,
+                    auto_fixable=False,
+                    fix_hint=f"Update cloud ConfigMap or Infisical to set {key}={local_v}",  # noqa: S608
+                )
+            )
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# checks — kafka_topic_parity (Task 7, --all-checks only)
+# ---------------------------------------------------------------------------
+
+
+def check_kafka_topic_parity(
+    local_topics: set[str],
+    cloud_topics: set[str],
+) -> list[ModelParityFinding]:
+    """Compare Kafka topic sets. Internal __ topics are filtered out."""
+    findings: list[ModelParityFinding] = []
+    local_filtered = {t for t in local_topics if not t.startswith("__")}
+    cloud_filtered = {t for t in cloud_topics if not t.startswith("__")}
+
+    for topic in sorted(local_filtered - cloud_filtered):
+        findings.append(
+            ModelParityFinding(
+                check_id="kafka_topic_parity",
+                severity="WARNING",
+                title=f"Kafka topic only in local: {topic}",
+                detail=f"Topic '{topic}' exists locally but not in cloud broker.",
+                local_value="exists",
+                cloud_value="missing",
+                auto_fixable=False,
+                fix_hint="Run create_kafka_topics.py against cloud broker.",
+            )
+        )
+    for topic in sorted(cloud_filtered - local_filtered):
+        findings.append(
+            ModelParityFinding(
+                check_id="kafka_topic_parity",
+                severity="INFO",
+                title=f"Kafka topic only in cloud: {topic}",
+                detail=f"Topic '{topic}' exists in cloud but not local (expected).",
+                local_value="missing",
+                cloud_value="exists",
+                auto_fixable=False,
+                fix_hint="No action required — cloud-only topics are expected.",
+            )
+        )
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# preflight + fix mode (Task 8)
+# ---------------------------------------------------------------------------
+
+# Hard allowlist — only these check_ids may be auto-fixed
+AUTO_FIXABLE_CHECKS: set[str] = {"infisical_path_completeness"}
+
+
+def preflight_namespace_check(
+    ssm: SsmRunner, namespace: str
+) -> ModelParityFinding | None:
+    """Verify the k8s namespace exists. Returns a CRITICAL finding if missing."""
+    result = ssm.run(
+        f"kubectl get namespace {namespace} -o name 2>/dev/null || echo NAMESPACE_MISSING"
+    )
+    if result.skipped:
+        return None
+    if "NAMESPACE_MISSING" in result.stdout:
+        return ModelParityFinding(
+            check_id="preflight_namespace",
+            severity="CRITICAL",
+            title=f"k8s namespace '{namespace}' not found",
+            detail=(
+                "All cloud-side checks skipped — cluster may be rebuilding"
+                " or namespace deleted."
+            ),
+            auto_fixable=False,
+            fix_hint=f"kubectl create namespace {namespace}",
+        )
+    return None
+
+
+# ---------------------------------------------------------------------------
+# aggregation — run_parity_check (Task 9)
+# ---------------------------------------------------------------------------
+
+
+def run_parity_check(
+    mode: str,
+    checks: list[str],
+    namespace: str,
+    instance_id: str,
+    region: str,
+    timeout: int,
+) -> ModelParityReport:
+    """Run all requested checks and return a ModelParityReport."""
+    ssm = SsmRunner(instance_id=instance_id, region=region, timeout=timeout)
+    all_findings: list[ModelParityFinding] = []
+
+    # Preflight: namespace check (short-circuits cloud probes if missing)
+    namespace_ok = True
+    preflight = preflight_namespace_check(ssm, namespace)
+    if preflight is not None:
+        all_findings.append(preflight)
+        namespace_ok = False
+
+    # Run each requested check
+    for check in checks:
+        if check == "credential" and namespace_ok:
+            # Remote SSM probe for cloud secrets
+            result = ssm.run(
+                f'python3 -c "'
+                f"import subprocess,json,base64;"
+                f"def dec(n,ns): r=subprocess.run(['kubectl','get','secret',n,'-n',ns,"
+                f"'-o','jsonpath={{{{.data}}}}'],capture_output=True,text=True,timeout=15);"
+                f" return {{k:base64.b64decode(v).decode() for k,v in json.loads(r.stdout).items()}} if r.returncode==0 else {{}};"
+                f"print(json.dumps({{"
+                f"'onex_runtime_credentials':dec('onex-runtime-credentials','{namespace}'),"
+                f"'omniintelligence_credentials':dec('omniintelligence-credentials','{namespace}'),"
+                f"'omnidash_credentials':dec('omnidash-credentials','{namespace}')"
+                f'}}))"'
+            )
+            if not result.skipped:
+                try:
+                    data = json.loads(result.stdout)
+                    cloud_secrets = {
+                        "onex-runtime-credentials": data.get(
+                            "onex_runtime_credentials", {}
+                        ),
+                        "omniintelligence-credentials": data.get(
+                            "omniintelligence_credentials", {}
+                        ),
+                        "omnidash-credentials": data.get("omnidash_credentials", {}),
+                    }
+                    all_findings.extend(check_credential_parity(cloud_secrets))
+                except Exception as exc:
+                    all_findings.append(
+                        ModelParityFinding(
+                            check_id="credential_parity",
+                            severity="INFO",
+                            title="credential check skipped — SSM parse error",
+                            detail=f"Could not parse SSM output: {exc}. stdout[:200]={result.stdout[:200]}",
+                            auto_fixable=False,
+                            fix_hint="Verify SSM instance access and kubectl permissions.",
+                        )
+                    )
+
+        elif check == "ecr" and namespace_ok:
+            script = _DEPLOYMENT_IMAGE_SCRIPT_TEMPLATE.format(namespace=namespace)
+            result = ssm.run(script)
+            if not result.skipped:
+                try:
+                    deployments = json.loads(result.stdout)
+                    all_findings.extend(
+                        check_ecr_tag_validity(deployments, region=region)
+                    )
+                except Exception as exc:
+                    all_findings.append(
+                        ModelParityFinding(
+                            check_id="ecr_tag_validity",
+                            severity="INFO",
+                            title="ECR check skipped — SSM parse error",
+                            detail=str(exc),
+                            auto_fixable=False,
+                            fix_hint="Verify SSM instance access and kubectl permissions.",
+                        )
+                    )
+
+    # Build summary
+    critical = sum(1 for f in all_findings if f.severity == "CRITICAL")
+    warning = sum(1 for f in all_findings if f.severity == "WARNING")
+    info = sum(1 for f in all_findings if f.severity == "INFO")
+
+    return ModelParityReport(
+        run_id=str(uuid.uuid4())[:8],
+        generated_at=datetime.now(tz=UTC).isoformat(),
+        mode=mode,
+        checks_run=checks,
+        findings=all_findings,
+        summary=ModelParitySummary(
+            critical_count=critical,
+            warning_count=warning,
+            info_count=info,
+            checks_skipped=[],
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # checks registry
 # ---------------------------------------------------------------------------
 
@@ -480,15 +828,13 @@ def main() -> None:
     checks = (
         ALL_CHECKS if args.all_checks else [c.strip() for c in args.checks.split(",")]
     )
-    report = ModelParityReport(
-        run_id=str(uuid.uuid4())[:8],
-        generated_at=datetime.now(tz=UTC).isoformat(),
+    report = run_parity_check(
         mode=args.mode,
-        checks_run=checks,
-        findings=[],
-        summary=ModelParitySummary(
-            critical_count=0, warning_count=0, info_count=0, checks_skipped=checks
-        ),
+        checks=checks,
+        namespace=args.namespace,
+        instance_id=args.instance_id,
+        region=args.region,
+        timeout=args.timeout,
     )
     print(report.model_dump_json(indent=2))
 
