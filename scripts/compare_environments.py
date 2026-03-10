@@ -168,6 +168,149 @@ class SsmRunner:
 
 
 # ---------------------------------------------------------------------------
+# checks — credential_parity and infisical_path_completeness
+# ---------------------------------------------------------------------------
+
+# Explicit credential rule map. Keys NOT in this map are not compared.
+# Format: (secret_name, key, rule_type, expected_value_or_None)
+# rule_type "role" → key must equal expected_value
+# rule_type "runtime_secret" → key must match value in onex-runtime-credentials
+CREDENTIAL_RULES: list[tuple[str, str, str, str | None]] = [
+    ("omniintelligence-credentials", "POSTGRES_USER", "role", "role_omniintelligence"),
+    ("omnidash-credentials", "POSTGRES_USER", "role", "role_omnidash"),
+    ("omniintelligence-credentials", "POSTGRES_PASSWORD", "runtime_secret", None),
+    ("omnidash-credentials", "POSTGRES_PASSWORD", "runtime_secret", None),
+]
+
+
+def check_credential_parity(
+    cloud_secrets: dict[str, dict[str, str]],
+) -> list[ModelParityFinding]:
+    """Check k8s service secrets against CREDENTIAL_RULES explicit map."""
+    findings: list[ModelParityFinding] = []
+    runtime = cloud_secrets.get("onex-runtime-credentials", {})
+
+    for secret_name, key, rule_type, expected_value in CREDENTIAL_RULES:
+        service_secret = cloud_secrets.get(secret_name, {})
+        actual = service_secret.get(key)
+        if actual is None:
+            findings.append(
+                ModelParityFinding(
+                    check_id="credential_parity",
+                    severity="CRITICAL",
+                    title=f"Missing {key} in {secret_name}",
+                    detail=f"Key '{key}' not found in k8s secret '{secret_name}'",
+                    cloud_value=None,
+                    auto_fixable=False,
+                    fix_hint=f"Re-seed {secret_name} in Infisical and resync InfisicalSecret",
+                )
+            )
+            continue
+
+        if rule_type == "role":
+            if actual != expected_value:
+                findings.append(
+                    ModelParityFinding(
+                        check_id="credential_parity",
+                        severity="CRITICAL",
+                        title=f"Wrong {key} for {secret_name}",
+                        detail=(
+                            f"k8s secret has '{actual}'; expected '{expected_value}'"
+                        ),
+                        local_value=expected_value,
+                        cloud_value=actual,
+                        auto_fixable=False,
+                        fix_hint=(
+                            f"Re-seed /{secret_name.replace('-', '/')}/ in Infisical"
+                            " and force-resync the InfisicalSecret"
+                        ),
+                    )
+                )
+        elif rule_type == "runtime_secret":
+            runtime_value = runtime.get(key)
+            if runtime_value is not None and actual != runtime_value:
+                findings.append(
+                    ModelParityFinding(
+                        check_id="credential_parity",
+                        severity="CRITICAL",
+                        title=f"Mismatched {key} for {secret_name}",
+                        detail=(
+                            f"'{secret_name}' {key} does not match onex-runtime-credentials"
+                        ),
+                        auto_fixable=False,
+                        fix_hint=(
+                            "onex-runtime-credentials is authoritative. Re-seed service"
+                            f" secret path for {secret_name} and resync."
+                        ),
+                    )
+                )
+
+    return findings
+
+
+def probe_infisical_paths(
+    infisical_addr: str,
+    project_id: str,
+    paths: list[tuple[str, str, str]],
+    token: str,
+) -> list[ModelParityFinding]:
+    """Check that each Infisical path exists for the given project.
+
+    paths: list of (path, environment, infisical_secret_name)
+    """
+    import httpx
+
+    findings: list[ModelParityFinding] = []
+    infisical_addr = infisical_addr.rstrip("/")
+
+    for path, environment, secret_name in paths:
+        try:
+            resp = httpx.get(
+                f"{infisical_addr}/api/v1/secrets",
+                params={
+                    "workspaceId": project_id,
+                    "environment": environment,
+                    "secretPath": path,
+                },
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
+            )
+            if resp.status_code == 404:
+                findings.append(
+                    ModelParityFinding(
+                        check_id="infisical_path_completeness",
+                        severity="CRITICAL",
+                        title=f"Infisical path missing: {path}",
+                        detail=(
+                            f"Path '{path}' (env={environment}) not found in Infisical"
+                            f" project {project_id}. InfisicalSecret '{secret_name}'"
+                            " will loop on 404."
+                        ),
+                        cloud_value=None,
+                        auto_fixable=True,
+                        fix_hint=(
+                            f"Run: uv run python scripts/seed-infisical.py"
+                            f" --contracts-dir src/omnibase_infra/nodes --execute"
+                            f"  # seeds path {path}"
+                        ),
+                    )
+                )
+        except Exception as exc:
+            findings.append(
+                ModelParityFinding(
+                    check_id="infisical_path_completeness",
+                    severity="INFO",
+                    title=f"Infisical probe skipped for {path}",
+                    detail=f"Could not reach Infisical at {infisical_addr}: {exc}",
+                    auto_fixable=False,
+                    fix_hint="Verify INFISICAL_ADDR is set and Infisical is running.",
+                )
+            )
+
+    return findings
+
+
+# ---------------------------------------------------------------------------
 # checks registry
 # ---------------------------------------------------------------------------
 
