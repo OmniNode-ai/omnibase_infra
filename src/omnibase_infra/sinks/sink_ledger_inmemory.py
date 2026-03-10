@@ -60,6 +60,7 @@ class InMemoryLedgerSink:
         "_events",
         "_lock",
         "_max_size",
+        "_not_full",
     )
 
     def __init__(
@@ -77,6 +78,7 @@ class InMemoryLedgerSink:
         self._drop_policy = drop_policy
         self._events: deque[ModelLedgerEventBase] = deque(maxlen=max_size)
         self._lock = asyncio.Lock()
+        self._not_full = asyncio.Condition(self._lock)
         self._closed = False
 
     async def emit(self, event: ModelLedgerEventBase) -> bool:
@@ -101,7 +103,7 @@ class InMemoryLedgerSink:
             detect when old events are dropped; use DROP_NEWEST or RAISE policies
             if drop notification is required.
         """
-        async with self._lock:
+        async with self._not_full:
             # Check closed INSIDE lock to prevent race with close()
             if self._closed:
                 raise LedgerSinkClosedError("Cannot emit to closed sink")
@@ -113,12 +115,12 @@ class InMemoryLedgerSink:
                         f"Sink buffer full ({self._max_size} events)"
                     )
                 elif self._drop_policy == EnumLedgerSinkDropPolicy.BLOCK:
-                    # BLOCK policy requires proper condition variable implementation
-                    # which is not provided in this test-only sink
-                    raise NotImplementedError(
-                        "BLOCK policy is not supported in InMemoryLedgerSink. "
-                        "Use DROP_OLDEST, DROP_NEWEST, or RAISE for testing."
-                    )
+                    # Wait until space is available; drain() calls notify_all()
+                    while len(self._events) >= self._max_size:
+                        await self._not_full.wait()
+                    # Re-check closed after waking (drain may have closed the sink)
+                    if self._closed:
+                        raise LedgerSinkClosedError("Cannot emit to closed sink")
                 # DROP_OLDEST: deque with maxlen handles this automatically
 
             self._events.append(event)
@@ -163,8 +165,25 @@ class InMemoryLedgerSink:
         """
         return list(self._events)
 
+    async def drain(self) -> list[ModelLedgerEventBase]:
+        """Remove and return all events from the buffer.
+
+        Wakes any BLOCK-policy emitters waiting for space.
+
+        Returns:
+            List of events in emission order (oldest first).
+        """
+        async with self._not_full:
+            events = list(self._events)
+            self._events.clear()
+            self._not_full.notify_all()
+            return events
+
     def clear(self) -> None:
-        """Clear all events from the buffer (for testing)."""
+        """Clear all events from the buffer (for testing).
+
+        Note: Does not wake BLOCK-policy waiters. Use drain() in async contexts.
+        """
         self._events.clear()
 
 
