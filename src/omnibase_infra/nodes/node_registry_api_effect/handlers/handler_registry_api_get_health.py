@@ -2,29 +2,35 @@
 # SPDX-License-Identifier: MIT
 
 # Copyright (c) 2026 OmniNode Team
-"""Stub handler for registry API operation: get_health.
+"""Handler for registry API operation: get_health.
 
-Full implementation pending. See node_registry_api_effect contract.yaml
-and services/registry_api/service.py for business logic.
+Pings each infrastructure component (DB, Kafka, Qdrant) with try/except
+and returns per-component status. Never raises on individual component failure.
 
-Ticket: OMN-2909
+Ticket: OMN-4482
 """
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_registry_api_effect.models import (
+    ModelRegistryApiResponse,
+)
+
+logger = logging.getLogger(__name__)
+
+__all__ = ["HandlerRegistryApiGetHealth"]
 
 
 class HandlerRegistryApiGetHealth:
-    """Stub handler for operation: get_health.
+    """Handler for operation: get_health.
 
-    Returns component-level health status for the registry service.
-    Full implementation is delegated to the FastAPI service layer.
-
-    Raises:
-        NotImplementedError: Always — full implementation pending.
+    Returns per-component health status for the registry service.
+    Individual component failures are caught and reported as unhealthy
+    rather than propagated as exceptions.
     """
 
     @property
@@ -40,11 +46,77 @@ class HandlerRegistryApiGetHealth:
     async def handle(self, request: object, correlation_id: UUID) -> object:
         """Handle get_health operation.
 
-        Raises:
-            NotImplementedError: Full implementation pending.
+        Pings DB, Kafka, and Qdrant. Each component ping is wrapped in
+        try/except so a single failure does not crash the health check.
+
+        Args:
+            request: Ignored for health checks.
+            correlation_id: Distributed tracing identifier.
+
+        Returns:
+            ModelRegistryApiResponse with component health status in ``data``.
         """
-        raise NotImplementedError(
-            "HandlerRegistryApiGetHealth is not yet implemented. "
-            "See node_registry_api_effect contract for full spec. "
-            f"Correlation ID: {correlation_id}"
+        components: dict[str, str] = {}
+
+        # DB health check
+        try:
+            # Attempt a minimal connection and close immediately.
+            import os
+
+            import asyncpg
+
+            db_url = os.environ.get("OMNIBASE_INFRA_DB_URL", "")
+            if db_url:
+                conn = await asyncpg.connect(db_url, timeout=2)
+                await conn.close()
+                components["db"] = "healthy"
+            else:
+                components["db"] = "unconfigured"
+        except Exception as exc:
+            logger.warning("Health check: DB unavailable — %s", exc)
+            components["db"] = "unhealthy"
+
+        # Kafka health check
+        try:
+            import os
+
+            from aiokafka.admin import AIOKafkaAdminClient
+
+            bootstrap = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
+            admin = AIOKafkaAdminClient(
+                bootstrap_servers=bootstrap, request_timeout_ms=2000
+            )
+            await admin.start()
+            await admin.close()
+            components["kafka"] = "healthy"
+        except Exception as exc:
+            logger.warning("Health check: Kafka unavailable — %s", exc)
+            components["kafka"] = "unhealthy"
+
+        # Qdrant health check
+        try:
+            import os
+
+            import httpx
+
+            qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+            async with httpx.AsyncClient(timeout=2) as client:
+                resp = await client.get(f"{qdrant_url}/healthz")
+                components["qdrant"] = (
+                    "healthy" if resp.status_code == 200 else "degraded"
+                )
+        except Exception as exc:
+            logger.warning("Health check: Qdrant unavailable — %s", exc)
+            components["qdrant"] = "unhealthy"
+
+        overall = (
+            "healthy"
+            if all(v == "healthy" for v in components.values())
+            else "degraded"
+        )
+        return ModelRegistryApiResponse(
+            operation="get_health",
+            correlation_id=correlation_id,
+            success=True,
+            data={"status": overall, "components": components},
         )
