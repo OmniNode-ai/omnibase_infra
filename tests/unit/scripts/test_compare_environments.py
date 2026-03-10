@@ -43,3 +43,52 @@ def test_parity_report_serializes_to_json() -> None:
     parsed = json.loads(raw)
     assert parsed["findings"][0]["severity"] == "CRITICAL"
     assert parsed["summary"]["critical_count"] == 1
+
+
+@pytest.mark.unit
+def test_ssm_runner_skips_when_aws_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    import shutil
+
+    from compare_environments import SsmRunner
+
+    monkeypatch.setattr(shutil, "which", lambda _x: None)
+    result = SsmRunner("i-test", "us-east-1", timeout=5).run("echo hi")
+    assert result.skipped is True
+    assert "aws CLI not found" in result.skip_reason
+
+
+@pytest.mark.unit
+def test_ssm_runner_skips_on_expired_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    import shutil
+    import subprocess
+
+    from compare_environments import SsmRunner
+
+    monkeypatch.setattr(shutil, "which", lambda _x: "/usr/bin/aws")
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *_a, **_kw: type(
+            "R",
+            (),
+            {"returncode": 255, "stdout": "", "stderr": "ExpiredTokenException"},
+        )(),
+    )
+    result = SsmRunner("i-test", "us-east-1", timeout=5).run("echo hi")
+    assert result.skipped is True
+    assert "SSO session expired" in result.skip_reason
+
+
+@pytest.mark.unit
+def test_ssm_runner_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SsmRunner.run() must return SsmResult on all failure paths, never raise."""
+    import shutil
+
+    from compare_environments import SsmRunner
+
+    monkeypatch.setattr(shutil, "which", lambda _x: "/usr/bin/aws")
+    monkeypatch.setattr(
+        "subprocess.run", lambda *_a, **_kw: (_ for _ in ()).throw(OSError("broken"))
+    )
+    result = SsmRunner("i-test", "us-east-1", timeout=5).run("echo hi")
+    assert result.skipped is True
