@@ -32,7 +32,7 @@ required_checks:
 excluded_checks:
   - name: "Tests (Split 1/10) through Tests (Split 10/10)"
     reason: "Individual matrix legs -- aggregated by CI Tests Gate"
-  - name: "Test Summary"
+  - name: "CI Summary"
     reason: "Reporting aggregator -- not a correctness gate (CI Tests Gate covers this)"
   - name: "Check architecture handshake"
     workflow: check-handshake.yml
