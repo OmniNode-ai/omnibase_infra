@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Pytest fixtures for correlation ID propagation integration tests.
+"""Pytest fixtures for correlation ID propagation integration tests.  # ai-slop-ok: pre-existing
 
 This module provides fixtures and helper classes for testing correlation ID
 propagation across service boundaries. The fixtures capture structured log
