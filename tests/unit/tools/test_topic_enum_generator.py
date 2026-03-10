@@ -666,3 +666,30 @@ def test_generator_does_not_validate_topics(tmp_path: Path) -> None:
     )
     result = gen.render([entry], output_dir=tmp_path)
     assert len(result) == 2  # enum + init
+
+
+# ---------------------------------------------------------------------------
+# SPDX-skip marker — OMN-4468
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_generated_enum_file_spdx_skip_is_line_1() -> None:
+    """_FILE_HEADER must have '# spdx-skip:' as the very first line (OMN-4468)."""
+    from omnibase_infra.tools.topic_enum_generator import _FILE_HEADER
+
+    first_line = _FILE_HEADER.splitlines()[0]
+    assert first_line.startswith("# spdx-skip:"), (
+        f"_FILE_HEADER first line must start with '# spdx-skip:'; got: {first_line!r}"
+    )
+
+
+@pytest.mark.unit
+def test_generated_init_file_spdx_skip_is_line_1() -> None:
+    """_INIT_HEADER must have '# spdx-skip:' as the very first line (OMN-4468)."""
+    from omnibase_infra.tools.topic_enum_generator import _INIT_HEADER
+
+    first_line = _INIT_HEADER.splitlines()[0]
+    assert first_line.startswith("# spdx-skip:"), (
+        f"_INIT_HEADER first line must start with '# spdx-skip:'; got: {first_line!r}"
+    )
