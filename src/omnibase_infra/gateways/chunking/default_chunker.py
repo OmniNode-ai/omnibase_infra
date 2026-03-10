@@ -54,6 +54,8 @@ class DefaultEnvelopeChunker:
         Returns:
             Ordered list of ModelChunkedEnvelope.
         """
+        if max_chunk_size <= 0:
+            raise ValueError(f"max_chunk_size must be positive, got {max_chunk_size}")
         payload = envelope.to_bytes()
         payload_checksum = _sha256_hex(payload)
         total_size = len(payload)
@@ -87,15 +89,15 @@ class DefaultEnvelopeChunker:
     def reassemble(
         self,
         chunks: list[ModelChunkedEnvelope],
-        envelope_factory: type[ProtocolChunkableEnvelope],
+        envelope_factory: EnvelopeFactory,
     ) -> ProtocolChunkableEnvelope:
         """Reassemble a list of chunks into the original logical envelope.
 
         Args:
             chunks: All chunks for a single chunk series (any order).
-            envelope_factory: A class satisfying ProtocolChunkableEnvelope with a
-                ``from_bytes(data: bytes)`` classmethod. Used to reconstruct the
-                domain envelope from raw bytes.
+            envelope_factory: An object satisfying the ``EnvelopeFactory`` protocol
+                (has a ``from_bytes(data: bytes)`` classmethod). Used to reconstruct
+                the domain envelope from raw bytes.
 
         Returns:
             Reconstructed envelope via ``envelope_factory.from_bytes``.
