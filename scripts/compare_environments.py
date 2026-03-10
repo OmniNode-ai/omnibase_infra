@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 """compare-environments.py — local Docker vs k8s environment parity checker.
 
@@ -304,6 +306,138 @@ def probe_infisical_paths(
                     detail=f"Could not reach Infisical at {infisical_addr}: {exc}",
                     auto_fixable=False,
                     fix_hint="Verify INFISICAL_ADDR is set and Infisical is running.",
+                )
+            )
+
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# checks — ecr_tag_validity
+# ---------------------------------------------------------------------------
+
+# SSM remote script: emits one JSON object {deployment_name: image_ref}
+_DEPLOYMENT_IMAGE_SCRIPT_TEMPLATE = (
+    'python3 -c "'
+    "import subprocess, json; "
+    "r = subprocess.run(['kubectl','get','deployments','-n','{namespace}',"
+    "  '-o','jsonpath={{range .items[*]}}{{.metadata.name}}={{.spec.template.spec.containers[0].image}}\\\\n{{end}}'],"
+    "  capture_output=True, text=True); "
+    "d = {{}}; "
+    "[d.update({{p.split('=',1)[0].strip(): p.split('=',1)[1].strip()}})"
+    " for p in r.stdout.strip().splitlines() if '=' in p]; "
+    "print(json.dumps(d))"
+    '"'
+)
+
+
+def _ecr_tag_exists(repo: str, tag: str, region: str) -> bool:
+    """Return True if the ECR tag exists in the registry."""
+    r = subprocess.run(
+        [
+            "aws",
+            "ecr",
+            "describe-images",
+            "--repository-name",
+            repo,
+            "--image-ids",
+            f"imageTag={tag}",
+            "--region",
+            region,
+            "--output",
+            "json",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    return r.returncode == 0
+
+
+def _parse_ecr_image(image_ref: str) -> tuple[str, str] | None:
+    """Parse 'registry/repo:tag' → (repo, tag). Returns None if not ECR or no tag."""
+    if ".dkr.ecr." not in image_ref and ".ecr/" not in image_ref:
+        return None
+    if ":" not in image_ref:
+        return None
+    # strip registry prefix: everything after the last '/' before ':'
+    path_part = image_ref.split("/", 1)[-1] if "/" in image_ref else image_ref
+    if ":" not in path_part:
+        return None
+    repo, tag = path_part.rsplit(":", 1)
+    # skip digest-pinned references
+    if tag.startswith("sha256:"):
+        return None
+    return repo, tag
+
+
+def check_ecr_tag_validity(
+    deployments: dict[str, str],
+    region: str,
+) -> list[ModelParityFinding]:
+    """Check that deployment image tags still exist in ECR.
+
+    Scope: primary containers only (spec.template.spec.containers[0]).
+    Does not cover initContainers or digest-pinned references.
+
+    deployments: {deployment_name: image_ref}
+    """
+    findings: list[ModelParityFinding] = []
+
+    if not shutil.which("aws"):
+        for deploy_name, image_ref in deployments.items():
+            findings.append(
+                ModelParityFinding(
+                    check_id="ecr_tag_validity",
+                    severity="INFO",
+                    title=f"ECR check skipped for {deploy_name}",
+                    detail="aws CLI not found — install awscli to enable ECR tag validation",
+                    cloud_value=image_ref,
+                    auto_fixable=False,
+                    fix_hint="Install awscli: https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html",
+                )
+            )
+        return findings
+
+    for deploy_name, image_ref in deployments.items():
+        parsed = _parse_ecr_image(image_ref)
+        if parsed is None:
+            # Not an ECR image or digest-pinned — skip silently
+            continue
+        repo, tag = parsed
+        try:
+            exists = _ecr_tag_exists(repo, tag, region)
+        except Exception as exc:
+            findings.append(
+                ModelParityFinding(
+                    check_id="ecr_tag_validity",
+                    severity="INFO",
+                    title=f"ECR check skipped for {deploy_name}",
+                    detail=f"ECR describe-images failed: {exc}",
+                    cloud_value=image_ref,
+                    auto_fixable=False,
+                    fix_hint="Verify aws credentials and ECR access.",
+                )
+            )
+            continue
+
+        if not exists:
+            findings.append(
+                ModelParityFinding(
+                    check_id="ecr_tag_validity",
+                    severity="CRITICAL",
+                    title=f"ECR tag missing for {deploy_name}",
+                    detail=(
+                        f"Image tag '{tag}' for deployment '{deploy_name}' not found"
+                        f" in ECR repo '{repo}'. Active deployment will ErrImagePull on pod restart."
+                    ),
+                    cloud_value=image_ref,
+                    auto_fixable=False,
+                    fix_hint=(
+                        f"Either push a new image with tag '{tag}' to ECR repo '{repo}',"
+                        f" or update the deployment to reference an existing tag."
+                    ),
                 )
             )
 
