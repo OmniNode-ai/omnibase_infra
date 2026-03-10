@@ -487,8 +487,8 @@ jobs:
           fi
           echo "All 10 test splits passed"
 
-  test-summary:
-    name: Test Summary
+  ci-summary:
+    name: CI Summary
     # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
     runs-on: >-
       ${{
