@@ -151,7 +151,7 @@ class ProjectorShellPlaceholder:
         Raises:
             NotImplementedError: Always, as this is a placeholder without DB access.
         """
-        raise NotImplementedError(
+        raise NotImplementedError(  # stub-ok: discovery-only placeholder; no DB pool provided
             f"ProjectorShellPlaceholder for '{self.projector_id}' cannot project events. "
             "Provide a database pool to ProjectorPluginLoader to use ProjectorShell."
         )
@@ -170,7 +170,7 @@ class ProjectorShellPlaceholder:
         Raises:
             NotImplementedError: Always, as this is a placeholder without DB access.
         """
-        raise NotImplementedError(
+        raise NotImplementedError(  # stub-ok: discovery-only placeholder; no DB pool provided
             f"ProjectorShellPlaceholder for '{self.projector_id}' cannot query state. "
             "Provide a database pool to ProjectorPluginLoader to use ProjectorShell."
         )
@@ -685,9 +685,9 @@ class ProjectorPluginLoader:
                 and be readable.
 
         Returns:
-            A configured ProtocolEventProjector instance.
-            Note: Currently returns ProjectorShellPlaceholder until
-            OMN-1169 implements the full ProjectorShell.
+            A configured ProtocolEventProjector instance. Returns ProjectorShell
+            when a database pool is provided, or ProjectorShellPlaceholder for
+            discovery-only scenarios (no pool).
 
         Raises:
             ModelOnexError: If contract parsing or validation fails.
@@ -737,7 +737,6 @@ class ProjectorPluginLoader:
             },
         )
 
-        # Return placeholder until OMN-1169 implements ProjectorShell
         return self._create_projector(contract)
 
     async def load_from_directory(
