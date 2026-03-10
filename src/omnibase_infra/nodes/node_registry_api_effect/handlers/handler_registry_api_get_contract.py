@@ -2,30 +2,48 @@
 # SPDX-License-Identifier: MIT
 
 # Copyright (c) 2026 OmniNode Team
-"""Stub handler for registry API operation: get_contract.
+"""Handler for registry API operation: get_contract.
 
-Full implementation pending. See node_registry_api_effect contract.yaml
-and services/registry_api/service.py for business logic.
-
-Ticket: OMN-2909
+Ticket: OMN-4481
 """
 
 from __future__ import annotations
 
+import logging
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_registry_api_effect.models import (
+    ModelRegistryApiRequest,
+    ModelRegistryApiResponse,
+)
+
+if TYPE_CHECKING:
+    from omnibase_infra.services.registry_api.service import ServiceRegistryDiscovery
+
+logger = logging.getLogger(__name__)
+
+__all__ = ["HandlerRegistryApiGetContract"]
 
 
 class HandlerRegistryApiGetContract:
-    """Stub handler for operation: get_contract.
+    """Handler for operation: get_contract.
 
-    Fetches a single contract by ID.
-    Full implementation is delegated to the FastAPI service layer.
+    Fetches a single contract by ID, delegating to
+    ServiceRegistryDiscovery.get_contract().
 
-    Raises:
-        NotImplementedError: Always — full implementation pending.
+    Attributes:
+        _service: Registry discovery service instance.
     """
+
+    def __init__(self, service: ServiceRegistryDiscovery) -> None:
+        """Initialise the handler with a registry discovery service.
+
+        Args:
+            service: Registry discovery service for contract lookup.
+        """
+        self._service = service
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -40,11 +58,39 @@ class HandlerRegistryApiGetContract:
     async def handle(self, request: object, correlation_id: UUID) -> object:
         """Handle get_contract operation.
 
+        Deserialises the request, calls ServiceRegistryDiscovery.get_contract(),
+        and returns a ModelRegistryApiResponse with the contract data or
+        success=False if not found.
+
+        Args:
+            request: ModelRegistryApiRequest (or mapping-compatible object).
+                Must include contract_id.
+            correlation_id: Distributed tracing identifier.
+
+        Returns:
+            ModelRegistryApiResponse with contract data or success=False if not found.
+
         Raises:
-            NotImplementedError: Full implementation pending.
+            ValueError: If contract_id is not provided in the request.
         """
-        raise NotImplementedError(
-            "HandlerRegistryApiGetContract is not yet implemented. "
-            "See node_registry_api_effect contract for full spec. "
-            f"Correlation ID: {correlation_id}"
+        req = ModelRegistryApiRequest.model_validate(request)
+        if req.contract_id is None:
+            raise ValueError("contract_id is required for get_contract operation")
+        contract, warnings = await self._service.get_contract(
+            contract_id=str(req.contract_id),
+            correlation_id=correlation_id,
+        )
+        logger.debug(
+            "get_contract for %s found=%s",
+            req.contract_id,
+            contract is not None,
+            extra={"correlation_id": str(correlation_id)},
+        )
+        return ModelRegistryApiResponse(
+            operation=req.operation,
+            correlation_id=correlation_id,
+            success=contract is not None,
+            data={"result": contract.model_dump() if contract is not None else None},
+            warnings=[w.message for w in warnings],
+            error="Contract not found" if contract is None else None,
         )
