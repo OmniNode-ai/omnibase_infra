@@ -149,19 +149,25 @@ class TestFileSpoolLedgerSink:
         await sink.close()
 
     @pytest.mark.asyncio
-    async def test_block_policy_raises_not_implemented(self, tmp_path: Path) -> None:
-        """Test BLOCK policy raises NotImplementedError."""
+    async def test_block_policy_does_not_raise_when_space_available(
+        self, tmp_path: Path
+    ) -> None:
+        """Test BLOCK policy does not raise when buffer has space.
+
+        BLOCK policy is now implemented: emit waits for space instead of raising.
+        This test verifies the basic case where buffer has space (no blocking needed).
+        """
         sink = FileSpoolLedgerSink(
             spool_dir=tmp_path,
-            max_buffer_size=1,
+            max_buffer_size=2,
             drop_policy=EnumLedgerSinkDropPolicy.BLOCK,
             flush_interval_seconds=60.0,
         )
 
-        await sink.emit(_make_test_event("op_0"))
-
-        with pytest.raises(NotImplementedError, match="BLOCK policy"):
-            await sink.emit(_make_test_event("op_1"))
+        result1 = await sink.emit(_make_test_event("op_0"))
+        result2 = await sink.emit(_make_test_event("op_1"))
+        assert result1 is True
+        assert result2 is True
 
         await sink.close()
 
