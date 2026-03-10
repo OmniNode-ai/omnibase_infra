@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 """Tests for scripts/compare-environments.py — parity checker."""
 
@@ -123,6 +125,39 @@ def test_detects_wrong_postgres_user() -> None:
     assert not any(
         "omnidash" in f.title.lower() and "POSTGRES_USER" in f.title for f in critical
     )
+
+
+@pytest.mark.unit
+def test_detects_missing_ecr_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+
+    from compare_environments import check_ecr_tag_validity
+
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *_a, **_kw: type(
+            "R", (), {"returncode": 1, "stderr": "ImageNotFoundException", "stdout": ""}
+        )(),
+    )
+    findings = check_ecr_tag_validity(
+        deployments={
+            "omniintelligence": "123.dkr.ecr.us-east-1.amazonaws.com/omniintelligence:stale"
+        },
+        region="us-east-1",
+    )
+    assert any(f.severity == "CRITICAL" and "stale" in f.detail for f in findings)
+
+
+@pytest.mark.unit
+def test_skips_ecr_check_when_aws_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    import shutil
+
+    from compare_environments import check_ecr_tag_validity
+
+    monkeypatch.setattr(shutil, "which", lambda _x: None)
+    findings = check_ecr_tag_validity({"svc": "123.ecr/repo:tag"}, region="us-east-1")
+    assert all(f.severity == "INFO" for f in findings)
 
 
 @pytest.mark.unit
