@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# Dockerfile.migrate — omnibase_infra database migration image
+#
+# Ownership: omnibase_infra repo owns all migration SQL artifacts.
+# This image is pulled by the k8s/migrations/omnibase-infra-migrate.yaml
+# initContainer and used by the omnibase-infra migration Job.
+#
+# Migration numbering convention:
+#   001-043 — legacy migrations from docker/migrations/forward/ (no gaps in range used)
+#   044-050 — canonical migrations from src/omnibase_infra/migrations/forward/
+#
+# No numbering conflicts exist between the two directories:
+#   docker/ tops out at 043_create_merge_gate_decisions.sql
+#   src/ starts at 044_create_event_ledger.sql (renumbered from 042)
+#
+# Build context: repo root (docker build -f docker/Dockerfile.migrate .)
+
+FROM alpine:3.19
+
+# Copy legacy migrations (001-043)
+COPY docker/migrations/forward/ /migrations/forward/
+COPY docker/migrations/rollback/ /migrations/rollback/
+
+# Copy canonical migrations (044-050)
+# These are the new tables required for cloud environment recovery:
+#   044 — event_ledger
+#   045 — validation_event_ledger
+#   046 — decision_store
+#   047 — manifest_injection_lifecycle
+#   048 — skill_executions
+#   049 — add topic columns to node_registrations
+#   050 — baselines_roi_table
+COPY src/omnibase_infra/migrations/forward/ /migrations/forward/
+COPY src/omnibase_infra/migrations/rollback/ /migrations/rollback/

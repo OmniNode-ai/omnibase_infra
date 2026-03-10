@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# Build and push omnibase_infra migration image to ECR
+#
+# Triggers on push to main when migration SQL files or Dockerfile.migrate change.
+# Uses OIDC (no long-lived credentials) to assume omninode-github-actions-role.
+# Pushes SHA-tagged image; :latest is also pushed for pull convenience but
+# run-migrations.sh enforces pinned tags for production execution.
+#
+# ECR repository: 272493677981.dkr.ecr.us-east-1.amazonaws.com/omnibase-infra-migrate
+# IAM role: arn:aws:iam::272493677981:role/omninode-github-actions-role
+
+name: Build and push migration image to ECR
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docker/Dockerfile.migrate'
+      - 'docker/migrations/**'
+      - 'src/omnibase_infra/migrations/**'
+      - '.github/workflows/build-and-push-migrate-image.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: build-migrate-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REPOSITORY: omnibase-infra-migrate
+
+jobs:
+  build-and-push:
+    name: Build and push migration image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC -> omninode-github-actions-role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/omninode-github-actions-role
+          role-session-name: gha-build-migrate-omnibase-infra
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify AWS caller identity
+        run: aws sts get-caller-identity
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push migration image
+        id: build-push
+        env:
+          IMAGE_URI: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          docker build \
+            -f docker/Dockerfile.migrate \
+            -t "${IMAGE_URI}:${COMMIT_SHA}" \
+            -t "${IMAGE_URI}:latest" \
+            .
+          docker push "${IMAGE_URI}:${COMMIT_SHA}"
+          docker push "${IMAGE_URI}:latest"
+          IMAGE_TAG="${IMAGE_URI}:${COMMIT_SHA}"
+          echo "image=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Output image reference
+        run: |
+          echo "Migration image pushed: ${{ steps.build-push.outputs.image }}"
+          echo "Pin this SHA tag in k8s/migrations/omnibase-infra-migrate.yaml"
+          echo "before running migrations in production."
