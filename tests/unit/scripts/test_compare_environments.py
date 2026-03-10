@@ -92,3 +92,54 @@ def test_ssm_runner_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     result = SsmRunner("i-test", "us-east-1", timeout=5).run("echo hi")
     assert result.skipped is True
+
+
+@pytest.mark.unit
+def test_detects_wrong_postgres_user() -> None:
+    from compare_environments import check_credential_parity
+
+    # Simulates: omniintelligence-credentials has postgres instead of role_omniintelligence
+    cloud_secrets = {
+        "onex-runtime-credentials": {
+            "OMNIINTELLIGENCE_DB_URL": "postgresql://role_omniintelligence:pass@host/db"
+        },
+        "omniintelligence-credentials": {
+            "POSTGRES_USER": "postgres",
+            "POSTGRES_PASSWORD": "wrong",
+        },
+        "omnidash-credentials": {
+            "POSTGRES_USER": "role_omnidash",
+            "POSTGRES_PASSWORD": "ok",
+        },
+    }
+    findings = check_credential_parity(cloud_secrets)
+    critical = [f for f in findings if f.severity == "CRITICAL"]
+    assert len(critical) >= 1
+    assert any(
+        "POSTGRES_USER" in f.title and "omniintelligence" in f.title.lower()
+        for f in critical
+    )
+    # Correct service should produce no CRITICAL finding for omnidash POSTGRES_USER
+    assert not any(
+        "omnidash" in f.title.lower() and "POSTGRES_USER" in f.title for f in critical
+    )
+
+
+@pytest.mark.unit
+def test_infisical_path_missing(httpserver: object) -> None:
+    from compare_environments import probe_infisical_paths
+
+    # httpserver fixture from pytest-httpserver
+    httpserver.expect_request("/api/v1/secrets").respond_with_data(  # type: ignore[attr-defined]
+        "", status=404
+    )
+    findings = probe_infisical_paths(
+        infisical_addr=httpserver.url_for("/"),  # type: ignore[attr-defined]
+        project_id="proj-id",
+        paths=[("/dev/omniweb/", "dev", "omniweb-infisical-secret")],
+        token="tok",
+    )
+    assert any(
+        f.severity == "CRITICAL" and "/dev/omniweb/" in f.title for f in findings
+    )
+    assert any(f.auto_fixable is True for f in findings)
