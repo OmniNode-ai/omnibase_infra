@@ -29,8 +29,8 @@ dependencies = [
     #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
     # Remember to switch back to PyPI versions before merging to main.
     #
-    "omnibase-core>=0.24.1",
-    "omnibase-spi==0.15.1",
+    "omnibase-core==0.24.2",
+    "omnibase-spi==0.15.2",
     # ============================================================================
     # External Dependency Security Guidance
     # ============================================================================
@@ -374,10 +374,3 @@ exclude_lines = [
     "@abstractmethod",
     "@abc.abstractmethod"
 ]
-
-[tool.uv.sources]
-# PRE-RELEASE: omnibase-core chunking models (models.chunking.*) are on main but
-# not yet in a published PyPI release. Pin to the SHA that includes these models.
-# Switch back to a PyPI version pin once omnibase-core >=0.25.0 is released.
-# See: https://github.com/OmniNode-ai/omnibase_core/commit/c62c5c20
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "c62c5c20f737c3553d077c51f10681ec552c17c8" }
