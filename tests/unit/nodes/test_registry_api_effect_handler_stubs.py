@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import importlib
 import uuid
+from unittest.mock import MagicMock
 
 import pytest
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 
+# All 10 handler modules that must be importable and have correct type properties.
 HANDLER_CASES = [
     (
         "handler_registry_api_list_nodes",
@@ -73,6 +75,28 @@ HANDLER_CASES = [
     ),
 ]
 
+# Handlers that require a ``service`` argument (implemented in OMN-4481).
+_SERVICE_REQUIRED = {
+    "HandlerRegistryApiListNodes",
+    "HandlerRegistryApiGetNode",
+    "HandlerRegistryApiListContracts",
+    "HandlerRegistryApiGetContract",
+    "HandlerRegistryApiListTopics",
+    "HandlerRegistryApiGetTopic",
+}
+
+# Only the 4 operational handlers remain as stubs (raise NotImplementedError).
+STUB_HANDLER_CASES = [
+    case for case in HANDLER_CASES if case[1] not in _SERVICE_REQUIRED
+]
+
+
+def _instantiate(cls, class_name: str) -> object:
+    """Instantiate a handler, providing a mock service when required."""
+    if class_name in _SERVICE_REQUIRED:
+        return cls(service=MagicMock())
+    return cls()
+
 
 @pytest.mark.unit
 @pytest.mark.parametrize(("module_suffix", "class_name", "operation"), HANDLER_CASES)
@@ -100,7 +124,7 @@ def test_handler_has_correct_type_properties(
     )
     module = importlib.import_module(module_path)
     cls = getattr(module, class_name)
-    instance = cls()
+    instance = _instantiate(cls, class_name)
 
     assert hasattr(instance, "handler_type"), (
         f"{class_name} missing handler_type property"
@@ -117,18 +141,23 @@ def test_handler_has_correct_type_properties(
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(("module_suffix", "class_name", "operation"), HANDLER_CASES)
+@pytest.mark.parametrize(
+    ("module_suffix", "class_name", "operation"), STUB_HANDLER_CASES
+)
 @pytest.mark.asyncio
 async def test_handler_raises_not_implemented(
     module_suffix: str, class_name: str, operation: str
 ) -> None:
-    """Each stub handler must raise NotImplementedError when handle() is called."""
+    """Operational stub handlers must raise NotImplementedError when handle() is called.
+
+    Read handlers (OMN-4481) are fully implemented and excluded from this test.
+    """
     module_path = (
         f"omnibase_infra.nodes.node_registry_api_effect.handlers.{module_suffix}"
     )
     module = importlib.import_module(module_path)
     cls = getattr(module, class_name)
-    instance = cls()
+    instance = _instantiate(cls, class_name)
     correlation_id = uuid.uuid4()
 
     with pytest.raises(NotImplementedError, match=class_name):
