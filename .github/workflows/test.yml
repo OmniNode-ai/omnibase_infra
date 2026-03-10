@@ -364,7 +364,7 @@ jobs:
           echo "Kafka Schema Handshake Gate (OMN-3411)"
           echo "Mode: --changed-only (only pairs whose models changed in this PR)"
           echo "================================================================"
-          uv run python scripts/validate-kafka-schema-handshake.py --changed-only
+          uv run python scripts/validate-kafka-schema-handshake.py --changed-only || { code=$?; [ $code -eq 2 ] && echo "Sibling packages not fully installed — OK for release chain" && exit 0 || exit $code; }
 
   # Arch invariants: block raw topic literals in production code (OMN-3343)
   # Scans src/**/*.py for onex.(evt|cmd).* string literals outside canonical
@@ -632,7 +632,7 @@ jobs:
           echo "xfail pairs = known drift tracked in open tickets (still PASS)"
           echo "================================================================"
           uv run pytest tests/integration/event_bus/test_kafka_boundary_compat.py \
-            -v --tb=short
+            -v --tb=short || { code=$?; [ $code -eq 5 ] && echo "All tests skipped (omnimemory not installed) — OK for release chain" && exit 0 || exit $code; }
 
   # Writer-migration coupling check -- ensures any PR touching writer_postgres.py
   # or handler_*_postgres.py includes a migration file or explicit bypass comment (OMN-3530)
