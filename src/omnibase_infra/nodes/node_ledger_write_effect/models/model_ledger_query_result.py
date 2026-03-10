@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Ledger query result model for search responses.
 
 This module defines the result structure returned by ledger search operations.

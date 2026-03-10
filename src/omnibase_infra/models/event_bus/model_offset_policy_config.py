@@ -1,5 +1,5 @@
-# Copyright 2025 OmniNode Team. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
 """Kafka offset commit policy configuration model.
 
 This module defines the configuration for Kafka consumer offset commit strategies,

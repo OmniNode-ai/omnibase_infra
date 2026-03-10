@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Configure infinite retention on platform topics for ledger support.
 
 WARNING: This script overrides retention.ms=-1 on ALL platform topics,

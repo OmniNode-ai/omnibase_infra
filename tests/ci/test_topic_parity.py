@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """CI test: every topic string defined in platform_topic_suffixes is provisioned.
 
 Prevents future unregistered topics from missing Redpanda provisioning.

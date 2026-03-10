@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Tests for scripts/check_migration_required.py writer-without-migration gate."""
 
 import importlib.util

@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Statistical utilities for performance testing.
+"""Statistical utilities for performance testing.  # ai-slop-ok: pre-existing
 
 This module provides statistically rigorous utilities for performance tests,
 including proper warmup handling, multiple-run aggregation, confidence intervals,

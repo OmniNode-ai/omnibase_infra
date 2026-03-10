@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 # ruff: noqa: G201
 # G201 disabled: Logging extra dict is intentional for structured logging with correlation IDs

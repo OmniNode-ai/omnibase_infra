@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Pre-commit validator: block duplicate migration sequence numbers.
 
 Scans docker/migrations/forward/ and src/omnibase_infra/migrations/forward/

@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2026 OmniNode Team
 """Handler for reading a run context (runs/{run_id}.json).
 

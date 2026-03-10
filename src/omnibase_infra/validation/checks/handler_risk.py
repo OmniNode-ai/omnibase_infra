@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2026 OmniNode Team
 """Risk-gating check executors (CHECK-RISK-001 through CHECK-RISK-003).
 

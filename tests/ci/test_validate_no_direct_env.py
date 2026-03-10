@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Tests for validate_no_direct_env.py script.
 
 This module tests the environment variable access validator that enforces

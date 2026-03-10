@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 """Request-response wiring for correlation-based RPC-style Kafka communication.
 

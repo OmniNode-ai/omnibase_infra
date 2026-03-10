@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2026 OmniNode Team
 """E2E regression tests for the contract-driven topic enum pipeline (OMN-3186).
 

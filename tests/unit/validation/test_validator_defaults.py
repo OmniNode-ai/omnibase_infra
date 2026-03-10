@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """
 Tests verifying validator default parameters are consistent across all entry points.
 

@@ -1,4 +1,7 @@
-"""Comprehensive determinism verification tests for compute plugins.
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+"""Comprehensive determinism verification tests for compute plugins.  # ai-slop-ok: pre-existing
 
 This module provides extensive testing of determinism guarantees for compute plugins
 following the ProtocolPluginCompute contract. All compute plugins MUST pass these tests

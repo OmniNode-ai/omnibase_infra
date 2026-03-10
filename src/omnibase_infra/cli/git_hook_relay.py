@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 """onex-git-hook-relay CLI — relay git hook events to Kafka.
 

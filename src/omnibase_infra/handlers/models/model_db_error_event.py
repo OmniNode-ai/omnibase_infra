@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Model for PostgreSQL error events emitted to Kafka.
 
 Produced by the postgres error emitter in scripts/monitor_logs.py when a

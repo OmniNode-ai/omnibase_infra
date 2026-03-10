@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2026 OmniNode Team
 """Node Session Lifecycle Reducer — pure FSM for session lifecycle.
 

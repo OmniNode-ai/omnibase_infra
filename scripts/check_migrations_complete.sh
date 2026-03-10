@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 # check_migrations_complete.sh — Docker healthcheck for migration sentinel
 #
 # Returns exit 0 if the db_metadata.migrations_complete flag is TRUE,

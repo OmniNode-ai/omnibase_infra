@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Ledger entry model for event ledger storage.
 
 This module defines the data structure for a single event ledger entry,

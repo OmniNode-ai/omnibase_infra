@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 # cloud-bus-tunnel.sh — Persistent cloud bus tunnel (SSM + kubectl port-forward)
 # Managed by launchd plist ai.omninode.cloud-bus-tunnel
 #

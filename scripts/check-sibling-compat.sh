@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 # check-sibling-compat.sh — CI pre-check for sibling repo install compatibility
 #
 # Validates that sibling repos (omniintelligence, omnimemory) can be installed

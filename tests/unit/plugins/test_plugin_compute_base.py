@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Unit tests for PluginCompute base class and protocol conformance.
 
 Tests verify:

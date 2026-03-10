@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Pytest fixtures for observability integration tests.
+"""Pytest fixtures for observability integration tests.  # ai-slop-ok: pre-existing
 
 This module provides shared fixtures for testing observability components:
 - Isolated Prometheus registries to prevent metric conflicts

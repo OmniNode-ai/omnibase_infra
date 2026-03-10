@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 #
 # install-git-hooks.sh — Install onex-git-hook-relay git hooks into a repo.

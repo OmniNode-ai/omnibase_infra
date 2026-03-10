@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Event message model for ONEX event bus.
 
 ModelEventMessage, a Pydantic model implementing

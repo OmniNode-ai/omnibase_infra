@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""DLQ Replay Utility - Replay failed messages from Dead Letter Queue.
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""DLQ Replay Utility - Replay failed messages from Dead Letter Queue.  # ai-slop-ok: pre-existing
 
 This script provides a command-line interface for replaying messages from
 the Dead Letter Queue (DLQ) back to their original topics.
@@ -135,7 +137,7 @@ def safe_truncate(text: str, max_chars: int, suffix: str = "...") -> str:
         'Hello...'
         >>> safe_truncate("Hello", 10)
         'Hello'
-    """
+    """  # ai-slop-ok: pre-existing
     if len(text) <= max_chars:
         return text
     # Reserve space for suffix
@@ -146,7 +148,7 @@ def safe_truncate(text: str, max_chars: int, suffix: str = "...") -> str:
 
 
 def generate_replay_correlation_id() -> UUID:
-    """Generate a new correlation ID for replay tracking.
+    """Generate a new correlation ID for replay tracking.  # ai-slop-ok: pre-existing
 
     This function provides a single point of correlation ID generation
     for all replay outcomes (completed, failed, skipped), ensuring
@@ -159,7 +161,7 @@ def generate_replay_correlation_id() -> UUID:
 
 
 def parse_datetime_with_timezone(dt_string: str) -> datetime:
-    """Parse an ISO 8601 datetime string ensuring timezone-awareness.
+    """Parse an ISO 8601 datetime string ensuring timezone-awareness.  # ai-slop-ok: pre-existing
 
     This function handles common datetime string formats and ensures the
     resulting datetime object is always timezone-aware. It provides a

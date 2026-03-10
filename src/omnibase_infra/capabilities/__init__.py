@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Capability extraction and inference for ONEX contracts."""
 
 from omnibase_infra.capabilities.capability_inference_rules import (

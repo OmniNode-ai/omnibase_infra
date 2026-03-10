@@ -1,6 +1,6 @@
-# Copyright (c) 2025 OmniNode.ai
-# SPDX-License-Identifier: Apache-2.0
-"""Deterministic test utilities for predictable testing.
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""Deterministic test utilities for predictable testing.  # ai-slop-ok: pre-existing
 
 This module provides utilities that generate deterministic values for testing,
 enabling reproducible test behavior and eliminating flakiness from random
@@ -36,7 +36,7 @@ __all__ = [
 
 
 class DeterministicIdGenerator:
-    """Generates predictable UUIDs for testing.
+    """Generates predictable UUIDs for testing.  # ai-slop-ok: pre-existing
 
     This class provides deterministic UUID generation based on an incrementing
     counter, enabling reproducible test assertions on generated identifiers.

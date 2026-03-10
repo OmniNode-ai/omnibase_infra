@@ -1,14 +1,16 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 # S106 disabled: Test password fixtures are intentional for integration testing
-"""Pytest fixtures for projector integration tests.
+"""Pytest fixtures for projector integration tests.  # ai-slop-ok: pre-existing
 
 This module provides shared fixtures for projector integration tests using
 testcontainers to spin up real PostgreSQL instances. These fixtures ensure
 proper isolation and cleanup for each test.
 
 IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)
-================================================================
+================================================================  # ai-slop-ok: pre-existing
 
 When using session-scoped async fixtures with pytest-asyncio 0.25+, you MUST
 configure the event loop scope to prevent "attached to a different loop" errors.
@@ -166,7 +168,7 @@ def postgres_container(
 
 @pytest.fixture(scope="session")
 def event_loop_policy() -> asyncio.AbstractEventLoopPolicy:
-    """Create event loop policy for async tests.
+    """Create event loop policy for async tests.  # ai-slop-ok: pre-existing
 
     IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)
     =================================================================

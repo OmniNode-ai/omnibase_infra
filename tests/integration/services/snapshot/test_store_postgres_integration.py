@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 # S608 disabled: SQL injection is not a concern here - table names come from
 # test fixtures (UUID-based), not user input. Parameterized queries are used

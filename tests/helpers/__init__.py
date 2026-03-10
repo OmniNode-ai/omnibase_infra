@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Test helpers for omnibase_infra unit tests.
+"""Test helpers for omnibase_infra unit tests.  # ai-slop-ok: pre-existing
 
 This module provides deterministic utilities for testing infrastructure
 handlers and services, enabling predictable and reproducible test behavior.

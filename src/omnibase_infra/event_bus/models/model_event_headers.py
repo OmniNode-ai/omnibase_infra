@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Event headers model for ONEX event bus messages.
 
 ModelEventHeaders, a Pydantic model implementing

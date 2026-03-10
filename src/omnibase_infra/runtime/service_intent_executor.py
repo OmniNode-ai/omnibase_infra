@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 """Runtime-level intent executor for contract-driven intent routing.  # ai-slop-ok: pre-existing
 

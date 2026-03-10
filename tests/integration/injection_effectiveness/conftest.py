@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2026 OmniNode Team
-"""Pytest fixtures for injection effectiveness golden path integration tests.
+"""Pytest fixtures for injection effectiveness golden path integration tests.  # ai-slop-ok: pre-existing
 
 This module provides fixtures for testing:
 - WriterInjectionEffectivenessPostgres metric writes

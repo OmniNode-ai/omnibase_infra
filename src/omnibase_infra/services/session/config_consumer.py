@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Configuration for session event consumers.
 
 Loads from environment variables with OMNIBASE_INFRA_SESSION_CONSUMER_ prefix.

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Unit tests for markdown link validation.
 
 Tests for anchor extraction and duplicate heading disambiguation following

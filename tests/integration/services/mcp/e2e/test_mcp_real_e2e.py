@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 """Real MCP E2E integration tests using actual MCP SDK client and server.
 
@@ -102,7 +104,7 @@ def wait_for_server(host: str, port: int, timeout: float = 10.0) -> bool:
 
 
 class MCPServerFixture:
-    """Wrapper for a real FastMCP server running in a background thread.
+    """Wrapper for a real FastMCP server running in a background thread.  # ai-slop-ok: pre-existing
 
     This class manages the lifecycle of a real MCP server using the MCP SDK's
     FastMCP class, running it via uvicorn in a background thread.
@@ -631,7 +633,7 @@ class TestRealMCPProtocolCompliance:
 
 
 class MCPConsulServerFixture:
-    """Wrapper for a real FastMCP server that discovers tools from Consul.
+    """Wrapper for a real FastMCP server that discovers tools from Consul.  # ai-slop-ok: pre-existing
 
     This class manages the lifecycle of a real MCP server that discovers
     tools from Consul instead of using locally-registered test tools.

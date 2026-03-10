@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Unit tests for docstring detection edge cases in architecture compliance.
 
 These tests verify that the _scan_file_for_imports function correctly handles

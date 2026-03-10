@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Test cryptography 46.x compatibility.
 
 Verifies cryptography package upgrade (46.0.x) doesn't break existing

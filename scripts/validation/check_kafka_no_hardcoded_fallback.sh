@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 # OMN-3554: Reject hardcoded Kafka broker address fallbacks
 # Detects os.getenv("KAFKA_*", non-empty) and private-IP Kafka broker ports
 #

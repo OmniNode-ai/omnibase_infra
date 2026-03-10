@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Platform and domain topic suffixes for ONEX infrastructure.
 
 This module defines topic suffixes for:

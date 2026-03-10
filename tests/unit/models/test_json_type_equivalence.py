@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Test JsonType equivalence with legacy JsonValue.
 
 This test ensures JsonType (omnibase_core 0.6.2+) accepts the same

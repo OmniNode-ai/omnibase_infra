@@ -1,4 +1,6 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Shared testing utilities for omnibase_infra.
 
 Utility functions commonly needed across test files,

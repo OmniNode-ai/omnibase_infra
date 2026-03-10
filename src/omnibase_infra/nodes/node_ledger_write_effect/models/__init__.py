@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Ledger write effect node models.
 
 This package contains Pydantic models for the ledger write effect node,

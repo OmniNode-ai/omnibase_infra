@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Contract capability extractor for ONEX nodes.
 
 Extracts ModelContractCapabilities from typed contract models.

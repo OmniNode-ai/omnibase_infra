@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Verify that x-runtime-env in docker-compose.infra.yml contains all required keys.
 
 Runtime containers inherit environment variables from the ``x-runtime-env`` YAML

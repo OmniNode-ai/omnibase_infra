@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 # system_health_check.sh -- Canonical system health gate for ONEX infrastructure
 #
 # Composes individual service health checks into a single pass/fail gate.

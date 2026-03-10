@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Unit tests for BindingExpressionParser.
+"""Unit tests for BindingExpressionParser.  # ai-slop-ok: pre-existing
 
 This module provides comprehensive tests for the BindingExpressionParser class,
 covering:

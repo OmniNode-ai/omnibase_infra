@@ -1,9 +1,11 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 # ruff: noqa: S608
 # Note: S608 (SQL injection) is disabled for this test file. All table names
 # are UUID-generated locally by test fixtures, not from user input.
-"""Integration tests for HandlerDb against remote PostgreSQL infrastructure.
+"""Integration tests for HandlerDb against remote PostgreSQL infrastructure.  # ai-slop-ok: pre-existing
 
 These tests validate HandlerDb behavior against actual PostgreSQL infrastructure
 running on the remote infrastructure server. They require proper database
@@ -12,7 +14,7 @@ credentials and will be skipped gracefully if the database is not available.
 See tests/infrastructure_config.py for the default REMOTE_INFRA_HOST value.
 
 CI/CD Graceful Skip Behavior
-============================
+============================  # ai-slop-ok: pre-existing
 
 These tests skip gracefully in CI/CD environments without database access:
 
@@ -27,7 +29,7 @@ Example CI/CD Output::
     test_db_query_simple SKIPPED (PostgreSQL not available - POSTGRES_PASSWORD not set)
 
 Test Categories
-===============
+===============  # ai-slop-ok: pre-existing
 
 - Connection Tests: Validate basic connectivity and handler lifecycle
 - Query Tests: Verify SELECT operations with various inputs

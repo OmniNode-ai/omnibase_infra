@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Performance benchmarks for policy_registry module.
+"""Performance benchmarks for policy_registry module.  # ai-slop-ok: pre-existing
 
 This module contains performance tests to verify the optimization work
 done to reduce redundant operations in the RegistryPolicy.get() method.

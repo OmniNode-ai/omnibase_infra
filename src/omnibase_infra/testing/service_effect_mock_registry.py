@@ -1,4 +1,6 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Service effect mock registry for testing.
 
 Provides a registry for mapping service protocol names to mock/stub

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Smoke tests for omnibase_infra package.
 
 These tests verify that the package structure is correct and basic imports work.

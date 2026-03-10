@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Intent type extraction from ONEX contracts.
 
 Extracts intent types from various contract structures including

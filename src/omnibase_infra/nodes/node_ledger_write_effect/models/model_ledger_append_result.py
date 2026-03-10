@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Ledger append result model for write operation outcomes.
 
 This module defines the result structure returned after attempting

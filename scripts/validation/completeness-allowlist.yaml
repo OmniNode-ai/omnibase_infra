@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
 # Topic Completeness Allowlist (OMN-3257)
 #
 # Topics listed here are known to appear as string literals in Python source

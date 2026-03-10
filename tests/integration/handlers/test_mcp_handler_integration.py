@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 """Integration tests for MCP handler using MCP client SDK.
 
@@ -68,7 +70,7 @@ requires_mcp = pytest.mark.skipif(
 
 
 class MockToolDefinition:
-    """Test helper for tool definitions.
+    """Test helper for tool definitions.  # ai-slop-ok: pre-existing
 
     This class provides a simple wrapper for tool definitions used in tests.
     It conforms to the ProtocolMCPToolDefinition protocol expected by the

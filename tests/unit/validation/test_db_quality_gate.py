@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Tests for the DB quality gate validator (OMN-1785).
 
 Validates that the quality gate correctly detects and reports:

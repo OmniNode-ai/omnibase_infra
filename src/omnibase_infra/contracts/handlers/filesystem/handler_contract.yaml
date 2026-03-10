@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
 # Handler ID follows convention: {node_type}.{domain}.handler
 handler_id: effect.filesystem.handler
 name: FileSystem Handler

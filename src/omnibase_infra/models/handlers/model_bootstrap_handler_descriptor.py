@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 """Bootstrap Handler Descriptor Model with Required handler_class.  # ai-slop-ok: pre-existing
 

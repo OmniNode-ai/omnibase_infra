@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """CI guard: no nested variable expansion in Docker Compose files.
 
 Nested expansion (e.g. ${OUTER:-prefix-${INNER:-default}}) silently produces

@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 # ruff: noqa: PLW0603
 # PLW0603 disabled: Global statement is intentional for singleton pattern with thread-safe initialization

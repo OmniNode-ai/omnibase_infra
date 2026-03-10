@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Pytest configuration and shared fixtures for omnibase_infra tests.  # ai-slop-ok: pre-existing
 
 ==============================================================================

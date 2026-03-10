@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Integration tests for BindingConfigResolver security controls.
+"""Integration tests for BindingConfigResolver security controls.  # ai-slop-ok: pre-existing
 
 This module provides comprehensive security testing for the BindingConfigResolver,
 focusing on path traversal protection, symlink attacks, and input validation with

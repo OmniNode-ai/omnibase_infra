@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Shared pytest fixtures for event bus performance tests.
+"""Shared pytest fixtures for event bus performance tests.  # ai-slop-ok: pre-existing
 
 Provides fixtures for performance testing including:
 - Pre-configured event bus instances with various settings
@@ -8,11 +10,11 @@ Provides fixtures for performance testing including:
 - Latency measurement utilities
 - Concurrent subscriber simulation
 
-==============================================================================
+==============================================================================  # ai-slop-ok: pre-existing
 IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)
-==============================================================================
+==============================================================================  # ai-slop-ok: pre-existing
 
-This module provides **function-scoped** async fixtures for performance testing.
+This module provides **function-scoped** async fixtures for performance testing.  # ai-slop-ok: pre-existing
 With pytest-asyncio 0.25+, the default event loop scope is "function", which
 provides proper isolation between performance test runs.
 

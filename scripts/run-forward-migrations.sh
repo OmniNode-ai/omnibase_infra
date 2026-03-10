@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 # run-forward-migrations.sh — Apply omnibase_infra forward migrations on warm Postgres volumes
 #
 # Tracks applied migrations in public.schema_migrations and applies any

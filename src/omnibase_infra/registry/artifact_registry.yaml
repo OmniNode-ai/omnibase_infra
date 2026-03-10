@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
 version: "1.0.0"
 description: "Artifact registry for omnibase_infra documentation — tracks docs, design specs, and reference material that must be kept in sync with code changes."
 artifacts:
