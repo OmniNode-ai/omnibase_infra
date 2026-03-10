@@ -755,4 +755,4 @@ jobs:
           CHANGED_FILES: ${{ steps.changed.outputs.files }}
         run: |
           if [ -z "$CHANGED_FILES" ]; then exit 0; fi
-          python scripts/validation/check_ai_slop.py --strict $CHANGED_FILES
+          echo "$CHANGED_FILES" | tr ' ' '\n' | xargs python scripts/validation/check_ai_slop.py --strict
