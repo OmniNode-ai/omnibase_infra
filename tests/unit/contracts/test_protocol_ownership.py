@@ -119,6 +119,9 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolEmissionCountSource": "observability/wiring_health/protocol_emission_count_source.py",
     "ProtocolConsumptionCountSource": "observability/wiring_health/protocol_consumption_count_source.py",
     "ProtocolCircuitBreakerFailureRecorder": "utils/util_db_error_context.py",
+    # === [NODE] Chunking gateway protocols ===
+    # [NODE] DI boundary for DefaultEnvelopeChunker — factory callable injected via constructor (OMN-4145)
+    "EnvelopeFactory": "gateways/chunking/default_chunker.py",
 }
 
 # Duplicate protocol names that appear in multiple files (node-internal
