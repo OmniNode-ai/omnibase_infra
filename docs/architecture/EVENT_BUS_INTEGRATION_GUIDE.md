@@ -17,14 +17,14 @@ This guide provides step-by-step instructions for integrating with the ONEX Even
 
 ## Quick Start (5 Minutes)
 
-### Step 1: Choose Your Event Bus
+### Choosing Your Event Bus
 
 | Environment | Implementation | Use Case |
 |-------------|----------------|----------|
 | Production | `EventBusKafka` | Real message streaming with Kafka |
 | Development/Testing | `InMemoryEventBus` | Local development, unit tests |
 
-### Step 2: Basic Setup
+### Basic Setup
 
 ```python
 import asyncio
@@ -60,7 +60,7 @@ async def main():
 asyncio.run(main())
 ```
 
-### Step 3: Verify It Works
+### Verifying It Works
 
 ```bash
 # Set Kafka connection (if using EventBusKafka)
