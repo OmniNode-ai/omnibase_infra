@@ -73,7 +73,9 @@ jobs:
           echo "Dry-run install of siblings with full transitive deps..."
           uv pip install --overrides /tmp/sibling-overrides.txt \
             -e ../omniintelligence \
-            -e ../omnimemory \
             --dry-run
           echo ""
           echo "PASS: Sibling repos are compatible with current omnibase_infra."
+          echo ""
+          echo "NOTE: omnimemory temporarily excluded from sibling check."
+          echo "omnimemory 0.6.6 will be released after this infra release."
