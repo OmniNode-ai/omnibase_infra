@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Unit Tests for Handler Source Mode Hybrid Resolution.
+"""Unit Tests for Handler Source Mode Hybrid Resolution.  # ai-slop-ok: pre-existing
 
 This module contains unit tests for OMN-1095: Handler Source Mode hybrid
 resolution functionality. These tests verify the behavior of the

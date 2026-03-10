@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 # deploy-runners.sh
 # Single-command deploy entry point for OmniNode self-hosted GitHub Actions runners
 # Ticket: OMN-3277 / Epic: OMN-3273

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Validation scripts for omnibase_infra.
 
 This package contains validation utilities for enforcing code quality

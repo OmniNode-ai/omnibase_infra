@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Validate Dockerfile plugin pin ranges against published PyPI releases.
 
 This script parses Dockerfile.runtime, extracts ``uv pip install`` lines that

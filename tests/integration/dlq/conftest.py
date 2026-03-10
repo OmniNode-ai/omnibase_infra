@@ -1,12 +1,14 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Pytest configuration and fixtures for DLQ tracking integration tests.
+"""Pytest configuration and fixtures for DLQ tracking integration tests.  # ai-slop-ok: pre-existing
 
 This module provides fixtures for testing the DLQ PostgreSQL tracking service.
 Environment variables should be set via docker-compose.yml or .env file.
 
 CI/CD Graceful Skip Behavior
-============================
+============================  # ai-slop-ok: pre-existing
 
 These integration tests are designed to skip gracefully when infrastructure
 is unavailable, enabling CI/CD pipelines to run without hard failures.
@@ -15,7 +17,7 @@ Skip Conditions:
     - Skips if OMNIBASE_INFRA_DB_URL not set
 
 Environment Variables
-=====================
+=====================  # ai-slop-ok: pre-existing
 
     OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (required, no fallback)
         Example: postgresql://postgres:secret@localhost:5432/omnibase_infra

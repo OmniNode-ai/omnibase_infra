@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Ledger query model for searching ledger entries.
 
 This module defines the query parameters for ledger search operations.

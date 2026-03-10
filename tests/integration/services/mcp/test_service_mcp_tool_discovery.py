@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Mock-based tests for ServiceMCPToolDiscovery via event bus registry.
+"""Mock-based tests for ServiceMCPToolDiscovery via event bus registry.  # ai-slop-ok: pre-existing
 
 These tests validate ServiceMCPToolDiscovery behavior using mock
 ProjectionReaderRegistration objects — no database or other infrastructure
@@ -9,7 +11,7 @@ the boundary between the MCP discovery service and the registration
 projection layer.
 
 Test Categories
-===============
+===============  # ai-slop-ok: pre-existing
 
 - Mock-based tests using MagicMock/AsyncMock (no infra required)
 

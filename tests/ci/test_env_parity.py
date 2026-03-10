@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Env parity test: every x-runtime-env key has a k8s ConfigMap or Secret entry.
 
 Ensures that every variable in the docker-compose x-runtime-env anchor is

@@ -1,4 +1,7 @@
 #!/usr/bin/env -S uv run python
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Demo script for Registry-Based Contract Discovery (OMN-1100).
 
 This script demonstrates contract materialization from Consul KV:

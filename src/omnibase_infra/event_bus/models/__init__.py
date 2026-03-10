@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Event bus models for omnibase_infra.
 
 Concrete Pydantic model implementations that satisfy

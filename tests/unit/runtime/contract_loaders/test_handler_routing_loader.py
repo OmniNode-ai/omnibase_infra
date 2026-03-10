@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 """Tests for handler routing loader utility.
 
@@ -178,7 +180,7 @@ class TestConvertClassToHandlerKey:
         ],
     )
     def test_underscore_handling(self, class_name: str, expected: str) -> None:
-        """CHARACTERIZATION TEST: Documents ACTUAL underscore behavior, not IDEAL.
+        """CHARACTERIZATION TEST: Documents ACTUAL underscore behavior, not IDEAL.  # ai-slop-ok: pre-existing
 
         ===========================================================================
         CHARACTERIZATION TEST - DO NOT "FIX" EXPECTED VALUES WITHOUT DISCUSSION

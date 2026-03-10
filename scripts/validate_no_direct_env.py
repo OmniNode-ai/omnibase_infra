@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """CI validator to detect direct os.getenv/os.environ usage.
 
 This script enforces the SecretResolver pattern by blocking direct environment

@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2026 OmniNode Team
 """Unit tests for InMemoryLedgerSink."""
 
@@ -159,17 +161,18 @@ class TestInMemoryLedgerSink:
         assert sink.drop_policy == EnumLedgerSinkDropPolicy.RAISE
 
     @pytest.mark.asyncio
-    async def test_block_policy_raises_not_implemented(self) -> None:
-        """Test BLOCK policy raises NotImplementedError."""
+    async def test_block_policy_does_not_raise_when_space_available(self) -> None:
+        """Test BLOCK policy does not raise when buffer has space."""
+        # BLOCK policy is now implemented: emit waits for space instead of raising.
+        # This test verifies the basic case where buffer has space (no blocking needed).
         sink = InMemoryLedgerSink(
-            max_size=1, drop_policy=EnumLedgerSinkDropPolicy.BLOCK
+            max_size=2, drop_policy=EnumLedgerSinkDropPolicy.BLOCK
         )
-        # First event fills the buffer
-        await sink.emit(_make_test_event("op_0"))
-
-        # Second event should trigger BLOCK policy
-        with pytest.raises(NotImplementedError, match="BLOCK policy"):
-            await sink.emit(_make_test_event("op_1"))
+        result1 = await sink.emit(_make_test_event("op_0"))
+        result2 = await sink.emit(_make_test_event("op_1"))
+        assert result1 is True
+        assert result2 is True
+        await sink.close()
 
 
 @pytest.mark.unit

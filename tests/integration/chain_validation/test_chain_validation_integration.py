@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Integration tests for correlation and causation chain validation.
+"""Integration tests for correlation and causation chain validation.  # ai-slop-ok: pre-existing
 
 This module provides comprehensive integration tests for the chain propagation
 validator system, validating that messages properly maintain correlation and

@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Integration tests for end-to-end envelope routing.
+"""Integration tests for end-to-end envelope routing.  # ai-slop-ok: pre-existing
 
 This module provides comprehensive integration tests validating the complete flow
 of event envelopes through the routing system. Tests cover:
@@ -96,7 +98,7 @@ def handler_registry() -> RegistryProtocolBinding:
             envelope: dict[str, object],
             correlation_id: UUID | None = None,
         ) -> dict[str, object]:
-            """Handle the envelope and return response.
+            """Handle the envelope and return response.  # ai-slop-ok: pre-existing
 
             This method implements the ProtocolHandler protocol requirement.
 

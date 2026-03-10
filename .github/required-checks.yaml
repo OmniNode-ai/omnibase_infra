@@ -5,35 +5,42 @@
 # branch protection settings (Settings > Branches > main).
 #
 # Added: OMN-2184
-# Last verified: 2026-02-14
+# Last verified: 2026-03-10
+# Architecture: OMN-4497 -- CI Summary is the single required gate across all repos
 required_checks:
   # -- test.yml (primary pipeline) -------------------------------------------
+  - name: "CI Summary"
+    workflow: test.yml
+    job_id: ci-summary
+    rationale: >
+      Umbrella correctness gate (OMN-4497). Aggregates ALL sub-jobs in test.yml via `needs:` -- tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, arch-invariants, schema-handshake, migration-integration, migration-required-check. Fails if any required sub-job fails. This is the single branch protection check required across all repos per OMN-4497.
+
+# -- Sub-jobs (feed into CI Summary -- not required directly in branch protection) -
+sub_jobs:
   - name: "Lint"
     workflow: test.yml
     job_id: lint
-    rationale: "Ruff format, lint, and mypy type checking"
+    rationale: "Ruff format, lint, and mypy type checking -- gated by CI Summary"
   - name: "ONEX Validators"
     workflow: test.yml
     job_id: onex-validation
-    rationale: "Architecture layers, ONEX rules, I/O purity audit, markdown links"
+    rationale: "Architecture layers, ONEX rules, I/O purity audit, markdown links -- gated by CI Summary"
   - name: "Migration Freeze Check"
     workflow: test.yml
     job_id: migration-freeze
-    rationale: "Blocks new migrations during DB-SPLIT freeze (OMN-2055)"
+    rationale: "Blocks new migrations during DB-SPLIT freeze (OMN-2055) -- gated by CI Summary"
   - name: "Fingerprint Check"
     workflow: test.yml
     job_id: fingerprint-check
-    rationale: "CI twins for runtime assertions B2 (schema) and B3 (event registry) -- prevents stale fingerprint artifacts (OMN-2149)"
+    rationale: "CI twins for runtime assertions B2 (schema) and B3 (event registry) -- gated by CI Summary"
   - name: "CI Tests Gate"
     workflow: test.yml
     job_id: tests-gate
-    rationale: "Aggregator for 10-split test matrix -- split count can change without updating branch protection"
+    rationale: "Aggregator for 10-split test matrix -- gated by CI Summary"
 # -- Explicitly excluded ------------------------------------------------------
 excluded_checks:
   - name: "Tests (Split 1/10) through Tests (Split 10/10)"
-    reason: "Individual matrix legs -- aggregated by CI Tests Gate"
-  - name: "Test Summary"
-    reason: "Reporting aggregator -- not a correctness gate (CI Tests Gate covers this)"
+    reason: "Individual matrix legs -- aggregated by CI Tests Gate, which feeds CI Summary"
   - name: "Check architecture handshake"
     workflow: check-handshake.yml
     reason: "paths: filter skips this on most PRs -- requiring it would block unrelated PRs"

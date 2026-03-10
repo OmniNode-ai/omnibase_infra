@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """ONEX Infrastructure Topic Constants.
 
 Platform-reserved topic suffix constants for ONEX infrastructure components. Domain

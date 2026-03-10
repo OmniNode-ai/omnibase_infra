@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Tests for platform, intelligence, omnimemory, and omniclaude topic suffix constants."""
 
 import importlib

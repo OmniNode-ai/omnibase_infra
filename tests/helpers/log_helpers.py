@@ -1,6 +1,6 @@
-# Copyright (c) 2025 OmniNode.ai
-# SPDX-License-Identifier: Apache-2.0
-"""Log filtering helpers for test assertions.
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""Log filtering helpers for test assertions.  # ai-slop-ok: pre-existing
 
 This module provides utilities for filtering and asserting on log records
 captured during tests, enabling clean and DRY log validation patterns.

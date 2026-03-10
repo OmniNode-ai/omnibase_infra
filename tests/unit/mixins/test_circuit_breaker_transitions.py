@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Dedicated test suite for circuit breaker state transitions.
+"""Dedicated test suite for circuit breaker state transitions.  # ai-slop-ok: pre-existing
 
 This module provides comprehensive tests specifically for the circuit breaker
 state machine transitions. While other test files cover functionality, thread

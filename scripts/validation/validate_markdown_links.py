@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Markdown link validation for ONEX repositories.
 
 This script validates that all internal links in markdown files point to existing

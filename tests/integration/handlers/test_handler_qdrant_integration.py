@@ -1,13 +1,15 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Integration tests for HandlerQdrant against real Qdrant infrastructure.
+"""Integration tests for HandlerQdrant against real Qdrant infrastructure.  # ai-slop-ok: pre-existing
 
 These tests validate HandlerQdrant behavior against an actual Qdrant vector database
 instance. They require a running Qdrant server and will be skipped gracefully if
 the server is not available.
 
 CI/CD Graceful Skip Behavior
-============================
+============================  # ai-slop-ok: pre-existing
 
 These tests skip gracefully in CI/CD environments without Qdrant access:
 
@@ -26,7 +28,7 @@ Run with infrastructure::
     $ QDRANT_URL=http://localhost:6333 uv run pytest tests/integration/handlers/test_handler_qdrant_integration.py -v
 
 Test Categories
-===============
+===============  # ai-slop-ok: pre-existing
 
 - Handler Metadata Tests: Validate describe functionality and capabilities
 - Collection Tests: Create and manage vector collections

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Shared utilities for Infisical provisioning scripts.
+"""Shared utilities for Infisical provisioning scripts.  # ai-slop-ok: pre-existing
 
 This module contains helpers used by both provision-infisical.py and
 register-repo.py.  It is intentionally a lightweight, stdlib-only module so

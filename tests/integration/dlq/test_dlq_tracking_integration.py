@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Integration tests for DLQ PostgreSQL tracking service.
+"""Integration tests for DLQ PostgreSQL tracking service.  # ai-slop-ok: pre-existing
 
 These tests validate ServiceDlqTracking behavior against actual PostgreSQL
 infrastructure running on the remote infrastructure server. They require
@@ -8,7 +10,7 @@ proper database credentials and will be skipped gracefully if the database
 is not available.
 
 CI/CD Graceful Skip Behavior
-============================
+============================  # ai-slop-ok: pre-existing
 
 These tests skip gracefully in CI/CD environments without database access:
 
@@ -23,7 +25,7 @@ Example CI/CD Output::
     test_record_replay_attempt_success SKIPPED (PostgreSQL not available)
 
 Test Categories
-===============
+===============  # ai-slop-ok: pre-existing
 
 - Initialization Tests: Validate service startup and table creation
 - Record Tests: Verify replay attempt recording

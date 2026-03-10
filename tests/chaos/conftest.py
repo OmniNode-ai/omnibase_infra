@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 """Shared pytest fixtures for chaos tests.
 
@@ -222,7 +224,7 @@ def get_chaos_profile(name: str) -> ChaosConfig:
 
 @dataclass
 class FailureInjector:
-    """Utility for injecting failures into operations.
+    """Utility for injecting failures into operations.  # ai-slop-ok: pre-existing
 
     This class provides methods for injecting various failure modes into
     operations, simulating real-world failure scenarios.
@@ -719,7 +721,7 @@ class ChaosEffectExecutor:
 
 
 class MockEventBusWithPartition:
-    """Mock event bus that can simulate network partitions.
+    """Mock event bus that can simulate network partitions.  # ai-slop-ok: pre-existing
 
     This class provides a mock event bus implementation that can simulate
     network partitions and reconnection behavior for testing.

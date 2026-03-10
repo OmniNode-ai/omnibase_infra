@@ -1,4 +1,7 @@
 #!/usr/bin/env -S uv run python
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Demo: ONEX Runtime Contract Routing Verification (OMN-2081).
 
 Demonstrates the full runtime lifecycle for investor-facing verification:

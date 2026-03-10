@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Unit Tests for HandlerSourceResolver KAFKA_EVENTS Mode.
+"""Unit Tests for HandlerSourceResolver KAFKA_EVENTS Mode.  # ai-slop-ok: pre-existing
 
 This module contains unit tests for the KAFKA_EVENTS resolution path in
 HandlerSourceResolver, added as part of OMN-1654.

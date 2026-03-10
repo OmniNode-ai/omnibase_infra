@@ -1,5 +1,5 @@
-# Copyright 2025 OmniNode Team. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
 """Performance metrics model for node introspection operations.
 
 A Pydantic model for capturing performance metrics from

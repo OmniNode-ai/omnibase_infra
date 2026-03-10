@@ -1,4 +1,7 @@
-"""Performance comparison demonstrating optimization benefits.
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+"""Performance comparison demonstrating optimization benefits.  # ai-slop-ok: pre-existing
 
 This module provides detailed performance analysis of the optimizations
 made to PluginJsonNormalizer._sort_keys_recursively().

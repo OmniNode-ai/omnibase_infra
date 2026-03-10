@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 # ruff: noqa: S104
 # S104 disabled: Tests verify 0.0.0.0 binding for container networking

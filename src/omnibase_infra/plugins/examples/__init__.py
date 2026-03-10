@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Example compute plugins demonstrating deterministic computation patterns.
 
 Reference implementations that demonstrate best practices

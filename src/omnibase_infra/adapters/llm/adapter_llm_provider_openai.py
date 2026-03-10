@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2026 OmniNode Team
 """Concrete ProtocolLLMProvider implementation for OpenAI-compatible endpoints.
 
@@ -21,6 +23,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -506,19 +509,27 @@ class AdapterLlmProviderOpenai:
     def generate_stream(self, request: ModelLlmAdapterRequest) -> Iterator[str]:
         """Generate a streaming response (synchronous).
 
-        Not supported for OpenAI-compatible adapter in v1. Raises
-        NotImplementedError.
+        Uses a dedicated event loop per call. Safe for single-threaded use.
+        Not safe to share across threads. The async generator is explicitly
+        closed after iteration to prevent resource leaks.
 
         Args:
-            request: The LLM request.
+            request: The LLM request with prompt and parameters.
 
-        Raises:
-            NotImplementedError: Streaming is not supported in v1.
+        Yields:
+            Generated text chunks as they are produced.
         """
-        raise NotImplementedError(
-            "Synchronous streaming is not supported in v1. "
-            "Use generate_stream_async for async streaming."
-        )
+        loop = asyncio.new_event_loop()
+        agen = self.generate_stream_async(request)
+        try:
+            while True:
+                try:
+                    yield loop.run_until_complete(agen.__anext__())
+                except StopAsyncIteration:
+                    break
+        finally:
+            loop.run_until_complete(agen.aclose())
+            loop.close()
 
     async def generate_stream_async(
         self,
@@ -671,15 +682,15 @@ class AdapterLlmProviderOpenai:
             "base_url": self._sanitize_url(self._base_url),
             "default_model": self._default_model,
             "is_available": self._is_available,
-            "supports_streaming": False,
+            "supports_streaming": True,
             "supports_async": True,
         }
 
     # ── Feature support ────────────────────────────────────────────────
 
     def supports_streaming(self) -> bool:
-        """Check if provider supports streaming. Returns False for v1."""
-        return False
+        """Check if provider supports streaming. Returns True (generate_stream implemented)."""
+        return True
 
     def supports_async(self) -> bool:
         """Check if provider supports async operations. Always True."""

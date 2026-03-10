@@ -21,6 +21,11 @@
 #   pre-commit install --hook-type pre-push  # Install pre-push hooks
 #   pre-commit run --all-files            # Run all pre-commit hooks
 repos:
+  # Stub implementation detection — sourced from omnibase_core (OMN-4473)
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: 30a06f85bb5849902d33c8d0bdb90fc6cba0c346 # pragma: allowlist secret
+    hooks:
+      - id: check-stub-implementations
   # YAML formatting (standard across ecosystem)
   - repo: https://github.com/google/yamlfmt
     rev: v0.17.2
@@ -298,6 +303,15 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+        stages: [pre-commit]
+      # OMN-4385: SPDX header enforcement
+      - id: validate-spdx-headers
+        name: ONEX SPDX Header Requirement
+        entry: uv run onex spdx validate
+        language: system
+        pass_filenames: true
+        files: ^(src|tests|scripts|examples)/.*\.(py|sh|bash|yml|yaml|toml)$
+        exclude: ^(archived/|archive/)
         stages: [pre-commit]
 # Configuration
 default_install_hook_types: [pre-commit, pre-push]

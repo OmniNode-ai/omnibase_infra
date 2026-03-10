@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2026 OmniNode Team
 """Unit tests for AdapterLlmProviderOpenai."""
 
@@ -44,10 +46,10 @@ class TestAdapterLlmProviderOpenaiProperties:
         adapter = AdapterLlmProviderOpenai()
         assert adapter.is_available is True
 
-    def test_supports_streaming_v1(self) -> None:
-        """Streaming is not supported in v1."""
+    def test_supports_streaming(self) -> None:
+        """Streaming is supported (generate_stream implemented via asyncio.new_event_loop)."""
         adapter = AdapterLlmProviderOpenai()
-        assert adapter.supports_streaming() is False
+        assert adapter.supports_streaming() is True
 
     def test_supports_async(self) -> None:
         """Async is always supported."""
@@ -132,16 +134,26 @@ class TestAdapterLlmProviderOpenaiCostEstimation:
 class TestAdapterLlmProviderOpenaiGenerate:
     """Tests for generation methods."""
 
-    @pytest.mark.asyncio
-    async def test_generate_stream_raises(self) -> None:
-        """Synchronous streaming raises NotImplementedError."""
-        adapter = AdapterLlmProviderOpenai()
+    def test_generate_stream_does_not_raise_not_implemented(self) -> None:
+        """Synchronous streaming is implemented and does not raise NotImplementedError.
+
+        generate_stream() wraps generate_stream_async() using asyncio.new_event_loop()
+        per call. This test verifies the stub has been replaced with the real impl.
+        """
+        from unittest.mock import patch
+
+        adapter = AdapterLlmProviderOpenai.__new__(AdapterLlmProviderOpenai)
         request = ModelLlmAdapterRequest(
             prompt="Hello",
             model_name="test",
         )
-        with pytest.raises(NotImplementedError):
-            adapter.generate_stream(request)
+
+        async def fake_stream(req: ModelLlmAdapterRequest) -> object:
+            yield "ok"
+
+        with patch.object(adapter, "generate_stream_async", side_effect=fake_stream):
+            result = list(adapter.generate_stream(request))
+        assert result == ["ok"]
 
     @pytest.mark.asyncio
     async def test_get_provider_info(self) -> None:

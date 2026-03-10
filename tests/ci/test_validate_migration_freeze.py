@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Tests for migration freeze validation with freeze age gate.
 
 Covers the freeze_date= expiry logic added in OMN-3533:

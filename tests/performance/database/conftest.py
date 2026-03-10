@@ -1,12 +1,14 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Pytest configuration and fixtures for database performance tests.
+"""Pytest configuration and fixtures for database performance tests.  # ai-slop-ok: pre-existing
 
 This module provides fixtures for testing PostgreSQL query performance
 using EXPLAIN ANALYZE to verify index usage and query efficiency.
 
 IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)
-================================================================
+================================================================  # ai-slop-ok: pre-existing
 This module requires ``loop_scope="module"`` for the asyncio marker to prevent
 event loop mismatch errors. Without this, module-scoped async fixtures will
 fail with::
@@ -761,7 +763,7 @@ class ExplainResult:
         node: dict[str, object] | None = None,
         node_type: str | None = None,
     ) -> list[dict[str, object]]:
-        """Recursively find all nodes in the plan tree.
+        """Recursively find all nodes in the plan tree.  # ai-slop-ok: pre-existing
 
         Args:
             node: Starting node (defaults to root Plan).
@@ -771,7 +773,7 @@ class ExplainResult:
             List of matching plan nodes.
 
         Note:
-            This method handles malformed plan structures defensively:
+            This method handles malformed plan structures defensively:  # ai-slop-ok: pre-existing
             - Missing "Plan" key returns empty list
             - Non-dict nodes are skipped
             - Missing "Plans" key is treated as no children

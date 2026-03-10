@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Quality tests for the seeded artifact_registry.yaml.
 
 These tests verify structural integrity and data quality of the production

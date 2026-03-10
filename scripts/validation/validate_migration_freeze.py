@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Migration freeze enforcement for ONEX repositories.
 
 When a `.migration_freeze` file exists in the repository root, this script

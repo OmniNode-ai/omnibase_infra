@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Configuration for session snapshot storage.
 
 Reads standard POSTGRES_* environment variables sourced from ~/.omnibase/.env

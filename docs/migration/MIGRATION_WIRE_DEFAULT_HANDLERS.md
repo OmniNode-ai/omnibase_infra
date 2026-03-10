@@ -62,7 +62,7 @@ The new approach:
 
 ## Migration Steps
 
-### Step 1: Create Handler Contracts
+### Creating Handler Contracts
 
 For each handler you want to register, create a `handler_contract.yaml` file:
 
@@ -84,7 +84,7 @@ capability_tags:
 **Optional fields:**
 - `capability_tags`: List of tags for handler categorization
 
-### Step 2: Update RuntimeHostProcess Initialization
+### Updating RuntimeHostProcess Initialization
 
 **Before:**
 ```python
@@ -110,7 +110,7 @@ process = RuntimeHostProcess(
 )
 ```
 
-### Step 3: Remove wire_default_handlers() Calls
+### Removing wire_default_handlers() Calls
 
 Search for and remove all calls to:
 - `wire_default_handlers()`
@@ -119,7 +119,7 @@ Search for and remove all calls to:
 
 These are replaced by handler contracts and `HandlerPluginLoader`.
 
-### Step 4: Update Tests
+### Updating Tests
 
 **Before (Mock Wiring):**
 ```python

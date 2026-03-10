@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Configuration for agent actions observability consumer.
 
 Loads from environment variables with OMNIBASE_INFRA_AGENT_ACTIONS_ prefix.

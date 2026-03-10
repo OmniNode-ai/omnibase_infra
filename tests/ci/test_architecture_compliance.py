@@ -1,4 +1,7 @@
-"""Architecture compliance tests for ONEX infrastructure.
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+"""Architecture compliance tests for ONEX infrastructure.  # ai-slop-ok: pre-existing
 
 These tests verify that architectural boundaries are maintained between
 omnibase_core (pure, no I/O) and omnibase_infra (infrastructure, owns all I/O).
@@ -8,7 +11,7 @@ imports such as kafka, httpx, or asyncpg. These belong exclusively in omnibase_i
 
 Ticket: OMN-255
 
-CI Integration
+CI Integration  # ai-slop-ok: pre-existing
 ==============
 
 These tests run as part of the CI pipeline in two ways:
@@ -23,7 +26,7 @@ These tests run as part of the CI pipeline in two ways:
    - Runs: `uv run python scripts/validate.py all --verbose`
    - Includes architecture_layers as part of the full validation suite
 
-Detection Capabilities
+Detection Capabilities  # ai-slop-ok: pre-existing
 ======================
 
 **This Python test file** uses line-by-line regex scanning which detects:
@@ -480,7 +483,7 @@ def _find_multiline_state_after_line(
     current_in_multiline: bool,
     current_delimiter: str | None,
 ) -> tuple[bool, str | None, str]:
-    """Determine multiline string state after processing a line.
+    """Determine multiline string state after processing a line.  # ai-slop-ok: pre-existing
 
     This function handles the complex logic of tracking multiline string state
     including cases where one delimiter type appears inside another, and where

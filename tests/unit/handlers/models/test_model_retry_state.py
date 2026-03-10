@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Unit tests for ModelRetryState.next_attempt() method.
+"""Unit tests for ModelRetryState.next_attempt() method.  # ai-slop-ok: pre-existing
 
 This module provides comprehensive tests for the retry state model's
 backoff calculation, max delay capping, timestamp handling, and

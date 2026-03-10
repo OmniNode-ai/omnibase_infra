@@ -153,6 +153,17 @@ uv run ruff check src/ tests/             # Linting
 pre-commit run --all-files                    # All hooks
 ```
 
+## SPDX Headers
+
+All source files in `src/`, `tests/`, `scripts/`, `examples/` require MIT SPDX headers.
+Canonical spec: `omnibase_core/docs/conventions/FILE_HEADERS.md`
+
+- Stamp missing headers: `onex spdx fix src tests scripts examples`
+- Check without writing: `onex spdx fix --check src tests scripts examples`
+- Bypass a file: add `# spdx-skip: <reason>` in the first 10 lines
+
+---
+
 ### Git Commit Rules (repo-specific additions)
 
 > `--no-verify` and hook rules: see `~/.claude/CLAUDE.md` Git Standards.

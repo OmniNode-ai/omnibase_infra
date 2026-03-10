@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 """Node Slack Alerter Effect — declarative effect node for Slack alerting (OMN-1905)."""
 
@@ -8,7 +10,7 @@ from omnibase_core.nodes.node_effect import NodeEffect
 
 
 class NodeSlackAlerterEffect(NodeEffect):
-    """Declarative effect node for Slack webhook alerting.
+    """Declarative effect node for Slack webhook alerting.  # ai-slop-ok: pre-existing
 
     This effect node is a lightweight shell that defines the I/O contract
     for Slack alert operations. All routing and execution logic is driven
@@ -21,7 +23,7 @@ class NodeSlackAlerterEffect(NodeEffect):
     Dependency Injection:
         The HandlerSlackWebhook is instantiated by callers with its
         dependencies (bot_token from env, optional http_session).
-        This node contains NO instance variables for the handler.
+        This node contains NO instance variables for the handler.  # ai-slop-ok: pre-existing
 
     Example:
         ```python

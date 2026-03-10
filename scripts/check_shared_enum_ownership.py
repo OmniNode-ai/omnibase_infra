@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """CI guard: EnumMessageCategory may only be defined in omnibase_core.
 
 Usage: python scripts/check_shared_enum_ownership.py [src_root]

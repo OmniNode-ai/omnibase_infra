@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Capability inference rules for deriving tags from contract structure.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides deterministic pattern matching to infer capability tags

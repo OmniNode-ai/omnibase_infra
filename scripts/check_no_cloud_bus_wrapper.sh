@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 if [[ -z "${OMNI_HOME:-}" ]]; then
   echo "SKIP: OMNI_HOME is not set" >&2
   exit 0

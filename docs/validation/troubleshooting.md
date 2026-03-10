@@ -524,7 +524,7 @@ CI:    Architecture FAIL
 
 2. **Check job dependencies**:
    ```yaml
-   test-summary:
+   ci-summary:
      needs: [smoke-test, test, lint, onex-validation]
      # Must include onex-validation
    ```

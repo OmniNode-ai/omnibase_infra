@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 # shellcheck shell=bash
 # shellcheck enable=require-variable-braces
 # Architecture Invariant Verification Script

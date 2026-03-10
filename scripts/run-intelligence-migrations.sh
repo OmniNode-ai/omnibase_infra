@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 # run-intelligence-migrations.sh — Apply omniintelligence database migrations
 #
 # Creates the omniintelligence database if absent and applies all pending SQL

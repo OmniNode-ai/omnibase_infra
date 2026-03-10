@@ -1,4 +1,7 @@
-"""Shared fixtures for CI tests.
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+"""Shared fixtures for CI tests.  # ai-slop-ok: pre-existing
 
 This module provides common fixtures used across CI test modules,
 promoting code reuse and consistent test patterns.

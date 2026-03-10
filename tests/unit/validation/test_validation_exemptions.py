@@ -1,4 +1,7 @@
-"""
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+"""# ai-slop-ok: pre-existing
 Tests for validation_exemptions.yaml regex pattern validity.
 
 This module provides pre-commit validation that all regex patterns in the

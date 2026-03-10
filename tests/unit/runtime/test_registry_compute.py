@@ -1,4 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
 # ruff: noqa: RUF001, PLR0133, B023
 # RUF001/PLR0133 disabled: Greek letters are intentional for Unicode homograph testing

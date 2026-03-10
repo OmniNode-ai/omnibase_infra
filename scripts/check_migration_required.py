@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """
 CI gate: any PR touching a writer_postgres.py or handler_*_postgres.py file
 must either include a new migration file OR have a '# no-migration: <reason>'

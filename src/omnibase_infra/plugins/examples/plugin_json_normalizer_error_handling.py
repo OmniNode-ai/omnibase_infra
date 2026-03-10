@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """JSON normalization plugin demonstrating ONEX error handling standards.
 
 This plugin recursively sorts JSON object keys to enable consistent comparison

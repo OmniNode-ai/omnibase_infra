@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 # Copyright (c) 2025 OmniNode Team
-"""Chaos testing module for OMN-955.
+"""Chaos testing module for OMN-955.  # ai-slop-ok: pre-existing
 
 This module contains chaos engineering tests that validate system resilience
 under various failure conditions. Tests in this module simulate real-world

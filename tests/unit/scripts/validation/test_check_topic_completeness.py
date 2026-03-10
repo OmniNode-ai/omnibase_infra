@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Tests for scripts/validation/check_topic_completeness.py (OMN-3257)."""
 
 from __future__ import annotations
