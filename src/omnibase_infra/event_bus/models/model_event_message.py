@@ -61,3 +61,4 @@ class ModelEventMessage(BaseModel):
         For in-memory event bus, this is a no-op.
         For real Kafka/RedPanda implementations, this would commit the offset.
         """
+        return  # no-op for in-memory model; Kafka impls override via subclass

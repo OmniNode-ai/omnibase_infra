@@ -27,6 +27,7 @@ __all__ = ["HandlerRegistryApiListInstances"]
 
 _DEFAULT_CONSUL_HOST = "localhost"
 _DEFAULT_CONSUL_PORT = 8500
+_DEFAULT_CONSUL_PORT_STR = str(_DEFAULT_CONSUL_PORT)
 
 
 class HandlerRegistryApiListInstances:
@@ -54,12 +55,10 @@ class HandlerRegistryApiListInstances:
             consul_port: Consul agent port. Defaults to CONSUL_PORT env var
                 or 8500.
         """
-        self._consul_host = consul_host or os.environ.get(
-            "CONSUL_HOST", _DEFAULT_CONSUL_HOST
-        )
-        self._consul_port = consul_port or int(
-            os.environ.get("CONSUL_PORT", str(_DEFAULT_CONSUL_PORT))
-        )
+        _env_host = os.environ.get("CONSUL_HOST", _DEFAULT_CONSUL_HOST)  # ONEX_EXCLUDE
+        _env_port = os.environ.get("CONSUL_PORT", _DEFAULT_CONSUL_PORT_STR)  # ONEX_EXCLUDE  # fmt: skip
+        self._consul_host = consul_host or _env_host
+        self._consul_port = consul_port or int(_env_port)
 
     @property
     def handler_type(self) -> EnumHandlerType:

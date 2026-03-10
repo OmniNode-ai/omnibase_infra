@@ -85,16 +85,30 @@ _SERVICE_REQUIRED = {
     "HandlerRegistryApiGetTopic",
 }
 
-# Only the 4 operational handlers remain as stubs (raise NotImplementedError).
-STUB_HANDLER_CASES = [
-    case for case in HANDLER_CASES if case[1] not in _SERVICE_REQUIRED
-]
+# Operational handlers implemented in OMN-4482 (no longer stubs).
+# GetDiscovery requires callable dependencies injected via constructor.
+_OPERATIONAL_IMPLEMENTED = {
+    "HandlerRegistryApiListInstances",
+    "HandlerRegistryApiGetWidgetMapping",
+    "HandlerRegistryApiGetHealth",
+    "HandlerRegistryApiGetDiscovery",
+}
+
+# All 10 handlers are now implemented; stub set is empty.
+STUB_HANDLER_CASES: list[tuple[str, str, str]] = []
 
 
 def _instantiate(cls, class_name: str) -> object:
-    """Instantiate a handler, providing a mock service when required."""
+    """Instantiate a handler, providing required constructor args."""
     if class_name in _SERVICE_REQUIRED:
         return cls(service=MagicMock())
+    if class_name == "HandlerRegistryApiGetDiscovery":
+        # Requires three callable dependencies injected at construction time (OMN-4482).
+        return cls(
+            list_nodes=MagicMock(),
+            list_instances=MagicMock(),
+            get_widget_mapping=MagicMock(),
+        )
     return cls()
 
 

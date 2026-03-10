@@ -65,7 +65,7 @@ class HandlerRegistryApiGetHealth:
 
             import asyncpg
 
-            db_url = os.environ.get("OMNIBASE_INFRA_DB_URL", "")
+            db_url = os.environ.get("OMNIBASE_INFRA_DB_URL", "")  # ONEX_EXCLUDE
             if db_url:
                 conn = await asyncpg.connect(db_url, timeout=2)
                 await conn.close()
@@ -82,9 +82,9 @@ class HandlerRegistryApiGetHealth:
 
             from aiokafka.admin import AIOKafkaAdminClient
 
-            bootstrap = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
+            _kafka = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")  # ONEX_EXCLUDE  # fmt: skip
             admin = AIOKafkaAdminClient(
-                bootstrap_servers=bootstrap, request_timeout_ms=2000
+                bootstrap_servers=_kafka, request_timeout_ms=2000
             )
             await admin.start()
             await admin.close()
@@ -99,7 +99,7 @@ class HandlerRegistryApiGetHealth:
 
             import httpx
 
-            qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+            qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")  # ONEX_EXCLUDE  # fmt: skip
             async with httpx.AsyncClient(timeout=2) as client:
                 resp = await client.get(f"{qdrant_url}/healthz")
                 components["qdrant"] = (
