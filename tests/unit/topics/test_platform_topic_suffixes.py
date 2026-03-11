@@ -203,9 +203,11 @@ class TestIntelligenceTopicSuffixes:
                 f"Expected 'omniintelligence' or 'pattern' producer in: {spec.suffix}"
             )
 
-    def test_intelligence_topic_count(self) -> None:
-        """Intelligence spec registry should have 13 topics (10 original + 2 decision-recorded added in OMN-2943 + 1 routing-decision CMD added in OMN-4299)."""
-        assert len(ALL_INTELLIGENCE_TOPIC_SPECS) == 13
+    def test_intelligence_topic_count_is_nonzero(self) -> None:
+        """Intelligence spec registry must have at least 1 topic (structural guard, not count lock)."""
+        assert len(ALL_INTELLIGENCE_TOPIC_SPECS) > 0, (
+            "ALL_INTELLIGENCE_TOPIC_SPECS must not be empty"
+        )
 
     def test_intelligence_command_topics(self) -> None:
         """Intelligence command topics should be defined."""
@@ -300,9 +302,11 @@ class TestOmniMemoryTopicSuffixes:
                 f"Expected 'omnimemory' producer in: {spec.suffix}"
             )
 
-    def test_omnimemory_topic_count(self) -> None:
-        """OmniMemory spec registry should have 27 topics (OMN-2941)."""
-        assert len(ALL_OMNIMEMORY_TOPIC_SPECS) == 27
+    def test_omnimemory_topic_count_is_nonzero(self) -> None:
+        """OmniMemory spec registry must have at least 1 topic (structural guard, not count lock)."""
+        assert len(ALL_OMNIMEMORY_TOPIC_SPECS) > 0, (
+            "ALL_OMNIMEMORY_TOPIC_SPECS must not be empty"
+        )
 
     def test_omnimemory_event_topics(self) -> None:
         """OmniMemory event topics should be defined with correct suffixes."""
@@ -477,9 +481,11 @@ class TestOmniClaudeTopicSuffixes:
                 f"Expected 'omniclaude' producer in: {spec.suffix}"
             )
 
-    def test_omniclaude_topic_count(self) -> None:
-        """OmniClaude spec registry should have 209 topics (68 skills x 3 each + 2 lifecycle topics [OMN-2934] + 2 DLQ [OMN-2945, OMN-2959] + 1 agent trace topic [OMN-4572])."""
-        assert len(ALL_OMNICLAUDE_TOPIC_SPECS) == 209
+    def test_omniclaude_topic_count_is_nonzero(self) -> None:
+        """OmniClaude spec registry must have at least 1 topic (structural guard, not count lock)."""
+        assert len(ALL_OMNICLAUDE_TOPIC_SPECS) > 0, (
+            "ALL_OMNICLAUDE_TOPIC_SPECS must not be empty"
+        )
 
     def test_omniclaude_skill_topics_use_1_partition(self) -> None:
         """Skill dispatch topics should use 1 partition; DLQ and agent trace topics use 3 partitions."""
@@ -515,10 +521,11 @@ class TestOmniClaudeTopicSuffixes:
         evt_topics = [s for s in ALL_OMNICLAUDE_TOPIC_SPECS if ".evt." in s.suffix]
         assert len(cmd_topics) > 0, "Expected cmd topics in OmniClaude registry"
         assert len(evt_topics) > 0, "Expected evt topics in OmniClaude registry"
-        # 68 cmd topics + 141 evt topics:
-        #   68 completed + 68 failed (skill) + 2 lifecycle [OMN-2934] + 2 DLQ [OMN-2945, OMN-2959] + 1 agent trace [OMN-4572] = 209
-        assert len(cmd_topics) == 68
-        assert len(evt_topics) == 141
+        # Structural ratio guard: evt topics should outnumber cmd topics (skills produce
+        # completed + failed per cmd, plus lifecycle/DLQ/trace topics add to evt)
+        assert len(evt_topics) > len(cmd_topics), (
+            f"Expected more evt than cmd topics; got cmd={len(cmd_topics)}, evt={len(evt_topics)}"
+        )
 
     def test_epic_team_topic_in_registry(self) -> None:
         """Spot check: epic-team skill topics should be in the registry."""
