@@ -157,6 +157,8 @@ DEFAULT_RUNTIME_CONFIG = "runtime/runtime_config.yaml"
 
 # Environment variable name for contracts directory
 ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
+# Environment variable for omniclaude skills root (cross-repo topic discovery)
+ENV_OMNICLAUDE_SKILLS_ROOT = "OMNICLAUDE_SKILLS_ROOT"
 DEFAULT_INPUT_TOPIC = "requests"
 DEFAULT_OUTPUT_TOPIC = "responses"
 DEFAULT_GROUP_ID = "onex-runtime"
@@ -832,8 +834,37 @@ async def bootstrap() -> int:
                     TopicProvisioner,
                 )
 
+                # Resolve optional cross-repo skill-manifest root for topic discovery.
+                # OMNICLAUDE_SKILLS_ROOT: path to omniclaude plugins/onex/skills/
+                _skills_root_env = os.environ.get(
+                    ENV_OMNICLAUDE_SKILLS_ROOT, ""
+                ).strip()
+                _skill_manifests_root: Path | None = None
+                if not _skills_root_env:
+                    logger.info(
+                        "Topic provisioning: skill-manifest discovery disabled"
+                        " (OMNICLAUDE_SKILLS_ROOT not set)"
+                    )
+                else:
+                    _skill_manifests_path = Path(_skills_root_env)
+                    if not _skill_manifests_path.exists():
+                        logger.warning(
+                            "Topic provisioning: OMNICLAUDE_SKILLS_ROOT=%s not found,"
+                            " skill topics will not be provisioned",
+                            _skills_root_env,
+                        )
+                    else:
+                        _skill_manifests_root = _skill_manifests_path
+
+                _contracts_dir = _get_contracts_dir()
+                _contracts_root: Path | None = (
+                    _contracts_dir if _contracts_dir.exists() else None
+                )
+
                 topic_provisioner = TopicProvisioner(
                     bootstrap_servers=kafka_bootstrap_servers,
+                    contracts_root=_contracts_root,
+                    skill_manifests_root=_skill_manifests_root,
                 )
                 provisioning_result = (
                     await topic_provisioner.ensure_provisioned_topics_exist(
@@ -2270,6 +2301,7 @@ if __name__ == "__main__":
 
 __all__: list[str] = [
     "ENV_CONTRACTS_DIR",
+    "ENV_OMNICLAUDE_SKILLS_ROOT",
     "bootstrap",
     "load_runtime_config",
     "main",
