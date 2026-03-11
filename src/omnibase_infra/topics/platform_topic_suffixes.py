@@ -444,6 +444,42 @@ is registered yet.
 """
 
 # =============================================================================
+# OMNICLAUDE AGENT TRACE TOPIC SUFFIXES
+# =============================================================================
+# Non-skill domain topics produced by omniclaude agent trace system.
+# These are NOT skill lifecycle topics -- they are infrastructure-level trace
+# events emitted by the agent trace pipeline (OMN-3264 et al.).
+#
+# Provisioned here so the broker topic exists at startup. No consumer is
+# currently registered (see OMN-4572 for consumer implementation tracking).
+
+SUFFIX_OMNICLAUDE_AGENT_TRACE_FIX_TRANSITION: str = (
+    "onex.evt.omniclaude.fix-transition.v1"
+)
+"""Topic for agent trace fix transition events.
+
+Published by omniclaude fix_transition.py (TopicBase.AGENT_TRACE_FIX_TRANSITION)
+when a new passing ChangeFrame resolves a previously open failure within the same
+trace session. Records which failure was fixed, which frames were involved, and
+the diff that produced the fix.
+
+Producer: omniclaude trace/fix_transition.py (emit_fix_transition_event)
+Consumer: None currently registered (OMN-4572 — consumer implementation pending)
+
+Note: Provisioned to guarantee topic exists on broker at startup. Data loss is
+acceptable by design (non-blocking emit pattern in producer). See fix_transition.py.
+"""
+
+_OMNICLAUDE_AGENT_TRACE_TOPIC_SUFFIXES: tuple[str, ...] = (
+    SUFFIX_OMNICLAUDE_AGENT_TRACE_FIX_TRANSITION,
+)
+"""Agent trace topic suffixes for the omniclaude trace pipeline.
+
+Provisioned to guarantee broker topic existence for trace events emitted
+by omniclaude. No consumer is currently registered for these topics.
+"""
+
+# =============================================================================
 # OMNICLAUDE OBSERVABILITY DLQ TOPIC SUFFIXES
 # =============================================================================
 # Dead letter queue topics for OmniClaude observability consumers. These are
@@ -915,6 +951,11 @@ ALL_OMNICLAUDE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
         ModelTopicSpec(suffix=suffix, partitions=3)
         for suffix in _OMNICLAUDE_OBSERVABILITY_DLQ_TOPIC_SUFFIXES
     ),
+    # Agent trace topics (3 partitions -- low-throughput trace events per session)
+    *tuple(
+        ModelTopicSpec(suffix=suffix, partitions=3)
+        for suffix in _OMNICLAUDE_AGENT_TRACE_TOPIC_SUFFIXES
+    ),
 )
 """OmniClaude topic specs provisioned for skill orchestrator nodes and observability.
 
@@ -925,9 +966,8 @@ Observability DLQ topics: 3 partitions each (matches agent-actions consumer
 throughput). Provisioned to guarantee broker topic existence when auto-creation
 is disabled (OMN-2945).
 
-Observability DLQ topics: 3 partitions each (matches agent-actions consumer
-throughput). Provisioned to guarantee broker topic existence when auto-creation
-is disabled (OMN-2945).
+Agent trace topics: 3 partitions each (low-throughput trace events). Provisioned
+to guarantee broker topic existence. No consumer currently registered (OMN-4572).
 
 Source: ``omniclaude/src/omniclaude/nodes/node_skill_*/contract.yaml``
 """
