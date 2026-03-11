@@ -231,6 +231,15 @@ POSTGRES_ADAPTER_PORT=18085
 # Example: ./contracts, /app/contracts, /etc/onex/contracts
 # ONEX_CONTRACTS_DIR=./contracts
 
+# Path to omniclaude skills root for cross-repo topic discovery (OMN-4597)
+# When set, TopicProvisioner scans topics.yaml files under this path and merges
+# the discovered skill topics into the provisioned topic set at runtime startup.
+# Default: unset (skill-manifest discovery disabled)
+# Local dev example: /Volumes/PRO-G40/Code/omni_home/omniclaude/plugins/onex/skills
+# Docker example: /app/omniclaude/plugins/onex/skills (if omniclaude is volume-mounted)
+# Leave unset if omniclaude is not co-located or skill topics are not needed.
+# OMNICLAUDE_SKILLS_ROOT=/path/to/omniclaude/plugins/onex/skills
+
 # Environment name: local, development, staging, production
 # Default: local
 # Example: local (development), staging (pre-prod), production (live)
