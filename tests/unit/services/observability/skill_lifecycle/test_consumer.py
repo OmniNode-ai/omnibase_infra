@@ -390,19 +390,25 @@ class TestHealthResponse:
         assert response["idle"] is True
 
     @pytest.mark.unit
-    def test_degraded_when_stale_writes(self) -> None:
-        """Returns DEGRADED when last write exceeds staleness threshold."""
+    def test_healthy_when_caught_up_idle(self) -> None:
+        """Returns HEALTHY (200) when consumer has written before but is caught up.
+
+        OMN-4586: The consumer is polling fine (LAG=0, no new events) but
+        last_successful_write_at is stale. This is caught-up idle — not degraded.
+        Write staleness alone is not a degraded signal; only poll staleness is.
+        """
         consumer = _make_consumer()
         consumer._running = True
-        # Set last write to far in the past
+        # Last write was long ago (e.g., 24h — consumed all available events)
         stale_time = datetime(2020, 1, 1, tzinfo=UTC)
         consumer.metrics.last_successful_write_at = stale_time
-        consumer.metrics.last_poll_at = datetime.now(UTC)
+        consumer.metrics.last_poll_at = datetime.now(UTC)  # Polling is healthy
 
         response, status_code = consumer._build_health_response()
 
-        assert response["status"] == str(EnumHealthStatus.DEGRADED)
-        assert status_code == 503
+        assert response["status"] == str(EnumHealthStatus.HEALTHY)
+        assert status_code == 200
+        assert response["idle"] is True  # Caught-up idle
 
     @pytest.mark.unit
     def test_unhealthy_when_not_running(self) -> None:

@@ -641,12 +641,28 @@ class SkillLifecycleConsumer:
     def _build_health_response(self) -> tuple[dict[str, object], int]:
         """Build health check response dict and HTTP status code.
 
-        Idle-aware health (OMN-3784): When the consumer is running and polling
-        Kafka but has never received events (last_successful_write_at is None),
-        it is considered idle — not unhealthy.  Write staleness only applies
-        after the first successful write, because only then does a stale write
-        indicate an actual problem.  Poll staleness always applies since a
-        failure to poll indicates a broken Kafka connection.
+        Idle-aware health (OMN-3784, OMN-4586): The only reliable signal that
+        the consumer is broken is poll staleness — if it stops polling Kafka,
+        the Kafka connection is gone and the consumer cannot make progress.
+
+        Write staleness alone is NOT a reliable degraded signal because a
+        healthy consumer that has consumed all available events will not write
+        until new events arrive. Treating write staleness as degraded causes
+        false 503s on low-traffic topics where the consumer is caught up
+        (LAG=0) but the readiness probe sees no writes in the last 5 minutes.
+
+        Health classification:
+            UNHEALTHY  — consumer is not running (stopped/crashed)
+            DEGRADED   — poll is stale or missing (Kafka connection broken)
+            HEALTHY    — running and polling; idle if no writes yet or caught up
+
+        The ``idle`` flag distinguishes two HEALTHY sub-states:
+            idle=True  — polling OK, no successful writes ever or since startup
+            idle=False — polling OK, at least one write completed this session
+
+        Poll staleness always applies because a failure to poll indicates a
+        broken Kafka connection. Write staleness is recorded in the response
+        for observability but does not affect the health status code.
 
         Returns:
             Tuple of (response_dict, http_status_code).
@@ -658,8 +674,20 @@ class SkillLifecycleConsumer:
         write_age = (now - last_write).total_seconds() if last_write else None
         poll_age = (now - last_poll).total_seconds() if last_poll else None
 
-        # Determine if consumer is idle (running but never received events)
-        idle = self._running and last_write is None
+        # Determine if consumer is idle (HEALTHY sub-state — no degradation).
+        # Two idle cases:
+        # 1. Never written (last_write is None) — no events received yet
+        # 2. Caught-up idle — previously written, polls are fresh, but writes
+        #    are stale (LAG=0, consumer consumed all available events)
+        idle = self._running and (
+            last_write is None
+            or (
+                write_age is not None
+                and write_age > self.config.health_check_staleness_seconds
+                and poll_age is not None
+                and poll_age <= self.config.health_check_poll_staleness_seconds
+            )
+        )
 
         if not self._running:
             status = EnumHealthStatus.UNHEALTHY
@@ -669,14 +697,8 @@ class SkillLifecycleConsumer:
         ):
             # No polls at all, or polls are stale — Kafka connection problem
             status = EnumHealthStatus.DEGRADED
-        elif (
-            write_age is not None
-            and write_age > self.config.health_check_staleness_seconds
-        ):
-            # Has written before but writes are stale — downstream problem
-            status = EnumHealthStatus.DEGRADED
         else:
-            # Either idle (no writes ever, but polling OK) or actively healthy
+            # Polling is healthy — consumer is either actively writing or idle/caught up
             status = EnumHealthStatus.HEALTHY
 
         http_code = 200 if status == EnumHealthStatus.HEALTHY else 503
