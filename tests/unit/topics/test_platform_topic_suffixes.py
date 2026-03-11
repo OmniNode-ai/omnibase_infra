@@ -478,24 +478,26 @@ class TestOmniClaudeTopicSuffixes:
             )
 
     def test_omniclaude_topic_count(self) -> None:
-        """OmniClaude spec registry should have 208 topics (68 skills x 3 each + 2 lifecycle topics [OMN-2934] + 2 DLQ [OMN-2945, OMN-2959])."""
-        assert len(ALL_OMNICLAUDE_TOPIC_SPECS) == 208
+        """OmniClaude spec registry should have 209 topics (68 skills x 3 each + 2 lifecycle topics [OMN-2934] + 2 DLQ [OMN-2945, OMN-2959] + 1 agent trace topic [OMN-4572])."""
+        assert len(ALL_OMNICLAUDE_TOPIC_SPECS) == 209
 
     def test_omniclaude_skill_topics_use_1_partition(self) -> None:
-        """Skill dispatch topics should use 1 partition; DLQ topics use 3 partitions."""
+        """Skill dispatch topics should use 1 partition; DLQ and agent trace topics use 3 partitions."""
         from omnibase_infra.topics import (
             SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
             SUFFIX_OMNICLAUDE_AGENT_OBSERVABILITY_DLQ,
+            SUFFIX_OMNICLAUDE_AGENT_TRACE_FIX_TRANSITION,
         )
 
-        dlq_suffixes = {
+        three_partition_suffixes = {
             SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
             SUFFIX_OMNICLAUDE_AGENT_OBSERVABILITY_DLQ,
+            SUFFIX_OMNICLAUDE_AGENT_TRACE_FIX_TRANSITION,
         }
         for spec in ALL_OMNICLAUDE_TOPIC_SPECS:
-            if spec.suffix in dlq_suffixes:
+            if spec.suffix in three_partition_suffixes:
                 assert spec.partitions == 3, (
-                    f"Expected 3 partitions for DLQ topic {spec.suffix}, got {spec.partitions}"
+                    f"Expected 3 partitions for {spec.suffix}, got {spec.partitions}"
                 )
             else:
                 assert spec.partitions == 1, (
@@ -513,10 +515,10 @@ class TestOmniClaudeTopicSuffixes:
         evt_topics = [s for s in ALL_OMNICLAUDE_TOPIC_SPECS if ".evt." in s.suffix]
         assert len(cmd_topics) > 0, "Expected cmd topics in OmniClaude registry"
         assert len(evt_topics) > 0, "Expected evt topics in OmniClaude registry"
-        # 68 cmd topics + 140 evt topics:
-        #   68 completed + 68 failed (skill) + 2 lifecycle [OMN-2934] + 2 DLQ [OMN-2945, OMN-2959] = 208
+        # 68 cmd topics + 141 evt topics:
+        #   68 completed + 68 failed (skill) + 2 lifecycle [OMN-2934] + 2 DLQ [OMN-2945, OMN-2959] + 1 agent trace [OMN-4572] = 209
         assert len(cmd_topics) == 68
-        assert len(evt_topics) == 140
+        assert len(evt_topics) == 141
 
     def test_epic_team_topic_in_registry(self) -> None:
         """Spot check: epic-team skill topics should be in the registry."""
