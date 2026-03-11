@@ -641,12 +641,13 @@ class SkillLifecycleConsumer:
     def _build_health_response(self) -> tuple[dict[str, object], int]:
         """Build health check response dict and HTTP status code.
 
-        Idle-aware health (OMN-3784): When the consumer is running and polling
-        Kafka but has never received events (last_successful_write_at is None),
+        Idle-aware health (OMN-3784 / OMN-4568): When the consumer is running
+        and polling Kafka but has no incoming traffic (messages_received == 0),
         it is considered idle — not unhealthy.  Write staleness only applies
-        after the first successful write, because only then does a stale write
-        indicate an actual problem.  Poll staleness always applies since a
-        failure to poll indicates a broken Kafka connection.
+        when the consumer has received messages that should have produced writes;
+        a stale write with zero received messages simply means the consumer is
+        caught up (Kafka lag = 0) and waiting for new events.  Poll staleness
+        always applies since a failure to poll indicates a broken Kafka connection.
 
         Returns:
             Tuple of (response_dict, http_status_code).
@@ -658,8 +659,8 @@ class SkillLifecycleConsumer:
         write_age = (now - last_write).total_seconds() if last_write else None
         poll_age = (now - last_poll).total_seconds() if last_poll else None
 
-        # Determine if consumer is idle (running but never received events)
-        idle = self._running and last_write is None
+        # Idle: running but no messages received since startup (lag=0, caught up)
+        idle = self._running and self.metrics.messages_received == 0
 
         if not self._running:
             status = EnumHealthStatus.UNHEALTHY
@@ -672,11 +673,15 @@ class SkillLifecycleConsumer:
         elif (
             write_age is not None
             and write_age > self.config.health_check_staleness_seconds
+            and self.metrics.messages_received > 0
         ):
-            # Has written before but writes are stale — downstream problem
+            # Has written before, writes are stale, AND messages have been received
+            # since startup — traffic that should have produced writes is not being
+            # written (downstream problem).  An idle consumer (lag=0, no messages
+            # received) is HEALTHY regardless of write age (OMN-4568).
             status = EnumHealthStatus.DEGRADED
         else:
-            # Either idle (no writes ever, but polling OK) or actively healthy
+            # Idle (lag=0, no messages received, polls current) or actively healthy
             status = EnumHealthStatus.HEALTHY
 
         http_code = 200 if status == EnumHealthStatus.HEALTHY else 503
