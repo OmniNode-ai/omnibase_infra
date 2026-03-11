@@ -354,6 +354,10 @@ class TestHealthResponse:
     OMN-3784: Idle-aware health check — consumer reports HEALTHY when idle
     (connected to Kafka, polling, but no events received yet), and only
     reports DEGRADED for actual failures.
+
+    OMN-4568: Caught-up health check — consumer reports HEALTHY when it has
+    written before but Kafka lag is 0 (messages_received == 0 since startup),
+    even if write_age exceeds the staleness threshold.
     """
 
     @pytest.mark.unit
@@ -363,6 +367,7 @@ class TestHealthResponse:
         consumer._running = True
         now = datetime.now(UTC)
         consumer.metrics.last_successful_write_at = now
+        consumer.metrics.messages_received = 5
         consumer.metrics.last_poll_at = now
 
         response, status_code = consumer._build_health_response()
@@ -391,18 +396,48 @@ class TestHealthResponse:
 
     @pytest.mark.unit
     def test_degraded_when_stale_writes(self) -> None:
-        """Returns DEGRADED when last write exceeds staleness threshold."""
+        """Returns DEGRADED when last write exceeds staleness threshold AND messages received.
+
+        OMN-4568: The stale-write DEGRADED path requires messages_received > 0 to
+        distinguish an active-but-broken pipeline from an idle caught-up consumer.
+        """
         consumer = _make_consumer()
         consumer._running = True
         # Set last write to far in the past
         stale_time = datetime(2020, 1, 1, tzinfo=UTC)
         consumer.metrics.last_successful_write_at = stale_time
         consumer.metrics.last_poll_at = datetime.now(UTC)
+        # Messages were received but not written — write pipeline is broken
+        consumer.metrics.messages_received = 10
 
         response, status_code = consumer._build_health_response()
 
         assert response["status"] == str(EnumHealthStatus.DEGRADED)
         assert status_code == 503
+
+    @pytest.mark.unit
+    def test_healthy_when_caught_up_no_new_messages(self) -> None:
+        """Returns HEALTHY when last write is stale but no messages received (lag=0).
+
+        OMN-4568: Core fix. When the consumer has fully caught up (Kafka lag = 0,
+        messages_received == 0 since startup) and is actively polling, write staleness
+        does NOT indicate a problem — there is simply no traffic to write.
+        Previously this returned DEGRADED (503).
+        """
+        consumer = _make_consumer()
+        consumer._running = True
+        # Last write was long ago (consumer processed events then went idle)
+        stale_time = datetime(2020, 1, 1, tzinfo=UTC)
+        consumer.metrics.last_successful_write_at = stale_time
+        consumer.metrics.last_poll_at = datetime.now(UTC)
+        # No messages received since startup — consumer is caught up (lag=0)
+        consumer.metrics.messages_received = 0
+
+        response, status_code = consumer._build_health_response()
+
+        assert response["status"] == str(EnumHealthStatus.HEALTHY)
+        assert status_code == 200
+        assert response["idle"] is True
 
     @pytest.mark.unit
     def test_unhealthy_when_not_running(self) -> None:
@@ -472,11 +507,16 @@ class TestHealthResponse:
 
     @pytest.mark.unit
     def test_not_idle_after_first_write(self) -> None:
-        """Consumer is not idle once it has processed at least one event."""
+        """Consumer is not idle once it has processed at least one event (OMN-4568).
+
+        idle is True only when messages_received == 0. Once messages have been
+        received and processed, the consumer is active — not idle.
+        """
         consumer = _make_consumer()
         consumer._running = True
         now = datetime.now(UTC)
         consumer.metrics.last_successful_write_at = now
+        consumer.metrics.messages_received = 3
         consumer.metrics.last_poll_at = now
 
         response, _ = consumer._build_health_response()
