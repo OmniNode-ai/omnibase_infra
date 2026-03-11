@@ -139,6 +139,17 @@ Examples:
             f"Default: {_DEFAULT_CONTRACTS_ROOT}"
         ),
     )
+    parser.add_argument(
+        "--skills-root",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Path to omniclaude plugins/onex/skills/ directory. "
+            "When set, topics.yaml manifests from each skill are discovered "
+            "and merged with contract-extracted topics. Enables cross-repo "
+            "topic discovery in CI. Optional — omitted in contract-only runs."
+        ),
+    )
     return parser
 
 
@@ -310,13 +321,31 @@ def main() -> int:
         )
         return 2
 
-    # Extract topics from contract files
+    # Resolve optional skills root (--skills-root)
+    skill_manifests_root: Path | None = None
+    if args.skills_root is not None:
+        skill_manifests_root = Path(args.skills_root).resolve()
+        if not skill_manifests_root.exists():
+            print(
+                f"WARNING: --skills-root does not exist: {skill_manifests_root} — "
+                "skill topic discovery will be skipped.",
+                file=sys.stderr,
+            )
+            skill_manifests_root = None
+
+    # Extract topics from contract files (and optionally skill manifests)
     try:
         # Import here so the script fails fast if omnibase_infra is not installed
         from omnibase_infra.tools.contract_topic_extractor import ContractTopicExtractor
 
         extractor = ContractTopicExtractor()
-        entries = extractor.extract(contracts_root)
+        if skill_manifests_root is not None:
+            entries = extractor.extract_all(
+                contracts_root=contracts_root,
+                skill_manifests_root=skill_manifests_root,
+            )
+        else:
+            entries = extractor.extract(contracts_root)
     except Exception as exc:
         print(f"ERROR: Failed to extract topics from contracts: {exc}", file=sys.stderr)
         return 1
@@ -332,6 +361,8 @@ def main() -> int:
     topics = [e.topic for e in entries]
 
     if args.dry_run:
+        if skill_manifests_root is not None:
+            print(f"Skills root: {skill_manifests_root}")
         return _run_dry(topics, args.bootstrap_servers, contracts_root)
 
     return _run_live(
