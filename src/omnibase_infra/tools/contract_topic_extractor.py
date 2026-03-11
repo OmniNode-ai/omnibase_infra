@@ -384,31 +384,132 @@ class ContractTopicExtractor:
 
         return sorted(accumulated.values(), key=lambda e: e.topic)
 
+    def extract_from_skill_manifests(
+        self, skills_root: Path
+    ) -> list[ModelContractTopicEntry]:
+        """Extract topics from omniclaude skill topics.yaml manifests.
+
+        Recursively scans *skills_root* for ``topics.yaml`` files in direct
+        child directories (one level deep). Skip directories whose names start
+        with ``_`` or ``__`` (e.g. ``_lib``, ``_shared``, ``__pycache__``).
+
+        Each ``topics.yaml`` is expected to contain a ``topics:`` list of
+        ONEX topic strings. Malformed topics are warned and skipped (no crash).
+        Duplicate topics across multiple manifests are deduplicated (sources
+        merged).
+
+        Args:
+            skills_root: Path to the omniclaude ``plugins/onex/skills/`` directory.
+
+        Returns:
+            Sorted (by topic string), deduplicated list of
+            :class:`ModelContractTopicEntry` objects.
+
+        Raises:
+            RuntimeError: If the same topic string yields inconsistent parsed
+                components across files (implies a parser bug).
+
+        Ticket: OMN-4593
+        """
+        accumulated: dict[str, ModelContractTopicEntry] = {}
+
+        if not skills_root.is_dir():
+            _warn(
+                f"skills_root {skills_root} is not a directory — "
+                "extract_from_skill_manifests returns empty list"
+            )
+            return []
+
+        for skill_dir in sorted(skills_root.iterdir()):
+            # Only process direct child directories; skip _ / __ prefixes
+            if not skill_dir.is_dir():
+                continue
+            if skill_dir.name.startswith("_") or skill_dir.name.startswith("__"):
+                continue
+
+            topics_yaml = skill_dir / "topics.yaml"
+            if not topics_yaml.exists():
+                continue
+
+            try:
+                with topics_yaml.open(encoding="utf-8") as fh:
+                    data = yaml.safe_load(fh)
+            except Exception as exc:
+                _warn(f"Could not parse {topics_yaml}: {exc} — skipping")
+                continue
+
+            if not isinstance(data, dict):
+                _warn(f"topics.yaml is not a mapping: {topics_yaml} — skipping")
+                continue
+
+            raw_topics = data.get("topics")
+            if not isinstance(raw_topics, list):
+                _warn(f"topics.yaml missing 'topics' list: {topics_yaml} — skipping")
+                continue
+
+            for raw in raw_topics:
+                if not isinstance(raw, str) or not raw.strip():
+                    _warn(f"Skipping non-string or empty topic entry in {topics_yaml}")
+                    continue
+
+                entry = _parse_topic(raw.strip(), topics_yaml)
+                if entry is None:
+                    # Malformed — warned inside _parse_topic
+                    continue
+
+                if raw in accumulated:
+                    existing = accumulated[raw]
+                    if (
+                        existing.kind != entry.kind
+                        or existing.producer != entry.producer
+                        or existing.event_name != entry.event_name
+                        or existing.version != entry.version
+                    ):
+                        _error(
+                            f"Inconsistent parsed components for topic {raw!r}: "
+                            f"first seen in {existing.source_contracts[0]}, "
+                            f"now in {topics_yaml}. This implies a parser bug."
+                        )
+                    accumulated[raw] = existing.merge_sources(entry)
+                else:
+                    accumulated[raw] = entry
+
+        return sorted(accumulated.values(), key=lambda e: e.topic)
+
     def extract_all(
         self,
         contracts_root: Path,
         supplementary_sources: list[Path] | None = None,
+        skill_manifests_root: Path | None = None,
     ) -> list[ModelContractTopicEntry]:
-        """Extract topics from contracts AND supplementary Python sources.
+        """Extract topics from contracts AND supplementary Python sources AND skill manifests.
 
-        Combines results from contract.yaml scanning and Python source file
-        scanning into a single deduplicated list. Topics appearing in both
-        sources are merged (source_contracts combined).
+        Combines results from contract.yaml scanning, Python source file
+        scanning, and omniclaude skill manifest scanning into a single
+        deduplicated list. Topics appearing in multiple sources are merged
+        (source_contracts combined).
 
         This is the recommended entry point for the generation pipeline
-        (OMN-3254) to ensure all topics -- whether declared in contracts
-        or hardcoded in Python constants -- appear in the generated enums.
+        (OMN-3254, OMN-4593) to ensure all topics -- whether declared in
+        contracts, hardcoded in Python constants, or declared in skill
+        topics.yaml manifests -- appear in the generated enums.
 
         Args:
             contracts_root: Directory to scan for contract.yaml files.
             supplementary_sources: Optional list of Python files to scan
                 for additional topic constants.
+            skill_manifests_root: Optional path to omniclaude
+                ``plugins/onex/skills/`` directory. When set, skill
+                ``topics.yaml`` manifests are discovered and merged.
+                When ``None``, skill manifest discovery is skipped.
 
         Returns:
             Sorted, deduplicated list of ModelContractTopicEntry objects.
 
         Raises:
             RuntimeError: On inconsistent parsed components.
+
+        Ticket: OMN-4593
         """
         # Start with contract-derived topics
         contract_entries = self.extract(contracts_root)
@@ -416,7 +517,7 @@ class ContractTopicExtractor:
             e.topic: e for e in contract_entries
         }
 
-        # Merge supplementary sources
+        # Merge supplementary Python sources (legacy path, OMN-3254)
         if supplementary_sources:
             supplementary_entries = self.extract_from_python_sources(
                 supplementary_sources
@@ -424,7 +525,16 @@ class ContractTopicExtractor:
             for entry in supplementary_entries:
                 if entry.topic in accumulated:
                     existing = accumulated[entry.topic]
-                    # Same topic from both contract and Python source — merge sources
+                    accumulated[entry.topic] = existing.merge_sources(entry)
+                else:
+                    accumulated[entry.topic] = entry
+
+        # Merge skill manifest topics (OMN-4593)
+        if skill_manifests_root is not None:
+            skill_entries = self.extract_from_skill_manifests(skill_manifests_root)
+            for entry in skill_entries:
+                if entry.topic in accumulated:
+                    existing = accumulated[entry.topic]
                     accumulated[entry.topic] = existing.merge_sources(entry)
                 else:
                     accumulated[entry.topic] = entry
