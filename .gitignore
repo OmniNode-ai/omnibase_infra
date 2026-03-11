@@ -281,3 +281,10 @@ junit-*.xml
 .infisical-admin-token
 .infisical-admin-token.tmp
 .infisical-identity.tmp
+
+# Operational artifacts — never commit (OMN-4569)
+# Recovery logs, validation logs, and session artifacts are auto-generated
+# by automated tooling and must never be tracked as repo content.
+docs/recovery/
+*-validation-log-*.md
+*-recovery-log-*.md
