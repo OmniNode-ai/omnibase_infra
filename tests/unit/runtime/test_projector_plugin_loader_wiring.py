@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2026 OmniNode Team
 """Unit tests verifying ProjectorShell is wired into ProjectorPluginLoader (OMN-4484).
 
 OMN-1169 implemented ProjectorShell. This test verifies that ProjectorPluginLoader._create_projector
