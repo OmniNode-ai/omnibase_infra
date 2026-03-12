@@ -51,13 +51,11 @@ from omnibase_infra.models.checkpoint.model_phase_payload_ready_for_merge import
 )
 
 PhasePayload = Annotated[
-    Union[
-        Annotated[ModelPhasePayloadImplement, Tag("implement")],
-        Annotated[ModelPhasePayloadLocalReview, Tag("local_review")],
-        Annotated[ModelPhasePayloadCreatePr, Tag("create_pr")],
-        Annotated[ModelPhasePayloadPrReleaseReady, Tag("pr_release_ready")],
-        Annotated[ModelPhasePayloadReadyForMerge, Tag("ready_for_merge")],
-    ],
+    Annotated[ModelPhasePayloadImplement, Tag("implement")]
+    | Annotated[ModelPhasePayloadLocalReview, Tag("local_review")]
+    | Annotated[ModelPhasePayloadCreatePr, Tag("create_pr")]
+    | Annotated[ModelPhasePayloadPrReleaseReady, Tag("pr_release_ready")]
+    | Annotated[ModelPhasePayloadReadyForMerge, Tag("ready_for_merge")],
     Discriminator("phase"),
 ]
 """Discriminated union of per-phase payloads, keyed on the ``phase`` literal."""
