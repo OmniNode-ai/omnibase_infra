@@ -1,3 +1,21 @@
+## v0.18.0 (2026-03-12)
+
+### Features
+- feat(topics): wire TopicProvisioner to ContractTopicExtractor (transitional union) [OMN-4594] (#780)
+- feat(topics): add --skills-root flag to create_kafka_topics.py [OMN-4595] (#781)
+- feat(topics): add contract topic parity gate CI script [OMN-4600] (#783)
+- feat(runtime): wire OMNICLAUDE_SKILLS_ROOT to TopicProvisioner at startup [OMN-4597] (#784)
+- feat(topics): add extract_from_skill_manifests and extend extract_all [OMN-4593] (#779)
+- feat(topics): provision onex.evt.omniclaude.fix-transition.v1 topic [OMN-4572] (#777)
+
+### Bug Fixes
+- fix(health): mark skill-lifecycle-consumer healthy when lag=0 and polls current (OMN-4568) (#775)
+- fix(hygiene): block operational artifact commits (OMN-4569) (#776)
+
+### Other Changes
+- test(topics): replace count-based assertions with structural guards [OMN-4596] (#782)
+- docs(env): document OMNICLAUDE_SKILLS_ROOT in env-example-full.txt [OMN-4599] (#785)
+
 # Changelog
 
 All notable changes to the ONEX Infrastructure (omnibase_infra) will be documented in this file.
