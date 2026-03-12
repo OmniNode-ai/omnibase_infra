@@ -2,7 +2,7 @@
 -- MIGRATION: Create role_omniweb and grant table permissions
 -- =============================================================================
 -- Ticket: OMN-4700 (omniweb-migrate P0 connectivity fix)
--- Version: 1.0.0
+-- Version: 1.1.0
 --
 -- PURPOSE:
 --   omniweb-migrate currently uses the postgres superuser from
@@ -15,6 +15,14 @@
 --      (kubectl patch — see PR description for the operator command)
 --   2. Update omniweb-migrate.yaml to use role_omniweb instead of postgres
 --      (done in the companion omninode_infra PR)
+--
+-- NOTE ON TABLE GRANTS:
+--   waitlist_signups and admin_events_log are managed by omniweb's own
+--   migrations (not omnibase_infra). The GRANTs are wrapped in conditional
+--   DO blocks so this migration is safe to run even when those tables do not
+--   yet exist (e.g. in a fresh CI test database that only applies
+--   omnibase_infra migrations). In production the tables already exist and
+--   the GRANTs apply immediately.
 --
 -- ROLLBACK:
 --   DROP ROLE role_omniweb;  (after revoking grants)
@@ -29,15 +37,31 @@ BEGIN
 END;
 $$;
 
--- Grant DML on omniweb tables in the omnibase_infra DB.
--- These are the only tables omniweb migrations touch.
-GRANT INSERT, SELECT, UPDATE, DELETE
-  ON TABLE public.waitlist_signups
-  TO role_omniweb;
-
-GRANT INSERT, SELECT, UPDATE, DELETE
-  ON TABLE public.admin_events_log
-  TO role_omniweb;
-
 -- Grant usage on the schema so the role can resolve objects.
 GRANT USAGE ON SCHEMA public TO role_omniweb;
+
+-- Grant DML on omniweb tables in the omnibase_infra DB.
+-- These are the only tables omniweb migrations touch.
+-- Wrapped in DO blocks so the migration is safe when tables do not yet exist
+-- (e.g. CI test DB that only runs omnibase_infra migrations).
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'waitlist_signups'
+  ) THEN
+    EXECUTE 'GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.waitlist_signups TO role_omniweb';
+  END IF;
+END;
+$$;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'admin_events_log'
+  ) THEN
+    EXECUTE 'GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.admin_events_log TO role_omniweb';
+  END IF;
+END;
+$$;
