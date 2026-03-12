@@ -221,15 +221,17 @@ class HandlerNodeHeartbeat:
                 timestamp=now,
             )
 
-        # Short-circuit for terminal states (OMN-4824): heartbeats arriving
-        # after liveness expiry or rejection are no-ops.  This prevents stale
-        # heartbeats from extending the liveness deadline on dead registrations.
+        # OMN-4824: Short-circuit immediately for terminal states.
+        # The reducer (OMN-4822) returns no_op for terminal states, but we
+        # emit the structured warning here before calling the reducer so the
+        # log appears with the full projection context.
         if projection.current_state.is_terminal():
             logger.warning(
                 "terminal-state heartbeat ignored",
                 extra={
                     "node_id": str(event.node_id),
                     "current_state": projection.current_state.value,
+                    "heartbeat_timestamp": str(event.timestamp),
                     "correlation_id": str(correlation_id),
                 },
             )
@@ -247,7 +249,8 @@ class HandlerNodeHeartbeat:
                 timestamp=now,
             )
 
-        # Check if node is in a state that should receive heartbeats
+        # Log a warning for non-active, non-terminal states (race conditions
+        # during state transitions are possible and should be visible).
         if not projection.current_state.is_active():
             logger.warning(
                 "Heartbeat received for non-active node",
@@ -257,8 +260,6 @@ class HandlerNodeHeartbeat:
                     "correlation_id": str(correlation_id),
                 },
             )
-            # Still process the heartbeat to update tracking, but log the warning
-            # This can happen during state transitions or race conditions
 
         # Decision: Should we update heartbeat?
         ctx = ModelReducerContext(correlation_id=correlation_id, now=now)
