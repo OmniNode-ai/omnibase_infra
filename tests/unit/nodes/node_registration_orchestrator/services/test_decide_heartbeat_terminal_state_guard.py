@@ -94,10 +94,6 @@ def make_ctx(now=None, correlation_id=None):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="OMN-4822 pending: decide_heartbeat does not yet guard terminal states",
-)
 class TestDecideHeartbeatTerminalStateGuard:
     """decide_heartbeat must return no_op immediately for terminal states.
 

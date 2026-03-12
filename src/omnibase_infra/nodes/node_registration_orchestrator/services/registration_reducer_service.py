@@ -409,6 +409,14 @@ class RegistrationReducerService:
         if projection is None:
             return _no_op("Unknown node")
 
+        # OMN-4822: Guard against terminal states. A heartbeat arriving for a
+        # node in LIVENESS_EXPIRED or REJECTED state must not extend the liveness
+        # deadline — doing so triggers spurious re-registration in the handler.
+        if projection.current_state.is_terminal():
+            return _no_op(
+                f"Terminal state {projection.current_state} — heartbeat ignored"
+            )
+
         new_liveness_deadline = heartbeat_timestamp + timedelta(
             seconds=self._liveness_window_seconds
         )
