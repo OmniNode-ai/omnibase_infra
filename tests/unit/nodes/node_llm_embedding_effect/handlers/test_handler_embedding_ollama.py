@@ -23,6 +23,7 @@ Related:
 
 from __future__ import annotations
 
+import os
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -40,7 +41,13 @@ from omnibase_infra.nodes.node_llm_embedding_effect.models.model_llm_embedding_r
     ModelLlmEmbeddingRequest,
 )
 
-pytestmark = [pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        not os.getenv("OLLAMA_BASE_URL"),
+        reason="Ollama not configured — decommissioned, tests kept for historical reference",
+    ),
+]
 
 
 # =============================================================================
