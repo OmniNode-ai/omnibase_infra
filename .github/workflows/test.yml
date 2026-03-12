@@ -129,6 +129,17 @@ jobs:
           echo "================================================================"
           uv run python scripts/validate.py db_quality_gate --verbose
 
+      - name: No Consul references (decommissioned — OMN-4857)
+        run: |
+          echo "================================================================"
+          echo "No Consul references check (OMN-4857)"
+          echo "================================================================"
+          if grep -rn "CONSUL_HOST" src/; then
+            echo "FAIL: CONSUL_HOST references found in src/ — Consul is decommissioned (OMN-4857)"
+            exit 1
+          fi
+          echo "PASS: No CONSUL_HOST references in src/"
+
   # Fingerprint drift detection -- CI twins for runtime assertions B2 and B3
   # Prevents stale fingerprint artifacts from being merged (OMN-2149)
   fingerprint-check:
