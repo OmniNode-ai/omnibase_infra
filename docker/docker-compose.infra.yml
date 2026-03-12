@@ -584,7 +584,6 @@ services:
       - runtime_logs:/app/logs
       - runtime_data:/app/data
       - ../contracts:/app/contracts:ro
-      - ../src/omnibase_infra/nodes:/app/contracts/nodes:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
@@ -623,7 +622,6 @@ services:
       - effects_logs:/app/logs
       - effects_data:/app/data
       - ../contracts:/app/contracts:ro
-      - ../src/omnibase_infra/nodes:/app/contracts/nodes:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
@@ -658,7 +656,6 @@ services:
     volumes:
       - worker_logs:/app/logs
       - ../contracts:/app/contracts:ro
-      - ../src/omnibase_infra/nodes:/app/contracts/nodes:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
@@ -920,7 +917,6 @@ services:
     volumes:
       - contract_resolver_logs:/app/logs
       - ../contracts:/app/contracts:ro
-      - ../src/omnibase_infra/nodes:/app/contracts/nodes:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8091/health"]
       interval: 30s
