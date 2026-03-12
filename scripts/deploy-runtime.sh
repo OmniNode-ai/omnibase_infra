@@ -351,6 +351,28 @@ validate_repo_structure() {
     fi
 
     log_info "Repository structure validated."
+
+    # VirtioFS bind-mount conflict detection
+    # docker-compose has two mounts:
+    #   ../contracts:/app/contracts:ro
+    #   ../src/omnibase_infra/nodes:/app/contracts/nodes:ro  (overlays nodes/ subdirectory)
+    # When ../contracts/nodes exists but ../src/omnibase_infra/nodes does NOT exist,
+    # the overlay source is missing and containers see an empty nodes/ directory.
+    local parent_dir
+    parent_dir="$(dirname "${repo_root}")"
+    local contracts_nodes="${parent_dir}/contracts/nodes"
+    local src_nodes="${repo_root}/src/omnibase_infra/nodes"
+
+    if [[ ! -d "${contracts_nodes}" ]]; then
+        log_warn "VirtioFS CHECK: ${contracts_nodes} not found (rsync may not have run yet — advisory)"
+    elif [[ ! -d "${src_nodes}" ]]; then
+        log_error "VirtioFS CHECK: ${contracts_nodes} exists but ${src_nodes} does not"
+        log_error "  This will cause an empty bind-mount overlay at /app/contracts/nodes"
+        log_error "  Fix: ensure src/omnibase_infra/nodes/ exists in the deploy root"
+        exit 1
+    else
+        log_info "VirtioFS CHECK: both mount sources exist"
+    fi
 }
 
 # =============================================================================
@@ -1183,9 +1205,10 @@ verify_deployment() {
     if [[ "${healthy}" == true ]]; then
         log_info "Health check passed."
     else
-        log_warn "Health check failed after ${HEALTH_CHECK_RETRIES} attempts."
-        log_warn "The service may still be starting. Check manually:"
-        log_warn "  curl ${HEALTH_CHECK_URL}"
+        log_error "Health check FAILED after ${HEALTH_CHECK_RETRIES} attempts."
+        log_error "Service is not responding at ${HEALTH_CHECK_URL}"
+        log_error "Check container logs: docker logs omnibase-infra-omninode-runtime"
+        exit 1
     fi
 
     # 2. Resolve runtime container ID (supports dynamic compose project names)
