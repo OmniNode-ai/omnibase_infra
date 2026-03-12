@@ -26,9 +26,9 @@ BEGIN;
 
 -- Step 1: Backfill all NULL checksum rows with a stable sentinel value.
 -- The prefix "backfilled:pre-checksum-era:" identifies rows patched by
--- this migration. The suffix is the migration_id for traceability.
+-- this migration. The suffix is the version for traceability.
 UPDATE public.schema_migrations
-SET checksum = 'backfilled:pre-checksum-era:' || migration_id
+SET checksum = 'backfilled:pre-checksum-era:' || version
 WHERE checksum IS NULL;
 
 -- Step 2: Enforce NOT NULL now that all rows have a value.
