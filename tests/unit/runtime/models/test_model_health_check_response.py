@@ -218,6 +218,80 @@ class TestModelHealthCheckResponseImmutability:
         assert isinstance(hash_value, int)
 
 
+class TestModelHealthCheckResponseReadinessIntegration:
+    """Regression tests for readiness details in health check responses (OMN-4910).
+
+    The /ready endpoint nests ModelEventBusReadiness.model_dump(mode="json")
+    inside ModelHealthCheckResponse.details. Before the fix, model_dump()
+    without mode="json" produced tuples for tuple fields, which Pydantic
+    strict mode rejected during JSON serialization.
+    """
+
+    def test_readiness_details_with_list_topics_serializes(self) -> None:
+        """Test that readiness details with list required_topics serializes correctly.
+
+        This is the post-fix path: model_dump(mode="json") converts tuples to lists.
+        """
+        readiness_details: dict[str, object] = {
+            "is_ready": True,
+            "consumers_started": True,
+            "assignments": {"topic-a": [0, 1]},
+            "consume_tasks_alive": {"topic-a": True},
+            "required_topics": ["topic-a"],  # list (from mode="json")
+            "required_topics_ready": True,
+            "last_error": "",
+        }
+        resp = ModelHealthCheckResponse.success(
+            status="healthy",
+            version="1.0.0",
+            details={"ready": True, "event_bus_readiness": readiness_details},
+        )
+        json_str = resp.model_dump_json(exclude_none=True)
+        assert '"required_topics":["topic-a"]' in json_str
+
+    def test_readiness_details_roundtrip(self) -> None:
+        """Test JSON roundtrip with nested readiness details."""
+        readiness_details: dict[str, object] = {
+            "is_ready": False,
+            "consumers_started": True,
+            "assignments": {},
+            "consume_tasks_alive": {},
+            "required_topics": ["topic-a", "topic-b"],
+            "required_topics_ready": False,
+            "last_error": "",
+        }
+        original = ModelHealthCheckResponse.success(
+            status="unhealthy",
+            version="1.0.0",
+            details={
+                "ready": False,
+                "event_bus_readiness": readiness_details,
+            },
+        )
+        json_str = original.model_dump_json()
+        restored = ModelHealthCheckResponse.model_validate_json(json_str)
+        assert original == restored
+
+    def test_empty_required_topics_serializes(self) -> None:
+        """Test that empty required_topics list serializes correctly."""
+        readiness_details: dict[str, object] = {
+            "is_ready": True,
+            "consumers_started": True,
+            "assignments": {},
+            "consume_tasks_alive": {},
+            "required_topics": [],
+            "required_topics_ready": True,
+            "last_error": "",
+        }
+        resp = ModelHealthCheckResponse.success(
+            status="healthy",
+            version="1.0.0",
+            details={"ready": True, "event_bus_readiness": readiness_details},
+        )
+        json_str = resp.model_dump_json(exclude_none=True)
+        assert '"required_topics":[]' in json_str
+
+
 class TestModelHealthCheckResponseEquality:
     """Tests for ModelHealthCheckResponse equality comparison."""
 

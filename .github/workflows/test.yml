@@ -129,6 +129,17 @@ jobs:
           echo "================================================================"
           uv run python scripts/validate.py db_quality_gate --verbose
 
+      - name: No Consul references (decommissioned — OMN-4857)
+        run: |
+          echo "================================================================"
+          echo "No Consul references check (OMN-4857)"
+          echo "================================================================"
+          if grep -rn "CONSUL_HOST" src/; then
+            echo "FAIL: CONSUL_HOST references found in src/ — Consul is decommissioned (OMN-4857)"
+            exit 1
+          fi
+          echo "PASS: No CONSUL_HOST references in src/"
+
   # Fingerprint drift detection -- CI twins for runtime assertions B2 and B3
   # Prevents stale fingerprint artifacts from being merged (OMN-2149)
   fingerprint-check:
@@ -499,6 +510,57 @@ jobs:
           path: junit-${{ matrix.split }}.xml
           retention-days: 7
 
+  # ---------------------------------------------------------------------------
+  # Version Pin Compliance Check (OMN-4807)
+  # ---------------------------------------------------------------------------
+  # Verifies that this repo's dependency pins are compliant with the shared
+  # version matrix defined in omni_home/standards/version-matrix.yaml.
+  # Depends on OMN-4803 (check_version_pins.py must exist in omni_home main).
+  version-pin-check:
+    name: Version Pin Compliance
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Checkout omni_home standards
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          repository: OmniNode-ai/omni_home
+          token: ${{ secrets.CROSS_REPO_PAT }}
+          path: omni_home
+          sparse-checkout: |
+            standards/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+
+      - name: Check version pin compliance
+        run: |
+          SCRIPT="omni_home/standards/check_version_pins.py"
+          if [ ! -f "$SCRIPT" ]; then
+            echo "::warning::$SCRIPT not found — skipping version pin check (depends on OMN-4803)"
+            exit 0
+          fi
+          python "$SCRIPT" --repo omnibase_infra --root omni_home
+
   # ============================================================================
   # CI Tests Gate (aggregator for branch protection)
   # Required check: "CI Tests Gate" -- do not rename without updating
@@ -541,7 +603,7 @@ jobs:
         && fromJSON('["self-hosted","omnibase-ci"]')
         || fromJSON('["ubuntu-latest"]')
       }}
-    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, arch-invariants, schema-handshake, migration-integration, migration-required-check]
+    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check]
     if: always()
 
     steps:

@@ -92,8 +92,7 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 
 # SQL statements
 # NOTE: Database column is `registered_at` but model uses `created_at`. The column
-# is aliased in queries for mapping. This aligns with the existing database schema
-# on 192.168.86.200 which uses `registered_at` for the creation timestamp.
+# is aliased in queries for mapping.
 SQL_CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS node_registrations (
     node_id UUID PRIMARY KEY,

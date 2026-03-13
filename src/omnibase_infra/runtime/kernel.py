@@ -22,7 +22,7 @@ Example:
     >>> print(config.input_topic)
     requests
     >>> print(config.event_bus.type)
-    inmemory
+    kafka
 
 Note:
     This module serves as a stable public API. The implementation resides

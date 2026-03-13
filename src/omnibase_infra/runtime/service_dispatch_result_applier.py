@@ -133,6 +133,7 @@ class DispatchResultApplier:
         intent_executor: IntentExecutor | None = None,
         clock: Callable[[], datetime] | None = None,
         projection_effect: ProtocolProjectionEffect | None = None,
+        topic_router: dict[str, str] | None = None,
     ) -> None:
         """Initialize the dispatch result applier.
 
@@ -148,12 +149,21 @@ class DispatchResultApplier:
                 (OMN-2510).  When provided, its ``execute()`` is called with
                 each ``ModelProjectionIntent`` in the dispatch result.
                 Kafka publish is skipped if ``execute()`` raises.
+            topic_router: Optional mapping of Python event class names to their
+                declared Kafka topics (e.g. ``{"ModelNodeRegistrationAccepted":
+                "onex.evt.platform.node-registration-accepted.v1"}``).  When
+                provided, each output event is published to its per-type topic
+                instead of the single ``output_topic`` fallback.  Events whose
+                class name is not in the map fall back to ``output_topic``.
+                Build this map with ``build_topic_router_from_contract()``
+                (OMN-4881).
         """
         self._event_bus = event_bus
         self._output_topic = output_topic
         self._intent_executor = intent_executor
         self._clock = clock or (lambda: datetime.now(UTC))
         self._projection_effect = projection_effect
+        self._topic_router: dict[str, str] = topic_router or {}
 
     def _resolve_partition_key(self, event: BaseModel) -> bytes | None:
         """Extract partition key from event model for per-entity ordering.
@@ -423,15 +433,18 @@ class DispatchResultApplier:
                             str(effective_correlation_id),
                         )
 
+                    resolved_topic = self._topic_router.get(
+                        type(output_event).__name__, self._output_topic
+                    )
                     await self._event_bus.publish_envelope(
                         envelope=output_envelope,
-                        topic=self._output_topic,
+                        topic=resolved_topic,
                         key=partition_key,
                     )
 
                     logger.info(
                         "Published output event to %s (correlation_id=%s)",
-                        self._output_topic,
+                        resolved_topic,
                         str(effective_correlation_id),
                         extra={
                             "output_event_type": type(output_event).__name__,

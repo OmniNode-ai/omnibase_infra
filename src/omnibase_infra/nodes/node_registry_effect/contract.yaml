@@ -6,9 +6,9 @@
 # Node: NodeRegistryEffect
 #
 # This contract defines the interface for the Registry Effect node,
-# which handles dual-backend node registration against Consul and PostgreSQL.
-# The node uses declarative operation routing to dispatch operations to
-# backend-specific handlers.
+# which handles PostgreSQL-backed node registration. Consul service discovery
+# was decommissioned (OMN-4857). The node uses declarative operation routing
+# to dispatch operations to backend-specific handlers.
 # Contract identifiers
 name: "node_registry_effect"
 contract_name: "node_registry_effect"
@@ -25,7 +25,7 @@ node_version:
 node_type: "EFFECT_GENERIC"
 # Description
 description: >
-  Effect node for dual-backend node registration. Executes registration operations against both Consul (service discovery) and PostgreSQL (registration record persistence), with support for partial failure handling and targeted retries. Uses declarative operation routing to dispatch to backend-specific handlers.
+  Effect node for PostgreSQL-backed node registration. Consul service discovery was decommissioned (OMN-4857). Executes registration operations against PostgreSQL (registration record persistence), with support for partial failure handling and targeted retries. Uses declarative operation routing to dispatch to backend-specific handlers.
 
 # Strongly typed I/O models
 input_model:
@@ -72,16 +72,14 @@ output_model:
 # │            │                                                            │
 # │            │ operation == "register_node"                               │
 # │            │                                                            │
-# │     ┌──────┴──────┐     execution_mode: "parallel"                      │
-# │     │             │     (asyncio.gather)                                │
-# │     ▼             ▼                                                     │
-# │ ┌────────────┐ ┌────────────┐                                           │
-# │ │  Handler   │ │  Handler   │                                           │
-# │ │  Consul    │ │  Postgres  │                                           │
-# │ │  Register  │ │  Upsert    │                                           │
-# │ └─────┬──────┘ └─────┬──────┘                                           │
-# │       │              │                                                  │
-# │       ▼              ▼                                                  │
+# │            ▼             execution_mode: "parallel"                     │
+# │ ┌────────────────────┐   (asyncio.gather — single backend post OMN-4857)│
+# │ │  Handler           │                                                  │
+# │ │  Postgres          │                                                  │
+# │ │  Upsert            │                                                  │
+# │ └──────────┬─────────┘                                                  │
+# │            │                                                            │
+# │            ▼                                                            │
 # │ ┌──────────────────────────┐                                            │
 # │ │   Result Aggregator      │  aggregation_strategy: "all_or_partial"   │
 # │ │   partial_failure: true  │                                            │
@@ -90,7 +88,7 @@ output_model:
 # │              ▼                                                          │
 # │  ┌─────────────────────────┐                                            │
 # │  │  ModelRegistryResponse  │  status: "success"/"partial"/"failed"     │
-# │  │  consul_result: Result  │  consul_result.success: bool               │
+# │  │  consul_result: Result  │  consul_result: always success (no-op)    │
 # │  │  postgres_result: Result│  postgres_result.success: bool             │
 # │  └─────────────────────────┘                                            │
 # │                                                                         │
@@ -180,9 +178,6 @@ error_handling:
     half_open_max_requests: 3
     per_backend: true
     backends:
-      - name: "consul"
-        failure_threshold: 5
-        reset_timeout_ms: 60000
       - name: "postgres"
         failure_threshold: 5
         reset_timeout_ms: 60000
@@ -199,7 +194,7 @@ error_handling:
   #   - Returns immediately after handler execution
   #   - Effective retry count at this layer: ZERO (0)
   #
-  # Handler Layer (HandlerConsulRegister, HandlerPostgresUpsert, etc.):
+  # Handler Layer (HandlerPostgresUpsert, etc.):
   #   - OWNS retry logic using this retry_policy configuration
   #   - Implements exponential backoff for retriable errors
   #   - Returns final ModelBackendResult after all retries exhausted
@@ -212,7 +207,7 @@ error_handling:
   #
   # Why this separation?
   #   - Clear separation of concerns (effect routes, handlers retry)
-  #   - Per-backend retry isolation (Consul retries don't affect Postgres)
+  #   - Per-backend retry isolation
   #   - Consistent retry behavior across all handler implementations
   #   - Callers have full control over partial failure retry strategy
   #
@@ -266,37 +261,6 @@ error_handling:
   #   - *_UNKNOWN_ERROR: Unknown - unclassified exceptions
   #   - *_REGISTRATION_ERROR, *_DEREGISTRATION_ERROR, etc.: Operation-specific failures
   error_codes:
-    # Consul backend error codes
-    - code: "CONSUL_REGISTRATION_ERROR"
-      backend: "consul"
-      operation: "register_node"
-      description: "Consul service registration failed (non-connection error)"
-      retriable: false
-    - code: "CONSUL_DEREGISTRATION_ERROR"
-      backend: "consul"
-      operation: "deregister_node"
-      description: "Consul service deregistration failed (non-connection error)"
-      retriable: false
-    - code: "CONSUL_CONNECTION_ERROR"
-      backend: "consul"
-      operation: "all"
-      description: "Connection to Consul server failed"
-      retriable: true
-    - code: "CONSUL_TIMEOUT_ERROR"
-      backend: "consul"
-      operation: "all"
-      description: "Consul operation exceeded timeout"
-      retriable: true
-    - code: "CONSUL_AUTH_ERROR"
-      backend: "consul"
-      operation: "all"
-      description: "Authentication with Consul server failed"
-      retriable: false
-    - code: "CONSUL_UNKNOWN_ERROR"
-      backend: "consul"
-      operation: "all"
-      description: "Unknown error during Consul operation"
-      retriable: false
     # PostgreSQL backend error codes
     - code: "POSTGRES_UPSERT_ERROR"
       backend: "postgres"
@@ -332,7 +296,7 @@ error_handling:
     - code: "INVALID_TARGET_BACKEND"
       backend: "dynamic"
       operation: "retry_partial_failure"
-      description: "Invalid target_backend specified for retry (must be 'consul' or 'postgres')"
+      description: "Invalid target_backend specified for retry (must be 'postgres')"
       retriable: false
     # Orchestration-level error codes (used by node.py dispatcher)
     - code: "HANDLER_NOT_EXECUTED"
@@ -340,11 +304,6 @@ error_handling:
       operation: "all"
       description: "Handler was not executed (default state before dispatch)"
       retriable: true
-    - code: "CONSUL_EXCEPTION"
-      backend: "consul"
-      operation: "all"
-      description: "Unhandled exception during Consul operation dispatch"
-      retriable: false
     - code: "POSTGRES_EXCEPTION"
       backend: "postgres"
       operation: "all"
@@ -426,8 +385,8 @@ dependencies:
     description: "Circuit breaker awareness for backend protection"
 # Capabilities provided by this node
 capabilities:
-  - name: "dual_backend_registration"
-    description: "Register nodes with both Consul and PostgreSQL simultaneously"
+  - name: "postgres_registration"
+    description: "Register nodes with PostgreSQL (Consul decommissioned — OMN-4857)"
   - name: "partial_failure_handling"
     description: "Handle and recover from partial registration failures"
   - name: "targeted_retry"
@@ -628,9 +587,6 @@ health_check:
   endpoint: "/health"
   interval_seconds: 30
   backends:
-    - name: "consul"
-      check_type: "http"
-      endpoint: "/v1/status/leader"
     - name: "postgres"
       check_type: "connection"
       timeout_ms: 5000
@@ -643,9 +599,7 @@ metadata:
   tags:
     - effect
     - registration
-    - consul
     - postgresql
-    - dual-backend
     - idempotency
     - circuit-breaker
     - parallel-execution

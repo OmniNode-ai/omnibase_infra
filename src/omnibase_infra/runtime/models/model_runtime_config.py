@@ -74,7 +74,7 @@ class ModelRuntimeConfig(BaseModel):
         input_topic: Topic for incoming messages [ACTIVE]
         output_topic: Topic for outgoing messages [ACTIVE]
         consumer_group: Consumer group identifier for message consumption [ACTIVE]
-        event_bus: Event bus configuration [PARTIAL - only environment field used]
+        event_bus: Event bus configuration [ACTIVE - type and environment used]
         protocols: Enabled protocols configuration [RESERVED]
         logging: Logging configuration [RESERVED]
         shutdown: Shutdown configuration [ACTIVE - grace_period_seconds used]

@@ -164,9 +164,10 @@ class TestOrderingContract:
         )
         await applier.apply(result)
 
-        assert call_order == ["execute_all", "publish_envelope"], (
-            f"Expected intents before events, got: {call_order}"
-        )
+        assert call_order == [
+            "execute_all",
+            "publish_envelope",
+        ], f"Expected intents before events, got: {call_order}"
 
 
 # ---------------------------------------------------------------------------
@@ -382,3 +383,86 @@ class TestCorrelationId:
         )
         assert bare_result.correlation_id is not None
         assert isinstance(bare_result.correlation_id, UUID)
+
+
+# ---------------------------------------------------------------------------
+# topic_router tests (OMN-4881)
+# ---------------------------------------------------------------------------
+
+import uuid as _uuid
+from datetime import timedelta
+
+from omnibase_infra.models.registration.events.model_node_registration_accepted import (
+    ModelNodeRegistrationAccepted,
+)
+
+
+def _make_accepted_event() -> ModelNodeRegistrationAccepted:
+    now = datetime.now(UTC)
+    return ModelNodeRegistrationAccepted(
+        entity_id=_uuid.uuid4(),
+        node_id=_uuid.uuid4(),
+        correlation_id=_uuid.uuid4(),
+        causation_id=_uuid.uuid4(),
+        emitted_at=now,
+        ack_deadline=now + timedelta(seconds=90),
+    )
+
+
+def _make_result_with(events: list) -> ModelDispatchResult:  # type: ignore[type-arg]
+    return ModelDispatchResult(
+        status=EnumDispatchStatus.SUCCESS,
+        topic="onex.evt.platform.node-introspection.v1",
+        started_at=datetime.now(UTC),
+        output_events=events,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_topic_router_routes_known_event_to_declared_topic() -> None:
+    """Router overrides output_topic for a known event type."""
+    bus = AsyncMock()
+    router = {
+        "ModelNodeRegistrationAccepted": "onex.evt.platform.node-registration-accepted.v1"
+    }
+    applier = DispatchResultApplier(
+        event_bus=bus,
+        output_topic="responses",
+        topic_router=router,
+    )
+    result = _make_result_with([_make_accepted_event()])
+    await applier.apply(result)
+    published_topic = bus.publish_envelope.call_args.kwargs["topic"]
+    assert published_topic == "onex.evt.platform.node-registration-accepted.v1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_topic_router_falls_back_for_unknown_event_type() -> None:
+    """Router falls back to output_topic for event types not in the map."""
+    bus = AsyncMock()
+    applier = DispatchResultApplier(
+        event_bus=bus,
+        output_topic="responses",
+        topic_router={"ModelSomeOtherClass": "onex.evt.platform.other.v1"},
+    )
+    result = _make_result_with([_make_accepted_event()])
+    await applier.apply(result)
+    published_topic = bus.publish_envelope.call_args.kwargs["topic"]
+    assert published_topic == "responses"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_no_topic_router_uses_output_topic() -> None:
+    """Backward compat: no router → all events go to output_topic."""
+    bus = AsyncMock()
+    applier = DispatchResultApplier(
+        event_bus=bus,
+        output_topic="responses",
+    )
+    result = _make_result_with([_make_accepted_event()])
+    await applier.apply(result)
+    published_topic = bus.publish_envelope.call_args.kwargs["topic"]
+    assert published_topic == "responses"

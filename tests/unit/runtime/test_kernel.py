@@ -644,7 +644,7 @@ class TestBootstrap:
         mock_config.output_topic = "test-output"
         mock_config.group_id = "test-group"
         mock_config.event_bus = MagicMock()
-        mock_config.event_bus.type = "inmemory"  # Force inmemory for this test
+        mock_config.event_bus.type = "kafka"  # Use kafka (inmemory is forbidden)
         mock_config.event_bus.environment = "test-env"
 
         with (
@@ -675,6 +675,8 @@ class TestBootstrap:
         """Test that bootstrap creates EventBusKafka when KAFKA_BOOTSTRAP_SERVERS is set."""
         monkeypatch.setenv("KAFKA_ENVIRONMENT", "dev")
         monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+        # Allow kafka: prefix in broker allowlist for this test
+        monkeypatch.setenv("KAFKA_BROKER_ALLOWLIST", "kafka:,localhost:")
         # Clear ONEX_ENVIRONMENT to avoid interference
         monkeypatch.delenv("ONEX_ENVIRONMENT", raising=False)
         # Clear any CI override that forces inmemory event bus
@@ -1672,3 +1674,43 @@ class TestHttpPortValidation:
         assert len(warning_calls) == 1, (
             f"Expected exactly one warning logged for {description}"
         )
+
+
+@pytest.mark.unit
+class TestEventBusTypeHonored:
+    """Tests that kernel.py reads and honors config.event_bus.type (OMN-4848)."""
+
+    def test_no_reserved_comment_in_service_kernel(self) -> None:
+        """The RESERVED/partially-ignored comment for event_bus should be gone."""
+        kernel_path = (
+            Path(__file__).resolve().parents[3]
+            / "src"
+            / "omnibase_infra"
+            / "runtime"
+            / "service_kernel.py"
+        )
+        content = kernel_path.read_text(encoding="utf-8")
+        # The old comment said event_bus was PARTIAL/only environment used
+        assert "PARTIAL - only environment field used" not in content
+        # The defense-in-depth assertion should be present as executable code
+        assert "if not config.event_bus.type.is_production_safe:" in content
+
+    def test_model_runtime_config_event_bus_active(self) -> None:
+        """model_runtime_config.py should mark event_bus as ACTIVE, not PARTIAL."""
+        config_path = (
+            Path(__file__).resolve().parents[3]
+            / "src"
+            / "omnibase_infra"
+            / "runtime"
+            / "models"
+            / "model_runtime_config.py"
+        )
+        content = config_path.read_text(encoding="utf-8")
+        # Find the specific docstring line for event_bus
+        event_bus_line = next(
+            line
+            for line in content.splitlines()
+            if "event_bus: Event bus configuration" in line
+        )
+        assert "[ACTIVE" in event_bus_line
+        assert "PARTIAL" not in event_bus_line

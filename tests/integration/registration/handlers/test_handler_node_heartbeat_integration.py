@@ -530,6 +530,11 @@ class TestHandlerNodeHeartbeatNonActiveNode:
 
     OMN-4879: Stabilized by adding seed read-back verification and improved
     assertion messages to diagnose flaky failures in CI parallel execution.
+
+    Note:
+        Terminal states (REJECTED, LIVENESS_EXPIRED) are tested separately in
+        TestHandlerNodeHeartbeatTerminalState -- OMN-4822 added a guard that
+        returns no_op for terminal states, so they must NOT produce intents.
     """
 
     @pytest.mark.parametrize(
@@ -539,7 +544,6 @@ class TestHandlerNodeHeartbeatNonActiveNode:
             EnumRegistrationState.ACCEPTED,
             EnumRegistrationState.AWAITING_ACK,
             EnumRegistrationState.ACK_TIMED_OUT,
-            EnumRegistrationState.REJECTED,
         ],
     )
     async def test_handle_heartbeat_for_non_active_node(
@@ -549,11 +553,14 @@ class TestHandlerNodeHeartbeatNonActiveNode:
         reader: ProjectionReaderRegistration,
         state: EnumRegistrationState,
     ) -> None:
-        """Verify heartbeat is still processed for non-ACTIVE nodes.
+        """Verify heartbeat is still processed for non-ACTIVE, non-terminal nodes.
 
-        Per handler design, heartbeats from non-ACTIVE nodes are processed
-        (to update tracking) but a warning is logged. This can happen during
-        state transitions or race conditions.
+        Per handler design, heartbeats from non-ACTIVE (but non-terminal) nodes
+        are processed (to update tracking) but a warning is logged. This can
+        happen during state transitions or race conditions.
+
+        OMN-4824: Terminal states (REJECTED, LIVENESS_EXPIRED) now short-circuit
+        with empty output instead. See test_handle_heartbeat_for_terminal_node.
 
         OMN-4879: Uses seed read-back verification to catch connection pool
         visibility issues that previously caused flaky 0-intent failures.
@@ -580,6 +587,101 @@ class TestHandlerNodeHeartbeatNonActiveNode:
         assert payload.entity_id == node_id
         assert payload.updates.last_heartbeat_at == event.timestamp
         assert payload.updates.liveness_deadline is not None
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            EnumRegistrationState.REJECTED,
+            EnumRegistrationState.LIVENESS_EXPIRED,
+        ],
+    )
+    async def test_handle_heartbeat_for_terminal_node(
+        self,
+        heartbeat_handler: HandlerNodeHeartbeat,
+        projector: ProjectorShell,
+        reader: ProjectionReaderRegistration,
+        state: EnumRegistrationState,
+    ) -> None:
+        """Verify heartbeat is short-circuited for terminal-state nodes.
+
+        OMN-4824: Terminal states (REJECTED, LIVENESS_EXPIRED) must produce
+        empty handler output with no intents or events. The handler logs a
+        'terminal-state heartbeat ignored' warning for observability.
+        """
+        node_id = uuid4()
+        projection = make_projection(entity_id=node_id, state=state)
+        await seed_projection(projector, projection, reader=reader)
+
+        event = make_heartbeat_event(node_id)
+        envelope = create_envelope(event)
+        output = await heartbeat_handler.handle(envelope)
+
+        # Verify output (ORCHESTRATOR returns result=None)
+        assert output.result is None
+
+        # Terminal states must produce zero intents and zero events
+        assert len(output.intents) == 0, (
+            f"Expected 0 intents for terminal state={state.value}, "
+            f"got {len(output.intents)}. "
+            f"node_id={node_id}, handler_id={output.handler_id}"
+        )
+        assert len(output.events) == 0, (
+            f"Expected 0 events for terminal state={state.value}, "
+            f"got {len(output.events)}. "
+            f"node_id={node_id}, handler_id={output.handler_id}"
+        )
+
+
+class TestHandlerNodeHeartbeatTerminalState:
+    """Tests for heartbeat handling when node is in a terminal state (OMN-4822).
+
+    Terminal states (REJECTED, LIVENESS_EXPIRED) indicate the registration has
+    ended. Heartbeats for terminal-state nodes must return no_op with zero
+    intents — extending the liveness deadline would trigger spurious
+    re-registration side effects.
+
+    ONEX Contract Compliance:
+        Handler returns result=None. No intents emitted for terminal states.
+    """
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            EnumRegistrationState.REJECTED,
+            EnumRegistrationState.LIVENESS_EXPIRED,
+        ],
+    )
+    async def test_handle_heartbeat_for_terminal_node(
+        self,
+        heartbeat_handler: HandlerNodeHeartbeat,
+        projector: ProjectorShell,
+        reader: ProjectionReaderRegistration,
+        state: EnumRegistrationState,
+    ) -> None:
+        """Verify heartbeat returns no_op for terminal-state nodes.
+
+        OMN-4822: decide_heartbeat guards against terminal states to prevent
+        spurious liveness deadline extensions.
+
+        OMN-4879: Uses seed read-back verification to catch connection pool
+        visibility issues.
+        """
+        node_id = uuid4()
+        projection = make_projection(entity_id=node_id, state=state)
+        await seed_projection(projector, projection, reader=reader)
+
+        event = make_heartbeat_event(node_id)
+        envelope = create_envelope(event)
+        output = await heartbeat_handler.handle(envelope)
+
+        # Verify output (ORCHESTRATOR returns result=None)
+        assert output.result is None
+
+        # OMN-4822: Terminal states must produce zero intents
+        assert len(output.intents) == 0, (
+            f"Expected 0 intents for terminal state={state}, got {len(output.intents)}. "
+            f"node_id={node_id}, handler_id={heartbeat_handler.handler_id}"
+        )
 
 
 # =============================================================================

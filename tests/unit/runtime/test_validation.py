@@ -40,7 +40,7 @@ class TestValidateRuntimeConfig:
             "output_topic": "responses",
             "consumer_group": "onex-runtime",
             "event_bus": {
-                "type": "inmemory",
+                "type": "kafka",
                 "environment": "local",
                 "max_history": 1000,
                 "circuit_breaker_threshold": 5,
@@ -164,28 +164,34 @@ class TestConsumerGroupValidation:
 class TestEventBusValidation:
     """Tests for event_bus configuration validation."""
 
-    def test_valid_event_bus_inmemory(self) -> None:
-        """Test that inmemory event bus type is valid."""
-        config: dict[str, object] = {"event_bus": {"type": "inmemory"}}
-        errors = validate_runtime_config(config)
-        assert errors == []
-
     def test_valid_event_bus_kafka(self) -> None:
         """Test that kafka event bus type is valid."""
         config: dict[str, object] = {"event_bus": {"type": "kafka"}}
         errors = validate_runtime_config(config)
         assert errors == []
 
+    def test_valid_event_bus_cloud(self) -> None:
+        """Test that cloud event bus type is valid."""
+        config: dict[str, object] = {"event_bus": {"type": "cloud"}}
+        errors = validate_runtime_config(config)
+        assert errors == []
+
+    def test_inmemory_event_bus_rejected(self) -> None:
+        """Test that inmemory event bus type is rejected (not production-safe)."""
+        config: dict[str, object] = {"event_bus": {"type": "inmemory"}}
+        errors = validate_runtime_config(config)
+        assert len(errors) == 1
+        assert "event_bus.type" in errors[0]
+
     def test_invalid_event_bus_type(self) -> None:
         """Test that invalid event bus type fails validation."""
         # NOTE: "redis" is intentionally used as an example of an invalid event bus type.
         # This is unrelated to the REDIS->VALKEY cache backend rename; event_bus only
-        # supports "inmemory" and "kafka" types.
+        # supports "kafka" and "cloud" types.
         config: dict[str, object] = {"event_bus": {"type": "redis"}}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
         assert "event_bus.type" in errors[0]
-        assert "inmemory" in errors[0]
         assert "kafka" in errors[0]
 
     def test_event_bus_type_wrong_type(self) -> None:
@@ -412,9 +418,10 @@ class TestConstants:
         assert not TOPIC_NAME_PATTERN.match("")
 
     def test_valid_event_bus_types(self) -> None:
-        """Test that VALID_EVENT_BUS_TYPES contains expected values."""
-        assert "inmemory" in VALID_EVENT_BUS_TYPES
+        """Test that VALID_EVENT_BUS_TYPES contains only production-safe values."""
         assert "kafka" in VALID_EVENT_BUS_TYPES
+        assert "cloud" in VALID_EVENT_BUS_TYPES
+        assert "inmemory" not in VALID_EVENT_BUS_TYPES
         assert len(VALID_EVENT_BUS_TYPES) == 2
 
     def test_grace_period_bounds(self) -> None:
