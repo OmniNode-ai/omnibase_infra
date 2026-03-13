@@ -295,7 +295,7 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                 extra={
                     "handler": self.__class__.__name__,
                     "correlation_id": str(init_correlation_id),
-                    "existing_config": self._config.model_dump()
+                    "existing_config": self._config.model_dump(mode="json")
                     if self._config
                     else None,
                 },
@@ -690,7 +690,7 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                 )
 
             # Merge existing config with new values
-            current_dict = self._config.model_dump()
+            current_dict = self._config.model_dump()  # noqa: model-dump-bare
             current_dict.update(payload)
 
             # Validate new configuration BEFORE acquiring emit lock
