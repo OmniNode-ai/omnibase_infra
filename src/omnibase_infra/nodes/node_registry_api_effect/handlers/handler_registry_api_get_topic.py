@@ -90,7 +90,9 @@ class HandlerRegistryApiGetTopic:
             operation=req.operation,
             correlation_id=correlation_id,
             success=topic is not None,
-            data={"result": topic.model_dump() if topic is not None else None},
+            data={
+                "result": topic.model_dump(mode="json") if topic is not None else None
+            },
             warnings=[w.message for w in warnings],
             error="Topic not found" if topic is None else None,
         )

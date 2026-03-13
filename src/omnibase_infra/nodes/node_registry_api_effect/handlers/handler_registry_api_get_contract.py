@@ -90,7 +90,11 @@ class HandlerRegistryApiGetContract:
             operation=req.operation,
             correlation_id=correlation_id,
             success=contract is not None,
-            data={"result": contract.model_dump() if contract is not None else None},
+            data={
+                "result": contract.model_dump(mode="json")
+                if contract is not None
+                else None
+            },
             warnings=[w.message for w in warnings],
             error="Contract not found" if contract is None else None,
         )

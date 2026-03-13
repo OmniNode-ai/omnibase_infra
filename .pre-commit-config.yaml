@@ -206,7 +206,7 @@ repos:
       # Ratchet rule: any PR reducing violations must lower --max-violations.
       - id: validate-model-dump-json-mode
         name: Validate model_dump uses mode="json"
-        entry: uv run python scripts/validation/validate_model_dump_json_mode.py --directory src/ --max-violations 23
+        entry: uv run python scripts/validation/validate_model_dump_json_mode.py --directory src/ --max-violations 0
         language: system
         pass_filenames: false
         files: ^src/.*\.py$
