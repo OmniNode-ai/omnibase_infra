@@ -269,6 +269,7 @@ services:
       - --mode dev-container
       - --smp 1
       - --memory ${REDPANDA_MEMORY:-8G}
+      - --admin-addr 0.0.0.0:9644
       - --default-log-level=warn
     ports:
       - "${REDPANDA_EXTERNAL_PORT:-19092}:19092"
@@ -276,6 +277,8 @@ services:
       - "${REDPANDA_PANDAPROXY_PORT:-18082}:18082"
       # Schema Registry
       - "${REDPANDA_SCHEMA_REGISTRY_PORT:-18081}:18081"
+      # OMN-4959: Admin API (used by omnidash event-bus-health-poller)
+      - "${REDPANDA_ADMIN_PORT:-9644}:9644"
     volumes:
       - redpanda_data:/var/lib/redpanda/data
     networks:
