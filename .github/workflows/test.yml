@@ -290,6 +290,15 @@ jobs:
           uv run python scripts/validation/lint_topic_names.py \
             --scan-contracts src/omnibase_infra/nodes
 
+      - name: Check for placeholder topic names (OMN-4805)
+        run: |
+          echo "================================================================"
+          echo "Placeholder Topic Denylist Check (OMN-4805)"
+          echo "================================================================"
+          uv run python scripts/validation/lint_topic_names.py \
+            --check-placeholders \
+            --scan-dir src/omnibase_infra
+
   # Schema handshake gate -- validates producer->consumer Pydantic round-trip
   # across every registered Kafka boundary pair (OMN-3411).
   # Uses --changed-only in CI: only checks pairs whose models were touched by the PR.

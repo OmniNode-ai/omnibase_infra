@@ -169,7 +169,8 @@ IGNORE_PATTERN = re.compile(
 
 WARNING_PATTERN = re.compile(
     r"\[WARNING\].*("
-    r"Heartbeat received for non-active node"
+    r"terminal-state heartbeat ignored"
+    r"|Heartbeat received for non-active node"
     r"|dispatch_handlers:.*nacking message for retry"
     r"|DeadlockDetectedError"
     r"|HandlerConsul.*ConnectionError"
@@ -183,6 +184,9 @@ _WARNING_BACKOFF_BASE = 1800  # 30 minutes
 _WARNING_BACKOFF_CAP = 3600  # 1 hour max
 
 _WARNING_ISSUE_LABELS: dict[str, str] = {
+    # OMN-4826: terminal-state heartbeat ignored — node received a heartbeat
+    # after LIVENESS_EXPIRED or REJECTED. Alert includes node_id and current_state.
+    "terminal-state heartbeat ignored": "terminal-state-heartbeat",
     "non-active node": "stale-registration",
     "dispatch_handlers": "kafka-nack",
     "DeadlockDetectedError": "schema-deadlock",
