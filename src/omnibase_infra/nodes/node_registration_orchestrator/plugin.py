@@ -63,9 +63,22 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
+
+from omnibase_infra.runtime.contract_topic_router import (
+    build_topic_router_from_contract,
+)
 from omnibase_infra.runtime.models.model_postgres_pool_config import (
     ModelPostgresPoolConfig,
 )
+
+# Build topic router from contract published_events at module import time.
+# This maps Python event class names to their declared Kafka topics so that
+# DispatchResultApplier can publish each output event to the correct topic
+# instead of the single fallback output_topic. (OMN-4881/OMN-4883)
+_CONTRACT_PATH = Path(__file__).parent / "contract.yaml"
+_CONTRACT_DATA: dict[str, object] = yaml.safe_load(_CONTRACT_PATH.read_text())
+_TOPIC_ROUTER: dict[str, str] = build_topic_router_from_contract(_CONTRACT_DATA)
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -1073,6 +1086,7 @@ class PluginRegistration:
                 event_bus=config.event_bus,  # type: ignore[arg-type]
                 output_topic=config.output_topic,
                 intent_executor=intent_executor,
+                topic_router=_TOPIC_ROUTER,
             )
 
             # Register DispatchResultApplier in the DI container for the same
