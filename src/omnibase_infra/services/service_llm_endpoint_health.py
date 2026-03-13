@@ -48,6 +48,7 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.event_bus.topic_constants import TOPIC_LLM_ENDPOINT_HEALTH
 from omnibase_infra.mixins.mixin_async_circuit_breaker import MixinAsyncCircuitBreaker
 from omnibase_infra.models.health.model_llm_endpoint_health_config import (
     ModelLlmEndpointHealthConfig,
@@ -76,9 +77,6 @@ CircuitState = Literal["closed", "open", "half_open"]
 """Valid circuit breaker states for endpoint status."""
 
 _VALID_CIRCUIT_STATES: frozenset[str] = frozenset({"closed", "open", "half_open"})
-
-TOPIC_LLM_ENDPOINT_HEALTH: str = "onex.evt.omnibase-infra.llm-endpoint-health.v1"
-"""Canonical topic for LLM endpoint health events."""
 
 
 def _parse_circuit_state(

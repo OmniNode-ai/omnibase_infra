@@ -587,6 +587,15 @@ Consumer: Audit log, intelligence pipeline, replay infrastructure
 Ticket: OMN-2895 (Phase 6 of OMN-2897 epic)
 """
 
+# LLM Endpoint Health topics (OMN-2255 / OMN-4840)
+TOPIC_LLM_ENDPOINT_HEALTH: Final[str] = "onex.evt.omnibase-infra.llm-endpoint-health.v1"
+"""LLM endpoint health probe events.
+
+Producer: ServiceLlmEndpointHealth
+Consumer: Dashboards, alerting, orchestrators
+Ticket: OMN-2255
+"""
+
 # Grouped constants for wiring health monitoring
 WIRING_HEALTH_MONITORED_TOPICS: Final[tuple[str, ...]] = (
     TOPIC_SESSION_OUTCOME_CURRENT,
@@ -617,6 +626,8 @@ __all__ = [
     "TOPIC_RESOLUTION_DECIDED",
     # LLM Call Metrics Topics
     "TOPIC_LLM_CALL_COMPLETED",
+    # LLM Endpoint Health Topics
+    "TOPIC_LLM_ENDPOINT_HEALTH",
     # Wiring Health Topics
     "TOPIC_INJECTION_AGENT_MATCH",
     "TOPIC_INJECTION_CONTEXT_UTILIZATION",
