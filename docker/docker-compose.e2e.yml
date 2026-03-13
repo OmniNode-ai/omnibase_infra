@@ -109,7 +109,7 @@ services:
       - --default-log-level=warn
     ports:
       # Kafka external listener (for host access)
-      - "${KAFKA_PORT:-29092}:29092"
+      - "${KAFKA_PORT:-19092}:29092"
       # Admin API
       - "9644:9644"
       # Schema Registry (external)
