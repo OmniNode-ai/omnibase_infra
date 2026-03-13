@@ -40,12 +40,17 @@ class ModelDumpModeDetector(ast.NodeVisitor):
         self.source_lines = source_lines
 
     def visit_Call(self, node: ast.Call) -> None:
-        """Check for model_dump() calls without mode= keyword argument."""
+        """Check for model_dump() calls without mode="json"."""
         if isinstance(node.func, ast.Attribute) and node.func.attr == "model_dump":
-            # Check if mode= is present in keyword arguments
-            has_mode = any(kw.arg == "mode" for kw in node.keywords)
+            # Check if mode="json" is explicitly set (not just any mode= keyword)
+            has_json_mode = any(
+                kw.arg == "mode"
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value == "json"
+                for kw in node.keywords
+            )
 
-            if not has_mode:
+            if not has_json_mode:
                 # Check for noqa suppression on the same line
                 line_idx = node.lineno - 1
                 if line_idx < len(self.source_lines):
