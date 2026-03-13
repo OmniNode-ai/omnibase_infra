@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# feature_spec_overrides.yaml
+#
+# Manual overrides for generate_feature_inventory.py output.
+#
+# Format:
+#   "<repo>/<node_name>":
+#     design_spec: "[SpecName.md](../design/SpecName.md)"  # Override auto-detected design spec
+#     manual_review: "Needs attention: reason"             # Flag for human review
+#     fixture_present: true                                # Override fixture detection
+#
+# Example:
+#   "omnibase_infra/node_baselines_batch_compute":
+#     design_spec: "[DESIGN_BASELINES.md](../design/DESIGN_BASELINES.md)"
+#     manual_review: "—"

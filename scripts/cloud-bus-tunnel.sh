@@ -7,7 +7,7 @@
 #
 # Architecture:
 #   1. SSM session → localhost:6443 → k8s API (i-0e596e8b557e27785:6443)
-#   2. kubectl port-forward → localhost:29092 → svc/omninode-redpanda:9092
+#   2. kubectl port-forward → localhost:29092 → svc/omninode-redpanda:9092  # cloud-bus-ok OMN-4922
 #   3. kubectl port-forward → localhost:9092 → svc/omninode-redpanda:9092
 #
 # The script runs as a long-lived process. launchd restarts it on exit.
@@ -52,9 +52,9 @@ if ! kill -0 "$SSM_PID" 2>/dev/null; then
 fi
 
 # 2. Start kubectl port-forwards
-echo "[cloud-bus-tunnel] Starting kubectl port-forward 29092->9092..."
+echo "[cloud-bus-tunnel] Starting kubectl port-forward 29092->9092..."  # cloud-bus-ok OMN-4922
 kubectl --kubeconfig "$KUBECONFIG" -n data-plane \
-    port-forward svc/omninode-redpanda 29092:9092 \
+    port-forward svc/omninode-redpanda 29092:9092 \  # cloud-bus-ok OMN-4922
     > "${LOG_DIR}/omninode-redpanda-tunnel.log" 2>&1 &
 
 echo "[cloud-bus-tunnel] Starting kubectl port-forward 9092->9092..."

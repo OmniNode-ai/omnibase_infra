@@ -267,6 +267,8 @@ ignore = [
 # S106: Hardcoded password in function arg - test fixtures only
 # Production secrets managed via Infisical/Vault (OMN-2287, OMN-2736)
 "tests/**/*.py" = ["S106"]
+# N999: Hyphenated script names are intentional (executable CLI scripts, not importable modules)
+"scripts/*-*.py" = ["N999"]
 
 [tool.ruff.lint.isort]
 # Ensure consistent import sorting between local and CI

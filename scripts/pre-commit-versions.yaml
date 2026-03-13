@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# OmniNode Platform — Canonical Pre-commit Hook Versions
+# Maintained by: platform team
+# Updated: 2026-03-12
+#
+# PURPOSE:
+#   Single source of truth for pre-commit hook versions across all OmniNode repos.
+#   All repos using astral-sh/ruff-pre-commit or google/yamlfmt MUST pin to these versions.
+#
+# SCOPE:
+#   - omnibase_core, omnimemory, onex_change_control, omnibase_spi
+#   - omniclaude, omnidash, omniweb, omnibase_compat
+#
+# NOTE (OMN-4833 Epic 6):
+#   pre-commit-versions.yaml is policy documentation + manual reference.
+#   Automated enforcement follows once Task 16 (scheduled gap-detect) ships.
+#   Until then, use this file as the authoritative version reference when
+#   updating .pre-commit-config.yaml files.
+#
+# UPDATE PROCEDURE:
+#   1. Check latest release: https://github.com/astral-sh/ruff/releases
+#      Check latest release: https://github.com/google/yamlfmt/releases
+#   2. Update ruff_rev and yamlfmt_rev below
+#   3. Update this file's `updated` field
+#   4. Submit PR to omni_home with the version bump
+#   5. Update all affected repos in their own PRs (one PR per repo)
+#   6. Run `pre-commit run --all-files` in each repo after updating
+#   7. Review ruff changelog for breaking rule changes before upgrading
+#      https://github.com/astral-sh/ruff/blob/main/CHANGELOG.md
+ruff_rev: v0.15.6
+yamlfmt_rev: v0.21.0
+maintained_by: platform team
+updated: "2026-03-12"
+
+# Per-repo status (as of last update):
+#   omnimemory:          ruff v0.15.6 (updated OMN-4858), yamlfmt v0.21.0 (updated OMN-4858)
+#   onex_change_control: ruff v0.15.6 (updated OMN-4858)
+#   omnibase_core:       ruff via local hooks, yamlfmt v0.21.0 (updated OMN-4858)
+#   omnidash:            ruff via local hooks (no astral-sh/ruff-pre-commit)
+#   omniweb:             ruff via local hooks (no astral-sh/ruff-pre-commit)
+#   omniclaude:          ruff via local hooks (no astral-sh/ruff-pre-commit)
+#   omnibase_spi:        ruff via local hooks (no astral-sh/ruff-pre-commit)
+#   omnibase_compat:     yamlfmt to be added (OMN-4862), mypy to be added (OMN-4863)
+#   onex_change_control: yamlfmt to be added (OMN-4862)

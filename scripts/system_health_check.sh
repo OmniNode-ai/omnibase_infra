@@ -31,8 +31,8 @@
 #   7.  required_topics   - Required Kafka topics exist
 #   8.  migration_parity  - Docker and src migration directories in sync
 #   9.  env_audit         - No rogue .env files (--cross-repo only)
-#  10.  cloud_bus_refs    - No unsuppressed 29092 references (--cross-repo only)
-#  11.  bus_endpoint      - KAFKA_BOOTSTRAP_SERVERS must not contain 29092
+#  10.  cloud_bus_refs    - No unsuppressed 29092 references (--cross-repo only)  # cloud-bus-ok OMN-4922
+#  11.  bus_endpoint      - KAFKA_BOOTSTRAP_SERVERS must not contain 29092  # cloud-bus-ok OMN-4922
 #  12.  infisical_folders - /shared/<transport>/ folders exist in Infisical (when INFISICAL_ADDR is set)
 #
 # OMN-3772 OMN-3903
@@ -357,7 +357,7 @@ check_cloud_bus_refs() {
 
     local result
     if result=$(bash "$guard_script" "${REPO_ROOT}" 2>&1); then
-        log_check "$name" "green" "no unsuppressed 29092 references"
+        log_check "$name" "green" "no unsuppressed 29092 references"  # cloud-bus-ok OMN-4922
     else
         local count
         count=$(echo "$result" | grep -c '^VIOLATION' || true)
@@ -374,8 +374,8 @@ check_bus_endpoint() {
         return
     fi
 
-    if echo "$bootstrap" | grep -q "29092"; then
-        log_check "$name" "red" "KAFKA_BOOTSTRAP_SERVERS contains 29092 (cloud bus): ${bootstrap}"
+    if echo "$bootstrap" | grep -q "29092"; then  # cloud-bus-ok OMN-4922
+        log_check "$name" "red" "KAFKA_BOOTSTRAP_SERVERS contains 29092 (cloud bus): ${bootstrap}"  # cloud-bus-ok OMN-4922
     else
         log_check "$name" "green" "endpoint OK: ${bootstrap}"
     fi

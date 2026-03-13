@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# version-matrix.yaml
+#
+# Single authoritative version matrix for all shared OmniNode packages.
+# Each repo's pyproject.toml is checked against these minimum versions
+# by standards/check_version_pins.py.
+#
+# Update this file when a new minimum version is approved for platform-wide use.
+# CI wiring per repo (OMN-4806..OMN-4810) runs check_version_pins.py against
+# this matrix.
+packages:
+  omnibase-core: ">=0.26.0"
+  omnibase-spi: ">=0.17.0"
+  omnibase-infra: ">=0.16.2"
+  omnibase-compat: ">=0.2.0"
+# Registry of repos to check. Each entry maps a directory name (under omni_home)
+# to a human-readable label. Only repos with a pyproject.toml are checked.
+repos:
+  - name: omnibase_core
+    label: "omnibase-core"
+  - name: omnibase_spi
+    label: "omnibase-spi"
+  - name: omnibase_infra
+    label: "omnibase-infra"
+  - name: omninode_infra
+    label: "omninode-infra"
+  - name: omniclaude
+    label: "omniclaude"
+  - name: omnimemory
+    label: "omnimemory"
+  - name: omniintelligence
+    label: "omniintelligence"
+  - name: onex_change_control
+    label: "onex-change-control"

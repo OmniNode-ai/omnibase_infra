@@ -52,10 +52,10 @@ done
 # ── Bus tunnel reachability ────────────────────────────────────────────────
 
 if [[ "${SKIP_TUNNEL_CHECK}" == false ]]; then
-  if nc -z localhost 29092 2>/dev/null; then
-    echo "PREFLIGHT OK: cloud bus tunnel reachable (localhost:29092)"
+  if nc -z localhost 29092 2>/dev/null; then  # cloud-bus-ok OMN-4922
+    echo "PREFLIGHT OK: cloud bus tunnel reachable (localhost:29092)"  # cloud-bus-ok OMN-4922
   else
-    echo "PREFLIGHT MISSING: cloud bus tunnel not reachable at localhost:29092"
+    echo "PREFLIGHT MISSING: cloud bus tunnel not reachable at localhost:29092"  # cloud-bus-ok OMN-4922
     MISSING+=("cloud-bus-tunnel")
   fi
 fi
