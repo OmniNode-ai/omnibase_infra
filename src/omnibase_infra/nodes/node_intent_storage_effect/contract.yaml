@@ -56,6 +56,15 @@ capabilities:
 # Event-driven topic configuration
 # Topics use realm-agnostic 5-segment format: onex.<kind>.<producer>.<event-name>.v<N>
 # The runtime composes the full qualified topic by prepending env.namespace at startup.
+event_bus:
+  subscribe_topics:
+    - "onex.evt.platform.intent-classified.v1"
+    - "onex.cmd.platform.intent-query-session.v1"
+    - "onex.cmd.platform.intent-query-distribution.v1"
+  publish_topics:
+    - "onex.evt.platform.intent-stored.v1"
+    - "onex.evt.platform.intent-session-query-result.v1"
+    - "onex.evt.platform.intent-distribution-result.v1"
 consumed_events:
   - topic: "onex.evt.platform.intent-classified.v1"
     event_type: "IntentClassifiedEvent"

@@ -140,6 +140,9 @@ jobs:
           fi
           echo "PASS: No CONSUL_HOST references in src/"
 
+      - name: Check published_events consistency (OMN-4885)
+        run: uv run python scripts/validation/check_published_events_consistency.py
+
   # Fingerprint drift detection -- CI twins for runtime assertions B2 and B3
   # Prevents stale fingerprint artifacts from being merged (OMN-2149)
   fingerprint-check:

@@ -60,6 +60,13 @@ capabilities:
 # Event-driven topic configuration
 # Topics use realm-agnostic 5-segment format: onex.<kind>.<producer>.<event-name>.v<N>
 # The runtime composes the full qualified topic by prepending env.namespace at startup.
+event_bus:
+  subscribe_topics:
+    - "onex.cmd.platform.ledger-append.v1"
+    - "onex.cmd.platform.ledger-query.v1"
+  publish_topics:
+    - "onex.evt.platform.ledger-appended.v1"
+    - "onex.evt.platform.ledger-query-result.v1"
 consumed_events:
   - topic: "onex.cmd.platform.ledger-append.v1"
     event_type: "LedgerAppendCommand"

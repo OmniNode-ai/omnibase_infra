@@ -262,6 +262,14 @@ repos:
         files: (contract.*\.yaml|\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-4885: Validate published_events topics appear in event_bus.publish_topics
+      - id: onex-validate-published-events
+        name: Contract published_events consistency
+        entry: uv run python scripts/validation/check_published_events_consistency.py
+        language: system
+        pass_filenames: false
+        files: contract\.yaml$
+        stages: [pre-commit]
       # OMN-3554: Reject hardcoded Kafka broker address fallbacks
       # Detects os.getenv("KAFKA_*", non-empty) and private-IP Kafka broker ports
       - id: kafka-no-hardcoded-fallback
