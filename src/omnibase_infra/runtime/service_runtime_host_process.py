@@ -4380,7 +4380,7 @@ class RuntimeHostProcess:
                 getattr(self._event_bus, "get_readiness_status", None)
             ):
                 readiness = await self._event_bus.get_readiness_status()
-                event_bus_readiness = readiness.model_dump()
+                event_bus_readiness = readiness.model_dump(mode="json")
                 event_bus_ready = readiness.is_ready
             else:
                 # Event bus doesn't support readiness (treat as ready if healthy)
