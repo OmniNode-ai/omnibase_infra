@@ -10,14 +10,12 @@ and its associated handlers for provider-specific communication.
 Exports:
     NodeLlmInferenceEffect: Declarative effect node (zero custom logic)
     ALLOWED_INFERENCE_OPERATIONS: Valid operation identifiers for routing
-    HandlerLlmOllama: Ollama-native inference handler
     HandlerLlmOpenaiCompatible: OpenAI wire-format inference handler
     RegistryInfraLlmInferenceEffect: Factory and metadata registry
     ServiceLlmMetricsPublisher: Wraps a handler and emits call metrics
 
 Related:
     - OMN-2107: OpenAI-compatible handler
-    - OMN-2108: Ollama handler
     - OMN-2111: Node assembly
     - OMN-2443: Wire metrics emission to llm-call-completed topic
 """
@@ -25,7 +23,6 @@ Related:
 from __future__ import annotations
 
 from omnibase_infra.nodes.node_llm_inference_effect.handlers import (
-    HandlerLlmOllama,
     HandlerLlmOpenaiCompatible,
 )
 from omnibase_infra.nodes.node_llm_inference_effect.node import (
@@ -46,7 +43,6 @@ ALLOWED_INFERENCE_OPERATIONS: frozenset[str] = frozenset(
 
 __all__: list[str] = [
     "ALLOWED_INFERENCE_OPERATIONS",
-    "HandlerLlmOllama",
     "HandlerLlmOpenaiCompatible",
     "NodeLlmInferenceEffect",
     "RegistryInfraLlmInferenceEffect",

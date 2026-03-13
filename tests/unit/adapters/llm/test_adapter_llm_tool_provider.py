@@ -66,15 +66,6 @@ class TestAdapterLlmToolProviderAccess:
         assert provider is mock
 
     @pytest.mark.asyncio
-    async def test_get_ollama_provider(self) -> None:
-        """Returns registered Ollama provider."""
-        tool_provider = AdapterLlmToolProvider()
-        mock = _make_mock_provider("ollama")
-        await tool_provider.register_provider("ollama", mock)
-        provider = await tool_provider.get_ollama_provider()
-        assert provider is mock
-
-    @pytest.mark.asyncio
     async def test_get_gemini_provider(self) -> None:
         """Returns registered Gemini provider."""
         tool_provider = AdapterLlmToolProvider()

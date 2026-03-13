@@ -12,7 +12,7 @@ Architecture:
     RegistryInfraLlmInferenceEffect handles dependency injection setup
     for the NodeLlmInferenceEffect node:
     - Validates required protocols before node construction
-    - Registers handler implementations (OpenAI-compatible, Ollama)
+    - Registers handler implementations (OpenAI-compatible)
     - Provides factory methods for handler instantiation
     - Optionally wires ServiceLlmMetricsPublisher when a publisher is
       provided so that each inference call emits
@@ -28,7 +28,7 @@ Usage:
         )
 
         container = ModelONEXContainer()
-        await RegistryInfraLlmInferenceEffect.register_ollama(container)
+        await RegistryInfraLlmInferenceEffect.register_openai_compatible(container)
 
         # With metrics emission (requires an event publisher):
         await RegistryInfraLlmInferenceEffect.register_openai_compatible_with_metrics(
@@ -38,7 +38,6 @@ Usage:
 Related:
     - NodeLlmInferenceEffect: Node that consumes registered dependencies
     - HandlerLlmOpenaiCompatible: OpenAI-compatible inference handler
-    - HandlerLlmOllama: Ollama inference handler
     - ServiceLlmMetricsPublisher: Wraps handler and publishes call metrics
     - OMN-2111: Phase 11 node assembly
     - OMN-2443: Wire metrics emission to llm-call-completed topic
@@ -108,7 +107,6 @@ class RegistryInfraLlmInferenceEffect:
     Class Methods:
         create: Create node with validated container dependencies.
         register_openai_compatible: Register OpenAI-compatible handler.
-        register_ollama: Register Ollama handler.
 
     Example:
         >>> from omnibase_core.models.container import ModelONEXContainer
@@ -157,7 +155,7 @@ class RegistryInfraLlmInferenceEffect:
                 msg = (
                     f"Required protocol '{MixinLlmHttpTransport.__name__}' "
                     f"is not registered in the container. "
-                    f"Call register_openai_compatible() or register_ollama() "
+                    f"Call register_openai_compatible() "
                     f"before creating the node."
                 )
                 raise OnexError(msg) from exc
@@ -295,154 +293,6 @@ class RegistryInfraLlmInferenceEffect:
         )
 
     @staticmethod
-    async def register_ollama(
-        container: ModelONEXContainer,
-        target_name: str = "ollama-inference",
-    ) -> None:
-        """Register an Ollama inference handler.
-
-        Creates and registers a ``HandlerLlmOllama`` instance
-        with the given target name using the container's service
-        registry API.
-
-        Args:
-            container: ONEX dependency injection container.
-            target_name: Identifier for the target (used in error context
-                and logging). Default: ``"ollama-inference"``.
-        """
-        from omnibase_core.enums import EnumInjectionScope
-        from omnibase_infra.mixins import MixinLlmHttpTransport
-        from omnibase_infra.nodes.node_llm_inference_effect.handlers import (
-            HandlerLlmOllama,
-        )
-
-        handler = HandlerLlmOllama(target_name=target_name)
-
-        if container.service_registry is None:
-            logger.warning(
-                "service_registry is None; skipping Ollama handler "
-                "registration for target '%s'",
-                target_name,
-            )
-            return
-
-        await container.service_registry.register_instance(
-            interface=HandlerLlmOllama,
-            instance=handler,
-            scope=EnumInjectionScope.GLOBAL,
-        )
-        await container.service_registry.register_instance(
-            interface=MixinLlmHttpTransport,
-            instance=handler,
-            scope=EnumInjectionScope.GLOBAL,
-        )
-        logger.info(
-            "Registered Ollama inference handler: %s",
-            target_name,
-        )
-
-    @staticmethod
-    async def register_ollama_with_metrics(
-        container: ModelONEXContainer,
-        publisher: Callable[..., Awaitable[bool]],
-        target_name: str = "ollama-inference",
-    ) -> None:
-        """Register an Ollama handler wrapped with metrics emission.
-
-        Builds a ``HandlerLlmOllama`` and wraps it in a
-        ``ServiceLlmMetricsPublisher`` so that every inference call
-        publishes ``ContractLlmCallMetrics`` to
-        ``onex.evt.omniintelligence.llm-call-completed.v1``.
-
-        Warning:
-            Metrics emission is not supported for Ollama handlers.
-            ``HandlerLlmOllama`` does not populate ``last_call_metrics``,
-            so this registration provides the same observability as calling
-            ``register_ollama`` directly. Metrics will be emitted once
-            ``HandlerLlmOllama`` supports ``last_call_metrics``.
-            Until then, ``ServiceLlmMetricsPublisher`` silently skips
-            emission and logs at DEBUG level.
-
-            **MixinLlmHttpTransport is registered with the raw handler
-            instance, not the ServiceLlmMetricsPublisher.** This differs
-            from ``register_openai_compatible_with_metrics``, which registers
-            the transport adapter under ``MixinLlmHttpTransport``. Here,
-            ``HandlerLlmOllama`` itself implements ``MixinLlmHttpTransport``
-            (it IS the transport), so the raw handler is the correct value to
-            register under that interface. Callers resolving
-            ``MixinLlmHttpTransport`` from the container will receive the
-            handler directly; callers wanting metrics-wrapped inference must
-            resolve ``ServiceLlmMetricsPublisher`` instead.
-
-            **Mutually exclusive with** ``register_ollama``. Both methods
-            register under the same interface keys (``HandlerLlmOllama``
-            and ``MixinLlmHttpTransport``). If both are called on the same
-            container, the second call will silently overwrite the first
-            registration. Call only one of the two methods per container.
-
-        Args:
-            container: ONEX dependency injection container.
-            publisher: Async callable with signature
-                ``(event_type, payload, correlation_id) -> bool``.
-            target_name: Identifier for the target. Default:
-                ``"ollama-inference"``.
-        """
-        from typing import cast
-
-        from omnibase_core.enums import EnumInjectionScope
-        from omnibase_infra.mixins import MixinLlmHttpTransport
-        from omnibase_infra.nodes.node_llm_inference_effect.handlers import (
-            HandlerLlmOllama,
-        )
-        from omnibase_infra.nodes.node_llm_inference_effect.services.protocol_llm_handler import (
-            ProtocolLlmHandler,
-        )
-        from omnibase_infra.nodes.node_llm_inference_effect.services.service_llm_metrics_publisher import (
-            ServiceLlmMetricsPublisher,
-        )
-
-        if container.service_registry is None:
-            logger.warning(
-                "service_registry is None; skipping Ollama metrics handler "
-                "registration for target '%s'",
-                target_name,
-            )
-            return
-
-        handler = HandlerLlmOllama(target_name=target_name)
-        # ONEX: cast required because HandlerLlmOllama uses effects.models.ModelLlmInferenceRequest
-        # (structurally identical to node_llm_inference_effect.models.ModelLlmInferenceRequest but
-        # not nominally related). ADR-approved cast-instead-of-Any workaround; see OMN-2443 and
-        # docs/decisions/adr-any-type-pydantic-workaround.md.
-        service = ServiceLlmMetricsPublisher(
-            handler=cast("ProtocolLlmHandler", handler), publisher=publisher
-        )
-
-        logger.debug(
-            "register_ollama_with_metrics: metrics emission is a no-op "
-            "until HandlerLlmOllama populates last_call_metrics"
-        )
-        await container.service_registry.register_instance(
-            interface=HandlerLlmOllama,
-            instance=handler,
-            scope=EnumInjectionScope.GLOBAL,
-        )
-        await container.service_registry.register_instance(
-            interface=MixinLlmHttpTransport,
-            instance=handler,
-            scope=EnumInjectionScope.GLOBAL,
-        )
-        await container.service_registry.register_instance(
-            interface=ServiceLlmMetricsPublisher,
-            instance=service,
-            scope=EnumInjectionScope.GLOBAL,
-        )
-        logger.info(
-            "Registered Ollama inference handler with metrics emission: %s",
-            target_name,
-        )
-
-    @staticmethod
     def get_required_protocols() -> list[str]:
         """Get list of protocols required by this node.
 
@@ -488,7 +338,6 @@ class RegistryInfraLlmInferenceEffect:
         """
         return [
             "openai_compatible_inference",
-            "ollama_inference",
             "chat_completion",
             "tool_calling",
             "circuit_breaker_protection",
@@ -505,7 +354,6 @@ class RegistryInfraLlmInferenceEffect:
         """
         return [
             "inference.openai_compatible",
-            "inference.ollama",
         ]
 
     @staticmethod
@@ -517,7 +365,7 @@ class RegistryInfraLlmInferenceEffect:
 
         .. versionadded:: 0.8.0
         """
-        return ["openai_compatible", "ollama"]
+        return ["openai_compatible"]
 
 
 __all__ = ["RegistryInfraLlmInferenceEffect"]
