@@ -221,6 +221,32 @@ class HandlerNodeHeartbeat:
                 timestamp=now,
             )
 
+        # Short-circuit for terminal states (OMN-4824): heartbeats arriving
+        # after liveness expiry or rejection are no-ops.  This prevents stale
+        # heartbeats from extending the liveness deadline on dead registrations.
+        if projection.current_state.is_terminal():
+            logger.warning(
+                "terminal-state heartbeat ignored",
+                extra={
+                    "node_id": str(event.node_id),
+                    "current_state": projection.current_state.value,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            processing_time_ms = (time.perf_counter() - start_time) * 1000
+            return ModelHandlerOutput(
+                input_envelope_id=envelope.envelope_id,
+                correlation_id=correlation_id,
+                handler_id=self.handler_id,
+                node_kind=self.node_kind,
+                events=(),
+                intents=(),
+                projections=(),
+                result=None,
+                processing_time_ms=processing_time_ms,
+                timestamp=now,
+            )
+
         # Check if node is in a state that should receive heartbeats
         if not projection.current_state.is_active():
             logger.warning(
