@@ -18,12 +18,13 @@ The kernel is responsible for:
 
 Event Bus Selection:
     The kernel supports two event bus implementations:
-    - EventBusInmemory: For local development and testing (default)
-    - EventBusKafka: For production use with Kafka/Redpanda
+    - EventBusKafka: For production use with Kafka/Redpanda (default)
+    - EventBusInmemory: For testing only (via ONEX_EVENT_BUS_TYPE env override)
 
     Selection is determined by:
+    - ONEX_EVENT_BUS_TYPE environment variable (highest priority, testing only)
     - KAFKA_BOOTSTRAP_SERVERS environment variable (if set, uses Kafka)
-    - config.event_bus.type field in runtime_config.yaml
+    - config.event_bus.type field in runtime_config.yaml (defaults to kafka)
 
 Usage:
     # Run with default contracts directory (./contracts)
@@ -324,7 +325,7 @@ def load_runtime_config(
         >>> print(config.input_topic)
         requests
         >>> print(config.event_bus.type)
-        inmemory
+        kafka
 
     Example Error:
         >>> # If runtime_config.yaml has invalid YAML syntax
@@ -652,12 +653,32 @@ async def bootstrap() -> int:
             },
         )
 
+        # 2b. Assert config.event_bus.type is production-safe (OMN-4848)
+        # The ModelEventBusConfig validator already rejects non-production-safe types
+        # at model construction time. This runtime assertion is a defense-in-depth
+        # guard that catches any bypass (e.g., mock configs in tests that skip
+        # Pydantic validation). The ONEX_EVENT_BUS_TYPE env var override below
+        # can still select inmemory for testing — that path is separate.
+        if hasattr(config.event_bus.type, "is_production_safe"):
+            if not config.event_bus.type.is_production_safe:
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="validate_event_bus_config",
+                    correlation_id=correlation_id,
+                )
+                raise ProtocolConfigurationError(
+                    f"config.event_bus.type='{config.event_bus.type}' is not production-safe. "
+                    f"Use 'kafka' or 'cloud' instead.",
+                    context=context,
+                    parameter="event_bus.type",
+                )
+
         # 3. Create event bus
         # Dispatch based on configuration or environment variable:
         # - ONEX_EVENT_BUS_TYPE env var overrides config.event_bus.type
         # - If KAFKA_BOOTSTRAP_SERVERS env var is set, use EventBusKafka
         # - If config.event_bus.type == "kafka", use EventBusKafka
-        # - Otherwise, use EventBusInmemory for local development/testing
+        # - Otherwise, use EventBusInmemory for testing (via ONEX_EVENT_BUS_TYPE override)
         # Environment override takes precedence over config for environment field.
         # KAFKA_ENVIRONMENT is the authoritative source for the Kafka topic prefix.
         # ONEX_ENVIRONMENT is a general environment name (not always a valid Kafka env value)

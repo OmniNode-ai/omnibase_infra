@@ -40,7 +40,7 @@ class TestValidateRuntimeConfig:
             "output_topic": "responses",
             "consumer_group": "onex-runtime",
             "event_bus": {
-                "type": "inmemory",
+                "type": "kafka",
                 "environment": "local",
                 "max_history": 1000,
                 "circuit_breaker_threshold": 5,
@@ -418,9 +418,10 @@ class TestConstants:
         assert not TOPIC_NAME_PATTERN.match("")
 
     def test_valid_event_bus_types(self) -> None:
-        """Test that VALID_EVENT_BUS_TYPES contains expected values."""
-        assert "inmemory" in VALID_EVENT_BUS_TYPES
+        """Test that VALID_EVENT_BUS_TYPES contains only production-safe values."""
         assert "kafka" in VALID_EVENT_BUS_TYPES
+        assert "cloud" in VALID_EVENT_BUS_TYPES
+        assert "inmemory" not in VALID_EVENT_BUS_TYPES
         assert len(VALID_EVENT_BUS_TYPES) == 2
 
     def test_grace_period_bounds(self) -> None:
