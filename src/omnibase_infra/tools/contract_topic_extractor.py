@@ -420,6 +420,13 @@ class ContractTopicExtractor:
             )
             return []
 
+        # Also check for a root-level topics.yaml (for standalone manifests
+        # like cli/topics.yaml or services/topics.yaml where the directory
+        # itself IS the producer, not a parent of skill subdirectories).
+        root_topics_yaml = skills_root / "topics.yaml"
+        if root_topics_yaml.exists():
+            self._extract_manifest_file(root_topics_yaml, skills_root.name, accumulated)
+
         for skill_dir in sorted(skills_root.iterdir()):
             # Only process direct child directories; skip _ / __ prefixes
             if not skill_dir.is_dir():
@@ -430,57 +437,66 @@ class ContractTopicExtractor:
             topics_yaml = skill_dir / "topics.yaml"
             if not topics_yaml.exists():
                 continue
-
-            try:
-                with topics_yaml.open(encoding="utf-8") as fh:
-                    data = yaml.safe_load(fh)
-            except Exception as exc:
-                _warn(f"Could not parse {topics_yaml}: {exc} — skipping")
-                continue
-
-            if not isinstance(data, dict):
-                _warn(f"topics.yaml is not a mapping: {topics_yaml} — skipping")
-                continue
-
-            raw_topics = data.get("topics")
-            if not isinstance(raw_topics, list):
-                _warn(f"topics.yaml missing 'topics' list: {topics_yaml} — skipping")
-                continue
-
-            for raw in raw_topics:
-                if not isinstance(raw, str) or not raw.strip():
-                    _warn(f"Skipping non-string or empty topic entry in {topics_yaml}")
-                    continue
-
-                entry = _parse_topic(raw.strip(), topics_yaml)
-                if entry is None:
-                    # Malformed — warned inside _parse_topic
-                    continue
-
-                if raw in accumulated:
-                    existing = accumulated[raw]
-                    if (
-                        existing.kind != entry.kind
-                        or existing.producer != entry.producer
-                        or existing.event_name != entry.event_name
-                        or existing.version != entry.version
-                    ):
-                        _error(
-                            f"Inconsistent parsed components for topic {raw!r}: "
-                            f"first seen in {existing.source_contracts[0]}, "
-                            f"now in {topics_yaml}. This implies a parser bug."
-                        )
-                    accumulated[raw] = existing.merge_sources(entry)
-                else:
-                    accumulated[raw] = entry
+            self._extract_manifest_file(topics_yaml, skill_dir.name, accumulated)
 
         return sorted(accumulated.values(), key=lambda e: e.topic)
+
+    @staticmethod
+    def _extract_manifest_file(
+        topics_yaml: Path,
+        _producer_name: str,
+        accumulated: dict[str, ModelContractTopicEntry],
+    ) -> None:
+        """Parse a single topics.yaml manifest and merge into accumulated dict."""
+        try:
+            with topics_yaml.open(encoding="utf-8") as fh:
+                data = yaml.safe_load(fh)
+        except Exception as exc:
+            _warn(f"Could not parse {topics_yaml}: {exc} — skipping")
+            return
+
+        if not isinstance(data, dict):
+            _warn(f"topics.yaml is not a mapping: {topics_yaml} — skipping")
+            return
+
+        raw_topics = data.get("topics")
+        if not isinstance(raw_topics, list):
+            _warn(f"topics.yaml missing 'topics' list: {topics_yaml} — skipping")
+            return
+
+        for raw in raw_topics:
+            if not isinstance(raw, str) or not raw.strip():
+                _warn(f"Skipping non-string or empty topic entry in {topics_yaml}")
+                continue
+
+            entry = _parse_topic(raw.strip(), topics_yaml)
+            if entry is None:
+                # Malformed — warned inside _parse_topic
+                continue
+
+            if raw in accumulated:
+                existing = accumulated[raw]
+                if (
+                    existing.kind != entry.kind
+                    or existing.producer != entry.producer
+                    or existing.event_name != entry.event_name
+                    or existing.version != entry.version
+                ):
+                    _error(
+                        f"Inconsistent parsed components for topic {raw!r}: "
+                        f"first seen in {existing.source_contracts[0]}, "
+                        f"now in {topics_yaml}. This implies a parser bug."
+                    )
+                accumulated[raw] = existing.merge_sources(entry)
+            else:
+                accumulated[raw] = entry
 
     def extract_all(
         self,
         contracts_root: Path,
         supplementary_sources: list[Path] | None = None,
         skill_manifests_root: Path | None = None,
+        skill_manifests_roots: list[Path] | None = None,
     ) -> list[ModelContractTopicEntry]:
         """Extract topics from contracts AND supplementary Python sources AND skill manifests.
 
@@ -489,19 +505,23 @@ class ContractTopicExtractor:
         deduplicated list. Topics appearing in multiple sources are merged
         (source_contracts combined).
 
-        This is the recommended entry point for the generation pipeline
-        (OMN-3254, OMN-4593) to ensure all topics -- whether declared in
-        contracts, hardcoded in Python constants, or declared in skill
-        topics.yaml manifests -- appear in the generated enums.
+        This is the single owner of topic-entry merge/dedup logic. All callers
+        (TopicProvisioner, CLI scripts, validation) should use this method
+        rather than combining extract() + extract_from_skill_manifests() manually.
 
         Args:
             contracts_root: Directory to scan for contract.yaml files.
             supplementary_sources: Optional list of Python files to scan
                 for additional topic constants.
-            skill_manifests_root: Optional path to omniclaude
-                ``plugins/onex/skills/`` directory. When set, skill
-                ``topics.yaml`` manifests are discovered and merged.
-                When ``None``, skill manifest discovery is skipped.
+            skill_manifests_root: Optional single path to a skill manifests
+                directory. Kept for backwards compatibility with existing
+                callers. When set, equivalent to passing it as the first
+                element of ``skill_manifests_roots``.
+            skill_manifests_roots: Optional list of paths to scan for
+                ``topics.yaml`` flat-list manifests. Supports multiple roots
+                (e.g., omniclaude skills, infra CLI relays, infra services).
+                When both ``skill_manifests_root`` and ``skill_manifests_roots``
+                are set, the single root is prepended to the list.
 
         Returns:
             Sorted, deduplicated list of ModelContractTopicEntry objects.
@@ -509,7 +529,7 @@ class ContractTopicExtractor:
         Raises:
             RuntimeError: On inconsistent parsed components.
 
-        Ticket: OMN-4593
+        Ticket: OMN-4593, OMN-4622
         """
         # Start with contract-derived topics
         contract_entries = self.extract(contracts_root)
@@ -529,9 +549,16 @@ class ContractTopicExtractor:
                 else:
                     accumulated[entry.topic] = entry
 
-        # Merge skill manifest topics (OMN-4593)
+        # Merge skill manifest topics (OMN-4593, OMN-4622)
+        # Combine singular root (backwards compat) with plural roots list
+        all_roots: list[Path] = []
         if skill_manifests_root is not None:
-            skill_entries = self.extract_from_skill_manifests(skill_manifests_root)
+            all_roots.append(skill_manifests_root)
+        if skill_manifests_roots:
+            all_roots.extend(skill_manifests_roots)
+
+        for root in all_roots:
+            skill_entries = self.extract_from_skill_manifests(root)
             for entry in skill_entries:
                 if entry.topic in accumulated:
                     existing = accumulated[entry.topic]

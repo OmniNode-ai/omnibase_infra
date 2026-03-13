@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from omnibase_infra.topics import ALL_PROVISIONED_SUFFIXES, ALL_PROVISIONED_TOPIC_SPECS
 from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
 from omnibase_infra.utils import sanitize_error_message
 
@@ -73,6 +72,7 @@ class TopicProvisioner:
         request_timeout_ms: int = 30000,
         contracts_root: Path | None = None,
         skill_manifests_root: Path | None = None,
+        skill_manifests_roots: list[Path] | None = None,
     ) -> None:
         """Initialize the topic provisioner.
 
@@ -82,16 +82,17 @@ class TopicProvisioner:
             request_timeout_ms: Timeout for admin operations in milliseconds.
             contracts_root: Optional path to contract.yaml root directory.
                 When set, topics are discovered from contracts via
-                ContractTopicExtractor and merged with ALL_PROVISIONED_TOPIC_SPECS.
-                This is transitional — as parity gate (OMN-4600) drives migration,
-                the legacy union shrinks. When None, ALL_PROVISIONED_TOPIC_SPECS
-                is used unchanged (backwards-compatible default).
-            skill_manifests_root: Optional path to omniclaude skills root
-                (plugins/onex/skills/). When set alongside contracts_root,
-                skill topics.yaml manifests are discovered and merged.
-                Ignored when contracts_root is None.
+                ContractTopicExtractor. When None, ALL_PROVISIONED_TOPIC_SPECS
+                is used unchanged (backwards-compatible default for tests
+                and legacy execution paths).
+            skill_manifests_root: Optional single path to omniclaude skills
+                root (plugins/onex/skills/). Kept for backwards compatibility.
+            skill_manifests_roots: Optional list of paths to scan for
+                topics.yaml manifests (supports multiple roots: skills,
+                CLI relays, services). When both singular and plural are set,
+                the singular root is prepended to the list.
 
-        Ticket: OMN-4594
+        Ticket: OMN-4594, OMN-4622
         """
         self._bootstrap_servers = bootstrap_servers or os.environ.get(
             ENV_BOOTSTRAP_SERVERS, DEFAULT_BOOTSTRAP_SERVERS
@@ -99,27 +100,31 @@ class TopicProvisioner:
         self._request_timeout_ms = request_timeout_ms
         self._contracts_root = contracts_root
         self._skill_manifests_root = skill_manifests_root
+        self._skill_manifests_roots = skill_manifests_roots
         self._topic_specs = self._build_topic_specs()
 
     def _build_topic_specs(self) -> tuple[ModelTopicSpec, ...]:
-        """Build the merged topic spec list for this provisioner instance.
+        """Build topic specs from contracts (preferred) or Python registry (fallback).
 
-        When contracts_root is set: merges contract-extracted topics with
-        ALL_PROVISIONED_TOPIC_SPECS (transitional union, OMN-4594).
-        When contracts_root is None: returns ALL_PROVISIONED_TOPIC_SPECS unchanged.
+        When contracts_root is set: topics are derived entirely from contract
+        YAML extraction via ContractTopicExtractor.extract_all(). The Python
+        constant registry (ALL_PROVISIONED_TOPIC_SPECS) is NOT used — contract-
+        first is the normal runtime mode after OMN-4622.
 
-        The union is deduped by suffix string. Contract-derived topics that
-        already exist in ALL_PROVISIONED_TOPIC_SPECS are not duplicated.
-        Contract-derived topics use default partition/replication settings
-        (1 partition, 1 replication factor) unless a matching legacy spec
-        exists with custom settings (in which case the legacy spec wins to
-        preserve existing topic configuration).
+        When contracts_root is None: falls back to ALL_PROVISIONED_TOPIC_SPECS
+        unchanged. This fallback exists only for tests and explicitly legacy
+        execution paths (e.g., the CLI entrypoint without --contracts-root).
+        It is NOT a co-equal long-term source of truth.
 
-        Returns:
-            Tuple of ModelTopicSpec objects representing the full merged topic set.
+        Ticket: OMN-4594, OMN-4622
         """
         if self._contracts_root is None:
-            return ALL_PROVISIONED_TOPIC_SPECS
+            # Legacy/test fallback — no contracts_root configured
+            from omnibase_infra.topics import (
+                ALL_PROVISIONED_TOPIC_SPECS as _LEGACY_SPECS,
+            )
+
+            return _LEGACY_SPECS
 
         try:
             from omnibase_infra.tools.contract_topic_extractor import (
@@ -127,15 +132,21 @@ class TopicProvisioner:
             )
         except ImportError:
             logger.warning(
-                "ContractTopicExtractor not available — using ALL_PROVISIONED_TOPIC_SPECS only"
+                "ContractTopicExtractor not available — "
+                "falling back to ALL_PROVISIONED_TOPIC_SPECS"
             )
-            return ALL_PROVISIONED_TOPIC_SPECS
+            from omnibase_infra.topics import (
+                ALL_PROVISIONED_TOPIC_SPECS as _LEGACY_SPECS,
+            )
+
+            return _LEGACY_SPECS
 
         extractor = ContractTopicExtractor()
         try:
             contract_entries = extractor.extract_all(
                 contracts_root=self._contracts_root,
                 skill_manifests_root=self._skill_manifests_root,
+                skill_manifests_roots=self._skill_manifests_roots,
             )
         except Exception as exc:
             logger.warning(
@@ -143,33 +154,36 @@ class TopicProvisioner:
                 "falling back to ALL_PROVISIONED_TOPIC_SPECS",
                 exc,
             )
-            return ALL_PROVISIONED_TOPIC_SPECS
+            from omnibase_infra.topics import (
+                ALL_PROVISIONED_TOPIC_SPECS as _LEGACY_SPECS,
+            )
 
-        # Build lookup: suffix -> existing legacy spec
+            return _LEGACY_SPECS
+
+        # Contract-first: derive specs solely from extracted topics
+        # Use legacy specs for partition/replication settings where available
+        from omnibase_infra.topics import ALL_PROVISIONED_TOPIC_SPECS as _LEGACY_SPECS
+
         legacy_by_suffix: dict[str, ModelTopicSpec] = {
-            spec.suffix: spec for spec in ALL_PROVISIONED_TOPIC_SPECS
+            spec.suffix: spec for spec in _LEGACY_SPECS
         }
 
-        # Union: start from legacy, add contract-only topics
-        merged: dict[str, ModelTopicSpec] = dict(legacy_by_suffix)
-        contract_only_count = 0
+        result_specs: list[ModelTopicSpec] = []
         for entry in contract_entries:
-            if entry.topic not in merged:
-                # New topic from contracts — use default partition settings
-                merged[entry.topic] = ModelTopicSpec(suffix=entry.topic)
-                contract_only_count += 1
+            if entry.topic in legacy_by_suffix:
+                # Preserve existing partition/replication config
+                result_specs.append(legacy_by_suffix[entry.topic])
+            else:
+                result_specs.append(ModelTopicSpec(suffix=entry.topic))
 
-        result = tuple(spec for _, spec in sorted(merged.items(), key=lambda kv: kv[0]))
+        result = tuple(sorted(result_specs, key=lambda s: s.suffix))
 
-        legacy_count = len(ALL_PROVISIONED_TOPIC_SPECS)
         skill_count = len([e for e in contract_entries if "omniclaude" in e.topic])
         logger.info(
-            "topic provisioning — contract topics: %d, skill-manifest topics: %d, "
-            "legacy-only topics: %d, merged total: %d",
-            len(contract_entries),
-            skill_count,
-            legacy_count,
+            "topic provisioning (contract-first) — total: %d, "
+            "skill-manifest topics: %d",
             len(result),
+            skill_count,
         )
 
         return result
@@ -218,7 +232,7 @@ class TopicProvisioner:
             return {
                 "created": created,
                 "existing": existing,
-                "failed": list(ALL_PROVISIONED_SUFFIXES),
+                "failed": [s.suffix for s in self._topic_specs],
                 "status": "unavailable",
             }
 
@@ -286,9 +300,8 @@ class TopicProvisioner:
             )
             # Separate individually-failed topics from those never attempted
             already_resolved = set(created) | set(existing) | set(failed)
-            not_attempted = [
-                s for s in ALL_PROVISIONED_SUFFIXES if s not in already_resolved
-            ]
+            all_suffixes = {spec.suffix for spec in self._topic_specs}
+            not_attempted = [s for s in all_suffixes if s not in already_resolved]
             if not_attempted:
                 logger.warning(
                     "Topics not attempted due to early termination: %d topics",

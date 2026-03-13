@@ -145,6 +145,51 @@ def collect_registry_from_contracts(contracts_root: Path) -> set[str]:
     return topics
 
 
+def collect_registry_from_manifests(manifest_roots: list[Path]) -> set[str]:
+    """Collect topics from flat-list topics.yaml manifests.
+
+    Scans each root for a root-level topics.yaml and/or child-directory
+    topics.yaml files (same format as omniclaude skill manifests).
+
+    Ticket: OMN-4622
+    """
+    topics: set[str] = set()
+    for root in manifest_roots:
+        if not root.exists() or not root.is_dir():
+            continue
+        # Root-level topics.yaml
+        root_yaml = root / "topics.yaml"
+        if root_yaml.exists():
+            topics.update(_extract_topics_from_manifest(root_yaml))
+        # Child-directory topics.yaml (omniclaude skill format)
+        for child in sorted(root.iterdir()):
+            if not child.is_dir() or child.name.startswith("_"):
+                continue
+            child_yaml = child / "topics.yaml"
+            if child_yaml.exists():
+                topics.update(_extract_topics_from_manifest(child_yaml))
+    return topics
+
+
+def _extract_topics_from_manifest(yaml_path: Path) -> set[str]:
+    """Extract topics from a flat-list topics.yaml manifest."""
+    topics: set[str] = set()
+    try:
+        text = yaml_path.read_text(encoding="utf-8")
+    except OSError:
+        return topics
+
+    parsed = _parse_yaml_minimal(text)
+    if parsed is not None and isinstance(parsed.get("topics"), list):
+        for item in parsed["topics"]:
+            if isinstance(item, str) and _TOPIC_PATTERN.match(item):
+                topics.add(item)
+    else:
+        # Fallback: regex
+        topics.update(_extract_topics_from_yaml_text(text))
+    return topics
+
+
 def _collect_from_parsed_yaml(data: dict[str, object], topics: set[str]) -> None:
     """Extract topic strings from a parsed contract YAML dict."""
     # event_bus section
@@ -381,6 +426,7 @@ def check_completeness(
     contracts_root: Path | None = None,
     constants_files: list[Path] | None = None,
     allowlist_path: Path | None = None,
+    manifest_roots: list[Path] | None = None,
 ) -> tuple[list[tuple[Path, str, int]], set[str]]:
     """Check that all topic literals in source are in the registry.
 
@@ -389,6 +435,8 @@ def check_completeness(
         contracts_root: Root directory containing contract.yaml files.
         constants_files: Additional Python files defining topic constants.
         allowlist_path: Path to allowlist file for false positives.
+        manifest_roots: Additional directories with topics.yaml manifests
+            (omniclaude skills, CLI relays, services).
 
     Returns:
         Tuple of (unregistered_hits, registry) where unregistered_hits is a
@@ -408,6 +456,10 @@ def check_completeness(
     if constants_files:
         for cf in constants_files:
             registry.update(collect_registry_from_constants_file(cf))
+
+    # (d) Flat-list topics.yaml manifests (skills, CLI, services)
+    if manifest_roots:
+        registry.update(collect_registry_from_manifests(manifest_roots))
 
     # Load allowlist
     allowlist: set[str] = set()
@@ -473,6 +525,21 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--skills-root",
+        metavar="DIR",
+        type=Path,
+        default=None,
+        help="Path to omniclaude skills root (topics.yaml manifests)",
+    )
+    parser.add_argument(
+        "--manifest-root",
+        metavar="DIR",
+        type=Path,
+        action="append",
+        default=None,
+        help="Additional manifest root with topics.yaml (can be specified multiple times)",
+    )
+    parser.add_argument(
         "--show-registry",
         action="store_true",
         help="Print the discovered topic registry and exit",
@@ -530,6 +597,19 @@ def main(argv: list[str] | None = None) -> int:
         if candidate.exists():
             allowlist_path = candidate
 
+    # Resolve manifest roots (skills + any extra --manifest-root args)
+    manifest_roots: list[Path] = []
+    if args.skills_root is not None:
+        manifest_roots.append(args.skills_root.resolve())
+    if args.manifest_root:
+        manifest_roots.extend(mr.resolve() for mr in args.manifest_root)
+    # Auto-discover infra standalone manifests (cli/, services/)
+    infra_pkg = src_root / "omnibase_infra"
+    for subdir in ("cli", "services"):
+        candidate = infra_pkg / subdir
+        if candidate.is_dir() and (candidate / "topics.yaml").exists():
+            manifest_roots.append(candidate)
+
     # Show registry mode
     if args.show_registry:
         registry: set[str] = set()
@@ -539,6 +619,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.constants_file:
             for cf in args.constants_file:
                 registry.update(collect_registry_from_constants_file(cf.resolve()))
+        if manifest_roots:
+            registry.update(collect_registry_from_manifests(manifest_roots))
         print(f"Topic registry ({len(registry)} topics):")
         for topic in sorted(registry):
             print(f"  {topic}")
@@ -554,6 +636,7 @@ def main(argv: list[str] | None = None) -> int:
             else None
         ),
         allowlist_path=allowlist_path,
+        manifest_roots=manifest_roots if manifest_roots else None,
     )
 
     if not unregistered:
