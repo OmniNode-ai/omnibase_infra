@@ -556,6 +556,7 @@ class TestQwen72BSlo(BaseLLMEndpointSloTest):
     MODEL = os.getenv("LLM_QWEN_72B_MODEL", "Qwen/Qwen2.5-72B-Instruct")
 
 
+@pytest.mark.skipif(not os.getenv("LLM_VISION_URL"), reason="No vision model deployed")
 class TestVisionSlo(BaseLLMEndpointSloTest):
     """SLO profiling for Qwen2-VL (Mac Studio M2 Ultra, vision/multimodal)."""
 

@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal
@@ -211,7 +212,7 @@ class ServiceLlmEndpointHealth:
         config = ModelLlmEndpointHealthConfig(
             endpoints={
                 "coder-14b": "http://192.168.86.201:8000",
-                "qwen-72b":  "http://192.168.86.200:8100",
+                "qwen-embedding": os.getenv("LLM_EMBEDDING_URL", "http://192.168.86.200:8100"),
             },
             probe_interval_seconds=30.0,
         )
