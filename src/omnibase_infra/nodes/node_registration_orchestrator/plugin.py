@@ -77,7 +77,18 @@ from omnibase_infra.runtime.models.model_postgres_pool_config import (
 # DispatchResultApplier can publish each output event to the correct topic
 # instead of the single fallback output_topic. (OMN-4881/OMN-4883)
 _CONTRACT_PATH = Path(__file__).parent / "contract.yaml"
-_CONTRACT_DATA: dict[str, object] = yaml.safe_load(_CONTRACT_PATH.read_text())
+try:
+    _contract_raw = yaml.safe_load(_CONTRACT_PATH.read_text(encoding="utf-8"))
+except (OSError, yaml.YAMLError) as _contract_exc:
+    logging.getLogger(__name__).warning(
+        "Failed to load registration contract at %s: %s. Using empty topic router.",
+        _CONTRACT_PATH,
+        _contract_exc,
+    )
+    _contract_raw = {}
+_CONTRACT_DATA: dict[str, object] = (
+    _contract_raw if isinstance(_contract_raw, dict) else {}
+)
 _TOPIC_ROUTER: dict[str, str] = build_topic_router_from_contract(_CONTRACT_DATA)
 
 if TYPE_CHECKING:
