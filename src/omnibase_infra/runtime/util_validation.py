@@ -47,8 +47,8 @@ from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationE
 # (e.g., "dev.onex.evt.node-introspection.v1")
 TOPIC_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
 
-# Valid event bus types (matches ModelEventBusConfig.type Literal)
-VALID_EVENT_BUS_TYPES = frozenset({"inmemory", "kafka"})
+# Valid event bus types (matches EnumEventBusType production-safe values)
+VALID_EVENT_BUS_TYPES = frozenset({"kafka", "cloud"})
 
 # Shutdown grace period bounds (matches ModelShutdownConfig constraints)
 MIN_GRACE_PERIOD_SECONDS = 0

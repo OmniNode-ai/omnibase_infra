@@ -644,7 +644,7 @@ class TestBootstrap:
         mock_config.output_topic = "test-output"
         mock_config.group_id = "test-group"
         mock_config.event_bus = MagicMock()
-        mock_config.event_bus.type = "inmemory"  # Force inmemory for this test
+        mock_config.event_bus.type = "kafka"  # Use kafka (inmemory is forbidden)
         mock_config.event_bus.environment = "test-env"
 
         with (
