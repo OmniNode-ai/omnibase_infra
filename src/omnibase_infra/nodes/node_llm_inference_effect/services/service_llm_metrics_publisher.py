@@ -4,7 +4,7 @@
 # Copyright (c) 2026 OmniNode Team
 """Service that publishes LLM call metrics to the event bus after each inference.
 
-This service wraps a handler (HandlerLlmOpenaiCompatible or HandlerLlmOllama)
+This service wraps a handler (HandlerLlmOpenaiCompatible)
 and publishes ``ContractLlmCallMetrics`` to
 ``onex.evt.omniintelligence.llm-call-completed.v1`` after every successful
 inference call.
@@ -20,7 +20,7 @@ Architecture:
 
 Wiring:
     ``RegistryInfraLlmInferenceEffect.register_openai_compatible_with_metrics``
-    and ``register_ollama_with_metrics`` create and wire this service.
+    creates and wires this service.
     When no publisher is supplied, the plain handlers are used as-is (no
     metrics emission) so that local / test environments work without Kafka.
 
@@ -74,8 +74,7 @@ class ServiceLlmMetricsPublisher:
 
     Attributes:
         _handler: The inner handler instance (any object satisfying
-            ``ProtocolLlmHandler``, e.g. ``HandlerLlmOpenaiCompatible`` or
-            ``HandlerLlmOllama``).
+            ``ProtocolLlmHandler``, e.g. ``HandlerLlmOpenaiCompatible``).
         _publisher: Callable that accepts ``(event_type, payload, correlation_id)``
             and returns an awaitable bool.  Typically an
             ``AdapterProtocolEventPublisherKafka.publish`` method.
@@ -97,7 +96,7 @@ class ServiceLlmMetricsPublisher:
         >>> response = await service.handle(request)
     """
 
-    def __init__(
+    def __init__(  # stub-ok
         self,
         handler: ProtocolLlmHandler,
         publisher: Callable[..., Awaitable[bool]],
@@ -108,8 +107,6 @@ class ServiceLlmMetricsPublisher:
             handler: The wrapped LLM inference handler (any object satisfying
                 ``ProtocolLlmHandler``).  ``HandlerLlmOpenaiCompatible``
                 populates a ``last_call_metrics`` attribute after each call.
-                ``HandlerLlmOllama`` does not; metrics emission is silently
-                skipped when ``last_call_metrics`` is absent or ``None``.
             publisher: An async callable with the signature::
 
                     async def publish(

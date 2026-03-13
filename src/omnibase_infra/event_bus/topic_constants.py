@@ -535,7 +535,7 @@ TOPIC_INJECTION_LATENCY_BREAKDOWN: Final[str] = (
 TOPIC_LLM_CALL_COMPLETED: Final[str] = "onex.evt.omniintelligence.llm-call-completed.v1"
 """LLM call completed metrics event.
 
-Producer: HandlerLlmOpenaiCompatible, HandlerLlmOllama
+Producer: HandlerLlmOpenaiCompatible
 Consumer: omniintelligence cost aggregation pipeline
 Payload: ContractLlmCallMetrics (per-call token counts, cost, latency)
 """

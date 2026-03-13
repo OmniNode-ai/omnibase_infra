@@ -82,7 +82,7 @@ class TestMultiProviderRouting:
         """Router selects the first available provider."""
         router = AdapterModelRouter()
         await router.register_provider("vllm", _mock_provider("vllm"))
-        await router.register_provider("ollama", _mock_provider("ollama"))
+        await router.register_provider("openai", _mock_provider("openai"))
 
         request = ModelLlmAdapterRequest(
             prompt="Hello",
@@ -184,28 +184,28 @@ class TestToolProviderIntegration:
         """Tool provider's router includes all registered providers."""
         tool_provider = AdapterLlmToolProvider()
         await tool_provider.register_provider("vllm", _mock_provider("vllm"))
-        await tool_provider.register_provider("ollama", _mock_provider("ollama"))
+        await tool_provider.register_provider("openai", _mock_provider("openai"))
 
         router = await tool_provider.get_model_router()
         available = await router.get_available_providers()
         assert "vllm" in available
-        assert "ollama" in available
+        assert "openai" in available
 
     @pytest.mark.asyncio
     async def test_tool_provider_named_access(self) -> None:
         """Tool provider returns specific providers by name."""
         tool_provider = AdapterLlmToolProvider()
         openai_mock = _mock_provider("openai")
-        ollama_mock = _mock_provider("ollama")
+        claude_mock = _mock_provider("claude")
 
         await tool_provider.register_provider("openai", openai_mock)
-        await tool_provider.register_provider("ollama", ollama_mock)
+        await tool_provider.register_provider("claude", claude_mock)
 
         openai = await tool_provider.get_openai_provider()
         assert openai is openai_mock
 
-        ollama = await tool_provider.get_ollama_provider()
-        assert ollama is ollama_mock
+        claude = await tool_provider.get_claude_provider()
+        assert claude is claude_mock
 
     @pytest.mark.asyncio
     async def test_tool_provider_end_to_end_routing(self) -> None:

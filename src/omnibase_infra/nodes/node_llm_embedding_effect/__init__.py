@@ -9,7 +9,6 @@ vector embeddings via pluggable handler backends.
 
 Supported Operations:
     - ``embedding.openai_compatible``: OpenAI-compatible ``/v1/embeddings`` endpoint
-    - ``embedding.ollama``: Ollama ``/api/embed`` endpoint
 
 Node:
     NodeLlmEmbeddingEffect: Declarative effect node for embedding generation.
@@ -20,7 +19,6 @@ Models:
 
 Handlers:
     HandlerEmbeddingOpenaiCompatible: Handler for OpenAI-compatible endpoints.
-    HandlerEmbeddingOllama: Handler for Ollama endpoints.
 
 Registry:
     RegistryInfraLlmEmbeddingEffect: DI registry for node dependencies.
@@ -54,7 +52,6 @@ Related:
 import typing
 
 from .handlers import (
-    HandlerEmbeddingOllama,
     HandlerEmbeddingOpenaiCompatible,
 )
 from .models import (
@@ -71,7 +68,6 @@ from .registry import (
 ALLOWED_EMBEDDING_OPERATIONS: typing.Final[frozenset[str]] = frozenset(
     {
         "embedding.openai_compatible",
-        "embedding.ollama",
     }
 )
 
@@ -83,7 +79,6 @@ __all__ = [
     "ModelLlmEmbeddingResponse",
     # Handlers
     "HandlerEmbeddingOpenaiCompatible",
-    "HandlerEmbeddingOllama",
     # Registry
     "RegistryInfraLlmEmbeddingEffect",
     # Constants

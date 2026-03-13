@@ -68,7 +68,6 @@ class AdapterLlmToolProvider:
     # Canonical registration names expected by the typed getter methods.
     PROVIDER_NAME_GEMINI: str = "gemini"
     PROVIDER_NAME_OPENAI: str = "openai"
-    PROVIDER_NAME_OLLAMA: str = "ollama"
     PROVIDER_NAME_CLAUDE: str = "claude"
 
     def __init__(self) -> None:
@@ -138,20 +137,6 @@ class AdapterLlmToolProvider:
             KeyError: If no provider is registered under the expected name.
         """
         return self._get_provider(self.PROVIDER_NAME_OPENAI)
-
-    async def get_ollama_provider(self) -> ProtocolLLMProvider:
-        """Get Ollama LLM provider instance.
-
-        Expects the provider to be registered under
-        ``PROVIDER_NAME_OLLAMA`` (``"ollama"``).
-
-        Returns:
-            Configured Ollama provider.
-
-        Raises:
-            KeyError: If no provider is registered under the expected name.
-        """
-        return self._get_provider(self.PROVIDER_NAME_OLLAMA)
 
     async def get_claude_provider(self) -> ProtocolLLMProvider:
         """Get Claude LLM provider instance (Anthropic).

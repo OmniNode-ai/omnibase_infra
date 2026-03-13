@@ -6,7 +6,7 @@
 
 This module validates the registry functionality for the LLM inference
 effect node, including node creation with protocol validation, handler
-registration for OpenAI-compatible and Ollama backends, transport adapter
+registration for OpenAI-compatible backend, transport adapter
 creation, and static metadata methods.
 
 Test Coverage:
@@ -16,8 +16,6 @@ Test Coverage:
     - register_openai_compatible(): Registers handler and transport as separate instances
     - register_openai_compatible(): Registers MixinLlmHttpTransport with transport (not handler)
     - register_openai_compatible(): Warning logged when service_registry is None
-    - register_ollama(): Registers handler and MixinLlmHttpTransport (handler IS transport)
-    - register_ollama(): Warning logged when service_registry is None
     - _create_transport_adapter(): Returns MixinLlmHttpTransport with _execute_llm_http_call
     - Static methods: get_node_type, get_node_name, get_required_protocols,
       get_capabilities, get_supported_operations, get_backends
@@ -27,7 +25,6 @@ Related:
     - RegistryInfraLlmInferenceEffect: Registry implementation
     - NodeLlmInferenceEffect: Declarative effect node
     - HandlerLlmOpenaiCompatible: OpenAI-compatible handler
-    - HandlerLlmOllama: Ollama handler
 """
 
 from __future__ import annotations
@@ -143,7 +140,6 @@ class TestRegistryCreate:
 
         error_msg = str(exc_info.value)
         assert "register_openai_compatible()" in error_msg
-        assert "register_ollama()" in error_msg
 
     def test_create_preserves_exception_chain(
         self, mock_container_transport_missing: MagicMock
@@ -313,128 +309,6 @@ class TestRegisterOpenaiCompatible:
 
 
 # =============================================================================
-# register_ollama() Tests
-# =============================================================================
-
-
-class TestRegisterOllama:
-    """Tests for RegistryInfraLlmInferenceEffect.register_ollama()."""
-
-    @pytest.mark.asyncio
-    async def test_registers_handler_and_transport(
-        self, mock_container: MagicMock
-    ) -> None:
-        """register_ollama() calls register_instance twice."""
-        await RegistryInfraLlmInferenceEffect.register_ollama(mock_container)
-
-        assert mock_container.service_registry.register_instance.call_count == 2
-
-    @pytest.mark.asyncio
-    async def test_registers_handler_as_handler_interface(
-        self, mock_container: MagicMock
-    ) -> None:
-        """register_ollama() registers HandlerLlmOllama interface."""
-        from omnibase_infra.nodes.node_llm_inference_effect.handlers import (
-            HandlerLlmOllama,
-        )
-
-        await RegistryInfraLlmInferenceEffect.register_ollama(mock_container)
-
-        first_call = mock_container.service_registry.register_instance.call_args_list[0]
-        assert first_call.kwargs["interface"] is HandlerLlmOllama
-
-    @pytest.mark.asyncio
-    async def test_registers_handler_as_mixin_transport_interface(
-        self, mock_container: MagicMock
-    ) -> None:
-        """register_ollama() registers handler (not separate transport) as MixinLlmHttpTransport.
-
-        Unlike register_openai_compatible(), HandlerLlmOllama extends
-        MixinLlmHttpTransport directly, so the handler instance itself
-        is registered under the MixinLlmHttpTransport interface.
-        """
-        from omnibase_infra.mixins import MixinLlmHttpTransport
-
-        await RegistryInfraLlmInferenceEffect.register_ollama(mock_container)
-
-        calls = mock_container.service_registry.register_instance.call_args_list
-
-        handler_instance = calls[0].kwargs["instance"]
-        transport_instance = calls[1].kwargs["instance"]
-
-        # For Ollama, the handler IS the transport
-        assert handler_instance is transport_instance
-        assert second_interface_is_transport(calls)
-
-    @pytest.mark.asyncio
-    async def test_uses_global_scope(self, mock_container: MagicMock) -> None:
-        """register_ollama() uses GLOBAL injection scope for both registrations."""
-        from omnibase_core.enums import EnumInjectionScope
-
-        await RegistryInfraLlmInferenceEffect.register_ollama(mock_container)
-
-        for call in mock_container.service_registry.register_instance.call_args_list:
-            assert call.kwargs["scope"] is EnumInjectionScope.GLOBAL
-
-    @pytest.mark.asyncio
-    async def test_custom_target_name(self, mock_container: MagicMock) -> None:
-        """register_ollama() passes custom target_name to handler."""
-        await RegistryInfraLlmInferenceEffect.register_ollama(
-            mock_container, target_name="custom-ollama"
-        )
-
-        calls = mock_container.service_registry.register_instance.call_args_list
-        handler_instance = calls[0].kwargs["instance"]
-
-        assert handler_instance._llm_target_name == "custom-ollama"
-
-    @pytest.mark.asyncio
-    async def test_default_target_name(self, mock_container: MagicMock) -> None:
-        """register_ollama() uses 'ollama-inference' as default target."""
-        await RegistryInfraLlmInferenceEffect.register_ollama(mock_container)
-
-        calls = mock_container.service_registry.register_instance.call_args_list
-        handler_instance = calls[0].kwargs["instance"]
-
-        assert handler_instance._llm_target_name == "ollama-inference"
-
-    @pytest.mark.asyncio
-    async def test_none_registry_logs_warning_and_returns(
-        self,
-        mock_container_no_registry: MagicMock,
-        caplog: pytest.LogCaptureFixture,
-    ) -> None:
-        """register_ollama() logs warning when service_registry is None."""
-        with caplog.at_level(logging.WARNING):
-            await RegistryInfraLlmInferenceEffect.register_ollama(
-                mock_container_no_registry
-            )
-
-        assert any(
-            "service_registry is None" in record.message for record in caplog.records
-        )
-
-    @pytest.mark.asyncio
-    async def test_none_registry_does_not_raise(
-        self, mock_container_no_registry: MagicMock
-    ) -> None:
-        """register_ollama() returns without error when registry is None."""
-        # Should not raise
-        await RegistryInfraLlmInferenceEffect.register_ollama(
-            mock_container_no_registry
-        )
-
-
-def second_interface_is_transport(
-    call_args_list: list[MagicMock],
-) -> bool:
-    """Helper: verify second registration uses MixinLlmHttpTransport interface."""
-    from omnibase_infra.mixins import MixinLlmHttpTransport
-
-    return call_args_list[1].kwargs["interface"] is MixinLlmHttpTransport
-
-
-# =============================================================================
 # _create_transport_adapter() Tests
 # =============================================================================
 
@@ -509,7 +383,6 @@ class TestStaticMethods:
 
         assert isinstance(capabilities, list)
         assert "openai_compatible_inference" in capabilities
-        assert "ollama_inference" in capabilities
         assert "chat_completion" in capabilities
         assert "tool_calling" in capabilities
         assert "circuit_breaker_protection" in capabilities
@@ -520,7 +393,6 @@ class TestStaticMethods:
 
         assert isinstance(operations, list)
         assert "inference.openai_compatible" in operations
-        assert "inference.ollama" in operations
 
     def test_get_backends(self) -> None:
         """get_backends() returns expected backend list."""
@@ -528,13 +400,11 @@ class TestStaticMethods:
 
         assert isinstance(backends, list)
         assert "openai_compatible" in backends
-        assert "ollama" in backends
 
 
 __all__: list[str] = [
     "TestRegistryCreate",
     "TestRegisterOpenaiCompatible",
-    "TestRegisterOllama",
     "TestCreateTransportAdapter",
     "TestStaticMethods",
 ]
