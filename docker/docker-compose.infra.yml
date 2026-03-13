@@ -179,6 +179,8 @@ x-runtime-env: &runtime-env
   # which doesn't exist inside the container. The pip-installed package has its
   # nodes at the site-packages path below.
   OMNICLAUDE_CONTRACTS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/nodes
+  # OMN-4622: Skills root for topic provisioning (flat-list topics.yaml manifests)
+  OMNICLAUDE_SKILLS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/plugins/onex/skills
   # OMN-3894: Enable event-based agent routing in containers. App defaults to false;
   # compose ensures containers always enable it via :-true default.
   USE_EVENT_ROUTING: ${USE_EVENT_ROUTING:-true}

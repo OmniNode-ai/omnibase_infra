@@ -12,11 +12,10 @@
 from enum import Enum
 
 
-class EnumGithubTopic(str, Enum):
-    """Kafka topic enum for producer: github.
+class EnumRuntimeTopic(str, Enum):
+    """Kafka topic enum for producer: runtime.
 
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-    EVT_PR_STATUS_V1 = "onex.evt.github.pr-status.v1"  # onex.evt.github.pr-status.v1
-    EVT_PR_WEBHOOK_V1 = "onex.evt.github.pr-webhook.v1"  # onex.evt.github.pr-webhook.v1
+    EVT_TICK_V1 = "onex.evt.runtime.tick.v1"  # onex.evt.runtime.tick.v1

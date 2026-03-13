@@ -78,7 +78,6 @@ logger = logging.getLogger(__name__)
 CANONICAL_EVENT_TOPICS: Final[tuple[str, ...]] = (
     # Platform topics (runtime)
     "onex.evt.platform.node-introspection.v1",
-    "onex.evt.platform.registration-completed.v1",
     # Intelligence topics
     TOPIC_SESSION_OUTCOME_CANONICAL,
     TOPIC_LLM_CALL_COMPLETED,

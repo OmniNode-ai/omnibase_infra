@@ -252,3 +252,102 @@ def test_extract_all_with_skill_manifests_root_combines_sources(
     topics_no_skills = {e.topic for e in entries_no_skills}
     assert "onex.evt.platform.example-event.v1" in topics_no_skills
     assert "onex.cmd.omniclaude.epic-team.v1" not in topics_no_skills
+
+
+# ---------------------------------------------------------------------------
+# Test 5: extract_all with plural skill_manifests_roots (OMN-4622)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_extract_all_with_plural_skill_manifests_roots(
+    tmp_path: Path,
+    skills_root: Path,
+) -> None:
+    """extract_all(skill_manifests_roots=[...]) scans multiple manifest roots."""
+    # Create contracts root
+    contracts_root = tmp_path / "nodes"
+    contracts_root.mkdir()
+    node_dir = contracts_root / "node_test"
+    node_dir.mkdir()
+    (node_dir / "contract.yaml").write_text(
+        textwrap.dedent(
+            """\
+            event_bus:
+              publish_topics:
+                - onex.evt.platform.contract-topic.v1
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    # Create a second manifest root (e.g., infra CLI relays)
+    cli_root = tmp_path / "cli"
+    cli_root.mkdir()
+    cli_dir = cli_root / "cli"
+    cli_dir.mkdir()
+    (cli_dir / "topics.yaml").write_text(
+        "topics:\n  - onex.evt.git.hook.v1\n  - onex.evt.linear.snapshot.v1\n",
+        encoding="utf-8",
+    )
+
+    # Create a third manifest root (e.g., infra services)
+    svc_root = tmp_path / "services"
+    svc_root.mkdir()
+    svc_dir = svc_root / "services"
+    svc_dir.mkdir()
+    (svc_dir / "topics.yaml").write_text(
+        "topics:\n  - onex.evt.omnibase-infra.llm-endpoint-health.v1\n",
+        encoding="utf-8",
+    )
+
+    extractor = ContractTopicExtractor()
+    entries = extractor.extract_all(
+        contracts_root=contracts_root,
+        skill_manifests_roots=[skills_root, cli_root, svc_root],
+    )
+    topics = {e.topic for e in entries}
+
+    # Contract topic
+    assert "onex.evt.platform.contract-topic.v1" in topics
+    # Skills root topics
+    assert "onex.cmd.omniclaude.epic-team.v1" in topics
+    # CLI relay topics
+    assert "onex.evt.git.hook.v1" in topics
+    assert "onex.evt.linear.snapshot.v1" in topics
+    # Services topic
+    assert "onex.evt.omnibase-infra.llm-endpoint-health.v1" in topics
+
+
+@pytest.mark.unit
+def test_extract_all_singular_and_plural_roots_combined(
+    tmp_path: Path,
+    skills_root: Path,
+) -> None:
+    """When both skill_manifests_root and skill_manifests_roots are set, they combine."""
+    contracts_root = tmp_path / "nodes"
+    contracts_root.mkdir()
+
+    # singular root: skills_root (from fixture)
+    # plural root: a separate CLI manifest
+    cli_root = tmp_path / "cli"
+    cli_root.mkdir()
+    cli_dir = cli_root / "relay"
+    cli_dir.mkdir()
+    (cli_dir / "topics.yaml").write_text(
+        "topics:\n  - onex.evt.git.hook.v1\n",
+        encoding="utf-8",
+    )
+
+    extractor = ContractTopicExtractor()
+    entries = extractor.extract_all(
+        contracts_root=contracts_root,
+        skill_manifests_root=skills_root,
+        skill_manifests_roots=[cli_root],
+    )
+    topics = {e.topic for e in entries}
+
+    # From singular root
+    assert "onex.cmd.omniclaude.epic-team.v1" in topics
+    # From plural root
+    assert "onex.evt.git.hook.v1" in topics
