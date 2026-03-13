@@ -1,3 +1,24 @@
+## v0.19.0 (2026-03-13)
+
+### Features
+- feat(ci): add placeholder topic denylist to prevent stub topic names [OMN-4805] (#802)
+- feat(deploy): k8s-pod-readiness-check, verify-omnidash-health, VirtioFS gate, fatal health check [OMN-4674–OMN-4677 OMN-4680 OMN-4681] (#789)
+- feat(deploy): add preflight-check.sh with env var and bus tunnel gates (#788)
+
+### Bug Fixes
+- fix(monitoring): alert on terminal-state heartbeat warning in monitor_logs.py (OMN-4826) (#801)
+- fix(types): modernize pre-PEP604 Union type annotation to X | Y syntax [OMN-4814] (#798)
+- fix(ci): extend kafka-no-hardcoded-fallback to catch private-IP endpoints [OMN-4802] (#796)
+- fix(docker): remove overlayfs-incompatible nodes bind mount [OMN-4670] (#787)
+- fix(migrations): backfill NULL checksums + enforce NOT NULL on schema_migrations [OMN-4701] (#790)
+- fix(migrations): create role_omniweb with DML grants for omniweb tables [OMN-4700] (#791)
+
+### Other Changes
+- test(registration): failing tests for decide_heartbeat terminal-state guard (OMN-4819) (#794)
+- chore(version): add version source sync check script [OMN-4796] (#792)
+- chore(topics): add placeholder topic denylist script [OMN-4797] (#793)
+- test(ci): add x-runtime-env anchor regression tests [OMN-4800] (#795)
+
 ## v0.18.0 (2026-03-12)
 
 ### Features
