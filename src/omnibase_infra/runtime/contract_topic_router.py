@@ -43,6 +43,8 @@ def build_topic_router_from_contract(
         e.g. ``{"ModelNodeRegistrationAccepted": "onex.evt.platform.node-registration-accepted.v1"}``
     """
     router: dict[str, str] = {}
+    if not isinstance(contract_data, dict):
+        return router
     published_events = contract_data.get("published_events", [])
     if not isinstance(published_events, list):
         return router
