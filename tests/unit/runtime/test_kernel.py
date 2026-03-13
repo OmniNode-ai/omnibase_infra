@@ -1692,8 +1692,8 @@ class TestEventBusTypeHonored:
         content = kernel_path.read_text(encoding="utf-8")
         # The old comment said event_bus was PARTIAL/only environment used
         assert "PARTIAL - only environment field used" not in content
-        # The defense-in-depth assertion should be present
-        assert "is_production_safe" in content
+        # The defense-in-depth assertion should be present as executable code
+        assert "if not config.event_bus.type.is_production_safe:" in content
 
     def test_model_runtime_config_event_bus_active(self) -> None:
         """model_runtime_config.py should mark event_bus as ACTIVE, not PARTIAL."""
@@ -1706,5 +1706,11 @@ class TestEventBusTypeHonored:
             / "model_runtime_config.py"
         )
         content = config_path.read_text(encoding="utf-8")
-        assert "event_bus: Event bus configuration [ACTIVE" in content
-        assert "PARTIAL" not in content.split("event_bus")[1].split("\n")[0]
+        # Find the specific docstring line for event_bus
+        event_bus_line = next(
+            line
+            for line in content.splitlines()
+            if "event_bus: Event bus configuration" in line
+        )
+        assert "[ACTIVE" in event_bus_line
+        assert "PARTIAL" not in event_bus_line
