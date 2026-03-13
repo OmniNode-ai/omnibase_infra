@@ -5865,7 +5865,7 @@ class RuntimeHostProcess:
         return ModelDuplicateResponse(
             message_id=message_id,
             correlation_id=correlation_id,
-        ).model_dump()
+        ).model_dump(mode="json")
 
     async def _cleanup_idempotency_store(self) -> None:
         """Cleanup idempotency store during shutdown.

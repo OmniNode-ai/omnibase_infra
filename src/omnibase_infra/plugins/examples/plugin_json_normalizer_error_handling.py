@@ -115,7 +115,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
                 error_code=EnumCoreErrorCode.INTERNAL_ERROR,
                 correlation_id=correlation_id,
                 plugin_name=self.__class__.__name__,
-                input_keys=list(input_data.model_dump().keys()),
+                input_keys=list(input_data.model_dump().keys()),  # noqa: model-dump-bare
             ) from e
 
         except Exception as e:
@@ -125,7 +125,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
                 error_code=EnumCoreErrorCode.INTERNAL_ERROR,
                 correlation_id=correlation_id,
                 plugin_name=self.__class__.__name__,
-                input_keys=list(input_data.model_dump().keys()),
+                input_keys=list(input_data.model_dump().keys()),  # noqa: model-dump-bare
                 exception_type=type(e).__name__,
             ) from e
 

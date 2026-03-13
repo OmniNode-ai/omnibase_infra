@@ -159,7 +159,7 @@ class IntentEffectPostgresUpsert:
             # model_dump() returns explicit fields + the ``data`` dict.
             # Merge ``data`` into top-level so the projector receives a flat
             # column dict matching the database schema.
-            record_dict = record.model_dump()
+            record_dict = record.model_dump(mode="json")
             data_fields = record_dict.pop("data", {})
             record_dict.update(data_fields)
 
