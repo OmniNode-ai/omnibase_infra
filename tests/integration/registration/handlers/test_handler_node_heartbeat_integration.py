@@ -196,12 +196,21 @@ def make_sequence(
 async def seed_projection(
     projector: ProjectorShell,
     projection: ModelRegistrationProjection,
+    reader: ProjectionReaderRegistration | None = None,
 ) -> None:
     """Seed the database with a projection for testing.
+
+    After upserting, optionally verifies the projection is readable via the
+    provided reader. This guards against silent write failures or connection
+    pool visibility issues that can cause flaky assertion failures downstream
+    (OMN-4879).
 
     Args:
         projector: ProjectorShell instance for persistence.
         projection: Projection to seed.
+        reader: Optional reader to verify seed visibility. When provided,
+            the function reads back the seeded projection and asserts it
+            matches the expected state.
     """
     # Convert projection to values dict for upsert_partial
     values: dict[str, object] = {
@@ -235,6 +244,23 @@ async def seed_projection(
         conflict_columns=["entity_id", "domain"],
     )
     assert result is True, "Failed to seed projection"
+
+    # OMN-4879: Verify seed visibility through reader to catch pool/connection
+    # issues early with a clear error message, rather than failing downstream
+    # with an opaque "len(output.intents) == 0" assertion.
+    if reader is not None:
+        readback = await reader.get_entity_state(projection.entity_id)
+        assert readback is not None, (
+            f"Seed verification failed: projection for entity_id="
+            f"{projection.entity_id} (state={projection.current_state.value}) "
+            f"was upserted but reader returned None. This indicates a "
+            f"connection pool visibility issue."
+        )
+        assert readback.current_state == projection.current_state, (
+            f"Seed verification failed: seeded state "
+            f"{projection.current_state.value} but reader returned "
+            f"{readback.current_state.value}"
+        )
 
 
 # =============================================================================
@@ -501,6 +527,9 @@ class TestHandlerNodeHeartbeatNonActiveNode:
     ONEX Contract Compliance:
         Handler returns result=None. Success verified via DB state.
         Warning is logged for non-ACTIVE nodes but heartbeat is still processed.
+
+    OMN-4879: Stabilized by adding seed read-back verification and improved
+    assertion messages to diagnose flaky failures in CI parallel execution.
     """
 
     @pytest.mark.parametrize(
@@ -525,10 +554,13 @@ class TestHandlerNodeHeartbeatNonActiveNode:
         Per handler design, heartbeats from non-ACTIVE nodes are processed
         (to update tracking) but a warning is logged. This can happen during
         state transitions or race conditions.
+
+        OMN-4879: Uses seed read-back verification to catch connection pool
+        visibility issues that previously caused flaky 0-intent failures.
         """
         node_id = uuid4()
         projection = make_projection(entity_id=node_id, state=state)
-        await seed_projection(projector, projection)
+        await seed_projection(projector, projection, reader=reader)
 
         event = make_heartbeat_event(node_id)
         envelope = create_envelope(event)
@@ -537,8 +569,12 @@ class TestHandlerNodeHeartbeatNonActiveNode:
         # Verify output (ORCHESTRATOR returns result=None)
         assert output.result is None
 
-        # Verify intent was emitted with correct update payload
-        assert len(output.intents) == 1
+        # Verify intent was emitted with correct update payload.
+        # OMN-4879: Added state context to assertion message for CI diagnostics.
+        assert len(output.intents) == 1, (
+            f"Expected 1 intent for state={state.value}, got {len(output.intents)}. "
+            f"node_id={node_id}, handler_id={output.handler_id}"
+        )
         payload = output.intents[0].payload
         assert isinstance(payload, ModelPayloadPostgresUpdateRegistration)
         assert payload.entity_id == node_id
