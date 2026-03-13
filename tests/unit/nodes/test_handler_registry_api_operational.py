@@ -7,7 +7,7 @@
 Tests:
     - test_get_health_returns_component_status_fields
     - test_get_widget_mapping_parses_yaml
-    - test_list_instances_returns_empty_on_consul_connection_error
+    - test_list_instances_returns_empty
     - test_get_discovery_aggregates_three_handlers
 
 Ticket: OMN-4482
@@ -122,30 +122,12 @@ class TestHandlerRegistryApiListInstances:
     """Tests for HandlerRegistryApiListInstances."""
 
     @pytest.mark.asyncio
-    async def test_list_instances_returns_empty_on_consul_connection_error(
-        self,
-    ) -> None:
-        """list_instances must return empty list when Consul raises any exception."""
-        handler = HandlerRegistryApiListInstances(
-            consul_host="localhost", consul_port=9999
-        )
+    async def test_list_instances_returns_empty(self) -> None:
+        """list_instances must return empty list (Consul decommissioned, OMN-4857)."""
+        handler = HandlerRegistryApiListInstances()
         correlation_id = uuid4()
 
-        # Patch httpx to simulate connection error
-        import httpx
-
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.get = AsyncMock(
-                side_effect=httpx.ConnectError("Connection refused")
-            )
-            mock_client_cls.return_value = mock_client
-
-            result = await handler.handle(
-                request=object(), correlation_id=correlation_id
-            )
+        result = await handler.handle(request=object(), correlation_id=correlation_id)
 
         assert isinstance(result, ModelRegistryApiResponse)
         assert result.operation == "list_instances"
