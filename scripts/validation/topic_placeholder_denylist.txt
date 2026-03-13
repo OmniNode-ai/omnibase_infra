@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# topic_placeholder_denylist.txt — forbidden placeholder topic name patterns (OMN-4805)
+#
+# One pattern per line. Lines beginning with '#' are comments and are ignored.
+# Patterns are matched as literal substrings against topic strings found in
+# production source files (src/). Test files (tests/) are excluded.
+#
+# Used by: scripts/validation/lint_topic_names.py --check-placeholders
+#
+# When adding a new pattern:
+#   1. Confirm the pattern is not present in src/ (script must pass on main)
+#   2. Add a comment explaining why it is forbidden
+#   3. Open a PR so CI enforces it going forward
+
+# Generic placeholder names that indicate a topic has not been properly named
+example-topic
+example_topic
+your-topic-here
+your_topic_here
+placeholder-topic
+placeholder_topic
+
+# TODO/FIXME markers used as temporary topic names
+TODO-topic
+TODO_topic
+FIXME-topic
+FIXME_topic
+
+# Uppercase placeholder constants (often copy-paste stubs)
+PLACEHOLDER_TOPIC
+MY_TOPIC
+SAMPLE_TOPIC
+TEST_TOPIC_NAME
+YOUR_TOPIC_NAME

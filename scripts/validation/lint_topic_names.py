@@ -4,7 +4,7 @@
 
 # Copyright (c) 2026 OmniNode Team
 #
-# Topic Naming Linter (OMN-3188, OMN-3259).
+# Topic Naming Linter (OMN-3188, OMN-3259, OMN-4805).
 #
 # Validates that all topic strings in contract.yaml files AND Python source
 # files follow the canonical ONEX naming convention:
@@ -22,12 +22,20 @@
 #   onex.badkind.platform.foo.v1                       ❌ invalid kind
 #   onex.evt.platform.foo                              ❌ missing version suffix
 #
+# --check-placeholders mode (OMN-4805):
+#   Scans src/ for literal substrings matching entries in
+#   scripts/validation/topic_placeholder_denylist.txt.
+#   Test files (tests/) are excluded.
+#   Exits 1 if any placeholder topic name is found in production source.
+#
 # Usage:
 #   uv run python scripts/validation/lint_topic_names.py --topic TOPIC
 #   uv run python scripts/validation/lint_topic_names.py --scan-contracts ROOT
 #   uv run python scripts/validation/lint_topic_names.py --scan-python ROOT
 #   uv run python scripts/validation/lint_topic_names.py \
 #       --scan-contracts ROOT_YAML --scan-python ROOT_PY
+#   uv run python scripts/validation/lint_topic_names.py \
+#       --check-placeholders --scan-dir src/
 #
 # Exit codes:
 #   0  all topics valid (or no topics found)
@@ -309,6 +317,84 @@ def scan_python(python_root: Path) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Placeholder denylist scanning (OMN-4805)
+# ---------------------------------------------------------------------------
+
+_DEFAULT_DENYLIST_PATH = Path(__file__).parent / "topic_placeholder_denylist.txt"
+
+# Default directory to scan when --check-placeholders is used without --scan-dir
+_DEFAULT_PLACEHOLDER_SCAN_DIR = Path(__file__).parent.parent.parent / "src"
+
+# Subdirectory patterns to exclude from placeholder scanning (test files)
+_PLACEHOLDER_EXCLUDE_DIRS: tuple[str, ...] = ("tests",)
+
+
+def _load_placeholder_denylist(denylist_path: Path) -> list[str]:
+    """
+    Load placeholder topic patterns from *denylist_path*.
+
+    Lines beginning with '#' and empty lines are ignored.
+    Returns a list of literal pattern strings to deny.
+    """
+    if not denylist_path.exists():
+        return []
+    patterns: list[str] = []
+    for line in denylist_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            patterns.append(line)
+    return patterns
+
+
+def _is_excluded_path(path: Path, exclude_dirs: tuple[str, ...]) -> bool:
+    """Return True if *path* is under any of the *exclude_dirs* directories."""
+    parts = path.parts
+    return any(excluded in parts for excluded in exclude_dirs)
+
+
+def scan_placeholders(
+    scan_dir: Path,
+    denylist_path: Path = _DEFAULT_DENYLIST_PATH,
+    exclude_dirs: tuple[str, ...] = _PLACEHOLDER_EXCLUDE_DIRS,
+) -> list[str]:
+    """
+    Scan *scan_dir* recursively for Python files containing placeholder topic
+    names from *denylist_path*.
+
+    Files under any directory listed in *exclude_dirs* are skipped.
+
+    Returns a list of violation strings in ``file:lineno: pattern`` format.
+    Empty list means no violations.
+    """
+    patterns = _load_placeholder_denylist(denylist_path)
+    if not patterns:
+        return []
+
+    violations: list[str] = []
+
+    if scan_dir.is_file():
+        py_files: list[Path] = [scan_dir]
+    else:
+        py_files = sorted(scan_dir.rglob("*.py"))
+
+    for py_path in py_files:
+        if _is_excluded_path(py_path, exclude_dirs):
+            continue
+        try:
+            lines = py_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for lineno, line in enumerate(lines, start=1):
+            for pattern in patterns:
+                if pattern in line:
+                    violations.append(
+                        f"{py_path}:{lineno}: placeholder topic pattern {pattern!r}"
+                    )
+
+    return violations
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -360,6 +446,35 @@ def _build_parser() -> argparse.ArgumentParser:
             "string literals (strings starting with 'onex.')"
         ),
     )
+    mode_group.add_argument(
+        "--check-placeholders",
+        action="store_true",
+        help=(
+            "Scan --scan-dir (default: src/) for placeholder topic names listed in "
+            "scripts/validation/topic_placeholder_denylist.txt. "
+            "Test files are excluded. Exits 1 if any placeholder is found. (OMN-4805)"
+        ),
+    )
+    parser.add_argument(
+        "--scan-dir",
+        metavar="DIR",
+        type=Path,
+        default=None,
+        help=(
+            "Directory to scan when --check-placeholders is used "
+            "(default: src/ relative to repo root)"
+        ),
+    )
+    parser.add_argument(
+        "--denylist",
+        metavar="FILE",
+        type=Path,
+        default=None,
+        help=(
+            "Path to placeholder denylist file for --check-placeholders mode "
+            "(default: scripts/validation/topic_placeholder_denylist.txt)"
+        ),
+    )
     parser.add_argument(
         "--baseline",
         metavar="FILE",
@@ -397,16 +512,53 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"ERROR: {violation}", file=sys.stderr)
             return 1
 
+    # --check-placeholders mode (OMN-4805)
+    if args.check_placeholders:
+        scan_dir: Path = (
+            args.scan_dir
+            if args.scan_dir is not None
+            else _DEFAULT_PLACEHOLDER_SCAN_DIR
+        )
+        if not scan_dir.exists():
+            print(f"ERROR: scan directory does not exist: {scan_dir}", file=sys.stderr)
+            return 2
+        denylist_path: Path = (
+            args.denylist if args.denylist is not None else _DEFAULT_DENYLIST_PATH
+        )
+        if not denylist_path.exists():
+            print(
+                f"ERROR: denylist file does not exist: {denylist_path}", file=sys.stderr
+            )
+            return 2
+        placeholder_violations = scan_placeholders(
+            scan_dir, denylist_path=denylist_path
+        )
+        if not placeholder_violations:
+            if not args.quiet:
+                print(f"OK: no placeholder topic names found in {scan_dir}")
+            return 0
+        for violation in placeholder_violations:
+            print(f"ERROR: {violation}", file=sys.stderr)
+        print(
+            f"\nPlaceholder topic check failed: {len(placeholder_violations)} violation(s) found.",
+            file=sys.stderr,
+        )
+        print(
+            "Replace placeholder topic names with real names from the topic registry.",
+            file=sys.stderr,
+        )
+        return 1
+
     # Resolve baseline path (used by both scan modes)
     baseline: frozenset[str] = frozenset()
     if not args.no_baseline:
-        baseline_path: Path
+        baseline_path2: Path
         if args.baseline is not None:
-            baseline_path = args.baseline
+            baseline_path2 = args.baseline
         else:
             # Default: look for baseline relative to this script's directory
-            baseline_path = Path(__file__).parent / "topic_naming_baseline.txt"
-        baseline = _load_baseline(baseline_path)
+            baseline_path2 = Path(__file__).parent / "topic_naming_baseline.txt"
+        baseline = _load_baseline(baseline_path2)
 
     if args.scan_contracts is not None:
         root: Path = args.scan_contracts
