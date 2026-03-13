@@ -317,8 +317,11 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
 
             # Auto-ACK (Path B, OMN-3444): direct-publish ack when the reducer transitions
             # to AWAITING_ACK. Gate: ModelNodeRegistrationAccepted in output events.
-            # Published directly to _ACK_TOPIC (NOT in output_events — framework routes
-            # those to the wrong topic via single fixed output_topic).
+            # Published directly to _ACK_TOPIC as a command (not via output_events).
+            # This is intentional: ACK commands are not in published_events (they are commands,
+            # not events), so they are not routed by the topic_router. Direct publish is correct here.
+            # NOTE: The "wrong topic" routing bug (OMN-4880) has been fixed — output_events are
+            # now routed per-event-type via DispatchResultApplier.topic_router.
             if (
                 _auto_ack_enabled()
                 and self._event_bus is not None
