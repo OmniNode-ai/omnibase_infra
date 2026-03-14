@@ -1,3 +1,32 @@
+## v0.20.0 (2026-03-13)
+
+### Features
+- feat(scripts): rehome cross-repo governance scripts from omni_home [OMN-4922] (#820)
+- feat(runtime): add build_topic_router_from_contract() utility for per-event topic routing (#811)
+- feat(runtime): add topic_router to DispatchResultApplier for per-event-type topic routing (#810)
+
+### Bug Fixes
+- fix(infra): expose Redpanda Admin API port 9644 in docker-compose [OMN-4959] (#819)
+- fix(docker): bump Dockerfile.runtime plugin pins to latest releases (#818)
+- fix(registration): wire topic_router into DispatchResultApplier from contract published_events (#812)
+- fix(registration): short-circuit handler_node_heartbeat for terminal states (OMN-4824) (#799)
+- fix(health): use mode="json" in readiness model_dump to convert tuples to lists (OMN-4910) (#815)
+- fix(cleanup): purge dead endpoints and add skip markers (#805)
+- fix(registration): add terminal-state guard to decide_heartbeat (OMN-4822) (#797)
+- fix(runtime): eradicate inmemory default from ModelEventBusConfig and kernel (#809)
+- fix(consul): remove Consul handler and add recurrence-prevention [OMN-4857] (#804)
+- feat(cleanup): remove Ollama handlers, registries, and adapter (OMN-4849 Phase 2a) (#808)
+
+### Other Changes
+- docs(linear-relay): add activation guide for Linear snapshot automation [OMN-4973] (#823)
+- docs(pr-poller): add activation guide for GitHub PR poller effect node [OMN-4972] (#822)
+- docs(validation): add activation guide for validation orchestrator [OMN-4971] (#824)
+- docs(registration): update stale workaround comment now that topic routing is fixed (#814)
+- test(registration): add regression test asserting ModelNodeRegistrationAccepted routes to correct topic (#813)
+- ci: add published_events consistency checker to pre-commit and CI (#816)
+- ci(standards): add version pin compliance check [OMN-4807] (#803)
+- test(registration): integration test for liveness expiry -> heartbeat race (OMN-4825) (#800)
+
 ## v0.19.0 (2026-03-13)
 
 ### Features
