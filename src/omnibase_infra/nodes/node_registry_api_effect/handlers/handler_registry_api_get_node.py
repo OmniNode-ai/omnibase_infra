@@ -90,7 +90,7 @@ class HandlerRegistryApiGetNode:
             operation=req.operation,
             correlation_id=correlation_id,
             success=node is not None,
-            data={"result": node.model_dump() if node is not None else None},
+            data={"result": node.model_dump(mode="json") if node is not None else None},
             warnings=[w.message for w in warnings],
             error="Node not found" if node is None else None,
         )

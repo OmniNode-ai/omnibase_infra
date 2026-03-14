@@ -1256,7 +1256,7 @@ class ProjectorShell(MixinProjectorNotificationPublishing, MixinProjectorSqlOper
 
             # Fall back to Pydantic model_dump for nested access
             if isinstance(current, BaseModel):
-                dumped = current.model_dump()
+                dumped = current.model_dump()  # noqa: model-dump-bare
                 current = dumped.get(part)
                 continue
 

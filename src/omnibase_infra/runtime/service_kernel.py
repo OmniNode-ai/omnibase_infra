@@ -1595,7 +1595,7 @@ async def bootstrap() -> int:
         # - When service_name == node_name, the format is intentionally redundant but
         #   maintains consistency with multi-node deployments where they would differ
         runtime_create_start_time = time.time()
-        runtime_config_dict = cast("dict[str, object]", config.model_dump())
+        runtime_config_dict = cast("dict[str, object]", config.model_dump(mode="json"))
         if config.name:
             runtime_config_dict["service_name"] = config.name
             runtime_config_dict["node_name"] = config.name

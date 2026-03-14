@@ -837,7 +837,7 @@ class ModelKafkaEventBusConfig(BaseModel):
 
         if overrides:
             # Exclude computed field to avoid validation error
-            current_data = self.model_dump(exclude={"acks_aiokafka"})
+            current_data = self.model_dump(exclude={"acks_aiokafka"})  # noqa: model-dump-bare
             current_data.update(overrides)
             return ModelKafkaEventBusConfig(**current_data)
 
