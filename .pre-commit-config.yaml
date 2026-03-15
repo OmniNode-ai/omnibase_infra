@@ -235,15 +235,14 @@ repos:
         files: ^src/omnibase_infra/nodes/reducers/
         pass_filenames: false
         stages: [pre-commit]
-      # Markdown link validation (PR #172)
-      # Ensures all internal markdown links point to existing files and anchors
-      # External links are skipped by default (configurable in .markdown-link-check.json)
-      - id: onex-validate-markdown-links
-        name: ONEX Markdown Link Validation
-        entry: uv run python scripts/validate.py markdown_links
+      # Consolidated markdown link validation (OMN-5084)
+      # Uses onex-validate-links CLI entry point from omnibase_core
+      - id: onex-validate-links
+        name: Validate markdown links
+        entry: uv run onex-validate-links --verbose
         language: system
         types: [markdown]
-        pass_filenames: true
+        pass_filenames: false
         stages: [pre-commit]
       # DB quality gate - forbid domain-specific DB adapters (OMN-1785)
       # Detects forbidden patterns: adapter classes, direct SQL, direct connections

@@ -828,38 +828,25 @@ def run_markdown_links(verbose: bool = False, files: list[str] | None = None) ->
 
     Configuration is loaded from .markdown-link-check.json in the repository root.
 
+    Uses the consolidated validator from omnibase_core (OMN-5084).
+
     Args:
         verbose: Enable verbose output
         files: Optional list of specific files to validate (for pre-commit).
                If provided, only these files are validated.
                If None, validates the entire repository.
     """
-    import importlib.util
-
     try:
-        # Load the validator module directly to avoid import path issues
-        validator_path = (
-            Path(__file__).parent / "validation" / "validate_markdown_links.py"
+        from omnibase_core.scripts.validate_markdown_links import (
+            MarkdownLinkConfig,
+            ValidationResult,
+            generate_report,
+            validate_markdown_links,
         )
-
-        if not validator_path.exists():
-            print(f"Markdown Links: SKIP (validator not found: {validator_path})")
-            return True
-
-        spec = importlib.util.spec_from_file_location(
-            "validate_markdown_links", validator_path
-        )
-        if spec is None or spec.loader is None:
-            print("Markdown Links: SKIP (could not load validator module)")
-            return True
-
-        module = importlib.util.module_from_spec(spec)
-        sys.modules["validate_markdown_links"] = module
-        spec.loader.exec_module(module)
 
         repo_path = Path(__file__).parent.parent
         config_path = repo_path / ".markdown-link-check.json"
-        config = module.MarkdownLinkConfig.from_file(config_path)
+        config = MarkdownLinkConfig.from_file(config_path)
 
         # If specific files are provided, validate only those
         if files:
@@ -883,7 +870,7 @@ def run_markdown_links(verbose: bool = False, files: list[str] | None = None) ->
                         print(f"  Warning: File not found: {file_path}")
                     continue
 
-                result = module.validate_markdown_links(
+                result = validate_markdown_links(
                     repo_root=repo_path,
                     config=config,
                     verbose=verbose,
@@ -896,7 +883,7 @@ def run_markdown_links(verbose: bool = False, files: list[str] | None = None) ->
                 total_links_skipped += result.links_skipped
 
             # Create aggregated result
-            aggregated_result = module.ValidationResult(
+            aggregated_result = ValidationResult(
                 broken_links=total_broken_links,
                 files_checked=total_files_checked,
                 links_checked=total_links_checked,
@@ -904,7 +891,7 @@ def run_markdown_links(verbose: bool = False, files: list[str] | None = None) ->
             )
 
             if verbose or not aggregated_result.is_valid:
-                report = module.generate_report(aggregated_result, repo_path)
+                report = generate_report(aggregated_result, repo_path)
                 print(report)
             else:
                 print(
@@ -917,14 +904,14 @@ def run_markdown_links(verbose: bool = False, files: list[str] | None = None) ->
 
         else:
             # Validate entire repository (original behavior)
-            result = module.validate_markdown_links(
+            result = validate_markdown_links(
                 repo_root=repo_path,
                 config=config,
                 verbose=verbose,
             )
 
             if verbose or not result.is_valid:
-                report = module.generate_report(result, repo_path)
+                report = generate_report(result, repo_path)
                 print(report)
             else:
                 print(
