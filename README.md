@@ -1,164 +1,45 @@
-# ONEX Infrastructure
+# omnibase_infra
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+Production infrastructure services for the ONEX execution layer.
+
+[![CI](https://github.com/OmniNode-ai/omnibase_infra/actions/workflows/test.yml/badge.svg)](https://github.com/OmniNode-ai/omnibase_infra/actions/workflows/test.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
-[![Type checked: mypy](https://img.shields.io/badge/type%20checked-mypy-blue.svg)](https://mypy.readthedocs.io/)
-[![Pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
-[![Framework: Infrastructure](https://img.shields.io/badge/framework-infrastructure-green.svg)](https://github.com/OmniNode-ai/omnibase_infra)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Production infrastructure services for the ONEX execution layer.** Handlers, adapters, and runtime services for PostgreSQL, Kafka, Consul, Vault, and Redis.
-
-## What is This?
-
-This repository provides the **infrastructure layer** for ONEX-based systems. While [omnibase_core](https://github.com/OmniNode-ai/omnibase_core) defines the execution protocol and node archetypes, this package provides:
-
-- **Handlers** for external services (database, HTTP, messaging)
-- **Adapters** wrapping infrastructure clients
-- **Event bus** abstractions for Kafka/Redpanda
-- **Runtime services** deployable via Docker
-
-Built on `omnibase-core` ^0.8.0 and `omnibase-spi` ^0.5.0.
-
-## Install Model
-
-`omnibase_infra` serves two distinct purposes depending on how you use it:
-
-### As a library / runtime (pip install)
+## Install
 
 ```bash
-pip install omnibase-infra
-# or
 uv add omnibase-infra
 ```
 
-This gives you the Python library and bundled runtime CLIs (`onex-runtime`, `omni-infra`,
-`onex-status`, etc.). No clone required for library use or running the runtime.
+## Minimal Example
 
-### For operational bootstrapping (clone required)
+```python
+from omnibase_infra.handlers.handler_postgres import HandlerPostgres
+from omnibase_infra.runtime.runtime_host import RuntimeHostProcess
 
-The **operational scripts** in `scripts/` are not bundled in the pip package. A local
-clone is required to run them:
-
-```bash
-git clone https://github.com/OmniNode-ai/omnibase_infra.git
-cd omnibase_infra
-uv sync
+# Contract-driven handler registration
+process = RuntimeHostProcess(
+    contract_paths=["src/omnibase_infra/nodes/my_node/contract.yaml"],
+)
+await process.start()
 ```
 
-**Scripts that require a clone:**
-- `scripts/seed-infisical.py` — Populate Infisical from contract YAMLs
-- `scripts/bootstrap-infisical.sh` — Full first-time Infisical bootstrap
-- `scripts/provision-infisical.py` — Create machine identities
+## Key Features
 
-See [CLAUDE.md — Install Model](CLAUDE.md#install-model) for the full decision matrix.
-
-## Quick Start
-
-```bash
-# Clone the repository
-git clone https://github.com/OmniNode-ai/omnibase_infra.git
-cd omnibase_infra
-
-# Start infrastructure services with Docker
-cd docker
-cp .env.example .env
-# Edit .env - set POSTGRES_PASSWORD (required for Docker fallback)
-# Set OMNIBASE_INFRA_DB_URL (required for CLI/scripts; recommended for Docker)
-
-docker compose -f docker-compose.infra.yml up -d
-
-# Verify services are running
-docker compose -f docker-compose.infra.yml ps
-```
-
-## Docker Services
-
-Self-contained infrastructure via `docker-compose.infra.yml`:
-
-| Service | Profile | Port | Description |
-|---------|---------|------|-------------|
-| **PostgreSQL** | default | 5436 | Persistence (always starts) |
-| **Redpanda** | default | 29092 | Event bus (always starts) |
-| **Valkey** | default | 16379 | Caching (always starts) |
-| **Consul** | `consul` | 28500 | Service discovery (optional) |
-| **Infisical** | `secrets` | 8880 | Secrets management (optional) |
-| **Runtime** | `runtime` | 8085 | ONEX runtime services (optional) |
-
-**Profiles:**
-```bash
-# Infrastructure only (default)
-docker compose -f docker-compose.infra.yml up -d
-
-# With service discovery
-docker compose -f docker-compose.infra.yml --profile consul up -d
-
-# With secrets management
-docker compose -f docker-compose.infra.yml --profile secrets up -d
-
-# Everything
-docker compose -f docker-compose.infra.yml --profile full up -d
-```
-
-Configure via `.env` file - see [docker/README.md](docker/README.md) for details.
+- **Handlers**: Database (PostgreSQL), HTTP, messaging (Kafka/Redpanda), caching (Valkey)
+- **Adapters**: Infrastructure client wrappers with protocol-driven DI
+- **Event bus**: Kafka producer/consumer abstractions with topic provisioning
+- **Runtime services**: Deployable via Docker with contract-driven wiring
+- **Config management**: Infisical integration with env var fallback
+- **50+ ONEX nodes**: EFFECT, COMPUTE, REDUCER, ORCHESTRATOR implementations
 
 ## Documentation
 
-| I want to... | Go to... |
-|--------------|----------|
-| Get started quickly | [Quick Start Guide](docs/getting-started/quickstart.md) |
-| Understand the architecture | [Architecture Overview](docs/architecture/overview.md) |
-| Deploy with Docker | [Docker Guide](docker/README.md) |
-| See a complete example | [Registration Walkthrough](docs/guides/registration-example.md) |
-| Write a contract | [Contract Reference](docs/reference/contracts.md) |
-| Find implementation patterns | [Pattern Documentation](docs/patterns/README.md) |
-| Read coding standards | [CLAUDE.md](CLAUDE.md) |
-
-**Full documentation**: [docs/index.md](docs/index.md)
-
-## Repository Structure
-
-```
-src/omnibase_infra/
-├── handlers/          # Request/message handlers
-├── event_bus/         # Kafka/Redpanda abstractions
-├── clients/           # Service clients
-├── models/            # Pydantic models
-├── nodes/             # ONEX nodes (Effect, Compute, Reducer, Orchestrator)
-├── errors/            # Error hierarchy
-├── mixins/            # Reusable behaviors
-└── enums/             # Centralized enums
-```
-
-## Development
-
-```bash
-# Install dependencies
-uv sync
-
-# Run tests
-uv run pytest
-
-# Type checking
-uv run mypy src/omnibase_infra/
-
-# Format code
-uv run ruff format .
-uv run ruff check --fix .
-```
-
-### Pre-commit Hooks Setup
-
-Run once after cloning:
-```bash
-uv run pre-commit install
-uv run pre-commit install --hook-type pre-push
-```
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions and PR guidelines.
+- [Architecture](docs/architecture/)
+- [Getting started](docs/getting-started/)
+- [CLAUDE.md](CLAUDE.md) -- developer context and conventions
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+[MIT](LICENSE)
