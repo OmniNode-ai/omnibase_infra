@@ -57,6 +57,13 @@ capabilities:
     description: "Query events by Kafka topic"
   - name: "ledger.query.by_time_range"
     description: "Query events within a time range"
+# Node capabilities (infrastructure-level feature flags for introspection)
+# Extracted at startup by ContractNodeCapabilityExtractor -> ModelNodeCapabilities
+node_capabilities:
+  postgres: true
+  write: true
+  database: true
+  transactions: true
 # Event-driven topic configuration
 # Topics use realm-agnostic 5-segment format: onex.<kind>.<producer>.<event-name>.v<N>
 # The runtime composes the full qualified topic by prepending env.namespace at startup.

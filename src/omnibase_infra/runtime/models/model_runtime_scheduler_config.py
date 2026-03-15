@@ -588,7 +588,7 @@ class ModelRuntimeSchedulerConfig(BaseModel):
                     overrides[field_name] = env_value
 
         if overrides:
-            current_data = self.model_dump()
+            current_data = self.model_dump()  # noqa: model-dump-bare
             current_data.update(overrides)
             return ModelRuntimeSchedulerConfig(**current_data)
 

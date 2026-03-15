@@ -1859,7 +1859,7 @@ wheels = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.26.0"
+version = "0.27.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "blake3" },
@@ -1874,14 +1874,14 @@ dependencies = [
     { name = "pyyaml" },
     { name = "ruamel-yaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/19/75/2bbc00abdcab28ac37fc5eebe8301ffbcfaa11de9a69b01f2aba2145dcc1/omnibase_core-0.26.0.tar.gz", hash = "sha256:6352356afa7bfe9c2bf6a10cad5d2eac067033575aa5c83ed5becd5ec02c1675", size = 8464492, upload-time = "2026-03-13T12:22:29.908Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/89/96/195b61a63a5aceefb3d97ce90ee3db2cac151bf7f25abe25d2c5fe6553f3/omnibase_core-0.27.0.tar.gz", hash = "sha256:406feb4e61488e5cad67807b5e99bb1057f2d526f9f0c51cd36e7442710ccafa", size = 8466845, upload-time = "2026-03-13T23:57:17.005Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a2/02/4f3e7b31ebf641ccbf51f79aff3312359b742fe24d01a296422e88366174/omnibase_core-0.26.0-py3-none-any.whl", hash = "sha256:0e3d5e37fa131bb16d7039cb358d17e3265deadf4d9883ebd9c038f69bebb13b", size = 5170062, upload-time = "2026-03-13T12:22:33.146Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/df/76cdd282ebadbdaf0a951253e199965a5675d4678e6703419a98e63c26f8/omnibase_core-0.27.0-py3-none-any.whl", hash = "sha256:b6ec4364388f82c28819bda3d2adf881b7bf826e0284373ce7bad08a25331de5", size = 5169449, upload-time = "2026-03-13T23:57:20.285Z" },
 ]
 
 [[package]]
 name = "omnibase-infra"
-version = "0.19.0"
+version = "0.20.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -1970,7 +1970,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.20.0,<5.0.0" },
     { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<6.0.0" },
-    { name = "omnibase-core", specifier = "==0.26.0" },
+    { name = "omnibase-core", specifier = "==0.27.0" },
     { name = "omnibase-spi", specifier = "==0.16.1" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },

@@ -28,6 +28,11 @@ description: >
   Effect node that drains configured Gmail source labels on demand. For each message it applies an idempotency marker label, fetches the full message, extracts URLs, appends a gmail-intent-received event payload to pending_events, then archives the message. A recovery pass runs first to handle crashed mid-run states. Emits to onex.evt.omnibase_infra.gmail-intent-received.v1 with partition key = message_id.
 
 # No input_subscriptions — on-demand trigger only
+event_bus:
+  version: {major: 1, minor: 0, patch: 0}
+  subscribe_topics: []
+  publish_topics:
+    - "onex.evt.omnibase-infra.gmail-intent-received.v1"
 input_model:
   name: "ModelGmailIntentPollerConfig"
   module: "omnibase_infra.nodes.node_gmail_intent_poller_effect.models.model_gmail_intent_poller_config"

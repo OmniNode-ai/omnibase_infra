@@ -169,7 +169,7 @@ class ModelParsedDSN(BaseModel):
             {'scheme': 'postgresql', 'username': 'user', 'password': '[REDACTED]',
              'hostname': 'localhost', 'port': 5432, 'database': 'mydb', 'query': {}}
         """
-        data = self.model_dump()
+        data = self.model_dump()  # noqa: model-dump-bare
         if data.get("password"):
             data["password"] = "[REDACTED]"
         return data

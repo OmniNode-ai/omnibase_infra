@@ -40,8 +40,8 @@ event_bus:
   subscribe_topics:
     # Validation run lifecycle
     - "onex.evt.validation.cross-repo-run-started.v1"
-    # Violation batches
-    - "onex.evt.validation.violations-batch.v1"
+    # Violation batches (OMN-5050: corrected to canonical cross-repo topic name)
+    - "onex.evt.validation.cross-repo-violations-batch.v1"
     # Validation run completion
     - "onex.evt.validation.cross-repo-run-completed.v1"
   # Projection consumer - read-only consumption for ledger persistence

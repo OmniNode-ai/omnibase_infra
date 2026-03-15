@@ -887,10 +887,19 @@ async def bootstrap() -> int:
                     _contracts_dir if _contracts_dir.exists() else None
                 )
 
+                # Infra standalone manifests (cli/topics.yaml, services/topics.yaml)
+                _infra_src = Path(__file__).resolve().parent.parent
+                _extra_manifest_roots: list[Path] = []
+                for _subdir in ("cli", "services"):
+                    _candidate = _infra_src / _subdir
+                    if _candidate.is_dir():
+                        _extra_manifest_roots.append(_candidate)
+
                 topic_provisioner = TopicProvisioner(
                     bootstrap_servers=kafka_bootstrap_servers,
                     contracts_root=_contracts_root,
                     skill_manifests_root=_skill_manifests_root,
+                    skill_manifests_roots=_extra_manifest_roots,
                 )
                 provisioning_result = (
                     await topic_provisioner.ensure_provisioned_topics_exist(
@@ -1595,7 +1604,7 @@ async def bootstrap() -> int:
         # - When service_name == node_name, the format is intentionally redundant but
         #   maintains consistency with multi-node deployments where they would differ
         runtime_create_start_time = time.time()
-        runtime_config_dict = cast("dict[str, object]", config.model_dump())
+        runtime_config_dict = cast("dict[str, object]", config.model_dump(mode="json"))
         if config.name:
             runtime_config_dict["service_name"] = config.name
             runtime_config_dict["node_name"] = config.name

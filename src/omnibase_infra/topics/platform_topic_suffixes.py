@@ -138,6 +138,17 @@ SUFFIX_CONTRACT_DEREGISTERED: str = "onex.evt.platform.contract-deregistered.v1"
 Published when a node contract is deregistered from the runtime.
 """
 
+# Registration acceptance events
+SUFFIX_NODE_REGISTRATION_ACCEPTED: str = (
+    "onex.evt.platform.node-registration-accepted.v1"
+)
+"""Topic suffix for node registration acceptance events.
+
+Published by the registration orchestrator when a node's registration is
+accepted. Nodes subscribe to this topic to confirm their registration
+and emit ACK commands in response.
+"""
+
 # Registration ACK commands
 SUFFIX_NODE_REGISTRATION_ACKED: str = "onex.cmd.platform.node-registration-acked.v1"
 """Topic suffix for node registration ACK commands.
@@ -441,6 +452,71 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
 Covers gmail cleanup events and PostgreSQL error events. Topics are
 provisioned so the correct broker topic name exists even if no consumer
 is registered yet.
+"""
+
+# =============================================================================
+# VALIDATION DOMAIN TOPIC SUFFIXES (cross-repo validation pipeline)
+# =============================================================================
+# These topics are produced by the cross-repo validation pipeline. They are
+# provisioned so omnidash EventBusDataSource auto-subscribes via the onex.*
+# pattern match. Previously the pipeline bypassed topic provisioning by seeding
+# the DB directly (OMN-5042); registering here closes that gap.
+
+SUFFIX_VALIDATION_CROSS_REPO_RUN_STARTED: str = (
+    "onex.evt.validation.cross-repo-run-started.v1"
+)
+"""Topic suffix for cross-repo validation run started events.
+
+Published at the beginning of each cross-repo validation run to signal
+that a new validation cycle has started. omnidash subscribes to this topic
+via the EventBusDataSource onex.* subscription pattern.
+
+Producer: cross-repo validation pipeline (OMN-5050)
+Consumer: omnidash EventBusDataSource
+"""
+
+SUFFIX_VALIDATION_CROSS_REPO_VIOLATIONS_BATCH: str = (
+    "onex.evt.validation.cross-repo-violations-batch.v1"
+)
+"""Topic suffix for cross-repo validation violations batch events.
+
+Published during a cross-repo validation run for each batch of violations
+detected. Each message contains a set of violation records for processing
+and display by downstream consumers (e.g., omnidash).
+
+Producer: cross-repo validation pipeline (OMN-5050)
+Consumer: omnidash EventBusDataSource
+"""
+
+SUFFIX_VALIDATION_CROSS_REPO_RUN_COMPLETED: str = (
+    "onex.evt.validation.cross-repo-run-completed.v1"
+)
+"""Topic suffix for cross-repo validation run completed events.
+
+Published at the end of each cross-repo validation run to signal that the
+validation cycle has finished and all violation batches have been emitted.
+omnidash subscribes to this topic via the EventBusDataSource onex.* pattern.
+
+Producer: cross-repo validation pipeline (OMN-5050)
+Consumer: omnidash EventBusDataSource
+"""
+
+# =============================================================================
+# VALIDATION DOMAIN TOPIC SPEC REGISTRY
+# =============================================================================
+
+ALL_VALIDATION_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
+    # Cross-repo run lifecycle events (3 partitions — low-throughput, one per run)
+    ModelTopicSpec(suffix=SUFFIX_VALIDATION_CROSS_REPO_RUN_STARTED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_VALIDATION_CROSS_REPO_VIOLATIONS_BATCH, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_VALIDATION_CROSS_REPO_RUN_COMPLETED, partitions=3),
+)
+"""Validation domain topic specs for the cross-repo validation pipeline (OMN-5050).
+
+Provisioned so omnidash EventBusDataSource auto-subscribes via the onex.*
+topic catalog pattern. Previously bypassed via DB seed in OMN-5042; this
+registration closes that gap and makes topic creation deterministic at
+TopicProvisioner startup.
 """
 
 # =============================================================================
@@ -824,6 +900,7 @@ ALL_PLATFORM_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ),
     ModelTopicSpec(suffix=SUFFIX_CONTRACT_REGISTERED, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_CONTRACT_DEREGISTERED, partitions=6),
+    ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION_ACCEPTED, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION_ACKED, partitions=6),
     # Resolution event ledger (OMN-2895)
     ModelTopicSpec(suffix=SUFFIX_RESOLUTION_DECIDED, partitions=3),
@@ -1000,6 +1077,7 @@ ALL_PROVISIONED_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     + ALL_INTELLIGENCE_TOPIC_SPECS
     + (ALL_OMNIMEMORY_TOPIC_SPECS if _omnimemory_enabled() else ())
     + ALL_OMNIBASE_INFRA_TOPIC_SPECS
+    + ALL_VALIDATION_TOPIC_SPECS
     + ALL_OMNICLAUDE_TOPIC_SPECS
 )
 """All topic specs to be provisioned by TopicProvisioner at startup.

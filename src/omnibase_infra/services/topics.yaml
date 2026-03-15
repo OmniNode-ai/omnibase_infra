@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Topics produced by infrastructure services (not nodes)
+# Scanned by ContractTopicExtractor.extract_from_skill_manifests()
+# Ticket: OMN-4622
+topics:
+  - onex.evt.omnibase-infra.llm-endpoint-health.v1

@@ -85,8 +85,8 @@ class HandlerRegistryApiListTopics:
             correlation_id=correlation_id,
             success=True,
             data={
-                "results": [t.model_dump() for t in topics],
-                "pagination": pagination.model_dump(),
+                "results": [t.model_dump(mode="json") for t in topics],
+                "pagination": pagination.model_dump(mode="json"),
             },
             warnings=[w.message for w in warnings],
         )

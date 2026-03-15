@@ -898,7 +898,7 @@ class ServiceHealth:
             components = self._build_component_health(health_details)
             enriched_details = dict(health_details)
             enriched_details["components"] = {
-                name: comp.model_dump(exclude_none=True)
+                name: comp.model_dump(exclude_none=True)  # noqa: model-dump-bare
                 for name, comp in components.items()
             }
 

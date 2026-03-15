@@ -31,6 +31,12 @@ description: >
 input_subscriptions:
   - topic: "onex.evt.runtime.tick.v1"
     operation: "github.poll.prs"
+event_bus:
+  version: {major: 1, minor: 0, patch: 0}
+  subscribe_topics:
+    - "onex.evt.runtime.tick.v1"
+  publish_topics:
+    - "onex.evt.github.pr-status.v1"
 input_model:
   name: "ModelGitHubPollerConfig"
   module: "omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_poller_config"

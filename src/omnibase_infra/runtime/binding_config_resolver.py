@@ -1939,7 +1939,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 result["retry_policy"] = merged_retry
             elif isinstance(existing_retry, ModelRetryPolicy):
                 # Convert to dict, update, leave as dict for later construction
-                merged_retry = existing_retry.model_dump()
+                merged_retry = existing_retry.model_dump()  # noqa: model-dump-bare
                 merged_retry.update(retry_overrides)
                 result["retry_policy"] = merged_retry
             else:

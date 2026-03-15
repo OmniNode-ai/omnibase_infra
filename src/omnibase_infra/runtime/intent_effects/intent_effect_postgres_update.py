@@ -228,7 +228,7 @@ class IntentEffectPostgresUpdate:
                 context=context,
             )
 
-        updates = payload.updates.model_dump()
+        updates = payload.updates.model_dump(mode="json")
         if not updates:
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=effective_correlation_id,

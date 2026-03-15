@@ -2,35 +2,6 @@
 # SPDX-License-Identifier: MIT
 # Topic Completeness Allowlist (OMN-3257)
 #
-# Topics listed here are known to appear as string literals in Python source
-# but are NOT expected to be in the LOCAL topic registry. These are pre-existing
-# topics that are either:
-#   - Defined in other repos (omniclaude, omniintelligence) and consumed here
-#   - Legacy topics not yet migrated to contract-based registration
-#   - Cross-repo event topics where the producer is an external service
-#
-# DO NOT add topics here that should be registered in this repo.
-# Fix the registration in contract.yaml or topic constants instead.
-#
-# Format: YAML list under 'allowlist' key.
-# Total pre-existing entries: 16
-allowlist:
-  # External producer topics (defined in omniclaude, consumed by omnibase_infra)
-  - onex.evt.omniclaude.agent-actions.v1
-  - onex.evt.omniclaude.agent-execution-logs.v1
-  - onex.evt.omniclaude.agent-transformation.v1
-  - onex.evt.omniclaude.detection-failure.v1
-  - onex.evt.omniclaude.manifest-injected.v1
-  - onex.evt.omniclaude.manifest-injection-failed.v1
-  - onex.evt.omniclaude.manifest-injection-started.v1
-  - onex.evt.omniclaude.performance-metrics.v1
-  - onex.evt.omniclaude.routing-decision.v1
-  - onex.evt.omniclaude.skill-lifecycle-dlq.v1
-  # Infrastructure relay topics (git/github/linear hooks)
-  - onex.evt.git.hook.v1
-  - onex.evt.github.pr-status.v1
-  - onex.evt.linear.snapshot.v1
-  # Topics not yet in contract registry
-  - onex.evt.omnibase-infra.gmail-intent-received.v1
-  - onex.evt.omnibase-infra.llm-endpoint-health.v1
-  - onex.evt.platform.registration-completed.v1
+# All topics migrated to contract YAML or standalone manifests as of OMN-4622.
+# This file is intentionally empty.
+allowlist: []

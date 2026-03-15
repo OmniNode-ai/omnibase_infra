@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Topics produced by CLI relay scripts (git_hook_relay, linear_relay)
+# Scanned by ContractTopicExtractor.extract_from_skill_manifests()
+# Ticket: OMN-4622
+topics:
+  - onex.evt.git.hook.v1
+  - onex.evt.linear.snapshot.v1

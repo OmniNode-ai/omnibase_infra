@@ -769,7 +769,7 @@ class TestDuplicateResponse:
         assert response["success"] is True
         assert response["status"] == "duplicate"
         assert response["message"] == "Message already processed"
-        assert response["message_id"] == message_id
-        assert response["correlation_id"] == correlation_id
+        assert response["message_id"] == str(message_id)
+        assert response["correlation_id"] == str(correlation_id)
 
         await process.stop()

@@ -197,7 +197,9 @@ class HandlerUpsertMergeGate(MixinPostgresOpExecutor):
             correlation_id: Correlation ID for tracing.
         """
         # Serialize violations to JSON
-        violations_json = json.dumps([v.model_dump() for v in payload.violations])
+        violations_json = json.dumps(
+            [v.model_dump(mode="json") for v in payload.violations]
+        )
 
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(

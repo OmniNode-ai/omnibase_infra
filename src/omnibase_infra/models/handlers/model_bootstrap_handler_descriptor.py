@@ -159,7 +159,7 @@ class ModelBootstrapHandlerDescriptor(ModelHandlerDescriptor):
             >>> isinstance(base_desc, ModelHandlerDescriptor)
             True
         """
-        return ModelHandlerDescriptor(**self.model_dump())
+        return ModelHandlerDescriptor(**self.model_dump())  # noqa: model-dump-bare
 
 
 __all__ = ["ModelBootstrapHandlerDescriptor"]

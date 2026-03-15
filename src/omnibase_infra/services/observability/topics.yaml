@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Cross-repo topics consumed by observability services.
+# These are produced by omniclaude and consumed by omnibase_infra.
+# Scanned by ContractTopicExtractor.extract_from_skill_manifests()
+# Ticket: OMN-4622
+topics:
+  # Agent actions consumer
+  - onex.evt.omniclaude.agent-actions.v1
+  - onex.evt.omniclaude.agent-execution-logs.v1
+  - onex.evt.omniclaude.agent-transformation.v1
+  - onex.evt.omniclaude.detection-failure.v1
+  - onex.evt.omniclaude.performance-metrics.v1
+  - onex.evt.omniclaude.routing-decision.v1
+  # Injection effectiveness consumer
+  - onex.evt.omniclaude.manifest-injected.v1
+  - onex.evt.omniclaude.manifest-injection-failed.v1
+  - onex.evt.omniclaude.manifest-injection-started.v1
+  # Skill lifecycle consumer
+  - onex.evt.omniclaude.skill-lifecycle-dlq.v1

@@ -2427,7 +2427,7 @@ class MessageDispatchEngine:
             partition_key=partition_key,
         )
 
-        return snapshot.model_dump()
+        return snapshot.model_dump(mode="json")
 
     def _safe_str(self, value: object) -> str | None:
         """Safely convert value to string or None.
