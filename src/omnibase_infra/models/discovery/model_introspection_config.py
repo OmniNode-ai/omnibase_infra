@@ -107,8 +107,9 @@ class ModelIntrospectionConfig(BaseModel):
         declared_capabilities: Node's declared capabilities (feature flags).
             Used directly in introspection and node-became-active events.
             When not provided, defaults to all-false ModelNodeCapabilities.
-            Nodes should populate this from their registry's get_capabilities()
-            or by constructing ModelNodeCapabilities with the appropriate flags.
+            Can be populated from the contract YAML ``node_capabilities`` block
+            via ``ContractNodeCapabilityExtractor.extract_from_yaml()``, or from
+            the registry's get_capabilities().
 
     Example:
         ```python
@@ -250,9 +251,9 @@ class ModelIntrospectionConfig(BaseModel):
         default_factory=ModelNodeCapabilities,
         description="Node's declared capabilities (feature flags). "
         "Published verbatim in node-introspection and node-became-active events. "
-        "Defaults to all-false when not provided. Nodes should populate this "
-        "from their registry's declared capabilities (e.g. postgres=True for "
-        "effect nodes that interact with PostgreSQL).",
+        "Defaults to all-false when not provided. Can be populated from contract "
+        "YAML via ContractNodeCapabilityExtractor.extract_from_yaml() or from "
+        "the registry's declared capabilities.",
     )
 
     @field_validator("node_type", mode="before")
