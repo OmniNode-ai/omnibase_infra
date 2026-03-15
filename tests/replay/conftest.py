@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Replay-specific test fixtures for OMN-955.
 
 Fixtures for event replay verification: deterministic ID and timestamp

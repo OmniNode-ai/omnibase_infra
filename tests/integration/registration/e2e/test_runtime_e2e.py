@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """True E2E tests against the running ONEX runtime container.
 
 These tests verify the COMPLETE end-to-end flow:

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for root directory cleanliness validator.
 
 Tests the validate_clean_root.py script that enforces a clean, organized

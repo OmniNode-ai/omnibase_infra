@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests for the RRH emit effect node handlers.
 
 Tests that run against real system resources (git repo, filesystem).

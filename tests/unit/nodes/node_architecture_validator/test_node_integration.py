@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests for NodeArchitectureValidator.compute().
 
 These tests verify end-to-end behavior of the architecture validator node,

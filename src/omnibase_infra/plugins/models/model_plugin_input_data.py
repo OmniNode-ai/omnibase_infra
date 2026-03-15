@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Pydantic model for plugin input data.
 
 The ModelPluginInputData Pydantic BaseModel that replaces

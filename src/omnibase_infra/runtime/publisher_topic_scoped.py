@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Topic-scoped publisher that validates against contract-declared publish topics.
 
 A publisher that enforces topic-level access control

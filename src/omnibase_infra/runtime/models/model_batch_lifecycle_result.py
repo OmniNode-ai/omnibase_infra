@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """# ai-slop-ok: pre-existingBatch Lifecycle Result Model for handler batch shutdown operations.
 
 This module provides the ModelBatchLifecycleResult class for representing the

@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """CI parity gate: detect Python-only topic registry entries not covered by contracts (OMN-4600).
 
 Topics in ALL_PROVISIONED_SUFFIXES that appear in NO contract.yaml AND are NOT in

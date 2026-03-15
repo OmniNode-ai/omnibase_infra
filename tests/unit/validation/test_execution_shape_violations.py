@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Tests for Execution Shape Violations (OMN-958).
 
 5 "known bad" test cases validating that execution shape validators

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unified loader for runtime contract configuration.
 
 The RuntimeContractConfigLoader class that scans
@@ -93,7 +91,7 @@ class RuntimeContractConfigLoader:
         See CLAUDE.md Handler Plugin Loader security patterns.
     """
 
-    def __init__(self) -> None:
+    def __init__(self) -> None:  # stub-ok — stateless loader, no init needed
         """Initialize the contract config loader.
 
         The loader is stateless and delegates to individual subcontract

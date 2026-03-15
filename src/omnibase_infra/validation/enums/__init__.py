@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Validation enums package."""
 
 from omnibase_infra.validation.enums.enum_assertion_status import EnumAssertionStatus

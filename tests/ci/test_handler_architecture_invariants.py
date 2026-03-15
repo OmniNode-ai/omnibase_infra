@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Architecture invariant tests for handler classification compliance.
 
 Verifies the three architectural invariants from OMN-783 (INFRA-042):

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Schema manifest model and canonical table list for omnibase_infra.
 
 Defines the explicit allowlist of tables owned by omnibase_infra. Used by

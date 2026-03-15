@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Payload model for the write-conflict intent.
 
 Drives HandlerWriteConflict: idempotent insert of a single conflict pair

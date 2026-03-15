@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Protocols for the registration orchestrator workflow.
 
 This module defines the protocols for the reducer and effect nodes that

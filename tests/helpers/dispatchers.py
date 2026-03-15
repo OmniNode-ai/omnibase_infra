@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Shared test dispatchers for integration tests.
 
 Provides ``ContextCapturingDispatcher``, a test dispatcher that captures the

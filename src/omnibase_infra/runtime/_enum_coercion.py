@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Shared enum coercion utilities for the runtime layer.
 
 This module exists at a layer below both ``registry_dispatcher`` and

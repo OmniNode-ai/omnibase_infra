@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """PostgreSQL Writer for Skill Lifecycle Observability (OMN-2934).
 
 Persists skill-started and skill-completed events consumed from Kafka

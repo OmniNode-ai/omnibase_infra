@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Ed25519 Key Loading Utilities.
 
 Utility functions for loading Ed25519 keys from PEM files.

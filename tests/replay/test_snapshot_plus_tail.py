@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Snapshot Plus Tail Validation Tests for OMN-955.
 
 These tests validate the ONEX principle that:

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler for updating contract heartbeat timestamp.
 
 This handler encapsulates PostgreSQL-specific heartbeat update logic for the

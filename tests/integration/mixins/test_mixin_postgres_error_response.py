@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests for MixinPostgresErrorResponse mixin.
 
 This test suite validates the PostgreSQL error handling mixin that provides

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Failure-mode and recovery tests for production infrastructure [OMN-781].
 
 This test suite implements INFRA-040 for the PRODUCTION milestone, covering

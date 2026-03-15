@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Prometheus metrics handler - EFFECT handler exposing /metrics HTTP endpoint.
 
 An EFFECT handler that exposes Prometheus metrics via an
@@ -129,7 +127,7 @@ except ImportError:
     CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
     Histogram = None  # type: ignore[assignment, misc]
 
-    def generate_latest() -> bytes:  # type: ignore[misc]
+    def generate_latest() -> bytes:  # type: ignore[misc]  # stub-ok
         """Stub for when prometheus_client is not installed."""
         raise ImportError("prometheus_client is required but not installed")
 

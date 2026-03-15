@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Cross-repo Kafka schema handshake validator (OMN-3411).
 
 Validates that every registered producer→consumer boundary pair can

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Contract dependency materializer for infrastructure resources.
 
 Reads contract.dependencies declarations and auto-creates live DI providers

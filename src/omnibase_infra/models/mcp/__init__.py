@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """MCP models for Model Context Protocol integration."""
 
 from omnibase_infra.models.mcp.model_mcp_contract_config import ModelMCPContractConfig

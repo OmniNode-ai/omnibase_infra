@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Keycloak provisioning script for ONEX Infrastructure.
 
 Ensures the keycloak database exists, waits for Keycloak readiness, provisions

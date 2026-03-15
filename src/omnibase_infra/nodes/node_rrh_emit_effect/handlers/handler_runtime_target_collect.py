@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler that collects runtime target context for RRH validation.
 
 Captures deployment environment, Kafka broker address, and Kubernetes

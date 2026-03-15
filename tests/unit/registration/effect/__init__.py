@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Effect node tests for the registration system.
 
 This package contains unit tests for the Registry Effect Node (OMN-890)

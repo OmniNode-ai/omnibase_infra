@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """MCP services for Model Context Protocol integration.
 
 This package provides services for exposing ONEX orchestrator nodes

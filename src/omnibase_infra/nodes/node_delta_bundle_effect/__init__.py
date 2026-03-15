@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """NodeDeltaBundleEffect -- PR lifecycle tracking as delta bundles.
 
 Implements the ONEX effect node that tracks PRs from merge-gate decision

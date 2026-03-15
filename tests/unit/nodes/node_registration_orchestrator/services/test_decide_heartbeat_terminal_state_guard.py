@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Failing tests for decide_heartbeat terminal-state guard (OMN-4819).
 
 These tests assert that decide_heartbeat returns no_op when the node's

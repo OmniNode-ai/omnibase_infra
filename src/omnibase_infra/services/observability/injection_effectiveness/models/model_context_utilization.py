@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Context utilization event model.
 
 Represents the payload from onex.evt.omniclaude.context-utilization.v1 topic.

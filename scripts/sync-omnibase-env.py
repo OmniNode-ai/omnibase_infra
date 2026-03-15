@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Sync ~/.omnibase/.env non-bootstrap keys to Infisical.
 
 This script reads ``~/.omnibase/.env``, strips out bootstrap-only keys

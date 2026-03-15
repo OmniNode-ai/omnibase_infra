@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Validator for ARCH-002: No Handler Publishing.
 
 This validator uses AST analysis to detect handlers that directly publish

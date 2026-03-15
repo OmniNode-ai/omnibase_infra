@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Version compatibility matrix for ONEX package dependencies.
 
 This module verifies that omnibase_core and omnibase_spi versions meet the

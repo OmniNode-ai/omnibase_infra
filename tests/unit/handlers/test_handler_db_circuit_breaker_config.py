@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for HandlerDb circuit breaker env var configuration.
 
 Tests that ONEX_DB_CIRCUIT_THRESHOLD and ONEX_DB_CIRCUIT_RESET_TIMEOUT

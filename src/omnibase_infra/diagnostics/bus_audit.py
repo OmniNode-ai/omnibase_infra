@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Generic Kafka bus health audit engine.
 
 Point-in-time diagnostic tool — run once, see what's on the bus, fix problems.

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests for HandlerPluginLoader with real handler implementations.
 
 This module validates that HandlerPluginLoader can discover, load, and validate

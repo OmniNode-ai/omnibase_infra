@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """PostgreSQL upsert registration payload model for registration reducer.
 
 This payload implements ProtocolIntentPayload for use with ModelIntent.

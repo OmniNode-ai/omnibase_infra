@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """In-Memory Effect Idempotency Store with LRU Eviction and TTL.
 
 A bounded in-memory implementation of

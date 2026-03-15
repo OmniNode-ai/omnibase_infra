@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """LLM chat message model for multi-turn conversations.
 
 ModelLlmMessage, representing a single message in an LLM

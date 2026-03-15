@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Notification Publishing Mixin for Projector Implementations.
 
 Provides notification publishing capability for projector shells. This mixin
@@ -179,12 +177,12 @@ class MixinProjectorNotificationPublishing:
     _notification_config: ModelProjectorNotificationConfig | None
 
     @property
-    def projector_id(self) -> str:
+    def projector_id(self) -> str:  # stub-ok — mixin requires subclass impl
         """Unique identifier for the projector (expected from implementing class)."""
         raise NotImplementedError("projector_id must be implemented by subclass")
 
     @property
-    def aggregate_type(self) -> str:
+    def aggregate_type(self) -> str:  # stub-ok — mixin requires subclass impl
         """Aggregate type from contract (expected from implementing class)."""
         raise NotImplementedError("aggregate_type must be implemented by subclass")
 

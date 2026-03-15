@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Pytest fixtures for restart-safe timeout integration tests.
 
 Provides in-memory mocks for event bus and projection storage to test

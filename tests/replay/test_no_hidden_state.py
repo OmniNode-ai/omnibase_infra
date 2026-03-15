@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """No Hidden State Validation Tests for OMN-955.
 
 These tests prove that the RegistrationReducer has NO hidden mutable state

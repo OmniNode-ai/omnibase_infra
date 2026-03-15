@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Compose image pin tests for Docker infrastructure.
 
 Asserts that no service image in docker-compose.infra.yml uses the :latest tag.

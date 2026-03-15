@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Outcome update handler for NodeDeltaBundleEffect.
 
 Updates a delta_bundles row with the final PR outcome (merged, reverted,

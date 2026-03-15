@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Mixin providing dict-like accessors for Pydantic models.
 
 This mixin provides `get`, `__getitem__`, and `__contains__` methods

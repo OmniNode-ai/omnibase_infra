@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler for Gmail archive cleanup — core logic for node_gmail_archive_cleanup_effect.
 
 Implements the ``gmail.purge_archive`` operation declared in contract.yaml.

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests A5-A6: Normalized Determinism and Observability.
 
 Mocked E2E tests for the registration workflow verifying deterministic

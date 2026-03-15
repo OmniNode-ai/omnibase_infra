@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """NodeDecisionStoreEffect — two-stage decision write effect node.
 
 Implements the ONEX effect node that writes decisions to the decision_store

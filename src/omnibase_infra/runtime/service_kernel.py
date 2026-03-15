@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """ONEX Kernel - Minimal bootstrap for contract-driven runtime.
 
 This is the kernel entrypoint for the ONEX runtime. It provides a contract-driven

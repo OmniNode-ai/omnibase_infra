@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 # ruff: noqa: PLW0603
 # PLW0603 disabled: Global statement is intentional for singleton pattern with thread-safe initialization
 """Handler Registry - Constants and singleton accessors for handler registration.  # ai-slop-ok: pre-existing docstring opener
@@ -244,7 +242,7 @@ def get_event_bus_class(bus_kind: str) -> type[ProtocolEventBus]:
     return get_event_bus_registry().get(bus_kind)
 
 
-def register_handlers_from_config(
+def register_handlers_from_config(  # stub-ok
     runtime: object,  # Will be BaseRuntimeHostProcess
     protocol_configs: list[ModelProtocolRegistrationConfig],
 ) -> None:

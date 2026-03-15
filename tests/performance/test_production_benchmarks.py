@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Production performance benchmarks for ONEX infrastructure [OMN-782].
 
 This test suite establishes production baselines per INFRA-041. It validates
