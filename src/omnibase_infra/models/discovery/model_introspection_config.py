@@ -256,6 +256,23 @@ class ModelIntrospectionConfig(BaseModel):
         "the registry's declared capabilities.",
     )
 
+    @field_validator("declared_capabilities", mode="before")
+    @classmethod
+    def coerce_none_capabilities(
+        cls,
+        v: ModelNodeCapabilities | None,
+    ) -> ModelNodeCapabilities:
+        """Coerce None to default all-false ModelNodeCapabilities.
+
+        Legacy callers may pass ``declared_capabilities=None`` to indicate
+        "use defaults".  The Pydantic ``default_factory`` only fires when the
+        field is *omitted*; an explicit ``None`` triggers a validation error.
+        This validator normalises both cases.
+        """
+        if v is None:
+            return ModelNodeCapabilities()
+        return v
+
     @field_validator("node_type", mode="before")
     @classmethod
     def validate_node_type(cls, v: object) -> EnumNodeKind:
