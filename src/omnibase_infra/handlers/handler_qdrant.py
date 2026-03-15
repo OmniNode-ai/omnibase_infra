@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Qdrant Vector Store Handler - implements ProtocolVectorStoreHandler.
 
 Vector store operations for the Qdrant vector database

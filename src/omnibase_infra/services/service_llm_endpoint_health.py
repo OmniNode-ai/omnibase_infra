@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """LLM Endpoint Health Checker Service.
 
 Probes configured local LLM endpoints at a configurable interval and maintains

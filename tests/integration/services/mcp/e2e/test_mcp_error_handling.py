@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Mock-based MCP protocol tests for error handling.
 
 IMPORTANT: These are NOT true integration tests. They use mock JSON-RPC handlers

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler Type Category Enumeration for behavioral classification.
 
 Defines the behavioral classification of handlers for ONEX architecture.

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Shared pytest fixtures for runtime unit tests.
 
 This conftest.py provides fixtures commonly used across runtime tests,

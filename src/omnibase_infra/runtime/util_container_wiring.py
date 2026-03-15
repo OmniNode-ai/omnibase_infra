@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Container wiring for omnibase_infra services.  # ai-slop-ok: pre-existing
 
 This module provides functions to register infrastructure services

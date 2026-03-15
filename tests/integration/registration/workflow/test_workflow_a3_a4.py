@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests A3 and A4 for OMN-915 mocked E2E registration workflow.
 
 These tests verify the orchestrated registration workflow with ZERO real

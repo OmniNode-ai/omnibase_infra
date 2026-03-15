@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Build a Kafka topic router dict from a contract's published_events section.
 
 Maps Python class names (e.g. "ModelNodeRegistrationAccepted") to their

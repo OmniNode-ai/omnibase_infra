@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Configuration for LLM cost aggregation consumer.
 
 Loads from environment variables with OMNIBASE_INFRA_LLM_COST_ prefix.

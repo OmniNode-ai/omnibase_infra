@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Liveness expired event model for the registration orchestrator.
 
 Emitted when an active node misses its liveness heartbeat deadline.

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Registration Confirmation Model for Dual Registration Workflow.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides ModelRegistrationConfirmation, the Pydantic model for

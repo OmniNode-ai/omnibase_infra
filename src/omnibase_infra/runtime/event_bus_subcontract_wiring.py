@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Event bus subcontract wiring for contract-driven Kafka subscriptions.
 
 The bridge between contract-declared topics (from the

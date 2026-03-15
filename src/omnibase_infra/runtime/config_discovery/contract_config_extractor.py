@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Contract configuration extractor for ONEX Infrastructure.
 
 Scans ONEX contract YAML files and extracts configuration requirements by

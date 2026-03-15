@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Workflow integration tests for node registration E2E scenarios.
 
 This package provides mocked E2E tests for the registration workflow,

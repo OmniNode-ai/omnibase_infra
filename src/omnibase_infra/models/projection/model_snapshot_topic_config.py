@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Snapshot Topic Configuration Model.
 
 Provides Pydantic configuration for Kafka snapshot topics. Snapshot topics use

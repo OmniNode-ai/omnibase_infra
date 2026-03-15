@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Circuit breaker recovery tests for OMN-955.
 
 This test suite validates circuit breaker behavior under failure conditions,

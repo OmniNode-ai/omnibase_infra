@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests for RegistryPolicy with real ModelONEXContainer.
 
 These tests verify RegistryPolicy works correctly with actual omnibase_core

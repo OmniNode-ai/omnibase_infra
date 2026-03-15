@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Smoke plugin fixture and seam test for the discovery contract (OMN-2021).  # ai-slop-ok: pre-existing
 
 This module provides:

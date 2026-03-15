@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """RRH emit effect node — collects environment data for release readiness."""
 
 from omnibase_infra.nodes.node_rrh_emit_effect.node import NodeRRHEmitEffect

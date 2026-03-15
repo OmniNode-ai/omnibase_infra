@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """NodeMergeGateEffect -- merge gate decision persistence effect node.
 
 Subscribes to ``onex.evt.platform.merge-gate-decision.v1`` Kafka events and

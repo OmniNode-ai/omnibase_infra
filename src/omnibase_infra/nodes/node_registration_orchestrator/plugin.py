@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Registration domain plugin for kernel-level initialization.
 
 PluginRegistration implements ProtocolDomainPlugin for the Registration

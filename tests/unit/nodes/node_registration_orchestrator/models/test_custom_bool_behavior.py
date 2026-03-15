@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Tests for non-standard __bool__ behavior in result models.
 
 This module tests the custom __bool__ implementations in models that override

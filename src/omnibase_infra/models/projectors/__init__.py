@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """ONEX Projector Schema Models Module.
 
 Provides Pydantic models for projector schema definitions, used by

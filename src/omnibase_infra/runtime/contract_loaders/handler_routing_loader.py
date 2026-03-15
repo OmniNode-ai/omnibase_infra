@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler Routing Loader for Contract-Driven Orchestrators.
 
 Utilities for loading handler routing configuration
@@ -123,7 +121,7 @@ def _check_file_size(contract_path: Path, operation: str) -> None:
         )
 
 
-def _load_and_validate_contract_yaml(
+def _load_and_validate_contract_yaml(  # stub-ok
     contract_path: Path,
     operation: str,
 ) -> tuple[dict, dict]:

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Protocol for Capability-Based Node Query Service.
 
 Defines the protocol interface for querying nodes by capability rather than

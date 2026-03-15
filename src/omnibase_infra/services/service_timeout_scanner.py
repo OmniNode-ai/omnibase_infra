@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Timeout Scanner for querying overdue registration entities.
 
 This scanner queries the registration projection for nodes that have:

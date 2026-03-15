@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """PostgreSQL DSN validation utility.
 
 Robust DSN validation using urllib.parse instead of regex.

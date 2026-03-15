@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Qdrant handler models package.
 
 Provides strongly-typed Pydantic models for Qdrant vector database operations.

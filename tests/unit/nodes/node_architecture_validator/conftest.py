@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Shared pytest fixtures for architecture validator tests.
 
 test files, including helpers for creating temporary Python files with specific

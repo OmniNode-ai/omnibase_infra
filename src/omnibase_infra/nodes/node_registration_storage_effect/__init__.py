@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Node Registration Storage Effect - Capability-oriented storage node.
 
 This package provides the NodeRegistrationStorageEffect, a capability-oriented

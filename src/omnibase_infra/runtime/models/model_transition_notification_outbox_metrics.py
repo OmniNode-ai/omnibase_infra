@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Transition Notification Outbox Metrics Model.
 
 A strongly-typed Pydantic model for outbox metrics,

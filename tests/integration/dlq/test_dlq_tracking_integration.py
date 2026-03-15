@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests for DLQ PostgreSQL tracking service.  # ai-slop-ok: pre-existing
 
 These tests validate ServiceDlqTracking behavior against actual PostgreSQL

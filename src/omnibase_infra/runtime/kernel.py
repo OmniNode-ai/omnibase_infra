@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """ONEX Kernel - Contract-driven bootstrap entrypoint.
 
 The public API for the ONEX runtime kernel,

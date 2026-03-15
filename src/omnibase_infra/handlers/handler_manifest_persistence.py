@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Manifest Persistence Handler - Stores execution manifests to filesystem.
 
 This handler persists ModelExecutionManifest objects to the filesystem with

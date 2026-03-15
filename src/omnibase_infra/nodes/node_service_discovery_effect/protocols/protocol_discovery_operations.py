@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Protocol for Service Discovery Operations.
 
 This module defines ProtocolDiscoveryOperations, the protocol for

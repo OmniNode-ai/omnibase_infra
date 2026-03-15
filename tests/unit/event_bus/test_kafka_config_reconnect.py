@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for ModelKafkaEventBusConfig reconnect backoff fields (OMN-2916).
 
 Tests the reconnect_backoff_ms and reconnect_backoff_max_ms fields added to

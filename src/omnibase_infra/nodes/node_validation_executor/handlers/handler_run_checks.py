@@ -40,7 +40,7 @@ class HandlerRunChecks:
     wired in a follow-up ticket.
     """
 
-    def __init__(self) -> None:
+    def __init__(self) -> None:  # stub-ok
         """Initialize the handler (stateless)."""
 
     @property

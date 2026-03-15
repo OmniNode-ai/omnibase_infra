@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Test adapter implementing ProtocolEventPublisher bridged to EventBusInmemory.
 
 This adapter provides a production-equivalent envelope format for testing,

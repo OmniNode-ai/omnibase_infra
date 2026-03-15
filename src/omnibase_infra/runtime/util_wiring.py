@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler Wiring Module - Registers concrete handlers with the handler registry.  # ai-slop-ok: pre-existing docstring opener
 
 This module provides functions to wire up concrete handler implementations

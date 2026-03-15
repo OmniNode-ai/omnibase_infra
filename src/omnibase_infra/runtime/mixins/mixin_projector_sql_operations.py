@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """SQL Operation Mixin for Projector Implementations.
 
 Provides SQL generation and execution methods for projector shells. This mixin
@@ -113,7 +111,7 @@ class MixinProjectorSqlOperations:
     _query_timeout: float
 
     @property
-    def projector_id(self) -> str:
+    def projector_id(self) -> str:  # stub-ok — mixin requires subclass impl
         """Unique identifier for the projector (expected from implementing class)."""
         raise NotImplementedError("projector_id must be implemented by subclass")
 

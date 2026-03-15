@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """MCP Streamable HTTP Transport for ONEX.
 
 Provides streamable HTTP transport integration for exposing ONEX nodes

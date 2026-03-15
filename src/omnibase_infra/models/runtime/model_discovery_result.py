@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Discovery Result Model for Handler Discovery Operations.
 
 The ModelDiscoveryResult model for aggregating the results

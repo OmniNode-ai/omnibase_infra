@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Configuration prefetcher service for ONEX Infrastructure.
 
 Orchestrates the prefetching of configuration values from Infisical during

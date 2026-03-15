@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Tests for DLQ topic naming constants and utilities.
 
 These tests verify that the DLQ topic naming conventions follow ONEX standards

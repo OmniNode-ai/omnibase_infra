@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 # S106 disabled: Test password fixtures are intentional for integration testing
 """Pytest fixtures for projector integration tests.  # ai-slop-ok: pre-existing
 

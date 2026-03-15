@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Topic Category Validator for ONEX Execution Shape Validation.
 
 Validates that message categories match their topic naming patterns in the

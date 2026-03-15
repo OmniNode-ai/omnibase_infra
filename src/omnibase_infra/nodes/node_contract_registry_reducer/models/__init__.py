@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Models for the contract registry reducer node.
 
 This module exports the state model and intent payloads used by NodeContractRegistryReducer.

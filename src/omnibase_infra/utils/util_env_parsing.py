@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Environment variable parsing utilities for ONEX infrastructure.
 
 Type-safe environment variable parsing functions with:

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Async Kafka Consumer for Skill Lifecycle Observability (OMN-2934).
 
 Consumes skill-started and skill-completed events from Kafka and persists

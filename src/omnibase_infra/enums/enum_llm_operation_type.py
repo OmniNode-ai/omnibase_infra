@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """LLM Operation Type Enumeration.
 
 Defines the canonical operation types for LLM API calls. Used to classify

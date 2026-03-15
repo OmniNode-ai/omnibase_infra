@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Reusable retry execution mixin for infrastructure handlers.  # ai-slop-ok: pre-existing
 
 This module provides a mixin class that encapsulates retry logic with

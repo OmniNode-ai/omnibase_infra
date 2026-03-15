@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Protocol ownership verification tests (INFRA-016).
 
 These tests verify that omnibase_infra does not declare new public protocol

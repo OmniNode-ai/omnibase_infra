@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Runtime execution integration tests for NodeRegistrationOrchestrator.
 
 These tests verify the orchestrator's runtime workflow coordination with mocked

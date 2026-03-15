@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Dead Letter Queue (DLQ) recovery tests for OMN-955.
 
 This test suite validates DLQ behavior for permanently failing messages.

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests for RuntimeHostProcess auto-introspection (OMN-1930).
 
 This module validates that RuntimeHostProcess correctly integrates with

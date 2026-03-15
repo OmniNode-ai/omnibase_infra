@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Kafka consumer for the ONEX Status TUI.
 
 Subscribes to three topics and posts messages to the app via the

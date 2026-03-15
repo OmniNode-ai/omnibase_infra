@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Opt-in OpenTelemetry tracing configuration for the ONEX runtime.
 
 Exports traces to an OTLP HTTP endpoint (e.g. Arize Phoenix on port 6006).

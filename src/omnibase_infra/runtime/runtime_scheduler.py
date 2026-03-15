@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """RuntimeScheduler - Core service for emitting RuntimeTick events.
 
 The RuntimeScheduler service that emits RuntimeTick events

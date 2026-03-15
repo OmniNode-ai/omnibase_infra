@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Shared pytest configuration for all integration tests.
 
 This conftest.py automatically applies the `integration` marker to all tests

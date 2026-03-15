@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Kafka Event Bus implementation for production message streaming.
 
 Implements ProtocolEventBus interface using Apache Kafka (via aiokafka) for

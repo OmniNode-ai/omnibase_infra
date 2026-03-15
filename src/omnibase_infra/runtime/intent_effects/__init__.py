@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Intent effect adapters for contract-driven intent execution.
 
 This package provides intent effect adapters that bridge intent payloads

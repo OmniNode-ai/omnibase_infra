@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Generic Contract-Driven Projector Shell.
 
 Implements ProtocolEventProjector for contract-based event-to-state projection.

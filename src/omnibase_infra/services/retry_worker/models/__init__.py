@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Models for the RetryWorker service."""
 
 from omnibase_infra.services.retry_worker.models.enum_delivery_status import (

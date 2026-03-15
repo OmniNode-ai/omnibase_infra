@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Snapshot Publisher for Registration Projections.
 
 Publishes compacted snapshots to Kafka for read optimization. Snapshots are

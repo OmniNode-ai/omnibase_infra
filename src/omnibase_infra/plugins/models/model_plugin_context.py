@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Pydantic model for plugin execution context.
 
 The ModelPluginContext Pydantic BaseModel that replaces

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """ONEX to MCP Adapter - Convert ONEX contracts to MCP tool definitions.
 
 This adapter bridges the ONEX node ecosystem with the MCP (Model Context Protocol)

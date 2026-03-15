@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Kafka Topic Provisioner for automatic topic creation on startup.
 
 Ensures that all ONEX topics (platform + domain plugins) exist before the

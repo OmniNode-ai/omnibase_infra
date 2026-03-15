@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler for RuntimeTick - timeout detection.
 
 This handler processes RuntimeTick events from the runtime scheduler

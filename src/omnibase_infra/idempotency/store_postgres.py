@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 # ruff: noqa: S608
 # S608 disabled: All SQL f-strings use table_name which is validated via:
 # 1. Pydantic regex pattern ^[a-zA-Z_][a-zA-Z0-9_]*$ in ModelPostgresIdempotencyStoreConfig
