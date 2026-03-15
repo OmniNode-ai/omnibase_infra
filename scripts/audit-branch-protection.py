@@ -92,17 +92,6 @@ def fix_mismatches(repo: str, required: list[str], actual: set[str]) -> bool:
         return False
     removed = [r for r in required if r not in actual]
     payload = json.dumps({"strict": True, "contexts": valid})
-    r = run_gh(
-        [
-            "api",
-            "-X",
-            "PATCH",
-            f"repos/{ORG}/{repo}/branches/main/protection/required_status_checks",
-            "--input",
-            "-",
-        ]
-    )
-    # Use stdin for payload
     r = subprocess.run(
         [
             "gh",
