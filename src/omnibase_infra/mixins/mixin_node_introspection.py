@@ -476,6 +476,7 @@ class MixinNodeIntrospection:
     _introspection_service: str
     _introspection_start_time: float | None
     _introspection_contract: ModelContractBase | None
+    _introspection_declared_capabilities: ModelNodeCapabilities
     _registration_accepted_topic: str
     _time_provider: Callable[[], datetime]
 
@@ -681,6 +682,9 @@ class MixinNodeIntrospection:
 
         # Contract for capability extraction (may be None for legacy nodes)
         self._introspection_contract = config.contract
+
+        # Declared capabilities from config (OMN-5049: use actual values, not blank default)
+        self._introspection_declared_capabilities = config.declared_capabilities
 
         # State
         self._introspection_cache = None
@@ -1515,11 +1519,12 @@ class MixinNodeIntrospection:
             ) from e
 
         # Create event with performance metrics (metrics is already Pydantic model)
+        # Use declared_capabilities from config (OMN-5049: not a blank default)
         event = ModelNodeIntrospectionEvent(
             node_id=node_id_uuid,
             node_type=node_type,
             node_version=node_version,
-            declared_capabilities=ModelNodeCapabilities(),
+            declared_capabilities=self._introspection_declared_capabilities,
             discovered_capabilities=discovered_capabilities,
             contract_capabilities=contract_capabilities,
             endpoints=endpoints,

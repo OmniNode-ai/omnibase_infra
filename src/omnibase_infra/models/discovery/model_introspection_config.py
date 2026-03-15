@@ -28,6 +28,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.contracts import ModelContractBase
+from omnibase_infra.models.registration.model_node_capabilities import (
+    ModelNodeCapabilities,
+)
 from omnibase_infra.topics import (
     SUFFIX_NODE_HEARTBEAT,
     SUFFIX_NODE_INTROSPECTION,
@@ -99,6 +102,11 @@ class ModelIntrospectionConfig(BaseModel):
         contract: Optional typed contract model for capability extraction.
             When provided, MixinNodeIntrospection extracts contract_capabilities
             using ContractCapabilityExtractor. None for legacy nodes.
+        declared_capabilities: Node's declared capabilities (feature flags).
+            Used directly in introspection and node-became-active events.
+            When not provided, defaults to all-false ModelNodeCapabilities.
+            Nodes should populate this from their registry's get_capabilities()
+            or by constructing ModelNodeCapabilities with the appropriate flags.
 
     Example:
         ```python
@@ -234,6 +242,15 @@ class ModelIntrospectionConfig(BaseModel):
         description="Typed contract model for capability extraction. "
         "When provided, MixinNodeIntrospection will extract contract_capabilities "
         "using ContractCapabilityExtractor. None for legacy nodes without contracts.",
+    )
+
+    declared_capabilities: ModelNodeCapabilities = Field(
+        default_factory=ModelNodeCapabilities,
+        description="Node's declared capabilities (feature flags). "
+        "Published verbatim in node-introspection and node-became-active events. "
+        "Defaults to all-false when not provided. Nodes should populate this "
+        "from their registry's declared capabilities (e.g. postgres=True for "
+        "effect nodes that interact with PostgreSQL).",
     )
 
     @field_validator("node_type", mode="before")
