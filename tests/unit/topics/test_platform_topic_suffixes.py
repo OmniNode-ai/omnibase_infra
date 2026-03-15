@@ -18,6 +18,7 @@ from omnibase_infra.topics import (
     ALL_PLATFORM_TOPIC_SPECS,
     ALL_PROVISIONED_SUFFIXES,
     ALL_PROVISIONED_TOPIC_SPECS,
+    ALL_VALIDATION_TOPIC_SPECS,
     SUFFIX_CONTRACT_DEREGISTERED,
     SUFFIX_CONTRACT_REGISTERED,
     SUFFIX_FSM_STATE_TRANSITIONS,
@@ -433,6 +434,7 @@ class TestProvisionedTopicSpecs:
             + len(ALL_INTELLIGENCE_TOPIC_SPECS)
             + omnimemory_count
             + len(ALL_OMNIBASE_INFRA_TOPIC_SPECS)
+            + len(ALL_VALIDATION_TOPIC_SPECS)
             + len(ALL_OMNICLAUDE_TOPIC_SPECS)
         )
         assert len(ALL_PROVISIONED_TOPIC_SPECS) == expected
