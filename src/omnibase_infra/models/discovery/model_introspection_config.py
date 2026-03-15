@@ -34,6 +34,7 @@ from omnibase_infra.models.registration.model_node_capabilities import (
 from omnibase_infra.topics import (
     SUFFIX_NODE_HEARTBEAT,
     SUFFIX_NODE_INTROSPECTION,
+    SUFFIX_NODE_REGISTRATION_ACCEPTED,
     SUFFIX_REQUEST_INTROSPECTION,
 )
 
@@ -55,6 +56,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_INTROSPECTION_TOPIC = SUFFIX_NODE_INTROSPECTION
 DEFAULT_HEARTBEAT_TOPIC = SUFFIX_NODE_HEARTBEAT
 DEFAULT_REQUEST_INTROSPECTION_TOPIC = SUFFIX_REQUEST_INTROSPECTION
+DEFAULT_REGISTRATION_ACCEPTED_TOPIC = SUFFIX_NODE_REGISTRATION_ACCEPTED
 
 # Topic validation patterns
 # Matches valid topic characters: lowercase alphanumeric, dots, hyphens, underscores
@@ -231,7 +233,7 @@ class ModelIntrospectionConfig(BaseModel):
     )
 
     registration_accepted_topic: str = Field(
-        default="onex.evt.platform.node-registration-accepted.v1",
+        default=DEFAULT_REGISTRATION_ACCEPTED_TOPIC,
         description="Topic for registration acceptance events. "
         "The mixin subscribes to this to emit ACK commands. "
         "ONEX topics (onex.*) require version suffix (.v1, .v2, etc.).",
@@ -353,9 +355,9 @@ class ModelIntrospectionConfig(BaseModel):
                     "cache_ttl": 300.0,
                     "operation_keywords": None,
                     "exclude_prefixes": None,
-                    "introspection_topic": "onex.evt.platform.node-introspection.v1",
-                    "heartbeat_topic": "onex.evt.platform.node-heartbeat.v1",
-                    "request_introspection_topic": "onex.cmd.platform.request-introspection.v1",
+                    "introspection_topic": DEFAULT_INTROSPECTION_TOPIC,
+                    "heartbeat_topic": DEFAULT_HEARTBEAT_TOPIC,
+                    "request_introspection_topic": DEFAULT_REQUEST_INTROSPECTION_TOPIC,
                 },
                 # Second example: Custom prefixed topics for environment isolation
                 # Demonstrates adding env/namespace prefix to suffix constants

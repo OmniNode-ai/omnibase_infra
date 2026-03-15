@@ -138,6 +138,16 @@ SUFFIX_CONTRACT_DEREGISTERED: str = "onex.evt.platform.contract-deregistered.v1"
 Published when a node contract is deregistered from the runtime.
 """
 
+# Registration acceptance events
+SUFFIX_NODE_REGISTRATION_ACCEPTED: str = (
+    "onex.evt.platform.node-registration-accepted.v1"
+)
+"""Topic suffix for node registration acceptance events.
+
+Published by the registration orchestrator when a node's registration is accepted.
+Nodes subscribe to this to trigger ACK command emission.
+"""
+
 # Registration ACK commands
 SUFFIX_NODE_REGISTRATION_ACKED: str = "onex.cmd.platform.node-registration-acked.v1"
 """Topic suffix for node registration ACK commands.
@@ -824,6 +834,7 @@ ALL_PLATFORM_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ),
     ModelTopicSpec(suffix=SUFFIX_CONTRACT_REGISTERED, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_CONTRACT_DEREGISTERED, partitions=6),
+    ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION_ACCEPTED, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION_ACKED, partitions=6),
     # Resolution event ledger (OMN-2895)
     ModelTopicSpec(suffix=SUFFIX_RESOLUTION_DECIDED, partitions=3),
