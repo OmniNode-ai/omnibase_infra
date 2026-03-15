@@ -85,8 +85,8 @@ class HandlerRegistryApiListContracts:
             correlation_id=correlation_id,
             success=True,
             data={
-                "results": [c.model_dump() for c in contracts],
-                "pagination": pagination.model_dump(),
+                "results": [c.model_dump(mode="json") for c in contracts],
+                "pagination": pagination.model_dump(mode="json"),
             },
             warnings=[w.message for w in warnings],
         )

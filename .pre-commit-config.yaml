@@ -200,6 +200,17 @@ repos:
         types: [python]
         pass_filenames: false
         stages: [pre-commit]
+      # Bare model_dump() Detection (OMN-4912)
+      # Prevents bare model_dump() calls that produce non-JSON-safe types at
+      # serialization boundaries. Baseline: 23 violations (2026-03-13).
+      # Ratchet rule: any PR reducing violations must lower --max-violations.
+      - id: validate-model-dump-json-mode
+        name: Validate model_dump uses mode="json"
+        entry: uv run python scripts/validation/validate_model_dump_json_mode.py --directory src/ --max-violations 0
+        language: system
+        pass_filenames: false
+        files: ^src/.*\.py$
+        stages: [pre-commit]
       # Declarative node enforcement
       # Ensures node.py files follow the ONEX declarative pattern:
       # - Only extend base classes, no custom methods/properties
