@@ -329,7 +329,9 @@ class IntrospectionCacheDict(TypedDict):
     timestamp: str  # datetime serializes to ISO string in JSON mode
     # Optional fields
     node_role: str | None
-    metadata: dict[str, object]  # ModelNodeMetadata serializes to dict
+    metadata: dict[
+        str, object
+    ]  # ONEX_EXCLUDE: dict_str_any - ModelNodeMetadata serializes to dict
     network_id: str | None
     deployment_id: str | None
     epoch: int | None

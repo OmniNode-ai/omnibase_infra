@@ -61,11 +61,9 @@ class ModelMCPToolDefinition(BaseModel):
     timeout_seconds: int = Field(
         default=30, ge=1, le=300, description="Execution timeout in seconds"
     )
-    metadata: dict[str, object] = (
-        Field(  # ONEX_EXCLUDE: dict_str_any - MCP extensibility contract; third-party tools add arbitrary keys
-            default_factory=dict,
-            description="Additional metadata (tags, input_model module, etc.)",
-        )
+    metadata: dict[str, object] = Field(  # noqa: ONEX_EXCLUDE: dict_str_any - MCP extensibility
+        default_factory=dict,
+        description="Additional metadata (tags, input_model module, etc.)",
     )
 
     @property
