@@ -220,6 +220,10 @@ idempotency:
     - "node_type"
     - "timestamp"
   description: "Skip duplicate events based on event_id or derived hash"
+# Node capabilities (infrastructure-level feature flags for introspection)
+# Extracted at startup by ContractNodeCapabilityExtractor -> ModelNodeCapabilities
+node_capabilities:
+  processing: true
 # Dependencies
 # ============
 dependencies:

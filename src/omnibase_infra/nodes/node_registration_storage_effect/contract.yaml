@@ -139,6 +139,14 @@ database_schema:
     - name: "idx_node_registrations_updated"
       columns: ["updated_at"]
       description: "Index for ordering by recency"
+# Node capabilities (infrastructure-level feature flags for introspection)
+# Extracted at startup by ContractNodeCapabilityExtractor -> ModelNodeCapabilities
+node_capabilities:
+  postgres: true
+  read: true
+  write: true
+  database: true
+  transactions: true
 # Dependencies (protocols this node requires)
 dependencies:
   - name: "protocol_registration_storage_handler"

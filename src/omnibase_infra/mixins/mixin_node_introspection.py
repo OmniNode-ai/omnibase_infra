@@ -683,7 +683,9 @@ class MixinNodeIntrospection:
         # Contract for capability extraction (may be None for legacy nodes)
         self._introspection_contract = config.contract
 
-        # Declared capabilities from config (OMN-5049: use actual values, not blank default)
+        # Declared capabilities from contract YAML (node_capabilities block).
+        # When populated (e.g., via ContractNodeCapabilityExtractor), these are
+        # used in introspection events. Defaults to all-false ModelNodeCapabilities.
         self._introspection_declared_capabilities = config.declared_capabilities
 
         # State
