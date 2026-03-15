@@ -107,8 +107,9 @@ class ModelIntrospectionConfig(BaseModel):
         declared_capabilities: Node's declared capabilities (feature flags).
             Used directly in introspection and node-became-active events.
             When not provided, defaults to all-false ModelNodeCapabilities.
-            Nodes should populate this from their registry's get_capabilities()
-            or by constructing ModelNodeCapabilities with the appropriate flags.
+            Can be populated from the contract YAML ``node_capabilities`` block
+            via ``ContractNodeCapabilityExtractor.extract_from_yaml()``, or from
+            the registry's get_capabilities().
 
     Example:
         ```python
@@ -250,10 +251,27 @@ class ModelIntrospectionConfig(BaseModel):
         default_factory=ModelNodeCapabilities,
         description="Node's declared capabilities (feature flags). "
         "Published verbatim in node-introspection and node-became-active events. "
-        "Defaults to all-false when not provided. Nodes should populate this "
-        "from their registry's declared capabilities (e.g. postgres=True for "
-        "effect nodes that interact with PostgreSQL).",
+        "Defaults to all-false when not provided. Can be populated from contract "
+        "YAML via ContractNodeCapabilityExtractor.extract_from_yaml() or from "
+        "the registry's declared capabilities.",
     )
+
+    @field_validator("declared_capabilities", mode="before")
+    @classmethod
+    def coerce_none_capabilities(
+        cls,
+        v: ModelNodeCapabilities | None,
+    ) -> ModelNodeCapabilities:
+        """Coerce None to default all-false ModelNodeCapabilities.
+
+        Legacy callers may pass ``declared_capabilities=None`` to indicate
+        "use defaults".  The Pydantic ``default_factory`` only fires when the
+        field is *omitted*; an explicit ``None`` triggers a validation error.
+        This validator normalises both cases.
+        """
+        if v is None:
+            return ModelNodeCapabilities()
+        return v
 
     @field_validator("node_type", mode="before")
     @classmethod
@@ -382,6 +400,7 @@ class ModelIntrospectionConfig(BaseModel):
 __all__ = [
     "DEFAULT_HEARTBEAT_TOPIC",
     "DEFAULT_INTROSPECTION_TOPIC",
+    "DEFAULT_REGISTRATION_ACCEPTED_TOPIC",
     "DEFAULT_REQUEST_INTROSPECTION_TOPIC",
     "INVALID_TOPIC_CHARS",
     "TOPIC_PATTERN",

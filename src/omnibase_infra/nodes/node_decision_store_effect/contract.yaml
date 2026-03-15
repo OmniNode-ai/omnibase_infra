@@ -225,6 +225,14 @@ dependencies:
     class_name: "ProtocolCircuitBreakerAware"
     module: "omnibase_infra.mixins.protocol_circuit_breaker_aware"
     description: "Circuit breaker awareness for backend protection"
+# Node capabilities (infrastructure-level feature flags for introspection)
+# Extracted at startup by ContractNodeCapabilityExtractor -> ModelNodeCapabilities
+node_capabilities:
+  postgres: true
+  read: true
+  write: true
+  database: true
+  transactions: true
 # Capabilities provided by this node
 capabilities:
   - name: "decision_persistence"
