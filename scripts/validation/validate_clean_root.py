@@ -95,6 +95,7 @@ ALLOWED_ROOT_FILES: frozenset[str] = frozenset(
         "SECURITY.md",
         # ONEX-specific documentation
         "CLAUDE.md",
+        "AGENT.md",
         # Environment
         ".env.example",
         # Docker (if needed at root)
