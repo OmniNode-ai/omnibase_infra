@@ -655,7 +655,7 @@ class EventBusKafka(
                     if self._producer is not None:
                         try:
                             await self._producer.stop()
-                        except Exception as cleanup_err:
+                        except Exception as cleanup_err:  # noqa: BLE001 — boundary: logs warning and degrades
                             logger.warning(
                                 "Cleanup failed for Kafka producer stop: %s",
                                 cleanup_err,
@@ -697,7 +697,7 @@ class EventBusKafka(
                     if self._producer is not None:
                         try:
                             await self._producer.stop()
-                        except Exception as cleanup_err:
+                        except Exception as cleanup_err:  # noqa: BLE001 — boundary: logs warning and degrades
                             logger.warning(
                                 "Cleanup failed for Kafka producer stop: %s",
                                 cleanup_err,
@@ -809,7 +809,7 @@ class EventBusKafka(
         for consumer in consumers_to_close:
             try:
                 await consumer.stop()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(f"Error stopping consumer: {e}")
 
         # Close producer with proper locking
@@ -817,7 +817,7 @@ class EventBusKafka(
             if self._producer is not None:
                 try:
                     await self._producer.stop()
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                     logger.warning(f"Error stopping producer: {e}")
                 self._producer = None
 
@@ -957,7 +957,7 @@ class EventBusKafka(
             if self._producer is not None:
                 try:
                     await self._producer.stop()
-                except Exception as cleanup_err:
+                except Exception as cleanup_err:  # noqa: BLE001 — boundary: logs warning and degrades
                     logger.warning(
                         "Cleanup failed for Kafka producer stop during recreation: %s",
                         cleanup_err,
@@ -991,7 +991,7 @@ class EventBusKafka(
             if self._producer is not None:
                 try:
                     await self._producer.stop()
-                except Exception as cleanup_err:
+                except Exception as cleanup_err:  # noqa: BLE001 — boundary: logs warning and degrades
                     logger.warning(
                         "Cleanup failed for Kafka producer stop during recreation: %s",
                         cleanup_err,
@@ -1144,7 +1144,7 @@ class EventBusKafka(
                     if self._producer is not None:
                         try:
                             await self._producer.stop()
-                        except Exception as cleanup_err:
+                        except Exception as cleanup_err:  # noqa: BLE001 — boundary: logs warning and degrades
                             logger.warning(
                                 "Cleanup failed for Kafka producer stop during publish: %s",
                                 cleanup_err,
@@ -1178,7 +1178,7 @@ class EventBusKafka(
                     },
                 )
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 last_exception = e
                 async with self._circuit_breaker_lock:
                     await self._record_circuit_failure(
@@ -1365,7 +1365,7 @@ class EventBusKafka(
                     if not self._subscribers.get(topic):
                         await self._stop_consumer_for_topic(topic)
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                     logger.warning(f"Error during unsubscribe: {e}")
 
         return unsubscribe
@@ -1565,7 +1565,7 @@ class EventBusKafka(
             # Clean up consumer on failure to prevent resource leak
             try:
                 await consumer.stop()
-            except Exception as cleanup_err:
+            except Exception as cleanup_err:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Cleanup failed for Kafka consumer stop (topic=%s): %s",
                     topic,
@@ -1603,7 +1603,7 @@ class EventBusKafka(
             # Clean up consumer on failure to prevent resource leak
             try:
                 await consumer.stop()
-            except Exception as cleanup_err:
+            except Exception as cleanup_err:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Cleanup failed for Kafka consumer stop (topic=%s): %s",
                     topic,
@@ -1657,7 +1657,7 @@ class EventBusKafka(
             consumer = self._consumers.pop(topic)
             try:
                 await consumer.stop()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(f"Error stopping consumer for topic {topic}: {e}")
 
     async def _consume_loop(self, topic: str, correlation_id: UUID) -> None:
@@ -1723,7 +1723,7 @@ class EventBusKafka(
                             if hdr_key == "event_type" and hdr_val is not None:
                                 event_type = hdr_val.decode("utf-8")
                                 break
-                    except Exception:
+                    except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                         pass
                     logger.warning(
                         "Message received on topic '%s' with event_type='%s' "
@@ -1904,7 +1904,7 @@ class EventBusKafka(
                 try:
                     # Check if producer client is not closed
                     producer_healthy = not getattr(self._producer, "_closed", True)
-                except Exception:
+                except Exception:  # noqa: BLE001 — boundary: returns degraded response
                     producer_healthy = False
 
         return {
@@ -1952,7 +1952,7 @@ class EventBusKafka(
                         assignments[topic] = sorted(
                             tp.partition for tp in topic_partitions
                         )
-                    except Exception:
+                    except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
                         assignments[topic] = []
 
                 for topic, task in self._consumer_tasks.items():
@@ -1970,7 +1970,7 @@ class EventBusKafka(
             # If no required topics, readiness is True when started
             is_ready = consumers_started and required_topics_ready
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             last_error = str(e)
             is_ready = False
             consumers_started = False

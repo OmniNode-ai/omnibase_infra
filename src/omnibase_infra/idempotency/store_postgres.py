@@ -914,7 +914,7 @@ class StoreIdempotencyPostgres(ProtocolIdempotencyStore):
                     )
                 return ModelIdempotencyStoreHealthCheckResult(healthy=True, reason="ok")
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: returns degraded response
             return ModelIdempotencyStoreHealthCheckResult(
                 healthy=False,
                 reason="check_failed",

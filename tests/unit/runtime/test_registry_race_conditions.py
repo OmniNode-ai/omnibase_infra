@@ -196,7 +196,7 @@ class TestPolicyRegistryConcurrentRegistration:
                     policy_type=EnumPolicyType.ORCHESTRATOR,
                     version="1.0.0",
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         threads = [
@@ -226,7 +226,7 @@ class TestPolicyRegistryConcurrentRegistration:
                     policy_type=EnumPolicyType.ORCHESTRATOR,
                     version=f"{version_num}.0.0",
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         threads = [
@@ -264,7 +264,7 @@ class TestPolicyRegistryConcurrentRegistration:
                 for _ in range(100):
                     result = policy_registry.get("existing-policy")
                     read_results.append(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 read_errors.append(e)
 
         def write_policy(index: int) -> None:
@@ -275,7 +275,7 @@ class TestPolicyRegistryConcurrentRegistration:
                     policy_type=EnumPolicyType.ORCHESTRATOR,
                     version="1.0.0",
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 write_errors.append(e)
 
         readers = [threading.Thread(target=read_policy) for _ in range(5)]
@@ -312,7 +312,7 @@ class TestPolicyRegistrySecondaryIndexRaceConditions:
                         policy_type=EnumPolicyType.ORCHESTRATOR,
                         version=f"{version}.0.0",
                     )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         threads = [
@@ -359,7 +359,7 @@ class TestPolicyRegistrySecondaryIndexRaceConditions:
                     f"policy-{policy_index}", version="1.0.0"
                 )
                 unregister_counts.append(count)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         threads = [
@@ -398,7 +398,7 @@ class TestPolicyRegistrySemverCacheRaceConditions:
                 for i in range(50):
                     result = RegistryPolicy._parse_semver(f"{i % 10}.{i % 5}.{i % 3}")
                     results.append(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         threads = [threading.Thread(target=parse_version) for _ in range(10)]
@@ -426,7 +426,7 @@ class TestPolicyRegistrySemverCacheRaceConditions:
                     if version not in results:
                         results[version] = []
                     results[version].append(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         # Parse the same versions from many threads
@@ -481,7 +481,7 @@ class TestPolicyRegistrySemverCacheRaceConditions:
                     result = RegistryPolicy._parse_semver(f"{i % 10}.{i % 5}.{i % 3}")
                     assert result is not None
                     local_count += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
             finally:
                 with lock:
@@ -497,7 +497,7 @@ class TestPolicyRegistrySemverCacheRaceConditions:
                     local_count += 1
                     # Small sleep to allow interleaving
                     time.sleep(0.0001)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
             finally:
                 with lock:
@@ -556,7 +556,7 @@ class TestComputeRegistrySemverCacheResetDuringParsing:
                     result = RegistryCompute._parse_semver(f"{i % 10}.{i % 5}.{i % 3}")
                     assert result is not None
                     local_count += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
             finally:
                 with lock:
@@ -571,7 +571,7 @@ class TestComputeRegistrySemverCacheResetDuringParsing:
                     RegistryCompute._reset_semver_cache()
                     local_count += 1
                     time.sleep(0.0001)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
             finally:
                 with lock:
@@ -683,7 +683,7 @@ class TestSemverCacheClearOnReset:
                     # Parse versions that may or may not be cached
                     RegistryCompute._parse_semver(f"{i % 30}.{i % 15}.{i % 10}")
                     local_count += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
             finally:
                 with lock:
@@ -699,7 +699,7 @@ class TestSemverCacheClearOnReset:
                     local_count += 1
                     # Very short sleep to maximize interleaving
                     time.sleep(0.0001)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
             finally:
                 with lock:
@@ -774,7 +774,7 @@ class TestPolicyRegistryStressTest:
                         _ = policy_registry.list_versions(f"stress-{thread_id}-{i}")
                         with lock:
                             results.append("versions")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         threads = [
@@ -807,7 +807,7 @@ class TestHandlerRegistryConcurrentOperations:
         def register_handler(protocol: str, cls: type) -> None:
             try:
                 handler_registry.register(protocol, cls)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         # Use unique protocol types to avoid overwrite conflicts
@@ -851,7 +851,7 @@ class TestHandlerRegistryConcurrentOperations:
                     _ = handler_registry.list_protocols()
                     with lock:
                         read_count += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def write_operations(thread_id: int) -> None:
@@ -861,7 +861,7 @@ class TestHandlerRegistryConcurrentOperations:
                     handler_registry.register(f"custom-{thread_id}-{i}", MockHandler)  # type: ignore[arg-type]
                     with lock:
                         write_count += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         readers = [threading.Thread(target=read_operations) for _ in range(5)]
@@ -895,7 +895,7 @@ class TestHandlerRegistryConcurrentOperations:
                 result = handler_registry.unregister(f"handler-{index}")
                 with lock:
                     unregister_results.append(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         threads = [
@@ -930,7 +930,7 @@ class TestEventBusRegistryConcurrentOperations:
         def register_bus(index: int) -> None:
             try:
                 event_bus_registry.register(f"bus-{index}", MockEventBus)  # type: ignore[arg-type]
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         threads = [
@@ -959,7 +959,7 @@ class TestEventBusRegistryConcurrentOperations:
                 event_bus_registry.register("shared-bus", MockEventBus)  # type: ignore[arg-type]
                 with lock:
                     success_count += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         threads = [threading.Thread(target=try_register) for _ in range(num_threads)]
@@ -987,7 +987,7 @@ class TestEventBusRegistryConcurrentOperations:
                     result = event_bus_registry.is_registered("test-bus")
                     with lock:
                         check_results.append(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def register_bus() -> None:
@@ -995,7 +995,7 @@ class TestEventBusRegistryConcurrentOperations:
                 # Small delay to allow some checks to run first
                 time.sleep(0.001)
                 event_bus_registry.register("test-bus", MockEventBus)  # type: ignore[arg-type]
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         checkers = [threading.Thread(target=check_registered) for _ in range(5)]
@@ -1033,7 +1033,7 @@ class TestSingletonFactoryRaceConditions:
                 registry = get_handler_registry()
                 with lock:
                     registries.append(registry)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         threads = [threading.Thread(target=get_registry) for _ in range(50)]
@@ -1059,7 +1059,7 @@ class TestSingletonFactoryRaceConditions:
                 registry = get_event_bus_registry()
                 with lock:
                     registries.append(registry)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         threads = [threading.Thread(target=get_registry) for _ in range(50)]
@@ -1086,7 +1086,7 @@ class TestSingletonFactoryRaceConditions:
                 registry = get_handler_registry()
                 with lock:
                     handler_registries.append(registry)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def get_event_bus() -> None:
@@ -1094,7 +1094,7 @@ class TestSingletonFactoryRaceConditions:
                 registry = get_event_bus_registry()
                 with lock:
                     event_bus_registries.append(registry)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         handler_threads = [threading.Thread(target=get_handler) for _ in range(25)]
@@ -1139,7 +1139,7 @@ class TestThreadPoolExecutorStress:
                     version="1.0.0",
                 )
                 return f"success-{index}"
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: returns degraded response
                 errors.append(e)
                 return f"error-{index}"
 
@@ -1163,7 +1163,7 @@ class TestThreadPoolExecutorStress:
             try:
                 handler_registry.register(f"executor-handler-{index}", MockHandler)  # type: ignore[arg-type]
                 return f"success-{index}"
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: returns degraded response
                 errors.append(e)
                 return f"error-{index}"
 
@@ -1196,7 +1196,7 @@ class TestThreadPoolExecutorStress:
                 )
                 with lock:
                     results.append(f"policy-{index}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def handler_operation(index: int) -> None:
@@ -1204,7 +1204,7 @@ class TestThreadPoolExecutorStress:
                 handler_registry.register(f"mixed-handler-{index}", MockHandler)  # type: ignore[arg-type]
                 with lock:
                     results.append(f"handler-{index}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
@@ -1216,7 +1216,7 @@ class TestThreadPoolExecutorStress:
             for f in as_completed(futures):
                 try:
                     f.result()
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                     errors.append(e)
 
         assert len(errors) == 0, f"Errors: {errors}"
@@ -1260,7 +1260,7 @@ class TestVersionSelectionRaceConditions:
                         policy_type=EnumPolicyType.ORCHESTRATOR,
                         version=f"{i}.0.0",
                     )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def get_policy() -> None:
@@ -1269,7 +1269,7 @@ class TestVersionSelectionRaceConditions:
                     result = policy_registry.get(policy_id)
                     with lock:
                         get_results.append(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         register_thread = threading.Thread(target=register_versions)
@@ -1320,7 +1320,7 @@ class TestClearOperationRaceConditions:
                     except PolicyRegistryError:
                         pass  # Expected after clear
                     _ = policy_registry.list_keys()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def write_operations() -> None:
@@ -1332,14 +1332,14 @@ class TestClearOperationRaceConditions:
                         policy_type=EnumPolicyType.ORCHESTRATOR,
                         version="1.0.0",
                     )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def clear_operation() -> None:
             try:
                 time.sleep(0.01)  # Let some operations start
                 policy_registry.clear()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         readers = [threading.Thread(target=read_operations) for _ in range(3)]
@@ -1375,14 +1375,14 @@ class TestClearOperationRaceConditions:
                         MockHandler,
                     )  # type: ignore[arg-type]
                     _ = handler_registry.list_protocols()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def clear_operation() -> None:
             try:
                 time.sleep(0.005)
                 handler_registry.clear()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         threads = [threading.Thread(target=read_and_write) for _ in range(5)]
@@ -1436,7 +1436,7 @@ class TestComputeRegistryConcurrentWriteRead:
                     result = compute_registry.get("existing-plugin")
                     with lock:
                         read_results.append(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 read_errors.append(e)
 
         def writer_task(thread_id: int) -> None:
@@ -1448,7 +1448,7 @@ class TestComputeRegistryConcurrentWriteRead:
                         plugin_class=MockComputePlugin,  # type: ignore[arg-type]
                         version="1.0.0",
                     )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 write_errors.append(e)
 
         # Create threads
@@ -1493,7 +1493,7 @@ class TestComputeRegistryConcurrentWriteRead:
                         plugin_class=MockComputePlugin,  # type: ignore[arg-type]
                         version="1.0.0",
                     )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         threads = [
@@ -1537,7 +1537,7 @@ class TestComputeRegistryConcurrentWriteRead:
                     keys = compute_registry.list_keys()
                     with lock:
                         list_keys_results.append(keys)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def writer_task(thread_id: int) -> None:
@@ -1549,7 +1549,7 @@ class TestComputeRegistryConcurrentWriteRead:
                         plugin_class=MockComputePlugin,  # type: ignore[arg-type]
                         version="1.0.0",
                     )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         readers = [threading.Thread(target=reader_task) for _ in range(5)]
@@ -1609,7 +1609,7 @@ class TestComputeRegistryConcurrentVersioning:
                     versions = compute_registry.list_versions(plugin_id)
                     with lock:
                         version_results.append(versions)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def writer_task() -> None:
@@ -1621,7 +1621,7 @@ class TestComputeRegistryConcurrentVersioning:
                         plugin_class=MockComputePluginV2,  # type: ignore[arg-type]
                         version=f"{i}.0.0",
                     )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         readers = [threading.Thread(target=reader_task) for _ in range(5)]
@@ -1675,7 +1675,7 @@ class TestComputeRegistryConcurrentVersioning:
                     result = compute_registry.get(plugin_id)
                     with lock:
                         get_results.append(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def writer_task() -> None:
@@ -1687,7 +1687,7 @@ class TestComputeRegistryConcurrentVersioning:
                         plugin_class=MockComputePluginV2,  # type: ignore[arg-type]
                         version=f"{i}.0.0",
                     )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         readers = [threading.Thread(target=reader_task) for _ in range(5)]
@@ -1741,7 +1741,7 @@ class TestComputeRegistryConcurrentUnregister:
                         _ = compute_registry.is_registered(f"plugin-{i}")
                     with lock:
                         read_count += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def unregister_task() -> None:
@@ -1752,7 +1752,7 @@ class TestComputeRegistryConcurrentUnregister:
                     count = compute_registry.unregister(f"plugin-{i}")
                     with lock:
                         unregister_count += count
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         readers = [threading.Thread(target=reader_task) for _ in range(3)]
@@ -1801,7 +1801,7 @@ class TestComputeRegistryConcurrentUnregister:
                     versions = compute_registry.list_versions(plugin_id)
                     with lock:
                         version_counts.append(len(versions))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def unregister_task() -> None:
@@ -1810,7 +1810,7 @@ class TestComputeRegistryConcurrentUnregister:
                 for v in range(1, 6):  # Unregister first 5 versions
                     compute_registry.unregister(plugin_id, version=f"{v}.0.0")
                     time.sleep(0.001)  # Small delay to increase interleaving
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         readers = [threading.Thread(target=reader_task) for _ in range(3)]
@@ -1863,7 +1863,7 @@ class TestComputeRegistryHighContention:
                         version="1.0.0",
                     )
                     local_count += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
             finally:
                 with lock:
@@ -1893,7 +1893,7 @@ class TestComputeRegistryHighContention:
                         except ComputeRegistryError:
                             pass  # Expected - plugin may not exist yet
                     local_count += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 if not isinstance(e, ComputeRegistryError):
                     errors.append(e)
             finally:
@@ -2015,7 +2015,7 @@ class TestComputeRegistryHighContention:
                         _ = compute_registry.unregister(plugin_id)
                         local_counts["unregister"] += 1
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 if not isinstance(e, ComputeRegistryError):
                     errors.append(e)
             finally:
@@ -2079,7 +2079,7 @@ class TestComputeRegistryContainsOperatorConcurrency:
                     result = "known-plugin" in compute_registry
                     with lock:
                         check_results.append(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def writer_task(thread_id: int) -> None:
@@ -2091,7 +2091,7 @@ class TestComputeRegistryContainsOperatorConcurrency:
                         plugin_class=MockComputePlugin,  # type: ignore[arg-type]
                         version="1.0.0",
                     )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         checkers = [threading.Thread(target=checker_task) for _ in range(5)]
@@ -2136,7 +2136,7 @@ class TestComputeRegistryClearConcurrency:
                         pass  # Expected after clear
                     _ = compute_registry.list_keys()
                     _ = len(compute_registry)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def write_operations(thread_id: int) -> None:
@@ -2148,7 +2148,7 @@ class TestComputeRegistryClearConcurrency:
                         plugin_class=MockComputePlugin,  # type: ignore[arg-type]
                         version="1.0.0",
                     )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def clear_operation() -> None:
@@ -2156,7 +2156,7 @@ class TestComputeRegistryClearConcurrency:
             try:
                 time.sleep(0.01)  # Let some operations start
                 compute_registry.clear()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         readers = [threading.Thread(target=read_operations) for _ in range(3)]

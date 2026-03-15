@@ -231,7 +231,7 @@ class TestConsulRegistrationVisible:
             # Cleanup: deregister the test service
             try:
                 await client.agent.service.deregister(service_id)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                 import warnings
 
                 warnings.warn(
@@ -242,7 +242,7 @@ class TestConsulRegistrationVisible:
             # Close the async Consul client to prevent resource leaks
             try:
                 await client.close()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
                 pass
 
 

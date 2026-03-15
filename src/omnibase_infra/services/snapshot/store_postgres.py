@@ -320,7 +320,7 @@ class StoreSnapshotPostgres:
                                 },
                             )
                             return existing_id
-                except Exception:
+                except Exception:  # noqa: BLE001 — re-raises as typed error
                     pass  # Fall through to re-raise original error
 
             # Sequence conflict with different content - this is a real conflict
@@ -983,7 +983,7 @@ class StoreSnapshotPostgres:
                                 },
                             )
                             return existing_id, existing_seq
-                except Exception:
+                except Exception:  # noqa: BLE001 — re-raises as typed error
                     pass  # Fall through to re-raise original error
 
             context = ModelInfraErrorContext(

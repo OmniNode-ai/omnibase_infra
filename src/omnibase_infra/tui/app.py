@@ -103,17 +103,17 @@ class StatusApp(App[None]):
         try:
             ws: WidgetWorkstreams = self.query_one("#workstreams", WidgetWorkstreams)
             ws.refresh_display()
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
             logger.debug("Failed to refresh workstreams panel", exc_info=True)
         try:
             hf: WidgetHookFeed = self.query_one("#hook-feed", WidgetHookFeed)
             hf.refresh_all()
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
             logger.debug("Failed to refresh hook feed panel", exc_info=True)
         try:
             pt: WidgetPRTriage = self.query_one("#pr-triage", WidgetPRTriage)
             pt.refresh_table()
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
             logger.debug("Failed to refresh PR triage panel", exc_info=True)
 
     def action_open_pr(self) -> None:
@@ -121,7 +121,7 @@ class StatusApp(App[None]):
         try:
             pt: WidgetPRTriage = self.query_one("#pr-triage", WidgetPRTriage)
             pt.open_selected_pr()
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
             logger.debug("Failed to open selected PR", exc_info=True)
 
 

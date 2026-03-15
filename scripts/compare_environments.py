@@ -112,7 +112,7 @@ class SsmRunner:
                 timeout=30,
                 check=False,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: returns degraded response
             return SsmResult(skipped=True, skip_reason=f"send-command failed: {exc}")
         if send.returncode != 0:
             if (
@@ -127,7 +127,7 @@ class SsmRunner:
             )
         try:
             command_id = json.loads(send.stdout)["Command"]["CommandId"]
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: returns degraded response
             return SsmResult(
                 skipped=True, skip_reason=f"could not parse CommandId: {exc}"
             )
@@ -162,7 +162,7 @@ class SsmRunner:
                         stdout=inv.get("StandardOutputContent", ""),
                         stderr=inv.get("StandardErrorContent", ""),
                     )
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: returns degraded response
                 continue
         return SsmResult(
             skipped=True, skip_reason=f"instance unreachable after {self.timeout}s"
@@ -297,7 +297,7 @@ def probe_infisical_paths(
                         ),
                     )
                 )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
             findings.append(
                 ModelParityFinding(
                     check_id="infisical_path_completeness",
@@ -408,7 +408,7 @@ def check_ecr_tag_validity(
         repo, tag = parsed
         try:
             exists = _ecr_tag_exists(repo, tag, region)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
             findings.append(
                 ModelParityFinding(
                     check_id="ecr_tag_validity",
@@ -739,7 +739,7 @@ def run_parity_check(
                         "omnidash-credentials": data.get("omnidash_credentials", {}),
                     }
                     all_findings.extend(check_credential_parity(cloud_secrets))
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                     all_findings.append(
                         ModelParityFinding(
                             check_id="credential_parity",
@@ -760,7 +760,7 @@ def run_parity_check(
                     all_findings.extend(
                         check_ecr_tag_validity(deployments, region=region)
                     )
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                     all_findings.append(
                         ModelParityFinding(
                             check_id="ecr_tag_validity",

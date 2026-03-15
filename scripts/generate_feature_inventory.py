@@ -69,7 +69,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
             with open(path) as f:
                 data = yaml.safe_load(f)
             return data if isinstance(data, dict) else {}
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: returns degraded response
             return {}
 
     # Fallback: minimal line-by-line parser for subscribe/publish_topics only.
@@ -85,7 +85,7 @@ def _parse_yaml_fallback(path: Path) -> dict[str, Any]:
     lines: list[str] = []
     try:
         lines = path.read_text(errors="replace").splitlines()
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: returns degraded response
         return {}
 
     result: dict[str, Any] = {}
@@ -593,7 +593,7 @@ def main() -> int:
     if overrides_path.exists():
         try:
             overrides = _load_yaml(overrides_path)
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
             overrides = {}
 
     # Scan repos

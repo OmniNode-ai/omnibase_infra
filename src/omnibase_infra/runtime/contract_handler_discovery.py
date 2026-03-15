@@ -403,7 +403,7 @@ class ContractHandlerDiscovery:
                                 },
                             )
                         )
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                         # CATCH-ALL: Individual handler failures must NOT crash the entire
                         # discovery operation. This enables graceful degradation where some
                         # handlers can be registered even if others fail unexpectedly. All
@@ -455,7 +455,7 @@ class ContractHandlerDiscovery:
                     )
                 )
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 # CATCH-ALL: Discovery must be resilient - a single failing path must NOT
                 # crash the entire discovery operation. This enables processing remaining
                 # paths even if one path encounters unexpected errors (e.g., filesystem

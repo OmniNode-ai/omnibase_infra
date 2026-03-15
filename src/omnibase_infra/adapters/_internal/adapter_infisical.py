@@ -392,7 +392,7 @@ class AdapterInfisical:
                     secret_path=secret_path,
                 )
                 batch_result.secrets[name] = result
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: returns degraded response
                 batch_result.errors[name] = sanitize_error_message(e)
 
         return batch_result

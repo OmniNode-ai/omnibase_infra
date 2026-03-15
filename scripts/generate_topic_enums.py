@@ -223,7 +223,7 @@ def _run_generate(
         # Hard-stop: inconsistent parsed components (parser bug)
         print(f"ERROR (hard-stop): {exc}", file=sys.stderr)
         return 2
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"ERROR: Unexpected error during extraction: {exc}", file=sys.stderr)
         return 3
 
@@ -234,7 +234,7 @@ def _run_generate(
         # Hard-stop: enum key collision
         print(f"ERROR (hard-stop): {exc}", file=sys.stderr)
         return 2
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"ERROR: Unexpected error during generation: {exc}", file=sys.stderr)
         return 3
 
@@ -257,7 +257,7 @@ def _run_generate(
         for file_path, content in rendered.items():
             _atomic_write(file_path, content)
             print(f"  wrote: {file_path.relative_to(_REPO_ROOT)}")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"ERROR: Failed to write generated files: {exc}", file=sys.stderr)
         return 3
 
@@ -314,7 +314,7 @@ def _run_check(
     except RuntimeError as exc:
         print(f"ERROR (hard-stop): {exc}", file=sys.stderr)
         return 2
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"ERROR: Unexpected error during extraction: {exc}", file=sys.stderr)
         return 3
 
@@ -324,7 +324,7 @@ def _run_check(
     except RuntimeError as exc:
         print(f"ERROR (hard-stop): {exc}", file=sys.stderr)
         return 2
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"ERROR: Unexpected error during generation: {exc}", file=sys.stderr)
         return 3
 

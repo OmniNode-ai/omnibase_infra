@@ -170,7 +170,7 @@ def main() -> int:
         print(f"ERROR: Failed to import contract linter: {e}", file=sys.stderr)
         print("Make sure omnibase_infra is installed: uv sync", file=sys.stderr)
         return 2
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"ERROR: Unexpected error: {e}", file=sys.stderr)
         return 2
 

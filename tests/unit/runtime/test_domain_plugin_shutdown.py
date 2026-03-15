@@ -165,7 +165,7 @@ class TestPluginShutdownOrder:
         for plugin in reversed(activated_plugins):
             try:
                 await plugin.shutdown(config)
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: skips item and continues
                 # Kernel catches and logs errors, continues to next plugin
                 pass
 
@@ -296,7 +296,7 @@ class TestKernelShutdownIntegration:
         for plugin in reversed(activated_plugins):
             try:
                 await plugin.shutdown(config)
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: skips item and continues
                 # Kernel logs but continues (kernel.py:1070-1076)
                 pass
 

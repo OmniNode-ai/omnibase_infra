@@ -109,7 +109,7 @@ def mask_dsn_password(dsn: str) -> str:
                 parsed.fragment,
             )
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: returns degraded response
         logger.debug("Failed to parse DSN for masking, returning as-is")
         return dsn
 
@@ -161,7 +161,7 @@ class ConsumerMetrics:
         for hook in self._export_hooks:
             try:
                 hook(name, value, resolved_labels)
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
                 logger.debug("Metrics export hook failed", exc_info=True)
 
     async def record_received(self, count: int = 1, topic: str | None = None) -> None:
@@ -374,19 +374,19 @@ class SkillLifecycleConsumer:
         if self._consumer:
             try:
                 await self._consumer.stop()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning("Error stopping Kafka consumer", exc_info=True)
 
         if self._producer:
             try:
                 await self._producer.stop()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning("Error stopping Kafka producer", exc_info=True)
 
         if self._pool:
             try:
                 await self._pool.close()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning("Error closing PostgreSQL pool", exc_info=True)
 
         logger.info("SkillLifecycleConsumer stopped")

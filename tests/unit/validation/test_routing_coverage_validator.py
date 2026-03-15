@@ -749,7 +749,7 @@ class OrderCreatedEvent:
                 unmapped = validator.get_unmapped_types()
                 with lock:
                     results.append(unmapped)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 with lock:
                     errors.append(e)
 

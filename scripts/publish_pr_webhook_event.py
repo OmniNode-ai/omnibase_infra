@@ -268,7 +268,7 @@ def main(
             actor=actor,
             merged=is_merged,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
         click.echo(f"Validation error: {exc}", err=True)
         sys.exit(1)
 
@@ -297,7 +297,7 @@ def main(
             username=username,
             password=password,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
         click.echo(f"Delivery error: {exc}", err=True)
         sys.exit(1)
 

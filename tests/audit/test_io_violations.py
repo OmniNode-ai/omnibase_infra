@@ -782,7 +782,7 @@ def audit_all_nodes(nodes_dir: Path) -> list[IOAuditViolation]:
                     "error_type": "MemoryError",
                 },
             )
-        except Exception:  # catch-all-ok: validation must continue on unexpected errors
+        except Exception:  # catch-all-ok: validation must continue on unexpected errors  # noqa: BLE001 — boundary: logs warning and degrades
             # Catch-all to ensure audit continues even if individual files fail.
             # This is intentional - we want to audit as many files as possible
             # rather than failing the entire audit on one problematic file.

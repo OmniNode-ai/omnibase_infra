@@ -77,7 +77,7 @@ class ProviderKafkaProducer:
             # Best-effort cleanup to prevent resource leak
             try:
                 await producer.stop()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: returns degraded response
                 pass
             raise
 

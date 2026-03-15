@@ -595,7 +595,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         result = gate.run_all()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: returns degraded response
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 

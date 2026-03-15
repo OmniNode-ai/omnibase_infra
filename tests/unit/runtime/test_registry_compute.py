@@ -516,7 +516,7 @@ class TestThreadSafety:
 
             try:
                 registry.register_plugin(plugin_id, Plugin)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         with ThreadPoolExecutor(max_workers=10) as executor:
@@ -544,7 +544,7 @@ class TestThreadSafety:
                 result = registry.get(plugin_id)
                 with lock:
                     results.append(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 with lock:
                     errors.append(e)
 
@@ -580,7 +580,7 @@ class TestThreadSafety:
                 result = registry.get(f"existing_{thread_id % 5}")
                 with lock:
                     results.append(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 with lock:
                     errors.append(e)
 
@@ -2356,7 +2356,7 @@ class TestStressAndPerformance:
                         is_reg = registry.is_registered(f"pre_plugin_{i % 100:02d}")
                         with lock:
                             results.append(is_reg)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 with lock:
                     errors.append(e)
 

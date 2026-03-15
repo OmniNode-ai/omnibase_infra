@@ -123,7 +123,7 @@ class HandlerRRHStorageWrite:
                 correlation_id=request.correlation_id,
             )
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning("RRH storage write failed: %s", sanitize_error_message(exc))
             return ModelRRHStorageResult(
                 artifact_path="",

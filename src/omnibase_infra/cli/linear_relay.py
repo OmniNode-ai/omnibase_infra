@@ -114,7 +114,7 @@ async def _publish_event(
             _KAFKA_TIMEOUT_SECONDS,
         )
         return False
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
         logger.warning("Kafka publish failed: %s — spooling event", exc)
         return False
 

@@ -526,7 +526,7 @@ async def get_or_create_policy_registry(
             RegistryPolicy
         )
         return registry
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
         # RegistryPolicy not registered, create and register it
         logger.debug("RegistryPolicy not found in container, auto-registering")
 
@@ -800,7 +800,7 @@ async def get_or_create_compute_registry(
             RegistryCompute
         )
         return registry
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
         # RegistryCompute not registered, create and register it
         logger.debug("RegistryCompute not found in container, auto-registering")
 

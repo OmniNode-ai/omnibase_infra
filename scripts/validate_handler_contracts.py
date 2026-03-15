@@ -193,7 +193,7 @@ def validate_contract(
             # Loader not available - skip advanced validation
             if verbose:
                 print("    operation_bindings: skipped (loader not available)")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
             errors.append(f"operation_bindings validation failed: {e}")
 
     # Check io_operations (optional but validate structure if present)

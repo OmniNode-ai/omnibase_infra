@@ -279,7 +279,7 @@ def _run_live(
 
         return 0
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"ERROR: Broker operation failed: {exc}", file=sys.stderr)
         return 1
     finally:
@@ -346,7 +346,7 @@ def main() -> int:
             )
         else:
             entries = extractor.extract(contracts_root)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"ERROR: Failed to extract topics from contracts: {exc}", file=sys.stderr)
         return 1
 

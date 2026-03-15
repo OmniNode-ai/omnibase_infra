@@ -180,7 +180,7 @@ def _decode_body_data(part: _ApiDict) -> str:
         padded = data + "=" * (4 - len(data) % 4) if len(data) % 4 else data
         decoded_bytes = base64.urlsafe_b64decode(padded)
         return decoded_bytes.decode("utf-8", errors="replace")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
         logger.warning(
             "Failed to decode Gmail body part data",
             extra={"error": str(exc)},

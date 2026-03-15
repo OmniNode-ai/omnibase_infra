@@ -396,7 +396,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 sock.close()
                 if result == 0:
                     return  # Server is ready
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 last_error = e
 
             await asyncio.sleep(poll_interval)

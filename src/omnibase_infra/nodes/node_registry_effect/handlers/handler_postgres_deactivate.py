@@ -209,7 +209,7 @@ class HandlerPostgresDeactivate:
             )
 
         except (
-            Exception
+            Exception  # noqa: BLE001 — re-raises as typed error
         ) as e:  # ONEX: catch-all - database adapter may raise unexpected exceptions
             # beyond typed infrastructure errors (e.g., driver errors, encoding errors,
             # connection pool errors). Required to sanitize errors and prevent credential exposure.

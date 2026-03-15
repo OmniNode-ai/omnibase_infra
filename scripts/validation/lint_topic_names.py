@@ -209,7 +209,7 @@ def scan_contracts(contracts_root: Path) -> list[str]:
         try:
             with contract_path.open(encoding="utf-8") as fh:
                 raw_yaml = yaml.safe_load(fh)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: skips item and continues
             all_violations.append(f"Could not parse {contract_path}: {exc}")
             continue
 

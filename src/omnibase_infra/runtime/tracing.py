@@ -73,7 +73,7 @@ def configure_tracing() -> bool:
         )
         return True
 
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
         logger.warning(
             "Failed to configure OpenTelemetry tracing — continuing without traces",
             exc_info=True,

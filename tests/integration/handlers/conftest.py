@@ -336,7 +336,7 @@ async def initialized_db_handler(
     # Idempotent: safe even if test already called shutdown()
     try:
         await handler.shutdown()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
         logger.warning(
             "Cleanup failed for HandlerDb shutdown: %s",
             e,
@@ -390,7 +390,7 @@ async def cleanup_table(
                 },
             }
             await initialized_db_handler.execute(envelope)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Cleanup failed for table %s: %s",
                 table,
@@ -568,7 +568,7 @@ async def vault_handler(
     # Idempotent: safe even if test already called shutdown()
     try:
         await handler.shutdown()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
         logger.warning(
             "Cleanup failed for HandlerVault shutdown: %s",
             e,
@@ -674,7 +674,7 @@ async def initialized_qdrant_handler(
     # Idempotent: safe even if test already called shutdown()
     try:
         await handler.shutdown()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
         logger.warning(
             "Cleanup failed for HandlerQdrant shutdown: %s",
             e,
@@ -782,7 +782,7 @@ async def initialized_graph_handler(
     # Idempotent: safe even if test already called shutdown()
     try:
         await handler.shutdown()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
         logger.warning(
             "Cleanup failed for HandlerGraph shutdown: %s",
             e,

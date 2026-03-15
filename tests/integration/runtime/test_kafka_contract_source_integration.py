@@ -162,7 +162,7 @@ async def kafka_event_bus(
     # Cleanup: ensure bus is closed
     try:
         await bus.close()
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: swallows for resilience
         pass  # Ignore cleanup errors
 
 
@@ -235,7 +235,7 @@ class TestKafkaContractSourceE2E:
                         contract_yaml=event_contract_yaml,
                     )
                     contract_processed.set()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
                 pass  # Ignore malformed messages in test
 
         # Subscribe to the contract topic
@@ -327,7 +327,7 @@ class TestKafkaContractSourceE2E:
                 if event_node_name and event_type == "contract.deregistered":
                     source.on_contract_deregistered(node_name=event_node_name)
                     deregistration_processed.set()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
                 pass
 
         unsubscribe = await kafka_event_bus.subscribe(
@@ -405,7 +405,7 @@ class TestKafkaContractSourceE2E:
                     # In graceful mode, invalid contracts return False
                     if not success:
                         error_collected.set()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
                 pass
 
         unsubscribe = await kafka_event_bus.subscribe(
@@ -511,7 +511,7 @@ class TestKafkaContractSourceTypedEvents:
                 # Use the typed event handler
                 source.handle_registered_event(event)
                 event_processed.set()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
                 pass
 
         unsubscribe = await kafka_event_bus.subscribe(
@@ -598,7 +598,7 @@ class TestKafkaContractSourceMultipleConsumers:
                     contract_yaml=payload["contract_yaml"],
                 )
                 source1_processed.set()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
                 pass
 
         async def source2_handler(msg: ModelEventMessage) -> None:
@@ -609,7 +609,7 @@ class TestKafkaContractSourceMultipleConsumers:
                     contract_yaml=payload["contract_yaml"],
                 )
                 source2_processed.set()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
                 pass
 
         # Subscribe with different consumer groups
@@ -743,7 +743,7 @@ class TestKafkaContractSourceEventOrdering:
                 events_processed += 1
                 if events_processed >= expected_events:
                     all_processed.set()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
                 pass
 
         unsubscribe = await kafka_event_bus.subscribe(
@@ -835,7 +835,7 @@ class TestKafkaContractSourceCorrelationId:
                     correlation_id=corr_id,
                 )
                 event_processed.set()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
                 pass
 
         unsubscribe = await kafka_event_bus.subscribe(

@@ -620,7 +620,7 @@ class AdapterLlmProviderOpenai:
                 correlation_id=correlation_id,
                 headers=self._auth_headers,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: returns degraded response
             latency_ms = (time.perf_counter() - start_time) * 1000
             self._is_available = False
             return ModelLlmHealthResponse(

@@ -195,7 +195,7 @@ class ServiceLlmCategoryAugmenter:
             )
             return EnumContextSectionCategory.UNCATEGORIZED
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
             safe_heading = sanitize_error_string(section.heading or "(preamble)")
             safe_error = sanitize_error_message(exc)
             logger.warning(

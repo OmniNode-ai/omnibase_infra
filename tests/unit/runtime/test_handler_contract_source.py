@@ -968,7 +968,7 @@ class TestModelContractDiscoveryResultForwardReference:
         # model_rebuild() would fail if forward references weren't resolvable
         try:
             ModelContractDiscoveryResult.model_rebuild()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             pytest.fail(f"model_rebuild() failed, forward reference unresolved: {e}")
 
         # Verify we can get the JSON schema (requires resolved types)
@@ -977,7 +977,7 @@ class TestModelContractDiscoveryResultForwardReference:
             assert "validation_errors" in schema.get("properties", {}), (
                 "JSON schema should include validation_errors property"
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             pytest.fail(
                 f"model_json_schema() failed, forward reference unresolved: {e}"
             )

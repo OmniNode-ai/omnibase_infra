@@ -521,7 +521,7 @@ class TestThreadSafety:
                         {"counter": str(counter)},
                     )
                     counter += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def flush_loop() -> None:
@@ -529,7 +529,7 @@ class TestThreadSafety:
             try:
                 while not stop_event.is_set():
                     sink.flush()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         # Start emit and flush threads

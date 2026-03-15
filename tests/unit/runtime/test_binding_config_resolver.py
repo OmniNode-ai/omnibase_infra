@@ -1566,7 +1566,7 @@ class TestBindingConfigResolverThreadSafety:
                     )
                     with results_lock:
                         results.append(result)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                     with results_lock:
                         errors.append(e)
 
@@ -1602,7 +1602,7 @@ class TestBindingConfigResolverThreadSafety:
                     )
                     with results_lock:
                         results[handler_type] = result
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                     with results_lock:
                         errors.append(e)
 
@@ -1639,14 +1639,14 @@ class TestBindingConfigResolverThreadSafety:
                             handler_type="db",
                             inline_config={"timeout_ms": 5000},
                         )
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                         errors.append(e)
 
             def refresher() -> None:
                 while not stop_event.is_set():
                     try:
                         resolver.refresh("db")
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                         errors.append(e)
 
             readers = [threading.Thread(target=reader) for _ in range(5)]

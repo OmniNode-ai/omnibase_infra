@@ -101,7 +101,7 @@ def _latest_pypi_version(package: str) -> str | None:
         with urllib.request.urlopen(url, timeout=10) as resp:  # noqa: S310
             data = json.load(resp)
         return data["info"]["version"]
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
         print(
             f"  WARNING: could not fetch PyPI data for {package!r}: {exc}",
             file=sys.stderr,

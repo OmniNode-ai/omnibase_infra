@@ -135,7 +135,7 @@ class HandlerLifecycleUpdate:
                 verdict_applied=verdict,
                 correlation_id=correlation_id,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
             sanitized_error = sanitize_error_message(exc)
             logger.warning(
                 "Failed to apply verdict %s to pattern %s: %s (cid=%s)",

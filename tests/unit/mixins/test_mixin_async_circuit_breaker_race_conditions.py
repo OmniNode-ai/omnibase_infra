@@ -165,7 +165,7 @@ class TestConcurrentCircuitChecks:
                 result = await service.perform_operation(should_fail=False)
                 async with lock:
                     results.append(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 async with lock:
                     errors.append(e)
 
@@ -209,7 +209,7 @@ class TestConcurrentCircuitChecks:
             except InfraUnavailableError as e:
                 async with lock:
                     errors.append(e)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 async with lock:
                     errors.append(e)
 
@@ -242,7 +242,7 @@ class TestConcurrentFailureRecording:
                 await service.perform_operation(should_fail=True)
             except ValueError:
                 pass  # Expected
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 async with lock:
                     errors.append(e)
 
@@ -287,7 +287,7 @@ class TestConcurrentFailureRecording:
                 # Circuit opened during concurrent operations
                 async with lock:
                     circuit_open_count += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 async with lock:
                     errors.append(e)
 
@@ -430,7 +430,7 @@ class TestStateTransitionRaceConditions:
             except InfraUnavailableError as e:
                 async with lock:
                     errors.append(e)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 async with lock:
                     errors.append(e)
 
@@ -575,7 +575,7 @@ class TestMixedOperationRaceConditions:
                 )
                 async with lock:
                     results.append(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 async with lock:
                     errors.append(e)
 
@@ -617,7 +617,7 @@ class TestCircuitBreakerStress:
                     results.append(result)
             except ValueError:
                 pass  # Expected failures
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 async with lock:
                     errors.append(e)
 
@@ -661,7 +661,7 @@ class TestCircuitBreakerStress:
 
                 # Verify can operate again
                 await service.perform_operation(should_fail=False)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 async with lock:
                     errors.append(e)
 

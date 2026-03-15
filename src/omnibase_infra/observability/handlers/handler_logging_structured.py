@@ -403,7 +403,7 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
         if self._sink is not None:
             try:
                 self._sink.flush()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error during final flush on shutdown: %s",
                     e,
@@ -895,7 +895,7 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
             except asyncio.CancelledError:
                 # Task cancelled - exit gracefully
                 break
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 # NOTE: Broad Exception catch is intentional here to keep the
                 # background flush loop running despite transient I/O errors.
                 # This ensures the handler remains operational even if individual

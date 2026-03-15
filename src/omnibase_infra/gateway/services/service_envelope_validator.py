@@ -432,7 +432,7 @@ class ServiceEnvelopeValidator:
                 error_code=EnumValidationErrorCode.INVALID_SIGNATURE,
                 error_message=error_msg,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             # Catch any other crypto errors
             error_msg = f"Signature verification error: {type(e).__name__}: {e}"
             logger.warning(

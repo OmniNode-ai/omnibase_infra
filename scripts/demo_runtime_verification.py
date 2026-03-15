@@ -188,7 +188,7 @@ async def verify_runtime_startup(results: VerificationResult) -> None:
     }
     runtime = RuntimeHostProcess(event_bus=event_bus, config=config)
 
-    async def noop_populate() -> None:
+    async def noop_populate() -> None:  # stub-ok: intentional no-op mock
         pass
 
     with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
@@ -273,7 +273,7 @@ def verify_contract_routing(results: VerificationResult) -> None:
         try:
             mod = importlib.import_module(handler_module)
             importable = hasattr(mod, handler_name)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
             print(
                 f"    WARNING: Could not import {handler_module}: {type(e).__name__}: {e}"
             )

@@ -145,7 +145,7 @@ class ContractConfigExtractor:
             raw = contract_path.read_text(encoding="utf-8")
             # ONEX_EXCLUDE: any_type - yaml.safe_load returns untyped dict from contract YAML
             raw_data: object = yaml.safe_load(raw)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: returns degraded response
             return ModelConfigRequirements(
                 contract_paths=(contract_path,),
                 errors=(f"Failed to parse {contract_path}: {exc}",),

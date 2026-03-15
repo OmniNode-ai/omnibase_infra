@@ -993,7 +993,7 @@ def main() -> int:
     except (OSError, ConnectionRefusedError) as exc:
         # Network-level connection errors
         _handle_database_error(exc)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
         # Generic errors - log details but show safe message
         _handle_unexpected_error(exc)
 

@@ -332,7 +332,7 @@ def _do_seed(
                     # every key as missing and cascading into spurious
                     # create_secret() errors when Infisical is unreachable.
                     raise
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                     logger.debug(
                         "Key check failed for %s at %s: %s",
                         key,
@@ -390,7 +390,7 @@ def _do_seed(
                 else:
                     skipped += 1
 
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error processing %s: %s", key, sanitize_error_message(exc)
                 )

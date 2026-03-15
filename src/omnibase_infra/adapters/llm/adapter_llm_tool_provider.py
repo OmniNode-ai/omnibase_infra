@@ -191,7 +191,7 @@ class AdapterLlmToolProvider:
             try:
                 await close_fn()
                 logger.debug("Closed LLM provider: %s", name)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
                 sanitized = sanitize_error_message(exc)
                 logger.warning(
                     "Failed to close LLM provider %s: %s",

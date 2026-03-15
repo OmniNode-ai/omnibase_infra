@@ -254,7 +254,7 @@ class HandlerGmailApi:
 
         except RuntimeError:
             raise
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — re-raises as typed error
             # Sanitize: do not include credentials in the error message
             raise RuntimeError(
                 f"Gmail token refresh encountered an unexpected error: {type(exc).__name__}"
@@ -264,7 +264,7 @@ class HandlerGmailApi:
     # Public API
     # ------------------------------------------------------------------
 
-    async def list_messages(
+    async def list_messages(  # stub-ok: fully implemented
         self,
         label_ids: list[str],
         max_results: int = 50,
@@ -295,7 +295,7 @@ class HandlerGmailApi:
             raw_messages = result.get("messages", [])
             messages: list[_ApiDict] = _extract_list_of_dicts(raw_messages)
             return messages
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "HandlerGmailApi.list_messages failed",
                 extra={"error": str(exc), "label_ids": label_ids},
@@ -326,7 +326,7 @@ class HandlerGmailApi:
                 token=token,
             )
             return result
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "HandlerGmailApi.get_message failed",
                 extra={"error": str(exc), "message_id": message_id},
@@ -362,7 +362,7 @@ class HandlerGmailApi:
                 token=token,
             )
             return True
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "HandlerGmailApi.modify_labels failed",
                 extra={"error": str(exc), "message_id": message_id},
@@ -387,14 +387,14 @@ class HandlerGmailApi:
                 token=token,
             )
             return True
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "HandlerGmailApi.delete_message failed",
                 extra={"error": str(exc), "message_id": message_id},
             )
             return False
 
-    async def search_messages(
+    async def search_messages(  # stub-ok: fully implemented
         self,
         query: str,
         max_results: int = 500,
@@ -443,7 +443,7 @@ class HandlerGmailApi:
 
             return messages[:max_results]
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "HandlerGmailApi.search_messages failed",
                 extra={"error": str(exc), "query": query},
@@ -467,7 +467,7 @@ class HandlerGmailApi:
             raw_labels = result.get("labels", [])
             labels: list[_ApiDict] = _extract_list_of_dicts(raw_labels)
             return labels
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "HandlerGmailApi.list_labels failed",
                 extra={"error": str(exc)},

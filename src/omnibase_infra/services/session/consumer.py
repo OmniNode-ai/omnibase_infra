@@ -437,7 +437,7 @@ class SessionEventConsumer:
         if self._consumer is not None:
             try:
                 await self._consumer.stop()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error stopping Kafka consumer",
                     extra={
@@ -855,7 +855,7 @@ class SessionEventConsumer:
                         "partitions": [str(p) for p in partitions],
                     },
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Failed to pause consumer",
                 extra={
@@ -887,7 +887,7 @@ class SessionEventConsumer:
                         "partitions": [str(p) for p in partitions],
                     },
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Failed to resume consumer",
                 extra={

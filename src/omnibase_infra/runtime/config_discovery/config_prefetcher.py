@@ -161,7 +161,7 @@ class ConfigPrefetcher:
                 secret_path=spec.infisical_folder,
             )
             return result
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Failed to prefetch key %s from %s: %s",
                 key,

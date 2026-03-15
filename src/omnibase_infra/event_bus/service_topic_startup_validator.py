@@ -121,7 +121,7 @@ class TopicStartupValidator:
             broker_metadata = await admin.list_topics()
             broker_topics = set(broker_metadata)
 
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Broker unreachable at %s, skipping topic startup validation",
                 self._bootstrap_servers,
@@ -137,7 +137,7 @@ class TopicStartupValidator:
             if admin is not None:
                 try:
                     await admin.close()
-                except Exception:
+                except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
                     pass  # Best-effort cleanup
 
         # Compute present / missing

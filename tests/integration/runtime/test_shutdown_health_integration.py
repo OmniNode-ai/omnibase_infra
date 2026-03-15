@@ -114,7 +114,7 @@ class TestShutdownHealthIntegration:
                 assert isinstance(health, dict)
                 assert "is_running" in health
                 assert "healthy" in health
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 pytest.fail(f"Health check during shutdown raised exception: {e}")
 
             # Wait for shutdown to complete

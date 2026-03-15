@@ -918,7 +918,7 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
                 correlation_id=correlation_id,
             )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: returns degraded response
             duration_ms = (time.monotonic() - start_time) * 1000
             return ModelStorageHealthCheckResult(
                 healthy=False,

@@ -274,7 +274,7 @@ class HandlerPool:
                     return bool(result.get("healthy", True))
             # If no health_check, assume healthy
             return True
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Handler instance health check failed",
                 extra={"handler_type": self.handler_type},

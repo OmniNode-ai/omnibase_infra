@@ -108,7 +108,7 @@ class ConfigLlmCostAggregation(BaseSettings):
                 safe_prefix = (
                     f"{parsed.scheme}://..." if parsed.scheme else repr(v[:10])
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 — re-raises as typed error
                 safe_prefix = repr(v[:10])
             raise ValueError(
                 f"postgres_dsn must start with 'postgresql://' or 'postgres://', "

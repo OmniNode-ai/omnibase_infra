@@ -279,7 +279,7 @@ class HandlerTopicCatalogPostgres:
                 extra={"correlation_id": str(correlation_id)},
             )
             warnings.append(DB_UNAVAILABLE)
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "PostgreSQL topic catalog query failed",
                 extra={"correlation_id": str(correlation_id)},
@@ -379,7 +379,7 @@ class HandlerTopicCatalogPostgres:
             version_hash: str = row["version_hash"]
             # Take last 8 hex chars → unsigned 32-bit integer
             return int(version_hash[-8:], 16)
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: returns degraded response
             logger.debug(
                 "Failed to compute catalog version from PostgreSQL",
                 extra={"correlation_id": str(correlation_id)},

@@ -267,7 +267,7 @@ class HandlerGmailIntentPoll:
 
                 try:
                     msg = ModelGmailMessage.from_api_response(raw)
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                     errors.append(
                         f"Failed to parse message {message_id}: "
                         f"{type(exc).__name__}; skipping"

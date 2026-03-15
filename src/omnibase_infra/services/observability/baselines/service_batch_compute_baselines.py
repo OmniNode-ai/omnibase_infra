@@ -338,7 +338,7 @@ class ServiceBatchComputeBaselines:
                 },
             )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             safe_msg = sanitize_error_message(e)
             logger.warning(
                 "Failed to emit baselines-computed snapshot event (non-fatal): %s",

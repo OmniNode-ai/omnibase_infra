@@ -335,7 +335,7 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                             # post-commit cache insertion.
                             written += 1
                             persisted_dedup_keys.append(event_id)
-                        except Exception:
+                        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                             logger.warning(
                                 "Failed to insert call metric row, skipping",
                                 exc_info=True,
@@ -503,7 +503,7 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                                     row["estimated_coverage_pct"],
                                 )
                             upserted += 1
-                        except Exception:
+                        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                             logger.warning(
                                 "Failed to upsert aggregate row, skipping",
                                 exc_info=True,
@@ -951,7 +951,7 @@ def _safe_decimal(value: object) -> Decimal | None:
         if not result.is_finite():
             return None
         return result
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: returns degraded response
         return None
 
 
@@ -964,7 +964,7 @@ def _safe_jsonb(value: object) -> str | None:
     if isinstance(value, dict):
         try:
             return json.dumps(value, default=str)
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: returns degraded response
             return None
     return None
 

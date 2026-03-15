@@ -265,7 +265,7 @@ def main() -> int:
     except RuntimeError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"Unexpected error: {exc}", file=sys.stderr)
         return 2
 

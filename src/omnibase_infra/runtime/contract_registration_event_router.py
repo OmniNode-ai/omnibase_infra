@@ -474,7 +474,7 @@ class ContractRegistrationEventRouter:
             )
             return None
 
-        except Exception as msg_error:
+        except Exception as msg_error:  # noqa: BLE001 — boundary: logs warning and degrades
             # Use warning instead of exception to avoid credential exposure
             # in tracebacks (connection errors may contain DSN with password)
             logger.warning(

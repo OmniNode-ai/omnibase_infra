@@ -471,7 +471,7 @@ def sanitize_dsn(dsn: str) -> str:
 
         return sanitized
 
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: returns degraded response
         # If parsing fails, return a safe placeholder
         return "[INVALID_DSN]"
 

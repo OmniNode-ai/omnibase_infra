@@ -342,7 +342,7 @@ async def _delete_node_from_consul(
             correlation_id,
         )
     # consul.Consul raises consul.Timeout or OSError on network failure
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
         logger.warning(
             "_delete_node_from_consul: failed to delete prefix %r — "
             "test cleanup incomplete (correlation_id=%s)",
@@ -1009,7 +1009,7 @@ class TestChangeNotificationFlow:
             # Bump version to reflect the cleanup (best-effort)
             try:
                 await catalog_service.increment_version(correlation_id)
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Best-effort version bump failed during cleanup",
                     exc_info=True,

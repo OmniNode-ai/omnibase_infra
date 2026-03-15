@@ -43,11 +43,11 @@ def _resolve_actor() -> str:
     """Best-effort resolve a human-readable actor identity."""
     try:
         user = getpass.getuser()
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: returns degraded response
         user = "unknown"
     try:
         host = socket.gethostname()
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: returns degraded response
         host = "unknown"
     return f"{user}@{host}"
 

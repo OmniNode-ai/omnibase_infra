@@ -294,7 +294,7 @@ class HandlerRuntimeTick:
                         await self._snapshot_publisher.delete_snapshot(
                             str(event.entity_id), "registration"
                         )
-                    except Exception as snap_err:
+                    except Exception as snap_err:  # noqa: BLE001 — boundary: logs warning and degrades
                         logger.warning(
                             "Snapshot tombstone publish failed (non-blocking): %s",
                             sanitize_error_message(snap_err),

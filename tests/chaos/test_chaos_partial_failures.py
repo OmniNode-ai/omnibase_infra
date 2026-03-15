@@ -176,7 +176,7 @@ class MultiEffectWorkflowExecutor:
 
                 executed_so_far.append((effect_name, effect_id, rollback_fn))
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 effect_result = EffectResult(
                     effect_id=effect_id,
                     effect_name=effect_name,
@@ -227,7 +227,7 @@ class MultiEffectWorkflowExecutor:
                 async with self._lock:
                     self.rolled_back_effects.append(rollback_result)
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 rollback_result = EffectResult(
                     effect_id=effect_id,
                     effect_name=f"rollback:{effect_name}",

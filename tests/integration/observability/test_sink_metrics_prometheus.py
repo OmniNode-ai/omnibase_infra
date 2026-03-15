@@ -521,7 +521,7 @@ class TestThreadSafety:
                     metric_name,
                     {"label": "value"},
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         threads = [

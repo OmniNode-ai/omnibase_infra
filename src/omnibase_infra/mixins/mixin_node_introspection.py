@@ -999,7 +999,7 @@ class MixinNodeIntrospection:
             if result is None:
                 return None
             return self._extract_state_value(result)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: returns degraded response
             logger.debug(
                 f"Failed to get state from get_state method: {e}",
                 extra={"error": str(e)},
@@ -1293,7 +1293,7 @@ class MixinNodeIntrospection:
                             result = await result
                         if result and isinstance(result, str):
                             endpoints[endpoint_name] = result
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 — boundary: returns degraded response
                         logger.debug(
                             f"Failed to get endpoint from {method_name}: {e}",
                             extra={"method": method_name, "error": str(e)},
@@ -1984,7 +1984,7 @@ class MixinNodeIntrospection:
                 result = self._registry_unsubscribe()
                 if asyncio.iscoroutine(result):
                     await result
-            except Exception as cleanup_error:
+            except Exception as cleanup_error:  # noqa: BLE001 — boundary: catch-all for resilience
                 logger.debug(
                     "Error unsubscribing registry listener for "
                     f"{self._introspection_node_id}",
@@ -2057,7 +2057,7 @@ class MixinNodeIntrospection:
                     },
                 )
                 break
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 retry_count += 1
                 if not await self._handle_ack_subscription_error(
                     e,
@@ -2301,7 +2301,7 @@ class MixinNodeIntrospection:
                 },
             )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 f"Failed to emit registration ACK: {e}",
                 extra={
@@ -2326,7 +2326,7 @@ class MixinNodeIntrospection:
                 result = self._ack_unsubscribe()
                 if asyncio.iscoroutine(result):
                     await result
-            except Exception as cleanup_error:
+            except Exception as cleanup_error:  # noqa: BLE001 — boundary: catch-all for resilience
                 logger.debug(
                     "Error unsubscribing ACK listener for "
                     f"{self._introspection_node_id}",
@@ -2357,7 +2357,7 @@ class MixinNodeIntrospection:
             await self._process_introspection_request(message)
             # Reset failure counter on success
             self._registry_callback_consecutive_failures = 0
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             self._handle_request_error(e, request_correlation_id)
 
     async def _process_introspection_request(
@@ -2594,7 +2594,7 @@ class MixinNodeIntrospection:
                     },
                 )
                 break
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 retry_count += 1
                 if not await self._handle_subscription_error(
                     e,
@@ -2972,7 +2972,7 @@ class MixinNodeIntrospection:
                 self._active_operations += 1
                 count_after_increment = self._active_operations
             increment_succeeded = True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             # Log but don't fail the operation
             logger.warning(
                 f"Failed to increment operation counter: {e}",
@@ -3010,7 +3010,7 @@ class MixinNodeIntrospection:
                         counter_was_zero = True
                     count_after_decrement = self._active_operations
                 decrement_succeeded = True
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 # Log but don't fail the operation
                 logger.warning(
                     f"Failed to decrement operation counter: {e}",

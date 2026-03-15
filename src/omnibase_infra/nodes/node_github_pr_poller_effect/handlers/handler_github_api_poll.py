@@ -271,7 +271,7 @@ class HandlerGitHubApiPoll:
                     prs_polled += repo_prs
                     errors.extend(repo_errors)
                     pending_events.extend(pr_events)
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                     error_ctx = ModelInfraErrorContext.with_correlation(
                         transport_type=EnumInfraTransportType.RUNTIME,
                         operation="poll_repo",
@@ -349,7 +349,7 @@ class HandlerGitHubApiPoll:
                     "partition_key": f"{repo}:{pr_number}",
                 }
                 pr_events.append(event_payload)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                 error_ctx = ModelInfraErrorContext.with_correlation(
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="process_pr",
@@ -377,7 +377,7 @@ class HandlerGitHubApiPoll:
             resp.raise_for_status()
             data: dict[str, JsonType] = resp.json()
             return str(data.get("state", "pending"))
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: returns degraded response
             return "pending"
 
     async def _get_review_states(
@@ -405,5 +405,5 @@ class HandlerGitHubApiPoll:
                 if state in {"APPROVED", "CHANGES_REQUESTED"}:
                     latest[user] = state
             return list(latest.values())
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: returns degraded response
             return []

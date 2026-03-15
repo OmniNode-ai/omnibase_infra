@@ -59,7 +59,7 @@ def load_contract_resolver_bridge_config() -> ContractConfig:
     try:
         raw: ContractConfig = yaml.safe_load(contract_path.read_text())
         return dict(raw.get("config", {}))
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: returns degraded response
         return {}
 
 

@@ -132,7 +132,7 @@ async def kafka_event_bus(
     # Cleanup: ensure bus is closed
     try:
         await bus.close()
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: swallows for resilience
         pass  # Ignore cleanup errors
 
 
@@ -921,7 +921,7 @@ class TestLifecycle:
             # Verify metrics reflect the publish that happened before close
             assert metrics["events_published"] == 1
             assert isinstance(metrics, dict)
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: swallows for resilience
             # If metrics fail after close due to bus being closed, that's acceptable
             # The important thing is that the adapter tracked the closed state
             pass

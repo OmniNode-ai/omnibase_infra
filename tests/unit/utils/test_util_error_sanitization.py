@@ -29,7 +29,7 @@ class TestSanitizeErrorMessage:
         """Normal errors without sensitive patterns should pass through."""
         try:
             raise ValueError("Connection refused by remote host")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             result = sanitize_error_message(e)
 
         assert "Connection refused" in result
@@ -40,7 +40,7 @@ class TestSanitizeErrorMessage:
         """Errors containing 'password' should be redacted."""
         try:
             raise ValueError("Auth failed with password=secret123")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             result = sanitize_error_message(e)
 
         assert "REDACTED" in result
@@ -52,7 +52,7 @@ class TestSanitizeErrorMessage:
         """Errors containing 'api_key' should be redacted."""
         try:
             raise RuntimeError("Request failed with api_key=sk-12345abcde")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             result = sanitize_error_message(e)
 
         assert "REDACTED" in result
@@ -63,7 +63,7 @@ class TestSanitizeErrorMessage:
         """Errors containing 'bearer' token should be redacted."""
         try:
             raise RuntimeError("Auth failed with bearer eyJhbGciOiJIUzI1NiJ9.xxx")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             result = sanitize_error_message(e)
 
         assert "REDACTED" in result
@@ -75,7 +75,7 @@ class TestSanitizeErrorMessage:
             raise ConnectionError(
                 "Failed to connect to postgres://user:pass@db.example.com:5432/mydb"
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             result = sanitize_error_message(e)
 
         assert "REDACTED" in result
@@ -88,7 +88,7 @@ class TestSanitizeErrorMessage:
             raise ConnectionError(
                 "Connection failed: mongodb://admin:secret@mongo.example.com:27017/db"
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             result = sanitize_error_message(e)
 
         assert "REDACTED" in result
@@ -98,7 +98,7 @@ class TestSanitizeErrorMessage:
         """Redis connection strings should be redacted."""
         try:
             raise ConnectionError("Cannot connect: redis://user:pass@redis:6379/0")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             result = sanitize_error_message(e)
 
         assert "REDACTED" in result
@@ -108,7 +108,7 @@ class TestSanitizeErrorMessage:
         """Errors containing 'secret' should be redacted."""
         try:
             raise ValueError("Secret key is invalid: my-super-secret-key")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             result = sanitize_error_message(e)
 
         assert "REDACTED" in result
@@ -118,7 +118,7 @@ class TestSanitizeErrorMessage:
         """Errors containing 'credential' should be redacted."""
         try:
             raise PermissionError("Invalid credentials provided: admin/admin123")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             result = sanitize_error_message(e)
 
         assert "REDACTED" in result
@@ -128,7 +128,7 @@ class TestSanitizeErrorMessage:
         """Errors containing 'private_key' should be redacted."""
         try:
             raise ValueError("Failed to parse private_key: -----BEGIN RSA KEY-----")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             result = sanitize_error_message(e)
 
         assert "REDACTED" in result
@@ -138,7 +138,7 @@ class TestSanitizeErrorMessage:
         """PEM format headers should be redacted."""
         try:
             raise ValueError("Certificate parse error: -----BEGIN CERTIFICATE-----")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             result = sanitize_error_message(e)
 
         assert "REDACTED" in result
@@ -149,7 +149,7 @@ class TestSanitizeErrorMessage:
         long_message = "A" * 1000
         try:
             raise ValueError(long_message)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             result = sanitize_error_message(e, max_length=100)
 
         assert "[truncated]" in result
@@ -159,7 +159,7 @@ class TestSanitizeErrorMessage:
         """Pattern matching should be case-insensitive."""
         try:
             raise ValueError("PASSWORD is SECRET_TOKEN for API_KEY")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             result = sanitize_error_message(e)
 
         assert "REDACTED" in result
@@ -169,7 +169,7 @@ class TestSanitizeErrorMessage:
         """Exception type should always be in the result."""
         try:
             raise TypeError("password=secret")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             result = sanitize_error_message(e)
 
         assert "TypeError" in result
@@ -179,7 +179,7 @@ class TestSanitizeErrorMessage:
         message = "A" * 200
         try:
             raise ValueError(message)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             result = sanitize_error_message(e, max_length=50)
 
         # Result should contain type prefix + truncated message
@@ -252,7 +252,7 @@ class TestDLQIntegration:
                 "HTTP 401 Unauthorized: Invalid API key 'sk-abc123xyz789' "
                 "for service at https://api.example.com/v1/endpoint"
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             result = sanitize_error_message(e)
 
         assert "REDACTED" in result
@@ -265,7 +265,7 @@ class TestDLQIntegration:
                 "Error reading secret at path 'secret/data/database/credentials': "
                 "permission denied, token: hvs.CAESIG..."
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             result = sanitize_error_message(e)
 
         assert "REDACTED" in result

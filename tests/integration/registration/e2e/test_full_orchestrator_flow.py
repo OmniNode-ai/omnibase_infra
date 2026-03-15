@@ -1026,7 +1026,7 @@ async def validate_test_topic_exists(real_kafka_event_bus: EventBusKafka) -> str
             f"{topic_creation_hint}"
         )
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
         # Non-Kafka errors (network issues, etc.)
         pytest.fail(
             f"Unexpected error validating topic '{TEST_INTROSPECTION_TOPIC}'.\n"
@@ -1040,7 +1040,7 @@ async def validate_test_topic_exists(real_kafka_event_bus: EventBusKafka) -> str
         if admin_client is not None:
             try:
                 await admin_client.close()
-            except Exception as close_err:
+            except Exception as close_err:  # noqa: BLE001 — boundary: logs warning and degrades
                 # Log but don't fail on close errors
                 logger.warning("Error closing Kafka admin client: %s", close_err)
 

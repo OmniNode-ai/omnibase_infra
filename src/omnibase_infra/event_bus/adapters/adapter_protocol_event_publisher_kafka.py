@@ -423,7 +423,7 @@ class AdapterProtocolEventPublisherKafka:
                 cb_state = self._bus.get_circuit_breaker_state()
             else:
                 cb_state = {"state": "unknown", "failures": 0}
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: returns degraded response
             # If bus is closed or unavailable, return safe defaults
             # Log at debug level for observability without flooding logs
             logger.debug(
@@ -497,7 +497,7 @@ class AdapterProtocolEventPublisherKafka:
         if self._bus is not None:
             try:
                 await self._bus.close()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error closing underlying EventBusKafka",
                     extra={

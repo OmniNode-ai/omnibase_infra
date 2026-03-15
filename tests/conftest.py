@@ -811,7 +811,7 @@ async def cleanup_postgres_test_projections() -> AsyncGenerator[None, None]:
             )
         except asyncpg.UndefinedTableError:
             pass  # Table doesn't exist, nothing to cleanup
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             # Note: exc_info omitted to prevent credential exposure in tracebacks
             # Exception is sanitized to prevent DSN/credential leakage
             logger.warning(
@@ -822,7 +822,7 @@ async def cleanup_postgres_test_projections() -> AsyncGenerator[None, None]:
         finally:
             await conn.close()
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
         # Note: exc_info omitted to prevent credential exposure in tracebacks
         # (DSN contains password and would be visible in exception traceback)
         # Exception is sanitized to prevent DSN/credential leakage
@@ -907,7 +907,7 @@ async def cleanup_kafka_test_consumer_groups() -> AsyncGenerator[None, None]:
         finally:
             await admin_client.close()
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
         # Note: exc_info omitted for consistency with other cleanup handlers
         logger.warning("Kafka test cleanup failed: %s", sanitize_error_message(e))
 

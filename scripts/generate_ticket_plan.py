@@ -426,7 +426,7 @@ def fetch_project_issues(api_key: str, project_name: str) -> list[LinearIssue]:
             except httpx.HTTPError as e:
                 print(f"HTTP error fetching issues: {e}", file=sys.stderr)
                 break
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
                 print(f"Error fetching issues: {e}", file=sys.stderr)
                 break
 
@@ -489,7 +489,7 @@ def parse_issue(node: dict[str, Any]) -> LinearIssue | None:
             blocked_by=blocked_by,
             blocks=blocks,
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"Error parsing issue: {e}", file=sys.stderr)
         return None
 

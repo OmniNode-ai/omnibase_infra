@@ -651,7 +651,7 @@ class HandlerWriteDecision(MixinPostgresOpExecutor):
         try:
             async with self._pool.acquire() as conn2:
                 await self._run_stage2(payload, stage1, correlation_id, conn2)
-        except Exception as exc:  # ONEX: intentional broad catch for stage isolation
+        except Exception as exc:  # ONEX: intentional broad catch for stage isolation  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Stage 2 failed (Stage 1 already committed — no rollback)",
                 extra={

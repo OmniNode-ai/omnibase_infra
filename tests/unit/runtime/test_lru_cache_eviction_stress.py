@@ -451,7 +451,7 @@ class TestConcurrentCacheAccess:
                         if info.currsize > cache_size:
                             with lock:
                                 size_violations.append(info.currsize)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 with lock:
                     errors.append(e)
 
@@ -501,7 +501,7 @@ class TestConcurrentCacheAccess:
                 info = RegistryPolicy._get_semver_cache_info()
                 with lock:
                     read_results.append((info.hits, info.misses, info.currsize))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 with lock:
                     errors.append(e)
 
@@ -515,7 +515,7 @@ class TestConcurrentCacheAccess:
                 info = RegistryPolicy._get_semver_cache_info()
                 with lock:
                     read_results.append((info.hits, info.misses, info.currsize))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 with lock:
                     errors.append(e)
 
@@ -556,7 +556,7 @@ class TestConcurrentCacheAccess:
                 try:
                     RegistryPolicy._parse_semver(f"{i}.0.0")
                     success_count += 1
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: returns degraded response
                     errors.append(e)
             return success_count
 
@@ -568,7 +568,7 @@ class TestConcurrentCacheAccess:
                 try:
                     result = future.result()
                     results.append(result == 100)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                     errors.append(e)
 
         assert len(errors) == 0, f"Errors during concurrent execution: {errors}"
@@ -603,7 +603,7 @@ class TestConcurrentCacheAccess:
                     RegistryPolicy._parse_semver(version)
                     with lock:
                         access_counts[version] += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 with lock:
                     errors.append(e)
 

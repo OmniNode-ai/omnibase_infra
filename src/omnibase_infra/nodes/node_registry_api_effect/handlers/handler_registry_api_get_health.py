@@ -72,7 +72,7 @@ class HandlerRegistryApiGetHealth:
                 components["db"] = "healthy"
             else:
                 components["db"] = "unconfigured"
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning("Health check: DB unavailable — %s", exc)
             components["db"] = "unhealthy"
 
@@ -89,7 +89,7 @@ class HandlerRegistryApiGetHealth:
             await admin.start()
             await admin.close()
             components["kafka"] = "healthy"
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning("Health check: Kafka unavailable — %s", exc)
             components["kafka"] = "unhealthy"
 
@@ -105,7 +105,7 @@ class HandlerRegistryApiGetHealth:
                 components["qdrant"] = (
                     "healthy" if resp.status_code == 200 else "degraded"
                 )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning("Health check: Qdrant unavailable — %s", exc)
             components["qdrant"] = "unhealthy"
 

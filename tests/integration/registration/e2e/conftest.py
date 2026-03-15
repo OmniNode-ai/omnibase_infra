@@ -1000,7 +1000,7 @@ async def cleanup_projections(
                 """,
                 unique_node_id,
             )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
         # Note: exc_info omitted to prevent potential info leakage in tracebacks
         logger.warning(
             "Cleanup failed for projection entity_id %s: %s",
@@ -1052,7 +1052,7 @@ async def cleanup_node_ids(
                     """,
                     node_ids_to_cleanup,
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             # Note: exc_info omitted to prevent potential info leakage in tracebacks
             logger.warning(
                 "Cleanup failed for %d projection entity_ids: %s",

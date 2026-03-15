@@ -571,7 +571,7 @@ class HandlerQdrant(MixinAsyncCircuitBreaker, ProtocolVectorStoreHandler):
                         points=points,
                     )
                     total_stored += len(batch)
-                except Exception:
+                except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
                     # Track failed IDs in this batch
                     failed_ids.extend([emb.id for emb in batch])
 
@@ -1046,7 +1046,7 @@ class HandlerQdrant(MixinAsyncCircuitBreaker, ProtocolVectorStoreHandler):
             self._health_cache_time = current_time
 
             return health
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: returns degraded response
             latency_ms = int((time.time() - start_time) * 1000)
             return ModelVectorHealthStatus(
                 healthy=False,

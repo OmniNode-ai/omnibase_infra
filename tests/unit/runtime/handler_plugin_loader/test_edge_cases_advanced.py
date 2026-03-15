@@ -642,7 +642,7 @@ class TestRaceConditions:
                 handler = loader.load_from_contract(contract_file)
                 with lock:
                     results.append(handler)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 with lock:
                     errors.append(e)
 
@@ -692,7 +692,7 @@ class TestRaceConditions:
                 handler = loader.load_from_contract(contract)
                 with lock:
                     results[index] = handler
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 with lock:
                     errors.append(e)
 
@@ -734,7 +734,7 @@ class TestRaceConditions:
                 handlers = loader.load_from_directory(tmp_path)
                 with lock:
                     results.append(handlers)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 with lock:
                     errors.append(e)
 
@@ -783,7 +783,7 @@ class TestRaceConditions:
                 handler = loader.load_from_contract(contract_file)
                 with lock:
                     results.append(handler)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 with lock:
                     errors.append(e)
 
@@ -881,7 +881,7 @@ class TestRaceConditions:
                 )
                 with lock:
                     results.append(handlers)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 with lock:
                     errors.append(e)
 

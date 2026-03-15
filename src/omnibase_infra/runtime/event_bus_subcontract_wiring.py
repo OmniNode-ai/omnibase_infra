@@ -480,7 +480,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                     getattr(message, "offset", "unknown"),
                     str(correlation_id) if correlation_id else "none",
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 self._logger.warning(
                     "offset_commit_failed topic=%s error=%s correlation_id=%s",
                     getattr(message, "topic", "unknown"),
@@ -999,7 +999,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         for unsubscribe in self._unsubscribe_callables:
             try:
                 await unsubscribe()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 self._logger.warning(
                     "Error during unsubscribe: %s",
                     e,

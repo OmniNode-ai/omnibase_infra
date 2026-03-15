@@ -68,7 +68,7 @@ def extract_pr_numbers(subject: str) -> list[int]:
         for m in pat.finditer(subject):
             try:
                 prs.add(int(m.group("num")))
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: returns degraded response
                 # Defensive: don't let parsing crash the run.
                 continue
     return sorted(prs)
@@ -496,7 +496,7 @@ def compute_drift(repo_days: list[RepoDay], root: Path, date: dt.date) -> DriftR
                             diverged_branches += 1
                     except (ValueError, TypeError):
                         pass
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
                 pass
 
     # Scoring: only real risk signals count

@@ -50,7 +50,7 @@ def _endpoint_reachable(url: str) -> bool:
     try:
         resp = httpx.get(f"{url}/health", timeout=5.0)
         return resp.status_code < 500
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: returns degraded response
         return False
 
 

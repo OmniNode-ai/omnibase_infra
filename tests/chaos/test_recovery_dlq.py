@@ -308,7 +308,7 @@ class MessageProcessorWithDLQ:
                     self.processed_count += 1
                 return True
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 last_error = e
                 if first_failure_at is None:
                     first_failure_at = datetime.now(UTC)

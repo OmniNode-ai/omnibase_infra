@@ -446,7 +446,7 @@ class PostgresErrorEmitter:
                 file=sys.stderr,
             )
             return False
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
             print(
                 f"[monitor] Failed to create Kafka producer: {exc}; "
                 "postgres Kafka emission disabled",
@@ -476,7 +476,7 @@ class PostgresErrorEmitter:
                 file=sys.stderr,
             )
             return False
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
             print(
                 f"[monitor] Failed to create Valkey client: {exc}; "
                 "postgres Kafka emission disabled",
@@ -513,7 +513,7 @@ class PostgresErrorEmitter:
                 existing = self._valkey.get(dedup_key)
                 if existing:
                     return
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
             print(
                 f"[monitor] Valkey dedup check failed for {self.container}: {exc}; "
                 "will emit without dedup",
@@ -553,7 +553,7 @@ class PostgresErrorEmitter:
                     f"[monitor] Emitted postgres error event "
                     f"(fingerprint={fingerprint}) from {self.container}"
                 )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
             print(
                 f"[monitor] Kafka publish failed for {self.container}: {exc}; "
                 "dedup key not set — will retry on next occurrence",
@@ -566,7 +566,7 @@ class PostgresErrorEmitter:
                 if self._valkey is not None:
                     # TTL: 24 hours — avoid infinite suppression of recurring errors
                     self._valkey.setex(dedup_key, 86400, "1")
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
                 print(
                     f"[monitor] Failed to set Valkey dedup key for {self.container}: {exc}",
                     file=sys.stderr,
@@ -610,7 +610,7 @@ class PostgresErrorTailer(threading.Thread):
                 stderr=subprocess.STDOUT,
                 text=True,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
             print(
                 f"[monitor] Cannot tail postgres container {self.container}: {exc}",
                 file=sys.stderr,
@@ -879,7 +879,7 @@ def _post_slack_plain_text(
                     f"[monitor] Slack fallback error for {container}: {result.get('error')}",
                     file=sys.stderr,
                 )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
         print(
             f"[monitor] Failed to post Slack fallback for {container}: {exc}",
             file=sys.stderr,
@@ -944,7 +944,7 @@ def post_slack(
                         f"[monitor] Slack API error for {container}: {error}",
                         file=sys.stderr,
                     )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
         print(
             f"[monitor] Failed to post Slack alert for {container}: {exc}",
             file=sys.stderr,
@@ -992,7 +992,7 @@ class ContainerTailer(threading.Thread):
                 stderr=subprocess.STDOUT,
                 text=True,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
             print(f"[monitor] Cannot tail {self.container}: {exc}", file=sys.stderr)
             return
 

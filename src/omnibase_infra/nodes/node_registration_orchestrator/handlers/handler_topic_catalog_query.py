@@ -226,7 +226,7 @@ class HandlerTopicCatalogQuery:
                 include_inactive=payload.include_inactive,
                 topic_pattern=payload.topic_pattern,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs error and degrades
             logger.error(  # noqa: TRY400
                 "HandlerTopicCatalogQuery: unexpected error from ServiceTopicCatalog: %s",
                 type(e).__name__,

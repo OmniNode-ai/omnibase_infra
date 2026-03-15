@@ -217,7 +217,7 @@ def wait_for_keycloak(kc_url: str, timeout_s: int = 120) -> None:
             if r.status_code == 200 and r.json().get("realm") == "master":
                 log("Keycloak is ready")
                 return
-        except Exception:
+        except Exception:  # noqa: BLE001 — re-raises as typed error
             pass
         time.sleep(5)
     raise TimeoutError(
@@ -282,7 +282,7 @@ def patch_master_realm_ssl_none(
         log(
             "psycopg2 not available — skipping ssl_required patch (may fail on token grant)"
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
         log(f"Warning: could not patch ssl_required: {exc} — continuing anyway")
 
 
@@ -750,7 +750,7 @@ def seed_infisical(
 
         log("Infisical seed complete")
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
         log(f"WARNING: Infisical seed failed (non-fatal): {exc}")
         log("You can re-run with INFISICAL_ADDR set once Infisical is provisioned.")
 

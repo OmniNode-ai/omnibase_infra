@@ -136,7 +136,7 @@ async def kafka_event_bus_with_dlq(
     # Cleanup: ensure bus is closed
     try:
         await bus.close()
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: swallows for resilience
         pass  # Ignore cleanup errors
 
 

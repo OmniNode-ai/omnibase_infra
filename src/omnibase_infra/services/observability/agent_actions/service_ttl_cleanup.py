@@ -265,7 +265,7 @@ class ServiceTTLCleanup(MixinAsyncCircuitBreaker):
                         },
                     )
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 error_msg = f"{type(e).__name__}: {e}"
                 errors[table_name] = error_msg
                 tables_cleaned[table_name] = 0
