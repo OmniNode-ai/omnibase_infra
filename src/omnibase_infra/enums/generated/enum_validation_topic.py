@@ -20,4 +20,4 @@ class EnumValidationTopic(str, Enum):
     """
     EVT_CROSS_REPO_RUN_COMPLETED_V1 = "onex.evt.validation.cross-repo-run-completed.v1"  # onex.evt.validation.cross-repo-run-completed.v1
     EVT_CROSS_REPO_RUN_STARTED_V1 = "onex.evt.validation.cross-repo-run-started.v1"  # onex.evt.validation.cross-repo-run-started.v1
-    EVT_VIOLATIONS_BATCH_V1 = "onex.evt.validation.violations-batch.v1"  # onex.evt.validation.violations-batch.v1
+    EVT_CROSS_REPO_VIOLATIONS_BATCH_V1 = "onex.evt.validation.cross-repo-violations-batch.v1"  # onex.evt.validation.cross-repo-violations-batch.v1
