@@ -93,7 +93,7 @@ class RuntimeContractConfigLoader:
         See CLAUDE.md Handler Plugin Loader security patterns.
     """
 
-    def __init__(self) -> None:
+    def __init__(self) -> None:  # stub-ok: stateless init
         """Initialize the contract config loader.
 
         The loader is stateless and delegates to individual subcontract

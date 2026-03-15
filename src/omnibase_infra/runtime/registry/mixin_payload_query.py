@@ -55,7 +55,7 @@ class MixinPayloadQuery:
     _lock: threading.Lock
     _frozen: bool
 
-    def _require_frozen(self, method_name: str) -> None:
+    def _require_frozen(self, method_name: str) -> None:  # stub-ok: abstract mixin
         """Raise if registry is not frozen. Must be provided by host class."""
         raise NotImplementedError(
             f"_require_frozen() must be provided by the host class. "

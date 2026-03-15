@@ -244,7 +244,7 @@ def get_event_bus_class(bus_kind: str) -> type[ProtocolEventBus]:
     return get_event_bus_registry().get(bus_kind)
 
 
-def register_handlers_from_config(
+def register_handlers_from_config(  # stub-ok: has tracked TODO
     runtime: object,  # Will be BaseRuntimeHostProcess
     protocol_configs: list[ModelProtocolRegistrationConfig],
 ) -> None:

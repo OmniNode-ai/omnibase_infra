@@ -130,7 +130,7 @@ def _wait_for_healthy(
 
 
 @click.group()
-def env() -> None:
+def env() -> None:  # stub-ok: click group
     """Manage the E2E testing environment."""
 
 

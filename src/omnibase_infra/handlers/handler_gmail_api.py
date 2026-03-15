@@ -264,7 +264,7 @@ class HandlerGmailApi:
     # Public API
     # ------------------------------------------------------------------
 
-    async def list_messages(
+    async def list_messages(  # stub-ok: implemented
         self,
         label_ids: list[str],
         max_results: int = 50,
@@ -394,7 +394,7 @@ class HandlerGmailApi:
             )
             return False
 
-    async def search_messages(
+    async def search_messages(  # stub-ok: implemented
         self,
         query: str,
         max_results: int = 500,

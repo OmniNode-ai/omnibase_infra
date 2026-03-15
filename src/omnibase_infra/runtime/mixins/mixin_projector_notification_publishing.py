@@ -179,12 +179,12 @@ class MixinProjectorNotificationPublishing:
     _notification_config: ModelProjectorNotificationConfig | None
 
     @property
-    def projector_id(self) -> str:
+    def projector_id(self) -> str:  # stub-ok: abstract mixin
         """Unique identifier for the projector (expected from implementing class)."""
         raise NotImplementedError("projector_id must be implemented by subclass")
 
     @property
-    def aggregate_type(self) -> str:
+    def aggregate_type(self) -> str:  # stub-ok: abstract mixin
         """Aggregate type from contract (expected from implementing class)."""
         raise NotImplementedError("aggregate_type must be implemented by subclass")
 

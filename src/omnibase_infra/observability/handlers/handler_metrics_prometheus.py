@@ -129,7 +129,7 @@ except ImportError:
     CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
     Histogram = None  # type: ignore[assignment, misc]
 
-    def generate_latest() -> bytes:  # type: ignore[misc]
+    def generate_latest() -> bytes:  # type: ignore[misc]  # stub-ok: optional dep
         """Stub for when prometheus_client is not installed."""
         raise ImportError("prometheus_client is required but not installed")
 

@@ -131,7 +131,7 @@ def _extract_comment_portion(line: str) -> str | None:
     return None
 
 
-def _is_any_exemption_note(text: str) -> bool:
+def _is_any_exemption_note(text: str) -> bool:  # stub-ok: implemented
     """Check if text contains a valid Any exemption note.
 
     A valid exemption note must have:

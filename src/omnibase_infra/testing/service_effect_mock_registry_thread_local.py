@@ -49,7 +49,7 @@ from omnibase_infra.testing.service_effect_mock_registry import (
 _thread_local = threading.local()
 
 
-def get_thread_local_registry() -> EffectMockRegistry:
+def get_thread_local_registry() -> EffectMockRegistry:  # stub-ok: implemented
     """Get or create a thread-local mock registry instance.
 
     Each thread gets its own ``EffectMockRegistry``. The instance

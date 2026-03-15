@@ -27,12 +27,12 @@ console = Console()
 
 
 @click.group()
-def cli() -> None:
+def cli() -> None:  # stub-ok: click group
     """ONEX Infrastructure CLI."""
 
 
 @cli.group()
-def validate() -> None:
+def validate() -> None:  # stub-ok: click group
     """Validation commands for infrastructure code."""
 
 
@@ -201,7 +201,7 @@ def validate_all_cmd(directory: str, nodes_dir: str) -> None:
 
 
 @cli.group()
-def registry() -> None:
+def registry() -> None:  # stub-ok: click group
     """Registry discovery and node query commands.
 
     Query the registration projection database directly without needing
@@ -516,7 +516,7 @@ def registry_list_topics() -> None:
 
 
 @cli.group()
-def demo() -> None:
+def demo() -> None:  # stub-ok: click group
     """Demo environment management commands."""
 
 

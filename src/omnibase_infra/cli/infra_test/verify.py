@@ -34,7 +34,7 @@ ONEX_TOPIC_PATTERN = re.compile(
 
 
 @click.group()
-def verify() -> None:
+def verify() -> None:  # stub-ok: click group
     """Verify infrastructure state."""
 
 
