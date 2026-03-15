@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """OpenAI-compatible embedding handler for the embedding effect node.
 
 Calls ``POST {base_url}/v1/embeddings`` with the standard OpenAI embeddings

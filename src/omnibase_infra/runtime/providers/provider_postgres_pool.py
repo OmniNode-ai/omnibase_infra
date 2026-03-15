@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """PostgreSQL connection pool provider.
 
 Creates asyncpg connection pools from environment-driven configuration.

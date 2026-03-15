@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """AST-based Declarative Node Validator for ONEX.
 
 Contract-driven validator to enforce the ONEX declarative node policy:

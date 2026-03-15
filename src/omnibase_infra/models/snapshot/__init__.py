@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Generic Snapshot Models for Point-in-Time State Capture.
 
 Infrastructure primitives for managing point-in-time

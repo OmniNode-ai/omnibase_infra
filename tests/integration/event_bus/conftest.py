@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Pytest fixtures for Kafka event bus integration tests.
 
 Kafka topic management fixtures for integration tests.

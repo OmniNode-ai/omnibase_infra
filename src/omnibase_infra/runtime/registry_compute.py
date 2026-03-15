@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Compute Registry - SINGLE SOURCE OF TRUTH for compute plugin registration.
 
 The RegistryCompute class for registering and resolving

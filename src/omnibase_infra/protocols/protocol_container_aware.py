@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Protocol extension for Infrastructure Handlers with Container DI.
 
 This module defines the ProtocolContainerAware interface, which extends the base

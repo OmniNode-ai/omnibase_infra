@@ -58,7 +58,7 @@ class EffectMockRegistry:
         """Initialize an empty mock registry."""
         self._services: dict[str, object] = {}
 
-    def register(self, protocol_name: str, mock: object) -> None:
+    def register(self, protocol_name: str, mock: object) -> None:  # stub-ok
         """Register a mock implementation for a protocol name.
 
         Args:

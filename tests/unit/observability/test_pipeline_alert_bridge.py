@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for AdapterPipelineAlertBridge - Scenario 6: Failure notification wiring.
 
 These tests validate the automatic alerting pathways that bridge pipeline

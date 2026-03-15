@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests for NodeRegistrationOrchestrator (Declarative Pattern).
 
 These tests verify the orchestrator's contract-driven behavior works correctly

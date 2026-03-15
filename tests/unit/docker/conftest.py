@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Pytest fixtures for Docker unit tests.  # ai-slop-ok: pre-existing
 
 This module provides shared fixtures and constants for Docker unit tests.

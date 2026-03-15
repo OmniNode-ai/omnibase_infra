@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Generic per-topic creation spec for ONEX platform topics.
 
 Each topic in the platform registry has a ModelTopicSpec that defines its

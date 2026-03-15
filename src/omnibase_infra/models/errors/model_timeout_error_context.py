@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Timeout Error Context Model - Stricter Typing for Timeout Errors.
 
 This module defines a specialized context model for timeout errors that enforces

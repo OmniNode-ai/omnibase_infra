@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Node Registry Effect - Declarative effect node for PostgreSQL registration.
 
 This node follows the ONEX declarative pattern:

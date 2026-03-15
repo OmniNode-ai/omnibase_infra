@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Service Discovery Effect Node - Capability-Oriented Effect Node.  # ai-slop-ok: pre-existing
 
 This node provides capability-oriented service discovery operations following

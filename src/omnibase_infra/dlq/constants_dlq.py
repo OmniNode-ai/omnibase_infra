@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """DLQ Constants and Shared Validation Patterns.
 
 Shared constants for the DLQ subsystem, ensuring

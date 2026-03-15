@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Tests for RegistrationReducerService -- reducer-driven, pure function, no I/O.
 
 Validates all four reducer-driven decide_* methods:

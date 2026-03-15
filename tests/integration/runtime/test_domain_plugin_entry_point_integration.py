@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests for real entry_point discovery (OMN-2022).
 
 These tests verify that the ``PluginRegistration`` class is discoverable via

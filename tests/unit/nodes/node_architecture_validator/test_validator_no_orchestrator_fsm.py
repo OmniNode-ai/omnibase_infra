@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """RED tests for ARCH-003: No Workflow FSM in Orchestrators.
 
 These tests should FAIL initially (RED phase of TDD).

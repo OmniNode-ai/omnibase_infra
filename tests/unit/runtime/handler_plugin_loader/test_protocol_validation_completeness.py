@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Tests verifying _validate_handler_protocol() checks match ProtocolHandler.
 
 This module ensures that the HandlerPluginLoader's protocol validation

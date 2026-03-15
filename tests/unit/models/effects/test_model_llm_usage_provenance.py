@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Tests for ModelLlmUsage provenance tracking fields.
 
 Tests the ``usage_source`` and ``raw_provider_usage`` fields added in

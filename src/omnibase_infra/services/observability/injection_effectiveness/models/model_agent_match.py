@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Agent match event model.
 
 Represents the payload from onex.evt.omniclaude.agent-match.v1 topic.

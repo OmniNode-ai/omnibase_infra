@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """MCP Tool Sync Service - Kafka listener for hot reload with idempotency.
 
 This service subscribes to node registration events on Kafka and updates

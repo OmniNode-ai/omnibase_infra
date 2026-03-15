@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Runtime Shape Validator for ONEX Handler Output Validation.
 
 Runtime validation of handler outputs against the

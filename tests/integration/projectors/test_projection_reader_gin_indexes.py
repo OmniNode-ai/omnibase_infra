@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests for GIN index configuration by ProjectionReaderRegistration methods.
 
 This test suite verifies GIN indexes are properly configured for capability-based

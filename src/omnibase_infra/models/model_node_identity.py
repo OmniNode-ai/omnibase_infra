@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Node Identity Model for ONEX Infrastructure.
 
 A typed Pydantic model for uniquely identifying ONEX nodes

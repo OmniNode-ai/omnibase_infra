@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Kafka environment enumeration for type-safe environment handling.
 
 This module defines the environment identifiers used for Kafka topic prefixes

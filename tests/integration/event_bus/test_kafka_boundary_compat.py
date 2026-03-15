@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Cross-repo Kafka boundary compatibility tests (OMN-3256).
 
 Verifies that producer and consumer Pydantic models on the same Kafka topic

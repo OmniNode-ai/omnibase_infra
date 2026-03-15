@@ -188,7 +188,7 @@ async def verify_runtime_startup(results: VerificationResult) -> None:
     }
     runtime = RuntimeHostProcess(event_bus=event_bus, config=config)
 
-    async def noop_populate() -> None:
+    async def noop_populate() -> None:  # stub-ok
         pass
 
     with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):

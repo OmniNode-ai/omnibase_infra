@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Reducer Purity Enforcement Gates.
 
 These tests make reducer purity violations IMPOSSIBLE, not just discouraged.

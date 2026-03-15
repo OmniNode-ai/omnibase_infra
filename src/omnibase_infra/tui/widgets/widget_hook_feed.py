@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Hook Feed widget — scrollable real-time git hook event feed.
 
 Receives ModelGitHookEvent payloads (from onex.evt.git.hook.v1) and

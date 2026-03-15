@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """# ai-slop-ok: pre-existingTest doubles for NodeRegistryEffect integration tests.
 
 This module provides controllable test doubles that implement the protocol

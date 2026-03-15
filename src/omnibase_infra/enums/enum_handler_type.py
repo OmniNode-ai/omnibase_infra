@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler Type Enumeration - Architectural Role Classification.
 
 Defines the architectural role of handlers in the ONEX system.

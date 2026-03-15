@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """ModelProjectionResultLocal — local stub until OMN-2508 (omnibase_spi) merges.
 
 OMN-2508 will implement NodeProjectionEffect in omnibase_spi, which includes

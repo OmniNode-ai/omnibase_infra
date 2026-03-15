@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for the Kafka broker allowlist validator.
 
 Tests the validate_kafka_broker_allowlist() function added in OMN-3300.

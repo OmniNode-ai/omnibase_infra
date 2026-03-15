@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Security constants for runtime handler and plugin loading.
 
 This module defines the trusted namespace prefixes for dynamic handler and plugin

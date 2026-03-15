@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Error message sanitization utilities.  # ai-slop-ok: pre-existing
 
 This module provides functions to sanitize error messages before they are:

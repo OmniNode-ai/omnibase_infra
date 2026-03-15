@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Domain plugin protocol for kernel-level initialization hooks.
 
 This module defines the ProtocolDomainPlugin protocol, enabling domain-specific

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Publish Statistics Model.
 
 Statistics for contract publishing operations including counts, timing, and per-origin breakdown.

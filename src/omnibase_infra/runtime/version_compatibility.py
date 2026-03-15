@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Version compatibility matrix for ONEX package dependencies.
 
 This module verifies that omnibase_core and omnibase_spi versions meet the
@@ -167,13 +165,13 @@ def _build_matrix_from_pyproject(
 _FALLBACK_MATRIX: list[VersionConstraint] = [
     VersionConstraint(
         package="omnibase_core",
-        min_version="0.27.0",
+        min_version="0.27.1",
         max_version="0.28.0",
     ),
     VersionConstraint(
         package="omnibase_spi",
-        min_version="0.16.1",
-        max_version="0.17.0",
+        min_version="0.17.0",
+        max_version="0.18.0",
     ),
 ]
 

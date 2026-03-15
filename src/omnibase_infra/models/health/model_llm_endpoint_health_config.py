@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Configuration model for the LLM endpoint health checker.
 
 Defines probe intervals, HTTP timeouts, endpoint URLs, and per-endpoint

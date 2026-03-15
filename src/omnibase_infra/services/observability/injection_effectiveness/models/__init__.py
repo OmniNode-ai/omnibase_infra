@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Pydantic models for injection effectiveness events and query results.
 
 These models correspond to the event payloads emitted by OMN-1889

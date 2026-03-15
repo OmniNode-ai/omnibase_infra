@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """PostgreSQL intent payload model for registration orchestrator.
 
 The typed payload model for PostgreSQL registration intents.

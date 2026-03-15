@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for the schema fingerprint CI twin script (OMN-2149).
 
 Tests cover fingerprint computation from migration files, artifact

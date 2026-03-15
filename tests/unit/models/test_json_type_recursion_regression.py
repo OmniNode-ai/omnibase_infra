@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Regression tests for JsonType recursion fix.
 
 This test module validates that Pydantic 2.x models using JsonType from omnibase_core

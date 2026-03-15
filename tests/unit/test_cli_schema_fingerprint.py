@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for the schema fingerprint CLI entry point (OMN-2087).
 
 Tests cover the ``_main()``, ``_cli_stamp()``, and ``_cli_verify()`` functions

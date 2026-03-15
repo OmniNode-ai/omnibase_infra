@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler Source Type Enumeration for Validation Error Identification.
 
 Defines the canonical source types for handler validation errors in the ONEX

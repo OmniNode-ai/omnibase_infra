@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Bus health diagnostics for ONEX Kafka infrastructure.
 
 Generic, domain-free diagnostic engine. Reusable by any ONEX repository.

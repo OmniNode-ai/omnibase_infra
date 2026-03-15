@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Performance regression tests for RegistrationReducer [OMN-1258].
 
 This test suite validates that the RegistrationReducer meets its documented

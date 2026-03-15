@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """TypedDict definition for JSON-serialized introspection cache data.
 
 A TypedDict that represents the JSON-serialized form of

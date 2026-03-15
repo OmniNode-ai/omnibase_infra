@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Intent effect adapter for PostgreSQL registration UPDATE operations.
 
 The IntentEffectPostgresUpdate adapter, which bridges
