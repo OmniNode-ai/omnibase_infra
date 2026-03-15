@@ -20,11 +20,20 @@ maintaining flexibility for diverse policy contexts.
 
 from __future__ import annotations
 
+from typing import TypedDict
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.mixins import MixinDictLikeAccessors
+
+
+class ModelPolicyContextMetadataDict(TypedDict, total=False):
+    """Typed metadata for policy evaluation context.
+
+    All keys are optional (total=False) since metadata is an observability
+    bag that callers populate selectively.
+    """
 
 
 class ModelPolicyContext(MixinDictLikeAccessors, BaseModel):
@@ -96,7 +105,9 @@ class ModelPolicyContext(MixinDictLikeAccessors, BaseModel):
     correlation_id: UUID | None = None
     attempt: int = 0
     timestamp_ms: int = 0
-    metadata: dict[str, object] = Field(default_factory=dict)
+    metadata: ModelPolicyContextMetadataDict = Field(
+        default_factory=ModelPolicyContextMetadataDict
+    )
 
 
 __all__: list[str] = ["ModelPolicyContext"]
