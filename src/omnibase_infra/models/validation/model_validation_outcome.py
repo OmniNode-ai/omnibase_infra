@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Validation outcome model for representing validation results.
 
 This model replaces the tuple pattern `tuple[bool, str | None]` that was used

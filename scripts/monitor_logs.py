@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 #
 # monitor_logs.py -- Real-time container log monitoring with Slack alerts
 #                    and PostgreSQL error event emission to Kafka (OMN-3407)

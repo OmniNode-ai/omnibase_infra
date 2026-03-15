@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Dispatch outcome model for representing dispatcher output topics.
 
 This model replaces the union pattern `str | list[str] | None` that was used

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Architecture Validator Node - Declarative COMPUTE_GENERIC node for architecture validation.
 
 This COMPUTE_GENERIC node follows the ONEX declarative pattern:

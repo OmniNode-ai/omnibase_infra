@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """LLM embedding response model with dimension uniformity validator.
 
 ModelLlmEmbeddingResponse, the output model for the

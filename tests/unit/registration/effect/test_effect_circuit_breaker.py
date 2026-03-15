@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Effect circuit breaker integration tests for OMN-954.
 
 This test suite validates circuit breaker behavior at the effect layer level,

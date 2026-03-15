@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Plugin Load Context Model for Summary Logging.
 
 ModelPluginLoadContext which groups the parameters needed

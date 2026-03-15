@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Coroutine-safe emission counter mixin for EventBus wiring health monitoring.
 
 A mixin that tracks message emissions per-topic for use

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Mock-based tests for ServiceMCPToolDiscovery via event bus registry.  # ai-slop-ok: pre-existing
 
 These tests validate ServiceMCPToolDiscovery behavior using mock

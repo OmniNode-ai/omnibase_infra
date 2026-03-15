@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """At-Least-Once Delivery Tests Under Chaos Conditions (OMN-955).
 
 This test suite validates that the system provides at-least-once delivery

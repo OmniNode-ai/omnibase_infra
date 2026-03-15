@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """PostgreSQL Database Handler - MVP implementation using asyncpg async client.
 
 Supports query and execute operations with fixed pool size (5).

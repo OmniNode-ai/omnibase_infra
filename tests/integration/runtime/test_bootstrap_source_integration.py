@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests for HandlerBootstrapSource integration (OMN-1087).
 
 This module validates that HandlerBootstrapSource is correctly integrated

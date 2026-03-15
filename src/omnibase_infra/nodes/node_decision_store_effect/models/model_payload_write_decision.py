@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Payload model for the write-decision intent.
 
 This payload drives Stage 1 + Stage 2 of HandlerWriteDecision:

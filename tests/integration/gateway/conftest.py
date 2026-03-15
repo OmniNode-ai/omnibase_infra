@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Pytest fixtures for gateway integration tests.  # ai-slop-ok: pre-existing
 
 This module provides fixtures for testing envelope signing, validation, and

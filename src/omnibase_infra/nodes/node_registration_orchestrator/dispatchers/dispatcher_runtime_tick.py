@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 # ruff: noqa: TRY400
 # TRY400 disabled: logger.error is intentional to avoid leaking sensitive data in stack traces
 """Dispatcher adapter for HandlerRuntimeTick.

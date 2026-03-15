@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests for restart-safe durable timeout behavior.
 
 This package contains integration tests verifying OMN-932 acceptance criteria:

@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """CI twin for schema fingerprint validation (OMN-2149).
 
 Computes a deterministic SHA-256 fingerprint from the contents of all

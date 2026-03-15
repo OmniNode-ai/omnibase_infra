@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler for GitHub PR API polling — core logic for node_github_pr_poller_effect.
 
 Implements the ``github.poll.prs`` operation declared in contract.yaml.

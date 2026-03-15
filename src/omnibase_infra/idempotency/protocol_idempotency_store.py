@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Protocol definition for Idempotency Store.
 
 This module defines the ProtocolIdempotencyStore protocol that all idempotency

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Two-stage decision write handler for NodeDecisionStoreEffect.
 
 Stage 1 (committed independently):

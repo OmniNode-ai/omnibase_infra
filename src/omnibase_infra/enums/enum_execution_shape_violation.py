@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Execution Shape Violation Enumeration.
 
 Defines the canonical violation types for the ONEX execution shape validator.

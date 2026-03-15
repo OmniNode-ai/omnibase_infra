@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests for runtime startup readiness (OMN-2081).
 
 Tests that the ONEX runtime reaches a ready state in under 10 seconds

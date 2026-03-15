@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Filesystem Handler - Secure filesystem operations with path whitelisting.
 
 Provides secure filesystem operations including read, write, list, ensure directory,

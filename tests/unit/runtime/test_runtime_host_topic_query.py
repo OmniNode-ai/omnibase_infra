@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for RuntimeHostProcess.get_subscribers_for_topic() method.
 
 HandlerConsul was removed in OMN-3540.  get_subscribers_for_topic() is now a

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Race condition and concurrent access tests for registry components.  # ai-slop-ok: pre-existing
 
 This module provides comprehensive race condition tests for:

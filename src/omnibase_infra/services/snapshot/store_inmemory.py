@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """In-memory snapshot store for testing.
 
 Provides an in-memory implementation of ProtocolSnapshotStore suitable for

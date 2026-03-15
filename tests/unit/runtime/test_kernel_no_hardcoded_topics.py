@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Regression test: no hardcoded env-prefixed topic literals in kernel/runtime.
 
 OMN-1972 Phase 1 removed all hardcoded environment-prefixed topic strings from

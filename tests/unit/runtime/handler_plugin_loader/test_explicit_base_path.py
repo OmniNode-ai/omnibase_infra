@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Tests for HandlerPluginLoader.discover_and_load explicit base_path usage.
 
 This module tests the explicit base_path parameter in discover_and_load(),

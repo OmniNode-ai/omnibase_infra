@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 # ruff: noqa: S608
 # Note: S608 (SQL injection) is disabled for this test file. All table names
 # are UUID-generated locally by test fixtures, not from user input.

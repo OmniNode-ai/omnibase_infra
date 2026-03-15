@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Kernel wiring tests (OMN-1931 P2.5, OMN-2050).
 
 Pure Python tests (no Docker) verifying that the service_kernel correctly

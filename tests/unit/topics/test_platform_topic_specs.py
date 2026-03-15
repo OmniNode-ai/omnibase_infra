@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """CI drift guard: contract YAML topics vs ALL_PLATFORM_TOPIC_SPECS registry.
 
 Ensures that every platform topic declared in the orchestrator contract YAML

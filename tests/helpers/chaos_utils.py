@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Chaos testing utilities for OMN-955.  # ai-slop-ok: pre-existing
 
 This module provides shared utilities for chaos testing scenarios including:

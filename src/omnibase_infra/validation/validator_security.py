@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Security Validator for ONEX Infrastructure.
 
 Contract-driven AST validator for detecting security concerns in Python code.

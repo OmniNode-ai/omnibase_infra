@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Tests for custom __bool__ behavior in runtime optional models.
 
 This test module verifies the non-standard __bool__ behavior of Pydantic models

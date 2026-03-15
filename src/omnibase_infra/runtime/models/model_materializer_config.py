@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Top-level configuration for the DependencyMaterializer.
 
 Part of OMN-1976: Contract dependency materialization.

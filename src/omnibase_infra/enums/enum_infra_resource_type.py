@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Infrastructure resource type enumeration for dependency materialization.
 
 Defines the resource types that the DependencyMaterializer can create

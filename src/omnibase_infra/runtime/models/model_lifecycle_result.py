@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """# ai-slop-ok: pre-existingLifecycle Result Model for handler shutdown operations.
 
 This module provides the ModelLifecycleResult class for representing the outcome

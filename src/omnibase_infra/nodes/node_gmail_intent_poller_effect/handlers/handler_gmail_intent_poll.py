@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler for Gmail Intent Poll — core logic for node_gmail_intent_poller_effect.
 
 Implements the ``gmail.poll_inbox`` operation declared in contract.yaml.

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Node Archetype Enumeration for ONEX 4-Node Architecture.
 
 Defines the canonical node archetypes for the ONEX execution shape validator.

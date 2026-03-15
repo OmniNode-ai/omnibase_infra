@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler that collects build-toolchain versions for RRH validation.
 
 Detects installed versions of pre-commit, ruff, pytest, and mypy by

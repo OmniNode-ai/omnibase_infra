@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Registry for NodeDeltaBundleEffect infrastructure dependencies.
 
 Provides factory methods for creating NodeDeltaBundleEffect instances

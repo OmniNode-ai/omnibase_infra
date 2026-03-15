@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """LLM Finish Reason Enumeration.
 
 Defines canonical finish reasons for LLM API responses. Used to normalize

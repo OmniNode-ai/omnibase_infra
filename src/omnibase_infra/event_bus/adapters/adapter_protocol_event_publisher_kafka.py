@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Kafka adapter implementing ProtocolEventPublisher for production event publishing.
 
 This adapter wraps EventBusKafka to implement the ProtocolEventPublisher protocol

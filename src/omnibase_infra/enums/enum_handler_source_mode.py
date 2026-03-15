@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler Source Mode Enumeration for Handler Loading Strategy.
 
 Defines the canonical source modes for handler loading in the ONEX runtime.

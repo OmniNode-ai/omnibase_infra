@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Structured Logging Handler - EFFECT handler for structured logging with buffer/flush.
 
 The ONEX EFFECT handler pattern for structured logging.

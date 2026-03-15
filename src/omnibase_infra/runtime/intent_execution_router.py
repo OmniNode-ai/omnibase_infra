@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Intent Execution Router for Contract Persistence Operations.
 
 This module routes intents from ContractRegistryReducer to the appropriate

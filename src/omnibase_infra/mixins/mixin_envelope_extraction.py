@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Envelope extraction mixin for infrastructure handlers.
 
 A reusable mixin for extracting correlation_id and envelope_id

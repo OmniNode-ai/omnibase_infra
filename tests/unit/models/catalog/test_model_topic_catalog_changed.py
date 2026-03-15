@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for ModelTopicCatalogChanged.
 
 Tests sorted delta tuples (D7), creation, defaults, and validation.

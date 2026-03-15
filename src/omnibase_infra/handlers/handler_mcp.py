@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """MCP Handler - Model Context Protocol integration for ONEX nodes.
 
 Exposes ONEX nodes as MCP tools for AI agent integration via streamable HTTP transport.

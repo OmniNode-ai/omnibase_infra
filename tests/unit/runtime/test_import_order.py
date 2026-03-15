@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Regression tests for runtime module import order.  # ai-slop-ok: pre-existing
 
 This module contains tests to prevent circular import regressions in the

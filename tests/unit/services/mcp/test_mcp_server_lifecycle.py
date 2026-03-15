@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for MCPServerLifecycle dev mode contract scanning.
 
 This test suite validates the MCPServerLifecycle class focusing on dev mode

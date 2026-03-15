@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler for ingesting GitHub PR webhook events and mapping them to ModelUpdateTrigger.
 
 Maps the ``action`` field from a ``ModelPRWebhookEvent`` to the appropriate

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Intent Handler - Temporary demo wiring for intent graph operations.
 
 Wraps HandlerGraph to provide intent-specific graph operations for the demo.

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Shared pytest fixtures for orchestrator node tests.  # ai-slop-ok: pre-existing
 
 This module provides common fixtures used across multiple orchestrator test files,

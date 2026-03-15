@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for event bus readiness checking (OMN-1931).
 
 Tests the readiness API across EventBusInmemory and mocked EventBusKafka,

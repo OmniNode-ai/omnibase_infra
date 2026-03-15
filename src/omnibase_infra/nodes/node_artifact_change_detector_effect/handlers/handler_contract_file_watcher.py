@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler for watchdog-based contract file change detection with MD5 hash tracking.
 
 Watches ``contract.yaml`` files under a configurable root directory using the

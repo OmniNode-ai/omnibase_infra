@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """HandlerResourceManager — manages httpx async clients per handler_id.
 
 Lives outside the ONEX graph. Infrastructure-layer lifecycle management only.

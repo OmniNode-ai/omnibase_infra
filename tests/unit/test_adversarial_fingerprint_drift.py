@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Adversarial tests: fingerprint drift detection (CI twin validation) [OMN-2293].
 
 These tests prove the CI twin fingerprint system is NOT cosmetic by

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Filesystem Contract Source.
 
 Discovers contracts from a directory tree by globbing for contract.yaml files.

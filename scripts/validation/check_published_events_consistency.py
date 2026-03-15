@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Validate that published_events topics are declared in event_bus.publish_topics.
 
 For every contract.yaml found in src/omnibase_infra/nodes/:

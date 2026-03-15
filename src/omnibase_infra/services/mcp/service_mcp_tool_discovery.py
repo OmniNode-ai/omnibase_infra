@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """MCP Tool Discovery Service - Discovers MCP-enabled orchestrators from the event bus registry.
 
 This service queries the ONEX node registration projection for nodes that have

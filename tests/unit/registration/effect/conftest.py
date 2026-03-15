@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Shared pytest fixtures for Registry Effect Node tests.
 
 Provides common fixtures for OMN-954 (Registry Effect Node tests) including:

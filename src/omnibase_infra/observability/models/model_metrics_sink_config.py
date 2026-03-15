@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Configuration model for Prometheus metrics sink.
 
 This module defines the configuration model for creating SinkMetricsPrometheus

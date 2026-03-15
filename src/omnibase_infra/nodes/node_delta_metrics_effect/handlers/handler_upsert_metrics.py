@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Metrics rollup upsert handler for NodeDeltaMetricsEffect.
 
 Upserts a single rollup contribution into delta_metrics_by_model using

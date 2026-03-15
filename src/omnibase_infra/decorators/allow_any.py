@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Decorator to exempt functions/classes from Any type validation.
 
 This decorator is recognized by the ``any_type_validator.py`` AST-based validator.

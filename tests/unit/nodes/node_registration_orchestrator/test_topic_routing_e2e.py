@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Regression test: DispatchResultApplier must publish ModelNodeRegistrationAccepted
 to onex.evt.platform.node-registration-accepted.v1, not to the fallback "responses" topic.
 
