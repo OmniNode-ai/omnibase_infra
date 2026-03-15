@@ -537,15 +537,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Checkout omni_home standards
+      - name: Checkout onex_change_control standards
         uses: actions/checkout@v4
         continue-on-error: true
         with:
-          repository: OmniNode-ai/omni_home
+          repository: OmniNode-ai/onex_change_control
           token: ${{ secrets.CROSS_REPO_PAT }}
-          path: omni_home
+          path: onex_change_control
           sparse-checkout: |
             standards/
+            scripts/
           sparse-checkout-cone-mode: false
 
       - name: Setup Python and uv
@@ -557,12 +558,23 @@ jobs:
 
       - name: Check version pin compliance
         run: |
-          SCRIPT="omni_home/standards/check_version_pins.py"
+          SCRIPT="onex_change_control/scripts/check_version_pins.py"
           if [ ! -f "$SCRIPT" ]; then
-            echo "::warning::$SCRIPT not found — skipping version pin check (depends on OMN-4803)"
+            echo "::warning::$SCRIPT not found — skipping version pin check"
             exit 0
           fi
-          python "$SCRIPT" --repo omnibase_infra --root omni_home
+          # The script scans root/*/pyproject.toml — create a temp workspace
+          # with a symlink so the scanner can find this repo's pyproject.toml.
+          WORKSPACE=$(mktemp -d)
+          ln -s "$GITHUB_WORKSPACE" "$WORKSPACE/omnibase_infra"
+          python "$SCRIPT" --root "$WORKSPACE"
+
+      - name: Check Dockerfile.runtime plugin pins
+        run: |
+          echo "================================================================"
+          echo "Dockerfile.runtime Plugin Pin Check (OMN-5108)"
+          echo "================================================================"
+          uv run python scripts/check_dockerfile_pins.py
 
   # ============================================================================
   # CI Tests Gate (aggregator for branch protection)
