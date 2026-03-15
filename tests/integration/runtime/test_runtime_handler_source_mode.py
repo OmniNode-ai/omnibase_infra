@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests for RuntimeHostProcess handler source mode integration (OMN-1095).
 
 This module validates that RuntimeHostProcess correctly integrates with

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Failed Plugin Load Model for Observability Logging.
 
 ModelFailedPluginLoad which tracks plugin loading failures

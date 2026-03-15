@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Notification Publishing Mixin for Projector Implementations.
 
 Provides notification publishing capability for projector shells. This mixin

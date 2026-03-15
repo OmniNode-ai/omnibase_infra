@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """CLI command for manual artifact reconciliation.
 
 Publishes a ModelManualReconcileCommand to ``onex.cmd.artifact.reconcile.v1``

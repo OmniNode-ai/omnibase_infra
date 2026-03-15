@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """StatusApp — the main textual application for ONEX TUI.
 
 Launches the ScreenStatus screen and starts the Kafka consumer background

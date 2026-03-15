@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for EventRegistry - Event type to Kafka topic mapping.
 
 Tests the generic event registry that maps semantic event types to Kafka topics

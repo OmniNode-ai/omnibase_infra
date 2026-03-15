@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Shared mock helpers for omnibase_infra tests.  # ai-slop-ok: pre-existing
 
 This module provides reusable mock utilities for filesystem and I/O testing,

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for intelligence pipeline resilience scenarios 1-5.
 
 These tests validate pipeline behavior under failure conditions using

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Mixin for execution shape violation checking.
 
 The MixinExecutionShapeViolationChecks mixin which extracts
@@ -597,4 +595,4 @@ class MixinExecutionShapeViolationChecks:
             This method is provided by MixinNodeArchetypeDetection.
             Declared here for type checking purposes.
         """
-        raise NotImplementedError("Provided by MixinNodeArchetypeDetection")
+        raise NotImplementedError("Provided by MixinNodeArchetypeDetection")  # stub-ok

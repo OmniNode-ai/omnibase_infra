@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler for NodeRegistrationAcked command - ack processing.
 
 This handler processes NodeRegistrationAcked commands from nodes that

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Chain Propagation Validator for Correlation and Causation Chain Validation.
 
 Validates that messages properly maintain correlation and causation chains

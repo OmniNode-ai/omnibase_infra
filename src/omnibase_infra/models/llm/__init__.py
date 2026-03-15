@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Shared LLM models for inference, embeddings, and tool-calling interactions.
 
 These models are domain-level models used across multiple LLM-related nodes

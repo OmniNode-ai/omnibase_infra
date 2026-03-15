@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 # ruff: noqa: S608
 # S608 disabled: SQL table name 'delivery_attempts' is a hardcoded constant,
 # not user input. No SQL injection risk.

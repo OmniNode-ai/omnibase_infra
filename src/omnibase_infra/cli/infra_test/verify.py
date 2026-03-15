@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Verification commands for infrastructure state.
 
 Provides commands to verify the state of PostgreSQL, Kafka topics,

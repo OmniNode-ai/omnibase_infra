@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler for batch marking stale contracts as inactive.
 
 This handler encapsulates PostgreSQL-specific staleness marking logic for the

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Operation bindings subcontract model for contract.yaml section.
 
 This model represents the full operation_bindings section from a contract.yaml file,

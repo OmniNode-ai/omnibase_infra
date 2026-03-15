@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler that collects git repository state for RRH validation.
 
 Uses ``asyncio.create_subprocess_exec`` (not shell) to capture branch,

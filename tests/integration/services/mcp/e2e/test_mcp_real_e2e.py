@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Real MCP E2E integration tests using actual MCP SDK client and server.
 
 These tests use the REAL MCP SDK - not mocks. They start an actual MCP server

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests for HandlerPluginLoader ambiguous contract detection.
 
 This module tests the fail-fast behavior when both handler_contract.yaml and

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Pipeline hooks for cross-cutting observability concerns.
 
 Hooks that can be integrated into infrastructure pipelines

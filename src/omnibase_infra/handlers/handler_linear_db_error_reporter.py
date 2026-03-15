@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Linear DB Error Reporter Handler - PostgreSQL error -> Linear ticket.
 
 This handler processes ``ModelDbErrorEvent`` payloads received from the

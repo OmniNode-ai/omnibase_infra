@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Edge case tests for ModelLlmUsage type coercion and boundary conditions.
 
 Supplements test_model_llm_usage.py with focused coverage on:

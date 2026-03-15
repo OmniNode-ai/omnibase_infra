@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """SQL Operation Mixin for Projector Implementations.
 
 Provides SQL generation and execution methods for projector shells. This mixin

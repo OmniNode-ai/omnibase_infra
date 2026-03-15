@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 # ruff: noqa: S108
 # S108 disabled: /tmp paths are intentional for test fixtures
 # mypy: disable-error-code="index, operator, arg-type"

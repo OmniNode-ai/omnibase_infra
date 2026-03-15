@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Import-graph validation: no consul library imports in active runtime code.
 
 This test validates that no importable code path in omnibase_infra depends on

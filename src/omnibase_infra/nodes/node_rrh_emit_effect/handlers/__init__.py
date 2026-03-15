@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handlers for the RRH emit effect node."""
 
 from omnibase_infra.nodes.node_rrh_emit_effect.handlers.handler_repo_state_collect import (

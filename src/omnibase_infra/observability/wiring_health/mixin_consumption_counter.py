@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Coroutine-safe consumption counter mixin for wiring health monitoring.
 
 A mixin that tracks successful message consumption per-topic

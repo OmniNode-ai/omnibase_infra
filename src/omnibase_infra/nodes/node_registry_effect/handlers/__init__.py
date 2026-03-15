@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handlers for NodeRegistryEffect operations.
 
 This package contains the extracted handlers for the NodeRegistryEffect node,

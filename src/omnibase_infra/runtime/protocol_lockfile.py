@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Protocol lockfile generator for snapshot testing.
 
 This module generates a deterministic JSON lockfile from the protocol definitions

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Runtime Enumerations Module.
 
 Provides enumerations specific to the ONEX runtime scheduler and related components.

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Slack Alerter Effect Node - Declarative Slack webhook alerting.
 
 This module exports the declarative NodeSlackAlerterEffect for sending

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """FSM State Transition Tests for NodeRegistrationReducer.
 
 This test suite validates the FSM state transitions defined in contract.yaml

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Environment management commands (``env up`` / ``env down``).
 
 Wraps Docker Compose to manage the E2E testing infrastructure stack.

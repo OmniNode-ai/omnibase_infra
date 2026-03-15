@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Shared AST analysis utilities for testing.  # ai-slop-ok: pre-existing
 
 This module provides reusable functions for analyzing Python source code ASTs

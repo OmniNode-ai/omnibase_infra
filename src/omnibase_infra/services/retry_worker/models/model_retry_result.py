@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Retry result model for the RetryWorker service.
 
 Tracks per-run metrics including successful retries, failures, and DLQ moves

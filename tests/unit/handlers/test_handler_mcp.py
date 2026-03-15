@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 # ruff: noqa: S104
 # S104 disabled: Binding to 0.0.0.0 is tested for container networking patterns
 # mypy: disable-error-code="index, operator, arg-type"

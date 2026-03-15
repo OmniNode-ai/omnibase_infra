@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Runtime contract configuration model for consolidated contract loading.
 
 The ModelRuntimeContractConfig class for representing

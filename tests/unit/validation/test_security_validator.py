@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Tests for ValidatorSecurity (OMN-1277).
 
 Tests the contract-driven security validator that extends ValidatorBase.

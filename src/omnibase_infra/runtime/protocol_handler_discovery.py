@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Protocol interface for Handler Discovery Services in ONEX Infrastructure.
 
 This module defines the ProtocolHandlerDiscovery interface for discovering

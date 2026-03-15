@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Test package for HandlerPluginLoader unit tests.
 
 This package contains focused test modules for the HandlerPluginLoader:

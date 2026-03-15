@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Binding configuration resolver for ONEX infrastructure.
 
 BindingConfigResolver provides a unified interface for resolving handler configurations

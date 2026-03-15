@@ -4,9 +4,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.20.0"
+version = "0.20.1"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
-authors = [{name = "OmniNode Team", email = "team@omninode.ai"}]
+authors = [{ name = "OmniNode.ai", email = "contact@omninode.ai" }]
 license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.12"
@@ -29,8 +29,8 @@ dependencies = [
     #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
     # Remember to switch back to PyPI versions before merging to main.
     #
-    "omnibase-core==0.27.0",
-    "omnibase-spi==0.16.1",
+    "omnibase-core==0.27.1",
+    "omnibase-spi==0.17.0",
     # ============================================================================
     # External Dependency Security Guidance
     # ============================================================================
@@ -166,10 +166,7 @@ line-ending = "auto"
 # Matches omnibase_core settings for consistency across ONEX ecosystem
 select = ["E", "F", "W", "C90", "I", "N", "UP", "YTT", "S", "BLE", "FBT", "B", "A", "COM", "C4", "DTZ", "T10", "EM", "EXE", "ISC", "ICN", "G", "INP", "PIE", "T20", "PT", "Q", "RSE", "RET", "SLF", "SIM", "TID", "TCH", "ARG", "PTH", "ERA", "PD", "PGH", "PL", "TRY", "NPY", "RUF"]
 ignore = [
-    # Type annotation style rules
-    # Note: ONEX prefers X | None syntax (PEP 604). This ignore allows legacy Union[X,Y]
-    # if introduced, but codebase is already compliant. Can be removed to enforce strict PEP 604.
-    "UP007",     # Union[X, Y] -> X | Y (allow legacy Union syntax if present)
+    # UP007 (Union[X, Y] -> X | Y) is NOT ignored — PEP 604 syntax enforced
     "S101",      # Allow assert statements in tests
     "E501",      # Line too long (technical debt - will fix incrementally)
     "BLE001",    # Blind exception catching (technical debt)
@@ -211,7 +208,7 @@ ignore = [
     "PT017",     # pytest.raises in except (technical debt)
     "F841",      # Unused variable (technical debt)
     "ARG002",    # Unused method argument (technical debt)
-    "T201",      # Print statements (technical debt)
+    # T201 (print statements) is NOT ignored globally — enforced via per-file-ignores
     "FBT003",    # Boolean positional value in call (technical debt)
     "N802",      # Invalid function name (technical debt)
     "S603",      # Subprocess without shell (technical debt)
@@ -266,9 +263,24 @@ ignore = [
 "tests/integration/runtime/db/test_postgres_repository_runtime_integration.py" = ["S608"]
 # S106: Hardcoded password in function arg - test fixtures only
 # Production secrets managed via Infisical/Vault (OMN-2287, OMN-2736)
-"tests/**/*.py" = ["S106"]
+# T201: Print statements OK in tests
+"tests/**/*.py" = ["S106", "T201"]
 # N999: Hyphenated script names are intentional (executable CLI scripts, not importable modules)
-"scripts/*-*.py" = ["N999"]
+# T201: Scripts are CLI tools with intentional print() output
+"scripts/*-*.py" = ["N999", "T201"]
+"scripts/*.py" = ["T201"]
+# CLI tools, __main__ blocks, and intentional stdout output
+"src/omnibase_infra/runtime/emit_daemon/event_registry.py" = ["T201"]
+"src/omnibase_infra/runtime/service_kernel.py" = ["T201"]
+"src/omnibase_infra/runtime/util_schema_fingerprint.py" = ["T201"]
+"src/omnibase_infra/validation/demo_loop_gate.py" = ["T201"]
+"src/omnibase_infra/validation/linter_contract.py" = ["T201"]
+"src/omnibase_infra/validation/validator_any_type.py" = ["T201"]
+"src/omnibase_infra/tools/contract_topic_extractor.py" = ["T201"]
+"src/omnibase_infra/services/observability/llm_cost_aggregation/consumer.py" = ["T201"]
+# Intentional stdout sinks / fallback output
+"src/omnibase_infra/event_bus/service_topic_manager.py" = ["T201"]
+"src/omnibase_infra/observability/sinks/sink_logging_structured.py" = ["T201"]
 
 [tool.ruff.lint.isort]
 # Ensure consistent import sorting between local and CI
@@ -326,21 +338,49 @@ addopts = [
 [tool.mypy]
 plugins = ["pydantic.mypy"]
 python_version = "3.12"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
+strict = true
 mypy_path = "src"
 namespace_packages = true
 explicit_package_bases = true
-# NOTE: omnibase_core 0.9.0 now includes py.typed marker file
-# TODO: Remove ignore_missing_imports once omnibase_spi also adds py.typed
-# Current workaround: ignore_missing_imports = true (global)
-# Target state: Per-module overrides only (see [[tool.mypy.overrides]] below)
+# Global ignore for third-party libraries and cross-package imports.
+# TODO: Remove once all dependencies have py.typed markers.
 ignore_missing_imports = true
+# Disabled globally because mypy per-module overrides don't support these flags.
+# TODO: Enable once non-compliant modules are fixed.
+warn_redundant_casts = false
+no_implicit_reexport = false
 
 [[tool.mypy.overrides]]
-module = ["omnibase_spi.*"]
-ignore_missing_imports = true
+# Modules not yet strict-compliant (99 errors across 64 files).
+# Fix incrementally and remove modules from this list as they become compliant.
+module = [
+    "omnibase_infra.adapters._internal.*",
+    "omnibase_infra.diagnostics.*",
+    "omnibase_infra.event_bus.*",
+    "omnibase_infra.gateway.services.*",
+    "omnibase_infra.handlers.*",
+    "omnibase_infra.mixins.*",
+    "omnibase_infra.models.dispatch.*",
+    "omnibase_infra.models.handlers.*",
+    "omnibase_infra.nodes.*",
+    "omnibase_infra.observability.*",
+    "omnibase_infra.plugins.examples.*",
+    "omnibase_infra.protocols.*",
+    "omnibase_infra.runtime.*",
+    "omnibase_infra.services.*",
+    "omnibase_infra.sinks.*",
+]
+disallow_any_generics = false
+disallow_subclassing_any = false
+disallow_untyped_calls = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = false
+check_untyped_defs = false
+no_implicit_optional = false
+warn_unused_ignores = false
+warn_return_any = false
+strict_equality = false
+extra_checks = false
 
 [tool.pydantic-mypy]
 init_forbid_extra = true

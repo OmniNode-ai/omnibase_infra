@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Graph Database Handler - Implements ProtocolGraphDatabaseHandler from omnibase_spi.
 
 Provides backend-agnostic graph database operations via the neo4j async driver,

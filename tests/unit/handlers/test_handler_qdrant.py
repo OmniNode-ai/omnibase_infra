@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for HandlerQdrant implementing ProtocolVectorStoreHandler.
 
 These tests verify the SPI protocol implementation using mocked qdrant_client.QdrantClient

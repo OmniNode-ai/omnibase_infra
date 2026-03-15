@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Registration domain wiring for MessageDispatchEngine integration.
 
 Domain-specific wiring functions for the Registration orchestrator, enabling

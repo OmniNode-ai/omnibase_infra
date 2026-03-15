@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """AST-based Any Type Validator for ONEX Strong Typing Policy.
 
 Static analysis validation to detect improper Any type usage

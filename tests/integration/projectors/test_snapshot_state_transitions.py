@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests: State transitions produce snapshots.
 
 P3.6 of OMN-1932 (Wire Snapshot Publisher). Validates the end-to-end flow

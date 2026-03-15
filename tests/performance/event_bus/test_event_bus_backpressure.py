@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Backpressure and overload tests for Event Bus.
 
 This test suite validates event bus behavior when producers outpace consumers,

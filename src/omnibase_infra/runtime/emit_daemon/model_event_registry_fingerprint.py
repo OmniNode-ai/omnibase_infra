@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Event Registry Fingerprint Model.
 
 Frozen Pydantic model representing a deterministic SHA-256 fingerprint of

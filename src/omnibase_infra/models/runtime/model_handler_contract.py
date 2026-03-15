@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler Contract Model for Contract-Driven Discovery.
 
 ModelHandlerContract, a Pydantic model that represents the

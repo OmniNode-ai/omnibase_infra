@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for ModelKafkaEventBusConfig acks handling.
 
 Tests the EnumKafkaAcks integration with the config model,

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for ModelPayloadLedgerAppend intent payload model.
 
 This module validates the ModelPayloadLedgerAppend model used for audit ledger

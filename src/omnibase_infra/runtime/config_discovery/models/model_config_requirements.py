@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Aggregated configuration requirements from one or more ONEX contracts.
 
 .. versionadded:: 0.10.0

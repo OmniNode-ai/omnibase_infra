@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for live contract materialization (OMN-1989).
 
 Tests validate that RuntimeHostProcess can dynamically materialize handlers

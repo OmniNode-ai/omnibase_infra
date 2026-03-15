@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Protocols for Registration Storage Effect Node.
 
 This module exports protocols for the NodeRegistrationStorageEffect,

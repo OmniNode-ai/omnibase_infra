@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """MCP contract configuration model for enabling nodes as MCP tools.
 
 This model defines the `mcp` field that can be added to ONEX contracts to expose

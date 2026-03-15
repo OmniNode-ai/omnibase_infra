@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for ONEXToMCPAdapter — invoke_tool() dispatch (OMN-2697) and
 contract-driven discovery (OMN-2698).
 

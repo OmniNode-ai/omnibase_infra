@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler pool for per-handler-type instance pooling (OMN-477).
 
 Provides ``HandlerPool`` which manages multiple handler instances of a single
