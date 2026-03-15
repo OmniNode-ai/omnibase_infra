@@ -144,8 +144,9 @@ SUFFIX_NODE_REGISTRATION_ACCEPTED: str = (
 )
 """Topic suffix for node registration acceptance events.
 
-Published by the registration orchestrator when a node's registration is accepted.
-Nodes subscribe to this to trigger ACK command emission.
+Published by the registration orchestrator when a node's registration is
+accepted. Nodes subscribe to this topic to confirm their registration
+and emit ACK commands in response.
 """
 
 # Registration ACK commands

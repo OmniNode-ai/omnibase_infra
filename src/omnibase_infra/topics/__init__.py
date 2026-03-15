@@ -105,6 +105,7 @@ from omnibase_infra.topics.topic_resolver import (
 __all__: list[str] = [
     # Platform suffix constants
     "SUFFIX_NODE_REGISTRATION",
+    "SUFFIX_NODE_REGISTRATION_ACCEPTED",
     "SUFFIX_NODE_INTROSPECTION",
     "SUFFIX_NODE_HEARTBEAT",
     "SUFFIX_REQUEST_INTROSPECTION",
