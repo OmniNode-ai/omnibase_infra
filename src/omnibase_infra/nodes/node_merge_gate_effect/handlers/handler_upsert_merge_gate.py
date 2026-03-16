@@ -336,7 +336,7 @@ class HandlerUpsertMergeGate(MixinPostgresOpExecutor):
                     },
                 )
         except (
-            Exception
+            Exception  # noqa: BLE001 — boundary: logs warning and degrades
         ) as exc:  # ONEX: broad catch — ticket failure must not fail upsert
             logger.warning(
                 "Failed to create quarantine Linear ticket (upsert still succeeded)",

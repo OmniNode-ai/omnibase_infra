@@ -154,7 +154,7 @@ def mask_dsn_password(dsn: str) -> str:
         )
         return masked
 
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: returns degraded response
         # If parsing fails, return original (likely no password to mask)
         # Log at debug level to avoid noise
         logger.debug("Failed to parse DSN for masking, returning as-is")
@@ -327,7 +327,7 @@ class ConsumerMetrics:
         for hook in self._export_hooks:
             try:
                 hook(name, value, resolved_labels)
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
                 # Never let a failing hook crash the consumer
                 logger.debug("Metrics export hook failed", exc_info=True)
 
@@ -819,7 +819,7 @@ class AgentActionsConsumer:
         if self._dlq_producer is not None:
             try:
                 await self._dlq_producer.stop()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error stopping DLQ producer",
                     extra={
@@ -835,7 +835,7 @@ class AgentActionsConsumer:
         if self._consumer is not None:
             try:
                 await self._consumer.stop()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error stopping Kafka consumer",
                     extra={
@@ -851,7 +851,7 @@ class AgentActionsConsumer:
         if self._pool is not None:
             try:
                 await self._pool.close()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error closing PostgreSQL pool",
                     extra={

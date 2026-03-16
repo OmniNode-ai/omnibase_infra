@@ -1039,14 +1039,14 @@ class TestKafkaContractSourceThreadSafety:
                         node_name=f"node.reg.item{i}",
                         contract_yaml=yaml_content,
                     )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def deregister_worker() -> None:
             try:
                 for i in range(num_iterations):
                     source.on_contract_deregistered(node_name=f"node.reg.item{i}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def discover_worker() -> None:
@@ -1060,7 +1060,7 @@ class TestKafkaContractSourceThreadSafety:
                         loop.run_until_complete(source.discover_handlers())
                 finally:
                     loop.close()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         threads = [

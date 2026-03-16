@@ -64,7 +64,7 @@ class TestProtocolBindingRegistryGetRaceConditionFix:
                 with lock:
                     error_time.append(time.time())
                     errors.append(e)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         def register_thread(proto: str, sync_barrier: threading.Barrier) -> None:
@@ -75,7 +75,7 @@ class TestProtocolBindingRegistryGetRaceConditionFix:
                 # Record when registration completed
                 with lock:
                     registration_time.append(time.time())
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         getter = threading.Thread(target=getter_thread, args=(protocol_type, barrier))
@@ -162,7 +162,7 @@ class TestProtocolBindingRegistryGetRaceConditionFix:
                 try:
                     barrier.wait()  # Synchronize with getter_thread
                     registry.register(proto, MockHandler)  # type: ignore[arg-type]
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                     pytest.fail(f"Registration failed unexpectedly: {e}")
 
             getter = threading.Thread(
@@ -258,7 +258,7 @@ class TestProtocolBindingRegistryGetRaceConditionFix:
             except RegistryError as e:
                 with lock:
                     errors.append(e)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 with lock:
                     errors.append(e)
 
@@ -267,7 +267,7 @@ class TestProtocolBindingRegistryGetRaceConditionFix:
             try:
                 barrier.wait()  # Synchronize with getter
                 registry.register(protocol_type, MockHandler)  # type: ignore[arg-type]
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 with lock:
                     errors.append(e)
 

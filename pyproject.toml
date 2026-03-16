@@ -174,7 +174,6 @@ ignore = [
     # UP007 (Union[X, Y] -> X | Y) is NOT ignored — PEP 604 syntax enforced
     "S101",      # Allow assert statements in tests
     "E501",      # Line too long (technical debt - will fix incrementally)
-    "BLE001",    # Blind exception catching (technical debt)
     "E402",      # Module level import not at top (technical debt)
     "TC001",     # Type checking imports (technical debt)
     "TC002",     # Third-party imports in TYPE_CHECKING (Pydantic needs runtime access)

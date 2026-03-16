@@ -378,7 +378,7 @@ class HandlerNodeRegistrationAcked:
                     node_name=None,
                     correlation_id=correlation_id,
                 )
-            except Exception as snap_err:
+            except Exception as snap_err:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Snapshot publish failed (non-blocking): %s",
                     sanitize_error_message(snap_err),

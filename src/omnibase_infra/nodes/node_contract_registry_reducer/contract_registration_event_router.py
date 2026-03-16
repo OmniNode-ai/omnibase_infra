@@ -500,7 +500,7 @@ class ContractRegistrationEventRouter:
                 },
             )
 
-        except Exception as msg_error:
+        except Exception as msg_error:  # noqa: BLE001 — boundary: logs warning and degrades
             # Use warning instead of exception to avoid credential exposure
             logger.warning(
                 "Failed to process contract message: %s (correlation_id=%s)",
@@ -601,7 +601,7 @@ class ContractRegistrationEventRouter:
                         },
                     )
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error executing intent: %s (correlation_id=%s)",
                     sanitize_error_message(e),
@@ -678,7 +678,7 @@ class ContractRegistrationEventRouter:
             except asyncio.CancelledError:
                 break
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error in tick loop: %s",
                     sanitize_error_message(e),

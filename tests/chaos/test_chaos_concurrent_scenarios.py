@@ -595,7 +595,7 @@ class TestCascadingFailures:
             try:
                 await breaker.execute_with_breaker(f"op_{i}")
                 results.append(True)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 results.append(e)
 
         # Assert
@@ -1929,7 +1929,7 @@ class TestRecoveryRaceConditions:
                 try:
                     r = await manager.allocate()
                     results.append(r)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: returns degraded response
                     results.append(e)
                 await asyncio.sleep(0.001)  # Small delay
             return results
@@ -2378,7 +2378,7 @@ class TestSimultaneousMultipleFailureModes:
                     operation=f"sequenced_op_{i}",
                 )
                 results.append(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 results.append(e)
 
         # Assert

@@ -253,7 +253,7 @@ class DependencyMaterializer:
                         "Closed materialized resource",
                         extra={"type": resource_type},
                     )
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                     logger.warning(
                         "Error closing materialized resource",
                         extra={"type": resource_type, "error": str(e)},

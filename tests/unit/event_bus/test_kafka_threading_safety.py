@@ -76,7 +76,7 @@ class TestKafkaEventBusThreadingSafety:
                         key=f"key-{i}".encode(),
                         value=f"value-{i}".encode(),
                     )
-                except Exception:
+                except Exception:  # noqa: BLE001 — boundary: returns degraded response
                     pass  # Expected for some races
 
             # Launch 10 concurrent publish operations
@@ -109,7 +109,7 @@ class TestKafkaEventBusThreadingSafety:
                             "group": "test-group",
                         }
                     )
-                except Exception:
+                except Exception:  # noqa: BLE001 — boundary: swallows for resilience
                     pass
 
             async def update_task() -> None:
@@ -266,7 +266,7 @@ class TestKafkaEventBusThreadingSafety:
                 """Publish operation that catches and suppresses expected failures."""
                 try:
                     await bus.publish(topic="test", key=None, value=b"test")
-                except Exception:
+                except Exception:  # noqa: BLE001 — boundary: returns degraded response
                     pass  # Expected - circuit breaker or producer failure
 
             # Launch enough to trigger circuit breaker (threshold=3, launching 5)

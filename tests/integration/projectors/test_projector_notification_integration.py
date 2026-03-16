@@ -832,7 +832,7 @@ class TestTransitionNotificationPublisherIntegration:
             )
             try:
                 await publisher.publish(notification)
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
                 pass  # Expected to fail
 
         # Check metrics

@@ -164,7 +164,7 @@ class ServiceEffectivenessInvalidationNotifier:
                 },
             )
 
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
             # Best-effort: log but never raise
             logger.warning(
                 "Failed to publish effectiveness invalidation event",

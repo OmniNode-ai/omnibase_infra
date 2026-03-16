@@ -194,7 +194,7 @@ class AdapterModelRouter:
                 async with self._lock:
                     self._current_index = (idx + 1) % len(provider_order)
                 return response
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
                 sanitized = sanitize_error_string(str(exc))
                 errors.append((provider_name, sanitized))
                 logger.warning(
@@ -312,7 +312,7 @@ class AdapterModelRouter:
             try:
                 health = await provider.health_check()
                 results[name] = health
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — boundary: returns degraded response
                 results[name] = {"error": sanitize_error_string(str(exc))}
         return results
 

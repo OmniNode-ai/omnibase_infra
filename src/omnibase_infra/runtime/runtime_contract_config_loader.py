@@ -91,7 +91,7 @@ class RuntimeContractConfigLoader:
         See CLAUDE.md Handler Plugin Loader security patterns.
     """
 
-    def __init__(self) -> None:  # stub-ok: stateless init
+    def __init__(self) -> None:  # stub-ok: stateless loader, no init needed
         """Initialize the contract config loader.
 
         The loader is stateless and delegates to individual subcontract
@@ -294,7 +294,7 @@ class RuntimeContractConfigLoader:
                     e,
                 )
                 errors.append(error_msg)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             error_msg = f"handler_routing load failed: {type(e).__name__}: {e}"
             logger.warning(
                 "Unexpected error loading handler_routing from %s: %s",
@@ -338,7 +338,7 @@ class RuntimeContractConfigLoader:
                     e,
                 )
                 errors.append(error_msg)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             error_msg = f"operation_bindings load failed: {type(e).__name__}: {e}"
             logger.warning(
                 "Unexpected error loading operation_bindings from %s: %s",

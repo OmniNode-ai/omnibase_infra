@@ -529,7 +529,7 @@ class RegistryCompute:
         if self._metrics is not None:
             try:
                 self._metrics.record_registry_size(registry_size)
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                 # Metrics recording should never break registry operations
                 # WARNING level for development visibility (change to DEBUG for production)
                 logger.warning(
@@ -626,7 +626,7 @@ class RegistryCompute:
                         if self._metrics is not None:
                             try:
                                 self._metrics.record_error("not_found", plugin_id)
-                            except Exception:
+                            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                                 # Metrics recording should never break registry operations
                                 # WARNING level for development visibility (change to DEBUG for production)
                                 logger.warning(
@@ -659,7 +659,7 @@ class RegistryCompute:
                                 self._metrics.record_error(
                                     "version_not_found", plugin_id
                                 )
-                            except Exception:
+                            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                                 # Metrics recording should never break registry operations
                                 # WARNING level for development visibility (change to DEBUG for production)
                                 logger.warning(
@@ -700,7 +700,7 @@ class RegistryCompute:
                     self._metrics.record_get_latency(
                         plugin_id, version, timer.elapsed_ms
                     )
-                except Exception:
+                except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                     # Metrics recording should never break registry operations
                     # WARNING level for development visibility (change to DEBUG for production)
                     logger.warning(
@@ -839,7 +839,7 @@ class RegistryCompute:
         if removed_count > 0 and self._metrics is not None:
             try:
                 self._metrics.record_registry_size(registry_size)
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                 # Metrics recording should never break registry operations
                 # WARNING level for development visibility (change to DEBUG for production)
                 logger.warning(

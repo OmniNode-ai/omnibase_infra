@@ -144,7 +144,7 @@ def mask_dsn_password(dsn: str) -> str:
         )
         return masked
 
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: returns degraded response
         # If parsing fails, return original (likely no password to mask)
         # Log at debug level to avoid noise
         logger.debug("Failed to parse DSN for masking, returning as-is")
@@ -623,7 +623,7 @@ class InjectionEffectivenessConsumer:
         if self._consumer is not None:
             try:
                 await self._consumer.stop()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error stopping Kafka consumer",
                     extra={
@@ -639,7 +639,7 @@ class InjectionEffectivenessConsumer:
         if self._pool is not None:
             try:
                 await self._pool.close()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error closing PostgreSQL pool",
                     extra={

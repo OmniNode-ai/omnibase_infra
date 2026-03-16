@@ -91,7 +91,7 @@ async def provision(target_db_url: str, *, dry_run: bool = False) -> None:
 
     try:
         conn = await asyncpg.connect(target_db_url)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
         print(
             f"ERROR: Could not connect to target database: {exc}",
             file=sys.stderr,
@@ -104,7 +104,7 @@ async def provision(target_db_url: str, *, dry_run: bool = False) -> None:
                 for stmt in statements:
                     await conn.execute(stmt)
             print(f"  provisioned: {table_name}")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
         print(
             f"ERROR: Failed to provision cross-repo tables: {exc}",
             file=sys.stderr,

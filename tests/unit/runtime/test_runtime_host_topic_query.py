@@ -68,7 +68,7 @@ class TestGetSubscribersForTopic:
         """Stub never raises, regardless of topic string."""
         try:
             await runtime.get_subscribers_for_topic("onex.evt.test.v1")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
             pytest.fail(f"get_subscribers_for_topic raised unexpectedly: {exc}")
 
 

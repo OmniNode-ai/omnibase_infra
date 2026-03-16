@@ -147,7 +147,7 @@ logger = logging.getLogger(__name__)
 # installed (e.g., during development without editable install).
 try:
     KERNEL_VERSION = get_package_version("omnibase_infra")
-except Exception:
+except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
     KERNEL_VERSION = "unknown"
 
 # Default configuration
@@ -920,7 +920,7 @@ async def bootstrap() -> int:
                     provisioning_result["failed"] or "none",
                     correlation_id,
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Topic provisioning failed (best-effort, non-blocking) "
                     "(correlation_id=%s)",
@@ -954,7 +954,7 @@ async def bootstrap() -> int:
                     )
             except RuntimeError:
                 raise
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Topic validation failed (best-effort, non-blocking) "
                     "(correlation_id=%s)",
@@ -1043,7 +1043,7 @@ async def bootstrap() -> int:
                     event_bus_type,
                     correlation_id,
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Failed to register event bus as ProtocolEventBusPublisher "
                     "(correlation_id=%s)",
@@ -1083,7 +1083,7 @@ async def bootstrap() -> int:
                 "(correlation_id=%s)",
                 correlation_id,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "PluginIntelligence failed to initialize, continuing without it "
                 "(correlation_id=%s)",
@@ -1151,7 +1151,7 @@ async def bootstrap() -> int:
                     discovery_report.group,
                     correlation_id,
                 )
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Plugin entry_point discovery failed; continuing with "
                 "explicitly registered plugins only (correlation_id=%s)",
@@ -1360,7 +1360,7 @@ async def bootstrap() -> int:
                 # These are raised by validate_handshake() and must not be
                 # swallowed.
                 raise
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Plugin '%s' failed during lifecycle activation "
                     "(correlation_id=%s)",
@@ -1375,7 +1375,7 @@ async def bootstrap() -> int:
                 if plugin not in activated_plugins:
                     try:
                         await plugin.shutdown(plugin_config)
-                    except Exception:
+                    except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
                         logger.debug(
                             "Best-effort shutdown of untracked plugin '%s' "
                             "also failed (correlation_id=%s)",
@@ -1411,7 +1411,7 @@ async def bootstrap() -> int:
                     plugin_id,
                     correlation_id,
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Plugin '%s' failed to start consumers (correlation_id=%s)",
                     plugin_id,
@@ -1981,7 +1981,7 @@ async def bootstrap() -> int:
         for unsub_callback in plugin_unsubscribe_callbacks:
             try:
                 await unsub_callback()
-            except Exception as consumer_stop_error:
+            except Exception as consumer_stop_error:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Failed to stop plugin consumer: %s (correlation_id=%s)",
                     sanitize_error_message(consumer_stop_error),
@@ -1997,7 +1997,7 @@ async def bootstrap() -> int:
                     "Contract registry router stopped (correlation_id=%s)",
                     correlation_id,
                 )
-            except Exception as router_stop_error:
+            except Exception as router_stop_error:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Failed to stop contract registry router: %s (correlation_id=%s)",
                     sanitize_error_message(router_stop_error),
@@ -2019,7 +2019,7 @@ async def bootstrap() -> int:
                         unsub_name,
                         correlation_id,
                     )
-                except Exception as unsub_error:
+                except Exception as unsub_error:  # noqa: BLE001 — boundary: logs warning and degrades
                     logger.warning(
                         "Failed to stop contract registry consumer %s: %s (correlation_id=%s)",
                         unsub_name,
@@ -2044,7 +2044,7 @@ async def bootstrap() -> int:
                         "duration_seconds": health_stop_duration,
                     },
                 )
-            except Exception as health_stop_error:
+            except Exception as health_stop_error:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Failed to stop health server: %s (correlation_id=%s)",
                     health_stop_error,
@@ -2076,7 +2076,7 @@ async def bootstrap() -> int:
                             plugin.plugin_id,
                             correlation_id,
                         )
-                except Exception as plugin_shutdown_error:
+                except Exception as plugin_shutdown_error:  # noqa: BLE001 — boundary: logs warning and degrades
                     logger.warning(
                         "Plugin '%s' shutdown failed: %s (correlation_id=%s)",
                         plugin.plugin_id,
@@ -2150,7 +2150,7 @@ async def bootstrap() -> int:
         for unsub_callback in plugin_unsubscribe_callbacks:
             try:
                 await unsub_callback()
-            except Exception as cleanup_error:
+            except Exception as cleanup_error:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Failed to stop plugin consumer during cleanup: %s (correlation_id=%s)",
                     sanitize_error_message(cleanup_error),
@@ -2161,7 +2161,7 @@ async def bootstrap() -> int:
         if contract_router is not None:
             try:
                 await contract_router.stop()
-            except Exception as cleanup_error:
+            except Exception as cleanup_error:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Failed to stop contract registry router during cleanup: %s (correlation_id=%s)",
                     sanitize_error_message(cleanup_error),
@@ -2176,7 +2176,7 @@ async def bootstrap() -> int:
             if unsub_func is not None:
                 try:
                     await unsub_func()
-                except Exception as cleanup_error:
+                except Exception as cleanup_error:  # noqa: BLE001 — boundary: logs warning and degrades
                     logger.warning(
                         "Failed to stop contract registry consumer during cleanup: %s (correlation_id=%s)",
                         sanitize_error_message(cleanup_error),
@@ -2186,7 +2186,7 @@ async def bootstrap() -> int:
         if health_server is not None:
             try:
                 await health_server.stop()
-            except Exception as cleanup_error:
+            except Exception as cleanup_error:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Failed to stop health server during cleanup: %s (correlation_id=%s)",
                     sanitize_error_message(cleanup_error),
@@ -2196,7 +2196,7 @@ async def bootstrap() -> int:
         if runtime is not None:
             try:
                 await runtime.stop()
-            except Exception as cleanup_error:
+            except Exception as cleanup_error:  # noqa: BLE001 — boundary: logs warning and degrades
                 # Log cleanup failures with context instead of suppressing them
                 # Sanitize to prevent potential credential leakage from runtime errors
                 logger.warning(
@@ -2212,7 +2212,7 @@ async def bootstrap() -> int:
             for plugin in reversed(activated_plugins):
                 try:
                     await plugin.shutdown(plugin_config)
-                except Exception as cleanup_error:
+                except Exception as cleanup_error:  # noqa: BLE001 — boundary: logs warning and degrades
                     logger.warning(
                         "Failed to shut down plugin '%s' during cleanup: %s (correlation_id=%s)",
                         plugin.plugin_id,

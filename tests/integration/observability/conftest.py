@@ -98,7 +98,7 @@ def cleanup_default_registry() -> Generator[None, None, None]:
         for collector in new_collectors:
             try:
                 REGISTRY.unregister(collector)
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: skips item and continues
                 # Silently ignore individual cleanup failures - best-effort cleanup
                 pass
     except (TypeError, RuntimeError):
@@ -287,7 +287,7 @@ def logging_sink() -> Generator[SinkLoggingStructured, None, None]:
     # Flush any remaining entries
     try:
         sink.flush()
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: swallows for resilience
         pass
 
 

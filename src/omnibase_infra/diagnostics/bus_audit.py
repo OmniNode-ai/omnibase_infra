@@ -218,7 +218,7 @@ def _collect_watermarks(
                         TopicPartition(topic, pid), timeout=5
                     )
                     topic_offsets.append((pid, low, high))
-                except Exception:
+                except Exception:  # noqa: BLE001 — boundary: returns degraded response
                     logger.debug("Failed to get watermarks for %s[%d]", topic, pid)
             offsets[topic] = topic_offsets
     finally:
@@ -454,7 +454,7 @@ def _validate_domain_schema(
         try:
             model.model_validate(msg)
             valid_count += 1
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             invalid_count += 1
             if len(errors) < _MAX_SCHEMA_ERRORS:
                 err_str = str(e)

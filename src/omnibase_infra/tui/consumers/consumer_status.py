@@ -141,7 +141,7 @@ async def consume_all(app: object) -> None:
         if consumer is not None:
             try:
                 await consumer.stop()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
                 pass
 
 

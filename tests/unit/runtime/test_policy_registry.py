@@ -948,7 +948,7 @@ class TestPolicyRegistryThreadSafety:
                     policy_type=policy_type,
                     version="1.0.0",
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         threads = [
@@ -976,7 +976,7 @@ class TestPolicyRegistryThreadSafety:
                 for _ in range(50):
                     policy_cls = populated_policy_registry.get("sync-orchestrator")
                     results.append(policy_cls)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         threads = [threading.Thread(target=get_policy_thread) for _ in range(5)]

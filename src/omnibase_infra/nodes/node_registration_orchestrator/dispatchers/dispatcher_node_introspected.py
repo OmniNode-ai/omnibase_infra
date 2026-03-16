@@ -421,7 +421,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             # (e.g., routing to DLQ)
             raise
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             completed_at = datetime.now(UTC)
             duration_ms = (completed_at - started_at).total_seconds() * 1000
             sanitized_error = sanitize_error_message(e)

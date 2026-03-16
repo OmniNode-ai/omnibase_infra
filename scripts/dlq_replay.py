@@ -114,7 +114,7 @@ def sanitize_bootstrap_servers(servers: str) -> str:
                 # Just a hostname without port - allow it
                 sanitized_parts.append(part)
         return ",".join(sanitized_parts)
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: returns degraded response
         return "[redacted]"
 
 
@@ -704,7 +704,7 @@ class DLQConsumer:
                         f"Failed to parse DLQ message at offset {msg.offset}: {e}"
                     )
                     continue
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                     logger.warning(
                         f"Error processing message at offset {msg.offset}: {e}"
                     )
@@ -1051,7 +1051,7 @@ class DLQReplayExecutor:
             try:
                 await self._tracking_service.initialize()
                 logger.info("DLQ tracking service initialized")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(f"Failed to initialize tracking service: {e}")
                 self._tracking_service = None
 
@@ -1098,7 +1098,7 @@ class DLQReplayExecutor:
                 retry_count=message.retry_count,
             )
             await self._tracking_service.record_replay_attempt(record)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(f"Failed to record tracking: {e}")
 
     async def execute(self) -> list[ModelReplayResult]:

@@ -412,7 +412,7 @@ class ServiceTimeoutEmitter:
                 # See ModelTimeoutEmissionResult docstring for counter semantics.
                 ack_emitted += 1
                 markers_updated += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 error_msg = (
                     f"ack_timeout failed for node {projection.entity_id}: "
                     f"{type(e).__name__}"
@@ -441,7 +441,7 @@ class ServiceTimeoutEmitter:
                 # See ModelTimeoutEmissionResult docstring for counter semantics.
                 liveness_emitted += 1
                 markers_updated += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 error_msg = (
                     f"liveness_expiration failed for node {projection.entity_id}: "
                     f"{type(e).__name__}"

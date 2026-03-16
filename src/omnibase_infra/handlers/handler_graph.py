@@ -391,7 +391,7 @@ class HandlerGraph(
         if self._driver is not None:
             try:
                 await self._driver.close()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error during driver close: %s",
                     type(e).__name__,
@@ -1242,7 +1242,7 @@ class HandlerGraph(
             try:
                 server_info = await self._driver.get_server_info()
                 version = server_info.agent if server_info else None
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
                 pass
 
             health = ModelGraphHealthStatus(
@@ -1257,7 +1257,7 @@ class HandlerGraph(
             self._health_cache_time = current_time
 
             return health
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Health check failed: %s",
                 type(e).__name__,

@@ -291,7 +291,7 @@ class TestPolicyRegistryPerformance:
                 for _ in range(100):
                     policy_cls = large_policy_registry.get("policy_50")
                     results.append(policy_cls is MockPolicy)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         # Run 10 threads concurrently
@@ -638,7 +638,7 @@ class TestPolicyRegistryPerformanceRegression:
                     policy_cls = large_registry.get(policy_id)
                     results.append(policy_cls is MockPolicy)
                 thread_times.append(time.perf_counter() - thread_start)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         # Launch 10 threads concurrently

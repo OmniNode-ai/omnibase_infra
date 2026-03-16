@@ -674,7 +674,7 @@ class ServiceRegistryDiscovery:
                     "healthy": True,
                     "message": "Connected",
                 }
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 components["postgres"] = {
                     "healthy": False,
                     "message": f"Error: {type(e).__name__}",
@@ -810,7 +810,7 @@ class ServiceRegistryDiscovery:
                                 correlation_id=correlation_id,
                             )
                         )
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                         # Log but continue - partial success with empty topics
                         logger.warning(
                             "Failed to batch fetch topics for contracts",
@@ -926,7 +926,7 @@ class ServiceRegistryDiscovery:
                         topics_published.append(topic.topic_suffix)
                     elif topic.direction == "subscribe":
                         topics_subscribed.append(topic.topic_suffix)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Failed to get topics for contract",
                     extra={
@@ -1031,7 +1031,7 @@ class ServiceRegistryDiscovery:
                         direction=direction,
                         correlation_id=correlation_id,
                     )
-                except Exception as count_error:
+                except Exception as count_error:  # noqa: BLE001 — boundary: logs warning and degrades
                     # Fall back to estimate if count query fails
                     logger.warning(
                         "Failed to get accurate topic count, using estimate",
@@ -1141,7 +1141,7 @@ class ServiceRegistryDiscovery:
                                     version=f"{contract.version_major}.{contract.version_minor}.{contract.version_patch}",
                                 )
                             )
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                         logger.warning(
                             "Failed to get publisher contract",
                             extra={
@@ -1168,7 +1168,7 @@ class ServiceRegistryDiscovery:
                                     version=f"{contract.version_major}.{contract.version_minor}.{contract.version_patch}",
                                 )
                             )
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                         logger.warning(
                             "Failed to get subscriber contract",
                             extra={

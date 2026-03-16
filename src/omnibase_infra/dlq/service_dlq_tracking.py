@@ -603,7 +603,7 @@ class ServiceDlqTracking(MixinAsyncCircuitBreaker):
 
                 return table_exists is not None
 
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: returns degraded response
             logger.debug("Health check failed", exc_info=True)
             return False
 

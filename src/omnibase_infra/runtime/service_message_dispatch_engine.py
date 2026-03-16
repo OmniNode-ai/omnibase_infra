@@ -219,7 +219,7 @@ def _derive_dlq_topic(
             event_type=event_type,
             original_topic=original_topic,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: returns degraded response
         # DLQ derivation must never crash the dispatch engine.
         # If derivation fails, return None and the caller will handle
         # the NO_DISPATCHER result without DLQ routing.
@@ -1309,7 +1309,7 @@ class MessageDispatchEngine:
             except asyncio.CancelledError:
                 # Never suppress async cancellation
                 raise
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 dispatcher_duration_ms = (
                     time.perf_counter() - dispatcher_start_time
                 ) * 1000

@@ -312,7 +312,7 @@ class ExecutionShapeValidator(
                 try:
                     file_violations = self.validate_file(file_path)
                     violations.extend(file_violations)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                     # Unexpected errors (I/O errors, permission issues, etc.)
                     # Log and continue to validate remaining files
                     logger.warning(

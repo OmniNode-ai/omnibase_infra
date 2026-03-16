@@ -392,7 +392,7 @@ def main() -> int:
         topology_path = Path(args.topology_file).expanduser()
         try:
             topology = ModelDeploymentTopology.from_yaml(topology_path)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
             print(f"Error loading topology file: {exc}", file=sys.stderr)
             return 1
     elif args.preset:
@@ -435,7 +435,7 @@ def main() -> int:
         try:
             topology.to_yaml(topo_path)
             print(f"\nTopology written to {topo_path}")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
             print(f"Error writing topology file: {exc}", file=sys.stderr)
             return 1
 
@@ -460,7 +460,7 @@ def main() -> int:
                 dry_run=args.dry_run,
             )
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"\nSetup failed: {exc}", file=sys.stderr)
         return 1
 

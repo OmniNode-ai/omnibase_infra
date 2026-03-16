@@ -397,7 +397,7 @@ class HandlerLlmOpenaiCompatible:
                 normalized.source.value,
             )
             return metrics
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
             # Metrics building must never break inference flow.
             logger.warning(
                 "Failed to build LLM call metrics; ignoring. model=%s",

@@ -874,7 +874,7 @@ class TestCircuitBreaker:
             try:
                 payload: dict[str, object] = {"data": "test"}
                 await wiring.send_request(instance_name, payload, timeout_seconds=1)
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
                 pass  # Expected to fail
 
         # Circuit should now be open

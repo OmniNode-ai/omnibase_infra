@@ -350,7 +350,7 @@ class NodeRegistryEffect:
                 correlation_id=request.correlation_id,
             )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: returns degraded response
             # Unknown exception - sanitize to prevent credential exposure
             duration_ms = (time.perf_counter() - start_time) * 1000
             sanitized_error = sanitize_error_message(e)

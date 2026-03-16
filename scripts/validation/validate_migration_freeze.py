@@ -415,7 +415,7 @@ def main() -> int:
         print(report)
         return 0 if result.is_valid else 1
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"Error: {e}", file=sys.stderr)
         return 2
 

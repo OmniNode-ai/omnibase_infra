@@ -74,7 +74,7 @@ async def kafka_event_bus_basic(mock_producer_basic: AsyncMock) -> EventBusKafka
         # Cleanup: Ensure resources are freed even if test fails
         try:
             await bus.close()
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: swallows for resilience
             pass  # Best effort cleanup
 
 
@@ -251,7 +251,7 @@ class TestKafkaEventBusPublish:
             # Cleanup: Ensure resources are freed even if test fails
             try:
                 await bus.close()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
                 pass  # Best effort cleanup
 
     @pytest.mark.asyncio

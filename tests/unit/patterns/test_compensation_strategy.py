@@ -260,7 +260,7 @@ class CompensatingTransactionManager:
                         self.compensation_events.append(compensating_event)
                         # Note: Status stays SUCCEEDED - the event is preserved
                         # We just record that a compensating event was created
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 record.status = EnumOperationStatus.COMPENSATION_FAILED
                 record.error = e
                 # Continue compensating other operations

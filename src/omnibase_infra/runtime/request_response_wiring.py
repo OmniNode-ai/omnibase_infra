@@ -757,7 +757,7 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
         if instance.consumer is not None:
             try:
                 await instance.consumer.stop()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 self._logger.warning(
                     "Error stopping consumer for instance %s: %s",
                     instance.name,

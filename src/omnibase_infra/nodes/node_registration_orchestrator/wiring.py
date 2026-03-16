@@ -312,7 +312,7 @@ async def wire_registration_dispatchers(
             handler_heartbeat = await container.service_registry.resolve_service(
                 ProtocolNodeHeartbeat
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             logger.info(
                 "HandlerNodeHeartbeat not registered (projector may be unavailable), "
                 "heartbeat dispatcher will not be wired",
@@ -330,7 +330,7 @@ async def wire_registration_dispatchers(
                     HandlerTopicCatalogQuery
                 )
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             logger.info(
                 "HandlerTopicCatalogQuery not registered (catalog_service may be unavailable), "
                 "topic-catalog-query dispatcher will not be wired",
@@ -346,7 +346,7 @@ async def wire_registration_dispatchers(
             handler_catalog_request = await container.service_registry.resolve_service(
                 HandlerCatalogRequest
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             logger.info(
                 "HandlerCatalogRequest not registered, "
                 "catalog-request dispatcher will not be wired",
@@ -650,12 +650,23 @@ async def wire_registration_handlers(
             services_registered.append("ProjectorShell")
             logger.debug("Registered ProjectorShell in container")
 
+        # OMN-5132: Read ONEX_REGISTRATION_AUTO_ACK from environment.
+        # When enabled, the reducer skips the AWAITING_ACK intermediate state
+        # and transitions nodes directly to ACTIVE on introspection, eliminating
+        # the ack round-trip race condition.
+        import os
+
         from omnibase_infra.nodes.node_registration_orchestrator.services import (
             RegistrationReducerService,
         )
 
+        auto_ack = (
+            os.environ.get("ONEX_REGISTRATION_AUTO_ACK", "false").lower() == "true"
+        )
+
         reducer = RegistrationReducerService(
             liveness_interval_seconds=resolved_liveness_interval,
+            auto_ack=auto_ack,
         )
         await container.service_registry.register_instance(
             interface=RegistrationReducerService,
@@ -816,7 +827,7 @@ async def wire_registration_handlers(
             catalog_service = await container.service_registry.resolve_service(
                 HandlerTopicCatalogPostgres
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
             pass
 
         # Fall back to legacy ServiceTopicCatalog (Consul-backed)
@@ -825,7 +836,7 @@ async def wire_registration_handlers(
                 catalog_service = await container.service_registry.resolve_service(
                     ServiceTopicCatalog
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 logger.info(
                     "Neither HandlerTopicCatalogPostgres nor ServiceTopicCatalog "
                     "registered in container, HandlerTopicCatalogQuery will not be registered",
@@ -1136,7 +1147,7 @@ async def get_handler_node_heartbeat_from_container(
             "HandlerNodeHeartbeat",
             await container.service_registry.resolve_service(ProtocolNodeHeartbeat),
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: returns degraded response
         logger.debug(
             "HandlerNodeHeartbeat not registered (projector may be unavailable)"
         )
@@ -1169,7 +1180,7 @@ async def get_handler_topic_catalog_query_from_container(
             "HandlerTopicCatalogQuery",
             await container.service_registry.resolve_service(HandlerTopicCatalogQuery),
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: returns degraded response
         logger.debug(
             "HandlerTopicCatalogQuery not registered (no catalog service available)"
         )

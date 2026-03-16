@@ -689,7 +689,7 @@ class TransitionNotificationOutbox:
                                 },
                             )
 
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                             # Record failure but continue processing other notifications
                             self._notifications_failed += 1
                             error_message = sanitize_error_string(str(e))

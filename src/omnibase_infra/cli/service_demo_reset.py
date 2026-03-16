@@ -176,7 +176,7 @@ class AdapterPostgresConnection:
         if conn is not None:
             try:
                 await conn.close()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
                 # Best-effort cleanup; the connection may already be dead
                 # after a timeout or network error.
                 logger.debug(
@@ -596,7 +596,7 @@ class DemoResetEngine:
                     try:
                         future.result(timeout=10)
                         deleted.append(str(group_id))
-                    except Exception as exc:
+                    except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                         errors.append(f"{group_id}: {sanitize_error_message(exc)}")
 
                 if deleted:
@@ -767,7 +767,7 @@ class DemoResetEngine:
                                     TopicPartition(topic_name, partition_id),
                                     timeout=5,
                                 )
-                            except Exception as exc:
+                            except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                                 watermark_errors += 1
                                 logger.debug(
                                     "Failed to get watermarks for %s[%d]: %s",
@@ -792,7 +792,7 @@ class DemoResetEngine:
                         "Deleted ephemeral consumer group %s",
                         ephemeral_group_id,
                     )
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
                     logger.warning(
                         "Failed to delete ephemeral consumer group %s: %s",
                         ephemeral_group_id,
@@ -821,7 +821,7 @@ class DemoResetEngine:
                             future.result(timeout=10)
                             if tp.topic not in purged:
                                 purged.append(tp.topic)
-                        except Exception as exc:
+                        except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                             errors.append(
                                 f"{tp.topic}[{tp.partition}]: "
                                 f"{sanitize_error_message(exc)}"

@@ -284,7 +284,7 @@ class ServiceRetryWorker(MixinAsyncCircuitBreaker):
                     },
                 )
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 retries_failed += 1
                 error_msg = f"{type(e).__name__}: {e}"
                 errors.append((str(attempt.id), error_msg))

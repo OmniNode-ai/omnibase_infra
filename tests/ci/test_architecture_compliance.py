@@ -2857,7 +2857,7 @@ y = 2
             violations = _scan_file_for_imports(test_file, ["kafka"])
             # If we get here, scanner handled it gracefully (either way is fine)
             assert isinstance(violations, list)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             pytest.fail(f"Scanner crashed on invalid prefix '{invalid_prefix}': {e}")
 
     def test_scan_valid_prefix_no_false_positive(self, tmp_path: Path) -> None:

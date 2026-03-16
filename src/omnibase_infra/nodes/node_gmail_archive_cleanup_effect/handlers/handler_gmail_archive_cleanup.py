@@ -149,7 +149,7 @@ class HandlerGmailArchiveCleanup:
             # Search: failure → hard_failed, skip label
             try:
                 message_stubs = await self._gmail.search_messages(query=query)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
                 hard_failed = True
                 msg = (
                     f"search_messages failed for label '{label_name}': "

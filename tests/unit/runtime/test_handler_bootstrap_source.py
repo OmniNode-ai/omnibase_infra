@@ -950,7 +950,7 @@ class TestHandlerBootstrapSourceThreadSafety:
             try:
                 _ensure_model_rebuilt()
                 return True
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: returns degraded response
                 with lock:
                     exceptions.append(e)
                 return False

@@ -835,7 +835,7 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
                     "Valkey client closed",
                     extra={"scheduler_id": self.scheduler_id},
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error closing Valkey client",
                     extra={

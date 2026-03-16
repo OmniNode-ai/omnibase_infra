@@ -881,7 +881,7 @@ class TestSecretResolverThreadSafety:
                     if result:
                         with results_lock:
                             results.append(result.get_secret_value())
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                     with results_lock:
                         errors.append(e)
 
@@ -932,14 +932,14 @@ class TestSecretResolverThreadSafety:
                 while not stop_event.is_set():
                     try:
                         resolver.get_secret("test.secret", required=False)
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                         errors.append(e)
 
             def refresh_secret() -> None:
                 while not stop_event.is_set():
                     try:
                         resolver.refresh("test.secret")
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                         errors.append(e)
 
             readers = [threading.Thread(target=read_secret) for _ in range(5)]

@@ -2727,6 +2727,32 @@ architecture_exemptions:
     documentation:
       - CLAUDE.md (Protocol File Naming - domain-grouping convention)
     ticket: OMN-2736
+  # ==========================================================================
+  # ModelPolicyContext + TypedDict metadata helper (OMN-5060)
+  # ==========================================================================
+  # ModelPolicyContextMetadataDict is a TypedDict helper that types the
+  # metadata field on ModelPolicyContext. It is not a standalone model.
+  - file_pattern: 'model_policy_context\.py'
+    violation_pattern: '\d+ models in one file'
+    reason: >
+      ModelPolicyContextMetadataDict is a TypedDict helper that types the metadata field on ModelPolicyContext. It is always used with its parent model and is not a standalone domain object.
+
+    documentation:
+      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
+    ticket: OMN-5060
+  # ==========================================================================
+  # ModelPolicyResult + TypedDict metadata helper (OMN-5060)
+  # ==========================================================================
+  # ModelPolicyResultMetadataDict is a TypedDict helper that types the
+  # metadata field on ModelPolicyResult. It is not a standalone model.
+  - file_pattern: 'model_policy_result\.py'
+    violation_pattern: '\d+ models in one file'
+    reason: >
+      ModelPolicyResultMetadataDict is a TypedDict helper that types the metadata field on ModelPolicyResult. It is always used with its parent model and is not a standalone domain object.
+
+    documentation:
+      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
+    ticket: OMN-5060
 # These handle complex union type violations
 union_exemptions:
   # ==========================================================================

@@ -282,7 +282,7 @@ async def kafka_event_bus(
     # Cleanup
     try:
         await bus.close()
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: swallows for resilience
         pass
 
 
@@ -312,7 +312,7 @@ async def create_topic_if_not_exists(
         logger.info(f"Created topic: {topic_name}")
     except TopicAlreadyExistsError:
         logger.info(f"Topic already exists: {topic_name}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
         # Log but don't fail - topic might exist or creation might be handled elsewhere
         logger.warning(f"Failed to create topic {topic_name}: {e}")
     finally:

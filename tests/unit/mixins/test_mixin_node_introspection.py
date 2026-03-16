@@ -3539,7 +3539,7 @@ class TestIntrospectionCacheThreadSafety:
                 # Every 5th task invalidates cache
                 if i % 5 == 0:
                     node.invalidate_introspection_cache()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         # Launch concurrent reads with some invalidations

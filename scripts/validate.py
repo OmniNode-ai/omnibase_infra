@@ -606,7 +606,7 @@ def run_migration_freeze(verbose: bool = False) -> bool:
 
         return result.is_valid
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"Migration Freeze: ERROR ({type(e).__name__}: {e})")
         if verbose:
             import traceback
@@ -655,7 +655,7 @@ def run_migration_sequence(verbose: bool = False) -> bool:
     except RuntimeError as e:
         print(f"Migration Sequence: ERROR ({e})", file=sys.stderr)
         return False
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"Migration Sequence: ERROR ({type(e).__name__}: {e})")
         if verbose:
             import traceback
@@ -703,7 +703,7 @@ def run_clean_root(verbose: bool = False) -> bool:
 
         return result.is_valid
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"Clean Root: ERROR ({type(e).__name__}: {e})")
         if verbose:
             import traceback
@@ -809,7 +809,7 @@ def run_imports(verbose: bool = False) -> bool:
         print(f"Imports: ERROR (Permission denied: {e})")
         print(f"  Fix: Ensure read permissions for: {src_path}")
         return False
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
         # Unexpected errors during validation (file system issues, bugs in validator, etc.)
         # Log with full exception type to help debugging
         exception_type = type(e).__name__
@@ -935,7 +935,7 @@ def run_markdown_links(verbose: bool = False, files: list[str] | None = None) ->
 
             return result.is_valid
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"Markdown Links: ERROR ({type(e).__name__}: {e})")
         if verbose:
             import traceback
@@ -985,7 +985,7 @@ def run_db_quality_gate(verbose: bool = False) -> bool:
 
         return result.is_valid
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"DB Quality Gate: ERROR ({type(e).__name__}: {e})")
         if verbose:
             import traceback

@@ -617,7 +617,7 @@ class PluginRegistration:
                     extra={"contracts_dir": str(projector_contracts_dir)},
                 )
 
-        except Exception as discovery_error:
+        except Exception as discovery_error:  # noqa: BLE001 — boundary: logs warning and degrades
             # Log warning but continue - projector discovery is best-effort
             logger.warning(
                 "Projector contract discovery failed: %s (correlation_id=%s)",
@@ -671,7 +671,7 @@ class PluginRegistration:
                 "Registration projection schema initialized (correlation_id=%s)",
                 correlation_id,
             )
-        except Exception as schema_error:
+        except Exception as schema_error:  # noqa: BLE001 — boundary: catch-all for resilience
             # Import asyncpg exceptions at runtime to check for duplicate object errors
             # PostgreSQL error codes: 42P07 = duplicate_table, 42710 = duplicate_object
             import asyncpg.exceptions
@@ -749,7 +749,7 @@ class PluginRegistration:
                 # Clean up the raw AIOKafkaProducer to prevent resource leak
                 try:
                     await snapshot_producer.stop()
-                except Exception as producer_cleanup_error:
+                except Exception as producer_cleanup_error:  # noqa: BLE001 — boundary: logs warning and degrades
                     logger.warning(
                         "Failed to stop AIOKafkaProducer during cleanup: %s "
                         "(correlation_id=%s)",
@@ -770,7 +770,7 @@ class PluginRegistration:
                     "bootstrap_servers": kafka_bootstrap_servers,
                 },
             )
-        except Exception as snap_pub_error:
+        except Exception as snap_pub_error:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Failed to start SnapshotPublisherRegistration, "
                 "continuing without snapshot publishing: %s (correlation_id=%s)",
@@ -789,7 +789,7 @@ class PluginRegistration:
         if self._snapshot_publisher is not None:
             try:
                 await self._snapshot_publisher.stop()
-            except Exception as cleanup_error:
+            except Exception as cleanup_error:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Cleanup failed for snapshot publisher stop: %s (correlation_id=%s)",
                     sanitize_error_message(cleanup_error),
@@ -800,7 +800,7 @@ class PluginRegistration:
         if self._pool is not None:
             try:
                 await self._pool.close()
-            except Exception as cleanup_error:
+            except Exception as cleanup_error:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Cleanup failed for PostgreSQL pool close: %s (correlation_id=%s)",
                     sanitize_error_message(cleanup_error),
@@ -1441,7 +1441,7 @@ class PluginRegistration:
                     "Snapshot publisher stopped (correlation_id=%s)",
                     correlation_id,
                 )
-            except Exception as snap_stop_error:
+            except Exception as snap_stop_error:  # noqa: BLE001 — boundary: logs warning and degrades
                 error_msg = sanitize_error_message(snap_stop_error)
                 errors.append(f"snapshot_publisher: {error_msg}")
                 logger.warning(
@@ -1458,7 +1458,7 @@ class PluginRegistration:
                     "PostgreSQL pool closed (correlation_id=%s)",
                     correlation_id,
                 )
-            except Exception as pool_close_error:
+            except Exception as pool_close_error:  # noqa: BLE001 — boundary: logs warning and degrades
                 error_msg = sanitize_error_message(pool_close_error)
                 errors.append(f"pool_close: {error_msg}")
                 logger.warning(

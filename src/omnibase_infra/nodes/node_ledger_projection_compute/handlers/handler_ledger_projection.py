@@ -250,7 +250,7 @@ class HandlerLedgerProjection:
             return {}
         try:
             return headers.model_dump(mode="json")
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
             # Best-effort: try to get correlation_id for logging context
             correlation_id = getattr(headers, "correlation_id", None)
             logger.warning(

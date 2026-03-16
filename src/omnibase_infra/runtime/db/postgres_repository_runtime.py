@@ -253,7 +253,7 @@ class PostgresRepositoryRuntime:
             return
         try:
             await self._ledger_sink.emit(event)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(f"Failed to emit ledger event: {e}", exc_info=True)
 
     def _is_retriable_error(self, exc: Exception) -> bool:

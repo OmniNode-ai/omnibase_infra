@@ -271,7 +271,7 @@ async def _run_list_nodes(
             f"[red]Connection timed out to {sanitized} (correlation_id={correlation_id})[/red]"
         )
         raise SystemExit(1)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
         sanitized = _sanitize_dsn(dsn)
         console.print(
             f"[red]Failed to connect to {sanitized}: {type(e).__name__} "
@@ -394,7 +394,7 @@ async def _run_get_node(node_id_str: str) -> None:
             f"[red]Connection timed out to {sanitized} (correlation_id={correlation_id})[/red]"
         )
         raise SystemExit(1)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
         sanitized = _sanitize_dsn(dsn)
         console.print(
             f"[red]Failed to connect to {sanitized}: {type(e).__name__} "
@@ -480,7 +480,7 @@ def registry_list_nodes(state: str | None, node_type: str | None, limit: int) ->
         asyncio.run(_run_list_nodes(state, node_type, limit))
     except SystemExit:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — re-raises as typed error
         console.print(f"[red]Error: {type(e).__name__}[/red]")
         raise SystemExit(1)
 
@@ -493,7 +493,7 @@ def registry_get_node(node_id: str) -> None:
         asyncio.run(_run_get_node(node_id))
     except SystemExit:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — re-raises as typed error
         console.print(f"[red]Error: {type(e).__name__}[/red]")
         raise SystemExit(1)
 
@@ -505,7 +505,7 @@ def registry_list_topics() -> None:
         _run_list_topics()
     except SystemExit:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — re-raises as typed error
         console.print(f"[red]Error: {type(e).__name__}[/red]")
         raise SystemExit(1)
 
@@ -558,7 +558,7 @@ def demo_reset(dry_run: bool, purge_topics: bool, env_file: str) -> None:
         asyncio.run(_run_demo_reset(dry_run=dry_run, purge_topics=purge_topics))
     except SystemExit:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
         from omnibase_infra.enums import EnumInfraTransportType
         from omnibase_infra.models.errors.model_infra_error_context import (
             ModelInfraErrorContext,

@@ -398,7 +398,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                     "topic": self._config.topic,
                 },
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             # Log but don't fail startup - cache can be loaded lazily
             logger.warning(
                 "Cache warming failed for topic %s: %s. "
@@ -432,7 +432,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                 logger.debug(
                     "Snapshot consumer stopped for topic %s", self._config.topic
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — re-raises as typed error
                 # Log but don't raise - stop should be best-effort
                 logger.warning(
                     "Error stopping Kafka consumer: %s",
@@ -454,7 +454,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             await self._producer.stop()
             self._started = False
             logger.info("Snapshot publisher stopped for topic %s", self._config.topic)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — re-raises as typed error
             # Log but don't raise - stop should be best-effort
             logger.warning(
                 "Error stopping Kafka producer: %s",
@@ -503,7 +503,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             try:
                 if self._consumer is not None:
                     await self._consumer.stop()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
                 pass
             self._consumer_started = False
             self._consumer = None
@@ -1083,7 +1083,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         if self._consumer_started and self._consumer is not None:
             try:
                 await self._consumer.stop()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
                 pass
             self._consumer_started = False
             self._consumer = None
@@ -1439,7 +1439,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                     entity_id,
                     snapshot.snapshot_version,
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Failed to publish debounced snapshot for %s version %d: %s",
                     entity_id,
@@ -1484,7 +1484,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                     entity_id,
                     snapshot.snapshot_version,
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Failed to flush debounced snapshot for %s during stop: %s",
                     entity_id,

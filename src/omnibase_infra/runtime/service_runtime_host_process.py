@@ -436,7 +436,7 @@ class PluginLoaderContractSource(ProtocolContractSource):
                     )
                     descriptors.append(descriptor)
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Failed to load handlers from path %s: %s",
                     path_obj,
@@ -1793,7 +1793,7 @@ class RuntimeHostProcess:
             for pool_type, pool in self._handler_pools.items():
                 try:
                     await pool.shutdown()
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                     logger.warning(
                         "Error shutting down handler pool",
                         extra={
@@ -1835,7 +1835,7 @@ class RuntimeHostProcess:
             try:
                 await self._dependency_materializer.shutdown()
                 logger.info("Materialized infrastructure resources closed")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error closing materialized resources",
                     extra={"error": str(e)},
@@ -1849,7 +1849,7 @@ class RuntimeHostProcess:
             try:
                 await self._introspection_service.stop_heartbeat_task()
                 logger.debug("Introspection heartbeat task stopped")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Failed to stop heartbeat task",
                     extra={"error": str(e)},
@@ -1867,7 +1867,7 @@ class RuntimeHostProcess:
             for unsubscribe in self._baseline_subscriptions:
                 try:
                     await unsubscribe()
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                     logger.warning(
                         "Failed to unsubscribe baseline subscription",
                         extra={"error": str(e)},
@@ -2501,7 +2501,7 @@ class RuntimeHostProcess:
                     },
                 )
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 # Track the failure for health_check() reporting
                 self._failed_handlers[handler_type] = str(e)
 
@@ -2754,7 +2754,7 @@ class RuntimeHostProcess:
                 async with self._handler_mutation_lock:
                     self._materializing_handlers.discard(protocol_type)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             # Best-effort: never crash the runtime
             logger.warning(
                 "Live handler materialization failed",
@@ -2877,7 +2877,7 @@ class RuntimeHostProcess:
                     "correlation_id": str(correlation_id),
                 },
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Failed to publish CAPABILITY_CHANGE introspection",
                 extra={
@@ -3126,7 +3126,7 @@ class RuntimeHostProcess:
                 if _inline_handler is not None:
                     await _inline_handler.shutdown()
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="prefetch_config_from_infisical",
@@ -3750,7 +3750,7 @@ class RuntimeHostProcess:
             await self._publish_handler_response(
                 response, handler_type, operation, correlation_id
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             await self._handle_execution_error(
                 e, handler_type, operation, correlation_id
             )
@@ -3782,7 +3782,7 @@ class RuntimeHostProcess:
                 await self._publish_handler_response(
                     response, handler_type, operation, correlation_id
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             await self._handle_execution_error(
                 e, handler_type, operation, correlation_id
             )
@@ -4240,7 +4240,7 @@ class RuntimeHostProcess:
                     context=context,
                 )
             event_bus_healthy = bool(event_bus_health.get("healthy", False))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             # Create infrastructure error context for health check failure
             correlation_id = uuid4()
             context = ModelInfraErrorContext(
@@ -4385,7 +4385,7 @@ class RuntimeHostProcess:
                 health = await self._event_bus.health_check()
                 event_bus_ready = bool(health.get("healthy", False))
                 event_bus_readiness = {"fallback": True, "healthy": event_bus_ready}
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             error_context = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.KAFKA,
@@ -4561,7 +4561,7 @@ class RuntimeHostProcess:
             try:
                 handler_cls = handler_registry.get(handler_type)
                 handler_classes.append(handler_cls)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 # If a handler class can't be retrieved, skip it for validation
                 # (it will fail later during instantiation anyway)
                 logger.debug(
@@ -4904,7 +4904,7 @@ class RuntimeHostProcess:
                             correlation_id=correlation_id,
                         )
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Failed to process contract registration event",
                     extra={
@@ -4944,7 +4944,7 @@ class RuntimeHostProcess:
                     },
                 )
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Failed to process contract deregistration event",
                     extra={
@@ -5100,7 +5100,7 @@ class RuntimeHostProcess:
                 },
             )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Failed to initialize idempotency store, proceeding without",
                 extra={"error": str(e)},
@@ -5194,7 +5194,7 @@ class RuntimeHostProcess:
                 },
             )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             # Log warning but don't fail startup - introspection is optional
             logger.warning(
                 "Failed to publish startup introspection",
@@ -5209,7 +5209,7 @@ class RuntimeHostProcess:
         # Separate try block: heartbeat failure shouldn't affect throttle tracking
         try:
             await self._introspection_service.start_heartbeat_task()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Failed to start heartbeat task",
                 extra={
@@ -5343,7 +5343,7 @@ class RuntimeHostProcess:
                 },
             )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             # Gateway initialization failure is non-fatal - log and continue
             # The system will operate without signing/validation
             init_correlation_id = uuid4()
@@ -5418,7 +5418,7 @@ class RuntimeHostProcess:
             # Call the synchronous initialization method
             self._initialize_gateway(gateway_config)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Failed to parse gateway config, proceeding without",
                 extra={
@@ -5752,7 +5752,7 @@ class RuntimeHostProcess:
 
             return True
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             # FAIL-OPEN: Allow message through on idempotency store errors.
             # Rationale: Availability over exactly-once. Store outages should not
             # halt processing. Downstream handlers must tolerate duplicates.
@@ -5880,7 +5880,7 @@ class RuntimeHostProcess:
             elif hasattr(self._idempotency_store, "close"):
                 await self._idempotency_store.close()
             logger.debug("Idempotency store shutdown complete")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Failed to shutdown idempotency store",
                 extra={"error": str(e)},

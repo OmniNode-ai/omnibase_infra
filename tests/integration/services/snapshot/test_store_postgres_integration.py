@@ -145,7 +145,7 @@ async def store(db_pool: asyncpg.Pool) -> AsyncGenerator[StoreSnapshotPostgres, 
     try:
         async with db_pool.acquire() as conn:
             await conn.execute("TRUNCATE TABLE snapshots CASCADE")
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: returns degraded response
         pass  # Ignore cleanup failures
 
 
@@ -663,7 +663,7 @@ class TestConcurrentSequenceGeneration:
                 )
                 result_id = await store.save(snapshot)
                 return result_id, None
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: returns degraded response
                 return None, str(e)
 
         # Run all concurrently

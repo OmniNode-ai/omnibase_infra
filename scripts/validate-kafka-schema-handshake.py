@@ -231,7 +231,7 @@ def _validate_pair(pair: Any) -> PairResult:
             xfail=xfail,
             error=None,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: returns degraded response
         err = traceback.format_exc().strip()
         return PairResult(
             topic=topic,

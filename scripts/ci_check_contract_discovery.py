@@ -167,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         return check_contract_discovery(verbose=args.verbose)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
         print(
             f"FAILED: unexpected error during contract discovery check: {exc}",
             file=sys.stderr,

@@ -585,7 +585,7 @@ class TestLifecycleRaceConditions:
                         success_count += 1
                 except InfraUnavailableError:
                     pass  # Expected after close
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                     errors.append(e)
                 await asyncio.sleep(0)  # Yield
 
@@ -626,7 +626,7 @@ class TestLifecycleRaceConditions:
                     )
                     async with lock:
                         subscribe_count += 1
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                     errors.append(e)
                 await asyncio.sleep(0)
 
@@ -769,7 +769,7 @@ class TestInMemoryEventBusStress:
                         key=None,
                         value=f"pub-{pub_id}-{i}".encode(),
                     )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         async def subscriber(sub_id: int) -> None:
@@ -781,7 +781,7 @@ class TestInMemoryEventBusStress:
                 )
                 await asyncio.sleep(0.1)  # Let publishers run
                 await unsub()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         async def reader() -> None:
@@ -790,7 +790,7 @@ class TestInMemoryEventBusStress:
                     await event_bus.get_event_history(limit=100)
                     await event_bus.health_check()
                     await asyncio.sleep(0)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
         # Launch all operations concurrently

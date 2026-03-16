@@ -294,7 +294,7 @@ class ContractTopicExtractor:
             try:
                 with contract_path.open(encoding="utf-8") as fh:
                     raw_yaml = yaml.safe_load(fh)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                 _warn(f"Could not parse {contract_path}: {exc} — skipping")
                 continue
 
@@ -451,7 +451,7 @@ class ContractTopicExtractor:
         try:
             with topics_yaml.open(encoding="utf-8") as fh:
                 data = yaml.safe_load(fh)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: returns degraded response
             _warn(f"Could not parse {topics_yaml}: {exc} — skipping")
             return
 

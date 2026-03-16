@@ -241,7 +241,7 @@ class ServiceLlmMetricsPublisher:
                 metrics.completion_tokens,
                 correlation_id,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Failed to publish LLM call metrics to topic=%s; ignoring. "
                 "model=%s correlation_id=%s",

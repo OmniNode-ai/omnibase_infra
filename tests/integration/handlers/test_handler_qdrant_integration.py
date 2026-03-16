@@ -130,7 +130,7 @@ async def initialized_qdrant_handler(
     # Cleanup: ensure handler is properly shut down
     try:
         await handler.shutdown()
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: swallows for resilience
         pass  # Ignore cleanup errors
 
 

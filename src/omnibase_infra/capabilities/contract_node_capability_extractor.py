@@ -40,6 +40,7 @@ import logging
 from pathlib import Path
 
 import yaml
+from pydantic import ValidationError
 
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
@@ -78,7 +79,7 @@ class ContractNodeCapabilityExtractor:
         try:
             raw = contract_path.read_text(encoding="utf-8")
             raw_data: object = yaml.safe_load(raw)
-        except Exception as exc:
+        except (OSError, yaml.YAMLError) as exc:
             logger.warning(
                 "Failed to parse contract YAML for node capabilities: %s: %s",
                 contract_path,
@@ -103,7 +104,7 @@ class ContractNodeCapabilityExtractor:
 
         try:
             return ModelNodeCapabilities(**caps_block)
-        except Exception as exc:
+        except (TypeError, ValidationError) as exc:
             logger.warning(
                 "Failed to construct ModelNodeCapabilities from %s: %s",
                 contract_path,
@@ -133,7 +134,7 @@ class ContractNodeCapabilityExtractor:
 
         try:
             return ModelNodeCapabilities(**caps_block)
-        except Exception as exc:
+        except (TypeError, ValidationError) as exc:
             logger.warning(
                 "Failed to construct ModelNodeCapabilities from dict: %s",
                 exc,

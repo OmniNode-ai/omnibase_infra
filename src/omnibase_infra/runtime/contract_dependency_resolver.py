@@ -146,7 +146,7 @@ class ContractDependencyResolver:
                     },
                 )
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 error_msg = str(e)
                 resolution_errors[class_name] = error_msg
                 missing.append(class_name)

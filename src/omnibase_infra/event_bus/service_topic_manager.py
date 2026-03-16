@@ -146,7 +146,7 @@ class TopicProvisioner:
                 skill_manifests_root=self._skill_manifests_root,
                 skill_manifests_roots=self._skill_manifests_roots,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "ContractTopicExtractor.extract_all() failed: %s — "
                 "falling back to ALL_PROVISIONED_TOPIC_SPECS",
@@ -273,7 +273,7 @@ class TopicProvisioner:
                         extra={"correlation_id": str(correlation_id)},
                     )
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                     failed.append(spec.suffix)
                     logger.warning(
                         "Failed to create topic %s: %s",
@@ -285,7 +285,7 @@ class TopicProvisioner:
                         },
                     )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Topic auto-creation interrupted by %s. "
                 "Topics may need to be created manually or via broker auto-create.",
@@ -323,7 +323,7 @@ class TopicProvisioner:
             if admin is not None:
                 try:
                     await admin.close()
-                except Exception:
+                except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
                     pass  # Best-effort cleanup
 
         status = (
@@ -427,7 +427,7 @@ class TopicProvisioner:
             )
             return True
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Failed to create topic %s: %s",
                 topic_name,
@@ -443,7 +443,7 @@ class TopicProvisioner:
             if admin is not None:
                 try:
                     await admin.close()
-                except Exception:
+                except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
                     pass
 
 

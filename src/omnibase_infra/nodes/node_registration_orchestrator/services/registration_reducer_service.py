@@ -127,6 +127,7 @@ class RegistrationReducerService:
         ack_timeout_seconds: float = 30.0,
         liveness_interval_seconds: int = 60,
         liveness_window_seconds: float = 90.0,
+        auto_ack: bool = False,
     ) -> None:
         """Initialize the reducer service with timing and feature configuration.
 
@@ -134,10 +135,16 @@ class RegistrationReducerService:
             ack_timeout_seconds: How long to wait for a node ack before timeout.
             liveness_interval_seconds: Initial liveness deadline offset from activation.
             liveness_window_seconds: Liveness deadline extension per heartbeat.
+            auto_ack: When True, skip the AWAITING_ACK intermediate state and
+                transition directly to ACTIVE on introspection. This eliminates
+                the ack round-trip race condition for internal nodes that do not
+                implement the two-way handshake protocol. Controlled by the
+                ONEX_REGISTRATION_AUTO_ACK environment variable. (OMN-5132)
         """
         self._ack_timeout_seconds = ack_timeout_seconds
         self._liveness_interval_seconds = liveness_interval_seconds
         self._liveness_window_seconds = liveness_window_seconds
+        self._auto_ack = auto_ack
 
     @property
     def liveness_interval_seconds(self) -> int:
@@ -160,12 +167,19 @@ class RegistrationReducerService:
         Decision Logic:
             - No projection (new node) -> initiate
             - Retriable state (LIVENESS_EXPIRED, REJECTED, ACK_TIMED_OUT) -> initiate
+            - AWAITING_ACK with auto_ack -> initiate (unstick stale ack state, OMN-5132)
             - Blocking state (PENDING, ACCEPTED, AWAITING_ACK, ACK_RECEIVED, ACTIVE) -> no-op
 
-        When initiating, this method produces:
-            - ModelNodeRegistrationInitiated event
-            - ModelNodeRegistrationAccepted event
-            - PostgreSQL upsert intent (state=AWAITING_ACK)
+        When auto_ack is True (OMN-5132):
+            - Skips the AWAITING_ACK intermediate state entirely
+            - Transitions directly to ACTIVE with a liveness deadline
+            - Emits NodeRegistrationInitiated + NodeBecameActive events
+            - Eliminates the ack round-trip race condition
+
+        When auto_ack is False (standard two-way handshake):
+            - Transitions to AWAITING_ACK with an ack_deadline
+            - Emits NodeRegistrationInitiated + NodeRegistrationAccepted events
+            - Requires an external NodeRegistrationAcked command to activate
 
         Args:
             projection: Current registration projection, or None for new nodes.
@@ -184,6 +198,11 @@ class RegistrationReducerService:
         else:
             current_state = projection.current_state
             if current_state in _RETRIABLE_STATES:
+                should_initiate = True
+            elif current_state == EnumRegistrationState.AWAITING_ACK and self._auto_ack:
+                # OMN-5132: When auto_ack is enabled, unstick nodes that are
+                # stuck in AWAITING_ACK. This happens when the async ack
+                # round-trip failed (race condition, timeout, or restart).
                 should_initiate = True
             elif current_state in _BLOCKING_STATES:
                 should_initiate = False
@@ -209,21 +228,6 @@ class RegistrationReducerService:
             registration_attempt_id=registration_attempt_id,
         )
 
-        # Event 2: Registration accepted (fast-forward to AWAITING_ACK)
-        ack_deadline = now + timedelta(seconds=self._ack_timeout_seconds)
-        accepted_event = ModelNodeRegistrationAccepted(
-            entity_id=node_id,
-            node_id=node_id,
-            correlation_id=correlation_id,
-            causation_id=event.correlation_id,
-            emitted_at=now,
-            ack_deadline=ack_deadline,
-        )
-
-        # Build intents
-        intents: list[ModelIntent] = []
-
-        # Intent 1: PostgreSQL upsert registration (state=AWAITING_ACK)
         node_type = event.node_type
         capabilities_data = (
             event.declared_capabilities.model_dump(mode="json")
@@ -231,12 +235,52 @@ class RegistrationReducerService:
             else {}
         )
 
-        projection_record = ModelProjectionRecord(
-            entity_id=node_id,
-            domain="registration",
-            current_state=EnumRegistrationState.AWAITING_ACK.value,
-            node_type=node_type.value,
-            data={
+        # OMN-5132: When auto_ack is enabled, skip AWAITING_ACK and go
+        # directly to ACTIVE. This eliminates the ack round-trip race
+        # condition entirely.
+        if self._auto_ack:
+            liveness_deadline = now + timedelta(seconds=self._liveness_interval_seconds)
+            became_active_event = ModelNodeBecameActive(
+                entity_id=node_id,
+                node_id=node_id,
+                correlation_id=correlation_id,
+                causation_id=event.correlation_id,
+                emitted_at=now,
+                capabilities=capabilities_data,
+            )
+            target_state = EnumRegistrationState.ACTIVE
+            second_event: BaseModel = became_active_event
+            projection_data: dict[str, object] = {
+                "node_version": (
+                    str(event.node_version) if event.node_version is not None else None
+                ),
+                "capabilities": capabilities_data,
+                "contract_type": None,
+                "intent_types": [],
+                "protocols": [],
+                "capability_tags": [],
+                "contract_version": None,
+                "liveness_deadline": liveness_deadline,
+                "last_applied_event_id": registration_attempt_id,
+                "registered_at": now,
+                "updated_at": now,
+                "correlation_id": correlation_id,
+            }
+            reason = "Registration initiated (direct-to-active, auto_ack)"
+        else:
+            # Standard two-way handshake: transition to AWAITING_ACK
+            ack_deadline = now + timedelta(seconds=self._ack_timeout_seconds)
+            accepted_event = ModelNodeRegistrationAccepted(
+                entity_id=node_id,
+                node_id=node_id,
+                correlation_id=correlation_id,
+                causation_id=event.correlation_id,
+                emitted_at=now,
+                ack_deadline=ack_deadline,
+            )
+            target_state = EnumRegistrationState.AWAITING_ACK
+            second_event = accepted_event
+            projection_data = {
                 "node_version": (
                     str(event.node_version) if event.node_version is not None else None
                 ),
@@ -251,27 +295,33 @@ class RegistrationReducerService:
                 "registered_at": now,
                 "updated_at": now,
                 "correlation_id": correlation_id,
-            },
+            }
+            reason = "Registration initiated"
+
+        projection_record = ModelProjectionRecord(
+            entity_id=node_id,
+            domain="registration",
+            current_state=target_state.value,
+            node_type=node_type.value,
+            data=projection_data,
         )
 
         postgres_payload = ModelPayloadPostgresUpsertRegistration(
             correlation_id=correlation_id,
             record=projection_record,
         )
-        intents.append(
-            ModelIntent(
-                intent_type=postgres_payload.intent_type,
-                target=f"postgres://node_registrations/{node_id}",
-                payload=postgres_payload,
-            )
+        upsert_intent = ModelIntent(
+            intent_type=postgres_payload.intent_type,
+            target=f"postgres://node_registrations/{node_id}",
+            payload=postgres_payload,
         )
 
         return ModelReducerDecision(
             action="emit",
-            new_state=EnumRegistrationState.AWAITING_ACK,
-            events=(initiated_event, accepted_event),
-            intents=tuple(intents),
-            reason="Registration initiated",
+            new_state=target_state,
+            events=(initiated_event, second_event),
+            intents=(upsert_intent,),
+            reason=reason,
         )
 
     # ------------------------------------------------------------------

@@ -246,7 +246,7 @@ class WiringHealthChecker:
 
             _logger.debug("Updated Prometheus wiring health metrics")
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             _logger.warning(
                 "Failed to update Prometheus metrics",
                 extra={"error": str(e), "correlation_id": str(correlation_id)},

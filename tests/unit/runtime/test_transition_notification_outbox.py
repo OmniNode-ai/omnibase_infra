@@ -1324,7 +1324,7 @@ class TestTransitionNotificationOutboxErrorHandling:
             try:
                 await mock_publisher.publish(row["payload"])
                 notifications_processed += 1
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
                 notifications_failed += 1
 
         # All notifications should be attempted

@@ -37,7 +37,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 from uuid import UUID, uuid4
 
 import yaml
@@ -85,6 +85,19 @@ _PROTOCOL_FIELDS: frozenset[str] = frozenset(
 )
 
 
+class AdapterMcpMetadataDict(TypedDict, total=False):
+    """Typed metadata for MCP tool definitions discovered by the adapter.
+
+    Keys correspond to contract-discovery provenance fields set in
+    ``_load_contract()`` and passed through to ``ModelMCPToolDefinition``.
+    """
+
+    contract_path: str
+    node_name: str
+    node_type: str
+    source: str
+
+
 @dataclass
 class MCPToolParameter:
     """MCP tool parameter definition.
@@ -130,9 +143,7 @@ class MCPToolDefinition:
     retry_count: int = 3
     requires_auth: bool = False
     tags: list[str] = field(default_factory=list)
-    metadata: dict[str, object] = field(  # ONEX_EXCLUDE: dict_str_any
-        default_factory=dict
-    )
+    metadata: AdapterMcpMetadataDict = field(default_factory=AdapterMcpMetadataDict)
     # Full JSON Schema for input validation (OMN-2699).
     # When set, HandlerMCP._handle_call_tool() validates arguments against this
     # schema using jsonschema before dispatching to ONEX.  None means pass-through
@@ -739,6 +750,7 @@ class ONEXToMCPAdapter:
 
 
 __all__ = [
+    "AdapterMcpMetadataDict",
     "MCPToolDefinition",
     "MCPToolParameter",
     "ONEXToMCPAdapter",

@@ -294,7 +294,7 @@ class TestRegistryPayloadThreadSafety:
                 cls = registry.resolve("ModelClaudeHookEvent", "1.0.0")
                 with lock:
                     results.append(cls)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 with lock:
                     errors.append(e)
 
@@ -324,7 +324,7 @@ class TestRegistryPayloadThreadSafety:
 
                 DynamicModel.__name__ = f"DynamicModel_{index}"
                 registry.register(f"Type_{index}", "1.0.0", DynamicModel)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 with lock:
                     errors.append(e)
 
@@ -362,7 +362,7 @@ class TestRegistryPayloadThreadSafety:
             except PayloadRegistryError as e:
                 with lock:
                     errors.append(e)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 pytest.fail(f"Unexpected error: {e}")
 
         threads = [threading.Thread(target=try_register) for _ in range(num_threads)]
@@ -396,7 +396,7 @@ class TestRegistryPayloadThreadSafety:
             except PayloadRegistryError as e:
                 with lock:
                     errors.append(e)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 pytest.fail(f"Unexpected error: {e}")
 
         threads = [

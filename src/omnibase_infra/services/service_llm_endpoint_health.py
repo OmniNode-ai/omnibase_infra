@@ -498,7 +498,7 @@ class ServiceLlmEndpointHealth:
                 circuit_state=_parse_circuit_state(cb_state, "closed"),
             )
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
             # Record failure with circuit breaker
             async with cb.lock:
                 await cb.record_failure(
@@ -572,7 +572,7 @@ class ServiceLlmEndpointHealth:
             if 200 <= resp.status_code < 300:
                 return True, ""
             primary_error = f"Primary /health: HTTP {resp.status_code}"
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: returns degraded response
             primary_error = f"Primary /health: {type(exc).__name__}"
 
         # Fallback probe: /v1/models (vLLM-style)

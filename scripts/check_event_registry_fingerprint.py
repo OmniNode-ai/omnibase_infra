@@ -94,7 +94,7 @@ def cmd_verify(artifact_path: str) -> int:
             file=sys.stderr,
         )
         return 2
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"FAILED: unexpected error during verification: {exc}", file=sys.stderr)
         return 1
 
@@ -120,7 +120,7 @@ def cmd_stamp(artifact_path: str, *, dry_run: bool = False) -> int:
     try:
         _cli_stamp(artifact_path, dry_run=dry_run)
         return 0
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"FAILED: unexpected error during stamp: {exc}", file=sys.stderr)
         return 1
 

@@ -67,7 +67,7 @@ async def _check_http_health(url: str, timeout_s: float) -> tuple[bool, float]:
             response = await client.get(url)
         elapsed_ms = (time.monotonic() - start) * 1000.0
         return response.status_code < 500, elapsed_ms
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: returns degraded response
         elapsed_ms = (time.monotonic() - start) * 1000.0
         logger.debug("HTTP health check failed for %s: %s", url, exc)
         return False, elapsed_ms
@@ -97,7 +97,7 @@ async def _check_tcp_health(
         )
         elapsed_ms = (time.monotonic() - start) * 1000.0
         return True, elapsed_ms
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: returns degraded response
         elapsed_ms = (time.monotonic() - start) * 1000.0
         logger.debug("TCP health check failed for %s:%d: %s", host, port, exc)
         return False, elapsed_ms
@@ -106,7 +106,7 @@ async def _check_tcp_health(
             try:
                 writer.close()
                 await writer.wait_closed()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
                 pass
 
 

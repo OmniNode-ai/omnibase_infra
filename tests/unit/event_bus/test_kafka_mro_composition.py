@@ -450,7 +450,7 @@ class TestMixinMethodFunctionality:
             yield bus
             try:
                 await bus.close()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
                 pass
 
     @pytest.mark.asyncio

@@ -456,7 +456,7 @@ class HandlerBifrostGateway:
                 await self._record_success(backend_id)
                 return response, backend_id, attempted - 1
 
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Bifrost: backend '%s' failed (attempt %d/%d): %s. corr=%s",
                     backend_id,

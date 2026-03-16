@@ -18,9 +18,19 @@ maintaining flexibility for diverse policy results.
 
 from __future__ import annotations
 
+from typing import TypedDict
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.mixins import MixinDictLikeAccessors
+
+
+class ModelPolicyResultMetadataDict(TypedDict, total=False):
+    """Typed metadata for policy evaluation results.
+
+    All keys are optional (total=False) since metadata is an observability
+    bag that callers populate selectively.
+    """
 
 
 class ModelPolicyResult(MixinDictLikeAccessors, BaseModel):
@@ -97,8 +107,8 @@ class ModelPolicyResult(MixinDictLikeAccessors, BaseModel):
     # Common result fields - all optional with defaults
     success: bool = True
     reason: str = ""
-    metadata: dict[str, object] = Field(  # ONEX_EXCLUDE: dict_str_any
-        default_factory=dict,
+    metadata: ModelPolicyResultMetadataDict = Field(
+        default_factory=ModelPolicyResultMetadataDict
     )
 
 

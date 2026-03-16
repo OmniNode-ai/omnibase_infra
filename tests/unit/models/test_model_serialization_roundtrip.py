@@ -364,7 +364,7 @@ def discover_boundary_models() -> list[type[BaseModel]]:
                 continue
             try:
                 mod = importlib.import_module(modname)
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning("Failed to import %s", modname, exc_info=True)
                 continue
             for _name, obj in inspect.getmembers(mod, inspect.isclass):

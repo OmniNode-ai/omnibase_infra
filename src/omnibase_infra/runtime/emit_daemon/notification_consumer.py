@@ -191,7 +191,7 @@ class NotificationConsumer:
                             break
                         try:
                             await self._process_message(message, handler)  # type: ignore[arg-type]
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                             # Generate correlation_id for traceability (message may not
                             # have been parsed successfully to extract its correlation_id)
                             error_correlation_id = uuid4()
@@ -203,7 +203,7 @@ class NotificationConsumer:
 
                 except asyncio.CancelledError:
                     raise
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                     # Generate correlation_id for consumer-level errors
                     error_correlation_id = uuid4()
                     logger.warning(
@@ -254,7 +254,7 @@ class NotificationConsumer:
                 f"Failed to decode message: {e}",
                 extra={"correlation_id": str(correlation_id)},
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             correlation_id = correlation_id or uuid4()
             logger.warning(
                 f"Failed to process message: {e}",

@@ -226,7 +226,7 @@ class HandlerBaselinesBatchCompute:
                     started_at=started_at,
                 )
                 snapshot_emitted = True
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 safe_msg = sanitize_error_message(e)
                 msg = f"Snapshot emit failed: {safe_msg}"
                 logger.warning(

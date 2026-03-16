@@ -188,7 +188,11 @@ When agents participate in code review, note this in PR descriptions:
 
 ## Pre-commit Hooks
 
-This repository uses pre-commit hooks that run automatically. See [README.md](README.md#pre-commit-hooks-setup) for setup instructions.
+This repository uses pre-commit hooks that run automatically. Install them after cloning:
+
+```bash
+pre-commit install
+```
 
 ## See Also
 

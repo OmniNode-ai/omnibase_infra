@@ -144,7 +144,7 @@ def mask_dsn_password(dsn: str) -> str:
     # it was actually removed from the masked result.
     try:
         _original_password = urlparse(dsn).password
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
         _original_password = None
 
     try:
@@ -180,7 +180,7 @@ def mask_dsn_password(dsn: str) -> str:
         # Even on parse failure, attempt regex masking on the raw string
         pattern, replacement = _DSN_QUERY_PASSWORD_PATTERN
         masked = pattern.sub(replacement, dsn)
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
         logger.warning(
             "Unexpected error masking DSN password; returning placeholder to prevent credential leak",
         )
@@ -549,7 +549,7 @@ class ServiceLlmCostAggregator:
         if self._consumer is not None:
             try:
                 await self._consumer.stop()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error stopping Kafka consumer",
                     extra={
@@ -564,7 +564,7 @@ class ServiceLlmCostAggregator:
         if self._pool is not None:
             try:
                 await self._pool.close()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error closing PostgreSQL pool",
                     extra={

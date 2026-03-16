@@ -898,7 +898,7 @@ def _main() -> None:
     ) as exc:
         print(f"FAILED: {exc.message}", file=sys.stderr)
         sys.exit(2)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
         print(f"ERROR: {exc}", file=sys.stderr)
         sys.exit(1)
 

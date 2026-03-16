@@ -115,7 +115,7 @@ async def verify_consul_registration(
                     "correlation_id": str(correlation_id) if correlation_id else None,
                 },
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             # Unexpected errors - log with more detail but still retry
             logger.warning(
                 "Unexpected error during Consul lookup (retrying): %s: %s "
@@ -184,7 +184,7 @@ async def wait_for_consul_registration(
                     "correlation_id": str(correlation_id) if correlation_id else None,
                 },
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             # Unexpected errors - log with more detail
             last_error = e
             logger.warning(
@@ -271,7 +271,7 @@ async def wait_for_postgres_write(
         except KeyError:
             # Entity not found yet - expected case
             pass
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: skips item and continues
             # Unexpected errors - log but continue polling
             logger.debug(
                 "Unexpected error during postgres write poll: %s: %s",
@@ -326,7 +326,7 @@ async def verify_postgres_registration(
     except KeyError:
         # Entity not found - expected case, no need to log
         return None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
         # Unexpected errors - log with more detail
         logger.warning(
             "Unexpected error during projection lookup: %s: %s (correlation_id=%s)",
@@ -611,7 +611,7 @@ async def collect_registration_events(
                 type(e).__name__,
                 node_id,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             # Unexpected errors - log but continue with other topics
             logger.warning(
                 "Unexpected error subscribing to topic %s: %s: %s (node_id=%s)",
@@ -632,7 +632,7 @@ async def collect_registration_events(
         except (TimeoutError, ConnectionError, OSError):
             # Network errors during cleanup - best effort
             pass
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: skips item and continues
             # Unexpected errors during cleanup - log but continue
             logger.debug(
                 "Error during subscription cleanup: %s (node_id=%s)",

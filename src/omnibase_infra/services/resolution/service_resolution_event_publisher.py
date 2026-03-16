@@ -161,7 +161,7 @@ class ServiceResolutionEventPublisher:
 
             return True
 
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
             # Best-effort: log but never raise
             logger.warning(
                 "Failed to publish resolution event",
@@ -200,7 +200,7 @@ class ServiceResolutionEventPublisher:
         """
         try:
             event = ModelResolutionEventLocal.model_validate(event_data)
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Invalid resolution event data, cannot publish",
                 extra={

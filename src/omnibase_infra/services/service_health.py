@@ -698,7 +698,7 @@ class ServiceHealth:
         if self._site is not None:
             try:
                 await self._site.stop()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error stopping TCPSite during shutdown (correlation_id=%s)",
                     correlation_id,
@@ -713,7 +713,7 @@ class ServiceHealth:
         if self._runner is not None:
             try:
                 await self._runner.cleanup()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error cleaning up AppRunner during shutdown (correlation_id=%s)",
                     correlation_id,

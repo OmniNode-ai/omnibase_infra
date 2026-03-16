@@ -771,3 +771,143 @@ class TestDecideTimeout:
         )
 
         assert decision.action == "no_op"
+
+
+# ---------------------------------------------------------------------------
+# auto_ack (OMN-5132) — direct-to-active path
+# ---------------------------------------------------------------------------
+
+
+class TestDecideIntrospectionAutoAck:
+    """Tests for the auto_ack=True path in decide_introspection (OMN-5132).
+
+    When auto_ack is enabled, the reducer skips AWAITING_ACK and transitions
+    directly to ACTIVE, eliminating the ack round-trip race condition.
+    """
+
+    def test_new_node_goes_directly_to_active(self) -> None:
+        """New node with auto_ack=True should transition directly to ACTIVE."""
+        service = RegistrationReducerService(auto_ack=True)
+        event = make_introspection_event()
+
+        decision = service.decide_introspection(
+            projection=None,
+            event=event,
+            correlation_id=uuid4(),
+            now=TEST_NOW,
+        )
+
+        assert decision.action == "emit"
+        assert decision.new_state == EnumRegistrationState.ACTIVE
+        assert decision.reason == "Registration initiated (direct-to-active, auto_ack)"
+        # Should emit Initiated + BecameActive (not Accepted)
+        assert len(decision.events) == 2
+        assert isinstance(decision.events[0], ModelNodeRegistrationInitiated)
+        assert isinstance(decision.events[1], ModelNodeBecameActive)
+        # PostgreSQL upsert should write ACTIVE, not AWAITING_ACK
+        assert len(decision.intents) == 1
+        payload = decision.intents[0].payload
+        assert isinstance(payload, ModelPayloadPostgresUpsertRegistration)
+        assert payload.record.current_state == "active"
+
+    def test_awaiting_ack_unsticks_to_active(self) -> None:
+        """Node stuck in AWAITING_ACK with auto_ack=True should re-register as ACTIVE."""
+        service = RegistrationReducerService(auto_ack=True)
+        node_id = uuid4()
+        projection = make_projection(
+            EnumRegistrationState.AWAITING_ACK,
+            entity_id=node_id,
+            ack_deadline=TEST_NOW - timedelta(minutes=5),
+        )
+        event = make_introspection_event(node_id=node_id)
+
+        decision = service.decide_introspection(
+            projection=projection,
+            event=event,
+            correlation_id=uuid4(),
+            now=TEST_NOW,
+        )
+
+        assert decision.action == "emit"
+        assert decision.new_state == EnumRegistrationState.ACTIVE
+        assert "direct-to-active" in decision.reason
+
+    def test_awaiting_ack_without_auto_ack_is_noop(self) -> None:
+        """Node in AWAITING_ACK without auto_ack should remain blocked (no-op)."""
+        service = RegistrationReducerService(auto_ack=False)
+        node_id = uuid4()
+        projection = make_projection(
+            EnumRegistrationState.AWAITING_ACK,
+            entity_id=node_id,
+        )
+        event = make_introspection_event(node_id=node_id)
+
+        decision = service.decide_introspection(
+            projection=projection,
+            event=event,
+            correlation_id=uuid4(),
+            now=TEST_NOW,
+        )
+
+        assert decision.action == "no_op"
+
+    def test_active_node_stays_noop_with_auto_ack(self) -> None:
+        """Already-active node should still be no-op even with auto_ack."""
+        service = RegistrationReducerService(auto_ack=True)
+        node_id = uuid4()
+        projection = make_projection(
+            EnumRegistrationState.ACTIVE,
+            entity_id=node_id,
+        )
+        event = make_introspection_event(node_id=node_id)
+
+        decision = service.decide_introspection(
+            projection=projection,
+            event=event,
+            correlation_id=uuid4(),
+            now=TEST_NOW,
+        )
+
+        assert decision.action == "no_op"
+
+    def test_auto_ack_false_uses_awaiting_ack(self) -> None:
+        """auto_ack=False should use the standard AWAITING_ACK path."""
+        service = RegistrationReducerService(auto_ack=False)
+        event = make_introspection_event()
+
+        decision = service.decide_introspection(
+            projection=None,
+            event=event,
+            correlation_id=uuid4(),
+            now=TEST_NOW,
+        )
+
+        assert decision.action == "emit"
+        assert decision.new_state == EnumRegistrationState.AWAITING_ACK
+        # Should emit Initiated + Accepted (standard handshake)
+        assert len(decision.events) == 2
+        assert isinstance(decision.events[0], ModelNodeRegistrationInitiated)
+        assert isinstance(decision.events[1], ModelNodeRegistrationAccepted)
+
+    def test_liveness_deadline_set_on_direct_active(self) -> None:
+        """Direct-to-active should set a liveness_deadline in the projection data."""
+        service = RegistrationReducerService(
+            auto_ack=True,
+            liveness_interval_seconds=120,
+        )
+        event = make_introspection_event()
+
+        decision = service.decide_introspection(
+            projection=None,
+            event=event,
+            correlation_id=uuid4(),
+            now=TEST_NOW,
+        )
+
+        assert decision.action == "emit"
+        payload = decision.intents[0].payload
+        assert isinstance(payload, ModelPayloadPostgresUpsertRegistration)
+        data = payload.record.data
+        assert "liveness_deadline" in data
+        expected_deadline = TEST_NOW + timedelta(seconds=120)
+        assert data["liveness_deadline"] == expected_deadline

@@ -543,7 +543,7 @@ class SecretResolver:
                 "Resolved HandlerInfisical from container",
                 extra={"correlation_id": str(correlation_id)},
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             # HandlerInfisical not registered - this is acceptable
             logger.debug(
                 "HandlerInfisical not available in container, Infisical secrets disabled: %s",
@@ -561,7 +561,7 @@ class SecretResolver:
                 "Resolved ProtocolSecretResolverMetrics from container",
                 extra={"correlation_id": str(correlation_id)},
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             # Metrics collector not registered - this is acceptable
             logger.debug(
                 "Metrics collector not available in container: %s",
@@ -1117,7 +1117,7 @@ class SecretResolver:
                     collector.record_resolution_latency(source_type, latency_ms)
                 if source_type == "cache" and hasattr(collector, "record_cache_hit"):
                     collector.record_cache_hit()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 # Never let metrics failures affect secret resolution, but log
                 # at warning level since a configured collector failing indicates
                 # an integration issue worth investigating.
@@ -1180,7 +1180,7 @@ class SecretResolver:
                 # NOTE: Do NOT call record_cache_miss() here - resolution failures
                 # are distinct from cache misses. Cache misses are already tracked
                 # in get_secret() and get_secret_async() via self._misses += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 # Never let metrics failures affect secret resolution, but log
                 # at warning level since a configured collector failing indicates
                 # an integration issue worth investigating.

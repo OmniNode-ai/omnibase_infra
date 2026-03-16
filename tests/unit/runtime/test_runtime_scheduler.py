@@ -950,7 +950,7 @@ class TestRuntimeSchedulerCircuitBreaker:
         for _ in range(3):
             try:
                 await scheduler.emit_tick()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
                 pass
 
         # Circuit should now be open
@@ -972,7 +972,7 @@ class TestRuntimeSchedulerCircuitBreaker:
         for _ in range(3):
             try:
                 await scheduler.emit_tick()
-            except Exception:
+            except Exception:  # noqa: BLE001 — re-raises as typed error
                 pass
 
         # Next emit should raise InfraUnavailableError (circuit open)
@@ -1021,7 +1021,7 @@ class TestRuntimeSchedulerCircuitBreaker:
         for _ in range(2):
             try:
                 await scheduler.emit_tick()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
                 pass
 
         assert (await scheduler.get_metrics()).circuit_breaker_open is True
@@ -1053,7 +1053,7 @@ class TestRuntimeSchedulerCircuitBreaker:
         for _ in range(3):
             try:
                 await scheduler.emit_tick()
-            except Exception:
+            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
                 pass
 
         # Create new scheduler with same circuit breaker state

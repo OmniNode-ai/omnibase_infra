@@ -230,7 +230,7 @@ class MCPServerLifecycle:
                     },
                 )
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Cold start discovery failed - continuing with empty registry",
                     extra={
@@ -388,7 +388,7 @@ class MCPServerLifecycle:
                         "correlation_id": str(correlation_id),
                     },
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error processing contract",
                     extra={

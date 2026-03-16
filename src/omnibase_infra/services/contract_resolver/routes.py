@@ -200,7 +200,7 @@ def _emit_completed_event(
         # Attempt publish — protocol is synchronous in the base implementation
         if hasattr(event_bus, "publish"):
             event_bus.publish(event)
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
         # fallback-ok: fire-and-forget, never block the HTTP response
         logger.debug(
             "Failed to emit onex.contract.resolve.completed — continuing without event",

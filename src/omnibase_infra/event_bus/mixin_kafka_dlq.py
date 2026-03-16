@@ -270,7 +270,7 @@ class MixinKafkaDlq:
                 if failed_message.key
                 else None
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
             key_str = "<decode_failed>"
 
         try:
@@ -279,7 +279,7 @@ class MixinKafkaDlq:
                 if failed_message.value
                 else "<no_value>"
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
             value_str = "<decode_failed>"
 
         # Build DLQ message with failure metadata
@@ -484,7 +484,7 @@ class MixinKafkaDlq:
         for callback in callbacks:
             try:
                 await callback(event)
-            except Exception as callback_error:
+            except Exception as callback_error:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "DLQ callback raised exception",
                     extra={
@@ -568,7 +568,7 @@ class MixinKafkaDlq:
                 if raw_key is not None
                 else None
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
             key_str = "<decode_failed>"
 
         try:
@@ -577,7 +577,7 @@ class MixinKafkaDlq:
                 if isinstance(raw_value, bytes)
                 else str(raw_value)
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
             value_str = "<decode_failed>"
 
         # Build DLQ message with failure metadata

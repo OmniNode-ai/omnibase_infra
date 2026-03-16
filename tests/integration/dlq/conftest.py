@@ -171,7 +171,7 @@ async def dlq_tracking_service(
                 await conn.execute(
                     f"DROP TABLE IF EXISTS {dlq_tracking_config.storage_table}"
                 )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
         logger.warning(
             "Cleanup failed for DLQ tracking table %s: %s",
             dlq_tracking_config.storage_table,
@@ -182,7 +182,7 @@ async def dlq_tracking_service(
     # Always attempt shutdown
     try:
         await service.shutdown()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
         logger.warning(
             "Cleanup failed for ServiceDlqTracking shutdown: %s",
             e,

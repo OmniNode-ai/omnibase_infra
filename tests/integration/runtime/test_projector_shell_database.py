@@ -202,7 +202,7 @@ async def test_table(db_pool: asyncpg.Pool) -> AsyncGenerator[str, None]:
     try:
         async with db_pool.acquire() as conn:
             await conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
-    except Exception:
+    except Exception:  # noqa: BLE001 — boundary: swallows for resilience
         # Swallow exceptions during cleanup to avoid masking test failures.
         # The table will be orphaned but has a unique name, so no collision risk.
         pass

@@ -256,7 +256,7 @@ class ProtocolLifecycleExecutor:
                         "returned_type": type(priority).__name__,
                     },
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Error calling handler shutdown_priority(), using default",
                     extra={
@@ -390,7 +390,7 @@ class ProtocolLifecycleExecutor:
                 handler_type=handler_type,
                 timeout_seconds=effective_timeout,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "Handler health check failed",
                 extra={"handler_type": handler_type, "error": str(e)},
