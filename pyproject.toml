@@ -142,7 +142,12 @@ dev = [
     "types-requests>=2.32.0.20250914,<3.0.0",
     "hypothesis>=6.148.7,<7.0.0",
     "pytest-split>=0.10.0,<0.11.0",
+    # Centralized governance hooks (OMN-5135)
+    "onex-change-control>=0.1.0",
 ]
+
+[tool.uv.sources]
+onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 
 [tool.ruff]
 target-version = "py312"
