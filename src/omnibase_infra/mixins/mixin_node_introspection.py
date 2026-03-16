@@ -235,6 +235,7 @@ from omnibase_infra.models.registration.model_node_event_bus_config import (
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
 )
+from omnibase_infra.models.registration.model_node_metadata import ModelNodeMetadata
 from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION_ACKED, TopicResolver
 
 if TYPE_CHECKING:
@@ -1518,6 +1519,13 @@ class MixinNodeIntrospection:
                 parameter="event_bus",
             ) from e
 
+        # Extract description from contract for omnidash display (OMN-5132)
+        contract_description: str | None = None
+        if self._introspection_contract is not None:
+            contract_description = (
+                getattr(self._introspection_contract, "description", None) or None
+            )
+
         # Create event with performance metrics (metrics is already Pydantic model)
         # Use declared_capabilities from config (OMN-5049: not a blank default)
         event = ModelNodeIntrospectionEvent(
@@ -1534,6 +1542,7 @@ class MixinNodeIntrospection:
             timestamp=datetime.now(UTC),
             performance_metrics=metrics,
             event_bus=event_bus_config,
+            metadata=ModelNodeMetadata(description=contract_description),
         )
 
         # Update cache - cast the model_dump output to our typed dict since we know
