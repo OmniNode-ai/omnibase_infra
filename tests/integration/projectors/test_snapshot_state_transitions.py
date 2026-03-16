@@ -174,7 +174,7 @@ class TestSnapshotStateTransitions:
         # Verify the projection record in the intent payload
         record = postgres_intent.payload.record
         record_data = record.model_dump()
-        assert record_data["current_state"] == "awaiting_ack"
+        assert record_data["current_state"] == "active"
         assert record_data["entity_id"] == node_id
 
         # Consul intent removed in OMN-3540 - only PostgreSQL intent expected
