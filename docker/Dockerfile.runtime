@@ -173,7 +173,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps \
     "omninode-claude==0.7.2" \
-    "omninode-memory==0.7.2" \
+    "omninode-memory==0.8.0" \
     "omninode-intelligence==0.13.3"
 
 # Install CPU-only PyTorch (~2GB savings over CUDA wheels).
