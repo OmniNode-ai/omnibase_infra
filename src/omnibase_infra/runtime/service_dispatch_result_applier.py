@@ -169,6 +169,15 @@ class DispatchResultApplier:
         self._topic_router: dict[str, str] = topic_router or {}
         self._output_topic_map: dict[str, str] = output_topic_map or {}
 
+    @property
+    def published_events_map(self) -> dict[str, str]:
+        """Return the published_events topic routing map.
+
+        Exposes the output_topic_map for health check introspection (OMN-5164).
+        Returns the mapping of event_type names to their declared Kafka topics.
+        """
+        return self._output_topic_map
+
     def _resolve_partition_key(self, event: BaseModel) -> bytes | None:
         """Extract partition key from event model for per-entity ordering.
 

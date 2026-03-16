@@ -101,9 +101,15 @@ from omnibase_infra.runtime.envelope_validator import (
     validate_envelope,
 )
 from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
+from omnibase_infra.runtime.health.health_published_events_map import (
+    check_published_events_map_health,
+)
 from omnibase_infra.runtime.models import (
     ModelDuplicateResponse,
     ModelRuntimeContractConfig,
+)
+from omnibase_infra.runtime.models.model_component_health import (
+    ModelComponentHealth,
 )
 from omnibase_infra.runtime.models.model_materialized_resources import (
     ModelMaterializedResources,
@@ -4201,6 +4207,10 @@ class RuntimeHostProcess:
                   succeeded), "degraded_no_requirements" (INFISICAL_ADDR set
                   but zero contract requirements found),
                   "degraded_error" (prefetch raised an exception).
+                - components: List of ModelComponentHealth dicts for individual
+                  infrastructure components (OMN-5164). Currently includes
+                  ``published_events_map`` when a DispatchResultApplier is
+                  registered in the DI container.
 
         Health State Matrix:
             - healthy=True, degraded=False: Fully operational
@@ -4317,6 +4327,17 @@ class RuntimeHostProcess:
             for pool_type, pool in self._handler_pools.items():
                 pool_metrics[pool_type] = await pool.health_check()
 
+        # Check published_events_map health (OMN-5164)
+        # Resolve DispatchResultApplier from the DI container to inspect the
+        # topic routing map. An empty or missing map means output events will
+        # use the fallback topic, silently degrading event routing.
+        published_events_map_health = await self._check_published_events_map()
+        components: list[dict[str, object]] = []
+        if published_events_map_health is not None:
+            components.append(published_events_map_health.model_dump(mode="json"))
+            if published_events_map_health.status == "unhealthy":
+                healthy = False
+
         return {
             "healthy": healthy,
             "degraded": degraded,
@@ -4340,7 +4361,42 @@ class RuntimeHostProcess:
             "handler_pools": pool_metrics,
             "no_handlers_registered": no_handlers_registered,
             "config_prefetch_status": self._config_prefetch_status,
+            "components": components,
         }
+
+    async def _check_published_events_map(
+        self,
+    ) -> ModelComponentHealth | None:
+        """Resolve published_events_map from the DI container and check health.
+
+        Attempts to resolve ``DispatchResultApplier`` from the container's
+        service registry and inspects its ``published_events_map`` property.
+        Returns ``None`` when the container or service registry is unavailable
+        (e.g. in minimal test setups without domain plugins).
+
+        Returns:
+            ModelComponentHealth if the applier is resolvable, None otherwise.
+
+        OMN-5164
+        """
+        from omnibase_infra.runtime.service_dispatch_result_applier import (
+            DispatchResultApplier,
+        )
+
+        if self._container is None:
+            return None
+        registry = self._container.service_registry
+        if registry is None:
+            return None
+
+        applier = await registry.try_resolve_service(DispatchResultApplier)
+        if applier is None:
+            # DispatchResultApplier is not registered (no domain plugin wired).
+            # This is expected in lightweight runtimes without the registration
+            # orchestrator plugin.
+            return None
+
+        return check_published_events_map_health(applier.published_events_map)
 
     async def readiness_check(
         self, correlation_id: UUID | None = None
