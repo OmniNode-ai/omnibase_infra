@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """LLM token-usage model for Effect layer cost and usage tracking.
 
 ModelLlmUsage, a lightweight value object that captures

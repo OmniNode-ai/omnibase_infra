@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Fully automated Infisical provisioning for ONEX Infrastructure.
 
 Replaces the manual steps previously documented in setup-infisical-identity.sh.

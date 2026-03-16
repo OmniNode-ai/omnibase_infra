@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for orchestrator decision path event types (OMN-952).
 
 These tests verify that the Node Registration Orchestrator contract correctly

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Infrastructure-layer resource managers.
 
 Manages runtime resources (e.g. httpx clients) outside the ONEX graph.

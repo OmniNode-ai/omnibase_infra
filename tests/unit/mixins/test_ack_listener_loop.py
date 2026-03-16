@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for MixinNodeIntrospection._on_registration_accepted callback.
 
 Validates the node-side ACK emission logic:

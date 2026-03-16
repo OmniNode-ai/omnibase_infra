@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for ModelRoutingDecisionIngest (OMN-3422).
 
 Tests the permissive ingest model used at the Kafka boundary for

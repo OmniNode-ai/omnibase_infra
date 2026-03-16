@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Timeout Coordinator for coordinating RuntimeTick events.
 
 This coordinator is invoked when the orchestrator receives a RuntimeTick event.

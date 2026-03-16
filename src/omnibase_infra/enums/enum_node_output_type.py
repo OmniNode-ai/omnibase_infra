@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Node Output Type Enumeration for ONEX Execution Shape Validation.
 
 Defines the valid output types that ONEX nodes can produce. This enum is used

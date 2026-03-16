@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Test for RegistryProtocolBinding.get() race condition fix (PR #129).
 
 This module specifically tests the race condition that was fixed where:

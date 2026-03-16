@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Dispatch log context model for structured logging in the dispatch engine.
 
 This model replaces the union-heavy dict pattern in MessageDispatchEngine's

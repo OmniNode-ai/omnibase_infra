@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Security Configuration Model for Runtime Handler and Plugin Loading.
 
 The Pydantic model for configuring trusted handler and plugin

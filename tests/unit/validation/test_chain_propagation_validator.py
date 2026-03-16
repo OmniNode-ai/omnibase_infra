@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for ChainPropagationValidator.  # ai-slop-ok: pre-existing
 
 This module provides unit tests for the chain propagation validator,

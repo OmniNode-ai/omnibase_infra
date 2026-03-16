@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Schema fingerprint computation and validation utility.
 
 Computes a deterministic SHA-256 fingerprint of the live database schema

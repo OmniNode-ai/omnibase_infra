@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests for HandlerSlackWebhook.
 
 Tests the handler with a mock HTTP server simulating Slack Web API responses.

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Wiring health monitoring for ONEX event bus.
 
 Infrastructure for detecting silent partial wiring failures

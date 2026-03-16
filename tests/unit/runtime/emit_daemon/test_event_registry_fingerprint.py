@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Unit tests for event registry fingerprint computation and validation (OMN-2088).
 
 Tests cover the fingerprint computation, assertion, diff generation, model

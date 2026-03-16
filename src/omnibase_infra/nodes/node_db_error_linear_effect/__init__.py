@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Node: NodeDbErrorLinearEffect — Kafka consumer → Linear ticket reporter.
 
 Consumes ``onex.evt.omnibase-infra.db-error.v1`` events and auto-creates

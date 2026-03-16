@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Comprehensive unit tests for RuntimeScheduler (OMN-953).
 
 This test suite validates the RuntimeScheduler implementation for:

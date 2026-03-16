@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Mixin for execution shape violation checking.
 
 The MixinExecutionShapeViolationChecks mixin which extracts
@@ -588,11 +586,13 @@ class MixinExecutionShapeViolationChecks:
         return violations
 
     # Abstract method declaration for type checking - implemented by MixinNodeArchetypeDetection
-    def _get_name_from_expr(self, expr: ast.expr) -> str | None:
+    def _get_name_from_expr(
+        self, expr: ast.expr
+    ) -> str | None:  # stub-ok — mixin delegation
         """Extract a name string from an AST expression.
 
         Note:
             This method is provided by MixinNodeArchetypeDetection.
             Declared here for type checking purposes.
         """
-        raise NotImplementedError("Provided by MixinNodeArchetypeDetection")
+        raise NotImplementedError("Provided by MixinNodeArchetypeDetection")  # stub-ok

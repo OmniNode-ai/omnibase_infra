@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Node Contract Persistence Effect package - Declarative effect node for contract persistence.
 
 This package provides NodeContractPersistenceEffect, a declarative effect node that

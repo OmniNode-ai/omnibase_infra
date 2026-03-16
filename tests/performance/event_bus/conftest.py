@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Shared pytest fixtures for event bus performance tests.  # ai-slop-ok: pre-existing
 
 Provides fixtures for performance testing including:

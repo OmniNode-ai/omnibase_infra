@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Declarative EFFECT node for RRH environment data collection.
 
 Collects git state, runtime targets, and toolchain versions.

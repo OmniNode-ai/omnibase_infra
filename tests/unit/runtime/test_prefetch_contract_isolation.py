@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Tests for OMN-3893: Decouple prefetch contract scan from handler contract paths.
 
 Verifies that _prefetch_config_from_infisical uses the omnibase_infra package root

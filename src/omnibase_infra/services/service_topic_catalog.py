@@ -129,7 +129,7 @@ class ServiceTopicCatalog:
     # Public API
     # ------------------------------------------------------------------
 
-    async def build_catalog(
+    async def build_catalog(  # stub-ok
         self,
         correlation_id: UUID,
         include_inactive: bool = False,
@@ -156,7 +156,7 @@ class ServiceTopicCatalog:
             warnings=warnings,
         )
 
-    async def get_catalog_version(self, correlation_id: UUID) -> int:
+    async def get_catalog_version(self, correlation_id: UUID) -> int:  # stub-ok
         """Read the current catalog version (stub -- always returns -1).
 
         Returns:

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """ONEX Infrastructure Lifecycle Models.
 
 Provides models for lifecycle operation results, replacing tuple-based return

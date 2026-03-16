@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """True E2E tests that validate the complete orchestrator pipeline.
 
 These tests verify the FULL registration flow:

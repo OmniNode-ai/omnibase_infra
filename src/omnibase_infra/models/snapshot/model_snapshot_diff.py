@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Snapshot Diff Model for Structural Comparison.
 
 Provides a model for representing structural differences between two snapshots.

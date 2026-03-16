@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Pytest configuration and fixtures for DLQ tracking integration tests.  # ai-slop-ok: pre-existing
 
 This module provides fixtures for testing the DLQ PostgreSQL tracking service.

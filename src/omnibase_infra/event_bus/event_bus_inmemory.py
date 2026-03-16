@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """In-Memory Event Bus implementation for local development and testing.
 
 Implements ProtocolEventBus interface using deque-based event history with

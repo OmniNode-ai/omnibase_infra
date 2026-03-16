@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """PR Triage widget — displays GitHub PRs grouped by triage_state.
 
 Handles all 8 triage states defined in handler_github_api_poll.py:

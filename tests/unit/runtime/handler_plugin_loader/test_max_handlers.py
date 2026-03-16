@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Tests for max_handlers parameter in handler plugin loader.
 
 This module tests the max_handlers parameter functionality that prevents

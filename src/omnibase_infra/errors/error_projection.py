@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """ProjectionError — raised by NodeProjectionEffect on projection failure.
 
 Projection failure blocks Kafka publish (OMN-2363 / OMN-2510).  This error

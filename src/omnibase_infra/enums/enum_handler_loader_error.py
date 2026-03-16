@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Handler Loader Error Code Enumeration.
 
 Defines structured error codes for the HandlerPluginLoader system. These codes

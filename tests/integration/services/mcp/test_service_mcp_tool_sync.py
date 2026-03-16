@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests for ServiceMCPToolSync with real Kafka/Redpanda.
 
 These tests validate ServiceMCPToolSync behavior against actual Kafka infrastructure.

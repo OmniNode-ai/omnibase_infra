@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Pipeline Alert Bridge - Wires failure detection to human notification.
 
 This module bridges the gap between the intelligence pipeline's failure

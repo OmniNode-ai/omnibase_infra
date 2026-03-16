@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Idempotent bundle insert handler for NodeDeltaBundleEffect.
 
 Inserts a delta bundle record into delta_bundles using

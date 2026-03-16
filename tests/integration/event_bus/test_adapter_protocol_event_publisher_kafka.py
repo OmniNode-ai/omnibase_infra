@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Integration tests for AdapterProtocolEventPublisherKafka with real Kafka (Redpanda).
 
 Tests validating the Kafka adapter implementation for OMN-1764. These tests verify

@@ -384,7 +384,7 @@ def _derive_handler_id_from_path(file_path: str) -> str:
     return path.stem
 
 
-def _map_violation_to_rule_id(violation: ModelContractViolation) -> str:
+def _map_violation_to_rule_id(violation: ModelContractViolation) -> str:  # stub-ok
     """Map contract violation to appropriate rule ID using keyword heuristics.
 
     This function uses a decision tree based on keyword matching in the violation's

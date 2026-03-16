@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Payload model for merge gate decision events.
 
 Deserialized from ``onex.evt.platform.merge-gate-decision.v1`` Kafka events.

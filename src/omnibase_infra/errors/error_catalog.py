@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Error resolution catalog mapping transport types to retry guidance (OMN-518)."""
 
 from __future__ import annotations

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Thin Infisical SDK wrapper adapter.
 
 This adapter provides a minimal, testable interface over the ``infisicalsdk``

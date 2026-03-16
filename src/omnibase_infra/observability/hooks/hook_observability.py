@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Pipeline hook for cross-cutting observability concerns.
 
 The HookObservability class, a pipeline hook that enables

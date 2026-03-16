@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """# ai-slop-ok: pre-existingPytest fixtures for NodeRegistryEffect integration tests.
 
 This module provides fixtures that wire NodeRegistryEffect with:

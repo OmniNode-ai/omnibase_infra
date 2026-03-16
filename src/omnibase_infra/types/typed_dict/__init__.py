@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """TypedDict definitions for omnibase_infra.
 
 This package contains TypedDict definitions that represent JSON-serialized

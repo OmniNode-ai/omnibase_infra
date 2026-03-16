@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Property-based and edge case tests for architecture validator Rule classes.
 
 validators to ensure they handle unusual inputs gracefully without crashing.

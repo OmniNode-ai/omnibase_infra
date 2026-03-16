@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """CI-friendly integration tests for correlation ID propagation.  # ai-slop-ok: pre-existing
 
 This module provides integration tests that verify correlation IDs are properly

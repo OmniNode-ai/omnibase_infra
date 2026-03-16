@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Pydantic model for buffered log entries in structured logging sink.
 
 This module defines ModelBufferedLogEntry, the structured representation of

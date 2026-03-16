@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Snapshot tests for protocol lockfile integrity.
 
 These tests verify that the protocol definitions in ``omnibase_infra.protocols``

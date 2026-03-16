@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Node Registry Effect package - Declarative effect node for dual-backend registration.
 
 This package provides NodeRegistryEffect, a declarative effect node that coordinates

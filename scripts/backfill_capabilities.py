@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Backfill Capability Fields from Existing Capabilities JSONB.
 
 This script populates the new capability fields (contract_type, intent_types,

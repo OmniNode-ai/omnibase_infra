@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """LLM inference response model with text XOR tool_calls invariant.
 
 ModelLlmInferenceResponse, the output model for the

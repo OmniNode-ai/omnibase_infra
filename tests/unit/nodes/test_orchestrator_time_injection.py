@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Tests verifying orchestrator uses injected `now`, not system clock.
 
 These tests ensure the NodeRegistrationOrchestrator follows ONEX time injection

@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Node Artifact Change Detector Effect — declarative EFFECT node for change detection.
 
 This node follows the ONEX declarative pattern:

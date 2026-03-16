@@ -139,7 +139,7 @@ class HandlerCreatePlan:
         return tasks
 
     @staticmethod
-    def _artifact_to_task(
+    def _artifact_to_task(  # stub-ok
         artifact: ModelImpactedArtifact,
     ) -> ModelUpdateTask | None:
         """Map a single impacted artifact to a task.

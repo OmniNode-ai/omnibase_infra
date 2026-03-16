@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-
-# Copyright (c) 2025 OmniNode Team
 """Security tests for HandlerPluginLoader namespace allowlisting.  # ai-slop-ok: pre-existing
 
 This module provides explicit security documentation tests that verify the
