@@ -642,6 +642,11 @@ services:
   # ONEX Runtime - Workers (Runtime Profile)
   # ==========================================================================
   # Scalable worker containers for parallel compute operations.
+  # OMN-5095: Workers have an extended start_period (120s) and retries (5)
+  # because plugin initialization (intelligence DB ownership, schema fingerprint,
+  # message type registration) must complete before /health returns 200.
+  # Unhealthy detection latency = start_period + (interval * retries) = 120s + 150s = 270s.
+  # AUTOHEAL_START_PERIOD (180s) must exceed start_period to avoid premature restarts.
   runtime-worker:
     !!merge <<: *runtime-base
     profiles: ["runtime", "full"]
