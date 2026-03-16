@@ -1175,6 +1175,19 @@ def load_published_events_map(
             len(published_events),
         )
 
+    if (
+        isinstance(published_events, list)
+        and len(published_events) > 0
+        and len(result) == 0
+    ):
+        _logger.warning(
+            "published_events section in %s has %d entries but ALL were malformed — "
+            "routing will fall back entirely to the default output topic. "
+            "This is almost certainly a contract defect.",
+            contract_path,
+            len(published_events),
+        )
+
     _logger.debug(
         "Loaded published_events map from %s: %d entries",
         contract_path,

@@ -1063,6 +1063,19 @@ class PluginRegistration:
                 contract_path, logger=logger
             )
 
+            logger.info(
+                "Loaded published_events_map from %s: %d event-type→topic mappings",
+                contract_path,
+                len(published_events_map),
+            )
+            if not published_events_map:
+                logger.warning(
+                    "published_events_map is EMPTY for %s — all output events will use fallback topic %r. "
+                    "This likely indicates a missing or malformed contract file.",
+                    contract_path,
+                    config.output_topic,
+                )
+
             # Create intent executor for effect layer delegation (Phase C)
             # and register in the DI container for consistent service resolution.
             intent_executor = IntentExecutor(container=config.container)
