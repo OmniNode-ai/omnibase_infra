@@ -32,6 +32,7 @@ from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from omnibase_infra.runtime.event_bus_subcontract_wiring import (
     EventBusSubcontractWiring,
     load_event_bus_subcontract,
+    load_published_events_map,
 )
 
 pytestmark = pytest.mark.unit
@@ -2064,3 +2065,76 @@ class TestRetryTracking:
 
         # Verify retry counts cleared
         assert len(wiring._retry_counts) == 0
+
+
+# =============================================================================
+# Tests for load_published_events_map
+# =============================================================================
+
+
+class TestLoadPublishedEventsMap:
+    """Tests for the load_published_events_map helper."""
+
+    def test_returns_mapping_from_contract(self, tmp_path: Path) -> None:
+        contract = tmp_path / "contract.yaml"
+        contract.write_text(
+            "published_events:\n"
+            '  - topic: "onex.evt.platform.node-became-active.v1"\n'
+            '    event_type: "NodeBecameActive"\n'
+            '  - topic: "onex.evt.platform.node-registration-accepted.v1"\n'
+            '    event_type: "NodeRegistrationAccepted"\n'
+        )
+        result = load_published_events_map(contract)
+        assert result == {
+            "NodeBecameActive": "onex.evt.platform.node-became-active.v1",
+            "NodeRegistrationAccepted": "onex.evt.platform.node-registration-accepted.v1",
+        }
+
+    def test_returns_empty_dict_when_no_published_events(self, tmp_path: Path) -> None:
+        contract = tmp_path / "contract.yaml"
+        contract.write_text("event_bus:\n  subscribe_topics: []\n")
+        result = load_published_events_map(contract)
+        assert result == {}
+
+    def test_returns_empty_dict_when_file_missing(self, tmp_path: Path) -> None:
+        result = load_published_events_map(tmp_path / "nope.yaml")
+        assert result == {}
+
+    def test_ignores_entries_with_non_string_values(self, tmp_path: Path) -> None:
+        contract = tmp_path / "contract.yaml"
+        contract.write_text(
+            "published_events:\n"
+            "  - topic: 123\n"
+            '    event_type: "NodeBecameActive"\n'
+            '  - topic: "onex.evt.platform.node-became-active.v1"\n'
+            "    event_type: null\n"
+            '  - topic: ""\n'
+            '    event_type: "EmptyTopic"\n'
+            '  - topic: "onex.evt.platform.valid.v1"\n'
+            '    event_type: "ValidEvent"\n'
+        )
+        result = load_published_events_map(contract)
+        assert result == {"ValidEvent": "onex.evt.platform.valid.v1"}
+
+    def test_warns_and_keeps_last_on_duplicate_event_type(self, tmp_path: Path) -> None:
+        contract = tmp_path / "contract.yaml"
+        contract.write_text(
+            "published_events:\n"
+            '  - topic: "topic-a.v1"\n'
+            '    event_type: "Duplicate"\n'
+            '  - topic: "topic-b.v1"\n'
+            '    event_type: "Duplicate"\n'
+        )
+        result = load_published_events_map(contract)
+        assert result == {"Duplicate": "topic-b.v1"}
+
+    def test_ignores_non_dict_entries(self, tmp_path: Path) -> None:
+        contract = tmp_path / "contract.yaml"
+        contract.write_text(
+            "published_events:\n"
+            '  - "just-a-string"\n'
+            '  - topic: "onex.evt.platform.valid.v1"\n'
+            '    event_type: "ValidEvent"\n'
+        )
+        result = load_published_events_map(contract)
+        assert result == {"ValidEvent": "onex.evt.platform.valid.v1"}

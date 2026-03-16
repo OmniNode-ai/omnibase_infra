@@ -1105,7 +1105,86 @@ def load_event_bus_subcontract(
         return None
 
 
+def load_published_events_map(
+    contract_path: Path,
+    logger: logging.Logger | None = None,
+) -> dict[str, str]:
+    """Load event_type -> topic mapping from contract's published_events section.
+
+    Parses the ``published_events`` list in *contract_path* and returns a dict
+    keyed by ``event_type`` with values of ``topic``.  Both fields must be
+    non-empty strings; malformed entries are silently skipped (with a summary
+    warning at the end).  Duplicate ``event_type`` keys emit a per-key warning
+    and the last write wins.
+
+    Returns an empty dict when *contract_path* does not exist, cannot be
+    parsed, or contains no ``published_events`` section.
+    """
+    _logger = logger or logging.getLogger(__name__)
+
+    if not contract_path.exists():
+        _logger.debug("No contract file at %s for published_events map", contract_path)
+        return {}
+
+    try:
+        with contract_path.open() as f:
+            contract_data = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        _logger.warning("Failed to parse YAML in %s: %s", contract_path, e)
+        return {}
+
+    if not isinstance(contract_data, dict):
+        return {}
+
+    published_events = contract_data.get("published_events")
+    if not isinstance(published_events, list):
+        return {}
+
+    result: dict[str, str] = {}
+    skipped = 0
+    for entry in published_events:
+        if not isinstance(entry, dict):
+            skipped += 1
+            continue
+        event_type = entry.get("event_type")
+        topic = entry.get("topic")
+        if not isinstance(event_type, str) or not event_type:
+            skipped += 1
+            continue
+        if not isinstance(topic, str) or not topic:
+            skipped += 1
+            continue
+        if event_type in result:
+            _logger.warning(
+                "Duplicate event_type %r in published_events of %s "
+                "(previous topic: %s, new topic: %s — keeping new)",
+                event_type,
+                contract_path,
+                result[event_type],
+                topic,
+            )
+        result[event_type] = topic
+
+    if skipped > 0:
+        _logger.warning(
+            "Skipped %d malformed entries in published_events of %s "
+            "(valid: %d, total: %d) — malformed entries reduce routing coverage",
+            skipped,
+            contract_path,
+            len(result),
+            len(published_events),
+        )
+
+    _logger.debug(
+        "Loaded published_events map from %s: %d entries",
+        contract_path,
+        len(result),
+    )
+    return result
+
+
 __all__: list[str] = [
     "EventBusSubcontractWiring",
     "load_event_bus_subcontract",
+    "load_published_events_map",
 ]
