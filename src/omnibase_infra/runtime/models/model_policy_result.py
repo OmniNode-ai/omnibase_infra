@@ -97,7 +97,9 @@ class ModelPolicyResult(MixinDictLikeAccessors, BaseModel):
     # Common result fields - all optional with defaults
     success: bool = True
     reason: str = ""
-    metadata: dict[str, object] = Field(default_factory=dict)
+    metadata: dict[str, object] = Field(  # ONEX_EXCLUDE: dict_str_any
+        default_factory=dict,
+    )
 
 
 __all__: list[str] = ["ModelPolicyResult"]

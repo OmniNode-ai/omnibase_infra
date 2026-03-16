@@ -94,7 +94,9 @@ class ModelPolicyContext(MixinDictLikeAccessors, BaseModel):
     correlation_id: UUID | None = None
     attempt: int = 0
     timestamp_ms: int = 0
-    metadata: dict[str, object] = Field(default_factory=dict)
+    metadata: dict[str, object] = Field(  # ONEX_EXCLUDE: dict_str_any
+        default_factory=dict,
+    )
 
 
 __all__: list[str] = ["ModelPolicyContext"]
