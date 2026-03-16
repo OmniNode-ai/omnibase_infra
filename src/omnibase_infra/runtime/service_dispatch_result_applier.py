@@ -132,6 +132,7 @@ class DispatchResultApplier:
         clock: Callable[[], datetime] | None = None,
         projection_effect: ProtocolProjectionEffect | None = None,
         topic_router: dict[str, str] | None = None,
+        output_topic_map: dict[str, str] | None = None,
     ) -> None:
         """Initialize the dispatch result applier.
 
@@ -155,6 +156,10 @@ class DispatchResultApplier:
                 class name is not in the map fall back to ``output_topic``.
                 Build this map with ``build_topic_router_from_contract()``
                 (OMN-4881).
+            output_topic_map: Optional mapping of event_type names (from contract
+                ``published_events``) to their declared Kafka topics. Uses short
+                names (``Model`` prefix stripped) with full class name fallback.
+                Build with ``load_published_events_map()`` (OMN-5132).
         """
         self._event_bus = event_bus
         self._output_topic = output_topic
@@ -162,6 +167,7 @@ class DispatchResultApplier:
         self._clock = clock or (lambda: datetime.now(UTC))
         self._projection_effect = projection_effect
         self._topic_router: dict[str, str] = topic_router or {}
+        self._output_topic_map: dict[str, str] = output_topic_map or {}
 
     def _resolve_partition_key(self, event: BaseModel) -> bytes | None:
         """Extract partition key from event model for per-entity ordering.
@@ -187,6 +193,27 @@ class DispatchResultApplier:
             if value is not None:
                 return str(value).encode("utf-8")
         return None
+
+    def _resolve_output_topic(self, event: BaseModel) -> str:
+        """Resolve the output topic for an event using the output_topic_map.
+
+        Tries the short name (class name with ``Model`` prefix removed) first,
+        then the full class name, and falls back to ``_output_topic``.
+
+        Args:
+            event: The output event payload (a Pydantic BaseModel).
+
+        Returns:
+            The resolved topic string.
+        """
+        if not self._output_topic_map:
+            return self._output_topic
+        class_name = type(event).__name__
+        short_name = class_name.removeprefix("Model")
+        return self._output_topic_map.get(
+            short_name,
+            self._output_topic_map.get(class_name, self._output_topic),
+        )
 
     def _execute_projection(
         self,
@@ -432,7 +459,8 @@ class DispatchResultApplier:
                         )
 
                     resolved_topic = self._topic_router.get(
-                        type(output_event).__name__, self._output_topic
+                        type(output_event).__name__,
+                        self._resolve_output_topic(output_event),
                     )
                     await self._event_bus.publish_envelope(
                         envelope=output_envelope,
