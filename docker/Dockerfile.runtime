@@ -172,9 +172,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # in a separate step so plugins have their required third-party libraries.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps \
-    "omninode-claude==0.7.1" \
-    "omninode-memory==0.7.1" \
-    "omninode-intelligence==0.13.1"
+    "omninode-claude==0.7.2" \
+    "omninode-memory==0.7.2" \
+    "omninode-intelligence==0.13.3"
 
 # Install CPU-only PyTorch (~2GB savings over CUDA wheels).
 # K8s runtime has no GPU; inference offloads to LLM servers via HTTP.
