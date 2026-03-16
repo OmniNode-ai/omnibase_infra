@@ -1036,6 +1036,7 @@ class PluginRegistration:
             from omnibase_infra.runtime.event_bus_subcontract_wiring import (
                 EventBusSubcontractWiring,
                 load_event_bus_subcontract,
+                load_published_events_map,
             )
             from omnibase_infra.runtime.service_dispatch_result_applier import (
                 DispatchResultApplier,
@@ -1053,6 +1054,14 @@ class PluginRegistration:
                     plugin_id=self.plugin_id,
                     reason=f"No event_bus subcontract in {contract_path}",
                 )
+
+            # Load per-event-type topic routing from contract published_events
+            # (OMN-5132).  Maps event_type names to their declared Kafka topics
+            # so DispatchResultApplier can route each output event to the correct
+            # topic instead of a single output_topic fallback.
+            published_events_map = load_published_events_map(
+                contract_path, logger=logger
+            )
 
             # Create intent executor for effect layer delegation (Phase C)
             # and register in the DI container for consistent service resolution.
@@ -1096,6 +1105,7 @@ class PluginRegistration:
                 output_topic=config.output_topic,
                 intent_executor=intent_executor,
                 topic_router=_TOPIC_ROUTER,
+                output_topic_map=published_events_map,
             )
 
             # Register DispatchResultApplier in the DI container for the same
