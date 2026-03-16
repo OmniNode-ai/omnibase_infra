@@ -594,7 +594,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 90s
     labels:
       - "com.omninode.service=runtime-main"
       - "com.omninode.layer=runtime"
@@ -632,7 +632,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 90s
     labels:
       - "com.omninode.service=runtime-effects"
       - "com.omninode.layer=runtime"
@@ -665,8 +665,8 @@ services:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 60s
+      retries: 5
+      start_period: 120s
     deploy:
       mode: replicated
       replicas: ${WORKER_REPLICAS:-2}
@@ -1000,7 +1000,11 @@ services:
     environment:
       AUTOHEAL_CONTAINER_LABEL: autoheal
       AUTOHEAL_INTERVAL: 60
-      AUTOHEAL_START_PERIOD: 60
+      # OMN-5095: Increased from 60s to 180s so autoheal ignores containers
+      # still in their Docker health check start_period. Workers need up to
+      # 120s for plugin initialization (intelligence DB ownership validation,
+      # schema fingerprint, message type registration) before /health passes.
+      AUTOHEAL_START_PERIOD: 180
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     logging: *logging-defaults
