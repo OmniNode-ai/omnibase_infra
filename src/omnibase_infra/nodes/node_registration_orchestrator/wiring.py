@@ -650,23 +650,12 @@ async def wire_registration_handlers(
             services_registered.append("ProjectorShell")
             logger.debug("Registered ProjectorShell in container")
 
-        # OMN-5132: Read ONEX_REGISTRATION_AUTO_ACK from environment.
-        # When enabled, the reducer skips the AWAITING_ACK intermediate state
-        # and transitions nodes directly to ACTIVE on introspection, eliminating
-        # the ack round-trip race condition.
-        import os
-
         from omnibase_infra.nodes.node_registration_orchestrator.services import (
             RegistrationReducerService,
         )
 
-        auto_ack = (
-            os.environ.get("ONEX_REGISTRATION_AUTO_ACK", "false").lower() == "true"
-        )
-
         reducer = RegistrationReducerService(
             liveness_interval_seconds=resolved_liveness_interval,
-            auto_ack=auto_ack,
         )
         await container.service_registry.register_instance(
             interface=RegistrationReducerService,

@@ -88,9 +88,7 @@ class TestRegistrationHandlerInterface:
         mock_reader = MagicMock()
         mock_reader.get_entity_state = AsyncMock(return_value=None)
 
-        reducer = RegistrationReducerService(
-            ack_timeout_seconds=30.0,
-        )
+        reducer = RegistrationReducerService()
         handler = HandlerNodeIntrospected(
             projection_reader=mock_reader,
             reducer=reducer,
@@ -156,7 +154,7 @@ class TestRegistrationHandlerProperties:
         message_types, matching the contract.yaml declaration.
         """
         mock_reader = MagicMock()
-        reducer = RegistrationReducerService(ack_timeout_seconds=30.0)
+        reducer = RegistrationReducerService()
         handler = HandlerNodeIntrospected(
             projection_reader=mock_reader,
             reducer=reducer,

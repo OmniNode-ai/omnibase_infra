@@ -113,7 +113,7 @@ class HandlerNodeIntrospected:
     Example:
         >>> from datetime import datetime, UTC
         >>> from uuid import uuid4
-        >>> reducer = RegistrationReducerService(ack_timeout_seconds=30.0)
+        >>> reducer = RegistrationReducerService()
         >>> handler = HandlerNodeIntrospected(projection_reader, reducer)
         >>> output = await handler.handle(envelope)
         >>> # output.intents contains ModelIntent objects for effect layer
@@ -139,8 +139,8 @@ class HandlerNodeIntrospected:
             projection_reader: Reader for querying registration projection state.
             reducer: Pure-function reducer service that encapsulates all
                 registration decision logic (state checks, event creation,
-                intent construction). Configuration such as ack_timeout_seconds
-                and consul_enabled lives on the reducer, not on this handler.
+                intent construction). Configuration such as liveness_interval_seconds
+                lives on the reducer, not on this handler.
             topic_store: Optional shared in-memory store for accumulating
                 event_bus publish topics from introspection events. When provided,
                 this handler populates the store on every introspection event so

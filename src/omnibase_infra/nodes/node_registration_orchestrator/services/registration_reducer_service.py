@@ -44,9 +44,6 @@ from omnibase_infra.models.registration.events.model_node_became_active import (
 from omnibase_infra.models.registration.events.model_node_liveness_expired import (
     ModelNodeLivenessExpired,
 )
-from omnibase_infra.models.registration.events.model_node_registration_accepted import (
-    ModelNodeRegistrationAccepted,
-)
 from omnibase_infra.models.registration.events.model_node_registration_ack_received import (
     ModelNodeRegistrationAckReceived,
 )
@@ -77,12 +74,16 @@ from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgre
     ModelPayloadPostgresUpsertRegistration,
 )
 
-# States that allow re-registration (node can try again)
+# States that allow re-registration (node can try again).
+# AWAITING_ACK is included because the ack round-trip through Kafka was
+# eliminated in OMN-5132 — nodes now go directly to ACTIVE.  Any node
+# lingering in AWAITING_ACK from a prior runtime version is retriable.
 _RETRIABLE_STATES: frozenset[EnumRegistrationState] = frozenset(
     {
         EnumRegistrationState.LIVENESS_EXPIRED,
         EnumRegistrationState.REJECTED,
         EnumRegistrationState.ACK_TIMED_OUT,
+        EnumRegistrationState.AWAITING_ACK,
     }
 )
 
@@ -91,7 +92,6 @@ _BLOCKING_STATES: frozenset[EnumRegistrationState] = frozenset(
     {
         EnumRegistrationState.PENDING_REGISTRATION,
         EnumRegistrationState.ACCEPTED,
-        EnumRegistrationState.AWAITING_ACK,
         EnumRegistrationState.ACK_RECEIVED,
         EnumRegistrationState.ACTIVE,
     }
@@ -116,35 +116,30 @@ class RegistrationReducerService:
     No I/O is performed; no event bus, projector, or database access occurs.
     Callers are responsible for applying the returned events and intents.
 
+    Registration Flow (OMN-5132):
+        Introspection events always transition nodes directly to ACTIVE.
+        The previous AWAITING_ACK intermediate state (ack round-trip through
+        Kafka) has been removed — no external validator exists that would
+        need to reject registration.
+
     Args:
-        ack_timeout_seconds: Timeout in seconds for node acknowledgment.
         liveness_interval_seconds: Interval in seconds for liveness deadline.
         liveness_window_seconds: Window in seconds for heartbeat liveness extension.
     """
 
     def __init__(
         self,
-        ack_timeout_seconds: float = 30.0,
         liveness_interval_seconds: int = 60,
         liveness_window_seconds: float = 90.0,
-        auto_ack: bool = False,
     ) -> None:
-        """Initialize the reducer service with timing and feature configuration.
+        """Initialize the reducer service with timing configuration.
 
         Args:
-            ack_timeout_seconds: How long to wait for a node ack before timeout.
             liveness_interval_seconds: Initial liveness deadline offset from activation.
             liveness_window_seconds: Liveness deadline extension per heartbeat.
-            auto_ack: When True, skip the AWAITING_ACK intermediate state and
-                transition directly to ACTIVE on introspection. This eliminates
-                the ack round-trip race condition for internal nodes that do not
-                implement the two-way handshake protocol. Controlled by the
-                ONEX_REGISTRATION_AUTO_ACK environment variable. (OMN-5132)
         """
-        self._ack_timeout_seconds = ack_timeout_seconds
         self._liveness_interval_seconds = liveness_interval_seconds
         self._liveness_window_seconds = liveness_window_seconds
-        self._auto_ack = auto_ack
 
     @property
     def liveness_interval_seconds(self) -> int:
@@ -162,24 +157,17 @@ class RegistrationReducerService:
         correlation_id: UUID,
         now: datetime,
     ) -> ModelReducerDecision:
-        """Decide whether to initiate registration for an introspection event.
+        """Decide whether to register a node from an introspection event.
 
-        Decision Logic:
-            - No projection (new node) -> initiate
-            - Retriable state (LIVENESS_EXPIRED, REJECTED, ACK_TIMED_OUT) -> initiate
-            - AWAITING_ACK with auto_ack -> initiate (unstick stale ack state, OMN-5132)
-            - Blocking state (PENDING, ACCEPTED, AWAITING_ACK, ACK_RECEIVED, ACTIVE) -> no-op
+        Decision Logic (OMN-5132):
+            - No projection (new node) -> register as ACTIVE
+            - Retriable state (LIVENESS_EXPIRED, REJECTED, ACK_TIMED_OUT,
+              AWAITING_ACK) -> re-register as ACTIVE
+            - Blocking state (PENDING, ACCEPTED, ACK_RECEIVED, ACTIVE) -> no-op
 
-        When auto_ack is True (OMN-5132):
-            - Skips the AWAITING_ACK intermediate state entirely
-            - Transitions directly to ACTIVE with a liveness deadline
-            - Emits NodeRegistrationInitiated + NodeBecameActive events
-            - Eliminates the ack round-trip race condition
-
-        When auto_ack is False (standard two-way handshake):
-            - Transitions to AWAITING_ACK with an ack_deadline
-            - Emits NodeRegistrationInitiated + NodeRegistrationAccepted events
-            - Requires an external NodeRegistrationAcked command to activate
+        Nodes always transition directly to ACTIVE. The previous AWAITING_ACK
+        intermediate state has been removed — no external validator exists
+        that would need to reject registration.
 
         Args:
             projection: Current registration projection, or None for new nodes.
@@ -199,11 +187,6 @@ class RegistrationReducerService:
             current_state = projection.current_state
             if current_state in _RETRIABLE_STATES:
                 should_initiate = True
-            elif current_state == EnumRegistrationState.AWAITING_ACK and self._auto_ack:
-                # OMN-5132: When auto_ack is enabled, unstick nodes that are
-                # stuck in AWAITING_ACK. This happens when the async ack
-                # round-trip failed (race condition, timeout, or restart).
-                should_initiate = True
             elif current_state in _BLOCKING_STATES:
                 should_initiate = False
 
@@ -214,8 +197,6 @@ class RegistrationReducerService:
             return _no_op(f"State {state_label} blocks new registration")
 
         node_id = event.node_id
-
-        # Build registration attempt ID
         registration_attempt_id = uuid4()
 
         # Event 1: Registration initiated
@@ -235,22 +216,23 @@ class RegistrationReducerService:
             else {}
         )
 
-        # OMN-5132: When auto_ack is enabled, skip AWAITING_ACK and go
-        # directly to ACTIVE. This eliminates the ack round-trip race
-        # condition entirely.
-        if self._auto_ack:
-            liveness_deadline = now + timedelta(seconds=self._liveness_interval_seconds)
-            became_active_event = ModelNodeBecameActive(
-                entity_id=node_id,
-                node_id=node_id,
-                correlation_id=correlation_id,
-                causation_id=event.correlation_id,
-                emitted_at=now,
-                capabilities=capabilities_data,
-            )
-            target_state = EnumRegistrationState.ACTIVE
-            second_event: BaseModel = became_active_event
-            projection_data: dict[str, object] = {
+        # OMN-5132: Go directly to ACTIVE. No ack round-trip.
+        liveness_deadline = now + timedelta(seconds=self._liveness_interval_seconds)
+        became_active_event = ModelNodeBecameActive(
+            entity_id=node_id,
+            node_id=node_id,
+            correlation_id=correlation_id,
+            causation_id=event.correlation_id,
+            emitted_at=now,
+            capabilities=capabilities_data,
+        )
+
+        projection_record = ModelProjectionRecord(
+            entity_id=node_id,
+            domain="registration",
+            current_state=EnumRegistrationState.ACTIVE.value,
+            node_type=node_type.value,
+            data={
                 "node_version": (
                     str(event.node_version) if event.node_version is not None else None
                 ),
@@ -265,45 +247,7 @@ class RegistrationReducerService:
                 "registered_at": now,
                 "updated_at": now,
                 "correlation_id": correlation_id,
-            }
-            reason = "Registration initiated (direct-to-active, auto_ack)"
-        else:
-            # Standard two-way handshake: transition to AWAITING_ACK
-            ack_deadline = now + timedelta(seconds=self._ack_timeout_seconds)
-            accepted_event = ModelNodeRegistrationAccepted(
-                entity_id=node_id,
-                node_id=node_id,
-                correlation_id=correlation_id,
-                causation_id=event.correlation_id,
-                emitted_at=now,
-                ack_deadline=ack_deadline,
-            )
-            target_state = EnumRegistrationState.AWAITING_ACK
-            second_event = accepted_event
-            projection_data = {
-                "node_version": (
-                    str(event.node_version) if event.node_version is not None else None
-                ),
-                "capabilities": capabilities_data,
-                "contract_type": None,
-                "intent_types": [],
-                "protocols": [],
-                "capability_tags": [],
-                "contract_version": None,
-                "ack_deadline": ack_deadline,
-                "last_applied_event_id": registration_attempt_id,
-                "registered_at": now,
-                "updated_at": now,
-                "correlation_id": correlation_id,
-            }
-            reason = "Registration initiated"
-
-        projection_record = ModelProjectionRecord(
-            entity_id=node_id,
-            domain="registration",
-            current_state=target_state.value,
-            node_type=node_type.value,
-            data=projection_data,
+            },
         )
 
         postgres_payload = ModelPayloadPostgresUpsertRegistration(
@@ -318,10 +262,10 @@ class RegistrationReducerService:
 
         return ModelReducerDecision(
             action="emit",
-            new_state=target_state,
-            events=(initiated_event, second_event),
+            new_state=EnumRegistrationState.ACTIVE,
+            events=(initiated_event, became_active_event),
             intents=(upsert_intent,),
-            reason=reason,
+            reason="Registration initiated (direct-to-active)",
         )
 
     # ------------------------------------------------------------------

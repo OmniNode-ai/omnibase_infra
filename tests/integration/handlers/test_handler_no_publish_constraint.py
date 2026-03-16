@@ -536,7 +536,7 @@ class TestHandlerNodeIntrospectedBusIsolation:
         The reducer encapsulates all decision logic (ack_timeout, consul_enabled).
         """
         mock_reader = MagicMock()
-        reducer = RegistrationReducerService(ack_timeout_seconds=60.0)
+        reducer = RegistrationReducerService()
 
         handler = HandlerNodeIntrospected(
             projection_reader=mock_reader,
@@ -578,7 +578,7 @@ class TestHandlerNodeIntrospectedBusIsolation:
         layer via intent-based architecture.
         """
         mock_reader = MagicMock()
-        reducer = RegistrationReducerService(ack_timeout_seconds=30.0)
+        reducer = RegistrationReducerService()
 
         handler = HandlerNodeIntrospected(
             projection_reader=mock_reader,
@@ -1584,7 +1584,7 @@ class TestBusDetectionRegression:
         """
         handler = HandlerNodeIntrospected(
             projection_reader=MagicMock(),
-            reducer=RegistrationReducerService(ack_timeout_seconds=60.0),
+            reducer=RegistrationReducerService(),
         )
 
         for attr in dir(handler):

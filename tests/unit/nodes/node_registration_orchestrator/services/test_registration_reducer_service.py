@@ -156,7 +156,7 @@ class TestDecideIntrospectionNewAndRetriable:
     """Tests for reducer-driven decide_introspection: emit path (new node + retriable states)."""
 
     def test_new_node_emits_registration(self) -> None:
-        """projection=None (new node) -> action='emit', 2 events, postgres upsert intent."""
+        """projection=None (new node) -> action='emit', direct to ACTIVE (OMN-5132)."""
         service = RegistrationReducerService()
         event = make_introspection_event()
         correlation_id = uuid4()
@@ -170,20 +170,22 @@ class TestDecideIntrospectionNewAndRetriable:
 
         assert isinstance(decision, ModelReducerDecision)
         assert decision.action == "emit"
+        assert decision.new_state == EnumRegistrationState.ACTIVE
         assert len(decision.events) == 2
         assert isinstance(decision.events[0], ModelNodeRegistrationInitiated)
-        assert isinstance(decision.events[1], ModelNodeRegistrationAccepted)
-        # Must have at least the postgres upsert intent
-        assert len(decision.intents) >= 1
+        assert isinstance(decision.events[1], ModelNodeBecameActive)
+        # Must have the postgres upsert intent
+        assert len(decision.intents) == 1
         postgres_intents = [
             i
             for i in decision.intents
             if isinstance(i.payload, ModelPayloadPostgresUpsertRegistration)
         ]
         assert len(postgres_intents) == 1
+        assert postgres_intents[0].payload.record.current_state == "active"
 
     def test_liveness_expired_emits_registration(self) -> None:
-        """projection with state=LIVENESS_EXPIRED -> action='emit'."""
+        """projection with state=LIVENESS_EXPIRED -> re-register as ACTIVE."""
         service = RegistrationReducerService()
         event = make_introspection_event()
         projection = make_projection(EnumRegistrationState.LIVENESS_EXPIRED)
@@ -196,10 +198,11 @@ class TestDecideIntrospectionNewAndRetriable:
         )
 
         assert decision.action == "emit"
+        assert decision.new_state == EnumRegistrationState.ACTIVE
         assert len(decision.events) == 2
 
     def test_rejected_emits_registration(self) -> None:
-        """projection with state=REJECTED -> action='emit'."""
+        """projection with state=REJECTED -> re-register as ACTIVE."""
         service = RegistrationReducerService()
         event = make_introspection_event()
         projection = make_projection(EnumRegistrationState.REJECTED)
@@ -212,10 +215,11 @@ class TestDecideIntrospectionNewAndRetriable:
         )
 
         assert decision.action == "emit"
+        assert decision.new_state == EnumRegistrationState.ACTIVE
         assert len(decision.events) == 2
 
     def test_ack_timed_out_emits_registration(self) -> None:
-        """projection with state=ACK_TIMED_OUT -> action='emit'."""
+        """projection with state=ACK_TIMED_OUT -> re-register as ACTIVE."""
         service = RegistrationReducerService()
         event = make_introspection_event()
         projection = make_projection(EnumRegistrationState.ACK_TIMED_OUT)
@@ -228,7 +232,28 @@ class TestDecideIntrospectionNewAndRetriable:
         )
 
         assert decision.action == "emit"
+        assert decision.new_state == EnumRegistrationState.ACTIVE
         assert len(decision.events) == 2
+
+    def test_awaiting_ack_is_retriable(self) -> None:
+        """projection with state=AWAITING_ACK -> re-register as ACTIVE (OMN-5132)."""
+        service = RegistrationReducerService()
+        node_id = uuid4()
+        event = make_introspection_event(node_id=node_id)
+        projection = make_projection(
+            EnumRegistrationState.AWAITING_ACK,
+            entity_id=node_id,
+        )
+
+        decision = service.decide_introspection(
+            projection=projection,
+            event=event,
+            correlation_id=uuid4(),
+            now=TEST_NOW,
+        )
+
+        assert decision.action == "emit"
+        assert decision.new_state == EnumRegistrationState.ACTIVE
 
 
 class TestDecideIntrospectionBlockingStates:
@@ -256,21 +281,6 @@ class TestDecideIntrospectionBlockingStates:
         service = RegistrationReducerService()
         event = make_introspection_event()
         projection = make_projection(EnumRegistrationState.ACCEPTED)
-
-        decision = service.decide_introspection(
-            projection=projection,
-            event=event,
-            correlation_id=uuid4(),
-            now=TEST_NOW,
-        )
-
-        assert decision.action == "no_op"
-
-    def test_awaiting_ack_blocks(self) -> None:
-        """state=AWAITING_ACK -> action='no_op'."""
-        service = RegistrationReducerService()
-        event = make_introspection_event()
-        projection = make_projection(EnumRegistrationState.AWAITING_ACK)
 
         decision = service.decide_introspection(
             projection=projection,
@@ -315,32 +325,8 @@ class TestDecideIntrospectionBlockingStates:
 class TestDecideIntrospectionEventFields:
     """Tests for reducer-driven decide_introspection: event field correctness."""
 
-    def test_emits_accepted_event(self) -> None:
-        """Verify ModelNodeRegistrationAccepted has correct ack_deadline."""
-        ack_timeout = 45.0
-        service = RegistrationReducerService(
-            ack_timeout_seconds=ack_timeout,
-        )
-        event = make_introspection_event()
-
-        decision = service.decide_introspection(
-            projection=None,
-            event=event,
-            correlation_id=uuid4(),
-            now=TEST_NOW,
-        )
-
-        accepted_events = [
-            e for e in decision.events if isinstance(e, ModelNodeRegistrationAccepted)
-        ]
-        assert len(accepted_events) == 1
-        accepted = accepted_events[0]
-        expected_deadline = TEST_NOW + timedelta(seconds=ack_timeout)
-        assert accepted.ack_deadline == expected_deadline
-        assert accepted.emitted_at == TEST_NOW
-
-    def test_initial_state_is_awaiting_ack(self) -> None:
-        """Verify projection record in postgres intent has current_state='awaiting_ack'."""
+    def test_emits_became_active_event(self) -> None:
+        """Verify ModelNodeBecameActive is emitted with capabilities (OMN-5132)."""
         service = RegistrationReducerService()
         event = make_introspection_event()
 
@@ -351,7 +337,27 @@ class TestDecideIntrospectionEventFields:
             now=TEST_NOW,
         )
 
-        assert decision.new_state == EnumRegistrationState.AWAITING_ACK
+        became_active_events = [
+            e for e in decision.events if isinstance(e, ModelNodeBecameActive)
+        ]
+        assert len(became_active_events) == 1
+        became_active = became_active_events[0]
+        assert became_active.emitted_at == TEST_NOW
+        assert became_active.node_id == event.node_id
+
+    def test_initial_state_is_active(self) -> None:
+        """Verify projection record in postgres intent has current_state='active' (OMN-5132)."""
+        service = RegistrationReducerService()
+        event = make_introspection_event()
+
+        decision = service.decide_introspection(
+            projection=None,
+            event=event,
+            correlation_id=uuid4(),
+            now=TEST_NOW,
+        )
+
+        assert decision.new_state == EnumRegistrationState.ACTIVE
 
         postgres_intents = [
             i
@@ -360,7 +366,26 @@ class TestDecideIntrospectionEventFields:
         ]
         assert len(postgres_intents) == 1
         record = postgres_intents[0].payload.record.model_dump()
-        assert record["current_state"] == EnumRegistrationState.AWAITING_ACK.value
+        assert record["current_state"] == EnumRegistrationState.ACTIVE.value
+
+    def test_liveness_deadline_set(self) -> None:
+        """Verify liveness_deadline is set in projection data (OMN-5132)."""
+        service = RegistrationReducerService(liveness_interval_seconds=120)
+        event = make_introspection_event()
+
+        decision = service.decide_introspection(
+            projection=None,
+            event=event,
+            correlation_id=uuid4(),
+            now=TEST_NOW,
+        )
+
+        payload = decision.intents[0].payload
+        assert isinstance(payload, ModelPayloadPostgresUpsertRegistration)
+        data = payload.record.data
+        assert "liveness_deadline" in data
+        expected_deadline = TEST_NOW + timedelta(seconds=120)
+        assert data["liveness_deadline"] == expected_deadline
 
 
 # ---------------------------------------------------------------------------
@@ -774,20 +799,20 @@ class TestDecideTimeout:
 
 
 # ---------------------------------------------------------------------------
-# auto_ack (OMN-5132) — direct-to-active path
+# OMN-5132: direct-to-active regression tests
 # ---------------------------------------------------------------------------
 
 
-class TestDecideIntrospectionAutoAck:
-    """Tests for the auto_ack=True path in decide_introspection (OMN-5132).
+class TestDecideIntrospectionDirectToActive:
+    """Regression tests for direct-to-active registration (OMN-5132).
 
-    When auto_ack is enabled, the reducer skips AWAITING_ACK and transitions
-    directly to ACTIVE, eliminating the ack round-trip race condition.
+    Nodes always go directly to ACTIVE on introspection. There is no
+    AWAITING_ACK intermediate state and no ack round-trip.
     """
 
-    def test_new_node_goes_directly_to_active(self) -> None:
-        """New node with auto_ack=True should transition directly to ACTIVE."""
-        service = RegistrationReducerService(auto_ack=True)
+    def test_no_awaiting_ack_state_produced(self) -> None:
+        """The reducer must never produce AWAITING_ACK as a new_state."""
+        service = RegistrationReducerService()
         event = make_introspection_event()
 
         decision = service.decide_introspection(
@@ -797,22 +822,14 @@ class TestDecideIntrospectionAutoAck:
             now=TEST_NOW,
         )
 
-        assert decision.action == "emit"
         assert decision.new_state == EnumRegistrationState.ACTIVE
-        assert decision.reason == "Registration initiated (direct-to-active, auto_ack)"
-        # Should emit Initiated + BecameActive (not Accepted)
-        assert len(decision.events) == 2
-        assert isinstance(decision.events[0], ModelNodeRegistrationInitiated)
-        assert isinstance(decision.events[1], ModelNodeBecameActive)
-        # PostgreSQL upsert should write ACTIVE, not AWAITING_ACK
-        assert len(decision.intents) == 1
-        payload = decision.intents[0].payload
-        assert isinstance(payload, ModelPayloadPostgresUpsertRegistration)
-        assert payload.record.current_state == "active"
+        # No ModelNodeRegistrationAccepted should appear
+        for evt in decision.events:
+            assert not isinstance(evt, ModelNodeRegistrationAccepted)
 
-    def test_awaiting_ack_unsticks_to_active(self) -> None:
-        """Node stuck in AWAITING_ACK with auto_ack=True should re-register as ACTIVE."""
-        service = RegistrationReducerService(auto_ack=True)
+    def test_stale_awaiting_ack_is_retriable(self) -> None:
+        """Nodes stuck in AWAITING_ACK from a prior runtime are re-registered."""
+        service = RegistrationReducerService()
         node_id = uuid4()
         projection = make_projection(
             EnumRegistrationState.AWAITING_ACK,
@@ -830,84 +847,3 @@ class TestDecideIntrospectionAutoAck:
 
         assert decision.action == "emit"
         assert decision.new_state == EnumRegistrationState.ACTIVE
-        assert "direct-to-active" in decision.reason
-
-    def test_awaiting_ack_without_auto_ack_is_noop(self) -> None:
-        """Node in AWAITING_ACK without auto_ack should remain blocked (no-op)."""
-        service = RegistrationReducerService(auto_ack=False)
-        node_id = uuid4()
-        projection = make_projection(
-            EnumRegistrationState.AWAITING_ACK,
-            entity_id=node_id,
-        )
-        event = make_introspection_event(node_id=node_id)
-
-        decision = service.decide_introspection(
-            projection=projection,
-            event=event,
-            correlation_id=uuid4(),
-            now=TEST_NOW,
-        )
-
-        assert decision.action == "no_op"
-
-    def test_active_node_stays_noop_with_auto_ack(self) -> None:
-        """Already-active node should still be no-op even with auto_ack."""
-        service = RegistrationReducerService(auto_ack=True)
-        node_id = uuid4()
-        projection = make_projection(
-            EnumRegistrationState.ACTIVE,
-            entity_id=node_id,
-        )
-        event = make_introspection_event(node_id=node_id)
-
-        decision = service.decide_introspection(
-            projection=projection,
-            event=event,
-            correlation_id=uuid4(),
-            now=TEST_NOW,
-        )
-
-        assert decision.action == "no_op"
-
-    def test_auto_ack_false_uses_awaiting_ack(self) -> None:
-        """auto_ack=False should use the standard AWAITING_ACK path."""
-        service = RegistrationReducerService(auto_ack=False)
-        event = make_introspection_event()
-
-        decision = service.decide_introspection(
-            projection=None,
-            event=event,
-            correlation_id=uuid4(),
-            now=TEST_NOW,
-        )
-
-        assert decision.action == "emit"
-        assert decision.new_state == EnumRegistrationState.AWAITING_ACK
-        # Should emit Initiated + Accepted (standard handshake)
-        assert len(decision.events) == 2
-        assert isinstance(decision.events[0], ModelNodeRegistrationInitiated)
-        assert isinstance(decision.events[1], ModelNodeRegistrationAccepted)
-
-    def test_liveness_deadline_set_on_direct_active(self) -> None:
-        """Direct-to-active should set a liveness_deadline in the projection data."""
-        service = RegistrationReducerService(
-            auto_ack=True,
-            liveness_interval_seconds=120,
-        )
-        event = make_introspection_event()
-
-        decision = service.decide_introspection(
-            projection=None,
-            event=event,
-            correlation_id=uuid4(),
-            now=TEST_NOW,
-        )
-
-        assert decision.action == "emit"
-        payload = decision.intents[0].payload
-        assert isinstance(payload, ModelPayloadPostgresUpsertRegistration)
-        data = payload.record.data
-        assert "liveness_deadline" in data
-        expected_deadline = TEST_NOW + timedelta(seconds=120)
-        assert data["liveness_deadline"] == expected_deadline

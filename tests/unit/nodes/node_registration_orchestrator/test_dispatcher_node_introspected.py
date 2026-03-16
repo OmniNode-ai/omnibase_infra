@@ -1,16 +1,14 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Unit tests for DispatcherNodeIntrospected auto-ACK (OMN-3444).
+"""Unit tests for DispatcherNodeIntrospected (OMN-3444, OMN-5132).
 
-Tests validate:
-- When ONEX_REGISTRATION_AUTO_ACK=true and the reducer emits ModelNodeRegistrationAccepted,
-  the dispatcher direct-publishes ModelNodeRegistrationAcked to the ack topic.
-- When ONEX_REGISTRATION_AUTO_ACK is not set, no publish occurs.
-- The auto-ACK envelope is NOT included in output_events.
-
-Architecture note:
-    Handlers cannot have event_bus access (architecture invariant).
-    Auto-ACK is the dispatcher's responsibility (OMN-3444, Path B).
+OMN-5132: The reducer now transitions nodes directly to ACTIVE (no
+AWAITING_ACK, no ModelNodeRegistrationAccepted). The dispatcher's
+auto-ACK code path is never triggered because the reducer no longer
+emits ModelNodeRegistrationAccepted. These tests verify that:
+- The dispatcher processes introspection events successfully.
+- No auto-ACK publish occurs (no ModelNodeRegistrationAccepted to trigger it).
+- Output events include ModelNodeBecameActive (direct-to-active).
 """
 
 from __future__ import annotations
@@ -24,6 +22,9 @@ import pytest
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
+from omnibase_infra.models.registration.events.model_node_became_active import (
+    ModelNodeBecameActive,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.dispatchers.dispatcher_node_introspected import (
     DispatcherNodeIntrospected,
 )
@@ -39,16 +40,12 @@ from omnibase_infra.projectors.projection_reader_registration import (
 
 TEST_NOW = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
 
-_ACK_TOPIC = "onex.cmd.platform.node-registration-acked.v1"
-
 
 def _make_handler() -> HandlerNodeIntrospected:
     """Create a HandlerNodeIntrospected with a mock projection reader."""
     mock_reader = AsyncMock(spec=ProjectionReaderRegistration)
-    mock_reader.get_entity_state = AsyncMock(
-        return_value=None
-    )  # new node -> AWAITING_ACK
-    reducer = RegistrationReducerService(ack_timeout_seconds=30.0)
+    mock_reader.get_entity_state = AsyncMock(return_value=None)  # new node -> ACTIVE
+    reducer = RegistrationReducerService()
     return HandlerNodeIntrospected(mock_reader, reducer=reducer)
 
 
@@ -71,29 +68,16 @@ def _make_envelope(node_id: None = None) -> ModelEventEnvelope[object]:
     )
 
 
-class TestDispatcherNodeIntrospectedAutoAck:
-    """Tests for ONEX_REGISTRATION_AUTO_ACK feature in the dispatcher (OMN-3444)."""
+class TestDispatcherNodeIntrospectedDirectToActive:
+    """Tests for direct-to-active registration in the dispatcher (OMN-5132)."""
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_dispatcher_publishes_auto_ack_when_flag_enabled(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Gate: dispatcher direct-publishes ModelNodeRegistrationAcked when auto-ACK is on.
-
-        When ONEX_REGISTRATION_AUTO_ACK=true and the reducer emits
-        ModelNodeRegistrationAccepted (new-node path), the dispatcher must
-        direct-publish ModelNodeRegistrationAcked to _ACK_TOPIC.
-        The ack must NOT appear in the ModelDispatchResult.output_events.
-        """
+    async def test_dispatcher_emits_became_active(self) -> None:
+        """Dispatcher output_events should include ModelNodeBecameActive."""
         from omnibase_core.protocols.event_bus.protocol_event_bus import (
             ProtocolEventBus,
         )
-        from omnibase_infra.models.registration.commands.model_node_registration_acked import (
-            ModelNodeRegistrationAcked,
-        )
-
-        monkeypatch.setenv("ONEX_REGISTRATION_AUTO_ACK", "true")
 
         mock_event_bus = AsyncMock(spec=ProtocolEventBus)
         dispatcher = DispatcherNodeIntrospected(
@@ -103,35 +87,19 @@ class TestDispatcherNodeIntrospectedAutoAck:
         envelope = _make_envelope()
         result = await dispatcher.handle(envelope)
 
-        # publish_envelope must be called exactly once
-        mock_event_bus.publish_envelope.assert_awaited_once()
-
-        call_args = mock_event_bus.publish_envelope.call_args
-        # Envelope is first positional arg; topic is keyword arg
-        published_envelope = call_args.args[0]
-        assert isinstance(published_envelope, ModelEventEnvelope)
-        assert isinstance(published_envelope.payload, ModelNodeRegistrationAcked)
-
-        # Topic must be the ack topic
-        assert call_args.kwargs.get("topic") == _ACK_TOPIC
-
-        # Auto-ACK must NOT appear in output_events (would be routed to wrong topic)
-        ack_in_output = [
-            e for e in result.output_events if isinstance(e, ModelNodeRegistrationAcked)
+        assert result.status.value == "success"
+        became_active_events = [
+            e for e in result.output_events if isinstance(e, ModelNodeBecameActive)
         ]
-        assert len(ack_in_output) == 0
+        assert len(became_active_events) == 1
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_dispatcher_no_auto_ack_when_flag_disabled(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """When ONEX_REGISTRATION_AUTO_ACK is not set, publish_envelope must not be called."""
+    async def test_dispatcher_no_auto_ack_publish(self) -> None:
+        """No auto-ACK publish occurs because reducer no longer emits Accepted."""
         from omnibase_core.protocols.event_bus.protocol_event_bus import (
             ProtocolEventBus,
         )
-
-        monkeypatch.delenv("ONEX_REGISTRATION_AUTO_ACK", raising=False)
 
         mock_event_bus = AsyncMock(spec=ProtocolEventBus)
         dispatcher = DispatcherNodeIntrospected(
@@ -141,4 +109,5 @@ class TestDispatcherNodeIntrospectedAutoAck:
         envelope = _make_envelope()
         await dispatcher.handle(envelope)
 
+        # No publish_envelope call — reducer emits BecameActive, not Accepted
         mock_event_bus.publish_envelope.assert_not_awaited()

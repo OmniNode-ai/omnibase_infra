@@ -66,13 +66,9 @@ def create_mock_projection_reader() -> AsyncMock:
     return mock
 
 
-def create_default_reducer(
-    ack_timeout_seconds: float = 30.0,
-) -> RegistrationReducerService:
+def create_default_reducer() -> RegistrationReducerService:
     """Create a RegistrationReducerService with test defaults."""
-    return RegistrationReducerService(
-        ack_timeout_seconds=ack_timeout_seconds,
-    )
+    return RegistrationReducerService()
 
 
 def create_projection(
@@ -217,7 +213,6 @@ class TestHandlerNodeIntrospectedSkipsBlockingStates:
         [
             EnumRegistrationState.PENDING_REGISTRATION,
             EnumRegistrationState.ACCEPTED,
-            EnumRegistrationState.AWAITING_ACK,
             EnumRegistrationState.ACK_RECEIVED,
             EnumRegistrationState.ACTIVE,
         ],
@@ -257,6 +252,7 @@ class TestHandlerNodeIntrospectedRetriableStates:
             EnumRegistrationState.LIVENESS_EXPIRED,
             EnumRegistrationState.REJECTED,
             EnumRegistrationState.ACK_TIMED_OUT,
+            EnumRegistrationState.AWAITING_ACK,
         ],
     )
     async def test_emits_initiated_for_retriable_states(
@@ -551,7 +547,7 @@ class TestHandlerNodeIntrospectedIntents:
         record = postgres_payload.record.model_dump()
         assert record["entity_id"] == node_id
         assert record["domain"] == "registration"
-        assert record["current_state"] == EnumRegistrationState.AWAITING_ACK.value
+        assert record["current_state"] == EnumRegistrationState.ACTIVE.value
         assert record["node_type"] == "effect"
 
         # Verify intent envelope
@@ -631,13 +627,12 @@ class TestHandlerNodeIntrospectedIntents:
         assert len(output.intents) == 1
 
     @pytest.mark.asyncio
-    async def test_ack_deadline_in_postgres_intent(self) -> None:
-        """Test that ack_deadline is calculated correctly in postgres intent."""
+    async def test_liveness_deadline_in_postgres_intent(self) -> None:
+        """Test that liveness_deadline is set in postgres intent (OMN-5132)."""
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
-        ack_timeout_seconds = 60.0
-        reducer = create_default_reducer(ack_timeout_seconds=ack_timeout_seconds)
+        reducer = RegistrationReducerService(liveness_interval_seconds=120)
         handler = HandlerNodeIntrospected(mock_reader, reducer)
 
         introspection_event = create_introspection_event()
@@ -645,7 +640,6 @@ class TestHandlerNodeIntrospectedIntents:
 
         output = await handler.handle(envelope)
 
-        # Find postgres intent and verify ack_deadline
         postgres_intents = [
             i
             for i in output.intents
@@ -654,12 +648,12 @@ class TestHandlerNodeIntrospectedIntents:
         assert len(postgres_intents) == 1
 
         record = postgres_intents[0].payload.record.model_dump()
-        expected_deadline = TEST_NOW + timedelta(seconds=ack_timeout_seconds)
-        assert record["data"]["ack_deadline"] == expected_deadline
+        expected_deadline = TEST_NOW + timedelta(seconds=120)
+        assert record["data"]["liveness_deadline"] == expected_deadline
 
     @pytest.mark.asyncio
-    async def test_default_ack_timeout_in_intent(self) -> None:
-        """Test that default ack timeout (30s) is used in intent."""
+    async def test_state_is_active_in_postgres_intent(self) -> None:
+        """Test that new nodes write ACTIVE state directly (OMN-5132)."""
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
@@ -676,8 +670,7 @@ class TestHandlerNodeIntrospectedIntents:
             if isinstance(i.payload, ModelPayloadPostgresUpsertRegistration)
         ]
         record = postgres_intents[0].payload.record.model_dump()
-        expected_deadline = TEST_NOW + timedelta(seconds=30.0)
-        assert record["data"]["ack_deadline"] == expected_deadline
+        assert record["current_state"] == "active"
 
     @pytest.mark.asyncio
     async def test_capabilities_in_postgres_intent(self) -> None:
