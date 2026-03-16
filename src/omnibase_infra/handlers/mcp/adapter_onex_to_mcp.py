@@ -130,7 +130,9 @@ class MCPToolDefinition:
     retry_count: int = 3
     requires_auth: bool = False
     tags: list[str] = field(default_factory=list)
-    metadata: dict[str, object] = field(default_factory=dict)
+    metadata: dict[str, object] = field(  # ONEX_EXCLUDE: dict_str_any
+        default_factory=dict
+    )
     # Full JSON Schema for input validation (OMN-2699).
     # When set, HandlerMCP._handle_call_tool() validates arguments against this
     # schema using jsonschema before dispatching to ONEX.  None means pass-through
