@@ -106,5 +106,8 @@ class ModelDomainPluginConfig:
     # (e.g., SnapshotPublisher). None when using inmemory event bus.
     kafka_bootstrap_servers: str | None = None
 
+    # Optional: Per-event-type topic routing from contract published_events.
+    output_topic_map: dict[str, str] | None = None
+
 
 __all__ = ["ModelDomainPluginConfig"]
