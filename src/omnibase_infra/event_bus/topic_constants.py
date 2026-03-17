@@ -584,6 +584,8 @@ __all__ = [
     "TOPIC_LLM_CALL_COMPLETED",
     # LLM Endpoint Health Topics
     "TOPIC_LLM_ENDPOINT_HEALTH",
+    # Wiring Health Snapshot Topics (OMN-5292)
+    "TOPIC_WIRING_HEALTH_SNAPSHOT",
     # Wiring Health Topics
     "TOPIC_INJECTION_AGENT_MATCH",
     "TOPIC_INJECTION_CONTEXT_UTILIZATION",

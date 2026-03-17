@@ -97,6 +97,7 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_VALIDATION_CROSS_REPO_RUN_COMPLETED,
     SUFFIX_VALIDATION_CROSS_REPO_RUN_STARTED,
     SUFFIX_VALIDATION_CROSS_REPO_VIOLATIONS_BATCH,
+    SUFFIX_WIRING_HEALTH_SNAPSHOT,
 )
 from omnibase_infra.topics.topic_resolver import (
     BusDescriptorNotFoundError,
@@ -146,6 +147,7 @@ __all__: list[str] = [
     "SUFFIX_BASELINES_COMPUTED",
     "SUFFIX_CIRCUIT_BREAKER_STATE",
     "SUFFIX_GMAIL_ARCHIVE_PURGED",
+    "SUFFIX_WIRING_HEALTH_SNAPSHOT",
     # OmniMemory domain suffix constants
     "SUFFIX_OMNIMEMORY_DOCUMENT_DISCOVERED",
     "SUFFIX_OMNIMEMORY_DOCUMENT_CHANGED",

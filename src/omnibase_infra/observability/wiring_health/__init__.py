@@ -38,6 +38,9 @@ from omnibase_infra.observability.wiring_health.model_wiring_health_alert import
 from omnibase_infra.observability.wiring_health.model_wiring_health_metrics import (
     ModelWiringHealthMetrics,
 )
+from omnibase_infra.observability.wiring_health.model_wiring_health_snapshot_event import (
+    ModelWiringHealthSnapshotEvent,
+)
 from omnibase_infra.observability.wiring_health.protocol_consumption_count_source import (
     ProtocolConsumptionCountSource,
 )
@@ -60,6 +63,7 @@ __all__ = [
     "ModelTopicWiringHealth",
     "ModelWiringHealthAlert",
     "ModelWiringHealthMetrics",
+    "ModelWiringHealthSnapshotEvent",
     # Protocols
     "ProtocolConsumptionCountSource",
     "ProtocolEmissionCountSource",

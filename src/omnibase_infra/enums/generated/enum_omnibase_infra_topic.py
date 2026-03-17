@@ -24,3 +24,4 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_EFFECTIVENESS_DATA_CHANGED_V1 = "onex.evt.omnibase-infra.effectiveness-data-changed.v1"  # onex.evt.omnibase-infra.effectiveness-data-changed.v1
     EVT_GMAIL_INTENT_RECEIVED_V1 = "onex.evt.omnibase-infra.gmail-intent-received.v1"  # onex.evt.omnibase-infra.gmail-intent-received.v1
     EVT_LLM_ENDPOINT_HEALTH_V1 = "onex.evt.omnibase-infra.llm-endpoint-health.v1"  # onex.evt.omnibase-infra.llm-endpoint-health.v1
+    EVT_WIRING_HEALTH_SNAPSHOT_V1 = "onex.evt.omnibase-infra.wiring-health-snapshot.v1"  # onex.evt.omnibase-infra.wiring-health-snapshot.v1

@@ -42,9 +42,14 @@ See Also:
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from omnibase_infra.event_bus.topic_constants import WIRING_HEALTH_MONITORED_TOPICS
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.event_bus.topic_constants import (
+    TOPIC_WIRING_HEALTH_SNAPSHOT,
+    WIRING_HEALTH_MONITORED_TOPICS,
+)
 from omnibase_infra.observability.wiring_health.model_topic_wiring_health import (
     DEFAULT_MISMATCH_THRESHOLD,
 )
@@ -54,12 +59,18 @@ from omnibase_infra.observability.wiring_health.model_wiring_health_alert import
 from omnibase_infra.observability.wiring_health.model_wiring_health_metrics import (
     ModelWiringHealthMetrics,
 )
+from omnibase_infra.observability.wiring_health.model_wiring_health_snapshot_event import (
+    ModelWiringHealthSnapshotEvent,
+)
 from omnibase_infra.observability.wiring_health.protocol_consumption_count_source import (
     ProtocolConsumptionCountSource,
 )
 from omnibase_infra.observability.wiring_health.protocol_emission_count_source import (
     ProtocolEmissionCountSource,
 )
+
+if TYPE_CHECKING:
+    from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 
 _logger = logging.getLogger(__name__)
 
@@ -94,6 +105,7 @@ class WiringHealthChecker:
         environment: str,
         threshold: float = DEFAULT_MISMATCH_THRESHOLD,
         prometheus_sink: object | None = None,
+        event_bus: ProtocolEventBusLike | None = None,
     ) -> None:
         """Initialize the wiring health checker.
 
@@ -103,12 +115,14 @@ class WiringHealthChecker:
             environment: Environment identifier for alert context.
             threshold: Mismatch threshold (default 5%).
             prometheus_sink: Optional SinkMetricsPrometheus for metric export.
+            event_bus: Optional event bus for emitting snapshot events (OMN-5292).
         """
         self._emission_source = emission_source
         self._consumption_source = consumption_source
         self._environment = environment
         self._threshold = threshold
         self._prometheus_sink = prometheus_sink
+        self._event_bus = event_bus
         self._monitored_topics = frozenset(WIRING_HEALTH_MONITORED_TOPICS)
 
         _logger.info(
@@ -250,6 +264,44 @@ class WiringHealthChecker:
             _logger.warning(
                 "Failed to update Prometheus metrics",
                 extra={"error": str(e), "correlation_id": str(correlation_id)},
+            )
+
+    async def emit_snapshot(
+        self,
+        metrics: ModelWiringHealthMetrics,
+        correlation_id: UUID,
+    ) -> None:
+        """Emit a wiring health snapshot event to the event bus (OMN-5292).
+
+        No-op if no event bus was configured at construction time.
+        Failures are logged but do not raise — the snapshot is informational.
+
+        Args:
+            metrics: Computed wiring health metrics to publish.
+            correlation_id: Correlation ID for tracing.
+        """
+        if self._event_bus is None:
+            return
+
+        event = ModelWiringHealthSnapshotEvent.from_metrics(
+            metrics=metrics,
+            correlation_id=correlation_id,
+        )
+        envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+            payload=event,
+            correlation_id=correlation_id,
+            event_type="wiring-health-snapshot",
+            source_tool="WiringHealthChecker",
+        )
+        try:
+            await self._event_bus.publish_envelope(
+                envelope=envelope,
+                topic=TOPIC_WIRING_HEALTH_SNAPSHOT,
+            )
+        except Exception:
+            _logger.exception(
+                "Failed to emit wiring health snapshot event",
+                extra={"correlation_id": str(correlation_id)},
             )
 
     def to_health_response(
