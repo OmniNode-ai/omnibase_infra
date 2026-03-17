@@ -539,6 +539,19 @@ Consumer: Dashboards, alerting, orchestrators
 Ticket: OMN-2255
 """
 
+# Circuit Breaker State topics (OMN-5293)
+TOPIC_CIRCUIT_BREAKER_STATE: Final[str] = (
+    "onex.evt.omnibase-infra.circuit-breaker-state.v1"
+)
+"""Circuit breaker state transition events emitted by MixinAsyncCircuitBreaker.
+
+Emitted on CLOSED→OPEN, OPEN→HALF_OPEN, and HALF_OPEN→CLOSED transitions.
+
+Producer: MixinAsyncCircuitBreaker (any class using the mixin with event_bus set)
+Consumer: Omnidash /circuit-breakers dashboard
+Ticket: OMN-5293
+"""
+
 # Grouped constants for wiring health monitoring
 WIRING_HEALTH_MONITORED_TOPICS: Final[tuple[str, ...]] = (
     TOPIC_SESSION_OUTCOME_CURRENT,
