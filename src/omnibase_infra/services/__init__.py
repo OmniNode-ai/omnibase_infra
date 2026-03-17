@@ -47,6 +47,9 @@ from omnibase_infra.services.contract_publisher import (
 )
 from omnibase_infra.services.corpus_capture import CorpusCapture
 from omnibase_infra.services.service_capability_query import ServiceCapabilityQuery
+from omnibase_infra.services.service_circuit_breaker_event_publisher import (
+    CircuitBreakerEventPublisher,
+)
 from omnibase_infra.services.service_llm_endpoint_health import (
     TOPIC_LLM_ENDPOINT_HEALTH,
     ServiceLlmEndpointHealth,
@@ -117,6 +120,8 @@ __all__ = [
     "TOPIC_LLM_ENDPOINT_HEALTH",
     # Topic catalog service (OMN-2311)
     "ServiceTopicCatalog",
+    # Circuit breaker event publisher (OMN-5293)
+    "CircuitBreakerEventPublisher",
     # Contract publisher service (OMN-1752)
     "ContractPublisherError",
     "ContractPublishingInfraError",
