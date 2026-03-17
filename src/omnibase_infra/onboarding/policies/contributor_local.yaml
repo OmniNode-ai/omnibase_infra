@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+policy_name: "contributor_local"
+description: "Local development setup with event bus (~20 min)"
+target_capabilities:
+  - "event_bus_connected"
+max_estimated_minutes: 20
