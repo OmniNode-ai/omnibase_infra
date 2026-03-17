@@ -6,7 +6,11 @@
 from omnibase_infra.models.resilience.model_circuit_breaker_config import (
     ModelCircuitBreakerConfig,
 )
+from omnibase_infra.models.resilience.model_circuit_breaker_state_event import (
+    ModelCircuitBreakerStateEvent,
+)
 
 __all__ = [
     "ModelCircuitBreakerConfig",
+    "ModelCircuitBreakerStateEvent",
 ]

@@ -411,6 +411,18 @@ Producer: omnibase_infra baselines compute node (TODO: implement — OMN-4296)
 Consumer: omnidash /baselines dashboard
 """
 
+SUFFIX_CIRCUIT_BREAKER_STATE: str = "onex.evt.omnibase-infra.circuit-breaker.v1"
+"""Topic suffix for circuit breaker state transition events.
+
+Published by CircuitBreakerEventPublisher whenever a circuit breaker transitions
+between states: CLOSED → OPEN, OPEN → HALF_OPEN, or HALF_OPEN → CLOSED.
+
+Each event carries service_name, state, failure_count, threshold, and timestamp.
+
+Producer: CircuitBreakerEventPublisher (MixinAsyncCircuitBreaker integrations)
+Consumer: omnidash /circuit-breaker dashboard (OMN-5293)
+"""
+
 # Full topic name (not a suffix) — named as such to be unambiguous.
 # Used by monitor_logs.py postgres error emitter and downstream consumers.
 TOPIC_DB_ERROR_V1: str = "onex.evt.omnibase-infra.db-error.v1"
@@ -441,6 +453,15 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(
         suffix=SUFFIX_BASELINES_COMPUTED,
         partitions=1,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
+    # Circuit breaker state transitions (3 partitions — low-throughput, state-change-driven)
+    ModelTopicSpec(
+        suffix=SUFFIX_CIRCUIT_BREAKER_STATE,
+        partitions=3,
         kafka_config={
             "retention.ms": "604800000",
             "cleanup.policy": "delete",

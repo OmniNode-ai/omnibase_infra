@@ -945,6 +945,14 @@ pattern_exemptions:
     documentation:
       - docs/patterns/correlation_id_tracking.md
     ticket: OMN-1002
+  - file_pattern: 'model_circuit_breaker_state_event\.py'
+    violation_pattern: "Field 'service_name' might reference an entity"
+    reason: >
+      service_name in ModelCircuitBreakerStateEvent mirrors the same identifier used by MixinAsyncCircuitBreaker.service_name — a free-form string label (e.g. "kafka.production", "db.primary") identifying which service the circuit protects. It is not a reference to a domain entity; it is a telemetry label. The ID + display_name pattern does not apply here.
+
+    documentation:
+      - docs/patterns/circuit_breaker_implementation.md
+    ticket: OMN-5293
   # ModelDispatchLogContext - Dispatch-specific logging
   - file_pattern: 'model_dispatch_log_context\.py'
     class_pattern: "Class 'ModelDispatchLogContext'"
