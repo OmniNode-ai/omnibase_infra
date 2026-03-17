@@ -380,3 +380,88 @@ class TestWiringHealthChecker:
 
         assert alert is not None
         assert alert.correlation_id == correlation_id
+
+
+# =============================================================================
+# Fake event bus for emit_snapshot tests
+# =============================================================================
+
+
+class FakeEventBus:
+    """Minimal fake event bus that records publish_envelope calls."""
+
+    def __init__(self) -> None:
+        self.published: list[tuple[Any, str]] = []
+
+    async def publish_envelope(self, envelope: Any, topic: str) -> None:
+        self.published.append((envelope, topic))
+
+
+class TestWiringHealthCheckerEmitSnapshot:
+    """Tests for WiringHealthChecker.emit_snapshot (OMN-5292)."""
+
+    @pytest.fixture
+    def topic(self) -> str:
+        return WIRING_HEALTH_MONITORED_TOPICS[0]
+
+    @pytest.mark.asyncio
+    async def test_emit_snapshot_publishes_to_correct_topic(self, topic: str) -> None:
+        """emit_snapshot should publish to TOPIC_WIRING_HEALTH_SNAPSHOT."""
+        bus = FakeEventBus()
+        emission_source = MockEmissionSource({topic: 100})
+        consumption_source = MockConsumptionSource({topic: 98})
+
+        checker = WiringHealthChecker(
+            emission_source=emission_source,
+            consumption_source=consumption_source,
+            environment="dev",
+            event_bus=bus,  # type: ignore[arg-type]
+        )
+
+        correlation_id = uuid4()
+        metrics = checker.compute_health(correlation_id)
+        await checker.emit_snapshot(metrics, correlation_id)
+
+        assert len(bus.published) == 1
+        _envelope, published_topic = bus.published[0]
+        assert published_topic == TOPIC_WIRING_HEALTH_SNAPSHOT
+
+    @pytest.mark.asyncio
+    async def test_emit_snapshot_noop_without_event_bus(self, topic: str) -> None:
+        """emit_snapshot should silently no-op when no event bus is configured."""
+        emission_source = MockEmissionSource({topic: 100})
+        consumption_source = MockConsumptionSource({topic: 95})
+
+        checker = WiringHealthChecker(
+            emission_source=emission_source,
+            consumption_source=consumption_source,
+            environment="dev",
+            event_bus=None,
+        )
+
+        metrics = checker.compute_health()
+        # Should not raise
+        await checker.emit_snapshot(metrics, uuid4())
+
+    @pytest.mark.asyncio
+    async def test_emit_snapshot_payload_reflects_metrics(self, topic: str) -> None:
+        """Emitted envelope payload should mirror computed metrics."""
+        bus = FakeEventBus()
+        emission_source = MockEmissionSource({topic: 50})
+        consumption_source = MockConsumptionSource({topic: 50})
+
+        checker = WiringHealthChecker(
+            emission_source=emission_source,
+            consumption_source=consumption_source,
+            environment="dev",
+            event_bus=bus,  # type: ignore[arg-type]
+        )
+
+        metrics = checker.compute_health()
+        await checker.emit_snapshot(metrics, uuid4())
+
+        assert len(bus.published) == 1
+        envelope, _ = bus.published[0]
+        payload = envelope.payload
+        assert payload.overall_healthy == metrics.overall_healthy
+        assert payload.unhealthy_count == metrics.unhealthy_count
