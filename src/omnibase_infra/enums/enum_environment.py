@@ -26,9 +26,15 @@ class EnumEnvironment(str, Enum):
     and configuration management. Each environment has different security
     postures and permitted capabilities.
 
+    Note:
+        The canonical ONEX_ENVIRONMENT values are ``local``, ``staging``,
+        ``production``, and ``ci``.  Legacy code that used ``"dev"`` as a
+        default should be migrated to ``"local"`` (see OMN-5204).
+
     Attributes:
         DEVELOPMENT: Local development environment.
             Most permissive, allows debugging features and relaxed security.
+            Legacy references to ``"dev"`` should use ``"local"`` instead.
         STAGING: Pre-production testing environment.
             Production-like but allows some testing features.
         PRODUCTION: Live production environment.
