@@ -48,7 +48,7 @@ class TestConfigDefaults:
         """All scalar defaults match expected values."""
         cfg = _make_config()
 
-        assert cfg.kafka_bootstrap_servers == "localhost:9092"
+        assert cfg.kafka_bootstrap_servers == "localhost:19092"
         assert cfg.kafka_group_id == "skill-lifecycle-postgres"
         assert cfg.auto_offset_reset == "earliest"
         assert cfg.enable_auto_commit is False
