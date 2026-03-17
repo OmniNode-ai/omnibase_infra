@@ -189,6 +189,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 import random
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
@@ -218,12 +219,17 @@ from omnibase_infra.event_bus.models import (
     ModelEventMessage,
 )
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.event_bus.topic_violation_alerter import TopicViolationAlerter
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.observability.wiring_health import MixinEmissionCounter
 from omnibase_infra.utils import apply_instance_discriminator, compute_consumer_group_id
 from omnibase_infra.utils.util_consumer_group import KAFKA_CONSUMER_GROUP_MAX_LENGTH
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+from omnibase_infra.utils.util_onex_topic_format import (
+    TopicValidationResult,
+    validate_onex_topic_format,
+)
 from omnibase_infra.utils.util_topic_validation import validate_topic_name
 
 logger = logging.getLogger(__name__)
@@ -443,6 +449,18 @@ class EventBusKafka(
 
         # Initialize emission counter mixin (wiring health monitoring)
         self._init_emission_counter()
+
+        # ONEX topic format enforcement (OMN-5209)
+
+        _mode_raw = (
+            os.environ.get("ONEX_TOPIC_ENFORCEMENT_MODE", "warn").lower().strip()
+        )
+        self._topic_enforcement_mode: str = (
+            _mode_raw if _mode_raw in ("warn", "reject", "off") else "warn"
+        )
+        self._topic_violation_alerter: TopicViolationAlerter | None = (
+            TopicViolationAlerter() if self._topic_enforcement_mode != "off" else None
+        )
 
     # =========================================================================
     # Factory Methods
@@ -873,8 +891,11 @@ class EventBusKafka(
                 timestamp=datetime.now(UTC),
             )
 
-        # Validate topic name
+        # Validate topic name (Kafka naming rules)
         self._validate_topic_name(topic, headers.correlation_id)
+
+        # Enforce ONEX canonical topic format (OMN-5209)
+        await self._enforce_onex_topic_format(topic, headers.correlation_id)
 
         # Check circuit breaker - propagate correlation_id from headers (thread-safe)
         async with self._circuit_breaker_lock:
@@ -2043,6 +2064,57 @@ class EventBusKafka(
                 The standalone utility usable outside ``KafkaEventBus``.
         """
         validate_topic_name(topic, correlation_id=correlation_id)
+
+    async def _enforce_onex_topic_format(
+        self, topic: str, correlation_id: UUID
+    ) -> None:
+        """Enforce ONEX canonical topic format on outbound publishes (OMN-5209).
+
+        Validates the topic against the 5-segment ONEX format. In ``warn`` mode,
+        logs a warning and triggers a debounced Slack alert. In ``reject`` mode,
+        raises ``ProtocolConfigurationError`` to block the publish.
+
+        Args:
+            topic: Topic name to validate.
+            correlation_id: Correlation ID for error context.
+
+        Raises:
+            ProtocolConfigurationError: If mode is ``reject`` and topic is invalid.
+        """
+        if self._topic_enforcement_mode == "off":
+            return
+
+        result, reason = validate_onex_topic_format(topic)
+        if result in (
+            TopicValidationResult.VALID,
+            TopicValidationResult.VALID_LEGACY_DLQ,
+            TopicValidationResult.SKIPPED_INTERNAL,
+        ):
+            return
+
+        # Topic is invalid
+        if self._topic_enforcement_mode == "reject":
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="publish",
+                target_name=topic,
+            )
+            raise ProtocolConfigurationError(
+                reason,
+                context=context,
+                parameter="topic",
+                value=topic,
+            )
+
+        # mode == "warn"
+        logger.warning(
+            "ONEX topic format violation (warn mode): %s",
+            reason,
+            extra={"topic": topic, "correlation_id": str(correlation_id)},
+        )
+        if self._topic_violation_alerter is not None:
+            await self._topic_violation_alerter.maybe_alert(topic, reason)
 
     def _model_headers_to_kafka(
         self, headers: ModelEventHeaders
