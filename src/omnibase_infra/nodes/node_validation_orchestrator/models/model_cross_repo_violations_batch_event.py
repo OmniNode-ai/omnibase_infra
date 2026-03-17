@@ -30,7 +30,7 @@ class ModelCrossRepoViolationsBatchEvent(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     event_type: Literal["ValidationViolationsBatch"] = "ValidationViolationsBatch"
-    run_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)  # pattern-ok: opaque run identifier, not a UUID
     violations: list[ModelViolation] = Field(
         description="Violations found in this batch"
     )

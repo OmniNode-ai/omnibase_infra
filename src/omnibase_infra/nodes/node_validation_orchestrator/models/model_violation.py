@@ -21,7 +21,7 @@ class ModelViolation(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    rule_id: str = Field(min_length=1)
+    rule_id: str = Field(min_length=1)  # pattern-ok: opaque rule identifier, not a UUID
     severity: Literal["error", "warning", "info"] = Field(
         description="Violation severity level"
     )

@@ -68,6 +68,12 @@ class TestModelCrossRepoRunStartedEvent:
                 extra="bad",  # type: ignore[call-arg]
             )
 
+    def test_triggered_by_defaults_to_empty_string(self) -> None:
+        event = ModelCrossRepoRunStartedEvent(
+            run_id="x", repos=[], validators=[], timestamp=NOW
+        )
+        assert event.triggered_by == ""
+
     def test_json_keys(self) -> None:
         event = ModelCrossRepoRunStartedEvent(
             run_id="x", repos=[], validators=[], timestamp=NOW
@@ -143,6 +149,17 @@ class TestModelCrossRepoRunCompletedEvent:
         )
         assert event.violations_by_severity == {"error": 3, "warning": 2}
 
+    def test_violations_by_severity_rejects_negative(self) -> None:
+        with pytest.raises(ValueError, match="must be >= 0"):
+            ModelCrossRepoRunCompletedEvent(
+                run_id="run-123",
+                status="failed",
+                total_violations=5,
+                violations_by_severity={"error": -1},
+                duration_ms=8000,
+                timestamp=NOW,
+            )
+
     def test_json_keys(self) -> None:
         event = ModelCrossRepoRunCompletedEvent(
             run_id="x",
@@ -181,6 +198,24 @@ class TestModelLifecycleCandidateUpsertedEvent:
         )
         assert event.tier == "suggested"
         assert event.pass_streak == 5
+
+    def test_tz_validator_names_field(self) -> None:
+        """Timezone validator error message should reference the actual field name."""
+        with pytest.raises(ValueError, match="entered_tier_at must be timezone-aware"):
+            ModelLifecycleCandidateUpsertedEvent(
+                candidate_id="c1",
+                rule_name="r",
+                rule_id="R1",
+                tier="observed",
+                status="pending",
+                source_repo="repo",
+                entered_tier_at=datetime(2026, 1, 1),  # naive - no tz
+                last_validated_at=NOW,
+                pass_streak=0,
+                fail_streak=0,
+                total_runs=0,
+                timestamp=NOW,
+            )
 
     def test_roundtrip(self) -> None:
         event = ModelLifecycleCandidateUpsertedEvent(

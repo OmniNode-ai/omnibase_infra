@@ -26,11 +26,11 @@ class ModelCrossRepoRunStartedEvent(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     event_type: Literal["ValidationRunStarted"] = "ValidationRunStarted"
-    run_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)  # pattern-ok: opaque run identifier, not a UUID
     repos: list[str] = Field(description="List of repository names being validated")
     validators: list[str] = Field(description="List of validator names to execute")
-    triggered_by: str | None = Field(
-        default=None, description="User or system that initiated the run"
+    triggered_by: str = Field(
+        default="", description="User or system that initiated the run"
     )
     timestamp: datetime = Field(description="ISO-8601 UTC timestamp")
 

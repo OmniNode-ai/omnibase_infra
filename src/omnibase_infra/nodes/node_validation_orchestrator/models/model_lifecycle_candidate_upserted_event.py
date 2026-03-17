@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 
 class ModelLifecycleCandidateUpsertedEvent(BaseModel):
@@ -26,11 +26,13 @@ class ModelLifecycleCandidateUpsertedEvent(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     event_type: Literal["ValidationCandidateUpserted"] = "ValidationCandidateUpserted"
-    candidate_id: str = Field(min_length=1)
+    candidate_id: str = Field(
+        min_length=1
+    )  # pattern-ok: opaque candidate identifier, not a UUID
     rule_name: str = Field(
         min_length=1
     )  # pattern-ok: pinned to omnidash ValidationCandidateUpsertedSchema
-    rule_id: str = Field(min_length=1)
+    rule_id: str = Field(min_length=1)  # pattern-ok: opaque rule identifier, not a UUID
     tier: Literal["observed", "suggested", "shadow_apply", "promoted", "default"] = (
         Field(description="Lifecycle tier (1-5 mapped to names)")
     )
@@ -51,9 +53,9 @@ class ModelLifecycleCandidateUpsertedEvent(BaseModel):
 
     @field_validator("timestamp", "entered_tier_at", "last_validated_at")
     @classmethod
-    def validate_tz_aware(cls, v: datetime) -> datetime:
+    def validate_tz_aware(cls, v: datetime, info: ValidationInfo) -> datetime:
         if v.tzinfo is None:
-            raise ValueError("timestamp must be timezone-aware")
+            raise ValueError(f"{info.field_name} must be timezone-aware")
         return v
 
 

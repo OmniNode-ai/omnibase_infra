@@ -56,7 +56,9 @@ class ModelRuntimeHeartbeatEvent(BaseModel):
     )
 
     # Service identity
-    service_id: str = Field(..., description="Unique identifier per service instance")
+    service_id: str = Field(
+        ..., description="Unique identifier per service instance"
+    )  # pattern-ok: opaque service identifier, not a UUID
     service_name: str = (
         Field(  # pattern-ok: pinned to omnidash worker-health consumer contract
             ..., description="Human-readable service name"

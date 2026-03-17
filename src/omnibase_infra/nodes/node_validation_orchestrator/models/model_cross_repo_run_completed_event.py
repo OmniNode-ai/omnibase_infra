@@ -26,7 +26,7 @@ class ModelCrossRepoRunCompletedEvent(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     event_type: Literal["ValidationRunCompleted"] = "ValidationRunCompleted"
-    run_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)  # pattern-ok: opaque run identifier, not a UUID
     status: Literal["passed", "failed", "error"] = Field(description="Final run status")
     total_violations: int = Field(ge=0)
     violations_by_severity: dict[str, int] | None = Field(
@@ -34,6 +34,19 @@ class ModelCrossRepoRunCompletedEvent(BaseModel):
     )
     duration_ms: int = Field(ge=0, description="Total run duration in milliseconds")
     timestamp: datetime = Field(description="ISO-8601 UTC timestamp")
+
+    @field_validator("violations_by_severity")
+    @classmethod
+    def validate_non_negative_counts(
+        cls, v: dict[str, int] | None
+    ) -> dict[str, int] | None:
+        if v is not None:
+            for key, count in v.items():
+                if count < 0:
+                    raise ValueError(
+                        f"violations_by_severity[{key!r}] must be >= 0, got {count}"
+                    )
+        return v
 
     @field_validator("timestamp")
     @classmethod

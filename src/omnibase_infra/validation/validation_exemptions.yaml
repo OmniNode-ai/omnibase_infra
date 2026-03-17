@@ -2644,6 +2644,87 @@ pattern_exemptions:
     documentation:
       - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
     ticket: OMN-4225
+  # ==========================================================================
+  # Validation Event Model Opaque ID Exemptions (OMN-5184)
+  # ==========================================================================
+  # Validation event models use opaque string identifiers (run_id, candidate_id,
+  # rule_id) that are NOT UUIDs. These are human-readable or system-generated
+  # identifiers pinned to omnidash Zod schema contracts.
+  - file_pattern: 'model_cross_repo_run_started_event\.py'
+    violation_pattern: "Field 'run_id' should use UUID"
+    reason: >
+      run_id is an opaque run identifier (e.g., 'run-123'), not a UUID. Pinned to omnidash ValidationRunStartedSchema.
+
+    documentation:
+      - shared/validation-types.ts (omnidash Zod schema contract)
+    ticket: OMN-5184
+  - file_pattern: 'model_cross_repo_run_completed_event\.py'
+    violation_pattern: "Field 'run_id' should use UUID"
+    reason: >
+      run_id is an opaque run identifier, not a UUID. Pinned to omnidash ValidationRunCompletedSchema.
+
+    documentation:
+      - shared/validation-types.ts (omnidash Zod schema contract)
+    ticket: OMN-5184
+  - file_pattern: 'model_cross_repo_violations_batch_event\.py'
+    violation_pattern: "Field 'run_id' should use UUID"
+    reason: >
+      run_id is an opaque run identifier, not a UUID. Pinned to omnidash ValidationViolationsBatchSchema.
+
+    documentation:
+      - shared/validation-types.ts (omnidash Zod schema contract)
+    ticket: OMN-5184
+  - file_pattern: 'model_lifecycle_candidate_upserted_event\.py'
+    violation_pattern: "Field 'candidate_id' should use UUID"
+    reason: >
+      candidate_id is an opaque candidate identifier, not a UUID. Pinned to omnidash ValidationCandidateUpsertedSchema.
+
+    documentation:
+      - shared/validation-types.ts (omnidash Zod schema contract)
+    ticket: OMN-5184
+  - file_pattern: 'model_lifecycle_candidate_upserted_event\.py'
+    violation_pattern: "Field 'rule_name' might reference an entity"
+    reason: >
+      rule_name is a display field pinned to omnidash ValidationCandidateUpsertedSchema. Already has corresponding rule_id field.
+
+    documentation:
+      - shared/validation-types.ts (omnidash Zod schema contract)
+    ticket: OMN-5184
+  - file_pattern: 'model_lifecycle_candidate_upserted_event\.py'
+    violation_pattern: "Field 'rule_id' should use UUID"
+    reason: >
+      rule_id is an opaque rule identifier (e.g., 'R042'), not a UUID. Pinned to omnidash ValidationCandidateUpsertedSchema.
+
+    documentation:
+      - shared/validation-types.ts (omnidash Zod schema contract)
+    ticket: OMN-5184
+  - file_pattern: 'model_violation\.py'
+    violation_pattern: "Field 'rule_id' should use UUID"
+    reason: >
+      rule_id is an opaque rule identifier (e.g., 'R001'), not a UUID. Pinned to omnidash ViolationSchema.
+
+    documentation:
+      - shared/validation-types.ts (omnidash Zod schema contract)
+    ticket: OMN-5184
+  # ==========================================================================
+  # Service Heartbeat Event Model Opaque ID Exemptions (OMN-5184)
+  # ==========================================================================
+  - file_pattern: 'model_service_heartbeat_event\.py'
+    violation_pattern: "Field 'service_id' should use UUID"
+    reason: >
+      service_id is an opaque service instance identifier (e.g., 'omninode-runtime-abc123'), not a UUID. Pinned to omnidash worker-health consumer contract.
+
+    documentation:
+      - omnidash worker-health consumer contract
+    ticket: OMN-5184
+  - file_pattern: 'model_service_heartbeat_event\.py'
+    violation_pattern: "Field 'service_name' might reference an entity"
+    reason: >
+      service_name is a display field pinned to omnidash worker-health consumer contract. Already has corresponding service_id field.
+
+    documentation:
+      - omnidash worker-health consumer contract
+    ticket: OMN-5184
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
