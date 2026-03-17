@@ -42,14 +42,14 @@ jobs:
 
     steps:
       - name: Checkout omnibase_infra
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: omnibase_infra
 
       - name: Checkout omninode_infra (sibling — provides k8s ConfigMap)
         # GITHUB_TOKEN is scoped to omnibase_infra and cannot access the private
         # omninode_infra repo. Use CROSS_REPO_PAT (same pattern as dependency-cascade.yml).
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: OmniNode-ai/omninode_infra
           path: omninode_infra

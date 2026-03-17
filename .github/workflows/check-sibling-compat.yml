@@ -26,19 +26,19 @@ jobs:
 
     steps:
       - name: Checkout omnibase_infra
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: omnibase_infra
 
       - name: Checkout omniintelligence (sibling)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: OmniNode-ai/omniintelligence
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout omnimemory (sibling)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: OmniNode-ai/omnimemory
           path: omnimemory
