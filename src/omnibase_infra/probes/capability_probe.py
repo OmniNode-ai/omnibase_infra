@@ -107,7 +107,7 @@ def http_health_check(url: str, timeout: float = 1.0) -> bool:
     """
     try:
         req = urllib.request.urlopen(url, timeout=timeout)  # noqa: S310
-        return 200 <= req.status < 300
+        return 200 <= int(req.status) < 300
     except (OSError, urllib.error.URLError, ValueError):
         return False
 
