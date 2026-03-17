@@ -7,14 +7,17 @@
 Tests cover:
     - Metrics are published after a successful inference call
     - Publisher is called with the correct topic and payload fields
+    - Infra-namespace event emitted to TOPIC_LLM_CALL_COMPLETED_INFRA
     - Publish failures are swallowed and never break inference
     - When last_call_metrics is None, no publish is attempted
     - Correlation ID is threaded through to the publisher
 
 Related:
     - OMN-2443: Wire NodeLlmInferenceEffect to emit llm-call-completed events
+    - OMN-5201: Emit llm-call-completed.v1 from node_llm_inference_effect
     - service_llm_metrics_publisher.py: Module under test
     - TOPIC_LLM_CALL_COMPLETED: onex.evt.omniintelligence.llm-call-completed.v1
+    - TOPIC_LLM_CALL_COMPLETED_INFRA: onex.evt.omnibase-infra.llm-call-completed.v1
 """
 
 from __future__ import annotations
@@ -28,7 +31,10 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_infra.enums import EnumLlmOperationType
-from omnibase_infra.event_bus.topic_constants import TOPIC_LLM_CALL_COMPLETED
+from omnibase_infra.event_bus.topic_constants import (
+    TOPIC_LLM_CALL_COMPLETED,
+    TOPIC_LLM_CALL_COMPLETED_INFRA,
+)
 from omnibase_infra.mixins.mixin_llm_http_transport import MixinLlmHttpTransport
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,
@@ -127,7 +133,7 @@ class TestMetricsEmission:
 
     @pytest.mark.asyncio
     async def test_publisher_called_after_successful_inference(self) -> None:
-        """Publisher is called once after a successful inference call."""
+        """Publisher is called twice after a successful inference call (two topics)."""
         transport = _make_transport()
         transport._execute_llm_http_call.return_value = _make_response_with_usage()
         service, _, publisher = _make_service(transport=transport)
@@ -135,11 +141,11 @@ class TestMetricsEmission:
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
         await asyncio.sleep(0)
 
-        publisher.assert_awaited_once()
+        assert publisher.await_count == 2
 
     @pytest.mark.asyncio
     async def test_publisher_called_with_correct_topic(self) -> None:
-        """Publisher receives the canonical LLM call completed topic."""
+        """Publisher receives the canonical LLM call completed topic as first call."""
         transport = _make_transport()
         transport._execute_llm_http_call.return_value = _make_response_with_usage()
         service, _, publisher = _make_service(transport=transport)
@@ -147,12 +153,12 @@ class TestMetricsEmission:
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
         await asyncio.sleep(0)
 
-        call_args = publisher.call_args
-        assert call_args[0][0] == TOPIC_LLM_CALL_COMPLETED
+        first_call_topic = publisher.call_args_list[0][0][0]
+        assert first_call_topic == TOPIC_LLM_CALL_COMPLETED
 
     @pytest.mark.asyncio
     async def test_publisher_payload_contains_model_id(self) -> None:
-        """Published payload contains the model_id field."""
+        """Published payload (omniintelligence topic) contains the model_id field."""
         transport = _make_transport()
         transport._execute_llm_http_call.return_value = _make_response_with_usage()
         service, _, publisher = _make_service(transport=transport)
@@ -160,7 +166,7 @@ class TestMetricsEmission:
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
         await asyncio.sleep(0)
 
-        payload = publisher.call_args[0][1]
+        payload = publisher.call_args_list[0][0][1]
         assert isinstance(payload, dict)
         assert payload["model_id"] == _MODEL
 
@@ -176,7 +182,7 @@ class TestMetricsEmission:
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
         await asyncio.sleep(0)
 
-        payload = publisher.call_args[0][1]
+        payload = publisher.call_args_list[0][0][1]
         assert payload["prompt_tokens"] == 42
         assert payload["completion_tokens"] == 17
         assert payload["total_tokens"] == 59
@@ -191,7 +197,7 @@ class TestMetricsEmission:
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
         await asyncio.sleep(0)
 
-        payload = publisher.call_args[0][1]
+        payload = publisher.call_args_list[0][0][1]
         assert isinstance(payload.get("timestamp_iso"), str)
         assert payload["timestamp_iso"] != ""
 
@@ -205,7 +211,7 @@ class TestMetricsEmission:
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
         await asyncio.sleep(0)
 
-        payload = publisher.call_args[0][1]
+        payload = publisher.call_args_list[0][0][1]
         assert payload.get("reporting_source") == "handler-llm-openai-compatible"
 
     @pytest.mark.asyncio
@@ -218,8 +224,8 @@ class TestMetricsEmission:
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
         await asyncio.sleep(0)
 
-        call_args = publisher.call_args
-        assert call_args[0][2] == str(_CORRELATION_ID)
+        first_call_args = publisher.call_args_list[0][0]
+        assert first_call_args[2] == str(_CORRELATION_ID)
 
     @pytest.mark.asyncio
     async def test_inference_response_unchanged_by_emission(self) -> None:
@@ -240,7 +246,7 @@ class TestMetricsEmission:
 
     @pytest.mark.asyncio
     async def test_publisher_payload_is_json_serializable(self) -> None:
-        """Published payload dict is JSON-serializable (no Pydantic models)."""
+        """Both published payload dicts are JSON-serializable (no Pydantic models)."""
         transport = _make_transport()
         transport._execute_llm_http_call.return_value = _make_response_with_usage()
         service, _, publisher = _make_service(transport=transport)
@@ -248,9 +254,10 @@ class TestMetricsEmission:
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
         await asyncio.sleep(0)
 
-        payload = publisher.call_args[0][1]
-        # Must not raise
-        json.dumps(payload)
+        for call in publisher.call_args_list:
+            payload = call[0][1]
+            # Must not raise
+            json.dumps(payload)
 
     @pytest.mark.asyncio
     async def test_auto_generates_correlation_id_when_none(self) -> None:
@@ -262,10 +269,88 @@ class TestMetricsEmission:
         await service.handle(_make_chat_request())
         await asyncio.sleep(0)
 
-        call_args = publisher.call_args
-        received_corr_id = call_args[0][2]
-        # Must be a valid UUID string
-        UUID(received_corr_id)  # raises ValueError if invalid
+        # Both calls should receive the same generated correlation_id
+        first_corr_id = publisher.call_args_list[0][0][2]
+        second_corr_id = publisher.call_args_list[1][0][2]
+        # Must be valid UUID strings
+        UUID(first_corr_id)  # raises ValueError if invalid
+        UUID(second_corr_id)
+        assert first_corr_id == second_corr_id
+
+
+# ---------------------------------------------------------------------------
+# Infra-namespace topic emission tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestInfraTopicEmission:
+    """Tests that the infra-namespace event is emitted after each inference call."""
+
+    @pytest.mark.asyncio
+    async def test_infra_topic_emitted_after_inference(self) -> None:
+        """Second publisher call uses TOPIC_LLM_CALL_COMPLETED_INFRA topic."""
+        transport = _make_transport()
+        transport._execute_llm_http_call.return_value = _make_response_with_usage()
+        service, _, publisher = _make_service(transport=transport)
+
+        await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
+        await asyncio.sleep(0)
+
+        second_call_topic = publisher.call_args_list[1][0][0]
+        assert second_call_topic == TOPIC_LLM_CALL_COMPLETED_INFRA
+
+    @pytest.mark.asyncio
+    async def test_infra_payload_contains_required_fields(self) -> None:
+        """Infra event payload contains model_id, endpoint_url, tokens, success, timestamp."""
+        transport = _make_transport()
+        transport._execute_llm_http_call.return_value = _make_response_with_usage(
+            prompt_tokens=10, completion_tokens=5
+        )
+        service, _, publisher = _make_service(transport=transport)
+
+        await service.handle(
+            _make_chat_request(base_url=_BASE_URL), correlation_id=_CORRELATION_ID
+        )
+        await asyncio.sleep(0)
+
+        payload = publisher.call_args_list[1][0][1]
+        assert isinstance(payload, dict)
+        assert payload["model_id"] == _MODEL
+        assert payload["endpoint_url"] == _BASE_URL
+        assert payload["prompt_tokens"] == 10
+        assert payload["completion_tokens"] == 5
+        assert payload["total_tokens"] == 15
+        assert payload["success"] is True
+        assert isinstance(payload.get("timestamp"), str)
+        assert payload["timestamp"] != ""
+
+    @pytest.mark.asyncio
+    async def test_infra_payload_is_json_serializable(self) -> None:
+        """Infra event payload is JSON-serializable."""
+        transport = _make_transport()
+        transport._execute_llm_http_call.return_value = _make_response_with_usage()
+        service, _, publisher = _make_service(transport=transport)
+
+        await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
+        await asyncio.sleep(0)
+
+        payload = publisher.call_args_list[1][0][1]
+        json.dumps(payload)  # Must not raise
+
+    @pytest.mark.asyncio
+    async def test_infra_topic_receives_same_correlation_id(self) -> None:
+        """Infra event uses the same correlation_id as the omniintelligence event."""
+        transport = _make_transport()
+        transport._execute_llm_http_call.return_value = _make_response_with_usage()
+        service, _, publisher = _make_service(transport=transport)
+
+        await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
+        await asyncio.sleep(0)
+
+        first_corr = publisher.call_args_list[0][0][2]
+        second_corr = publisher.call_args_list[1][0][2]
+        assert first_corr == second_corr == str(_CORRELATION_ID)
 
 
 # ---------------------------------------------------------------------------
@@ -359,7 +444,7 @@ class TestMultipleCalls:
 
     @pytest.mark.asyncio
     async def test_publisher_called_for_each_call(self) -> None:
-        """Publisher is called once per handle() invocation."""
+        """Publisher is called twice per handle() invocation (two topics)."""
         transport = _make_transport()
         transport._execute_llm_http_call.return_value = _make_response_with_usage()
         service, _, publisher = _make_service(transport=transport)
@@ -369,7 +454,7 @@ class TestMultipleCalls:
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
         await asyncio.sleep(0)
 
-        assert publisher.await_count == 2
+        assert publisher.await_count == 4
 
     @pytest.mark.asyncio
     async def test_each_call_uses_own_correlation_id(self) -> None:
@@ -385,8 +470,9 @@ class TestMultipleCalls:
         await service.handle(_make_chat_request(), correlation_id=corr2)
         await asyncio.sleep(0)
 
+        # call_args_list: [call1-omniintelligence, call1-infra, call2-omniintelligence, call2-infra]
         first_call_corr = publisher.call_args_list[0][0][2]
-        second_call_corr = publisher.call_args_list[1][0][2]
+        second_call_corr = publisher.call_args_list[2][0][2]
         assert first_call_corr == str(corr1)
         assert second_call_corr == str(corr2)
         assert first_call_corr != second_call_corr
