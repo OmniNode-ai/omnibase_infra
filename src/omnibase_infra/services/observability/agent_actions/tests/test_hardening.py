@@ -164,7 +164,7 @@ def _make_health_consumer() -> AgentActionsConsumer:
     and sets only the attributes needed by ``_determine_health_status``.
     """
     config = ConfigAgentActionsConsumer(
-        kafka_bootstrap_servers="localhost:9092",
+        kafka_bootstrap_servers="localhost:19092",
         postgres_dsn="postgresql://test:test@localhost:5432/test",
         health_check_staleness_seconds=300,
         health_check_poll_staleness_seconds=60,

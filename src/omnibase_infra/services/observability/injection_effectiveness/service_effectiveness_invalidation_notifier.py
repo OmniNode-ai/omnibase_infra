@@ -26,7 +26,7 @@ Example:
     ...     ServiceEffectivenessInvalidationNotifier,
     ... )
     >>>
-    >>> producer = AIOKafkaProducer(bootstrap_servers="localhost:9092")
+    >>> producer = AIOKafkaProducer(bootstrap_servers="localhost:19092")
     >>> await producer.start()
     >>> notifier = ServiceEffectivenessInvalidationNotifier(producer)
     >>>

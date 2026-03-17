@@ -53,7 +53,7 @@ if TYPE_CHECKING:
 def mock_config() -> ConfigAgentActionsConsumer:
     """Create a test configuration."""
     return ConfigAgentActionsConsumer(
-        kafka_bootstrap_servers="localhost:9092",
+        kafka_bootstrap_servers="localhost:19092",
         postgres_dsn="postgresql://test:test@localhost:5432/test",
         batch_size=10,
         batch_timeout_ms=500,
@@ -204,7 +204,7 @@ class TestTopicModelMapping:
         subscribed but has no model/writer mapping, events are silently dropped.
         """
         config = ConfigAgentActionsConsumer(
-            kafka_bootstrap_servers="localhost:9092",
+            kafka_bootstrap_servers="localhost:19092",
             postgres_dsn="postgresql://test:test@localhost:5432/test",
         )
         for topic in config.topics:

@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Default bootstrap servers (matches event_bus_kafka.py pattern)
-DEFAULT_BOOTSTRAP_SERVERS = "localhost:9092"
+DEFAULT_BOOTSTRAP_SERVERS = "localhost:19092"
 ENV_BOOTSTRAP_SERVERS = "KAFKA_BOOTSTRAP_SERVERS"
 
 # Default partition and replication settings for standard event topics
@@ -76,7 +76,7 @@ class TopicProvisioner:
 
         Args:
             bootstrap_servers: Kafka broker addresses. If None, reads from
-                KAFKA_BOOTSTRAP_SERVERS env var or defaults to localhost:9092.
+                KAFKA_BOOTSTRAP_SERVERS env var or defaults to localhost:19092.
             request_timeout_ms: Timeout for admin operations in milliseconds.
             contracts_root: Optional path to contract.yaml root directory.
                 When set, topics are discovered from contracts via

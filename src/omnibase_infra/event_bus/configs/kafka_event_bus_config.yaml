@@ -9,7 +9,7 @@
 # IMPORTANT: Environment Variable Substitution Mechanism
 # -------------------------------------------------------
 # The ${VAR_NAME:-default} syntax in this file is NOT processed by yaml.safe_load().
-# YAML reads these as literal strings (e.g., "${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}").
+# YAML reads these as literal strings (e.g., "${KAFKA_BOOTSTRAP_SERVERS:-localhost:19092}").
 #
 # Environment variable substitution happens AFTER YAML parsing in
 # ModelKafkaEventBusConfig.apply_environment_overrides(), which:
@@ -19,7 +19,7 @@
 # 4. Falls back to the literal defaults from this file if environment variables are not set
 #
 # Example: If KAFKA_BOOTSTRAP_SERVERS="kafka:9092" is set in environment:
-#   - YAML loads: bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
+#   - YAML loads: bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS:-localhost:19092}"
 #   - apply_environment_overrides() detects KAFKA_BOOTSTRAP_SERVERS env var
 #   - Final value: "kafka:9092" (from environment, not from ${...} syntax)
 #
@@ -34,7 +34,7 @@
 # =============================================================================
 # Kafka broker connection configuration
 # Comma-separated list of Kafka broker addresses
-bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
+bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS:-localhost:19092}"
 # Environment identifier for message routing (e.g., "local", "dev", "staging", "prod")
 environment: "${KAFKA_ENVIRONMENT:-local}"
 # =============================================================================

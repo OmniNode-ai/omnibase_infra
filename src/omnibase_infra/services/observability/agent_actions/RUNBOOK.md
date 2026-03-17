@@ -190,7 +190,7 @@ All configuration is via environment variables with the
 
 | Variable | Default | Description |
 |---|---|---|
-| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka bootstrap servers |
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:19092` | Kafka bootstrap servers |
 | `POSTGRES_DSN` | (required) | PostgreSQL connection string |
 | `BATCH_SIZE` | `100` | Max records per batch |
 | `BATCH_TIMEOUT_MS` | `1000` | Batch accumulation timeout |

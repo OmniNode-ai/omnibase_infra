@@ -34,7 +34,7 @@ from omnibase_infra.topics import ALL_PROVISIONED_SUFFIXES
 logger = logging.getLogger(__name__)
 
 # Reuse constants from TopicProvisioner
-DEFAULT_BOOTSTRAP_SERVERS = "localhost:9092"
+DEFAULT_BOOTSTRAP_SERVERS = "localhost:19092"
 ENV_BOOTSTRAP_SERVERS = "KAFKA_BOOTSTRAP_SERVERS"
 
 
@@ -65,7 +65,7 @@ class TopicStartupValidator:
 
         Args:
             bootstrap_servers: Kafka broker addresses. If None, reads from
-                KAFKA_BOOTSTRAP_SERVERS env var or defaults to localhost:9092.
+                KAFKA_BOOTSTRAP_SERVERS env var or defaults to localhost:19092.
             request_timeout_ms: Timeout for admin operations in milliseconds.
         """
         self._bootstrap_servers = bootstrap_servers or os.environ.get(

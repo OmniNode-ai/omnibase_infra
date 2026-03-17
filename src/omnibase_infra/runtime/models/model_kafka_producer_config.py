@@ -23,7 +23,7 @@ class ModelKafkaProducerConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     bootstrap_servers: str = Field(
-        default="localhost:9092",
+        default="localhost:19092",
         description="Kafka bootstrap servers",
     )
     timeout_seconds: float = Field(
@@ -48,7 +48,7 @@ class ModelKafkaProducerConfig(BaseModel):
         try:
             # kafka-fallback-ok — these model-level defaults are overridden at runtime by env vars
             bootstrap = os.getenv(
-                "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"
+                "KAFKA_BOOTSTRAP_SERVERS", "localhost:19092"
             )  # kafka-fallback-ok
             timeout_ms = os.getenv(
                 "KAFKA_REQUEST_TIMEOUT_MS", "10000"

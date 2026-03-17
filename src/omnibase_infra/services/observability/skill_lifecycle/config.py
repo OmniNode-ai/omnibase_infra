@@ -36,7 +36,7 @@ class ConfigSkillLifecycleConsumer(BaseSettings):
 
     # Kafka connection
     kafka_bootstrap_servers: str = Field(
-        default="localhost:9092",
+        default="localhost:19092",
         description=(
             "Kafka bootstrap servers. Set via "
             "OMNIBASE_INFRA_SKILL_LIFECYCLE_KAFKA_BOOTSTRAP_SERVERS env var for production."

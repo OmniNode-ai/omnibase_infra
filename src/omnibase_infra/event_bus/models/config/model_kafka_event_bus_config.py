@@ -21,7 +21,7 @@ Environment Variables:
 
     Connection Settings:
         KAFKA_BOOTSTRAP_SERVERS: Kafka broker addresses (comma-separated)
-            Default: "localhost:9092"
+            Default: "localhost:19092"
             Example: "kafka1:9092,kafka2:9092"
 
         KAFKA_ENVIRONMENT: Environment identifier for message routing
@@ -214,7 +214,7 @@ class ModelKafkaEventBusConfig(BaseModel):
 
     # Connection settings
     bootstrap_servers: str = Field(
-        default="localhost:9092",
+        default="localhost:19092",
         description="Kafka bootstrap servers (host:port format, comma-separated for multiple)",
         min_length=1,
     )
@@ -838,7 +838,7 @@ class ModelKafkaEventBusConfig(BaseModel):
             Default configuration instance with environment overrides
         """
         base_config = cls(
-            bootstrap_servers="localhost:9092",
+            bootstrap_servers="localhost:19092",
             environment="local",
             timeout_seconds=30,
             max_retry_attempts=3,

@@ -243,7 +243,7 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
             import os
 
             self._bootstrap_servers = os.environ.get(
-                "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"
+                "KAFKA_BOOTSTRAP_SERVERS", "localhost:19092"
             )
 
         # Canonical topic resolver - all topic resolution delegates here
