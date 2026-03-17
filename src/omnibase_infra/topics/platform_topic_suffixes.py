@@ -485,6 +485,15 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
             "cleanup.policy": "delete",
         },  # 7 days
     ),
+    # Wiring health snapshots (3 partitions — low-throughput, per-evaluation-cycle)
+    ModelTopicSpec(
+        suffix=SUFFIX_WIRING_HEALTH_SNAPSHOT,
+        partitions=3,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
 )
 """Omnibase_infra domain topic specs for internal effect nodes.
 
