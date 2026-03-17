@@ -26,7 +26,7 @@ Example:
     ... )
     >>>
     >>> config = ConfigLlmCostAggregation(
-    ...     kafka_bootstrap_servers="localhost:9092",
+    ...     kafka_bootstrap_servers="localhost:19092",
     ...     postgres_dsn="postgresql://postgres:<password>@localhost:5432/omnibase_infra",
     ... )
     >>> service = ServiceLlmCostAggregator(config)

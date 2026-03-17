@@ -257,7 +257,7 @@ class SessionEventConsumer:
 
         Example:
             >>> config = ConfigSessionConsumer(
-            ...     bootstrap_servers="localhost:9092",
+            ...     bootstrap_servers="localhost:19092",
             ...     group_id="my-consumer-group",
             ... )
             >>> aggregator = InMemorySessionAggregator()

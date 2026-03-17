@@ -247,7 +247,7 @@ class TestModelKafkaProducerConfig:
 
     def test_default_values(self) -> None:
         config = ModelKafkaProducerConfig()
-        assert config.bootstrap_servers == "localhost:9092"
+        assert config.bootstrap_servers == "localhost:19092"
         assert config.timeout_seconds == 10.0
         assert config.acks == EnumKafkaAcks.ALL
 

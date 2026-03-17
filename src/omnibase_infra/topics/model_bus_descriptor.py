@@ -51,7 +51,7 @@ class ModelBusDescriptor(BaseModel):
         ...     trust_domain="local.default",
         ...     transport_type=EnumInfraTransportType.KAFKA,
         ...     namespace_prefix="",
-        ...     bootstrap_servers=["localhost:9092"],
+        ...     bootstrap_servers=["localhost:19092"],
         ...     allowed_classifications=["public", "internal"],
         ... )
     """

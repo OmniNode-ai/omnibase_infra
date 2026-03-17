@@ -49,7 +49,7 @@ Example Usage:
     from omnibase_infra.models.projection import ModelSnapshotTopicConfig
 
     # Create producer and config
-    producer = AIOKafkaProducer(bootstrap_servers="localhost:9092")
+    producer = AIOKafkaProducer(bootstrap_servers="localhost:19092")
     config = ModelSnapshotTopicConfig.default()
 
     # Initialize publisher
@@ -229,14 +229,14 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
 
         Example:
             >>> producer = AIOKafkaProducer(
-            ...     bootstrap_servers="localhost:9092",
+            ...     bootstrap_servers="localhost:19092",
             ...     value_serializer=lambda v: v,  # Publisher handles serialization
             ... )
             >>> config = ModelSnapshotTopicConfig.default()
             >>> publisher = SnapshotPublisherRegistration(
             ...     producer,
             ...     config,
-            ...     bootstrap_servers="localhost:9092",
+            ...     bootstrap_servers="localhost:19092",
             ... )
         """
         self._producer = producer
