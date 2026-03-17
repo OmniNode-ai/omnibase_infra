@@ -271,7 +271,10 @@ services:
       - --mode dev-container
       - --smp 1
       - --memory ${REDPANDA_MEMORY:-8G}
-      - --admin-addr 0.0.0.0:9644
+      # OMN-5176: --admin-addr removed — rpk wraps it into redpanda.yaml but
+      # the actual binary rejects the flag, causing a crash-loop on recreate.
+      # Admin API defaults to 0.0.0.0:9644 in dev-container mode; port mapping
+      # in ports: section is sufficient for external access.
       - --default-log-level=warn
     ports:
       - "${REDPANDA_EXTERNAL_PORT:-19092}:19092"
@@ -368,9 +371,9 @@ services:
       --storage-snapshot-retention-count=2 --storage-wal-enabled=true --storage-snapshot-interval-sec=3600 --log-level=WARNING
 
     healthcheck:
-      # Note: nc (netcat) is available in the official memgraph image.
-      # If using a stripped image, fall back to: bash -c 'echo > /dev/tcp/localhost/7687'
-      test: ["CMD-SHELL", "nc -z localhost 7687 || exit 1"]
+      # OMN-5176: nc (netcat) is NOT reliably in Memgraph v2.18.1 $PATH despite
+      # being installed. Use bash /dev/tcp probe which is always available.
+      test: ["CMD-SHELL", "echo > /dev/tcp/localhost/7687 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
