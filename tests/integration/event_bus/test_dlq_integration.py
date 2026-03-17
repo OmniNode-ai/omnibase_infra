@@ -160,73 +160,53 @@ class TestDlqTopicConstants:
     """
 
     def test_build_dlq_topic_basic(self) -> None:
-        """Verify build_dlq_topic constructs correct topic name."""
+        """Verify build_dlq_topic constructs realm-agnostic topic name (OMN-5189)."""
         from omnibase_infra.event_bus.topic_constants import build_dlq_topic
 
-        topic = build_dlq_topic("dev", "intents")
-        assert topic == "dev.dlq.intents.v1"
+        topic = build_dlq_topic("intents")
+        assert topic == "onex.dlq.intents.v1"
 
     def test_build_dlq_topic_all_categories(self) -> None:
         """Verify build_dlq_topic handles all message categories."""
         from omnibase_infra.event_bus.topic_constants import build_dlq_topic
 
         # Test plural forms
-        assert build_dlq_topic("prod", "intents") == "prod.dlq.intents.v1"
-        assert build_dlq_topic("prod", "events") == "prod.dlq.events.v1"
-        assert build_dlq_topic("prod", "commands") == "prod.dlq.commands.v1"
+        assert build_dlq_topic("intents") == "onex.dlq.intents.v1"
+        assert build_dlq_topic("events") == "onex.dlq.events.v1"
+        assert build_dlq_topic("commands") == "onex.dlq.commands.v1"
 
         # Test singular forms (normalized to plural)
-        assert build_dlq_topic("staging", "intent") == "staging.dlq.intents.v1"
-        assert build_dlq_topic("staging", "event") == "staging.dlq.events.v1"
-        assert build_dlq_topic("staging", "command") == "staging.dlq.commands.v1"
+        assert build_dlq_topic("intent") == "onex.dlq.intents.v1"
+        assert build_dlq_topic("event") == "onex.dlq.events.v1"
+        assert build_dlq_topic("command") == "onex.dlq.commands.v1"
 
     def test_build_dlq_topic_custom_version(self) -> None:
         """Verify build_dlq_topic accepts custom version."""
         from omnibase_infra.event_bus.topic_constants import build_dlq_topic
 
-        topic = build_dlq_topic("test", "events", version="v2")
-        assert topic == "test.dlq.events.v2"
+        topic = build_dlq_topic("events", version="v2")
+        assert topic == "onex.dlq.events.v2"
 
     def test_build_dlq_topic_invalid_category(self) -> None:
-        """Verify build_dlq_topic rejects categories that violate the identifier pattern.
-
-        Valid categories: any lowercase identifier starting with a letter
-        (e.g., 'intents', 'intelligence', 'platform').
-        Invalid: starts with digit, starts with dash, empty, etc.
-        """
+        """Verify build_dlq_topic rejects categories that violate the identifier pattern."""
         from omnibase_infra.event_bus.topic_constants import build_dlq_topic
 
-        # Starts with digit — fails _DLQ_CATEGORY_PATTERN (^[a-z][a-z0-9_-]*$)
         with pytest.raises(ProtocolConfigurationError, match="Invalid category"):
-            build_dlq_topic("dev", "123abc")
-
-    def test_build_dlq_topic_empty_environment(self) -> None:
-        """Verify build_dlq_topic rejects empty environment."""
-        from omnibase_infra.event_bus.topic_constants import build_dlq_topic
-
-        with pytest.raises(
-            ProtocolConfigurationError, match="environment cannot be empty"
-        ):
-            build_dlq_topic("", "intents")
-
-        with pytest.raises(
-            ProtocolConfigurationError, match="environment cannot be empty"
-        ):
-            build_dlq_topic("   ", "intents")
+            build_dlq_topic("123abc")
 
     def test_parse_dlq_topic_valid(self) -> None:
         """Verify parse_dlq_topic extracts components correctly."""
         from omnibase_infra.event_bus.topic_constants import parse_dlq_topic
 
-        result = parse_dlq_topic("dev.dlq.intents.v1")
+        result = parse_dlq_topic("onex.dlq.intents.v1")
         assert result is not None
-        assert result["environment"] == "dev"
+        assert result["prefix"] == "onex"
         assert result["category"] == "intents"
         assert result["version"] == "v1"
 
-        result = parse_dlq_topic("prod.dlq.events.v2")
+        result = parse_dlq_topic("onex.dlq.events.v2")
         assert result is not None
-        assert result["environment"] == "prod"
+        assert result["prefix"] == "onex"
         assert result["category"] == "events"
         assert result["version"] == "v2"
 
@@ -234,32 +214,28 @@ class TestDlqTopicConstants:
         """Verify parse_dlq_topic returns None for non-DLQ topics."""
         from omnibase_infra.event_bus.topic_constants import parse_dlq_topic
 
-        # Not a DLQ topic
-        assert parse_dlq_topic("dev.user.events.v1") is None
+        assert parse_dlq_topic("onex.evt.platform.events.v1") is None
         assert parse_dlq_topic("onex.registration.events") is None
         assert parse_dlq_topic("random-topic") is None
-
-        # Missing components
-        assert parse_dlq_topic("dev.dlq") is None
+        assert parse_dlq_topic("onex.dlq") is None
         assert parse_dlq_topic("dlq.intents.v1") is None
 
     def test_is_dlq_topic_true(self) -> None:
         """Verify is_dlq_topic returns True for DLQ topics."""
         from omnibase_infra.event_bus.topic_constants import is_dlq_topic
 
-        assert is_dlq_topic("dev.dlq.intents.v1") is True
-        assert is_dlq_topic("prod.dlq.events.v1") is True
-        assert is_dlq_topic("staging.dlq.commands.v2") is True
-        assert is_dlq_topic("test-env.dlq.intents.v1") is True
+        assert is_dlq_topic("onex.dlq.intents.v1") is True
+        assert is_dlq_topic("onex.dlq.events.v1") is True
+        assert is_dlq_topic("onex.dlq.commands.v2") is True
 
     def test_is_dlq_topic_false(self) -> None:
         """Verify is_dlq_topic returns False for non-DLQ topics."""
         from omnibase_infra.event_bus.topic_constants import is_dlq_topic
 
-        assert is_dlq_topic("dev.user.events.v1") is False
+        assert is_dlq_topic("onex.evt.platform.events.v1") is False
         assert is_dlq_topic("onex.registration.events") is False
         assert is_dlq_topic("random-topic") is False
-        assert is_dlq_topic("dev.dlq") is False
+        assert is_dlq_topic("onex.dlq") is False
 
     def test_build_and_parse_roundtrip(self) -> None:
         """Verify build_dlq_topic and parse_dlq_topic are consistent."""
@@ -268,15 +244,13 @@ class TestDlqTopicConstants:
             parse_dlq_topic,
         )
 
-        # Build then parse should recover original components
-        for env in ["dev", "prod", "staging", "test-1"]:
-            for category in ["intents", "events", "commands"]:
-                topic = build_dlq_topic(env, category)
-                parsed = parse_dlq_topic(topic)
-                assert parsed is not None
-                assert parsed["environment"] == env
-                assert parsed["category"] == category
-                assert parsed["version"] == "v1"
+        for category in ["intents", "events", "commands"]:
+            topic = build_dlq_topic(category)
+            parsed = parse_dlq_topic(topic)
+            assert parsed is not None
+            assert parsed["prefix"] == "onex"
+            assert parsed["category"] == category
+            assert parsed["version"] == "v1"
 
 
 # =============================================================================

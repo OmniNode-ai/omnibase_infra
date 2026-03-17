@@ -4881,7 +4881,7 @@ class TestDispatchDlqRouting:
         result = await engine.dispatch("dev.user.events.v1", envelope)
 
         assert result.status == EnumDispatchStatus.NO_DISPATCHER
-        assert result.dlq_topic == "dev.dlq.events.v1"
+        assert result.dlq_topic == "onex.dlq.events.v1"
 
     @pytest.mark.asyncio
     async def test_no_dispatcher_without_event_type_command_topic(self) -> None:
@@ -4897,7 +4897,7 @@ class TestDispatchDlqRouting:
         result = await engine.dispatch("dev.user.commands.v1", envelope)
 
         assert result.status == EnumDispatchStatus.NO_DISPATCHER
-        assert result.dlq_topic == "dev.dlq.commands.v1"
+        assert result.dlq_topic == "onex.dlq.commands.v1"
 
     @pytest.mark.asyncio
     async def test_successful_dispatch_has_no_dlq_topic(self) -> None:

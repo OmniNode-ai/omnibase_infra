@@ -106,8 +106,8 @@ class TestModelContractPublisherConfig:
     def test_resolve_environment_from_env_var(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test environment resolution from env var."""
-        monkeypatch.setenv("ONEX_ENV", "staging")
+        """Test environment resolution from ONEX_ENVIRONMENT env var."""
+        monkeypatch.setenv("ONEX_ENVIRONMENT", "staging")
         config = ModelContractPublisherConfig(
             mode="filesystem",
             filesystem_root=Path("/app"),
@@ -116,18 +116,18 @@ class TestModelContractPublisherConfig:
 
     def test_resolve_environment_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test environment resolution default."""
-        monkeypatch.delenv("ONEX_ENV", raising=False)
+        monkeypatch.delenv("ONEX_ENVIRONMENT", raising=False)
         config = ModelContractPublisherConfig(
             mode="filesystem",
             filesystem_root=Path("/app"),
         )
-        assert config.resolve_environment() == "dev"
+        assert config.resolve_environment() == "local"
 
     def test_resolve_environment_config_wins_over_env(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test config environment takes precedence over env var."""
-        monkeypatch.setenv("ONEX_ENV", "staging")
+        monkeypatch.setenv("ONEX_ENVIRONMENT", "staging")
         config = ModelContractPublisherConfig(
             mode="filesystem",
             filesystem_root=Path("/app"),

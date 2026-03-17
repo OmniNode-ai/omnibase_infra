@@ -109,22 +109,19 @@ def normalize_topic_for_storage(topic: str) -> str:
     consistent topic identity across different deployment environments.
 
     Args:
-        topic: The topic string to normalize, potentially with an environment
-            prefix (e.g., "{env}.onex.evt.platform.contract-registered.v1" or
-            "dev.onex.evt.platform.contract-registered.v1").
+        topic: The topic string to normalize, potentially with a legacy
+            environment prefix (e.g., "dev.onex.evt.platform.contract-registered.v1").
+            Topics should already be realm-agnostic (no env prefix) per OMN-5189.
 
     Returns:
-        The normalized topic suffix without environment prefix
+        The normalized topic string without environment prefix
         (e.g., "onex.evt.platform.contract-registered.v1").
 
     Examples:
-        >>> normalize_topic_for_storage("{env}.onex.evt.platform.contract-registered.v1")
-        'onex.evt.platform.contract-registered.v1'
-
-        >>> normalize_topic_for_storage("dev.onex.evt.platform.contract-registered.v1")
-        'onex.evt.platform.contract-registered.v1'
-
         >>> normalize_topic_for_storage("onex.evt.platform.contract-registered.v1")
+        'onex.evt.platform.contract-registered.v1'
+
+        >>> normalize_topic_for_storage("{env}.onex.evt.platform.contract-registered.v1")
         'onex.evt.platform.contract-registered.v1'
     """
     for prefix in _ENVIRONMENT_PREFIXES:

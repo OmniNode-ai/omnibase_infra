@@ -3,11 +3,11 @@
 """Event Bus Topic Entry Model.
 
 The model for a single topic entry in the event bus
-configuration, containing the environment-qualified topic string and
+configuration, containing the realm-agnostic topic string and
 optional tooling metadata.
 
 Key Design Decisions:
-    1. Topics stored as environment-qualified strings (e.g., "dev.onex.evt.intent-classified.v1")
+    1. Topics stored as realm-agnostic strings (e.g., "onex.evt.intent-classified.v1")
     2. Metadata fields (event_type, message_category, description) are tooling-only
     3. Routing uses ONLY the topic string - never metadata fields
     4. Model is frozen (immutable) with extra="forbid" for safety
@@ -26,7 +26,7 @@ class ModelEventBusTopicEntry(BaseModel):
     tooling-facing only and are never used for routing decisions.
 
     Attributes:
-        topic: Environment-qualified topic string (e.g., "dev.onex.evt...").
+        topic: Realm-agnostic topic string (e.g., "onex.evt.intent-classified.v1").
             This is the ONLY field used for routing.
         event_type: Optional event model name. Tooling metadata only.
         message_category: Message category (EVENT, COMMAND, INTENT).
@@ -38,7 +38,7 @@ class ModelEventBusTopicEntry(BaseModel):
 
     topic: str = Field(
         ...,
-        description="Environment-qualified topic string (e.g., 'dev.onex.evt.intent-classified.v1'). "
+        description="Realm-agnostic topic string (e.g., 'onex.evt.intent-classified.v1'). "
         "This is the ONLY field used for routing.",
     )
     event_type: str | None = Field(

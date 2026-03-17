@@ -11,17 +11,18 @@ Configuration Options:
     package_module: Module name for package mode
     fail_fast: Whether to raise on infrastructure errors
     allow_zero_contracts: Whether to allow empty publish results
-    environment: Environment prefix for Kafka topics
+    environment: Environment identifier (used for consumer groups, not topic naming)
 
 Environment Resolution:
     The environment is resolved with precedence:
     1. config.environment (if provided)
-    2. ONEX_ENV environment variable
-    3. Default "dev"
+    2. ONEX_ENVIRONMENT environment variable
+    3. Default "local"
 
 Related:
     - OMN-1752: Extract ContractPublisher to omnibase_infra
     - ARCH-002: Runtime owns all Kafka plumbing
+    - OMN-5189: Remove vestigial ONEX_ENV reads
 
 .. versionadded:: 0.3.0
     Created as part of OMN-1752 (ContractPublisher extraction).
@@ -130,16 +131,16 @@ class ModelContractPublisherConfig(BaseModel):
         return self
 
     def resolve_environment(self) -> str:
-        """Resolve environment with precedence: config > env var > 'dev'.
+        """Resolve environment with precedence: config > env var > 'local'.
 
         Resolution Order:
             1. self.environment (if provided and non-empty after normalization)
-            2. ONEX_ENV environment variable (if set and non-empty after normalization)
-            3. Default "dev"
+            2. ONEX_ENVIRONMENT environment variable (if set and non-empty)
+            3. Default "local"
 
         Normalization:
             - Whitespace is stripped
-            - Trailing dots are removed (to prevent "dev..topic" issues)
+            - Trailing dots are removed (to prevent "local..topic" issues)
 
         Note:
             Whitespace-only strings (e.g., "   ") are treated as empty and
@@ -157,12 +158,16 @@ class ModelContractPublisherConfig(BaseModel):
             >>> config.resolve_environment()
             'prod'
 
-            >>> # With no config.environment and ONEX_ENV=staging
+            >>> # With no config.environment and ONEX_ENVIRONMENT=staging
             >>> config2 = ModelContractPublisherConfig(
             ...     mode="filesystem",
             ...     filesystem_root=Path("/app"),
             ... )
-            >>> # Returns "staging" if ONEX_ENV is set, else "dev"
+            >>> # Returns "staging" if ONEX_ENVIRONMENT is set, else "local"
+
+        .. versionchanged:: 0.21.0
+            OMN-5189: Changed from ONEX_ENV to ONEX_ENVIRONMENT, default from
+            "dev" to "local".
         """
         # Priority 1: Explicit config (if non-empty after normalization)
         if self.environment:
@@ -171,14 +176,14 @@ class ModelContractPublisherConfig(BaseModel):
                 return normalized
 
         # Priority 2: Environment variable (if non-empty after normalization)
-        env_var = os.getenv("ONEX_ENV", "")
+        env_var = os.getenv("ONEX_ENVIRONMENT", "")
         if env_var:
             normalized = self._normalize_environment(env_var)
             if normalized:
                 return normalized
 
         # Priority 3: Default
-        return "dev"
+        return "local"
 
     @staticmethod
     def _normalize_environment(value: str) -> str:

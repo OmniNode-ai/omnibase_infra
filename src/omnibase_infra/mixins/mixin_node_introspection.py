@@ -200,7 +200,6 @@ import asyncio
 import inspect
 import json
 import logging
-import os
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -1009,7 +1008,6 @@ class MixinNodeIntrospection:
 
     def _extract_event_bus_config(
         self,
-        env_prefix: str,
     ) -> ModelNodeEventBusConfig | None:
         """Extract and resolve event_bus config from contract.
 
@@ -1022,10 +1020,6 @@ class MixinNodeIntrospection:
             onex.{kind}.{producer}.{event-name}.v{n}
 
             Example: "onex.evt.intent-classified.v1"
-
-        Args:
-            env_prefix: Environment prefix (retained for compatibility, but no longer
-                used for topic resolution as topics are realm-agnostic).
 
         Returns:
             Resolved event bus config with topic strings, or None if:
@@ -1040,7 +1034,7 @@ class MixinNodeIntrospection:
                 from being published to the registry.
 
         Example:
-            >>> config = self._extract_event_bus_config("dev")
+            >>> config = self._extract_event_bus_config()
             >>> config.publish_topic_strings
             ['onex.evt.platform.node-registered.v1']
 
@@ -1498,14 +1492,13 @@ class MixinNodeIntrospection:
             )
 
         # Extract event_bus config from contract (OMN-1613)
-        # Resolves topic suffixes to full environment-qualified topics
+        # Topics are realm-agnostic -- no environment prefix.
         # ValueError from _extract_event_bus_config (unresolved placeholders) is
         # wrapped in ProtocolConfigurationError for consistent error handling.
         # ProtocolConfigurationError (invalid format) propagates directly.
         event_bus_config: ModelNodeEventBusConfig | None = None
-        env_prefix = os.getenv("ONEX_ENV", "dev")
         try:
-            event_bus_config = self._extract_event_bus_config(env_prefix)
+            event_bus_config = self._extract_event_bus_config()
         except ValueError as e:
             # Wrap ValueError in ProtocolConfigurationError for fail-fast behavior
             context = ModelInfraErrorContext.with_correlation(

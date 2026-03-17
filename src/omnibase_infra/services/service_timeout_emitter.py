@@ -310,17 +310,23 @@ class ServiceTimeoutEmitter:
         return self._config.namespace
 
     def _build_topic(self, topic_suffix: str) -> str:
-        """Build fully qualified topic by prepending environment and namespace.
+        """Return realm-agnostic topic name.
+
+        Topics are realm-agnostic in ONEX -- environment isolation is enforced
+        at the bus level (local vs cloud bus), not via topic name prefixes.
 
         Args:
-            topic_suffix: Realm-agnostic ONEX topic suffix
+            topic_suffix: Realm-agnostic ONEX topic name
                 (e.g., ``onex.evt.platform.node-liveness-expired.v1``).
 
         Returns:
-            Fully qualified topic name
-                (e.g., ``prod.myapp.onex.evt.platform.node-liveness-expired.v1``).
+            The topic name as-is (no environment or namespace prefix).
+
+        .. versionchanged:: 0.21.0
+            OMN-5189: Removed environment/namespace prefix. Topic suffix IS
+            the topic name.
         """
-        return f"{self._config.environment}.{self._config.namespace}.{topic_suffix}"
+        return topic_suffix
 
     async def process_timeouts(
         self,

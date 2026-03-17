@@ -1589,7 +1589,7 @@ class MessageDispatchEngine:
         Args:
             topic: The full topic name from which the envelope was consumed.
                 Used for routing and logging context.
-                Example: "dev.onex.evt.node.introspected.v1"
+                Example: "onex.evt.node.introspected.v1"
             envelope: The deserialized event envelope containing the payload.
                 The payload type varies by topic/event type.
             tx: Database transaction/connection context. Typed as ``object``

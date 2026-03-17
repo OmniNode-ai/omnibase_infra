@@ -4531,8 +4531,8 @@ class RuntimeHostProcess:
         routing no longer exists.  Always returns an empty list.
 
         Args:
-            topic: Environment-qualified topic string
-                   (e.g., "dev.onex.evt.intent-classified.v1")
+            topic: Realm-agnostic topic string
+                   (e.g., "onex.evt.intent-classified.v1")
 
         Returns:
             Empty list.  Consul-backed topic routing is no longer available.
@@ -4716,12 +4716,12 @@ class RuntimeHostProcess:
             1. config["event_bus"]["environment"] (if config is dict-like)
             2. config.event_bus.environment (if config is object-like)
             3. ONEX_ENVIRONMENT environment variable
-            4. "dev" (hardcoded default)
+            4. "local" (hardcoded default)
 
         Returns:
-            Environment string (e.g., "dev", "staging", "prod").
+            Environment string (e.g., "local", "staging", "prod").
         """
-        default_env = os.getenv("ONEX_ENVIRONMENT", "dev")
+        default_env = os.getenv("ONEX_ENVIRONMENT", "local")
         config = self._config or {}
 
         event_bus_config = config.get("event_bus", {})

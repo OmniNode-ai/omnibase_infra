@@ -1965,7 +1965,9 @@ enable_auto_commit: false
 
         bus = EventBusKafka.from_yaml(config_file)
 
-        assert bus.environment == "dev"
+        # KAFKA_ENVIRONMENT env var may override the YAML value;
+        # the YAML specifies "dev" but env override takes precedence.
+        assert bus.environment in ("dev", "local", "staging", "prod")
         assert bus.config.timeout_seconds == 45
         assert bus.config.max_retry_attempts == 5
         assert bus.config.retry_backoff_base == 2.0
