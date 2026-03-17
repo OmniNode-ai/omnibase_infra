@@ -110,7 +110,7 @@ jobs:
       # Set up Docker Buildx with native docker driver (self-hosted runners
       # have persistent local cache, so GHA cache export is unnecessary)
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
         with:
           driver: docker
 
@@ -227,7 +227,7 @@ jobs:
           echo "Docker daemon accessible"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
         with:
           driver: docker
 
