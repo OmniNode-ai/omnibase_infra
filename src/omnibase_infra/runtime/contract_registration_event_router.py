@@ -109,7 +109,7 @@ class ContractRegistrationEventRouter:
         ... )
         >>> # Use as callback for event bus subscription
         >>> await event_bus.subscribe(
-        ...     topic="dev.onex.evt.platform.contract-registered.v1",
+        ...     topic="onex.evt.platform.contract-registered.v1",
         ...     group_id="contract-registry",
         ...     on_message=router.handle_message,
         ... )

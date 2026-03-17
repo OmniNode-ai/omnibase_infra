@@ -477,7 +477,7 @@ class TestServiceContractPublisherResolveTopic:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test topic resolution with default environment."""
-        monkeypatch.delenv("ONEX_ENV", raising=False)
+        monkeypatch.delenv("ONEX_ENVIRONMENT", raising=False)
 
         config = ModelContractPublisherConfig(
             mode="filesystem",
@@ -512,8 +512,8 @@ class TestServiceContractPublisherResolveTopic:
         mock_source: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Test topic resolution with ONEX_ENV environment variable."""
-        monkeypatch.setenv("ONEX_ENV", "staging")
+        """Test topic resolution with ONEX_ENVIRONMENT environment variable."""
+        monkeypatch.setenv("ONEX_ENVIRONMENT", "staging")
 
         config = ModelContractPublisherConfig(
             mode="filesystem",

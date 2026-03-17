@@ -2519,7 +2519,7 @@ pattern_exemptions:
   - file_pattern: 'model_topic_catalog_entry\.py'
     violation_pattern: "Field 'topic_name' might reference an entity"
     reason: >
-      topic_name is the resolved Kafka topic string (e.g., 'dev.onex.evt.platform.node-registration.v1'), not an entity reference. Design decision D1 requires both topic_suffix and topic_name in every entry.
+      topic_name is the resolved Kafka topic string (e.g., 'onex.evt.platform.node-registration.v1'), not an entity reference. Design decision D1 requires both topic_suffix and topic_name in every entry.
 
     documentation:
       - CLAUDE.md (Pydantic Model Standards)

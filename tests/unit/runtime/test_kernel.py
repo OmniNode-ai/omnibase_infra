@@ -630,6 +630,8 @@ class TestBootstrap:
     ) -> None:
         """Test that bootstrap creates event bus with correct environment."""
         monkeypatch.setenv("ONEX_ENVIRONMENT", "test-env")
+        # Clear KAFKA_ENVIRONMENT so ONEX_ENVIRONMENT takes effect
+        monkeypatch.delenv("KAFKA_ENVIRONMENT", raising=False)
         # Ensure EventBusInmemory is used by setting ONEX_EVENT_BUS_TYPE override
         # (config defaults to kafka since OMN-1869)
         monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")

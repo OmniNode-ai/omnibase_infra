@@ -249,10 +249,10 @@ class TestServiceTimeoutEmitterBasics:
         assert processor.namespace == "myapp"
 
     async def test_build_topic(self, processor: ServiceTimeoutEmitter) -> None:
-        """Test topic building with environment and namespace."""
+        """Test topic building returns suffix as-is (realm-agnostic, OMN-5189)."""
         topic = processor._build_topic("test.topic.v1")
 
-        assert topic == "test.omnitest.test.topic.v1"
+        assert topic == "test.topic.v1"
 
 
 @pytest.mark.unit
@@ -1170,7 +1170,7 @@ class TestServiceTimeoutEmitterTopicBuilding:
         call_args = mock_event_bus.publish_envelope.call_args
         assert (
             call_args.kwargs["topic"]
-            == "prod.myservice.onex.evt.platform.node-registration-ack-timed-out.v1"
+            == "onex.evt.platform.node-registration-ack-timed-out.v1"
         )
 
     async def test_liveness_expired_topic_format(
@@ -1206,7 +1206,4 @@ class TestServiceTimeoutEmitterTopicBuilding:
         )
 
         call_args = mock_event_bus.publish_envelope.call_args
-        assert (
-            call_args.kwargs["topic"]
-            == "staging.testapp.onex.evt.platform.node-liveness-expired.v1"
-        )
+        assert call_args.kwargs["topic"] == "onex.evt.platform.node-liveness-expired.v1"

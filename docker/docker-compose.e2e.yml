@@ -281,8 +281,8 @@ services:
       # Runtime configuration
       ONEX_ENVIRONMENT: test
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-DEBUG}
-      ONEX_INPUT_TOPIC: dev.onex.evt.node-introspection.v1
-      ONEX_OUTPUT_TOPIC: dev.onex.evt.registration-completed.v1
+      ONEX_INPUT_TOPIC: onex.evt.platform.node-introspection.v1
+      ONEX_OUTPUT_TOPIC: onex.evt.platform.registration-completed.v1
       ONEX_GROUP_ID: onex-runtime-e2e
       ONEX_CONTRACTS_DIR: /app/contracts
     ports:

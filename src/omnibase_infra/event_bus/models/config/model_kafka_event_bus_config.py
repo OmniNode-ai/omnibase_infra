@@ -163,7 +163,6 @@ from pydantic import (
 from omnibase_infra.enums import (
     EnumInfraTransportType,
     EnumKafkaAcks,
-    EnumKafkaEnvironment,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
@@ -179,7 +178,7 @@ class ModelKafkaEventBusConfig(BaseModel):
 
     Attributes:
         bootstrap_servers: Kafka bootstrap servers (host:port format)
-        environment: Environment identifier for message routing (EnumKafkaEnvironment)
+        environment: Environment identifier for consumer groups and logging
         timeout_seconds: Timeout for Kafka operations in seconds
         max_retry_attempts: Maximum retry attempts for publish operations
         retry_backoff_base: Base delay in seconds for exponential backoff
@@ -219,12 +218,11 @@ class ModelKafkaEventBusConfig(BaseModel):
         description="Kafka bootstrap servers (host:port format, comma-separated for multiple)",
         min_length=1,
     )
-    environment: EnumKafkaEnvironment = Field(
-        default=EnumKafkaEnvironment.LOCAL,
+    environment: str = Field(
+        default="local",
         description=(
-            "Environment identifier for message routing. "
-            "Valid values: 'local', 'dev', 'staging', 'prod'. "
-            "Accepts EnumKafkaEnvironment members or coercible string values."
+            "Environment identifier for consumer groups and logging. "
+            "Not used for topic naming (topics are realm-agnostic)."
         ),
     )
     timeout_seconds: int = Field(
@@ -627,22 +625,26 @@ class ModelKafkaEventBusConfig(BaseModel):
 
     @field_validator("environment", mode="before")
     @classmethod
-    def validate_environment(cls, v: object) -> EnumKafkaEnvironment:
-        """Validate environment identifier and coerce to EnumKafkaEnvironment.
+    def validate_environment(cls, v: object) -> str:
+        """Validate environment identifier.
 
-        Accepts EnumKafkaEnvironment members directly or string values that
-        correspond to valid enum values ('local', 'dev', 'staging', 'prod').
-        Invalid values raise ProtocolConfigurationError with context.
+        Accepts any non-empty string as an environment identifier.
+        The environment is used for consumer groups and logging, not
+        for topic naming (topics are realm-agnostic).
 
         Args:
             v: Environment value (any type before Pydantic conversion)
 
         Returns:
-            EnumKafkaEnvironment member
+            Normalized environment string
 
         Raises:
             ProtocolConfigurationError: If environment is None, not a string,
-                empty, or not a valid EnumKafkaEnvironment value
+                or empty
+
+        .. versionchanged:: 0.21.0
+            OMN-5189: Simplified from EnumKafkaEnvironment coercion to plain
+            string validation. Any non-empty string is accepted.
         """
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.KAFKA,
@@ -658,16 +660,9 @@ class ModelKafkaEventBusConfig(BaseModel):
                 parameter="environment",
                 value=None,
             )
-        # Allow EnumKafkaEnvironment instances to pass through
-        if isinstance(v, EnumKafkaEnvironment):
-            return v
         if not isinstance(v, str):
-            raise ProtocolConfigurationError(
-                f"environment must be a string, got {type(v).__name__}",
-                context=context,
-                parameter="environment",
-                value=type(v).__name__,
-            )
+            # Coerce StrEnum and other string-like values
+            v = str(v)
         v = v.strip()
         if not v:
             raise ProtocolConfigurationError(
@@ -676,16 +671,7 @@ class ModelKafkaEventBusConfig(BaseModel):
                 parameter="environment",
                 value=v,
             )
-        valid_values = {e.value: e for e in EnumKafkaEnvironment}
-        if v not in valid_values:
-            raise ProtocolConfigurationError(
-                f"environment '{v}' is not a valid Kafka environment. "
-                f"Valid values: {sorted(valid_values.keys())}",
-                context=context,
-                parameter="environment",
-                value=v,
-            )
-        return valid_values[v]
+        return v
 
     def apply_environment_overrides(self) -> ModelKafkaEventBusConfig:
         """Apply environment variable overrides to configuration.
@@ -853,7 +839,7 @@ class ModelKafkaEventBusConfig(BaseModel):
         """
         base_config = cls(
             bootstrap_servers="localhost:9092",
-            environment=EnumKafkaEnvironment.LOCAL,
+            environment="local",
             timeout_seconds=30,
             max_retry_attempts=3,
             retry_backoff_base=1.0,
@@ -956,15 +942,15 @@ class ModelKafkaEventBusConfig(BaseModel):
         """Get the DLQ topic for this configuration.
 
         If dead_letter_topic is explicitly set, returns that value.
-        Otherwise, builds a DLQ topic name following ONEX conventions
-        using the configuration's environment.
+        Otherwise, builds a realm-agnostic DLQ topic name following
+        ONEX conventions.
 
         DLQ Topic Naming Convention:
-            Format: <env>.dlq.<category>.v1
+            Format: onex.dlq.<category>.v1
             Examples:
-                - dev.dlq.intents.v1 (for permanently failed intents)
-                - prod.dlq.events.v1 (for permanently failed events)
-                - staging.dlq.commands.v1 (for permanently failed commands)
+                - onex.dlq.intents.v1 (for permanently failed intents)
+                - onex.dlq.events.v1 (for permanently failed events)
+                - onex.dlq.commands.v1 (for permanently failed commands)
 
         Args:
             category: Message category for DLQ routing. Valid values:
@@ -979,18 +965,21 @@ class ModelKafkaEventBusConfig(BaseModel):
             ValueError: If category is not a valid message category.
 
         Example:
-            >>> config = ModelKafkaEventBusConfig(environment="prod")
+            >>> config = ModelKafkaEventBusConfig(environment="local")
             >>> config.get_dlq_topic()
-            'prod.dlq.intents.v1'
+            'onex.dlq.intents.v1'
             >>> config.get_dlq_topic("events")
-            'prod.dlq.events.v1'
+            'onex.dlq.events.v1'
             >>> # Explicit topic takes precedence
             >>> config = ModelKafkaEventBusConfig(
-            ...     environment="prod",
+            ...     environment="local",
             ...     dead_letter_topic="custom-dlq"
             ... )
             >>> config.get_dlq_topic()
             'custom-dlq'
+
+        .. versionchanged:: 0.21.0
+            OMN-5189: DLQ topics are now realm-agnostic.
         """
         if self.dead_letter_topic:
             return self.dead_letter_topic
@@ -998,7 +987,7 @@ class ModelKafkaEventBusConfig(BaseModel):
         # Import here to avoid circular imports
         from omnibase_infra.event_bus.topic_constants import build_dlq_topic
 
-        return build_dlq_topic(self.environment, category)
+        return build_dlq_topic(category)
 
 
 __all__: list[str] = ["ModelKafkaEventBusConfig"]

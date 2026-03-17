@@ -85,7 +85,7 @@ class TestExtractEventBusConfig:
         """Returns None when contract is not configured."""
         self.node._introspection_contract = None
 
-        result = self.node._extract_event_bus_config("dev")
+        result = self.node._extract_event_bus_config()
 
         assert result is None
 
@@ -93,7 +93,7 @@ class TestExtractEventBusConfig:
         """Returns None when contract has no event_bus subcontract."""
         self.node._introspection_contract = MockContract(event_bus=None)
 
-        result = self.node._extract_event_bus_config("dev")
+        result = self.node._extract_event_bus_config()
 
         assert result is None
 
@@ -105,7 +105,7 @@ class TestExtractEventBusConfig:
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
-        result = self.node._extract_event_bus_config("dev")
+        result = self.node._extract_event_bus_config()
 
         assert result is None
 
@@ -117,7 +117,7 @@ class TestExtractEventBusConfig:
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
-        result = self.node._extract_event_bus_config("dev")
+        result = self.node._extract_event_bus_config()
 
         assert result is not None
         assert len(result.publish_topics) == 1
@@ -132,7 +132,7 @@ class TestExtractEventBusConfig:
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
-        result = self.node._extract_event_bus_config("dev")
+        result = self.node._extract_event_bus_config()
 
         assert result is not None
         assert len(result.subscribe_topics) == 1
@@ -155,7 +155,7 @@ class TestExtractEventBusConfig:
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
-        result = self.node._extract_event_bus_config("prod")
+        result = self.node._extract_event_bus_config()
 
         assert result is not None
         assert len(result.publish_topics) == 2
@@ -168,22 +168,16 @@ class TestExtractEventBusConfig:
         assert result.subscribe_topics[1].topic == "onex.cmd.platform.register-node.v1"
 
     def test_topics_are_realm_agnostic(self) -> None:
-        """Topics are the same regardless of environment parameter (realm-agnostic)."""
+        """Topics are realm-agnostic (no environment prefix, OMN-5189)."""
         event_bus = MockEventBusSubcontract(
             publish_topics=["onex.evt.platform.test-event.v1"],
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
-        dev_result = self.node._extract_event_bus_config("dev")
-        staging_result = self.node._extract_event_bus_config("staging")
-        prod_result = self.node._extract_event_bus_config("prod")
+        result = self.node._extract_event_bus_config()
 
-        # All environments produce the same realm-agnostic topic
-        assert dev_result.publish_topics[0].topic == "onex.evt.platform.test-event.v1"
-        assert (
-            staging_result.publish_topics[0].topic == "onex.evt.platform.test-event.v1"
-        )
-        assert prod_result.publish_topics[0].topic == "onex.evt.platform.test-event.v1"
+        # Topics are realm-agnostic
+        assert result.publish_topics[0].topic == "onex.evt.platform.test-event.v1"
 
     def test_fail_fast_on_unresolved_env_placeholder(self) -> None:
         """Raises ValueError on unresolved {env} placeholder."""
@@ -193,7 +187,7 @@ class TestExtractEventBusConfig:
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
         with pytest.raises(ValueError) as exc_info:
-            self.node._extract_event_bus_config("dev")
+            self.node._extract_event_bus_config()
 
         assert "Unresolved placeholder in topic" in str(exc_info.value)
         assert "{env}" in str(exc_info.value)
@@ -206,7 +200,7 @@ class TestExtractEventBusConfig:
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
         with pytest.raises(ValueError) as exc_info:
-            self.node._extract_event_bus_config("dev")
+            self.node._extract_event_bus_config()
 
         assert "Unresolved placeholder in topic" in str(exc_info.value)
         assert "{namespace}" in str(exc_info.value)
@@ -219,7 +213,7 @@ class TestExtractEventBusConfig:
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
         with pytest.raises(ValueError) as exc_info:
-            self.node._extract_event_bus_config("dev")
+            self.node._extract_event_bus_config()
 
         assert "Unresolved placeholder in topic" in str(exc_info.value)
 
@@ -230,7 +224,7 @@ class TestExtractEventBusConfig:
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
-        result = self.node._extract_event_bus_config("dev")
+        result = self.node._extract_event_bus_config()
 
         entry = result.publish_topics[0]
         assert entry.topic == "onex.evt.platform.test-event.v1"
@@ -245,7 +239,7 @@ class TestExtractEventBusConfig:
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
-        result = self.node._extract_event_bus_config("dev")
+        result = self.node._extract_event_bus_config()
 
         # Frozen model should raise on modification
         with pytest.raises(Exception):  # Pydantic raises ValidationError
@@ -262,7 +256,7 @@ class TestExtractEventBusConfig:
             event_bus=EventBusWithNoneTopics()
         )
 
-        result = self.node._extract_event_bus_config("dev")
+        result = self.node._extract_event_bus_config()
 
         assert result is None
 
@@ -301,8 +295,7 @@ class TestEventBusInGetIntrospectionData:
         contract = MockContract(event_bus=event_bus)
         self._initialize_node(contract)
 
-        with patch.dict(os.environ, {"ONEX_ENV": "dev"}):
-            event = await self.node.get_introspection_data()
+        event = await self.node.get_introspection_data()
 
         assert event.event_bus is not None
         assert len(event.event_bus.publish_topics) == 1
@@ -340,35 +333,15 @@ class TestEventBusInGetIntrospectionData:
         assert event.event_bus is None
 
     @pytest.mark.asyncio
-    async def test_topics_are_realm_agnostic_regardless_of_onex_env(self) -> None:
-        """get_introspection_data() produces realm-agnostic topics regardless of ONEX_ENV."""
+    async def test_topics_are_realm_agnostic(self) -> None:
+        """get_introspection_data() produces realm-agnostic topics (OMN-5189)."""
         event_bus = MockEventBusSubcontract(
             publish_topics=["onex.evt.platform.test-event.v1"],
         )
         contract = MockContract(event_bus=event_bus)
         self._initialize_node(contract)
 
-        with patch.dict(os.environ, {"ONEX_ENV": "production"}):
-            event = await self.node.get_introspection_data()
-
-        assert (
-            event.event_bus.publish_topics[0].topic == "onex.evt.platform.test-event.v1"
-        )
-
-    @pytest.mark.asyncio
-    async def test_produces_realm_agnostic_topics_when_onex_env_not_set(self) -> None:
-        """get_introspection_data() produces realm-agnostic topics when ONEX_ENV not set."""
-        event_bus = MockEventBusSubcontract(
-            publish_topics=["onex.evt.platform.test-event.v1"],
-        )
-        contract = MockContract(event_bus=event_bus)
-        self._initialize_node(contract)
-
-        # Ensure ONEX_ENV is not set
-        env = os.environ.copy()
-        env.pop("ONEX_ENV", None)
-        with patch.dict(os.environ, env, clear=True):
-            event = await self.node.get_introspection_data()
+        event = await self.node.get_introspection_data()
 
         assert (
             event.event_bus.publish_topics[0].topic == "onex.evt.platform.test-event.v1"
@@ -405,8 +378,7 @@ class TestEventBusInGetIntrospectionData:
         contract = MockContract(event_bus=event_bus)
         self._initialize_node(contract)
 
-        with patch.dict(os.environ, {"ONEX_ENV": "dev"}):
-            event = await self.node.get_introspection_data()
+        event = await self.node.get_introspection_data()
 
         # Use the convenience property for routing lookups
         topic_strings = event.event_bus.publish_topic_strings
@@ -433,7 +405,7 @@ class TestEventBusEdgeCases:
 
         self.node._introspection_contract = ContractWithoutEventBus()
 
-        result = self.node._extract_event_bus_config("dev")
+        result = self.node._extract_event_bus_config()
 
         assert result is None
 
@@ -444,7 +416,7 @@ class TestEventBusEdgeCases:
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
-        result = self.node._extract_event_bus_config("")
+        result = self.node._extract_event_bus_config()
 
         # Realm-agnostic topic without any prefix
         assert result.publish_topics[0].topic == "onex.evt.platform.test-event.v1"
@@ -456,7 +428,7 @@ class TestEventBusEdgeCases:
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
-        result = self.node._extract_event_bus_config("dev")
+        result = self.node._extract_event_bus_config()
 
         assert (
             result.publish_topics[0].topic == "onex.evt.platform.node-state-changed.v1"
@@ -472,7 +444,7 @@ class TestEventBusEdgeCases:
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
-        result = self.node._extract_event_bus_config("dev")
+        result = self.node._extract_event_bus_config()
 
         assert result.publish_topics[0].topic == "onex.evt.platform.test-event.v2"
         assert result.publish_topics[1].topic == "onex.evt.platform.test-event.v10"
