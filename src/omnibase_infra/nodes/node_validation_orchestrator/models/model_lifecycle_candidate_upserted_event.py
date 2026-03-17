@@ -27,7 +27,9 @@ class ModelLifecycleCandidateUpsertedEvent(BaseModel):
 
     event_type: Literal["ValidationCandidateUpserted"] = "ValidationCandidateUpserted"
     candidate_id: str = Field(min_length=1)
-    rule_name: str = Field(min_length=1)
+    rule_name: str = Field(
+        min_length=1
+    )  # pattern-ok: pinned to omnidash ValidationCandidateUpsertedSchema
     rule_id: str = Field(min_length=1)
     tier: Literal["observed", "suggested", "shadow_apply", "promoted", "default"] = (
         Field(description="Lifecycle tier (1-5 mapped to names)")

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Unit tests for ModelServiceHeartbeatEvent.
+"""Unit tests for ModelRuntimeHeartbeatEvent.
 
 Tests validate:
 - Required field instantiation with valid data
@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from omnibase_infra.models.registration import ModelServiceHeartbeatEvent
+from omnibase_infra.models.registration import ModelRuntimeHeartbeatEvent
 
 pytestmark = pytest.mark.unit
 
@@ -28,8 +28,8 @@ pytestmark = pytest.mark.unit
 TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 
-def _make_valid_event(**overrides: object) -> ModelServiceHeartbeatEvent:
-    """Create a valid ModelServiceHeartbeatEvent with sensible defaults."""
+def _make_valid_event(**overrides: object) -> ModelRuntimeHeartbeatEvent:
+    """Create a valid ModelRuntimeHeartbeatEvent with sensible defaults."""
     defaults: dict[str, object] = {
         "service_id": "omninode-runtime-abc123",
         "service_name": "omninode-runtime",
@@ -42,10 +42,10 @@ def _make_valid_event(**overrides: object) -> ModelServiceHeartbeatEvent:
         "emitted_at": TEST_TIMESTAMP,
     }
     defaults.update(overrides)
-    return ModelServiceHeartbeatEvent(**defaults)  # type: ignore[arg-type]
+    return ModelRuntimeHeartbeatEvent(**defaults)  # type: ignore[arg-type]
 
 
-class TestModelServiceHeartbeatEventInstantiation:
+class TestModelRuntimeHeartbeatEventInstantiation:
     """Tests for basic model instantiation."""
 
     def test_valid_instantiation(self) -> None:
@@ -77,7 +77,7 @@ class TestModelServiceHeartbeatEventInstantiation:
             _make_valid_event(status="unknown")
 
 
-class TestModelServiceHeartbeatEventFrozen:
+class TestModelRuntimeHeartbeatEventFrozen:
     """Tests for frozen immutability."""
 
     def test_frozen_service_id(self) -> None:
@@ -99,7 +99,7 @@ class TestModelServiceHeartbeatEventFrozen:
             event.uptime_ms = 9999  # type: ignore[misc]
 
 
-class TestModelServiceHeartbeatEventExtraForbid:
+class TestModelRuntimeHeartbeatEventExtraForbid:
     """Tests for extra fields forbidden."""
 
     def test_extra_field_rejected(self) -> None:
@@ -108,7 +108,7 @@ class TestModelServiceHeartbeatEventExtraForbid:
             _make_valid_event(extra_field="not allowed")
 
 
-class TestModelServiceHeartbeatEventSerialization:
+class TestModelRuntimeHeartbeatEventSerialization:
     """Tests for JSON serialization."""
 
     def test_json_keys_match_expected_set(self) -> None:
@@ -132,18 +132,18 @@ class TestModelServiceHeartbeatEventSerialization:
         """Test model_dump -> model_validate roundtrip preserves all data."""
         event = _make_valid_event()
         data = event.model_dump()
-        restored = ModelServiceHeartbeatEvent.model_validate(data)
+        restored = ModelRuntimeHeartbeatEvent.model_validate(data)
         assert restored == event
 
     def test_json_roundtrip(self) -> None:
         """Test model_dump_json -> model_validate_json roundtrip."""
         event = _make_valid_event()
         json_str = event.model_dump_json()
-        restored = ModelServiceHeartbeatEvent.model_validate_json(json_str)
+        restored = ModelRuntimeHeartbeatEvent.model_validate_json(json_str)
         assert restored == event
 
 
-class TestModelServiceHeartbeatEventConstraints:
+class TestModelRuntimeHeartbeatEventConstraints:
     """Tests for field constraints."""
 
     def test_negative_uptime_ms_rejected(self) -> None:

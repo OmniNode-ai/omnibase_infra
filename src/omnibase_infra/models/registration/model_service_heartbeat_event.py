@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Service Heartbeat Event Model.
 
-ModelServiceHeartbeatEvent for periodic service-level heartbeat broadcasts
+ModelRuntimeHeartbeatEvent for periodic service-level heartbeat broadcasts
 in the ONEX platform health telemetry system.
 """
 
@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from omnibase_infra.utils import validate_timezone_aware_datetime
 
 
-class ModelServiceHeartbeatEvent(BaseModel):
+class ModelRuntimeHeartbeatEvent(BaseModel):
     """Event model for periodic service-level heartbeat broadcasts.
 
     Services publish this event periodically to indicate they are alive and
@@ -36,7 +36,7 @@ class ModelServiceHeartbeatEvent(BaseModel):
 
     Example:
         >>> from datetime import UTC, datetime
-        >>> event = ModelServiceHeartbeatEvent(
+        >>> event = ModelRuntimeHeartbeatEvent(
         ...     service_id="omninode-runtime-abc123",
         ...     service_name="omninode-runtime",
         ...     status="healthy",
@@ -57,7 +57,11 @@ class ModelServiceHeartbeatEvent(BaseModel):
 
     # Service identity
     service_id: str = Field(..., description="Unique identifier per service instance")
-    service_name: str = Field(..., description="Human-readable service name")
+    service_name: str = (
+        Field(  # pattern-ok: pinned to omnidash worker-health consumer contract
+            ..., description="Human-readable service name"
+        )
+    )
     status: Literal["healthy", "degraded", "unhealthy"] = Field(
         ..., description="Current health status of the service"
     )
@@ -92,4 +96,4 @@ class ModelServiceHeartbeatEvent(BaseModel):
         return validate_timezone_aware_datetime(v)
 
 
-__all__ = ["ModelServiceHeartbeatEvent"]
+__all__ = ["ModelRuntimeHeartbeatEvent"]

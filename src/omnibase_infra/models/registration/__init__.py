@@ -44,7 +44,7 @@ from omnibase_infra.models.registration.model_node_registration_record import (
     ModelNodeRegistrationRecord,
 )
 from omnibase_infra.models.registration.model_service_heartbeat_event import (
-    ModelServiceHeartbeatEvent,
+    ModelRuntimeHeartbeatEvent,
 )
 from omnibase_infra.models.registration.model_topic_catalog_request import (
     ModelTopicCatalogRequest,
@@ -71,6 +71,6 @@ __all__ = [
     "ModelNodeRegistrationInitiated",
     "ModelNodeRegistrationRecord",
     "ModelNodeRegistrationRejected",
-    "ModelServiceHeartbeatEvent",
+    "ModelRuntimeHeartbeatEvent",
     "ModelTopicCatalogRequest",
 ]
