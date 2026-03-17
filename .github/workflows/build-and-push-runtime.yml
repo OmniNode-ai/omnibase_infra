@@ -133,7 +133,7 @@ jobs:
 
       - name: Build runtime image (local)
         id: build-local
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile.runtime
