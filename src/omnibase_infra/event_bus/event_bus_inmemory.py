@@ -610,6 +610,9 @@ class EventBusInmemory:
             target_environment: Target environment (defaults to current)
         """
         env = target_environment or self._environment
+        # INTENTIONAL ENV PREFIX: broadcast topics are infrastructure-scoped, not event routing.
+        # The {env}.broadcast pattern is used for environment-wide coordination commands,
+        # not for domain event routing which uses realm-agnostic onex.* suffixes.
         topic = f"{env}.broadcast"
         value_dict = {"command": command, "payload": payload}
         value = json.dumps(value_dict).encode("utf-8")
@@ -638,6 +641,8 @@ class EventBusInmemory:
             payload: Command payload data
             target_group: Target group identifier
         """
+        # INTENTIONAL ENV PREFIX: group-targeted topics are infrastructure-scoped,
+        # not event routing. Same rationale as broadcast topics above.
         topic = f"{self._environment}.{target_group}"
         value_dict = {"command": command, "payload": payload}
         value = json.dumps(value_dict).encode("utf-8")

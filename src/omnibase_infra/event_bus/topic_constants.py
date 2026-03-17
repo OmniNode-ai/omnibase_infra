@@ -160,6 +160,9 @@ def build_dlq_topic(
     *,
     version: str | None = None,
 ) -> str:
+    # INTENTIONAL ENV PREFIX: DLQ topics are infrastructure-scoped, not event routing.
+    # They use the fixed "onex" prefix rather than environment-based prefixes because
+    # DLQ routing is an infrastructure concern, not a domain routing concern.
     """Build a realm-agnostic DLQ topic name from components.
 
     Constructs a Dead Letter Queue topic name following ONEX conventions
