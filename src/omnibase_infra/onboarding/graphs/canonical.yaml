@@ -1,0 +1,155 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Canonical onboarding graph — 10 MVP steps.
+# Each step uses ModelOrchestratorStep fields with capability/verification extensions.
+#
+# DAG:
+#   check_python -> install_uv -> install_core -> create_first_node -> run_standalone_node
+#                                              \-> start_docker_infra -> start_event_bus -> connect_node_to_bus
+#                                                                    \-> configure_secrets
+#                                                                                        \-> start_omnidash
+title: "onex_onboarding_canonical"
+description: "Canonical onboarding graph for the ONEX platform"
+version: {major: 1, minor: 0, patch: 0}
+steps:
+  - step_key: "check_python"
+    name: "Check Python Installation"
+    step_type: "verification"
+    description: "Verify Python 3.12+ is available"
+    depends_on: []
+    required_capabilities: []
+    produces_capabilities: ["python_installed"]
+    tags: ["prerequisite"]
+    estimated_duration_seconds: 5
+    verification:
+      check_type: "command_exit_0"
+      target: "python3 --version"
+      timeout_seconds: 10
+      description: "Python 3 is installed and on PATH"
+  - step_key: "install_uv"
+    name: "Install uv Package Manager"
+    step_type: "action"
+    description: "Install uv for dependency management"
+    depends_on: ["check_python"]
+    required_capabilities: ["python_installed"]
+    produces_capabilities: ["uv_installed"]
+    tags: ["setup", "tooling"]
+    estimated_duration_seconds: 30
+    verification:
+      check_type: "command_exit_0"
+      target: "uv --version"
+      timeout_seconds: 10
+      description: "uv is installed and on PATH"
+  - step_key: "install_core"
+    name: "Install omnibase_core"
+    step_type: "action"
+    description: "Install the core ONEX package with uv"
+    depends_on: ["install_uv"]
+    required_capabilities: ["uv_installed"]
+    produces_capabilities: ["core_installed"]
+    tags: ["setup", "dependencies"]
+    estimated_duration_seconds: 60
+    verification:
+      check_type: "python_import"
+      target: "omnibase_core"
+      timeout_seconds: 10
+      description: "omnibase_core is importable"
+  - step_key: "create_first_node"
+    name: "Create First Node"
+    step_type: "action"
+    description: "Scaffold a minimal ONEX node using the CLI"
+    depends_on: ["install_core"]
+    required_capabilities: ["core_installed"]
+    produces_capabilities: ["node_created"]
+    tags: ["development"]
+    estimated_duration_seconds: 30
+    verification:
+      check_type: "file_exists"
+      target: "my_first_node/node.py"
+      timeout_seconds: 5
+      description: "Node scaffold directory exists"
+  - step_key: "run_standalone_node"
+    name: "Run Standalone Node"
+    step_type: "action"
+    description: "Execute the node in standalone mode (no infrastructure)"
+    depends_on: ["create_first_node"]
+    required_capabilities: ["node_created"]
+    produces_capabilities: ["first_node_running"]
+    tags: ["development", "standalone"]
+    estimated_duration_seconds: 15
+    verification:
+      check_type: "command_exit_0"
+      target: "uv run python -m my_first_node.node --dry-run"
+      timeout_seconds: 30
+      description: "Node executes successfully in dry-run mode"
+  - step_key: "start_docker_infra"
+    name: "Start Docker Infrastructure"
+    step_type: "action"
+    description: "Start PostgreSQL, Redpanda, and Valkey via Docker Compose"
+    depends_on: ["install_core"]
+    required_capabilities: ["core_installed"]
+    produces_capabilities: ["docker_infra_running"]
+    tags: ["infrastructure"]
+    estimated_duration_seconds: 120
+    verification:
+      check_type: "tcp_probe"
+      target: "localhost:5436"
+      timeout_seconds: 30
+      description: "PostgreSQL is accepting connections on external port"
+  - step_key: "start_event_bus"
+    name: "Start Event Bus"
+    step_type: "action"
+    description: "Verify Redpanda/Kafka event bus is running"
+    depends_on: ["start_docker_infra"]
+    required_capabilities: ["docker_infra_running"]
+    produces_capabilities: ["event_bus_running"]
+    tags: ["infrastructure", "messaging"]
+    estimated_duration_seconds: 30
+    verification:
+      check_type: "tcp_probe"
+      target: "localhost:19092"
+      timeout_seconds: 15
+      description: "Redpanda is accepting connections on external port"
+  - step_key: "connect_node_to_bus"
+    name: "Connect Node to Event Bus"
+    step_type: "action"
+    description: "Configure node to publish/consume events via Kafka"
+    depends_on: ["start_event_bus"]
+    required_capabilities: ["event_bus_running"]
+    produces_capabilities: ["event_bus_connected"]
+    tags: ["development", "messaging"]
+    estimated_duration_seconds: 60
+    verification:
+      check_type: "command_exit_0"
+      target: "uv run python -c \"from omnibase_infra.event_bus import get_bus; print('ok')\""
+      timeout_seconds: 15
+      description: "Event bus client imports successfully"
+  - step_key: "configure_secrets"
+    name: "Configure Secrets"
+    step_type: "action"
+    description: "Set up ~/.omnibase/.env with required environment variables"
+    depends_on: ["start_docker_infra"]
+    required_capabilities: ["docker_infra_running"]
+    produces_capabilities: ["secrets_configured"]
+    tags: ["infrastructure", "security"]
+    estimated_duration_seconds: 120
+    verification:
+      check_type: "file_exists"
+      target: "~/.omnibase/.env"
+      timeout_seconds: 5
+      description: "Environment file exists"
+  - step_key: "start_omnidash"
+    name: "Start Omnidash Dashboard"
+    step_type: "action"
+    description: "Start the analytics dashboard for monitoring"
+    depends_on: ["configure_secrets"]
+    required_capabilities: ["secrets_configured"]
+    produces_capabilities: ["omnidash_running"]
+    tags: ["monitoring", "dashboard"]
+    estimated_duration_seconds: 60
+    verification:
+      check_type: "http_health"
+      target: "http://localhost:3000"
+      timeout_seconds: 30
+      description: "Omnidash is serving on port 3000"
