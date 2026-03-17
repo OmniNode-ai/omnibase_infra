@@ -419,6 +419,16 @@ Producer: omnibase_infra baselines compute node (TODO: implement — OMN-4296)
 Consumer: omnidash /baselines dashboard
 """
 
+SUFFIX_WIRING_HEALTH_SNAPSHOT: str = "onex.evt.omnibase-infra.wiring-health-snapshot.v1"
+"""Topic suffix for wiring health snapshot events.
+
+Published by WiringHealthChecker after each health evaluation cycle.
+Each event carries per-topic emission/consumption counts and overall health status.
+
+Producer: WiringHealthChecker (OMN-5292)
+Consumer: omnidash /wiring-health dashboard
+"""
+
 SUFFIX_CIRCUIT_BREAKER_STATE: str = "onex.evt.omnibase-infra.circuit-breaker.v1"
 """Topic suffix for circuit breaker state transition events.
 
