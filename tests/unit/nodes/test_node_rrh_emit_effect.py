@@ -205,7 +205,7 @@ class TestHandlerRuntimeTargetCollect:
     async def test_falls_back_to_env(
         self, handler: HandlerRuntimeTargetCollect
     ) -> None:
-        with patch.dict("os.environ", {"ENVIRONMENT": "ci"}, clear=False):
+        with patch.dict("os.environ", {"ONEX_ENVIRONMENT": "ci"}, clear=False):
             result = await handler.handle()
         assert result.environment == "ci"
 

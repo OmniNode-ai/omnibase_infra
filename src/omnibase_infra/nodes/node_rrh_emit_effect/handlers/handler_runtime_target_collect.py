@@ -51,7 +51,7 @@ class HandlerRuntimeTargetCollect:
             Populated ``ModelRRHRuntimeTarget``.
         """
         return ModelRRHRuntimeTarget(
-            environment=environment or os.environ.get("ENVIRONMENT", "dev"),
+            environment=environment or os.environ.get("ONEX_ENVIRONMENT", "local"),
             kafka_broker=kafka_broker or os.environ.get("KAFKA_BOOTSTRAP_SERVERS", ""),
             kubernetes_context=kubernetes_context
             or os.environ.get("KUBECONFIG_CONTEXT", ""),
