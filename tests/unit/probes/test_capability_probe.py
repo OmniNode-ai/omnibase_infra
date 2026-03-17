@@ -84,7 +84,7 @@ class TestHttpHealthCheck:
 
     @patch("omnibase_infra.probes.capability_probe.urllib.request.urlopen")
     def test_returns_false_on_exception(self, mock_urlopen: MagicMock) -> None:
-        mock_urlopen.side_effect = Exception("Connection refused")
+        mock_urlopen.side_effect = OSError("Connection refused")
         assert http_health_check("http://localhost:8053/health") is False
 
 
