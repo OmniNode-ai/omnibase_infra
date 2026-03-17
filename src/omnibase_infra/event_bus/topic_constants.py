@@ -483,6 +483,17 @@ Consumer: omniintelligence cost aggregation pipeline
 Payload: ContractLlmCallMetrics (per-call token counts, cost, latency)
 """
 
+TOPIC_LLM_CALL_COMPLETED_INFRA: Final[str] = (
+    "onex.evt.omnibase-infra.llm-call-completed.v1"
+)
+"""LLM call completed event emitted by omnibase-infra inference effect.
+
+Producer: ServiceLlmMetricsPublisher (node_llm_inference_effect)
+Consumer: omnidash Cost Trends dashboard
+Payload: raw dict with model_id, endpoint_url, prompt_tokens,
+    completion_tokens, total_tokens, latency_ms, success, timestamp
+"""
+
 # Effectiveness data invalidation events (OMN-2303)
 TOPIC_EFFECTIVENESS_INVALIDATION: Final[str] = (
     "onex.evt.omnibase-infra.effectiveness-data-changed.v1"
@@ -582,6 +593,7 @@ __all__ = [
     "TOPIC_RESOLUTION_DECIDED",
     # LLM Call Metrics Topics
     "TOPIC_LLM_CALL_COMPLETED",
+    "TOPIC_LLM_CALL_COMPLETED_INFRA",
     # LLM Endpoint Health Topics
     "TOPIC_LLM_ENDPOINT_HEALTH",
     # Wiring Health Topics

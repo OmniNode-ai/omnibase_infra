@@ -38,10 +38,14 @@ import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from omnibase_infra.event_bus.topic_constants import TOPIC_LLM_CALL_COMPLETED
+from omnibase_infra.event_bus.topic_constants import (
+    TOPIC_LLM_CALL_COMPLETED,
+    TOPIC_LLM_CALL_COMPLETED_INFRA,
+)
 from omnibase_infra.nodes.node_llm_inference_effect.services.protocol_llm_handler import (
     ProtocolLlmHandler,
 )
@@ -190,7 +194,11 @@ class ServiceLlmMetricsPublisher:
             # conditions the set stays near-empty. Slow publishers (e.g. Kafka
             # back-pressure) may cause temporary accumulation; see __init__ comment.
             task = asyncio.create_task(
-                self._emit_metrics(correlation_id, captured_metrics)
+                self._emit_metrics(
+                    correlation_id,
+                    captured_metrics,
+                    endpoint_url=request.base_url,
+                )
             )
             self._background_tasks.add(task)
             task.add_done_callback(self._background_tasks.discard)
@@ -201,8 +209,16 @@ class ServiceLlmMetricsPublisher:
         self,
         correlation_id: UUID,
         metrics: ContractLlmCallMetrics | None,
+        *,
+        endpoint_url: str = "",
     ) -> None:
         """Publish pre-captured last_call_metrics to Kafka.
+
+        Emits two events fire-and-forget:
+        1. ``TOPIC_LLM_CALL_COMPLETED`` — full ``ContractLlmCallMetrics`` to
+           the omniintelligence cost aggregation pipeline.
+        2. ``TOPIC_LLM_CALL_COMPLETED_INFRA`` — lightweight raw dict to the
+           omnibase-infra namespace for the omnidash Cost Trends dashboard.
 
         Safe wrapper around the publish path.  All exceptions are caught
         and logged so that a Kafka outage never impacts inference callers.
@@ -216,7 +232,10 @@ class ServiceLlmMetricsPublisher:
                 this method reads it.  ``ContractLlmCallMetrics`` is a
                 TYPE_CHECKING-only import; the annotation is lazily evaluated
                 via ``from __future__ import annotations`` (PEP 563).
+            endpoint_url: Base URL of the LLM endpoint (``request.base_url``).
+                Used in the infra-namespace event payload.
         """
+
         if metrics is None:
             logger.debug(
                 "No LLM call metrics to publish (last_call_metrics is None). "
@@ -246,6 +265,38 @@ class ServiceLlmMetricsPublisher:
                 "Failed to publish LLM call metrics to topic=%s; ignoring. "
                 "model=%s correlation_id=%s",
                 TOPIC_LLM_CALL_COMPLETED,
+                getattr(metrics, "model_id", "<unknown>"),
+                correlation_id,
+                exc_info=True,
+            )
+
+        try:
+            infra_payload: dict[str, object] = {
+                "model_id": metrics.model_id,
+                "endpoint_url": endpoint_url,
+                "prompt_tokens": metrics.prompt_tokens,
+                "completion_tokens": metrics.completion_tokens,
+                "total_tokens": metrics.total_tokens,
+                "latency_ms": metrics.latency_ms,
+                "success": True,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+            await self._publisher(
+                TOPIC_LLM_CALL_COMPLETED_INFRA,
+                infra_payload,
+                str(correlation_id),
+            )
+            logger.debug(
+                "Published infra LLM call event. topic=%s model=%s correlation_id=%s",
+                TOPIC_LLM_CALL_COMPLETED_INFRA,
+                metrics.model_id,
+                correlation_id,
+            )
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+            logger.warning(
+                "Failed to publish infra LLM call event to topic=%s; ignoring. "
+                "model=%s correlation_id=%s",
+                TOPIC_LLM_CALL_COMPLETED_INFRA,
                 getattr(metrics, "model_id", "<unknown>"),
                 correlation_id,
                 exc_info=True,
