@@ -93,6 +93,14 @@ Published periodically by nodes to indicate liveness. Contains timestamp,
 resource usage metrics, and health status.
 """
 
+SUFFIX_SERVICE_HEARTBEAT: str = "onex.evt.platform.service-heartbeat.v1"
+"""Topic suffix for service-level heartbeat events.
+
+Published periodically by runtime services (e.g. omninode-runtime, effects-runtime)
+to report service health, uptime, resource usage, and restart count. Consumed by
+monitoring infrastructure for service failure detection and health dashboards.
+"""
+
 # Command topics
 SUFFIX_REQUEST_INTROSPECTION: str = "onex.cmd.platform.request-introspection.v1"
 """Topic suffix for introspection request commands.
@@ -911,6 +919,7 @@ ALL_PLATFORM_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_NODE_INTROSPECTION, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_REGISTRY_REQUEST_INTROSPECTION, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_NODE_HEARTBEAT, partitions=6),
+    ModelTopicSpec(suffix=SUFFIX_SERVICE_HEARTBEAT, partitions=3),
     ModelTopicSpec(suffix=SUFFIX_REQUEST_INTROSPECTION, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_FSM_STATE_TRANSITIONS, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_RUNTIME_TICK, partitions=1),

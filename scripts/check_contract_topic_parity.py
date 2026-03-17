@@ -307,6 +307,7 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omnibase-infra.gmail-archive-purged.v1": "pre-migration; needs contract.yaml in omnibase_infra | owner: jonah | expiry: 2026-06-01",
     "onex.evt.pattern.discovered.v1": "pre-migration; needs contract.yaml in omniintelligence | owner: jonah | expiry: 2026-06-01",
     "onex.evt.platform.resolution-decided.v1": "pre-migration; needs contract.yaml in omnibase_infra | owner: jonah | expiry: 2026-06-01",
+    "onex.evt.platform.service-heartbeat.v1": "new topic added in OMN-5184; contract.yaml needed once consuming node is wired | owner: jonah | expiry: 2026-06-01",
     "onex.snapshot.platform.registration-snapshots.v1": "non-standard kind 'snapshot'; topic validated separately via ValidateTopicSuffix skip-list | owner: jonah | expiry: 2026-06-01",
 }
 # fmt: on
