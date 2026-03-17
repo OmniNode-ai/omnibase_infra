@@ -124,7 +124,7 @@ registration = "omnibase_infra.nodes.node_registration_orchestrator.plugin:Plugi
 [dependency-groups]
 dev = [
     "pytest>=8.4.0,<9.0.0",
-    "pytest-asyncio>=0.25.0,<0.26.0",
+    "pytest-asyncio>=0.25.0,<1.4.0",
     "pytest-mock>=3.11.0,<4.0.0",
     "pytest-cov>=6.0.0,<8.0.0",
     "pytest-xdist>=3.5.0,<4.0.0",  # Parallel test execution
