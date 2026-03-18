@@ -1,0 +1,41 @@
+name: migration-gate
+description: Boot-order sentinel that gates runtime startup on migrations
+image: postgres:16-alpine
+layer: infrastructure
+container_name: omnibase-infra-migration-gate
+required_env:
+  - POSTGRES_PASSWORD
+hardcoded_env:
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: '5432'
+  POSTGRES_DB: omnibase_infra
+operational_defaults:
+  POSTGRES_USER: postgres
+ports: null
+healthcheck:
+  test: sh /check_migrations_complete.sh
+  interval_s: 10
+  timeout_s: 5
+  retries: 30
+  start_period_s: 10
+volumes:
+  - ../scripts/check_migrations_complete.sh:/check_migrations_complete.sh:ro
+depends_on:
+  - service: postgres
+    condition: service_healthy
+  - service: forward-migration
+    condition: service_completed_successfully
+restart: unless-stopped
+resources:
+  cpus: '0.1'
+  memory: 32M
+  cpus_reservation: '0.25'
+  memory_reservation: 128M
+command:
+  - sh
+  - -c
+  - while true; do sleep 3600; done
+labels:
+  com.omninode.service: migration-gate
+  com.omninode.layer: infrastructure
+  com.omninode.ticket: OMN-3737

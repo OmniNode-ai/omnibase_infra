@@ -1,0 +1,39 @@
+name: redpanda
+description: Kafka-compatible event streaming (local Docker, always-on)
+image: redpandadata/redpanda:v24.2.7
+layer: infrastructure
+container_name: omnibase-infra-redpanda
+required_env: []
+hardcoded_env: {}
+operational_defaults: {}
+ports:
+  external: 19092
+  internal: 19092
+healthcheck:
+  test: rpk cluster health | grep -q 'Healthy:.*true' || exit 1
+  interval_s: 30
+  timeout_s: 10
+  retries: 3
+  start_period_s: 30
+volumes:
+  - redpanda_data:/var/lib/redpanda/data
+depends_on: []
+restart: unless-stopped
+resources: null
+command:
+  - redpanda
+  - start
+  - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+  - --advertise-kafka-addr internal://redpanda:9092,external://localhost:${REDPANDA_EXTERNAL_PORT:-19092}
+  - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+  - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:${REDPANDA_PANDAPROXY_PORT:-18082}
+  - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+  - --rpc-addr redpanda:33145
+  - --advertise-rpc-addr redpanda:33145
+  - --mode dev-container
+  - --smp 1
+  - --memory ${REDPANDA_MEMORY:-8G}
+  - --default-log-level=warn
+labels:
+  com.omninode.service: redpanda
+  com.omninode.layer: infrastructure

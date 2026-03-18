@@ -1,0 +1,35 @@
+name: postgres
+description: Primary PostgreSQL data store for all ONEX platform databases
+image: postgres:16-alpine
+layer: infrastructure
+container_name: omnibase-infra-postgres
+required_env:
+  - POSTGRES_PASSWORD
+hardcoded_env:
+  POSTGRES_DB: omnibase_infra
+operational_defaults:
+  POSTGRES_USER: postgres
+  ROLE_OMNIBASE_PASSWORD: ''
+  ROLE_OMNICLAUDE_PASSWORD: ''
+  ROLE_OMNIDASH_PASSWORD: ''
+  ROLE_OMNIINTELLIGENCE_PASSWORD: ''
+  ROLE_OMNIMEMORY_PASSWORD: ''
+  ROLE_OMNINODE_PASSWORD: ''
+ports:
+  external: 5436
+  internal: 5432
+healthcheck:
+  test: pg_isready -U ${POSTGRES_USER:-postgres} -d omnibase_infra
+  interval_s: 30
+  timeout_s: 10
+  retries: 3
+  start_period_s: 10
+volumes:
+  - postgres_data:/var/lib/postgresql/data
+  - ./migrations/forward:/docker-entrypoint-initdb.d:ro
+depends_on: []
+restart: unless-stopped
+resources: null
+labels:
+  com.omninode.service: postgres
+  com.omninode.layer: infrastructure

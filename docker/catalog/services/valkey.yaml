@@ -1,0 +1,27 @@
+name: valkey
+description: Redis-compatible cache and pub/sub for session state and caching
+image: valkey/valkey:8.0-alpine
+layer: infrastructure
+container_name: omnibase-infra-valkey
+required_env: []
+hardcoded_env: {}
+operational_defaults:
+  VALKEY_PASSWORD: valkey-dev-password
+ports:
+  external: 16379
+  internal: 6379
+healthcheck:
+  test: valkey-cli $${VALKEY_PASSWORD:+-a "$$VALKEY_PASSWORD" --no-auth-warning} ping | grep -q PONG
+  interval_s: 30
+  timeout_s: 10
+  retries: 3
+  start_period_s: 10
+volumes:
+  - valkey_data:/data
+depends_on: []
+restart: unless-stopped
+resources: null
+command: sh -c 'valkey-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru $${VALKEY_PASSWORD:+--requirepass "$$VALKEY_PASSWORD"}'
+labels:
+  com.omninode.service: valkey
+  com.omninode.layer: infrastructure

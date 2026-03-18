@@ -1,0 +1,35 @@
+name: forward-migration
+description: One-shot runner for pending forward SQL migrations
+image: postgres:16-alpine
+layer: infrastructure
+container_name: omnibase-forward-migration
+required_env:
+  - POSTGRES_PASSWORD
+hardcoded_env:
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: '5432'
+  POSTGRES_DB: omnibase_infra
+  MIGRATIONS_DIR: /migrations/forward
+operational_defaults:
+  POSTGRES_USER: postgres
+ports: null
+healthcheck: null
+volumes:
+  - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
+  - ../docker/migrations/forward:/migrations/forward:ro
+depends_on:
+  - service: postgres
+    condition: service_healthy
+restart: 'no'
+resources:
+  cpus: '0.2'
+  memory: 64M
+  cpus_reservation: '0.25'
+  memory_reservation: 128M
+command:
+  - sh
+  - /run-forward-migrations.sh
+labels:
+  com.omninode.service: forward-migration
+  com.omninode.layer: infrastructure
+  com.omninode.ticket: OMN-4175

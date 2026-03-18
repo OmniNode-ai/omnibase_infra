@@ -1,0 +1,64 @@
+name: runtime-worker
+description: Scalable worker containers for parallel compute operations
+image: runtime:latest
+layer: runtime
+container_name: null
+required_env:
+  - POSTGRES_PASSWORD
+  - OMNIBASE_INFRA_DB_URL
+  - VALKEY_PASSWORD
+  - OMNIINTELLIGENCE_DB_URL
+  - KEYCLOAK_ADMIN_CLIENT_SECRET
+  - ONEX_SERVICE_CLIENT_SECRET
+  - ONEX_REGISTRATION_AUTO_ACK
+hardcoded_env:
+  KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+  KAFKA_BROKER_ALLOWLIST: 'redpanda:'
+  BUS_ID: local
+  ONEX_CONTRACTS_DIR: /app/contracts
+  VALKEY_HOST: valkey
+  VALKEY_PORT: '6379'
+  OMNICLAUDE_CONTRACTS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/nodes
+  OMNICLAUDE_SKILLS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/plugins/onex/skills
+  USE_EVENT_ROUTING: 'true'
+  KEYCLOAK_ADMIN_URL: http://keycloak:8080
+  OTEL_SERVICE_NAME: omninode-runtime-worker
+  RUNTIME_PROFILE: workers
+operational_defaults:
+  POSTGRES_USER: postgres
+  ONEX_LOG_LEVEL: INFO
+  ONEX_ENVIRONMENT: local
+  KEYCLOAK_REALM: omninode
+  KEYCLOAK_ADMIN_CLIENT_ID: onex-admin
+  KEYCLOAK_ISSUER: http://localhost:28080/realms/omninode
+  ONEX_SERVICE_CLIENT_ID: onex-service
+  ONEX_INPUT_TOPIC: worker-requests
+  ONEX_OUTPUT_TOPIC: worker-responses
+  ONEX_GROUP_ID: onex-runtime-workers
+ports: null
+healthcheck:
+  test: curl -sf http://localhost:8085/health
+  interval_s: 30
+  timeout_s: 10
+  retries: 5
+  start_period_s: 120
+volumes:
+  - worker_logs:/app/logs
+  - ../contracts:/app/contracts:ro
+depends_on:
+  - service: omninode-runtime
+    condition: service_healthy
+  - service: redpanda
+    condition: service_healthy
+restart: unless-stopped
+resources:
+  cpus: '0.5'
+  memory: 768M
+  cpus_reservation: '0.1'
+  memory_reservation: 128M
+stop_grace_period: 90s
+labels:
+  com.omninode.service: runtime-worker
+  com.omninode.layer: runtime
+  com.omninode.version: ${RUNTIME_VERSION:-0.1.0}
+  autoheal: 'true'
