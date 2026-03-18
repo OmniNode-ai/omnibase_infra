@@ -288,3 +288,7 @@ junit-*.xml
 docs/recovery/
 *-validation-log-*.md
 *-recovery-log-*.md
+
+# Generated compose (catalog CLI output)
+docker/docker-compose.generated.yml
+.onex/
