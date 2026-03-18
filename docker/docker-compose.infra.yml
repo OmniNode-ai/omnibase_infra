@@ -64,6 +64,7 @@
 #     - intelligence-api: 8053 [runtime profile]
 #     - contract-resolver: 8091 [runtime profile] (OMN-2756 transitional bridge)
 #     - skill-lifecycle-consumer: 8092 [runtime profile] (OMN-2934)
+#     - context-audit-consumer: 8093 [runtime profile] (OMN-5240)
 #     - phoenix: 6006 [runtime profile] (OMN-3542, LLM observability OTLP HTTP + UI)
 #
 # Dashboard Requirements (OMN-3337):
@@ -792,6 +793,55 @@ services:
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
       - "autoheal=true"
   # ==========================================================================
+  # Context Audit Consumer - Observability (Runtime Profile) [OMN-5240]
+  # ==========================================================================
+  # Consumes context integrity audit events from Kafka and persists them to
+  # the context_audit_events PostgreSQL table (migration 053, OMN-5239).
+  context-audit-consumer:
+    !!merge <<: *runtime-base
+    container_name: omninode-context-audit-consumer
+    profiles: ["runtime", "full"]
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    command: ["python", "-m", "omnibase_infra.services.observability.context_audit.consumer"]
+    environment:
+      # OMN-3431: Local Docker Redpanda
+      OMNIBASE_INFRA_CONTEXT_AUDIT_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN: ${OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN:?OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN must be set in ~/.omnibase/.env}
+      OMNIBASE_INFRA_CONTEXT_AUDIT_BATCH_SIZE: ${CONTEXT_AUDIT_BATCH_SIZE:-100}
+      OMNIBASE_INFRA_CONTEXT_AUDIT_BATCH_TIMEOUT_MS: ${CONTEXT_AUDIT_BATCH_TIMEOUT_MS:-1000}
+      OMNIBASE_INFRA_CONTEXT_AUDIT_HEALTH_CHECK_PORT: "8093"
+      OMNIBASE_INFRA_CONTEXT_AUDIT_HEALTH_CHECK_HOST: "0.0.0.0"
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
+    ports:
+      - "${CONTEXT_AUDIT_CONSUMER_PORT:-8093}:8093"
+    stop_grace_period: 60s
+    volumes:
+      - context_audit_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8093/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    labels:
+      - "com.omninode.service=context-audit-consumer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+      - "autoheal=true"
+  # ==========================================================================
   # OmniIntelligence Migration Runner (Runtime Profile) — OMN-4082
   # ==========================================================================
   # One-shot init container that creates the omniintelligence database (if
@@ -1054,6 +1104,8 @@ volumes:
     name: omninode-agent-actions-logs
   skill_lifecycle_logs:
     name: omninode-skill-lifecycle-logs
+  context_audit_logs:
+    name: omninode-context-audit-logs
   contract_resolver_logs:
     name: omninode-contract-resolver-logs
   phoenix_data:
