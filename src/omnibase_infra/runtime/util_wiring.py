@@ -327,7 +327,7 @@ def _load_handler_from_contract(
     return handler_class, description, activation
 
 
-def wire_default_handlers() -> dict[str, list[str]]:
+def wire_default_handlers() -> dict[str, list[str] | dict[str, str]]:
     """Register all default handlers and event buses with singleton registries.
 
     This function registers the standard set of handlers and event buses
