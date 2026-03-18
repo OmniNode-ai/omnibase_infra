@@ -7,7 +7,7 @@ Usage:
     update-plugin-pins.py [--dry-run] [--dockerfile PATH]
 
 Behaviour:
-    1. Fetch latest versions from PyPI for omninode-claude and omninode-memory.
+    1. Fetch latest versions from PyPI for omninode-claude, omninode-intelligence, and omninode-memory.
     2. Rewrite Dockerfile.runtime lines matching:
          RUN pip install omninode-claude==X.Y.Z
          RUN pip install omninode-memory==X.Y.Z
@@ -32,7 +32,7 @@ from pathlib import Path
 # Configuration
 # ---------------------------------------------------------------------------
 
-PLUGINS = ["omninode-claude", "omninode-memory"]
+PLUGINS = ["omninode-claude", "omninode-intelligence", "omninode-memory"]
 
 # Default Dockerfile path relative to the repo root (two directories above
 # this script, which lives in <repo>/scripts/).
@@ -82,7 +82,7 @@ def fetch_latest_version(package: str) -> str:
 #   omninode-claude==1.2.3   (without quotes)
 #   omninode-claude>=1.0,<2.0  (without quotes)
 _PIN_RE = re.compile(
-    r'(?P<q>["\']?)(?P<pkg>omninode-(?:claude|memory))(?P<spec>[^\s"\'\\]+)(?P=q)'
+    r'(?P<q>["\']?)(?P<pkg>omninode-(?:claude|intelligence|memory))(?P<spec>[^\s"\'\\]+)(?P=q)'
 )
 
 

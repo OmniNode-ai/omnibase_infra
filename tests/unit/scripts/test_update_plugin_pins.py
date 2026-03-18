@@ -65,6 +65,7 @@ CMD ["onex-runtime"]
 
 _VERSIONS = {
     "omninode-claude": "1.2.3",
+    "omninode-intelligence": "3.4.5",
     "omninode-memory": "2.3.4",
 }
 
@@ -160,3 +161,37 @@ def test_pypi_fetch_failure(tmp_path: Path) -> None:
     assert exit_code != 0
     # File must not have been modified
     assert dockerfile.read_text(encoding="utf-8") == _DOCKERFILE_RANGE_PINS
+
+
+# ---------------------------------------------------------------------------
+# test_intelligence_in_plugins_list (OMN-5374)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_intelligence_in_plugins_list() -> None:
+    """omninode-intelligence must be in the PLUGINS list."""
+    assert "omninode-intelligence" in _mod.PLUGINS
+
+
+@pytest.mark.unit
+def test_pin_re_matches_intelligence() -> None:
+    """_PIN_RE must match omninode-intelligence package references."""
+    line = 'RUN pip install "omninode-intelligence==0.5.0"'
+    m = _mod._PIN_RE.search(line)
+    assert m is not None
+    assert m.group("pkg") == "omninode-intelligence"
+
+
+@pytest.mark.unit
+def test_rewrite_updates_all_three_plugins() -> None:
+    """rewrite_content updates claude, intelligence, and memory pins."""
+    content = (
+        'RUN pip install "omninode-claude==0.1.0"\n'
+        'RUN pip install "omninode-intelligence==0.2.0"\n'
+        'RUN pip install "omninode-memory==0.3.0"\n'
+    )
+    result = rewrite_content(content, _VERSIONS)
+    assert '"omninode-claude==1.2.3"' in result
+    assert '"omninode-intelligence==3.4.5"' in result
+    assert '"omninode-memory==2.3.4"' in result
