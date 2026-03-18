@@ -698,6 +698,93 @@ def sectionize_highlights(commits: Iterable[CommitEntry]) -> dict[str, list[str]
     return {k: v for k, v in buckets.items() if v}
 
 
+@dataclass(frozen=True)
+class ActiveWorktree:
+    repo_name: str
+    worktree_path: str
+    branch: str
+    head: str  # short commit hash or "(bare)"
+
+
+def get_active_worktrees(repo: Path, repo_name: str) -> list[ActiveWorktree]:
+    """
+    Return non-main worktrees for a repo via `git worktree list --porcelain`.
+
+    The main worktree (the bare clone or the primary checkout) is excluded
+    since it already appears in the repo-day commit log.  Only feature-branch
+    worktrees are returned — these represent in-progress work that may not
+    have any commits today and would otherwise be invisible in the report.
+
+    Returns an empty list on any error (allow_fail semantics).
+    """
+    raw = _run(["git", "worktree", "list", "--porcelain"], repo, allow_fail=True)
+    if not raw.strip():
+        return []
+
+    worktrees: list[ActiveWorktree] = []
+    current: dict[str, str] = {}
+
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            # End of a worktree block
+            if current:
+                path = current.get("worktree", "")
+                branch_ref = current.get("branch", "")
+                head = current.get("HEAD", "")[:8] or "(unknown)"
+                is_bare = "bare" in current
+
+                # Derive a friendly branch name from the ref
+                if is_bare:
+                    branch = "(bare)"
+                elif branch_ref.startswith("refs/heads/"):
+                    branch = branch_ref[len("refs/heads/") :]
+                else:
+                    branch = branch_ref or "(detached)"
+
+                # Skip main/master and bare entries — they're in the commit log already
+                if branch not in ("main", "master", "(bare)") and path:
+                    worktrees.append(
+                        ActiveWorktree(
+                            repo_name=repo_name,
+                            worktree_path=path,
+                            branch=branch,
+                            head=head,
+                        )
+                    )
+                current = {}
+        elif ":" in line:
+            key, _, val = line.partition(" ")
+            current[key] = val.strip()
+        else:
+            # Lines like "bare" or "detached" are flags
+            current[line] = line
+
+    # Handle final block if no trailing blank line
+    if current:
+        path = current.get("worktree", "")
+        branch_ref = current.get("branch", "")
+        head = current.get("HEAD", "")[:8] or "(unknown)"
+        is_bare = "bare" in current
+        if is_bare:
+            branch = "(bare)"
+        elif branch_ref.startswith("refs/heads/"):
+            branch = branch_ref[len("refs/heads/") :]
+        else:
+            branch = branch_ref or "(detached)"
+        if branch not in ("main", "master", "(bare)") and path:
+            worktrees.append(
+                ActiveWorktree(
+                    repo_name=repo_name,
+                    worktree_path=path,
+                    branch=branch,
+                    head=head,
+                )
+            )
+
+    return worktrees
+
+
 def is_primary_onex_repo(repo_name: str) -> bool:
     if repo_name.startswith("omnibase_core"):
         return True
@@ -788,6 +875,7 @@ def main() -> int:
     repos = [r for r in repos if r.name.lower().startswith("omni")]
 
     repo_days: list[RepoDay] = []
+    all_active_worktrees: list[ActiveWorktree] = []
     scan_json: dict[str, object] = {
         "date": str(date),
         "start": start_s,
@@ -808,6 +896,7 @@ def main() -> int:
                 continue
 
         branch = get_branch(repo)
+        all_active_worktrees.extend(get_active_worktrees(repo, name))
         repo_days.append(
             RepoDay(
                 name=name,
@@ -1094,6 +1183,26 @@ def main() -> int:
     lines.append("")
     lines.append("---")
     lines.append("")
+
+    # Active worktrees (in-progress branches not yet merged)
+    if all_active_worktrees:
+        lines.append("## Active Worktrees (In-Progress Branches)")
+        lines.append("")
+        lines.append(
+            "*Worktrees represent active development branches that may have no commits today.*"
+        )
+        lines.append("")
+        lines.append("| Repo | Branch | Head | Path |")
+        lines.append("|------|--------|------|------|")
+        for wt in sorted(all_active_worktrees, key=lambda w: (w.repo_name, w.branch)):
+            lines.append(
+                f"| {wt.repo_name} | `{wt.branch}` | `{wt.head}` | `{wt.worktree_path}` |"
+            )
+        lines.append("")
+        lines.append(f"**Total active worktrees**: {len(all_active_worktrees)}")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
 
     # Major components: use ONEX-ish subset if present
     lines.append("## Major Components & Work Completed")
