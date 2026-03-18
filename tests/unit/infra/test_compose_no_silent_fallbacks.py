@@ -16,6 +16,15 @@ COMPOSE_FILE = (
 # ROLE_* passwords in postgres service are intentionally empty-means-skip:
 # the init script creates roles only when the corresponding password is set.
 # These are NOT feature flags or opt-in toggles.
+#
+# Infisical vars are intentionally opt-in via empty addr:
+#   INFISICAL_ADDR empty = skip Infisical, fall back to env vars (local dev).
+#   CLIENT_ID/SECRET/PROJECT_ID are only meaningful when ADDR is set.
+#   INFISICAL_REQUIRED is an opt-in strict mode flag; empty = permissive.
+#
+# OmniMemory vars are intentionally feature-flag style:
+#   OMNIMEMORY_ENABLED empty = feature disabled (non-memory deployments unaffected).
+#   OMNIMEMORY_DB_URL empty = skipped when memory feature is disabled.
 ALLOWED_EMPTY_DEFAULTS = {
     "ROLE_OMNIBASE_PASSWORD",
     "ROLE_OMNICLAUDE_PASSWORD",
@@ -23,6 +32,17 @@ ALLOWED_EMPTY_DEFAULTS = {
     "ROLE_OMNIINTELLIGENCE_PASSWORD",
     "ROLE_OMNIMEMORY_PASSWORD",
     "ROLE_OMNINODE_PASSWORD",
+    # Infisical opt-in: empty addr = disable Infisical prefetch (local dev without secrets profile)
+    "INFISICAL_ADDR",
+    "INFISICAL_CLIENT_ID",
+    "INFISICAL_CLIENT_SECRET",
+    "INFISICAL_PROJECT_ID",
+    "INFISICAL_REQUIRED",
+    # OmniMemory feature flag: empty = feature disabled for non-memory deployments
+    "OMNIMEMORY_ENABLED",
+    "OMNIMEMORY_DB_URL",
+    # Keycloak auth profile (OMN-3361): secret only needed when auth profile is active
+    "KEYCLOAK_ADMIN_CLIENT_SECRET",
 }
 
 
