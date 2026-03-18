@@ -1,14 +1,14 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 #
-# Plugin Pin Cascade (OMN-5110)
+# plugin-pin-cascade.yml
 #
-# Automatically updates Dockerfile.runtime plugin pins when a plugin package
-# is released. Triggered by repository_dispatch from omniclaude,
-# omniintelligence, or omnimemory release workflows.
+# Triggered by repository_dispatch (event-type: plugin-release) from app repos
+# (omniclaude, omniintelligence, omnimemory) after each PyPI release.
+# Updates Dockerfile.runtime pins for the released plugin and opens a PR.
 #
-# Event payload:
-#   { "package": "omninode-claude", "version": "v0.7.2", ... }
+# Ticket: OMN-5375
+
 name: Plugin Pin Cascade
 
 on:
@@ -17,11 +17,11 @@ on:
   workflow_dispatch:
     inputs:
       package:
-        description: 'Plugin package name (e.g. omninode-claude)'
+        description: 'PyPI package name (e.g. omninode-claude)'
         required: true
         type: string
       version:
-        description: 'Released version (e.g. v0.7.2)'
+        description: 'Released version (e.g. 0.5.0)'
         required: true
         type: string
 
@@ -31,113 +31,138 @@ permissions:
 
 jobs:
   update-dockerfile-pins:
-    name: Update Dockerfile.runtime Pins
-    runs-on: ubuntu-latest
-
+    name: Update Dockerfile.runtime pins for ${{ github.event.client_payload.package || inputs.package }}
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 1
-
-      - name: Extract event variables
-        id: vars
+      - name: Resolve inputs
+        id: inputs
         run: |
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            PACKAGE="${{ github.event.client_payload.package }}"
-            VERSION="${{ github.event.client_payload.version }}"
+            echo "package=${{ github.event.client_payload.package }}" >> $GITHUB_OUTPUT
+            echo "version=${{ github.event.client_payload.version }}" >> $GITHUB_OUTPUT
+            echo "source_repo=${{ github.event.client_payload.source_repo }}" >> $GITHUB_OUTPUT
           else
-            PACKAGE="${{ inputs.package }}"
-            VERSION="${{ inputs.version }}"
+            echo "package=${{ inputs.package }}" >> $GITHUB_OUTPUT
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+            echo "source_repo=manual" >> $GITHUB_OUTPUT
           fi
-          VERSION="${VERSION#v}"
-          echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "branch=automation/bump-dockerfile-${PACKAGE}-${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Updating $PACKAGE to $VERSION in Dockerfile.runtime"
 
-      - name: Update Dockerfile.runtime pin
-        id: update
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set branch name
+        id: branch
         run: |
-          DOCKERFILE="docker/Dockerfile.runtime"
-          PACKAGE="${{ steps.vars.outputs.package }}"
-          VERSION="${{ steps.vars.outputs.version }}"
+          PKG="${{ steps.inputs.outputs.package }}"
+          VER="${{ steps.inputs.outputs.version }}"
+          echo "name=automation/pin-${PKG}-${VER}" >> $GITHUB_OUTPUT
 
-          if ! grep -q "\"${PACKAGE}==" "$DOCKERFILE"; then
-            echo "Package $PACKAGE not found in $DOCKERFILE — skipping"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
+      - name: Create branch
+        run: git checkout -b "${{ steps.branch.outputs.name }}"
+
+      - name: Run update-plugin-pins.py
+        # **Reconciliation semantics**: This workflow is a full plugin reconciliation
+        # mechanism triggered by one release event. It fetches the latest visible PyPI
+        # version for ALL plugins in the PLUGINS list (omninode-claude,
+        # omninode-intelligence, omninode-memory) and rewrites Dockerfile.runtime
+        # accordingly. The dispatched `version` is enforced as a *minimum postcondition*
+        # for the triggering package — not a cap on what other pins may also advance.
+        # Any additional plugin pin changes in the same PR reflect reconciliation to the
+        # latest visible PyPI state. Reviewers should expect a single PR may advance one,
+        # two, or all three plugin pins simultaneously.
+        run: |
+          python scripts/update-plugin-pins.py \
+            --dockerfile docker/Dockerfile.runtime
+
+      - name: Verify pin advanced to expected version
+        # Postcondition: the Dockerfile pin for the dispatched package must match
+        # the requested version. If PyPI propagation lag caused update-plugin-pins.py
+        # to fetch an older version, fail loudly rather than silently succeed with
+        # stale data.
+        run: |
+          PKG="${{ steps.inputs.outputs.package }}"
+          EXPECTED_VER="${{ steps.inputs.outputs.version }}"
+          ACTUAL=$(grep -oP "(?<=${PKG}==)[0-9]+\.[0-9]+\.[0-9]+" docker/Dockerfile.runtime || true)
+          if [ "$ACTUAL" != "$EXPECTED_VER" ]; then
+            echo "ERROR: Dockerfile pin for ${PKG} did not reach expected version ${EXPECTED_VER} — PyPI propagation lag. Re-run workflow after 60s." >&2
+            exit 1
           fi
+          echo "Pin confirmed: ${PKG}==${ACTUAL}"
 
-          # Replace the exact pin for this package
-          sed -i "s/\"${PACKAGE}==[^\"]*\"/\"${PACKAGE}==${VERSION}\"/" "$DOCKERFILE"
-
-          if git diff --quiet "$DOCKERFILE"; then
-            echo "No changes — $PACKAGE already at $VERSION"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
+      - name: Check for changes
+        id: diff
+        run: |
+          if git diff --quiet docker/Dockerfile.runtime; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "Dockerfile.runtime unchanged — pin already up to date."
           else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "Updated $PACKAGE to $VERSION:"
-            git diff "$DOCKERFILE"
+            echo "changed=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Create branch, commit, and open PR
-        if: steps.update.outputs.skip != 'true'
+      - name: Commit and push
+        if: steps.diff.outputs.changed == 'true'
         run: |
-          BRANCH="${{ steps.vars.outputs.branch }}"
-          PACKAGE="${{ steps.vars.outputs.package }}"
-          VERSION="${{ steps.vars.outputs.version }}"
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$BRANCH"
           git add docker/Dockerfile.runtime
-          git commit -m "chore(docker): bump ${PACKAGE} to ${VERSION} in Dockerfile.runtime
+          git commit -m "chore(deps): pin ${{ steps.inputs.outputs.package }} to ${{ steps.inputs.outputs.version }}
 
-          Automated plugin pin cascade triggered by ${PACKAGE} release.
+          Automated Dockerfile.runtime pin update triggered by release of
+          ${{ steps.inputs.outputs.package }} ${{ steps.inputs.outputs.version }}
+          from ${{ steps.inputs.outputs.source_repo }}.
 
           Triggered-by: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          git push origin "$BRANCH"
+          git push origin "${{ steps.branch.outputs.name }}"
 
-      - name: Open pull request
-        if: steps.update.outputs.skip != 'true'
+      - name: Open PR
+        if: steps.diff.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          BRANCH="${{ steps.vars.outputs.branch }}"
-          PACKAGE="${{ steps.vars.outputs.package }}"
-          VERSION="${{ steps.vars.outputs.version }}"
-
-          # Dedup guard: check for existing PR
           EXISTING=$(gh pr list \
-            --head "$BRANCH" \
+            --head "${{ steps.branch.outputs.name }}" \
             --state open \
             --json number \
             --jq 'length')
-
           if [ "$EXISTING" -gt 0 ]; then
-            echo "PR already exists for $BRANCH — skipping"
+            echo "PR already exists — skipping."
             exit 0
           fi
-
           gh pr create \
-            --title "chore(docker): bump ${PACKAGE} to ${VERSION} in Dockerfile.runtime" \
-            --body "$(cat <<PREOF
+            --title "chore(deps): reconcile plugin pins (triggered by ${{ steps.inputs.outputs.package }} ${{ steps.inputs.outputs.version }})" \
+            --body "$(cat <<'PREOF'
           ## Summary
 
-          Automated Dockerfile.runtime pin update triggered by a new release of \`${PACKAGE}\` (v${VERSION}).
+          Automated Dockerfile.runtime pin update for `${{ steps.inputs.outputs.package }}` ${{ steps.inputs.outputs.version }}.
 
-          - Updates \`docker/Dockerfile.runtime\` plugin pin
-          - No source code changes
-
-          ## Triggered by
-
-          Release event from \`${PACKAGE}\`
+          - Updates pin in `docker/Dockerfile.runtime`
+          - Triggered by release from `${{ steps.inputs.outputs.source_repo }}`
 
           ## Test plan
 
           - [ ] CI passes
-          - [ ] Docker build succeeds with new pin
+          - [ ] Dockerfile.runtime pin reflects correct version
+          - [ ] Runtime image builds successfully with new pin
           PREOF
           )" \
-            --head "$BRANCH" \
+            --head "${{ steps.branch.outputs.name }}" \
             --base main
+
+      - name: Skip summary
+        if: steps.diff.outputs.changed == 'false'
+        run: |
+          echo "### Skipped: Dockerfile.runtime already at ${{ steps.inputs.outputs.package }} ${{ steps.inputs.outputs.version }}" >> $GITHUB_STEP_SUMMARY
