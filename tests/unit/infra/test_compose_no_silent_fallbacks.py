@@ -23,6 +23,17 @@ ALLOWED_EMPTY_DEFAULTS = {
     "ROLE_OMNIINTELLIGENCE_PASSWORD",
     "ROLE_OMNIMEMORY_PASSWORD",
     "ROLE_OMNINODE_PASSWORD",
+    # OMN-4316: OMNIMEMORY_* vars are intentionally opt-in (empty = disabled)
+    "OMNIMEMORY_ENABLED",
+    "OMNIMEMORY_DB_URL",
+    # Infisical: opt-in config store; empty = fall back to env vars
+    "INFISICAL_ADDR",
+    "INFISICAL_CLIENT_ID",
+    "INFISICAL_CLIENT_SECRET",
+    "INFISICAL_PROJECT_ID",
+    "INFISICAL_REQUIRED",
+    # Keycloak: opt-in auth; empty = keycloak not configured
+    "KEYCLOAK_ADMIN_CLIENT_SECRET",
 }
 
 
