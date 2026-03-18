@@ -231,7 +231,8 @@ class HandlerGraph(
                   2. ``bolt_uri``
                   3. ``MEMGRAPH_BOLT_URI`` environment variable
                   4. ``GRAPH_BOLT_URI`` environment variable
-                  5. Hard-coded default ``bolt://host.docker.internal:7687``
+                  5. ``OMNIMEMORY_MEMGRAPH_HOST``/``OMNIMEMORY_MEMGRAPH_PORT`` env vars
+                  6. Hard-coded default ``bolt://localhost:7687``
                 Additional dict keys ``auth`` and ``options`` are also extracted.
             auth: Optional tuple of (username, password) for authentication.
                 Ignored when connection_uri is a dict that contains an ``auth`` key.
@@ -263,12 +264,21 @@ class HandlerGraph(
             # Resolve URI from dict keys, then env vars, then hard-coded default.
             _env_memgraph = os.environ.get("MEMGRAPH_BOLT_URI")  # ONEX_EXCLUDE: env
             _env_graph = os.environ.get("GRAPH_BOLT_URI")  # ONEX_EXCLUDE: env
+            # Build from OMNIMEMORY_MEMGRAPH_HOST/PORT (compose-aligned) [OMN-5357]
+            _env_host = os.environ.get("OMNIMEMORY_MEMGRAPH_HOST")  # ONEX_EXCLUDE: env
+            _env_port = os.environ.get(
+                "OMNIMEMORY_MEMGRAPH_PORT", "7687"
+            )  # ONEX_EXCLUDE: env
+            _env_composed = f"bolt://{_env_host}:{_env_port}" if _env_host else None
             resolved_uri = (
                 str(connection_uri["connection_uri"])
                 if "connection_uri" in connection_uri
                 else str(connection_uri["bolt_uri"])
                 if "bolt_uri" in connection_uri
-                else _env_memgraph or _env_graph or "bolt://host.docker.internal:7687"
+                else _env_memgraph
+                or _env_graph
+                or _env_composed
+                or "bolt://localhost:7687"
             )
             dict_auth = connection_uri.get("auth")
             if (
