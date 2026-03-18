@@ -11,7 +11,7 @@ import pytest
 
 from omnibase_infra.docker.catalog.resolver import CatalogResolver
 
-REPO_ROOT = "/Volumes/PRO-G40/Code/omni_home/omnibase_infra"
+REPO_ROOT = str(Path(__file__).parent.parent.parent)
 CATALOG_DIR = str(Path(REPO_ROOT) / "docker" / "catalog")
 
 
