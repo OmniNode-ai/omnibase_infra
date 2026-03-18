@@ -71,4 +71,6 @@ class ModelPayloadPostgresUpdateRegistration(BaseModel):
 
 __all__: list[str] = [
     "ModelPayloadPostgresUpdateRegistration",
+    "ModelRegistrationAckUpdate",
+    "ModelRegistrationHeartbeatUpdate",
 ]

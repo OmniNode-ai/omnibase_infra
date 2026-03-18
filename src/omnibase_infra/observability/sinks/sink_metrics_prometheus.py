@@ -256,8 +256,7 @@ class SinkMetricsPrometheus:
         # - Returns labels (possibly stripped) if allowed
         # - Returns None if metric should be dropped
         # - Raises ModelOnexError if on_violation=RAISE
-        result: dict[str, str] | None = self._policy.enforce_labels(labels)
-        return result
+        return self._policy.enforce_labels(labels)
 
     def _get_or_create_counter(
         self,
