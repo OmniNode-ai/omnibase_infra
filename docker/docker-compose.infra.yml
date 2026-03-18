@@ -175,11 +175,7 @@ x-runtime-env: &runtime-env
   OMNIMEMORY_MEMGRAPH_PORT: ${OMNIMEMORY_MEMGRAPH_PORT:-7687}
   # OMNIMEMORY_DB_URL uses :- (empty default) so non-memory deployments are unaffected.
   OMNIMEMORY_DB_URL: ${OMNIMEMORY_DB_URL:-}
-  # OmniClaude domain plugin (OMN-3182): required by PluginClaude.wire_dispatchers()
-  # Hardcoded to venv path — host OMNICLAUDE_CONTRACTS_ROOT points at /Volumes/...
-  # which doesn't exist inside the container. The pip-installed package has its
-  # nodes at the site-packages path below.
-  OMNICLAUDE_CONTRACTS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/nodes
+  # OmniClaude domain plugin (OMN-3182): contracts discovered via entry points (OMN-5371/5372)
   # OMN-4622: Skills root for topic provisioning (flat-list topics.yaml manifests)
   OMNICLAUDE_SKILLS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/plugins/onex/skills
   # OMN-3894: Enable event-based agent routing in containers. App defaults to false;
