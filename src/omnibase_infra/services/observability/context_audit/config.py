@@ -13,6 +13,15 @@ from typing import Self
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from omnibase_infra.topics import (
+    SUFFIX_OMNICLAUDE_AUDIT_COMPRESSION_TRIGGERED,
+    SUFFIX_OMNICLAUDE_AUDIT_CONTEXT_BUDGET_EXCEEDED,
+    SUFFIX_OMNICLAUDE_AUDIT_DISPATCH_VALIDATED,
+    SUFFIX_OMNICLAUDE_AUDIT_RETURN_BOUNDED,
+    SUFFIX_OMNICLAUDE_AUDIT_SCOPE_VIOLATION,
+    SUFFIX_OMNICLAUDE_CONTEXT_AUDIT_DLQ,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,11 +59,11 @@ class ConfigContextAuditConsumer(BaseSettings):
     # Topics to subscribe — all omniclaude audit event topics (OMN-5234)
     topics: list[str] = Field(
         default_factory=lambda: [
-            "onex.evt.omniclaude.audit-dispatch-validated.v1",
-            "onex.evt.omniclaude.audit-scope-violation.v1",
-            "onex.evt.omniclaude.audit-context-budget-exceeded.v1",
-            "onex.evt.omniclaude.audit-return-bounded.v1",
-            "onex.evt.omniclaude.audit-compression-triggered.v1",
+            SUFFIX_OMNICLAUDE_AUDIT_DISPATCH_VALIDATED,
+            SUFFIX_OMNICLAUDE_AUDIT_SCOPE_VIOLATION,
+            SUFFIX_OMNICLAUDE_AUDIT_CONTEXT_BUDGET_EXCEEDED,
+            SUFFIX_OMNICLAUDE_AUDIT_RETURN_BOUNDED,
+            SUFFIX_OMNICLAUDE_AUDIT_COMPRESSION_TRIGGERED,
         ],
         description="Kafka topics to consume for context audit observability",
     )
@@ -123,7 +132,7 @@ class ConfigContextAuditConsumer(BaseSettings):
 
     # Dead Letter Queue
     dlq_topic: str = Field(
-        default="onex.evt.omniclaude.context-audit-dlq.v1",
+        default=SUFFIX_OMNICLAUDE_CONTEXT_AUDIT_DLQ,
         description=(
             "Dead letter topic for permanently failed audit messages. "
             "Configure via OMNIBASE_INFRA_CONTEXT_AUDIT_DLQ_TOPIC env var."

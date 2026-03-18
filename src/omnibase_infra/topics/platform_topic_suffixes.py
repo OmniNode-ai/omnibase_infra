@@ -630,6 +630,83 @@ DLQ contract explicit and auditable via the provisioning registry.
 """
 
 # =============================================================================
+# OMNICLAUDE CONTEXT AUDIT TOPIC SUFFIXES (OMN-5240)
+# =============================================================================
+# Context integrity audit event topics produced by the omniclaude context
+# audit pipeline (OMN-5234). Consumed by the ContextAuditConsumer
+# (omnibase_infra.services.observability.context_audit) for persistence
+# to PostgreSQL and enforcement tracking.
+
+SUFFIX_OMNICLAUDE_AUDIT_DISPATCH_VALIDATED: str = (
+    "onex.evt.omniclaude.audit-dispatch-validated.v1"
+)
+"""Topic for validated dispatch audit events.
+
+Producer: omniclaude context audit pipeline
+Consumer: ContextAuditConsumer (omnibase_infra)
+"""
+
+SUFFIX_OMNICLAUDE_AUDIT_SCOPE_VIOLATION: str = (
+    "onex.evt.omniclaude.audit-scope-violation.v1"
+)
+"""Topic for scope violation audit events.
+
+Producer: omniclaude context audit pipeline
+Consumer: ContextAuditConsumer (omnibase_infra)
+"""
+
+SUFFIX_OMNICLAUDE_AUDIT_CONTEXT_BUDGET_EXCEEDED: str = (
+    "onex.evt.omniclaude.audit-context-budget-exceeded.v1"
+)
+"""Topic for context budget exceeded audit events.
+
+Producer: omniclaude context audit pipeline
+Consumer: ContextAuditConsumer (omnibase_infra)
+"""
+
+SUFFIX_OMNICLAUDE_AUDIT_RETURN_BOUNDED: str = (
+    "onex.evt.omniclaude.audit-return-bounded.v1"
+)
+"""Topic for return-bounded audit events.
+
+Producer: omniclaude context audit pipeline
+Consumer: ContextAuditConsumer (omnibase_infra)
+"""
+
+SUFFIX_OMNICLAUDE_AUDIT_COMPRESSION_TRIGGERED: str = (
+    "onex.evt.omniclaude.audit-compression-triggered.v1"
+)
+"""Topic for compression-triggered audit events.
+
+Producer: omniclaude context audit pipeline
+Consumer: ContextAuditConsumer (omnibase_infra)
+"""
+
+SUFFIX_OMNICLAUDE_CONTEXT_AUDIT_DLQ: str = "onex.evt.omniclaude.context-audit-dlq.v1"
+"""Dead letter queue topic for the context audit consumer.
+
+Messages that fail validation or exceed max retry count in
+ContextAuditConsumer are forwarded to this topic.
+
+Producer: ContextAuditConsumer (omnibase_infra)
+Consumer: observability alerting, incident recovery tooling
+"""
+
+_OMNICLAUDE_CONTEXT_AUDIT_TOPIC_SUFFIXES: tuple[str, ...] = (
+    SUFFIX_OMNICLAUDE_AUDIT_DISPATCH_VALIDATED,
+    SUFFIX_OMNICLAUDE_AUDIT_SCOPE_VIOLATION,
+    SUFFIX_OMNICLAUDE_AUDIT_CONTEXT_BUDGET_EXCEEDED,
+    SUFFIX_OMNICLAUDE_AUDIT_RETURN_BOUNDED,
+    SUFFIX_OMNICLAUDE_AUDIT_COMPRESSION_TRIGGERED,
+    SUFFIX_OMNICLAUDE_CONTEXT_AUDIT_DLQ,
+)
+"""Context audit topic suffixes for the omniclaude audit pipeline (OMN-5240).
+
+Provisioned to guarantee broker topic existence for context integrity
+audit events. Consumed by ContextAuditConsumer for PostgreSQL persistence.
+"""
+
+# =============================================================================
 # OMNICLAUDE SKILL TOPIC SUFFIXES (omniclaude plugin)
 # =============================================================================
 # These topics are consumed/produced by OmniClaude skill orchestrator nodes.
@@ -1062,6 +1139,11 @@ ALL_OMNICLAUDE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     *tuple(
         ModelTopicSpec(suffix=suffix, partitions=3)
         for suffix in _OMNICLAUDE_AGENT_TRACE_TOPIC_SUFFIXES
+    ),
+    # Context audit topics (3 partitions -- OMN-5240 context integrity audit events)
+    *tuple(
+        ModelTopicSpec(suffix=suffix, partitions=3)
+        for suffix in _OMNICLAUDE_CONTEXT_AUDIT_TOPIC_SUFFIXES
     ),
 )
 """OmniClaude topic specs provisioned for skill orchestrator nodes and observability.
