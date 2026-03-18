@@ -60,7 +60,7 @@ def _load_stack() -> list[str]:
         return ["core"]
     with open(stack_path) as f:
         data: dict[str, list[str]] = yaml.safe_load(f) or {}
-    return data.get("bundles", ["core"])
+    return list(data.get("bundles", ["core"]))
 
 
 def cmd_generate(args: list[str]) -> int:
