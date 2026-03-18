@@ -530,11 +530,44 @@ jobs:
           echo "================================================================"
           uv run pytest tests/ci/test_plugin_env_service_completeness.py -v
 
+  compose-required-env-coverage:
+    name: "Compose Required-Env Coverage (OMN-5439)"
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+
+      - name: Check compose :? env var fixture coverage
+        run: |
+          echo "================================================================"
+          echo "Compose Required-Env Coverage Guard (OMN-5439)"
+          echo "Every :?-required var in compose must be in test fixture dict"
+          echo "================================================================"
+          uv run pytest tests/ci/test_compose_required_env_coverage.py -v --tb=short
+
   # Parallel test execution - 10 splits for ~927 tests each
   # Split strategy: 9265 tests / 10 = ~927 tests per split (~3-4 min each)
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/10)
-    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness]
+    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage]
     # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
     runs-on: >-
       ${{
