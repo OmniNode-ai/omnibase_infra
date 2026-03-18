@@ -12,6 +12,7 @@
 #
 # Additional databases (infrastructure):
 #   infisical_db  (Infisical secrets management)
+#   omniweb       (OmniWeb landing page — OMN-5324)
 #
 # Per-service roles:
 #   role_omnibase, role_omniintelligence, role_omniclaude,
@@ -44,7 +45,7 @@ SERVICE_DB_MAP=(
 )
 
 # Additional databases without dedicated roles (managed by superuser)
-INFRA_DATABASES=("infisical_db")
+INFRA_DATABASES=("infisical_db" "omniweb")
 
 # =============================================================================
 # Helper functions
