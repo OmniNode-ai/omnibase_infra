@@ -81,4 +81,4 @@ class ModelDeliveryAttempt(BaseModel):
     )
 
 
-__all__ = ["ModelDeliveryAttempt"]
+__all__ = ["EnumDeliveryStatus", "ModelDeliveryAttempt"]
