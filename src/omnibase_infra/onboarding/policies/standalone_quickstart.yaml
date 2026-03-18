@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+policy_name: "standalone_quickstart"
+description: "Minimal path to running a standalone node (~5 min)"
+target_capabilities:
+  - "first_node_running"
+max_estimated_minutes: 5

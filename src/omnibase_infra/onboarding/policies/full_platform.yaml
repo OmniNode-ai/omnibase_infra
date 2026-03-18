@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+policy_name: "full_platform"
+description: "Full platform setup with dashboard and secrets (~45 min)"
+target_capabilities:
+  - "omnidash_running"
+  - "secrets_configured"
+max_estimated_minutes: 45
