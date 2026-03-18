@@ -50,7 +50,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
@@ -261,7 +261,7 @@ class AdapterProtocolEventPublisherInmemory:
             Configured ModelEventEnvelope ready for serialization.
         """
         event_type = str(params["event_type"])
-        payload = cast("JsonType", params["payload"])
+        payload: JsonType = params["payload"]
         correlation_id = params.get("correlation_id")
         causation_id = params.get("causation_id")
         metadata = params.get("metadata")

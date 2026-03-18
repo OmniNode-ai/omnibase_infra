@@ -36,13 +36,13 @@ from __future__ import annotations
 from omnibase_infra.event_bus.enum_topic_validation_status import (
     EnumTopicValidationStatus,
 )
-from omnibase_infra.event_bus.event_bus_inmemory import (
-    EventBusInmemory,
-    ModelEventHeaders,
-    ModelEventMessage,
-)
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.model_topic_validation_result import (
     ModelTopicValidationResult,
+)
+from omnibase_infra.event_bus.models import (
+    ModelEventHeaders,
+    ModelEventMessage,
 )
 from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
 from omnibase_infra.event_bus.service_topic_startup_validator import (

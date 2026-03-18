@@ -829,5 +829,9 @@ __all__: list[str] = [
     "BindingExpressionParseError",
     "BindingExpressionParser",
     "EnumBindingParseErrorCode",
+    "MAX_EXPRESSION_LENGTH",
+    "MAX_PATH_SEGMENTS",
     "OperationBindingResolver",
+    "VALID_CONTEXT_PATHS",
+    "VALID_SOURCES",
 ]

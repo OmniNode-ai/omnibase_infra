@@ -83,7 +83,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
 
         try:
             # Retrieve JSON data with safe default
-            json_data = cast("object", input_data.get("json", {}))
+            json_data: object = input_data.get("json", {})
 
             # Perform pure deterministic computation
             normalized = self._sort_keys_recursively(json_data)

@@ -126,6 +126,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     SecretResolutionError,
 )
+from omnibase_infra.runtime.enums.enum_config_ref_scheme import EnumConfigRefScheme
 from omnibase_infra.runtime.models.model_binding_config import ModelBindingConfig
 from omnibase_infra.runtime.models.model_binding_config_cache_stats import (
     ModelBindingConfigCacheStats,
@@ -134,10 +135,7 @@ from omnibase_infra.runtime.models.model_binding_config_resolver_config import (
     ModelBindingConfigResolverConfig,
 )
 from omnibase_infra.runtime.models.model_config_cache_entry import ModelConfigCacheEntry
-from omnibase_infra.runtime.models.model_config_ref import (
-    EnumConfigRefScheme,
-    ModelConfigRef,
-)
+from omnibase_infra.runtime.models.model_config_ref import ModelConfigRef
 from omnibase_infra.runtime.models.model_retry_policy import ModelRetryPolicy
 
 if TYPE_CHECKING:

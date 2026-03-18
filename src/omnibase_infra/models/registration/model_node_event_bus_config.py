@@ -96,4 +96,4 @@ class ModelNodeEventBusConfig(BaseModel):
         return [entry.topic for entry in self.publish_topics]
 
 
-__all__ = ["ModelNodeEventBusConfig"]
+__all__ = ["ModelEventBusTopicEntry", "ModelNodeEventBusConfig"]

@@ -150,8 +150,10 @@ from omnibase_infra.mixins import MixinEnvelopeExtraction
 from omnibase_infra.observability.handlers.model_metrics_handler_config import (
     ModelMetricsHandlerConfig,
 )
-from omnibase_infra.observability.handlers.model_metrics_handler_response import (
+from omnibase_infra.observability.handlers.model_metrics_handler_payload import (
     ModelMetricsHandlerPayload,
+)
+from omnibase_infra.observability.handlers.model_metrics_handler_response import (
     ModelMetricsHandlerResponse,
 )
 

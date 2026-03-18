@@ -720,6 +720,7 @@ class ModelTopicParser:
 
 __all__ = [
     "ModelTopicParser",
+    "TypeCacheInfo",
     "clear_topic_parse_cache",
     "get_topic_parse_cache_info",
 ]

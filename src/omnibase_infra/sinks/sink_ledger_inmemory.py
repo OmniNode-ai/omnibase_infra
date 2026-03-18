@@ -17,7 +17,7 @@ import asyncio
 from collections import deque
 from typing import TYPE_CHECKING
 
-from omnibase_infra.protocols.protocol_ledger_sink import EnumLedgerSinkDropPolicy
+from omnibase_infra.enums import EnumLedgerSinkDropPolicy
 
 if TYPE_CHECKING:
     from omnibase_infra.models.ledger import ModelLedgerEventBase

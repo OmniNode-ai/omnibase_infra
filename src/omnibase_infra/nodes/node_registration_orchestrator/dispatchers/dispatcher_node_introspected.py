@@ -59,7 +59,7 @@ from __future__ import annotations
 import logging
 import os
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -284,9 +284,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
 
             # Type narrowing: the branch above guarantees payload is
             # ModelNodeIntrospectionEvent (isinstance returned True, or model_validate
-            # succeeded, or we returned early). Use cast() instead of a redundant
-            # runtime isinstance check to satisfy mypy.
-            payload = cast("ModelNodeIntrospectionEvent", payload)
+            # succeeded, or we returned early).
 
             # TODO(OMN-2050): Use injected time from ModelDispatchContext instead
             # of datetime.now(UTC). Currently, the ProtocolMessageDispatcher.handle()
