@@ -994,6 +994,9 @@ class RuntimeHostProcess:
         # Track failed handler instantiations (handler_type -> error message)
         # Used by health_check() to report degraded state
         self._failed_handlers: dict[str, str] = {}
+        # Track optional handlers skipped due to missing required_env [OMN-5356]
+        # Informational only -- does not affect degraded state
+        self._skipped_handlers: dict[str, str] = {}
 
         # Handler descriptors (handler_type -> descriptor with contract_config)
         # Stored during registration for use during handler initialization
@@ -4356,6 +4359,7 @@ class RuntimeHostProcess:
             "event_bus": event_bus_health,
             "event_bus_healthy": event_bus_healthy,
             "failed_handlers": self._failed_handlers,
+            "skipped_handlers": self._skipped_handlers,
             "registered_handlers": list(self._handlers.keys()),
             "handlers": handler_health_results,
             "handler_pools": pool_metrics,

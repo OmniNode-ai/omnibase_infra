@@ -56,6 +56,8 @@ operation_bindings:
       - parameter_name: "body"
         expression: "${payload.body}"
         required: false
+activation:
+  optional: false
 metadata:
   handler_id: "http-handler"
   handler_type: "infra_handler"

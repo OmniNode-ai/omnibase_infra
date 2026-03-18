@@ -51,6 +51,8 @@ operation_bindings:
         required: false
     # No payload bindings required - returns MCP server capabilities
     "mcp.describe": []
+activation:
+  optional: false
 metadata:
   handler_id: "mcp-handler"
   handler_type: "infra_handler"

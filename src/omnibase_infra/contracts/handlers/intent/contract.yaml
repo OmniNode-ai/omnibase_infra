@@ -53,6 +53,8 @@ operation_bindings:
         required: true
     # No payload bindings required - aggregates all intents by type (read-only)
     "intent.query_distribution": []
+activation:
+  optional: false
 metadata:
   handler_id: "intent-handler"
   handler_type: "intent_handler"
