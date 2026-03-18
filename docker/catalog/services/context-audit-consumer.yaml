@@ -1,0 +1,48 @@
+name: context-audit-consumer
+description: Persists context audit events from Kafka to PostgreSQL
+image: runtime:latest
+layer: runtime
+container_name: omninode-context-audit-consumer
+required_env:
+  - OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN
+hardcoded_env:
+  OMNIBASE_INFRA_CONTEXT_AUDIT_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+  OMNIBASE_INFRA_CONTEXT_AUDIT_HEALTH_CHECK_PORT: '8093'
+  OMNIBASE_INFRA_CONTEXT_AUDIT_HEALTH_CHECK_HOST: 0.0.0.0
+operational_defaults:
+  OMNIBASE_INFRA_CONTEXT_AUDIT_BATCH_SIZE: '100'
+  OMNIBASE_INFRA_CONTEXT_AUDIT_BATCH_TIMEOUT_MS: '1000'
+  ONEX_LOG_LEVEL: INFO
+  ONEX_ENVIRONMENT: local
+ports:
+  external: 8093
+  internal: 8093
+healthcheck:
+  test: curl -sf http://localhost:8093/health
+  interval_s: 30
+  timeout_s: 10
+  retries: 3
+  start_period_s: 40
+volumes:
+  - context_audit_logs:/app/logs
+depends_on:
+  - service: migration-gate
+    condition: service_healthy
+  - service: redpanda
+    condition: service_healthy
+restart: unless-stopped
+resources:
+  cpus: '0.5'
+  memory: 256M
+  cpus_reservation: '0.1'
+  memory_reservation: 64M
+stop_grace_period: 60s
+command:
+  - python
+  - -m
+  - omnibase_infra.services.observability.context_audit.consumer
+labels:
+  com.omninode.service: context-audit-consumer
+  com.omninode.layer: runtime
+  com.omninode.version: ${RUNTIME_VERSION:-0.1.0}
+  autoheal: 'true'

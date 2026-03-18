@@ -1,0 +1,27 @@
+name: phoenix
+description: Arize Phoenix LLM observability — traces, spans, and evals
+image: arizephoenix/phoenix:13.11.0
+layer: observability
+container_name: omnibase-infra-phoenix
+required_env: []
+hardcoded_env:
+  PHOENIX_WORKING_DIR: /data
+operational_defaults: {}
+ports:
+  external: 6006
+  internal: 6006
+healthcheck:
+  test: curl -sf http://localhost:6006/healthz || exit 1
+  interval_s: 30
+  timeout_s: 10
+  retries: 3
+  start_period_s: 20
+volumes:
+  - phoenix_data:/data
+depends_on: []
+restart: unless-stopped
+resources: null
+labels:
+  com.omninode.service: phoenix
+  com.omninode.layer: runtime
+  com.omninode.ticket: OMN-3542

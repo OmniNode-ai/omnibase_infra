@@ -1,0 +1,34 @@
+name: intelligence-migration
+description: One-shot migration runner for omniintelligence database
+image: postgres:16-alpine
+layer: infrastructure
+container_name: omnibase-intelligence-migration
+required_env:
+  - POSTGRES_PASSWORD
+hardcoded_env:
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: '5432'
+  MIGRATIONS_DIR: /migrations/intelligence
+operational_defaults:
+  POSTGRES_USER: postgres
+ports: null
+healthcheck: null
+volumes:
+  - ../scripts/run-intelligence-migrations.sh:/run-intelligence-migrations.sh:ro
+  - ../docker/migrations/intelligence:/migrations/intelligence:ro
+depends_on:
+  - service: postgres
+    condition: service_healthy
+restart: 'no'
+resources:
+  cpus: '0.2'
+  memory: 64M
+  cpus_reservation: '0.25'
+  memory_reservation: 128M
+command:
+  - sh
+  - /run-intelligence-migrations.sh
+labels:
+  com.omninode.service: intelligence-migration
+  com.omninode.layer: infrastructure
+  com.omninode.ticket: OMN-4082

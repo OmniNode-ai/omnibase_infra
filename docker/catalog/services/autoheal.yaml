@@ -1,0 +1,21 @@
+name: autoheal
+description: Automatic restart of unhealthy containers labeled autoheal=true
+image: willfarrell/autoheal:1.2.0
+layer: infrastructure
+container_name: omnibase-infra-autoheal
+required_env: []
+hardcoded_env:
+  AUTOHEAL_CONTAINER_LABEL: autoheal
+  AUTOHEAL_INTERVAL: '60'
+  AUTOHEAL_START_PERIOD: '180'
+operational_defaults: {}
+ports: null
+healthcheck: null
+volumes:
+  - /var/run/docker.sock:/var/run/docker.sock
+depends_on: []
+restart: unless-stopped
+resources: null
+labels:
+  com.omninode.service: autoheal
+  com.omninode.layer: infrastructure

@@ -1,0 +1,31 @@
+name: omnibase-infra-memgraph
+description: Graph database for OmniMemory plugin (optional)
+image: memgraph/memgraph:${MEMGRAPH_VERSION:-2.18.1}
+layer: infrastructure
+container_name: omnibase-infra-memgraph
+required_env: []
+hardcoded_env: {}
+operational_defaults:
+  MEMGRAPH_BOLT_PORT: '7687'
+  MEMGRAPH_HTTP_PORT: '7444'
+ports:
+  external: 7687
+  internal: 7687
+healthcheck:
+  test: echo > /dev/tcp/localhost/7687 || exit 1
+  interval_s: 10
+  timeout_s: 5
+  retries: 5
+  start_period_s: 15
+volumes:
+  - omnibase-infra-memgraph-data:/var/lib/memgraph
+  - omnibase-infra-memgraph-logs:/var/log/memgraph
+depends_on: []
+restart: unless-stopped
+resources: null
+command: '--storage-snapshot-retention-count=2 --storage-wal-enabled=true --storage-snapshot-interval-sec=3600 --log-level=WARNING
+
+'
+labels:
+  com.omninode.service: memgraph
+  com.omninode.layer: infrastructure

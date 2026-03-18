@@ -1,0 +1,35 @@
+name: keycloak
+description: Local OIDC/auth provider for development (optional)
+image: quay.io/keycloak/keycloak:26.3.3
+layer: infrastructure
+container_name: omnibase-infra-keycloak
+required_env:
+  - KC_DB_PASSWORD
+hardcoded_env:
+  KC_DB: postgres
+  KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+  KC_DB_USERNAME: postgres
+  KC_HTTP_ENABLED: 'true'
+  KC_HTTP_PORT: '8080'
+  KC_HOSTNAME_STRICT: 'false'
+  KC_LOG_LEVEL: INFO
+operational_defaults:
+  KC_BOOTSTRAP_ADMIN_USERNAME: admin
+  KC_BOOTSTRAP_ADMIN_PASSWORD: keycloak-dev-password
+ports:
+  external: 28080
+  internal: 8080
+healthcheck: null
+volumes:
+  - keycloak_data:/opt/keycloak/data
+  - ./keycloak/omninode-realm.json:/opt/keycloak/data/import/omninode-realm.json:ro
+depends_on:
+  - service: postgres
+    condition: service_healthy
+restart: unless-stopped
+resources: null
+command: start-dev --import-realm
+labels:
+  com.omninode.service: keycloak
+  com.omninode.layer: infrastructure
+  com.omninode.ticket: OMN-3361

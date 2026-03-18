@@ -1,0 +1,48 @@
+name: skill-lifecycle-consumer
+description: Persists skill execution events from Kafka to PostgreSQL
+image: runtime:latest
+layer: runtime
+container_name: omninode-skill-lifecycle-consumer
+required_env:
+  - OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN
+hardcoded_env:
+  OMNIBASE_INFRA_SKILL_LIFECYCLE_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+  OMNIBASE_INFRA_SKILL_LIFECYCLE_HEALTH_CHECK_PORT: '8092'
+  OMNIBASE_INFRA_SKILL_LIFECYCLE_HEALTH_CHECK_HOST: 0.0.0.0
+operational_defaults:
+  OMNIBASE_INFRA_SKILL_LIFECYCLE_BATCH_SIZE: '100'
+  OMNIBASE_INFRA_SKILL_LIFECYCLE_BATCH_TIMEOUT_MS: '1000'
+  ONEX_LOG_LEVEL: INFO
+  ONEX_ENVIRONMENT: local
+ports:
+  external: 8092
+  internal: 8092
+healthcheck:
+  test: curl -sf http://localhost:8092/health
+  interval_s: 30
+  timeout_s: 10
+  retries: 3
+  start_period_s: 40
+volumes:
+  - skill_lifecycle_logs:/app/logs
+depends_on:
+  - service: migration-gate
+    condition: service_healthy
+  - service: redpanda
+    condition: service_healthy
+restart: unless-stopped
+resources:
+  cpus: '0.5'
+  memory: 256M
+  cpus_reservation: '0.1'
+  memory_reservation: 64M
+stop_grace_period: 60s
+command:
+  - python
+  - -m
+  - omnibase_infra.services.observability.skill_lifecycle.consumer
+labels:
+  com.omninode.service: skill-lifecycle-consumer
+  com.omninode.layer: runtime
+  com.omninode.version: ${RUNTIME_VERSION:-0.1.0}
+  autoheal: 'true'

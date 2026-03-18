@@ -1,0 +1,71 @@
+# Bundle definitions for ONEX infrastructure catalog.
+# Each bundle groups entries that are deployed together.
+# "includes" pulls in all entries from another bundle (transitive).
+core:
+  description: "Core infrastructure — always deployed"
+  services:
+    - postgres
+    - redpanda
+  includes: []
+runtime:
+  description: "ONEX runtime platform — kernel, effects, workers, consumers"
+  services:
+    - valkey
+    - forward-migration
+    - migration-gate
+    - omninode-runtime
+    - runtime-effects
+    - runtime-worker
+    - agent-actions-consumer
+    - skill-lifecycle-consumer
+    - context-audit-consumer
+    - intelligence-migration
+    - intelligence-api
+    - omninode-contract-resolver
+    - autoheal
+  includes:
+    - core
+observability:
+  description: "LLM observability — Phoenix traces and evals"
+  services:
+    - phoenix
+  includes: []
+memgraph:
+  description: "Graph memory database for OmniMemory"
+  services:
+    - omnibase-infra-memgraph
+  includes: []
+  inject_env:
+    OMNIMEMORY_ENABLED: "true"
+    OMNIMEMORY_MEMGRAPH_HOST: "omnibase-infra-memgraph"
+    OMNIMEMORY_MEMGRAPH_PORT: "7687"
+  inject_required_env:
+    - OMNIMEMORY_DB_URL
+secrets:
+  description: "Infisical secrets management"
+  services:
+    - infisical
+  includes: []
+  inject_env:
+    INFISICAL_ADDR: "http://infisical:8080"
+  inject_required_env:
+    - INFISICAL_CLIENT_ID
+    - INFISICAL_CLIENT_SECRET
+    - INFISICAL_PROJECT_ID
+    - INFISICAL_ENCRYPTION_KEY
+    - INFISICAL_AUTH_SECRET
+auth:
+  description: "Keycloak local OIDC/auth"
+  services:
+    - keycloak
+  includes: []
+  inject_required_env:
+    - KEYCLOAK_ADMIN_PASSWORD
+tracing:
+  description: "OpenTelemetry tracing to Phoenix"
+  services: []
+  includes:
+    - observability
+  inject_env:
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://phoenix:6006"
+    OTEL_TRACES_EXPORTER: "otlp"

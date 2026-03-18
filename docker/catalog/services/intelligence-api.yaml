@@ -1,0 +1,53 @@
+name: intelligence-api
+description: HTTP API for pattern query and intelligence data access
+image: runtime:latest
+layer: runtime
+container_name: omnibase-intelligence-api
+required_env:
+  - POSTGRES_PASSWORD
+hardcoded_env:
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: '5432'
+  POSTGRES_DATABASE: omniintelligence
+operational_defaults:
+  POSTGRES_USER: postgres
+  ONEX_LOG_LEVEL: INFO
+  ONEX_ENVIRONMENT: local
+ports:
+  external: 8053
+  internal: 8053
+healthcheck:
+  test: curl -sf http://localhost:8053/health
+  interval_s: 30
+  timeout_s: 10
+  retries: 3
+  start_period_s: 40
+volumes: []
+depends_on:
+  - service: migration-gate
+    condition: service_healthy
+  - service: intelligence-migration
+    condition: service_completed_successfully
+  - service: redpanda
+    condition: service_healthy
+restart: unless-stopped
+resources:
+  cpus: '0.5'
+  memory: 256M
+  cpus_reservation: '0.1'
+  memory_reservation: 64M
+stop_grace_period: 30s
+command:
+  - uvicorn
+  - omniintelligence.api.app:create_app
+  - --factory
+  - --host
+  - 0.0.0.0
+  - --port
+  - '8053'
+  - --workers
+  - '1'
+labels:
+  com.omninode.service: intelligence-api
+  com.omninode.layer: runtime
+  com.omninode.version: ${RUNTIME_VERSION:-0.1.0}
