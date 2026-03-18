@@ -135,6 +135,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -190,7 +191,7 @@ _KNOWN_EVENT_BUSES: dict[str, tuple[type[ProtocolEventBus], str]] = {
 
 def _load_handler_from_contract(
     handler_type: str, contract_path: Path
-) -> tuple[type[ProtocolContainerAware], str]:
+) -> tuple[type[ProtocolContainerAware], str, dict[str, object]]:
     """Load handler class from a contract.yaml file.
 
     Args:
@@ -198,7 +199,7 @@ def _load_handler_from_contract(
         contract_path: Path to the contract.yaml file.
 
     Returns:
-        Tuple of (handler_class, description).
+        Tuple of (handler_class, description, activation_metadata).
 
     Raises:
         FileNotFoundError: If contract file does not exist.
@@ -310,6 +311,7 @@ def _load_handler_from_contract(
         ) from e
 
     description = contract.get("description", f"{handler_type} handler")
+    activation = contract.get("activation", {})
 
     logger.debug(
         "Loaded handler from contract",
@@ -318,10 +320,11 @@ def _load_handler_from_contract(
             "handler_class": handler_class_name,
             "handler_module": handler_module,
             "contract_path": str(contract_path),
+            "activation": activation,
         },
     )
 
-    return handler_class, description
+    return handler_class, description, activation
 
 
 def wire_default_handlers() -> dict[str, list[str]]:
@@ -354,11 +357,14 @@ def wire_default_handlers() -> dict[str, list[str]]:
         Summary dict with keys:
             - handlers: List of registered handler type names
             - event_buses: List of registered event bus kind names
+            - skipped_handlers: Dict of handler_type -> reason for optional
+              handlers that were skipped due to missing required_env
 
     Example:
         >>> summary = wire_default_handlers()
         >>> print(summary)
-        {'handlers': ['db', 'graph', 'http', 'intent', 'mcp'], 'event_buses': ['inmemory']}
+        {'handlers': ['db', 'http', 'intent', 'mcp'], 'event_buses': ['inmemory'],
+         'skipped_handlers': {'graph': 'required_env not set: OMNIMEMORY_MEMGRAPH_HOST'}}
 
     Note:
         This function uses the singleton registries returned by
@@ -367,12 +373,30 @@ def wire_default_handlers() -> dict[str, list[str]]:
     """
     handler_registry = get_handler_registry()
     event_bus_registry = get_event_bus_registry()
+    skipped_handlers: dict[str, str] = {}
 
     # Register all handlers from contracts
     for handler_type, contract_path in _HANDLER_CONTRACT_PATHS.items():
-        handler_cls, description = _load_handler_from_contract(
+        handler_cls, description, activation = _load_handler_from_contract(
             handler_type, contract_path
         )
+
+        # Activation check: skip optional handlers whose required_env is unset [OMN-5356]
+        is_optional = activation.get("optional", False)
+        required_env: list[str] = activation.get("required_env", [])  # type: ignore[assignment]
+
+        if is_optional and required_env:
+            missing_env = [var for var in required_env if not os.environ.get(var)]
+            if missing_env:
+                reason = f"required_env not set: {', '.join(missing_env)}"
+                skipped_handlers[handler_type] = reason
+                logger.info(
+                    "Handler '%s' skipped (optional, %s)",
+                    handler_type,
+                    reason,
+                )
+                continue
+
         # NOTE: Handlers implement ProtocolHandler structurally but don't inherit from it.
         # Mypy cannot verify structural subtyping for registration argument.
         handler_registry.register(handler_type, handler_cls)  # type: ignore[arg-type]  # NOTE: structural subtyping
@@ -411,12 +435,15 @@ def wire_default_handlers() -> dict[str, list[str]]:
             "handlers": registered_handlers,
             "event_bus_count": len(registered_buses),
             "event_buses": registered_buses,
+            "skipped_handler_count": len(skipped_handlers),
+            "skipped_handlers": skipped_handlers,
         },
     )
 
     return {
         "handlers": registered_handlers,
         "event_buses": registered_buses,
+        "skipped_handlers": skipped_handlers,
     }
 
 
@@ -522,7 +549,7 @@ def wire_handlers_from_contract(
 
             # Load and register the handler from contract
             contract_path = _HANDLER_CONTRACT_PATHS[handler_type]
-            handler_cls, description = _load_handler_from_contract(
+            handler_cls, description, _activation = _load_handler_from_contract(
                 handler_type, contract_path
             )
             # NOTE: Handlers implement ProtocolHandler structurally but don't inherit from it.
