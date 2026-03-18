@@ -154,11 +154,9 @@ x-runtime-env: &runtime-env
   OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:?OMNIINTELLIGENCE_DB_URL must be set in ~/.omnibase/.env}
   # OmniMemory domain plugin
   OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-}
-  # OMN-4311: Memgraph connection passthrough (required by PluginMemory after OMN-4310)
-  # Default: Docker service name resolvable via omnibase-infra-network DNS.
-  # When OMNIMEMORY_ENABLED is unset, PluginMemory.validate_handshake() skips the probe.
-  OMNIMEMORY_MEMGRAPH_HOST: ${OMNIMEMORY_MEMGRAPH_HOST:-omnibase-infra-memgraph}
-  OMNIMEMORY_MEMGRAPH_PORT: ${OMNIMEMORY_MEMGRAPH_PORT:-7687}
+  # OMN-5381: Memgraph container-internal addresses — hardcoded literals.
+  OMNIMEMORY_MEMGRAPH_HOST: "omnibase-infra-memgraph"
+  OMNIMEMORY_MEMGRAPH_PORT: "7687"
   # OMNIMEMORY_DB_URL uses :- (empty default) so non-memory deployments are unaffected.
   OMNIMEMORY_DB_URL: ${OMNIMEMORY_DB_URL:-}
   # OmniClaude domain plugin (OMN-3182): contracts discovered via entry points (OMN-5371/5372)
