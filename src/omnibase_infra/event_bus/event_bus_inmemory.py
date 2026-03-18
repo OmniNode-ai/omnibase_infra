@@ -845,4 +845,4 @@ class EventBusInmemory:
             }
 
 
-__all__: list[str] = ["EventBusInmemory"]
+__all__: list[str] = ["EventBusInmemory", "ModelEventHeaders", "ModelEventMessage"]

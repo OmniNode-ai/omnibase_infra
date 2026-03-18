@@ -253,6 +253,7 @@ class DispatcherNodeRegistrationAcked(MixinAsyncCircuitBreaker):
             # Type narrowing: the branch above guarantees payload is
             # ModelNodeRegistrationAcked (isinstance returned True, or model_validate
             # succeeded, or we returned early).
+            assert isinstance(payload, ModelNodeRegistrationAcked)
 
             # Get current time for handler
             now = datetime.now(UTC)

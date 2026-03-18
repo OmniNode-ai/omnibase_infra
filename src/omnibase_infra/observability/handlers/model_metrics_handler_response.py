@@ -97,5 +97,6 @@ class ModelMetricsHandlerResponse(BaseModel):
 
 
 __all__: list[str] = [
+    "ModelMetricsHandlerPayload",
     "ModelMetricsHandlerResponse",
 ]
