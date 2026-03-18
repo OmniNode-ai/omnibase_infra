@@ -44,8 +44,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from cryptography.exceptions import InvalidSignature
+
 from omnibase_core.crypto.crypto_blake3_hasher import hash_canonical_json
-from omnibase_core.crypto.crypto_ed25519_signer import InvalidSignature, verify_base64
+from omnibase_core.crypto.crypto_ed25519_signer import verify_base64
 from omnibase_infra.gateway.enums import EnumValidationErrorCode
 
 if TYPE_CHECKING:

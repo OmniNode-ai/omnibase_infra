@@ -39,9 +39,13 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 from confluent_kafka import Consumer, TopicPartition
-from confluent_kafka.admin import AdminClient, ClusterMetadata
+from confluent_kafka.admin import AdminClient  # type: ignore[attr-defined]
+
+if TYPE_CHECKING:
+    from confluent_kafka.admin import ClusterMetadata  # type: ignore[attr-defined]
 from pydantic import BaseModel
 
 from omnibase_core.validation import validate_topic_suffix

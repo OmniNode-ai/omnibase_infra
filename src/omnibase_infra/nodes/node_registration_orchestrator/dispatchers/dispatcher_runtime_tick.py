@@ -59,7 +59,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -252,9 +252,7 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
 
             # Type narrowing: the branch above guarantees payload is
             # ModelRuntimeTick (isinstance returned True, or model_validate
-            # succeeded, or we returned early). Use cast() instead of a redundant
-            # runtime isinstance check to satisfy mypy.
-            payload = cast("ModelRuntimeTick", payload)
+            # succeeded, or we returned early).
 
             # Get current time for handler
             now = datetime.now(UTC)

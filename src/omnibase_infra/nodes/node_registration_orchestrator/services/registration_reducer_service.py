@@ -67,11 +67,15 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_de
 )
 from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_update_registration import (
     ModelPayloadPostgresUpdateRegistration,
-    ModelRegistrationAckUpdate,
-    ModelRegistrationHeartbeatUpdate,
 )
 from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_upsert_registration import (
     ModelPayloadPostgresUpsertRegistration,
+)
+from omnibase_infra.nodes.node_registration_reducer.models.model_registration_ack_update import (
+    ModelRegistrationAckUpdate,
+)
+from omnibase_infra.nodes.node_registration_reducer.models.model_registration_heartbeat_update import (
+    ModelRegistrationHeartbeatUpdate,
 )
 
 # States that allow re-registration (node can try again).

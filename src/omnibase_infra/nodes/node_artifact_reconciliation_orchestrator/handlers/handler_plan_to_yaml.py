@@ -29,7 +29,7 @@ from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
 )
-from omnibase_infra.enums.generated import EnumArtifactTopic
+from omnibase_infra.enums.generated.enum_artifact_topic import EnumArtifactTopic
 from omnibase_infra.nodes.node_artifact_reconciliation_orchestrator.models.model_yaml_emit_result import (
     ModelYamlEmitResult,
 )

@@ -52,7 +52,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
@@ -256,8 +256,8 @@ class SinkMetricsPrometheus:
         # - Returns labels (possibly stripped) if allowed
         # - Returns None if metric should be dropped
         # - Raises ModelOnexError if on_violation=RAISE
-        # Cast needed because omnibase_core lacks type stubs
-        return cast("dict[str, str] | None", self._policy.enforce_labels(labels))
+        result: dict[str, str] | None = self._policy.enforce_labels(labels)
+        return result
 
     def _get_or_create_counter(
         self,

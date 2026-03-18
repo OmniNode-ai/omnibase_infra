@@ -86,8 +86,10 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.services.retry_worker.config_retry_worker import ConfigRetryWorker
-from omnibase_infra.services.retry_worker.models.model_delivery_attempt import (
+from omnibase_infra.services.retry_worker.models.enum_delivery_status import (
     EnumDeliveryStatus,
+)
+from omnibase_infra.services.retry_worker.models.model_delivery_attempt import (
     ModelDeliveryAttempt,
 )
 from omnibase_infra.services.retry_worker.models.model_retry_result import (
