@@ -1104,16 +1104,24 @@ Source: ``omniclaude/src/omniclaude/nodes/node_skill_*/contract.yaml``
 
 
 def _omnimemory_enabled() -> bool:
-    """Return True when OMNIMEMORY_ENABLED is set to a truthy value.
+    """Return True when omnimemory connection config is present.
 
-    Truthy values: "1", "true", "yes", "on" (case-insensitive).
-    Any other value (including empty string or unset) is falsy.
+    Infers from OMNIMEMORY_MEMGRAPH_HOST being set (connection config presence),
+    rather than requiring a separate OMNIMEMORY_ENABLED feature flag.
+    Also accepts legacy OMNIMEMORY_ENABLED for backwards compatibility during
+    migration.
 
     This function is called once at module import time to compute
     ALL_PROVISIONED_TOPIC_SPECS. It reads directly from os.environ so
     that tests can override via monkeypatch or environment manipulation.
     """
-    return os.environ.get("OMNIMEMORY_ENABLED", "").strip().lower() in {
+    # Primary: infer from connection config [OMN-5358]
+    if os.environ.get("OMNIMEMORY_MEMGRAPH_HOST", "").strip():  # ONEX_EXCLUDE: env
+        return True
+    # Legacy fallback: explicit flag (to be removed after full rollout)
+    return os.environ.get(
+        "OMNIMEMORY_ENABLED", ""
+    ).strip().lower() in {  # ONEX_EXCLUDE: env
         "1",
         "true",
         "yes",
