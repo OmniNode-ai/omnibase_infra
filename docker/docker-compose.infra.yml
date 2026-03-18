@@ -152,14 +152,14 @@ x-runtime-env: &runtime-env
   VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
   # OmniIntelligence domain plugin
   OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:?OMNIINTELLIGENCE_DB_URL must be set in ~/.omnibase/.env}
-  # OmniMemory domain plugin
-  OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-}
-  # OMN-5381: Memgraph container-internal addresses — hardcoded literals.
-  OMNIMEMORY_MEMGRAPH_HOST: "omnibase-infra-memgraph"
-  OMNIMEMORY_MEMGRAPH_PORT: "7687"
-  # OMNIMEMORY_DB_URL uses :- (empty default) so non-memory deployments are unaffected.
-  OMNIMEMORY_DB_URL: ${OMNIMEMORY_DB_URL:-}
-  # OmniClaude domain plugin (OMN-3182): contracts discovered via entry points (OMN-5371/5372)
+  # --- OmniMemory (OMN-5382: removed from base env — injected per-bundle) ---
+  # OMNIMEMORY_ENABLED, OMNIMEMORY_MEMGRAPH_HOST/PORT, OMNIMEMORY_DB_URL
+  # are only present when the memgraph bundle is selected.
+  # OmniClaude domain plugin (OMN-3182): required by PluginClaude.wire_dispatchers()
+  # Hardcoded to venv path — host OMNICLAUDE_CONTRACTS_ROOT points at /Volumes/...
+  # which doesn't exist inside the container. The pip-installed package has its
+  # nodes at the site-packages path below.
+  OMNICLAUDE_CONTRACTS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/nodes
   # OMN-4622: Skills root for topic provisioning (flat-list topics.yaml manifests)
   OMNICLAUDE_SKILLS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/plugins/onex/skills
   # --- Infisical config store ---
@@ -175,7 +175,7 @@ x-runtime-env: &runtime-env
   KEYCLOAK_ADMIN_URL: "http://keycloak:8080"
   KEYCLOAK_REALM: ${KEYCLOAK_REALM:-omninode}
   KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-onex-admin}
-  KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+  KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:?KEYCLOAK_ADMIN_CLIENT_SECRET must be set in ~/.omnibase/.env}
   KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:28080/realms/omninode}
   ONEX_SERVICE_CLIENT_ID: ${ONEX_SERVICE_CLIENT_ID:-onex-service}
   ONEX_SERVICE_CLIENT_SECRET: ${ONEX_SERVICE_CLIENT_SECRET:?ONEX_SERVICE_CLIENT_SECRET must be set in ~/.omnibase/.env}
