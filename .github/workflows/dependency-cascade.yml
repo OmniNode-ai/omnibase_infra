@@ -166,15 +166,52 @@ jobs:
             echo "Lockfile updated with new ${{ inputs.package }} version"
           fi
 
+      - name: Update pyproject.toml pin
+        if: steps.token_check.outputs.has_token == 'true' && env.SKIP == 'false'
+        env:
+          BUMP_PACKAGE: ${{ inputs.package }}
+        run: |
+          PKG_HYPHEN="${BUMP_PACKAGE//_/-}"
+
+          RESOLVED=$(python3 - <<'PYEOF'
+          import re, sys, os
+          pkg = os.environ["PKG_HYPHEN"]
+          content = open("uv.lock").read()
+          m = re.search(
+              r'name\s*=\s*"' + re.escape(pkg) + r'".*?version\s*=\s*"([^"]+)"',
+              content, re.DOTALL
+          )
+          if m:
+              print(m.group(1))
+          else:
+              sys.exit(1)
+          PYEOF
+          )
+          echo "Resolved version for ${PKG_HYPHEN}: ${RESOLVED}"
+          export RESOLVED PKG_HYPHEN
+
+          python3 - <<'PYEOF'
+          import re, os
+          pkg = os.environ["PKG_HYPHEN"]
+          version = os.environ["RESOLVED"]
+          content = open("pyproject.toml").read()
+          updated = re.sub(
+              r'"' + re.escape(pkg) + r'==[0-9]+\.[0-9]+\.[0-9]+"',
+              f'"{pkg}=={version}"',
+              content,
+          )
+          open("pyproject.toml", "w").write(updated)
+          PYEOF
+
       - name: Commit and push
         if: steps.token_check.outputs.has_token == 'true' && env.SKIP == 'false'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add uv.lock
+          git add uv.lock pyproject.toml
           git commit -m "chore(deps): bump ${{ inputs.package }} to ${{ steps.vars.outputs.version }}
 
-          Automated dependency cascade from ${{ github.repository }} release ${{ inputs.version }}.
+          Automated dependency cascade — updates uv.lock and pyproject.toml pins.
 
           Triggered-by: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           git push origin "${{ steps.vars.outputs.branch }}"
@@ -206,7 +243,7 @@ jobs:
           Automated dependency bump triggered by a new release of `${{ inputs.package }}` (${{ inputs.version }}).
 
           - Updates `uv.lock` via `uv lock --upgrade-package ${{ inputs.package }}`
-          - No source code changes -- lockfile only
+          - Updates `pyproject.toml` exact pins (`==X.Y.Z`) to match resolved version
 
           ## Triggered by
 
