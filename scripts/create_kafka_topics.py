@@ -49,6 +49,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import sys
 from pathlib import Path
 
@@ -64,6 +65,53 @@ _DEFAULT_CONTRACTS_ROOT = _REPO_ROOT / "src" / "omnibase_infra" / "nodes"
 
 
 # ---------------------------------------------------------------------------
+# Multi-package discovery via entry points
+# ---------------------------------------------------------------------------
+
+
+def _discover_all_packages(
+    *, filter_names: list[str] | None = None, lenient: bool = False
+) -> list[tuple[str, Path]]:
+    """Return [(name, nodes_dir_path)] for all ``onex.node_package`` entry points.
+
+    Args:
+        filter_names: If set, only return entry points whose ``ep.name`` is in
+            this list.  Matches are case-sensitive.
+        lenient: When ``True``, unloadable entry points emit a warning and are
+            skipped.  When ``False`` (default), any load failure causes a hard
+            exit (non-zero) because a broken entry point in the canonical path
+            indicates a broken environment.
+
+    Returns:
+        Sorted list of ``(ep.name, Path)`` tuples.
+    """
+    eps = importlib.metadata.entry_points(group="onex.node_package")
+    result: list[tuple[str, Path]] = []
+    for ep in eps:
+        if filter_names is not None and ep.name not in filter_names:
+            continue
+        try:
+            pkg = ep.load()
+        except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
+            msg = f"Could not load entry point {ep.name!r}: {exc}"
+            if lenient:
+                print(f"WARNING: {msg} — skipping", file=sys.stderr)
+                continue
+            print(f"ERROR: {msg}", file=sys.stderr)
+            sys.exit(1)
+        pkg_path = Path(pkg.__path__[0])
+        if not pkg_path.exists():
+            msg = f"Entry point {ep.name!r} path does not exist: {pkg_path}"
+            if lenient:
+                print(f"WARNING: {msg} — skipping", file=sys.stderr)
+                continue
+            print(f"ERROR: {msg}", file=sys.stderr)
+            sys.exit(1)
+        result.append((ep.name, pkg_path))
+    return sorted(result, key=lambda t: t[0])
+
+
+# ---------------------------------------------------------------------------
 # CLI argument parsing
 # ---------------------------------------------------------------------------
 
@@ -74,27 +122,36 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "Contract-driven Kafka topic creator. "
             "Reads topics from contract.yaml files and creates any missing topics "
-            "on the Kafka broker. Idempotent — safe to run repeatedly."
+            "on the Kafka broker. Idempotent — safe to run repeatedly.\n\n"
+            "Default mode (no --contracts-root): discovers all installed packages "
+            "that declare an onex.node_package entry point and merges their topics. "
+            "Use --contracts-root to scan a single directory instead (local dev)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exit codes:
   0  Success (always in --dry-run; or all topics ensured in non-dry-run)
-  1  Broker or topic creation failure
+  1  Broker or topic creation failure / unloadable entry point
   2  Missing --bootstrap-servers in non-dry-run mode
 
 Examples:
-  # Dry-run: print plan without connecting to broker
+  # Dry-run with multi-package discovery (default)
   uv run python scripts/create_kafka_topics.py --dry-run
+
+  # Dry-run restricted to specific packages
+  uv run python scripts/create_kafka_topics.py --dry-run \\
+      --packages omnibase_infra,omniclaude
+
+  # Dry-run with lenient mode (skip broken entry points)
+  uv run python scripts/create_kafka_topics.py --dry-run --lenient
 
   # Create missing topics on broker
   uv run python scripts/create_kafka_topics.py \\
       --bootstrap-servers localhost:19092
 
-  # Custom partitions and contracts root
+  # Legacy single-root mode (local dev)
   uv run python scripts/create_kafka_topics.py \\
       --bootstrap-servers localhost:19092 \\
-      --partitions 3 \\
       --contracts-root src/omnibase_infra/nodes/
 """,
     )
@@ -135,8 +192,10 @@ Examples:
         metavar="PATH",
         default=None,
         help=(
-            f"Root directory to scan for contract.yaml files. "
-            f"Default: {_DEFAULT_CONTRACTS_ROOT}"
+            "Root directory to scan for contract.yaml files (single-root mode). "
+            "When omitted, the script discovers all installed onex.node_package "
+            "entry points and scans each package's nodes directory (multi-package "
+            "mode). Use this flag for local dev or to override discovery."
         ),
     )
     parser.add_argument(
@@ -150,6 +209,27 @@ Examples:
             "topic discovery in CI. Optional — omitted in contract-only runs."
         ),
     )
+    parser.add_argument(
+        "--packages",
+        metavar="PKG1,PKG2",
+        default=None,
+        help=(
+            "Comma-separated list of onex.node_package entry point names to "
+            "scan (e.g. --packages omnibase_infra,omniclaude). "
+            "Only effective in multi-package mode (when --contracts-root is "
+            "not given). Matches against ep.name."
+        ),
+    )
+    parser.add_argument(
+        "--lenient",
+        action="store_true",
+        default=False,
+        help=(
+            "In multi-package mode, skip unloadable entry points with a "
+            "warning instead of exiting non-zero. Useful for debugging "
+            "partial environments."
+        ),
+    )
     return parser
 
 
@@ -159,19 +239,41 @@ Examples:
 
 
 def _run_dry(
-    topics: list[str], bootstrap_servers: str | None, contracts_root: Path
+    topics: list[str],
+    bootstrap_servers: str | None,
+    contracts_root: Path | None,
+    *,
+    topic_sources: dict[str, list[str]] | None = None,
 ) -> int:
     """
     Execute dry-run: print plan without any broker connection.
 
     Always exits 0 (unless internal error).
+
+    Args:
+        topics: Sorted list of topic strings.
+        bootstrap_servers: Broker address (display only).
+        contracts_root: Single contracts root (legacy mode) or None.
+        topic_sources: Optional mapping of topic -> list of package names
+            that declared it.  Used in multi-package mode for diagnostics.
     """
     bs_display = bootstrap_servers if bootstrap_servers else "<unset>"
     print(f"Bootstrap servers: {bs_display}")
-    print(f"Contracts root: {contracts_root}")
-    print(f"Topics to ensure exist ({len(topics)}):")
+    if contracts_root is not None:
+        print(f"Contracts root: {contracts_root}")
+    if topic_sources:
+        # Report per-topic provenance in multi-package mode
+        multi = {t: pkgs for t, pkgs in topic_sources.items() if len(pkgs) > 1}
+        if multi:
+            print(f"\nTopics declared by multiple packages ({len(multi)}):")
+            for t in sorted(multi):
+                print(f"  [WARN] {t} declared by: {', '.join(sorted(multi[t]))}")
+    print(f"\nTopics to ensure exist ({len(topics)}):")
     for topic in sorted(topics):
-        print(f"  - {topic}")
+        src = ""
+        if topic_sources and topic in topic_sources:
+            src = f"  ({', '.join(sorted(topic_sources[topic]))})"
+        print(f"  - {topic}{src}")
     return 0
 
 
@@ -298,20 +400,6 @@ def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
 
-    # Resolve contracts root
-    contracts_root: Path
-    if args.contracts_root is not None:
-        contracts_root = Path(args.contracts_root).resolve()
-    else:
-        contracts_root = _DEFAULT_CONTRACTS_ROOT
-
-    if not contracts_root.exists():
-        print(
-            f"ERROR: contracts root does not exist: {contracts_root}",
-            file=sys.stderr,
-        )
-        return 1
-
     # In non-dry-run mode, --bootstrap-servers is required
     if not args.dry_run and not args.bootstrap_servers:
         print(
@@ -333,44 +421,135 @@ def main() -> int:
             )
             skill_manifests_root = None
 
-    # Extract topics from contract files (and optionally skill manifests)
-    try:
-        # Import here so the script fails fast if omnibase_infra is not installed
-        from omnibase_infra.tools.contract_topic_extractor import ContractTopicExtractor
+    # Import here so the script fails fast if omnibase_infra is not installed
+    from omnibase_infra.tools.contract_topic_extractor import ContractTopicExtractor
 
-        extractor = ContractTopicExtractor()
-        if skill_manifests_root is not None:
-            entries = extractor.extract_all(
-                contracts_root=contracts_root,
-                skill_manifests_root=skill_manifests_root,
+    extractor = ContractTopicExtractor()
+
+    # -----------------------------------------------------------------------
+    # Mode selection: single-root (legacy) vs multi-package (new default)
+    # -----------------------------------------------------------------------
+    use_single_root = args.contracts_root is not None
+
+    if use_single_root:
+        # Legacy single-root mode (--contracts-root given)
+        contracts_root = Path(args.contracts_root).resolve()
+        if not contracts_root.exists():
+            print(
+                f"ERROR: contracts root does not exist: {contracts_root}",
+                file=sys.stderr,
             )
-        else:
-            entries = extractor.extract(contracts_root)
-    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
-        print(f"ERROR: Failed to extract topics from contracts: {exc}", file=sys.stderr)
-        return 1
+            return 1
 
-    if not entries:
+        try:
+            if skill_manifests_root is not None:
+                entries = extractor.extract_all(
+                    contracts_root=contracts_root,
+                    skill_manifests_root=skill_manifests_root,
+                )
+            else:
+                entries = extractor.extract(contracts_root)
+        except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
+            print(
+                f"ERROR: Failed to extract topics from contracts: {exc}",
+                file=sys.stderr,
+            )
+            return 1
+
+        if not entries:
+            print(
+                f"WARNING: No topics found in contracts root: {contracts_root}",
+                file=sys.stderr,
+            )
+            return 0
+
+        topics = [e.topic for e in entries]
+
+        if args.dry_run:
+            if skill_manifests_root is not None:
+                print(f"Skills root: {skill_manifests_root}")
+            return _run_dry(topics, args.bootstrap_servers, contracts_root)
+
+        return _run_live(
+            topics,
+            bootstrap_servers=args.bootstrap_servers,
+            partitions=args.partitions,
+            replication_factor=args.replication_factor,
+            contracts_root=contracts_root,
+        )
+
+    # -------------------------------------------------------------------
+    # Multi-package mode (default when --contracts-root is omitted)
+    # -------------------------------------------------------------------
+    filter_names: list[str] | None = None
+    if args.packages:
+        filter_names = [n.strip() for n in args.packages.split(",") if n.strip()]
+
+    packages = _discover_all_packages(filter_names=filter_names, lenient=args.lenient)
+
+    if not packages:
         print(
-            f"WARNING: No topics found in contracts root: {contracts_root}",
+            "WARNING: No onex.node_package entry points found. "
+            "Install app packages or use --contracts-root for local dev.",
             file=sys.stderr,
         )
-        # Not a failure — contracts may legitimately have no topics yet
         return 0
 
-    topics = [e.topic for e in entries]
+    print(f"Discovered {len(packages)} onex.node_package entry points:")
+    for name, path in packages:
+        print(f"  {name} -> {path}")
+
+    # Extract and merge topics from all packages
+    # Track which package(s) declared each topic for diagnostics
+    from omnibase_infra.tools.contract_topic_extractor import ModelContractTopicEntry
+
+    topic_sources: dict[str, list[str]] = {}
+    all_entries: list[ModelContractTopicEntry] = []
+
+    try:
+        for pkg_name, pkg_path in packages:
+            if skill_manifests_root is not None:
+                pkg_entries = extractor.extract_all(
+                    contracts_root=pkg_path,
+                    skill_manifests_root=skill_manifests_root,
+                )
+            else:
+                pkg_entries = extractor.extract(pkg_path)
+
+            print(f"  {pkg_name}: {len(pkg_entries)} topics")
+            for entry in pkg_entries:
+                topic_sources.setdefault(entry.topic, []).append(pkg_name)
+            all_entries.extend(pkg_entries)
+    except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
+        print(
+            f"ERROR: Failed to extract topics: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Deduplicate topics across packages
+    unique_topics = sorted({e.topic for e in all_entries})
+
+    if not unique_topics:
+        print("WARNING: No topics found across any packages.", file=sys.stderr)
+        return 0
 
     if args.dry_run:
         if skill_manifests_root is not None:
             print(f"Skills root: {skill_manifests_root}")
-        return _run_dry(topics, args.bootstrap_servers, contracts_root)
+        return _run_dry(
+            unique_topics,
+            args.bootstrap_servers,
+            None,
+            topic_sources=topic_sources,
+        )
 
     return _run_live(
-        topics,
+        unique_topics,
         bootstrap_servers=args.bootstrap_servers,
         partitions=args.partitions,
         replication_factor=args.replication_factor,
-        contracts_root=contracts_root,
+        contracts_root=packages[0][1],  # display first package path
     )
 
 
