@@ -131,7 +131,6 @@ def test_catalog_validator_rejects_missing_env(
     )
     assert result.returncode != 0
     assert "POSTGRES_PASSWORD" in result.stderr
-<<<<<<< HEAD
 
 
 @pytest.mark.integration
@@ -166,9 +165,9 @@ def test_catalog_runtime_without_memgraph_excludes_memory_env() -> None:
 
     # OMNIMEMORY vars must not be injected
     for key in stack.injected_env:
-        assert not key.startswith("OMNIMEMORY_"), (
-            f"Unexpected OMNIMEMORY var '{key}' in runtime-only stack"
-        )
+        assert not key.startswith(
+            "OMNIMEMORY_"
+        ), f"Unexpected OMNIMEMORY var '{key}' in runtime-only stack"
 
 
 @pytest.mark.integration
@@ -188,6 +187,6 @@ def test_catalog_tracing_bundle_injects_otel_env() -> None:
 
     # OMNIMEMORY vars must NOT leak in from tracing bundle
     for key in stack.injected_env:
-        assert not key.startswith("OMNIMEMORY_"), (
-            f"Unexpected OMNIMEMORY var '{key}' leaked into tracing-only stack"
-        )
+        assert not key.startswith(
+            "OMNIMEMORY_"
+        ), f"Unexpected OMNIMEMORY var '{key}' leaked into tracing-only stack"
