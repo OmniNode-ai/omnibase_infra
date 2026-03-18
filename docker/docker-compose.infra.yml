@@ -191,11 +191,11 @@ x-runtime-env: &runtime-env
   KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
   KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:28080/realms/omninode}
   ONEX_SERVICE_CLIENT_ID: ${ONEX_SERVICE_CLIENT_ID:-onex-service}
-  ONEX_SERVICE_CLIENT_SECRET: ${ONEX_SERVICE_CLIENT_SECRET:-}
+  ONEX_SERVICE_CLIENT_SECRET: ${ONEX_SERVICE_CLIENT_SECRET:?ONEX_SERVICE_CLIENT_SECRET must be set in ~/.omnibase/.env}
   # --- Registration lifecycle (OMN-3446) ---
   # Auto-ACK local/internal nodes after introspection. Never set in production —
   # external nodes send their own ack. Must be explicitly set to true or false.
-  ONEX_REGISTRATION_AUTO_ACK: ${ONEX_REGISTRATION_AUTO_ACK:-}
+  ONEX_REGISTRATION_AUTO_ACK: ${ONEX_REGISTRATION_AUTO_ACK:?ONEX_REGISTRATION_AUTO_ACK must be set in ~/.omnibase/.env (true or false)}
   # --- OpenTelemetry (OMN-5382: removed from base env — injected per-bundle) ---
   # OTEL vars are only present when the tracing bundle is selected.
   # OTEL_SERVICE_NAME is set per-service (already done in service blocks).
