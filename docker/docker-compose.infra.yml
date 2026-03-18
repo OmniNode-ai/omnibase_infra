@@ -142,24 +142,8 @@ x-runtime-env: &runtime-env
   ONEX_CONTRACTS_DIR: /app/contracts
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
   ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
-  # --- Infisical config prefetch (OMN-2287) ---
-  # Opt-in: config prefetch only activates when INFISICAL_ADDR is non-empty.
-  # When the secrets profile IS active, set INFISICAL_ADDR=http://infisical:8080
-  # in your .env or via --env-file so containers reach the Infisical service on
-  # the compose network. Do NOT use http://localhost:8880 here — that is the
-  # host-accessible port and is unreachable inside the container.
-  #
-  # When the secrets profile is NOT active (Infisical container absent), leave
-  # INFISICAL_ADDR unset (or empty) and the runtime falls back to standard
-  # environment variable resolution without attempting to contact Infisical.
-  INFISICAL_ADDR: ${INFISICAL_ADDR:-}
-  INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID:-}
-  INFISICAL_CLIENT_SECRET: ${INFISICAL_CLIENT_SECRET:-}
-  INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:-}
-  # Opt-in strict mode: when set to a non-empty value, missing Infisical keys
-  # are treated as fatal errors rather than silent fallbacks. Leave empty
-  # (the default) to allow standard environment variable resolution as fallback.
-  INFISICAL_REQUIRED: ${INFISICAL_REQUIRED:-}
+  # --- Infisical config (OMN-5382: removed from base env — injected per-bundle) ---
+  # Infisical vars are only present when the secrets bundle is selected.
   # --- Container-internal service addresses (OMN-5381: same invariant as OMN-3431 for Kafka) ---
   # Containers use Docker-internal valkey:6379. Host scripts use localhost:16379.
   # Password is required — no fallback to dev defaults.
@@ -168,13 +152,9 @@ x-runtime-env: &runtime-env
   VALKEY_PASSWORD: ${VALKEY_PASSWORD:?VALKEY_PASSWORD must be set in ~/.omnibase/.env}
   # OmniIntelligence domain plugin
   OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:?OMNIINTELLIGENCE_DB_URL must be set in ~/.omnibase/.env}
-  # OmniMemory domain plugin
-  OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-}
-  # OMN-5381: Memgraph container-internal addresses — hardcoded literals.
-  OMNIMEMORY_MEMGRAPH_HOST: "omnibase-infra-memgraph"
-  OMNIMEMORY_MEMGRAPH_PORT: "7687"
-  # OMNIMEMORY_DB_URL uses :- (empty default) so non-memory deployments are unaffected.
-  OMNIMEMORY_DB_URL: ${OMNIMEMORY_DB_URL:-}
+  # --- OmniMemory (OMN-5382: removed from base env — injected per-bundle) ---
+  # OMNIMEMORY_ENABLED, OMNIMEMORY_MEMGRAPH_HOST/PORT, OMNIMEMORY_DB_URL
+  # are only present when the memgraph bundle is selected.
   # OmniClaude domain plugin (OMN-3182): required by PluginClaude.wire_dispatchers()
   # Hardcoded to venv path — host OMNICLAUDE_CONTRACTS_ROOT points at /Volumes/...
   # which doesn't exist inside the container. The pip-installed package has its
@@ -190,20 +170,17 @@ x-runtime-env: &runtime-env
   KEYCLOAK_ADMIN_URL: "http://keycloak:8080"
   KEYCLOAK_REALM: ${KEYCLOAK_REALM:-omninode}
   KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-onex-admin}
-  KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+  KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:?KEYCLOAK_ADMIN_CLIENT_SECRET must be set in ~/.omnibase/.env}
   KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:28080/realms/omninode}
   ONEX_SERVICE_CLIENT_ID: ${ONEX_SERVICE_CLIENT_ID:-onex-service}
-  ONEX_SERVICE_CLIENT_SECRET: ${ONEX_SERVICE_CLIENT_SECRET:-}
+  ONEX_SERVICE_CLIENT_SECRET: ${ONEX_SERVICE_CLIENT_SECRET:?ONEX_SERVICE_CLIENT_SECRET must be set in ~/.omnibase/.env}
   # --- Registration lifecycle (OMN-3446) ---
   # Auto-ACK local/internal nodes after introspection. Never set in production —
-  # external nodes send their own ack. Default empty = disabled.
-  ONEX_REGISTRATION_AUTO_ACK: ${ONEX_REGISTRATION_AUTO_ACK:-}
-  # --- OpenTelemetry / Phoenix tracing (OMN-3811) ---
-  # Opt-in: tracing only activates when OTEL_EXPORTER_OTLP_ENDPOINT is non-empty.
-  # Inside Docker, point to phoenix:6006 (OTLP HTTP). On host, use localhost:6006.
-  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
-  OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-}
-  OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-}
+  # external nodes send their own ack. Must be explicitly set to true or false.
+  ONEX_REGISTRATION_AUTO_ACK: ${ONEX_REGISTRATION_AUTO_ACK:?ONEX_REGISTRATION_AUTO_ACK must be set in ~/.omnibase/.env (true or false)}
+  # --- OpenTelemetry (OMN-5382: removed from base env — injected per-bundle) ---
+  # OTEL vars are only present when the tracing bundle is selected.
+  # OTEL_SERVICE_NAME is set per-service (already done in service blocks).
 # ==========================================================================
 # Services
 # ==========================================================================
