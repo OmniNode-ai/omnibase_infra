@@ -10,19 +10,20 @@
 
 1. [Repo Invariants](#repo-invariants)
 2. [Non-Goals](#non-goals)
-3. [Quick Reference](#quick-reference)
-4. [Architecture: Four-Node Pattern](#architecture-four-node-pattern)
-5. [Declarative Nodes](#declarative-nodes)
-6. [Handler System](#handler-system)
-7. [Intent Model Architecture](#intent-model-architecture)
-8. [Error Handling](#error-handling)
-9. [Infrastructure Patterns](#infrastructure-patterns)
-10. [Pydantic Model Standards](#pydantic-model-standards)
-11. [Testing and CI](#testing-and-ci)
-12. [Contract-Driven Config Discovery](#contract-driven-config-discovery)
-13. [Agent-Driven Development](#agent-driven-development)
-14. [Common Pitfalls](#common-pitfalls)
-15. [Release Process](#release-process)
+3. [Service Catalog Architecture](#service-catalog-architecture)
+4. [Quick Reference](#quick-reference)
+5. [Architecture: Four-Node Pattern](#architecture-four-node-pattern)
+6. [Declarative Nodes](#declarative-nodes)
+7. [Handler System](#handler-system)
+8. [Intent Model Architecture](#intent-model-architecture)
+9. [Error Handling](#error-handling)
+10. [Infrastructure Patterns](#infrastructure-patterns)
+11. [Pydantic Model Standards](#pydantic-model-standards)
+12. [Testing and CI](#testing-and-ci)
+13. [Contract-Driven Config Discovery](#contract-driven-config-discovery)
+14. [Agent-Driven Development](#agent-driven-development)
+15. [Common Pitfalls](#common-pitfalls)
+16. [Release Process](#release-process)
 
 ---
 
@@ -131,6 +132,92 @@ write back to `~/.omnibase/.env`, or depend on shell tooling co-located with the
 > **Note on `sync-omnibase-env.py`**: This script is **not** part of `omnibase_infra`.
 > It is provided by the `omniclaude` plugin and installed separately. See the
 > [omniclaude README](https://github.com/OmniNode-ai/omniclaude) for details.
+
+---
+
+## Service Catalog Architecture
+
+The service catalog is the authoritative source for all Docker infrastructure.
+Every deployable unit is a typed YAML manifest; the compose file is generated, not hand-edited.
+
+### Concepts
+
+| Term | Description |
+|------|-------------|
+| **Manifest** | Typed YAML declaration of a single deployable service (`docker/catalog/services/<name>.yaml`) |
+| **Bundle** | Named group of manifests deployed together (`docker/catalog/bundles.yaml`) |
+| **Resolver** | Loads manifests + bundles, resolves transitive `includes`, returns `ResolvedStack` |
+| **Generator** | Renders `ResolvedStack` → `docker-compose.generated.yml` |
+| **Validator** | Checks that all `required_env` vars are present before start |
+
+### Bundle Definitions
+
+| Bundle | Contents | Purpose |
+|--------|----------|---------|
+| `core` | postgres, redpanda | Always-on infrastructure |
+| `runtime` | valkey, migration-gate, forward-migration, omninode-runtime, runtime-effects, runtime-worker, agent-actions-consumer, skill-lifecycle-consumer, context-audit-consumer, intelligence-migration, intelligence-api, omninode-contract-resolver, autoheal + core | Full ONEX runtime stack |
+| `memgraph` | omnibase-infra-memgraph | Graph memory — injects `OMNIMEMORY_*` env vars |
+| `observability` | phoenix | LLM observability (Phoenix traces/evals) |
+| `tracing` | (none) + observability | Injects OTEL env vars; phoenix pulled in transitively |
+| `secrets` | infisical | Secrets management — injects `INFISICAL_ADDR` |
+| `auth` | keycloak | Local OIDC/auth |
+
+**Transitive resolution**: `runtime` includes `core`; `tracing` includes `observability`. The resolver expands all `includes` before collecting services.
+
+**Env injection**: Each bundle may declare `inject_env` (hardcoded values injected into generated compose) and `inject_required_env` (vars that must be present in the operator environment at start time).
+
+### onex CLI Commands
+
+The `onex` CLI (`src/omnibase_infra/docker/catalog/cli.py`) is the primary operator interface.
+
+```bash
+# Generate compose file for one or more bundles
+uv run python -m omnibase_infra.docker.catalog.cli generate core
+uv run python -m omnibase_infra.docker.catalog.cli generate runtime memgraph
+
+# Validate env completeness before starting
+uv run python -m omnibase_infra.docker.catalog.cli validate runtime
+uv run python -m omnibase_infra.docker.catalog.cli validate runtime memgraph
+
+# Start a bundle (generate + validate + docker compose up)
+uv run python -m omnibase_infra.docker.catalog.cli up core
+uv run python -m omnibase_infra.docker.catalog.cli up runtime memgraph tracing
+
+# Stop a running bundle
+uv run python -m omnibase_infra.docker.catalog.cli down core
+```
+
+The shell functions `infra-up`, `infra-up-runtime`, `infra-up-memory`, and `infra-down` (defined in `~/.zshrc`) are backwards-compatible wrappers around `onex up/down`. They remain the preferred operator interface — do not bypass them with raw `docker compose -f <path>`.
+
+### Shell Function → onex Mapping
+
+| Shell Function | Equivalent onex Command |
+|----------------|------------------------|
+| `infra-up` | `onex up core` |
+| `infra-up-runtime` | `onex up runtime` |
+| `infra-up-memory` | `onex up runtime memgraph` |
+| `infra-down` | `onex down <active-bundles>` |
+
+### Adding a New Service
+
+1. Create `docker/catalog/services/<name>.yaml` using an existing manifest as template.
+2. Set `layer` to one of: `infrastructure`, `runtime`, `observability`, `auth`, `secrets`.
+3. Declare all `required_env` vars that the container needs from the operator environment.
+4. Add hardcoded container-internal addresses under `hardcoded_env` (never pass host-side env vars for internal addressing).
+5. Add the service name to the appropriate bundle(s) in `docker/catalog/bundles.yaml`.
+6. Run `uv run python -m omnibase_infra.docker.catalog.cli validate <bundle>` to confirm env contract.
+
+### Env Var Contract
+
+Three categories of env vars in the catalog:
+
+| Category | Location | Behavior |
+|----------|----------|----------|
+| `required_env` | Per-manifest YAML | Must be set in operator env; validated before start |
+| `hardcoded_env` | Per-manifest YAML | Container-internal addresses; never overrideable |
+| `inject_env` | Per-bundle in `bundles.yaml` | Injected only when that bundle is selected |
+
+**Rule**: Container-to-container addresses (e.g. `redpanda:9092`, `valkey:6379`) must live in `hardcoded_env`, never in `required_env`. Operator-supplied secrets (`POSTGRES_PASSWORD`, API keys) belong in `required_env`.
 
 ---
 

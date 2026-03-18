@@ -5,10 +5,14 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
+from omnibase_infra.docker.catalog.resolver import CatalogResolver
+
 REPO_ROOT = "/Volumes/PRO-G40/Code/omni_home/omnibase_infra"
+CATALOG_DIR = str(Path(REPO_ROOT) / "docker" / "catalog")
 
 
 @pytest.mark.integration
@@ -127,3 +131,62 @@ def test_catalog_validator_rejects_missing_env(
     )
     assert result.returncode != 0
     assert "POSTGRES_PASSWORD" in result.stderr
+
+
+@pytest.mark.integration
+def test_catalog_runtime_memgraph_bundle_injects_env() -> None:
+    """runtime+memgraph bundle injects OMNIMEMORY_* vars and includes memgraph service."""
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    stack = resolver.resolve(["runtime", "memgraph"])
+
+    # Memgraph service must be present
+    assert "omnibase-infra-memgraph" in stack.service_names
+
+    # Core infrastructure services pulled in transitively via runtime→core
+    assert "postgres" in stack.service_names
+    assert "redpanda" in stack.service_names
+
+    # OMNIMEMORY env vars injected by memgraph bundle
+    assert stack.injected_env.get("OMNIMEMORY_ENABLED") == "true"
+    assert (
+        stack.injected_env.get("OMNIMEMORY_MEMGRAPH_HOST") == "omnibase-infra-memgraph"
+    )
+    assert stack.injected_env.get("OMNIMEMORY_MEMGRAPH_PORT") == "7687"
+
+
+@pytest.mark.integration
+def test_catalog_runtime_without_memgraph_excludes_memory_env() -> None:
+    """runtime bundle alone must not inject any OMNIMEMORY_* vars or include memgraph."""
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    stack = resolver.resolve(["runtime"])
+
+    # Memgraph service must NOT be present
+    assert "omnibase-infra-memgraph" not in stack.service_names
+
+    # OMNIMEMORY vars must not be injected
+    for key in stack.injected_env:
+        assert not key.startswith("OMNIMEMORY_"), (
+            f"Unexpected OMNIMEMORY var '{key}' in runtime-only stack"
+        )
+
+
+@pytest.mark.integration
+def test_catalog_tracing_bundle_injects_otel_env() -> None:
+    """tracing bundle injects OTEL vars and pulls in phoenix transitively."""
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    stack = resolver.resolve(["tracing"])
+
+    # Phoenix must be included (tracing→observability→phoenix)
+    assert "phoenix" in stack.service_names
+
+    # OTEL env vars injected by tracing bundle
+    assert (
+        stack.injected_env.get("OTEL_EXPORTER_OTLP_ENDPOINT") == "http://phoenix:6006"
+    )
+    assert stack.injected_env.get("OTEL_TRACES_EXPORTER") == "otlp"
+
+    # OMNIMEMORY vars must NOT leak in from tracing bundle
+    for key in stack.injected_env:
+        assert not key.startswith("OMNIMEMORY_"), (
+            f"Unexpected OMNIMEMORY var '{key}' leaked into tracing-only stack"
+        )
