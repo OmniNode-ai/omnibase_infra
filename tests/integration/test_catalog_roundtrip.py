@@ -131,6 +131,7 @@ def test_catalog_validator_rejects_missing_env(
     )
     assert result.returncode != 0
     assert "POSTGRES_PASSWORD" in result.stderr
+<<<<<<< HEAD
 
 
 @pytest.mark.integration
