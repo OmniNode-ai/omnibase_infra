@@ -164,6 +164,11 @@ x-runtime-env: &runtime-env
   # OmniClaude domain plugin (OMN-3182): contracts discovered via entry points (OMN-5371/5372)
   # OMN-4622: Skills root for topic provisioning (flat-list topics.yaml manifests)
   OMNICLAUDE_SKILLS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/plugins/onex/skills
+  # --- Infisical config store ---
+  INFISICAL_ADDR: ${INFISICAL_ADDR:-}
+  INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID:-}
+  INFISICAL_CLIENT_SECRET: ${INFISICAL_CLIENT_SECRET:-}
+  INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:-}
   # OMN-5381: Containers always use event routing. Host-side USE_EVENT_ROUTING is for local dev scripts.
   USE_EVENT_ROUTING: "true"
   # --- Keycloak / Auth (auth profile, OMN-3361) ---
@@ -172,7 +177,7 @@ x-runtime-env: &runtime-env
   KEYCLOAK_ADMIN_URL: "http://keycloak:8080"
   KEYCLOAK_REALM: ${KEYCLOAK_REALM:-omninode}
   KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-onex-admin}
-  KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:?KEYCLOAK_ADMIN_CLIENT_SECRET must be set in ~/.omnibase/.env}
+  KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
   KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:28080/realms/omninode}
   ONEX_SERVICE_CLIENT_ID: ${ONEX_SERVICE_CLIENT_ID:-onex-service}
   ONEX_SERVICE_CLIENT_SECRET: ${ONEX_SERVICE_CLIENT_SECRET:?ONEX_SERVICE_CLIENT_SECRET must be set in ~/.omnibase/.env}
