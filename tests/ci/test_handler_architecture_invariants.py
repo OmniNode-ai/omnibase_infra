@@ -54,6 +54,8 @@ _RUNTIME_UTILITY_EXCLUSIONS: frozenset[str] = frozenset(
         "handler_check_executor.py",
         "handler_measurement.py",
         "handler_risk.py",
+        # Onboarding orchestrator utility (module-level async function, not ONEX handler class)
+        "handler_onboarding.py",
     }
 )
 

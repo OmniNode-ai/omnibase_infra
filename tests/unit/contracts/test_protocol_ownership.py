@@ -120,6 +120,9 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # === [NODE] Chunking gateway protocols ===
     # [NODE] DI boundary for DefaultEnvelopeChunker — factory callable injected via constructor (OMN-4145)
     "EnvelopeFactory": "gateways/chunking/default_chunker.py",
+    # === [NODE] Probe-internal protocols ===
+    # [NODE] DI boundary for verification executor — structural spec interface (OMN-5261)
+    "VerificationSpec": "probes/protocol_verification_spec.py",
 }
 
 # Duplicate protocol names that appear in multiple files (node-internal
