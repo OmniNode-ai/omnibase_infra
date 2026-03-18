@@ -261,7 +261,7 @@ class AdapterProtocolEventPublisherInmemory:
             Configured ModelEventEnvelope ready for serialization.
         """
         event_type = str(params["event_type"])
-        payload: JsonType = params["payload"]
+        payload = params["payload"]
         correlation_id = params.get("correlation_id")
         causation_id = params.get("causation_id")
         metadata = params.get("metadata")

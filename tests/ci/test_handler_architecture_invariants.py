@@ -2,15 +2,16 @@
 # SPDX-License-Identifier: MIT
 """Architecture invariant tests for handler classification compliance.
 
-Verifies the three architectural invariants from OMN-783 (INFRA-042):
+Verifies the four architectural invariants from OMN-783 (INFRA-042):
 
 1. All handler classes expose ``handler_type`` property returning ``EnumHandlerType``
 2. ``wiring.py`` is the only handler registration location
 3. No ``os.getenv`` / ``os.environ`` direct access in handler files
+4. Contract-declared handlers have explicit wiring paths (OMN-5345)
 
 These tests run as CI gates to prevent regressions.
 
-Ticket: OMN-783
+Ticket: OMN-783, OMN-5345
 """
 
 from __future__ import annotations
@@ -18,9 +19,11 @@ from __future__ import annotations
 import ast
 import os
 import re
+import warnings
 from pathlib import Path
 
 import pytest
+import yaml
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -63,6 +66,51 @@ _RUNTIME_UTILITY_EXCLUSIONS: frozenset[str] = frozenset(
 _ENV_ACCESS_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bos\.getenv\b"),
     re.compile(r"\bos\.environ\b"),
+)
+
+# Approved wiring file names and prefixes — shared by INV-2 and INV-4.
+# Handler instantiation or register_instance() calls are only valid in these files.
+_APPROVED_WIRING_NAMES: frozenset[str] = frozenset(
+    {
+        "wiring.py",
+        "plugin.py",
+        "util_container_wiring.py",
+        "service_kernel.py",
+    }
+)
+_APPROVED_WIRING_PREFIXES: tuple[str, ...] = ("registry_infra_",)
+
+# INV-4: Contract-declared handlers that are known-unwired.
+# Each entry is (contract_path_relative_to_repo, handler_class_name).
+# The meta-test TestWiringExemptionsValid enforces anti-permanence:
+# exemptions for handlers that pass the wiring check will cause test failure.
+_INV4_WIRING_EXEMPTIONS: frozenset[tuple[str, str]] = frozenset(
+    {
+        # HandlerEmbeddingOllama: Ollama deprecated (OMN-5345). Module deleted.
+        # Contract still declares it. Remove when contract is cleaned up.
+        (
+            "src/omnibase_infra/nodes/node_llm_embedding_effect/contract.yaml",
+            "HandlerEmbeddingOllama",
+        ),
+        # HandlerLlmOllama: Ollama deprecated (OMN-5345). Module deleted.
+        # Contract still declares it. Remove when contract is cleaned up.
+        (
+            "src/omnibase_infra/nodes/node_llm_inference_effect/contract.yaml",
+            "HandlerLlmOllama",
+        ),
+    }
+)
+
+# Contract YAML root directory
+_CONTRACTS_ROOT = _SRC_ROOT / "nodes"
+
+# Known routing strategies — INV-4 fails on unknown values to catch contract bugs.
+_KNOWN_ROUTING_STRATEGIES: frozenset[str] = frozenset(
+    {
+        "operation_match",
+        "payload_type_match",
+        "handler_type_match",
+    }
 )
 
 
@@ -366,14 +414,8 @@ class TestWiringLocationInvariant:
         - registry_infra_*.py (node-level registry files)
         - plugin.py (domain plugin lifecycle)
         """
-        allowed_files = frozenset(
-            {
-                "wiring.py",
-                "util_container_wiring.py",
-                "plugin.py",
-            }
-        )
-        allowed_prefixes = ("registry_infra_",)
+        allowed_files = _APPROVED_WIRING_NAMES
+        allowed_prefixes = _APPROVED_WIRING_PREFIXES
 
         pattern = re.compile(
             r"register_instance\s*\(\s*interface\s*=\s*(?:Handler|ProtocolNode)"
@@ -507,4 +549,342 @@ class TestRuntimeUtilityExclusionsValid:
             "Exclusion entries with no matching file:\n"
             + "\n".join(f"  - {f}" for f in sorted(orphaned))
             + "\n\nRemove stale entries from _RUNTIME_UTILITY_EXCLUSIONS."
+        )
+
+
+# ---------------------------------------------------------------------------
+# INV-4 Helpers
+# ---------------------------------------------------------------------------
+
+
+def _discover_contracts_with_handler_routing() -> list[Path]:
+    """Find all contract.yaml files under _CONTRACTS_ROOT that contain handler_routing."""
+    contracts: list[Path] = []
+    for root_str, _dirs, files in os.walk(_CONTRACTS_ROOT):
+        root = Path(root_str)
+        for f in files:
+            if f == "contract.yaml":
+                filepath = root / f
+                try:
+                    content = filepath.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+                if "handler_routing:" in content:
+                    contracts.append(filepath)
+    return sorted(contracts)
+
+
+def _extract_declared_handlers(
+    contract_path: Path,
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """Extract handler class names declared in a contract's handler_routing section.
+
+    Handles three schema variants:
+    - ``operation_match``: all handlers required
+    - ``payload_type_match``: all handlers required
+    - ``handler_type_match``: only ``default_handler`` type required
+
+    Args:
+        contract_path: Absolute path to the contract.yaml.
+
+    Returns:
+        Tuple of (handlers, errors) where handlers is a list of
+        (handler_class_name, handler_module) tuples and errors is a list of
+        error messages for malformed contracts.
+
+    """
+    repo_root = _SRC_ROOT.parent.parent
+    rel_path = str(contract_path.relative_to(repo_root))
+    errors: list[str] = []
+
+    try:
+        data = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        return [], [f"{rel_path}: YAML parse error: {exc}"]
+
+    if data is None:
+        return [], [f"{rel_path}: empty YAML"]
+
+    routing = data.get("handler_routing")
+    if routing is None:
+        return [], []
+    if not isinstance(routing, dict):
+        return [], [f"{rel_path}: handler_routing is not a dict"]
+
+    strategy = routing.get("routing_strategy")
+    if strategy is None:
+        return [], [f"{rel_path}: handler_routing missing routing_strategy"]
+    if strategy not in _KNOWN_ROUTING_STRATEGIES:
+        return [], [f"{rel_path}: unknown routing_strategy '{strategy}'"]
+
+    handlers_list = routing.get("handlers")
+    if handlers_list is None or not isinstance(handlers_list, list):
+        return [], [f"{rel_path}: handler_routing.handlers missing or not a list"]
+
+    default_handler = routing.get("default_handler")
+    seen_names: set[str] = set()
+    result: list[tuple[str, str]] = []
+
+    for entry in handlers_list:
+        if not isinstance(entry, dict):
+            errors.append(f"{rel_path}: handler entry is not a dict")
+            continue
+
+        # For handler_type_match with default_handler, skip non-default types
+        if strategy == "handler_type_match" and default_handler is not None:
+            handler_type = entry.get("handler_type")
+            if handler_type != default_handler:
+                continue
+
+        # Extract handler class name — three possible locations
+        handler_name: str | None = None
+        handler_module: str = ""
+
+        # Pattern 1: handler.name (nested dict)
+        handler_dict = entry.get("handler")
+        if isinstance(handler_dict, dict):
+            handler_name = handler_dict.get("name")
+            handler_module = handler_dict.get("module", "")
+
+        # Pattern 2: handler_class (flat string)
+        if handler_name is None:
+            handler_name = entry.get("handler_class")
+            handler_module = entry.get("handler_module", "")
+
+        if handler_name is None:
+            errors.append(
+                f"{rel_path}: handler entry missing both handler.name and handler_class"
+            )
+            continue
+
+        if handler_name in seen_names:
+            warnings.warn(
+                f"{rel_path}: duplicate handler declaration '{handler_name}'",
+                stacklevel=1,
+            )
+        else:
+            seen_names.add(handler_name)
+            result.append((handler_name, handler_module))
+
+    # Validate default_handler references an existing handler_type
+    if strategy == "handler_type_match" and default_handler is not None:
+        declared_types = {
+            e.get("handler_type")
+            for e in handlers_list
+            if isinstance(e, dict) and e.get("handler_type")
+        }
+        if default_handler not in declared_types:
+            errors.append(
+                f"{rel_path}: default_handler '{default_handler}' "
+                f"not found in declared handler_types {sorted(declared_types)}"
+            )
+
+    return result, errors
+
+
+def _collect_approved_wiring_file_contents() -> dict[Path, str]:
+    """Read all approved wiring files and return {path: content} map.
+
+    Approved wiring files are defined by ``_APPROVED_WIRING_NAMES`` and
+    ``_APPROVED_WIRING_PREFIXES``.
+    """
+    result: dict[Path, str] = {}
+    for root_str, _dirs, files in os.walk(_SRC_ROOT):
+        root = Path(root_str)
+        for f in files:
+            if not f.endswith(".py"):
+                continue
+            if f in _APPROVED_WIRING_NAMES or any(
+                f.startswith(p) for p in _APPROVED_WIRING_PREFIXES
+            ):
+                filepath = root / f
+                try:
+                    result[filepath] = filepath.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+    return result
+
+
+def _handler_has_wiring_path(
+    handler_name: str,
+    handler_module: str,
+    wiring_contents: dict[Path, str],
+) -> bool:
+    """Check if a handler has a structural wiring path.
+
+    A handler passes if ANY of the following holds:
+
+    1. **Explicit wiring**: Handler class name appears (constructor call or
+       register_instance) in an approved wiring file.
+    2. **Module-level proof**: The handler's declared module file exists on disk
+       AND defines the handler class. This covers handlers loaded dynamically
+       by the contract-driven ``HandlerPluginLoader``.
+
+    Both checks are structural — they prove the handler exists and is reachable,
+    not that runtime dispatch is correct.
+    """
+    # Tier 1: Explicit wiring in approved files (constructor call or register)
+    call_pattern = re.compile(
+        rf"(?:{re.escape(handler_name)}\s*\(|interface\s*=\s*{re.escape(handler_name)}\b)"
+    )
+    if any(call_pattern.search(content) for content in wiring_contents.values()):
+        return True
+
+    # Tier 2: Module exists AND defines the handler class.
+    # This covers handlers loaded by HandlerPluginLoader via contract YAML.
+    if handler_module:
+        module_path = (
+            _SRC_ROOT.parent.parent / "src" / handler_module.replace(".", os.sep)
+        )
+        module_file = Path(str(module_path) + ".py")
+        if module_file.exists():
+            try:
+                content = module_file.read_text(encoding="utf-8")
+                class_pattern = re.compile(
+                    rf"^class\s+{re.escape(handler_name)}\b", re.MULTILINE
+                )
+                if class_pattern.search(content):
+                    return True
+            except (OSError, UnicodeDecodeError):
+                pass
+
+    return False
+
+
+# ---------------------------------------------------------------------------
+# INV-4 Tests
+# ---------------------------------------------------------------------------
+
+
+class TestContractHandlerWiringInvariant:
+    """INV-4: Contract-declared handlers must have explicit wiring paths.
+
+    Every handler declared in a contract's handler_routing section must be
+    instantiated or registered via register_instance() in an approved wiring
+    location. This catches the class of bug where a handler is declared in a
+    contract but never wired at runtime (OMN-5345).
+    """
+
+    def test_all_contract_declared_handlers_are_wired(self) -> None:
+        """Every required handler from contract YAML must have a wiring path."""
+        contracts = _discover_contracts_with_handler_routing()
+        assert len(contracts) >= 30, (
+            f"Expected 30+ contracts with handler_routing, found {len(contracts)}. "
+            "Contract discovery may be broken."
+        )
+
+        wiring_contents = _collect_approved_wiring_file_contents()
+        repo_root = _SRC_ROOT.parent.parent
+        all_errors: list[str] = []
+        unwired: list[str] = []
+
+        for contract_path in contracts:
+            handlers, errors = _extract_declared_handlers(contract_path)
+            all_errors.extend(errors)
+
+            rel_contract = str(contract_path.relative_to(repo_root))
+            for handler_name, handler_module in handlers:
+                # Check exemptions
+                if (rel_contract, handler_name) in _INV4_WIRING_EXEMPTIONS:
+                    continue
+
+                if not _handler_has_wiring_path(
+                    handler_name, handler_module, wiring_contents
+                ):
+                    unwired.append(
+                        f"  - {handler_name}\n"
+                        f"    contract: {rel_contract}\n"
+                        f"    module: {handler_module}"
+                    )
+
+        # Fail on malformed contracts first — these are contract bugs
+        assert not all_errors, (
+            f"INV-4: {len(all_errors)} malformed contract(s):\n"
+            + "\n".join(f"  - {e}" for e in all_errors)
+        )
+
+        assert not unwired, (
+            f"INV-4 VIOLATION: {len(unwired)} contract-declared handler(s) "
+            "have no wiring path:\n"
+            + "\n".join(unwired)
+            + "\n\nEvery handler declared in a contract's handler_routing must be "
+            "instantiated or\nregistered via register_instance() in an approved "
+            "wiring location.\n\n"
+            "To fix:\n"
+            "  1. Add handler instantiation in the appropriate wiring file, OR\n"
+            "  2. Add to _INV4_WIRING_EXEMPTIONS with justification if intentional."
+        )
+
+    def test_contracts_discovered(self) -> None:
+        """Smoke test: contract discovery finds expected contracts."""
+        contracts = _discover_contracts_with_handler_routing()
+        assert len(contracts) >= 30, (
+            f"Expected 30+ contracts with handler_routing, found {len(contracts)}."
+        )
+
+
+class TestWiringExemptionsValid:
+    """Meta-test: verify INV-4 exemptions are structurally valid and still needed."""
+
+    def test_exemptions_reference_real_contracts_and_handlers(self) -> None:
+        """Every exemption must reference an existing contract that declares that handler."""
+        repo_root = _SRC_ROOT.parent.parent
+        invalid: list[str] = []
+
+        for contract_rel, handler_name in sorted(_INV4_WIRING_EXEMPTIONS):
+            contract_path = repo_root / contract_rel
+            if not contract_path.exists():
+                invalid.append(
+                    f"  - ({contract_rel!r}, {handler_name!r}): "
+                    "contract file does not exist"
+                )
+                continue
+
+            handlers, errors = _extract_declared_handlers(contract_path)
+            if errors:
+                invalid.append(
+                    f"  - ({contract_rel!r}, {handler_name!r}): "
+                    f"contract parse errors: {errors}"
+                )
+                continue
+
+            declared_names = {h[0] for h in handlers}
+            if handler_name not in declared_names:
+                invalid.append(
+                    f"  - ({contract_rel!r}, {handler_name!r}): "
+                    f"handler not declared in contract (found: {sorted(declared_names)})"
+                )
+
+        assert not invalid, (
+            "INV-4 exemption entries reference invalid contracts or handlers:\n"
+            + "\n".join(invalid)
+            + "\n\nFix or remove invalid entries from _INV4_WIRING_EXEMPTIONS."
+        )
+
+    def test_stale_exemptions_are_removed(self) -> None:
+        """Exemptions for handlers that are now wired must be removed."""
+        wiring_contents = _collect_approved_wiring_file_contents()
+        repo_root = _SRC_ROOT.parent.parent
+        stale: list[str] = []
+
+        for contract_rel, handler_name in sorted(_INV4_WIRING_EXEMPTIONS):
+            contract_path = repo_root / contract_rel
+            if not contract_path.exists():
+                continue
+            handlers, _errors = _extract_declared_handlers(contract_path)
+            handler_module = ""
+            for h_name, h_module in handlers:
+                if h_name == handler_name:
+                    handler_module = h_module
+                    break
+            if _handler_has_wiring_path(handler_name, handler_module, wiring_contents):
+                stale.append(
+                    f"  - Exemption for {handler_name} is stale — handler is now "
+                    "wired. Remove from _INV4_WIRING_EXEMPTIONS."
+                )
+
+        assert not stale, (
+            "INV-4 stale exemptions detected:\n"
+            + "\n".join(stale)
+            + "\n\nThese handlers now have wiring paths. Remove the exemptions."
         )

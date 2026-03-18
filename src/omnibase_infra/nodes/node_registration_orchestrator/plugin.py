@@ -94,6 +94,9 @@ if TYPE_CHECKING:
 
     import asyncpg
 
+    from omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres import (
+        HandlerRegistrationStoragePostgres,
+    )
     from omnibase_infra.projectors.snapshot_publisher_registration import (
         SnapshotPublisherRegistration,
     )
@@ -223,6 +226,7 @@ class PluginRegistration:
         """Initialize the plugin with empty state."""
         self._pool: asyncpg.Pool | None = None
         self._projector: ProjectorShell | None = None
+        self._registration_storage: HandlerRegistrationStoragePostgres | None = None
         self._snapshot_publisher: SnapshotPublisherRegistration | None = None
         self._wiring: EventBusSubcontractWiring | None = None
         self._shutdown_in_progress: bool = False
@@ -361,7 +365,14 @@ class PluginRegistration:
             await self._initialize_schema(config)
             resources_created.append("registration_schema")
 
-            # 4. Initialize SnapshotPublisher (optional, requires Kafka)
+            # 4. Wire HandlerRegistrationStoragePostgres (OMN-5345)
+            # Creates the node_registrations table and registers the handler
+            # in the DI container so NodeRegistrationStorageEffect can resolve it.
+            await self._wire_registration_storage(config)
+            if self._registration_storage is not None:
+                resources_created.append("registration_storage_handler")
+
+            # 5. Initialize SnapshotPublisher (optional, requires Kafka)
             await self._initialize_snapshot_publisher(config)
             if self._snapshot_publisher is not None:
                 resources_created.append("snapshot_publisher")
@@ -703,6 +714,85 @@ class PluginRegistration:
                     extra={"error_type": type(schema_error).__name__},
                 )
 
+    async def _wire_registration_storage(self, config: ModelDomainPluginConfig) -> None:
+        """Wire HandlerRegistrationStoragePostgres into the runtime (OMN-5345).
+
+        Creates a HandlerRegistrationStoragePostgres instance that shares the
+        plugin's asyncpg pool. The handler's auto_create_schema flag creates
+        the node_registrations table on first connection.
+
+        The handler is registered in:
+        1. RegistryInfraRegistrationStorage (module-level handler registry)
+        2. Service registry as ProtocolRegistrationPersistence (container DI)
+
+        Args:
+            config: Plugin configuration with container and correlation_id.
+        """
+        correlation_id = config.correlation_id
+
+        if self._pool is None:
+            logger.warning(
+                "Cannot wire registration storage: pool is None (correlation_id=%s)",
+                correlation_id,
+            )
+            return
+
+        try:
+            from omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres import (
+                HandlerRegistrationStoragePostgres,
+            )
+            from omnibase_infra.nodes.node_registration_storage_effect.registry.registry_infra_registration_storage import (
+                RegistryInfraRegistrationStorage,
+            )
+
+            handler = HandlerRegistrationStoragePostgres(
+                container=config.container,
+                dsn=(os.getenv("OMNIBASE_INFRA_DB_URL") or "").strip() or None,
+                auto_create_schema=True,
+            )
+
+            # Eagerly initialize the pool and create the table now rather
+            # than deferring to the first request. This ensures the
+            # node_registrations table exists before any registration
+            # events arrive.
+            await handler._ensure_pool(correlation_id=correlation_id)
+
+            # Register in the module-level handler registry
+            RegistryInfraRegistrationStorage.register(config.container)
+            RegistryInfraRegistrationStorage.register_handler(config.container, handler)
+
+            # Register in the container service registry for DI resolution
+            if config.container.service_registry is not None:
+                from omnibase_core.enums import EnumInjectionScope
+                from omnibase_infra.handlers.registration_storage.protocol_registration_persistence import (
+                    ProtocolRegistrationPersistence,
+                )
+
+                await config.container.service_registry.register_instance(
+                    interface=ProtocolRegistrationPersistence,  # type: ignore[type-abstract]  # Protocol used as DI key
+                    instance=handler,
+                    scope=EnumInjectionScope.GLOBAL,
+                    metadata={
+                        "description": "PostgreSQL registration storage handler",
+                        "plugin_id": "registration",
+                    },
+                )
+
+            self._registration_storage = handler
+            logger.info(
+                "HandlerRegistrationStoragePostgres wired "
+                "(auto_create_schema=True, correlation_id=%s)",
+                correlation_id,
+            )
+
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+            logger.warning(
+                "Failed to wire HandlerRegistrationStoragePostgres "
+                "(best-effort, non-blocking) (correlation_id=%s)",
+                correlation_id,
+                exc_info=True,
+            )
+
     async def _initialize_snapshot_publisher(
         self, config: ModelDomainPluginConfig
     ) -> None:
@@ -785,6 +875,17 @@ class PluginRegistration:
     async def _cleanup_on_failure(self, config: ModelDomainPluginConfig) -> None:
         """Clean up resources if initialization fails."""
         correlation_id = config.correlation_id
+
+        if self._registration_storage is not None:
+            try:
+                await self._registration_storage.shutdown()
+            except Exception as cleanup_error:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "Cleanup failed for registration storage shutdown: %s (correlation_id=%s)",
+                    sanitize_error_message(cleanup_error),
+                    correlation_id,
+                )
+            self._registration_storage = None
 
         if self._snapshot_publisher is not None:
             try:
@@ -1455,6 +1556,24 @@ class PluginRegistration:
         start_time = time.time()
         correlation_id = config.correlation_id
         errors: list[str] = []
+
+        # Shut down registration storage handler (closes its own pool)
+        if self._registration_storage is not None:
+            try:
+                await self._registration_storage.shutdown()
+                logger.debug(
+                    "Registration storage handler shut down (correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception as storage_error:  # noqa: BLE001 — boundary: logs warning and degrades
+                error_msg = sanitize_error_message(storage_error)
+                errors.append(f"registration_storage: {error_msg}")
+                logger.warning(
+                    "Failed to shut down registration storage: %s (correlation_id=%s)",
+                    error_msg,
+                    correlation_id,
+                )
+            self._registration_storage = None
 
         # Stop snapshot publisher first (depends on external Kafka)
         if self._snapshot_publisher is not None:
