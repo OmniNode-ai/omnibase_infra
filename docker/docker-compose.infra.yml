@@ -160,19 +160,19 @@ x-runtime-env: &runtime-env
   # are treated as fatal errors rather than silent fallbacks. Leave empty
   # (the default) to allow standard environment variable resolution as fallback.
   INFISICAL_REQUIRED: ${INFISICAL_REQUIRED:-}
-  # --- Fallback values (used when Infisical is not configured) ---
-  VALKEY_HOST: ${VALKEY_HOST:-valkey}
-  VALKEY_PORT: ${VALKEY_PORT:-6379}
-  VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
+  # --- Container-internal service addresses (OMN-5381: same invariant as OMN-3431 for Kafka) ---
+  # Containers use Docker-internal valkey:6379. Host scripts use localhost:16379.
+  # Password is required — no fallback to dev defaults.
+  VALKEY_HOST: "valkey"
+  VALKEY_PORT: "6379"
+  VALKEY_PASSWORD: ${VALKEY_PASSWORD:?VALKEY_PASSWORD must be set in ~/.omnibase/.env}
   # OmniIntelligence domain plugin
   OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:?OMNIINTELLIGENCE_DB_URL must be set in ~/.omnibase/.env}
   # OmniMemory domain plugin
   OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-}
-  # OMN-4311: Memgraph connection passthrough (required by PluginMemory after OMN-4310)
-  # Default: Docker service name resolvable via omnibase-infra-network DNS.
-  # When OMNIMEMORY_ENABLED is unset, PluginMemory.validate_handshake() skips the probe.
-  OMNIMEMORY_MEMGRAPH_HOST: ${OMNIMEMORY_MEMGRAPH_HOST:-omnibase-infra-memgraph}
-  OMNIMEMORY_MEMGRAPH_PORT: ${OMNIMEMORY_MEMGRAPH_PORT:-7687}
+  # OMN-5381: Memgraph container-internal addresses — hardcoded literals.
+  OMNIMEMORY_MEMGRAPH_HOST: "omnibase-infra-memgraph"
+  OMNIMEMORY_MEMGRAPH_PORT: "7687"
   # OMNIMEMORY_DB_URL uses :- (empty default) so non-memory deployments are unaffected.
   OMNIMEMORY_DB_URL: ${OMNIMEMORY_DB_URL:-}
   # OmniClaude domain plugin (OMN-3182): required by PluginClaude.wire_dispatchers()
@@ -182,13 +182,12 @@ x-runtime-env: &runtime-env
   OMNICLAUDE_CONTRACTS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/nodes
   # OMN-4622: Skills root for topic provisioning (flat-list topics.yaml manifests)
   OMNICLAUDE_SKILLS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/plugins/onex/skills
-  # OMN-3894: Enable event-based agent routing in containers. App defaults to false;
-  # compose ensures containers always enable it via :-true default.
-  USE_EVENT_ROUTING: ${USE_EVENT_ROUTING:-true}
+  # OMN-5381: Containers always use event routing. Host-side USE_EVENT_ROUTING is for local dev scripts.
+  USE_EVENT_ROUTING: "true"
   # --- Keycloak / Auth (auth profile, OMN-3361) ---
-  # KEYCLOAK_ADMIN_URL: internal container DNS — NEVER set to localhost here.
+  # OMN-5381: Keycloak internal address — hardcoded literal.
   # KEYCLOAK_ISSUER: external browser-visible URL — must match token iss claim.
-  KEYCLOAK_ADMIN_URL: ${KEYCLOAK_ADMIN_URL:-http://keycloak:8080}
+  KEYCLOAK_ADMIN_URL: "http://keycloak:8080"
   KEYCLOAK_REALM: ${KEYCLOAK_REALM:-omninode}
   KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-onex-admin}
   KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
