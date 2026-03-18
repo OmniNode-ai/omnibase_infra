@@ -26,6 +26,13 @@ repos:
     rev: 30a06f85bb5849902d33c8d0bdb90fc6cba0c346 # pragma: allowlist secret
     hooks:
       - id: check-stub-implementations
+  # Hardcoded topic guard — sourced from onex_change_control (OMN-5256/OMN-5259)
+  # Pre-existing violations excluded pending migration to canonical constants (OMN-5259)
+  - repo: https://github.com/OmniNode-ai/onex_change_control
+    rev: 1b0d2f0374bca1f39d9bab22a02251208cdce196 # pragma: allowlist secret
+    hooks:
+      - id: no-hardcoded-topics
+        exclude: ^(src/omnibase_infra/(enums/generated|cli|tui|models/registration/model_event_bus_topic_entry\.py|nodes/.*/handlers|nodes/.*/services|runtime/contract_registration_event_router\.py|services/observability|services/service_timeout_emitter\.py|validation)|contracts/|scripts/|tests/)
   # YAML formatting (standard across ecosystem)
   - repo: https://github.com/google/yamlfmt
     rev: v0.17.2
