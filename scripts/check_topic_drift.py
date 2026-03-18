@@ -17,6 +17,13 @@ Usage::
     # Default: scan nodes directory, compare against platform_topic_suffixes.py
     python scripts/check_topic_drift.py --contracts-dir src/omnibase_infra/nodes
 
+    # Cross-repo scanning (resolves sibling repo topic references)
+    python scripts/check_topic_drift.py \\
+        --contracts-dir src/omnibase_infra/nodes \\
+        --extra-contracts-dir ../omniintelligence/src/omniintelligence/nodes \\
+        --extra-contracts-dir ../omnimemory/src/omnimemory/nodes \\
+        --extra-contracts-dir ../omniclaude/src/omniclaude/nodes
+
     # Custom constants file
     python scripts/check_topic_drift.py \\
         --contracts-dir src/omnibase_infra/nodes \\
@@ -24,6 +31,9 @@ Usage::
 
 .. versionadded:: 0.22.0
     OMN-5248: Initial implementation.
+
+.. versionchanged:: 0.23.0
+    OMN-5258: Added --extra-contracts-dir for cross-repo contract scanning.
 """
 
 from __future__ import annotations
@@ -118,6 +128,14 @@ def main() -> int:
         help="Root directory to scan for contract.yaml files.",
     )
     parser.add_argument(
+        "--extra-contracts-dir",
+        type=Path,
+        action="append",
+        default=[],
+        help="Additional contract directories to scan (repeatable). "
+        "Use for sibling repos to resolve cross-repo topic references.",
+    )
+    parser.add_argument(
         "--constants-file",
         type=Path,
         default=_REPO_ROOT
@@ -155,10 +173,21 @@ def main() -> int:
         t for t in suffix_values if not _is_infrastructure_topic(t)
     }
 
-    # Scan contract YAML files
+    # Scan contract YAML files (primary + extra directories)
     extractor = ContractTopicExtractor()
     manifest = extractor.scan(contracts_dir)
-    contract_topics = manifest.all_unique_topics
+    contract_topics = set(manifest.all_unique_topics)
+
+    # Scan additional contract directories (sibling repos)
+    for extra_dir in args.extra_contracts_dir:
+        if not extra_dir.is_dir():
+            print(
+                f"WARNING: extra contracts directory not found (skipping): {extra_dir}",
+                file=sys.stderr,
+            )
+            continue
+        extra_manifest = extractor.scan(extra_dir)
+        contract_topics |= extra_manifest.all_unique_topics
 
     # Filter out infrastructure-scoped topics from contracts too
     contract_topics_filtered = {

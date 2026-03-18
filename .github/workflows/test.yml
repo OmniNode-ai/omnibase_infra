@@ -313,8 +313,9 @@ jobs:
             --check-placeholders \
             --scan-dir src/omnibase_infra
 
-  # Topic drift check -- CI gate validating SUFFIX_* constants against contracts (OMN-5248)
-  # Ensures static topic constants stay in sync with contract.yaml topic declarations
+  # Topic drift check -- CI gate validating SUFFIX_* constants against contracts (OMN-5248/OMN-5258)
+  # Ensures static topic constants stay in sync with contract.yaml topic declarations.
+  # Cross-repo scanning (OMN-5258): checks out sibling repos to resolve topic references.
   topic-drift-check:
     name: Topic Drift Check
     # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
@@ -330,24 +331,58 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - name: Checkout code
+      - name: Checkout omnibase_infra
         uses: actions/checkout@v6
+        with:
+          path: omnibase_infra
+
+      - name: Checkout omniintelligence (sibling contracts)
+        uses: actions/checkout@v6
+        with:
+          repository: OmniNode-ai/omniintelligence
+          path: omniintelligence
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout omnimemory (sibling contracts)
+        uses: actions/checkout@v6
+        with:
+          repository: OmniNode-ai/omnimemory
+          path: omnimemory
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout omniclaude (sibling contracts)
+        uses: actions/checkout@v6
+        with:
+          repository: OmniNode-ai/omniclaude
+          path: omniclaude
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python and uv
-        uses: ./.github/actions/setup-python-uv
+        uses: ./omnibase_infra/.github/actions/setup-python-uv
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
+          cache-key-prefix: uv-topic-drift
+          lock-file-path: 'omnibase_infra/**/uv.lock'
+          skip-install: 'true'
 
-      - name: Check topic drift
+      - name: Install omnibase_infra dependencies
+        working-directory: omnibase_infra
+        run: uv sync
+
+      - name: Check topic drift (cross-repo)
+        working-directory: omnibase_infra
         run: |
           echo "================================================================"
-          echo "Topic Drift Check (OMN-5248)"
-          echo "warn-only: cross-repo topics expected as orphans in single-repo scan"
+          echo "Topic Drift Check (OMN-5248/OMN-5258)"
+          echo "Cross-repo scanning: omniintelligence, omnimemory, omniclaude"
           echo "================================================================"
           uv run python scripts/check_topic_drift.py \
             --contracts-dir src/omnibase_infra/nodes \
+            --extra-contracts-dir ../omniintelligence/src/omniintelligence/nodes \
+            --extra-contracts-dir ../omnimemory/src/omnimemory/nodes \
+            --extra-contracts-dir ../omniclaude/src/omniclaude/nodes \
             --warn-only
 
   # Schema handshake gate -- validates producer->consumer Pydantic round-trip
