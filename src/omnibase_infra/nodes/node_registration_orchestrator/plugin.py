@@ -769,7 +769,7 @@ class PluginRegistration:
                 )
 
                 await config.container.service_registry.register_instance(
-                    interface=ProtocolRegistrationPersistence,
+                    interface=ProtocolRegistrationPersistence,  # type: ignore[type-abstract]  # Protocol used as DI key
                     instance=handler,
                     scope=EnumInjectionScope.GLOBAL,
                     metadata={
