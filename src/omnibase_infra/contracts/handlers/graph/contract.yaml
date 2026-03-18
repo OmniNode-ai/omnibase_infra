@@ -105,6 +105,10 @@ operation_bindings:
       - parameter_name: "filters"
         expression: "${payload.filters}"
         required: false
+activation:
+  optional: true
+  required_env:
+    - OMNIMEMORY_MEMGRAPH_HOST
 metadata:
   handler_id: "graph-handler"
   handler_type: "infra_handler"

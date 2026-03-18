@@ -122,5 +122,6 @@ class ProtocolLedgerSink(Protocol):
 
 
 __all__ = [
+    "EnumLedgerSinkDropPolicy",
     "ProtocolLedgerSink",
 ]

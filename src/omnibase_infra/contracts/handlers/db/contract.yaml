@@ -58,6 +58,8 @@ operation_bindings:
       - parameter_name: "parameters"
         expression: "${payload.parameters}"
         required: false
+activation:
+  optional: false
 metadata:
   handler_id: "db-handler"
   handler_type: "infra_handler"

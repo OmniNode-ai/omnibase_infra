@@ -327,5 +327,6 @@ ModelConfigRefParseResult.model_rebuild()
 
 
 __all__: list[str] = [
+    "EnumConfigRefScheme",
     "ModelConfigRef",
 ]

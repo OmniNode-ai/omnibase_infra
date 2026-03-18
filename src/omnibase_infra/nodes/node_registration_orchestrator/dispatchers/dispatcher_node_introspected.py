@@ -285,6 +285,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             # Type narrowing: the branch above guarantees payload is
             # ModelNodeIntrospectionEvent (isinstance returned True, or model_validate
             # succeeded, or we returned early).
+            assert isinstance(payload, ModelNodeIntrospectionEvent)
 
             # TODO(OMN-2050): Use injected time from ModelDispatchContext instead
             # of datetime.now(UTC). Currently, the ProtocolMessageDispatcher.handle()
