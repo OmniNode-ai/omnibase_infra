@@ -65,6 +65,8 @@ from aiohttp import web
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.errors import KafkaError
 
+from omnibase_infra.event_bus.consumer_health_emitter import ConsumerHealthEmitter
+from omnibase_infra.event_bus.mixin_consumer_health import MixinConsumerHealth
 from omnibase_infra.services.observability.context_audit.config import (
     ConfigContextAuditConsumer,
 )
@@ -249,7 +251,7 @@ class ConsumerMetrics:
 # =============================================================================
 
 
-class ContextAuditConsumer:
+class ContextAuditConsumer(MixinConsumerHealth):
     """Async Kafka consumer for context integrity audit observability events.
 
     Subscribes to all context audit topics and persists events to PostgreSQL
@@ -338,6 +340,17 @@ class ContextAuditConsumer:
             await self._producer.start()
 
         self._running = True
+
+        # Initialize consumer health emitter (OMN-5523)
+        if ConsumerHealthEmitter.is_enabled() and self._producer is not None:
+            self._init_health_emitter(
+                self._producer,
+                consumer_identity="context-audit-consumer",
+                consumer_group=self.config.kafka_group_id,
+                topic=",".join(self.config.topics),
+                service_label="ContextAuditConsumer",
+            )
+
         logger.info("ContextAuditConsumer started successfully")
 
     async def stop(self) -> None:

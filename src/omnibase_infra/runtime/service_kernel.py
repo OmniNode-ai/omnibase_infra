@@ -95,6 +95,7 @@ from omnibase_infra.nodes.node_contract_registry_reducer.reducer import (
 from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
     PluginRegistration,
 )
+from omnibase_infra.observability.runtime_log_event_bridge import RuntimeLogEventBridge
 from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 from omnibase_infra.runtime.models import (
     ModelDomainPluginConfig,
@@ -958,6 +959,50 @@ async def bootstrap() -> int:
                     correlation_id,
                     exc_info=True,
                 )
+
+        # 3.6. Initialize RuntimeLogEventBridge if enabled (OMN-5525)
+        # Captures ERROR/WARNING log records from allowlisted loggers and emits
+        # them as structured Kafka events. Requires a dedicated producer.
+        runtime_log_bridge: RuntimeLogEventBridge | None = None
+        if use_kafka and RuntimeLogEventBridge.is_enabled() and kafka_bootstrap_servers:
+            try:
+                from aiokafka import AIOKafkaProducer as _BridgeProducer
+
+                _bridge_producer = _BridgeProducer(
+                    bootstrap_servers=kafka_bootstrap_servers,
+                )
+                await _bridge_producer.start()
+
+                runtime_log_bridge = RuntimeLogEventBridge(
+                    producer=_bridge_producer,
+                    hostname=os.environ.get("HOSTNAME", ""),
+                    service_label="onex-kernel",
+                )
+
+                # Parse allowlist from env or use defaults
+                allowlist_raw = os.environ.get(
+                    "RUNTIME_LOG_BRIDGE_ALLOWLIST",
+                    "aiokafka.consumer,asyncpg,aiohttp",
+                )
+                allowlist = [
+                    name.strip() for name in allowlist_raw.split(",") if name.strip()
+                ]
+                runtime_log_bridge.attach_to_loggers(allowlist)
+                await runtime_log_bridge.start()
+
+                logger.info(
+                    "RuntimeLogEventBridge started (loggers=%s, correlation_id=%s)",
+                    allowlist,
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — best-effort, never blocks startup
+                logger.warning(
+                    "Failed to start RuntimeLogEventBridge, continuing without it "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+                runtime_log_bridge = None
 
         # 4. Create and wire container for dependency injection
         container_start_time = time.time()
@@ -2027,6 +2072,33 @@ async def bootstrap() -> int:
         contract_unsub_deregistered = None
         contract_unsub_heartbeat = None
 
+        # Stop RuntimeLogEventBridge (OMN-5525)
+        if runtime_log_bridge is not None:
+            try:
+                allowlist_raw = os.environ.get(
+                    "RUNTIME_LOG_BRIDGE_ALLOWLIST",
+                    "aiokafka.consumer,asyncpg,aiohttp",
+                )
+                allowlist = [
+                    name.strip() for name in allowlist_raw.split(",") if name.strip()
+                ]
+                runtime_log_bridge.detach_from_loggers(allowlist)
+                await runtime_log_bridge.stop()
+                # Stop the bridge's producer
+                if runtime_log_bridge._producer is not None:
+                    await runtime_log_bridge._producer.stop()
+                logger.debug(
+                    "RuntimeLogEventBridge stopped (correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — boundary: best-effort cleanup
+                logger.warning(
+                    "Error stopping RuntimeLogEventBridge (correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+            runtime_log_bridge = None
+
         # Stop health server (fast, non-blocking)
         if health_server is not None:
             try:
@@ -2179,6 +2251,18 @@ async def bootstrap() -> int:
                         sanitize_error_message(cleanup_error),
                         correlation_id,
                     )
+
+        # Cleanup RuntimeLogEventBridge (OMN-5525)
+        if runtime_log_bridge is not None:
+            try:
+                await runtime_log_bridge.stop()
+                if runtime_log_bridge._producer is not None:
+                    await runtime_log_bridge._producer.stop()
+            except Exception:  # noqa: BLE001 — boundary: best-effort cleanup
+                logger.warning(
+                    "Failed to stop RuntimeLogEventBridge during cleanup (correlation_id=%s)",
+                    correlation_id,
+                )
 
         if health_server is not None:
             try:

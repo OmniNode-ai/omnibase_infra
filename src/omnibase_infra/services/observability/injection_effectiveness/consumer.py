@@ -63,12 +63,14 @@ from uuid import UUID, uuid4
 
 import asyncpg
 from aiohttp import web
-from aiokafka import AIOKafkaConsumer, TopicPartition
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.errors import KafkaError
 from pydantic import BaseModel, ValidationError
 
 from omnibase_core.errors import OnexError
 from omnibase_core.types import JsonType
+from omnibase_infra.event_bus.consumer_health_emitter import ConsumerHealthEmitter
+from omnibase_infra.event_bus.mixin_consumer_health import MixinConsumerHealth
 from omnibase_infra.services.observability.injection_effectiveness.config import (
     ConfigInjectionEffectivenessConsumer,
 )
@@ -335,7 +337,7 @@ class ConsumerMetrics:
 # =============================================================================
 
 
-class InjectionEffectivenessConsumer:
+class InjectionEffectivenessConsumer(MixinConsumerHealth):
     """Async Kafka consumer for injection effectiveness events.
 
     Consumes events from multiple injection effectiveness topics and persists them
@@ -397,6 +399,7 @@ class InjectionEffectivenessConsumer:
         self._consumer: AIOKafkaConsumer | None = None
         self._pool: asyncpg.Pool | None = None
         self._writer: WriterInjectionEffectivenessPostgres | None = None
+        self._health_producer: AIOKafkaProducer | None = None
         self._running = False
         self._shutdown_event = asyncio.Event()
 
@@ -537,6 +540,20 @@ class InjectionEffectivenessConsumer:
             self._running = True
             self._shutdown_event.clear()
 
+            # Initialize consumer health emitter (OMN-5523)
+            if ConsumerHealthEmitter.is_enabled():
+                self._health_producer = AIOKafkaProducer(
+                    bootstrap_servers=self._config.kafka_bootstrap_servers,
+                )
+                await self._health_producer.start()
+                self._init_health_emitter(
+                    self._health_producer,
+                    consumer_identity="injection-effectiveness-consumer",
+                    consumer_group=self._config.kafka_group_id,
+                    topic=",".join(self._config.topics),
+                    service_label="InjectionEffectivenessConsumer",
+                )
+
             logger.info(
                 "InjectionEffectivenessConsumer started",
                 extra={
@@ -620,6 +637,18 @@ class InjectionEffectivenessConsumer:
             self._health_runner = None
 
         self._health_app = None
+
+        # Stop health producer (OMN-5523)
+        if self._health_producer is not None:
+            try:
+                await self._health_producer.stop()
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "Error stopping health producer",
+                    extra={"consumer_id": self._consumer_id},
+                )
+            finally:
+                self._health_producer = None
 
         # Stop Kafka consumer
         if self._consumer is not None:
