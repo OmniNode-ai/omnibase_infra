@@ -910,6 +910,8 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                 group_id=consumer_group,
                 auto_offset_reset="earliest",
                 enable_auto_commit=False,
+                session_timeout_ms=30000,
+                heartbeat_interval_ms=10000,
             )
 
             try:

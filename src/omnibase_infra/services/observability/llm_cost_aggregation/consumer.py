@@ -474,6 +474,8 @@ class ServiceLlmCostAggregator:
                 auto_offset_reset=self._config.auto_offset_reset,
                 enable_auto_commit=False,
                 max_poll_records=self._config.batch_size,
+                session_timeout_ms=self._config.session_timeout_ms,
+                heartbeat_interval_ms=self._config.heartbeat_interval_ms,
             )
 
             await self._consumer.start()

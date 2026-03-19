@@ -348,6 +348,8 @@ class SkillLifecycleConsumer:
             group_id=self.config.kafka_group_id,
             auto_offset_reset=self.config.auto_offset_reset,
             enable_auto_commit=self.config.enable_auto_commit,
+            session_timeout_ms=self.config.session_timeout_ms,
+            heartbeat_interval_ms=self.config.heartbeat_interval_ms,
             value_deserializer=lambda v: v,
         )
         await self._consumer.start()

@@ -143,6 +143,23 @@ pattern_exemptions:
       - OMN-1519 PR description
     ticket: OMN-1519
   # ==========================================================================
+  # ModelKafkaEventBusConfig Exemptions (OMN-5445)
+  # ==========================================================================
+  # Config model with Pydantic model_validators for cross-field validation
+  # (reconnect backoff, heartbeat/session ratio, auth config, bootstrap servers,
+  # environment, instance_id) plus factory methods (default, from_yaml,
+  # apply_environment_overrides) and computed properties (acks_aiokafka,
+  # get_dlq_topic). All methods are cohesive config-related concerns.
+  - file_pattern: 'model_kafka_event_bus_config\.py'
+    class_pattern: "Class 'ModelKafkaEventBusConfig'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Pydantic config model with model_validators for cross-field validation (reconnect backoff, heartbeat/session ratio, auth, bootstrap servers), factory methods (default, from_yaml, apply_environment_overrides), and computed properties. All methods are cohesive config concerns.
+
+    documentation:
+      - OMN-5445 (Kafka session timeout fix)
+    ticket: OMN-5445
+  # ==========================================================================
   # EventBusKafka Exemptions (OMN-934, OMN-1305)
   # ==========================================================================
   # Event bus pattern requires many methods for lifecycle (start/stop/health),

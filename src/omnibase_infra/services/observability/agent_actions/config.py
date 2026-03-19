@@ -76,6 +76,26 @@ class ConfigAgentActionsConsumer(BaseSettings):
         description="Disable auto-commit for at-least-once delivery",
     )
 
+    # Session timeout (OMN-5445)
+    session_timeout_ms: int = Field(
+        default=30000,
+        ge=6000,
+        le=300000,
+        description=(
+            "Session timeout in milliseconds. Default raised from aiokafka's 10s "
+            "to 30s to prevent rebalance storms."
+        ),
+    )
+    heartbeat_interval_ms: int = Field(
+        default=10000,
+        ge=1000,
+        le=100000,
+        description=(
+            "Heartbeat interval in milliseconds. "
+            "Kafka recommends <= session_timeout_ms / 3."
+        ),
+    )
+
     # PostgreSQL connection
     postgres_dsn: str = Field(
         description=(
