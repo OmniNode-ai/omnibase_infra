@@ -59,7 +59,7 @@ def _load_stack() -> list[str]:
     if not stack_path.exists():
         return ["core"]
     with open(stack_path) as f:
-        data = yaml.safe_load(f)
+        data: dict[str, list[str]] = yaml.safe_load(f) or {}
     return list(data.get("bundles", ["core"]))
 
 
