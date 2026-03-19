@@ -1932,7 +1932,7 @@ class EventBusKafka(
                         event_type=event_type,
                         severity=severity,
                         correlation_id=correlation_id,
-                        error_message=sanitize_error_message(str(e)),
+                        error_message=str(e)[:500],
                         error_type=error_type_name,
                         hostname=os.environ.get("HOSTNAME", ""),  # ONEX_EXCLUDE: env
                         service_label="EventBusKafka",

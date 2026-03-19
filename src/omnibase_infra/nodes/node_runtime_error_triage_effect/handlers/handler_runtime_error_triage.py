@@ -128,8 +128,8 @@ class HandlerRuntimeErrorTriage:
         incident = await self._upsert_incident(
             event, matched_rule, correlated_fingerprint
         )
-        occurrence_count = incident["occurrence_count"]
-        incident_state = incident["incident_state"]
+        occurrence_count = int(incident["occurrence_count"])
+        incident_state = str(incident["incident_state"])
 
         # Execute the triage action
         if matched_rule.action == "suppress":
