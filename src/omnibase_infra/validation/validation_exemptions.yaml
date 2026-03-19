@@ -2733,6 +2733,44 @@ pattern_exemptions:
     documentation:
       - omnidash worker-health consumer contract
     ticket: OMN-5184
+  # ==========================================================================
+  # Savings Estimation Model Exemptions (OMN-5547)
+  # ==========================================================================
+  # model_id and reference_model_id are human-readable LLM model names
+  # (e.g., "claude-opus-4-6", "qwen3-coder-30b-a3b"), not UUID entity references.
+  # session_id and correlation_id are wire-format strings matching SPI contracts.
+  - file_pattern: 'model_llm_call_record\.py'
+    violation_pattern: "Field 'model_id' should use UUID"
+    reason: >
+      model_id is a human-readable LLM model name (e.g., "claude-opus-4-6"), not a UUID entity reference.
+
+    documentation:
+      - configs/pricing_manifest.yaml (model ID examples)
+    ticket: OMN-5547
+  - file_pattern: 'model_savings_baseline_config\.py'
+    violation_pattern: "Field 'reference_model_id' should use UUID"
+    reason: >
+      reference_model_id is a human-readable LLM model name for counterfactual pricing, not a UUID.
+
+    documentation:
+      - configs/pricing_manifest.yaml (model ID examples)
+    ticket: OMN-5547
+  - file_pattern: 'model_savings_input\.py'
+    violation_pattern: "Field 'session_id' should use UUID"
+    reason: >
+      session_id is a wire-format string matching the SPI ContractSavingsEstimate contract.
+
+    documentation:
+      - omnibase_spi contracts/measurement/contract_savings_estimate.py
+    ticket: OMN-5547
+  - file_pattern: 'model_savings_input\.py'
+    violation_pattern: "Field 'correlation_id' should use UUID"
+    reason: >
+      correlation_id is a wire-format string matching the SPI ContractSavingsEstimate contract.
+
+    documentation:
+      - omnibase_spi contracts/measurement/contract_savings_estimate.py
+    ticket: OMN-5547
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

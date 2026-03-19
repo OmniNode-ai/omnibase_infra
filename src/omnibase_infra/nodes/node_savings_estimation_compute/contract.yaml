@@ -1,0 +1,94 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeSavingsEstimationCompute
+#
+# Tiered token savings attribution compute node.
+# Computes how much token spend the ONEX platform saved per session
+# by comparing actual costs against a counterfactual reference model.
+#
+# Related Tickets:
+#   - OMN-5547: Create HandlerSavingsEstimator compute handler
+# Contract identifiers
+name: "node_savings_estimation_compute"
+contract_name: "node_savings_estimation_compute"
+node_name: "node_savings_estimation_compute"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+# Node type
+node_type: "COMPUTE_GENERIC"
+# Description
+description: >
+  Compute node for tiered token savings attribution. Takes session LLM call records, injection signals, validator catches, and baseline config, then computes savings across 5 categories (local routing, pattern injection, agent delegation, memory/RAG, validator catches) with two tiers (direct/heuristic). Produces a ContractSavingsEstimate wire-format dict.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelSavingsInput"
+  module: "omnibase_infra.nodes.node_savings_estimation_compute.models"
+  description: "Session signals and baseline config for savings estimation."
+output_model:
+  name: "dict"
+  module: "builtins"
+  description: "ContractSavingsEstimate wire-format dict."
+# Capability declaration
+capabilities:
+  - name: "savings.estimate"
+    description: "Compute tiered token savings attribution for a session"
+# Handler routing
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "savings.estimate"
+      handler_class: "HandlerSavingsEstimator"
+      handler_module: "omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_estimator"
+      description: "Compute tiered savings from session signals and pricing table"
+      input_model:
+        name: "ModelSavingsInput"
+        module: "omnibase_infra.nodes.node_savings_estimation_compute.models"
+        description: "Session signals for savings estimation."
+# Error handling
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - name: "SavingsEstimationError"
+      description: "Failed to compute savings estimate"
+      recoverable: false
+    - name: "PricingLookupError"
+      description: "Reference model not found in pricing table"
+      recoverable: false
+# Health check
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  checks:
+    - name: "savings_handler_loaded"
+      type: "handler"
+      critical: true
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-03-19"
+  tags:
+    - compute
+    - savings
+    - estimation
+    - attribution
+    - pricing
+    - cost
+  related_tickets:
+    - "OMN-5547"
