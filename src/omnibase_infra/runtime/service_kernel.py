@@ -964,7 +964,6 @@ async def bootstrap() -> int:
         # 3.6. Initialize RuntimeLogEventBridge if enabled (OMN-5525)
         # Captures ERROR/WARNING log records from allowlisted loggers and emits
         # them as structured Kafka events. Requires a dedicated producer.
-        runtime_log_bridge: RuntimeLogEventBridge | None = None
         if use_kafka and RuntimeLogEventBridge.is_enabled() and kafka_bootstrap_servers:
             try:
                 from aiokafka import AIOKafkaProducer as _BridgeProducer
