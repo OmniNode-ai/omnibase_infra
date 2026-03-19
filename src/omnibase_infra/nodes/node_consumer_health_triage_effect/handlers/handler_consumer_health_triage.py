@@ -26,7 +26,7 @@ import logging
 import os
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -137,7 +137,7 @@ class HandlerConsumerHealthTriage:
 
         # Upsert incident in consumer_health_triage table
         incident = await self._upsert_incident(event)
-        occurrence_count = int(incident["occurrence_count"])
+        occurrence_count = cast("int", incident["occurrence_count"])
 
         # Graduated response logic
         if occurrence_count >= _RESTART_THRESHOLD and self.is_auto_restart_enabled():

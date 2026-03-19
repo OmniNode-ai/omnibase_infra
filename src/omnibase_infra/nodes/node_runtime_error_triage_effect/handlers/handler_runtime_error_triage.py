@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -128,8 +128,8 @@ class HandlerRuntimeErrorTriage:
         incident = await self._upsert_incident(
             event, matched_rule, correlated_fingerprint
         )
-        occurrence_count = int(incident["occurrence_count"])
-        incident_state = str(incident["incident_state"])
+        occurrence_count = cast("int", incident["occurrence_count"])
+        incident_state = cast("str", incident["incident_state"])
 
         # Execute the triage action
         if matched_rule.action == "suppress":
