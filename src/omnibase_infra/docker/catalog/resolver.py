@@ -153,7 +153,10 @@ class CatalogResolver:
 
         for bundle_name in all_bundle_names:
             if bundle_name not in self._bundles:
-                continue
+                raise ValueError(
+                    f"Unknown bundle '{bundle_name}'. "
+                    f"Valid bundles: {sorted(self._bundles)}"
+                )
             bundle = self._bundles[bundle_name]
 
             # Add entries
@@ -175,16 +178,21 @@ class CatalogResolver:
             # Add required env from bundle
             required_env.update(bundle.inject_required_env)
 
-        # Also resolve dependencies of selected entries
-        for manifest in list(selected_entries.values()):
-            for dep in manifest.depends_on:
-                if (
-                    dep.service in self._manifests
-                    and dep.service not in selected_entries
-                ):
-                    dep_manifest = self._manifests[dep.service]
-                    selected_entries[dep.service] = dep_manifest
-                    required_env.update(dep_manifest.required_env)
+        # Transitively resolve service dependencies (BFS until no new deps found)
+        pending: list[CatalogManifest] = list(selected_entries.values())
+        while pending:
+            next_pending: list[CatalogManifest] = []
+            for manifest in pending:
+                for dep in manifest.depends_on:
+                    if (
+                        dep.service in self._manifests
+                        and dep.service not in selected_entries
+                    ):
+                        dep_manifest = self._manifests[dep.service]
+                        selected_entries[dep.service] = dep_manifest
+                        required_env.update(dep_manifest.required_env)
+                        next_pending.append(dep_manifest)
+            pending = next_pending
 
         return ResolvedStack(
             manifests=selected_entries,

@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-INFRA_DIR="${OMNIBASE_INFRA_DIR:-/Volumes/PRO-G40/Code/omni_home/omnibase_infra}"
+INFRA_DIR="${OMNIBASE_INFRA_DIR:-$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")}"
 
 onex_up() {
     local bundles="$*"
