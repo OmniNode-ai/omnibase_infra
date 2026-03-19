@@ -60,7 +60,7 @@ class TopicProvisioner:
         the AIOKafkaAdminClient which handles its own connection pooling.
 
     Example:
-        >>> provisioner = TopicProvisioner()
+        >>> provisioner = TopicProvisioner(contracts_root=Path("src/.../nodes"))
         >>> await provisioner.ensure_provisioned_topics_exist()
     """
 
@@ -68,7 +68,8 @@ class TopicProvisioner:
         self,
         bootstrap_servers: str | None = None,
         request_timeout_ms: int = 30000,
-        contracts_root: Path | None = None,
+        *,
+        contracts_root: Path,
         skill_manifests_root: Path | None = None,
         skill_manifests_roots: list[Path] | None = None,
     ) -> None:
@@ -78,11 +79,11 @@ class TopicProvisioner:
             bootstrap_servers: Kafka broker addresses. If None, reads from
                 KAFKA_BOOTSTRAP_SERVERS env var or defaults to localhost:19092.
             request_timeout_ms: Timeout for admin operations in milliseconds.
-            contracts_root: Optional path to contract.yaml root directory.
-                When set, topics are discovered from contracts via
-                ContractTopicExtractor. When None, ALL_PROVISIONED_TOPIC_SPECS
-                is used unchanged (backwards-compatible default for tests
-                and legacy execution paths).
+            contracts_root: Path to contract.yaml root directory. Required.
+                Topics are discovered from contracts via
+                ContractTopicExtractor. The directory must exist; a
+                ``FileNotFoundError`` is raised at construction time if it
+                does not.
             skill_manifests_root: Optional single path to omniclaude skills
                 root (plugins/onex/skills/). Kept for backwards compatibility.
             skill_manifests_roots: Optional list of paths to scan for
@@ -90,8 +91,16 @@ class TopicProvisioner:
                 CLI relays, services). When both singular and plural are set,
                 the singular root is prepended to the list.
 
-        Ticket: OMN-4594, OMN-4622
+        Raises:
+            FileNotFoundError: If *contracts_root* does not point to an
+                existing directory.
+
+        Ticket: OMN-4594, OMN-4622, OMN-5132
         """
+        if not contracts_root.is_dir():
+            raise FileNotFoundError(
+                f"contracts_root does not exist or is not a directory: {contracts_root}"
+            )
         self._bootstrap_servers = bootstrap_servers or os.environ.get(
             ENV_BOOTSTRAP_SERVERS, DEFAULT_BOOTSTRAP_SERVERS
         )
@@ -102,77 +111,32 @@ class TopicProvisioner:
         self._topic_specs = self._build_topic_specs()
 
     def _build_topic_specs(self) -> tuple[ModelTopicSpec, ...]:
-        """Build topic specs from contracts (preferred) or Python registry (fallback).
+        """Build topic specs from contract YAML extraction.
 
-        When contracts_root is set: topics are derived entirely from contract
-        YAML extraction via ContractTopicExtractor.extract_all(). The Python
-        constant registry (ALL_PROVISIONED_TOPIC_SPECS) is NOT used — contract-
-        first is the normal runtime mode after OMN-4622.
+        Topics are derived entirely from contract YAML extraction via
+        ``ContractTopicExtractor.extract_all()``. There is no fallback to
+        the Python constant registry (``ALL_PROVISIONED_TOPIC_SPECS``).
 
-        When contracts_root is None: falls back to ALL_PROVISIONED_TOPIC_SPECS
-        unchanged. This fallback exists only for tests and explicitly legacy
-        execution paths (e.g., the CLI entrypoint without --contracts-root).
-        It is NOT a co-equal long-term source of truth.
+        Raises:
+            ImportError: If ``ContractTopicExtractor`` is not importable.
+            RuntimeError: If extraction fails unexpectedly.
 
-        Ticket: OMN-4594, OMN-4622
+        Ticket: OMN-4594, OMN-4622, OMN-5132
         """
-        if self._contracts_root is None:
-            # Legacy/test fallback — no contracts_root configured
-            from omnibase_infra.topics import (
-                ALL_PROVISIONED_TOPIC_SPECS as _LEGACY_SPECS,
-            )
-
-            return _LEGACY_SPECS
-
-        try:
-            from omnibase_infra.tools.contract_topic_extractor import (
-                ContractTopicExtractor,
-            )
-        except ImportError:
-            logger.warning(
-                "ContractTopicExtractor not available — "
-                "falling back to ALL_PROVISIONED_TOPIC_SPECS"
-            )
-            from omnibase_infra.topics import (
-                ALL_PROVISIONED_TOPIC_SPECS as _LEGACY_SPECS,
-            )
-
-            return _LEGACY_SPECS
+        from omnibase_infra.tools.contract_topic_extractor import (
+            ContractTopicExtractor,
+        )
 
         extractor = ContractTopicExtractor()
-        try:
-            contract_entries = extractor.extract_all(
-                contracts_root=self._contracts_root,
-                skill_manifests_root=self._skill_manifests_root,
-                skill_manifests_roots=self._skill_manifests_roots,
-            )
-        except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "ContractTopicExtractor.extract_all() failed: %s — "
-                "falling back to ALL_PROVISIONED_TOPIC_SPECS",
-                exc,
-            )
-            from omnibase_infra.topics import (
-                ALL_PROVISIONED_TOPIC_SPECS as _LEGACY_SPECS,
-            )
-
-            return _LEGACY_SPECS
-
-        # Contract-first: derive specs solely from extracted topics
-        # Use legacy specs for partition/replication settings where available
-        from omnibase_infra.topics import ALL_PROVISIONED_TOPIC_SPECS as _LEGACY_SPECS
-
-        legacy_by_suffix: dict[str, ModelTopicSpec] = {
-            spec.suffix: spec for spec in _LEGACY_SPECS
-        }
+        contract_entries = extractor.extract_all(
+            contracts_root=self._contracts_root,
+            skill_manifests_root=self._skill_manifests_root,
+            skill_manifests_roots=self._skill_manifests_roots,
+        )
 
         result_specs: list[ModelTopicSpec] = []
         for entry in contract_entries:
-            if entry.topic in legacy_by_suffix:
-                # Preserve existing partition/replication config
-                result_specs.append(legacy_by_suffix[entry.topic])
-            else:
-                result_specs.append(ModelTopicSpec(suffix=entry.topic))
+            result_specs.append(ModelTopicSpec(suffix=entry.topic))
 
         result = tuple(sorted(result_specs, key=lambda s: s.suffix))
 
@@ -192,9 +156,9 @@ class TopicProvisioner:
     ) -> dict[str, list[str] | str]:
         """Ensure all ONEX provisioned topics exist.
 
-        Creates any missing topics from ALL_PROVISIONED_TOPIC_SPECS (platform
-        + domain plugin topics). The snapshot topic gets special compaction
-        configuration via ModelSnapshotTopicConfig.
+        Creates any missing topics discovered from contract YAML extraction.
+        The snapshot topic gets special compaction configuration via
+        ModelSnapshotTopicConfig.
 
         This method is best-effort: individual topic creation failures are
         logged as warnings but do not prevent other topics from being created.
@@ -451,16 +415,32 @@ def _cli_main() -> None:
     """CLI entrypoint for manual topic provisioning without runtime.
 
     Usage:
-        uv run python -m omnibase_infra.event_bus.service_topic_manager
+        uv run python -m omnibase_infra.event_bus.service_topic_manager \\
+            --contracts-root src/omnibase_infra/nodes
 
     Useful for provisioning topics when running just Redpanda for development
     without the full runtime stack.
     """
+    import argparse
     import asyncio
     import json
 
+    parser = argparse.ArgumentParser(
+        description="Provision Kafka topics from contract YAML."
+    )
+    parser.add_argument(
+        "--contracts-root",
+        type=Path,
+        default=Path(os.environ.get("ONEX_CONTRACTS_DIR", "./contracts")),
+        help=(
+            "Root directory containing contract.yaml files. "
+            "Defaults to ONEX_CONTRACTS_DIR env var or ./contracts."
+        ),
+    )
+    args = parser.parse_args()
+
     async def _run() -> None:
-        provisioner = TopicProvisioner()
+        provisioner = TopicProvisioner(contracts_root=args.contracts_root)
         result = await provisioner.ensure_provisioned_topics_exist()
         print(json.dumps(result, indent=2))
 
