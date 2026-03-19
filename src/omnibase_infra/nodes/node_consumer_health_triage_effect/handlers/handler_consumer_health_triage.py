@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.event_bus.topic_constants import TOPIC_CONSUMER_RESTART_CMD
 from omnibase_infra.models.health.enum_consumer_incident_state import (
     EnumConsumerIncidentState,
@@ -103,6 +104,16 @@ class HandlerConsumerHealthTriage:
         self._producer = producer
         self._slack_handler = slack_handler
         self._linear_handler = linear_handler
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role: infrastructure handler for health triage."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification: side-effecting triage operation."""
+        return EnumHandlerTypeCategory.EFFECT
 
     @staticmethod
     def is_enabled() -> bool:

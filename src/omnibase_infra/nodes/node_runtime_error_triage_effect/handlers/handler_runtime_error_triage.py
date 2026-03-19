@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.health.enum_runtime_error_category import (
     EnumRuntimeErrorCategory,
 )
@@ -101,6 +102,16 @@ class HandlerRuntimeErrorTriage:
         self._rules = sorted(rules or DEFAULT_TRIAGE_RULES, key=lambda r: r.priority)
         self._slack_handler = slack_handler
         self._linear_handler = linear_handler
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role: infrastructure handler for error triage."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification: side-effecting triage operation."""
+        return EnumHandlerTypeCategory.EFFECT
 
     async def handle(
         self, event: ModelRuntimeErrorEvent

@@ -619,6 +619,7 @@ async def bootstrap() -> int:
     contract_unsub_deregistered: Callable[[], Awaitable[None]] | None = None
     contract_unsub_heartbeat: Callable[[], Awaitable[None]] | None = None
     plugin_config: ModelDomainPluginConfig | None = None
+    runtime_log_bridge: RuntimeLogEventBridge | None = None
     correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
 
