@@ -1,3 +1,37 @@
+## v0.22.0 (2026-03-19)
+
+### Added
+- feat: service catalog architecture with typed manifests and bundle definitions [OMN-5379..5386]
+- feat: onex CLI for catalog-driven infrastructure management [OMN-5386, OMN-5407]
+- feat: activation-aware handler wiring [OMN-5356]
+- feat(ci): add INV-4 contract-declared handler wiring completeness check [OMN-5345]
+- feat: contract-driven topic discovery and drift CI [OMN-5247]
+- feat(event_bus): wire ONEX topic format gate into publish() [OMN-5209]
+- feat(event_bus): add debounced Slack alerting for topic violations [OMN-5206]
+- feat(consumers): add ContextAuditConsumer for context integrity audit events [OMN-5240]
+- feat(infra): centralized onboarding system [OMN-5261]
+- feat: emit wiring-health-snapshot.v1 and llm-call-completed.v1 events [OMN-5292, OMN-5201]
+- feat(validation): cross-repo validation event models [OMN-5184]
+- feat: multi-package entry point discovery for create_kafka_topics.py [OMN-5371]
+- feat(ci): upgrade plugin-pin-cascade to full reconciliation workflow [OMN-5375]
+
+### Fixed
+- fix(test): replace hardcoded REPO_ROOT with relative path in catalog tests [OMN-5379]
+- fix: eliminate empty-default env var fallbacks from compose [OMN-5382]
+- fix: hardcode container-internal addresses for valkey, memgraph, keycloak [OMN-5381]
+- fix: graph handler reads OMNIMEMORY_MEMGRAPH_HOST/PORT for URI resolution [OMN-5357]
+- fix: replace wrong localhost:9092 defaults with localhost:19092 [OMN-5220]
+- fix: remove vestigial ONEX_ENV and environment-prefixed topic names [OMN-5189]
+- fix(docker): remove --admin-addr crash-loop and fix Memgraph healthcheck [OMN-5176]
+- fix(mypy): resolve 25 pre-existing mypy errors, make CI job fully blocking [OMN-5405]
+
+### Changed
+- chore(deps): bump omnibase-core to 0.29.0, omnibase-spi to 0.18.0
+- chore(deps): bump plugin pins (omninode-claude 0.9.0, omninode-memory 0.9.0, omninode-intelligence 0.15.0)
+- refactor: replace legacy Consul ServiceTopicCatalog with contract-driven impl [OMN-5300]
+- ci(omnibase_infra): add standards compliance workflow with blocking UP007 [std-sweep-v2]
+- chore(deps): multiple Dependabot updates (trivy-action, setup-buildx, codeql-action, etc.)
+
 ## v0.20.0 (2026-03-13)
 
 ### Features
