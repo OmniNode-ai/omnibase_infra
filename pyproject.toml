@@ -150,8 +150,8 @@ dev = [
 ]
 
 [tool.uv.sources]
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", branch = "release/v0.29.0" }
-omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", branch = "release/v0.18.0" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "v0.29.0" }
+omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", tag = "v0.18.0" }
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 
 [tool.ruff]
