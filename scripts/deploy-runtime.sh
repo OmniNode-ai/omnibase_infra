@@ -1120,6 +1120,11 @@ build_images() {
         env_file_args=(--env-file "${deploy_target}/docker/.env")
     fi
 
+    # Build timeout in seconds (default: 15 minutes). Prevents the known issue
+    # where `docker compose build` hangs indefinitely after images are built.
+    # Override via DOCKER_BUILD_TIMEOUT_SECONDS env var. (OMN-5462)
+    local build_timeout="${DOCKER_BUILD_TIMEOUT_SECONDS:-900}"
+
     local cmd=(
         docker compose
         -p "${compose_project}"
@@ -1127,6 +1132,7 @@ build_images() {
         ${env_file_args[@]+"${env_file_args[@]}"}
         --profile "${COMPOSE_PROFILE}"
         build
+        --progress=plain
         --build-arg "VCS_REF=${git_sha}"
         --build-arg "BUILD_DATE=${build_date}"
         --build-arg "RUNTIME_SOURCE_HASH=${git_sha}"
@@ -1134,11 +1140,19 @@ build_images() {
     )
 
     log_info "Building images with VCS_REF=${git_sha} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
+    log_info "Build timeout: ${build_timeout}s (set DOCKER_BUILD_TIMEOUT_SECONDS to override)"
     log_cmd "${cmd[*]}"
 
-    "${cmd[@]}"
-
-    log_info "Image build complete."
+    # Use timeout to prevent indefinite hangs after build completes (OMN-5462).
+    # Exit code 124 = timeout fired; we treat this as success if images exist.
+    if timeout "${build_timeout}" "${cmd[@]}"; then
+        log_info "Image build complete."
+    elif [[ $? -eq 124 ]]; then
+        log_warn "Build timed out after ${build_timeout}s — images may still be usable. Continuing."
+    else
+        log_error "Image build failed."
+        return 1
+    fi
 }
 
 # =============================================================================
