@@ -880,10 +880,7 @@ async def bootstrap() -> int:
                     else:
                         _skill_manifests_root = _skill_manifests_path
 
-                _contracts_dir = _get_contracts_dir()
-                _contracts_root: Path | None = (
-                    _contracts_dir if _contracts_dir.exists() else None
-                )
+                _contracts_root = _get_contracts_dir()
 
                 # Infra standalone manifests (cli/topics.yaml, services/topics.yaml)
                 _infra_src = Path(__file__).resolve().parent.parent
