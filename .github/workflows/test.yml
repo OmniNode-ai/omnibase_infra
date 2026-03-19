@@ -601,7 +601,7 @@ jobs:
         run: |
           uv run pytest tests/ \
             --ignore=tests/integration/docker \
-            -m "not slow and not chaos" \
+            -m "not slow and not chaos and not kafka" \
             --splits 10 \
             --group ${{ matrix.split }} \
             -n auto \
