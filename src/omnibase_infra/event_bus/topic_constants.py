@@ -577,6 +577,23 @@ Consumer: Omnidash /wiring-health dashboard
 Ticket: OMN-5292
 """
 
+# Savings estimation topics (OMN-5545)
+TOPIC_SAVINGS_ESTIMATED: Final[str] = "onex.evt.omnibase-infra.savings-estimated.v1"
+"""Savings estimation event with tiered attribution breakdown.
+
+Producer: ServiceSavingsEstimator
+Consumer: Omnidash savings projection, analytics pipeline
+Ticket: OMN-5545
+"""
+
+TOPIC_VALIDATOR_CATCH: Final[str] = "onex.evt.omniclaude.validator-catch.v1"
+"""Validator catch events from pre-commit hooks, CI checks, and poly enforcer.
+
+Producer: omniclaude (pre-commit hooks, CI guard, poly enforcer)
+Consumer: ServiceSavingsEstimator (for catch-based savings attribution)
+Ticket: OMN-5545
+"""
+
 # Grouped constants for wiring health monitoring
 WIRING_HEALTH_MONITORED_TOPICS: Final[tuple[str, ...]] = (
     TOPIC_SESSION_OUTCOME_CURRENT,
@@ -612,6 +629,9 @@ __all__ = [
     "TOPIC_LLM_ENDPOINT_HEALTH",
     # Wiring Health Snapshot Topics (OMN-5292)
     "TOPIC_WIRING_HEALTH_SNAPSHOT",
+    # Savings Estimation Topics (OMN-5545)
+    "TOPIC_SAVINGS_ESTIMATED",
+    "TOPIC_VALIDATOR_CATCH",
     # Wiring Health Topics
     "TOPIC_INJECTION_AGENT_MATCH",
     "TOPIC_INJECTION_CONTEXT_UTILIZATION",

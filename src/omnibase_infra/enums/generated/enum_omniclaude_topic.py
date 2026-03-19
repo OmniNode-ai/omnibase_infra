@@ -23,3 +23,4 @@ class EnumOmniclaudeTopic(str, Enum):
     EVT_CONTEXT_UTILIZATION_V1 = "onex.evt.omniclaude.context-utilization.v1"  # onex.evt.omniclaude.context-utilization.v1
     EVT_LATENCY_BREAKDOWN_V1 = "onex.evt.omniclaude.latency-breakdown.v1"  # onex.evt.omniclaude.latency-breakdown.v1
     EVT_SESSION_OUTCOME_V1 = "onex.evt.omniclaude.session-outcome.v1"  # onex.evt.omniclaude.session-outcome.v1
+    EVT_VALIDATOR_CATCH_V1 = "onex.evt.omniclaude.validator-catch.v1"  # onex.evt.omniclaude.validator-catch.v1
