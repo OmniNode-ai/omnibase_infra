@@ -161,6 +161,25 @@ def _check_no_exact_pin_without_no_deps(entry: PinEntry) -> str | None:
     return None
 
 
+def _check_no_exact_pin_for_plugins(entry: PinEntry) -> str | None:
+    """Return an error if a --no-deps plugin uses an exact pin (OMN-5474).
+
+    Exact pins (==) on --no-deps plugins cause CI failures when new versions
+    are published before the Dockerfile is updated. Range pins (>=x,<y) stay
+    valid across multiple releases and only need updating when the upper bound
+    is reached.
+    """
+    if "==" in entry.specifier and entry.no_deps:
+        return (
+            f"  Line {entry.line_number}: {entry.package}"
+            f"{entry.specifier} uses an exact pin with "
+            f"--no-deps. Use a range pin (e.g., "
+            f'">=x.y.z,<2.0.0") to avoid CI failures '
+            f"when new versions are published (OMN-5474)."
+        )
+    return None
+
+
 def _check_range_covers_latest(entry: PinEntry) -> str | None:
     """Return an error message if the latest PyPI release is outside the declared range."""
     latest = _latest_pypi_version(entry.package)
@@ -207,6 +226,11 @@ def main(argv: list[str] | None = None) -> int:
 
     for entry in entries:
         err = _check_no_exact_pin_without_no_deps(entry)
+        if err:
+            errors.append(err)
+
+        # OMN-5474: exact pins on --no-deps plugins cause forward-looking failures
+        err = _check_no_exact_pin_for_plugins(entry)
         if err:
             errors.append(err)
 
