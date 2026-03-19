@@ -16,6 +16,10 @@ from typing import Self
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -151,7 +155,7 @@ class ConfigAgentActionsConsumer(BaseSettings):
 
     # Dead Letter Queue (Phase 2 hardening - OMN-1768)
     dlq_topic: str = Field(
-        default="onex.evt.omniclaude.agent-actions-dlq.v1",
+        default=SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
         description=(
             "Dead letter topic for permanently failed messages. Messages that "
             "fail validation or exceed max retry count are forwarded here. "

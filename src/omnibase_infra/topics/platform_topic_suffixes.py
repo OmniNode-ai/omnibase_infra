@@ -638,9 +638,24 @@ Producer: legacy agent-observability consumer (consumers/agent_actions_consumer.
 Consumer: observability alerting, incident recovery tooling
 """
 
+SUFFIX_OMNICLAUDE_SKILL_LIFECYCLE_DLQ: str = (
+    "onex.evt.omniclaude.skill-lifecycle-dlq.v1"
+)
+"""Dead letter queue topic for the skill-lifecycle observability consumer.
+
+Messages that fail validation or exceed max retry count in
+ConfigSkillLifecycleConsumer are forwarded to this topic. Matches the
+hardcoded default in
+``omnibase_infra.services.observability.skill_lifecycle.config.ConfigSkillLifecycleConsumer.dlq_topic``.
+
+Producer: skill-lifecycle consumer (ServiceSkillLifecycleConsumer)
+Consumer: observability alerting, incident recovery tooling
+"""
+
 _OMNICLAUDE_OBSERVABILITY_DLQ_TOPIC_SUFFIXES: tuple[str, ...] = (
     SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
     SUFFIX_OMNICLAUDE_AGENT_OBSERVABILITY_DLQ,
+    SUFFIX_OMNICLAUDE_SKILL_LIFECYCLE_DLQ,
 )
 """DLQ topic suffixes for OmniClaude observability consumers.
 

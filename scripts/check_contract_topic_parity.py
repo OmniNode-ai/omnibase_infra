@@ -258,6 +258,7 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     # --- omniclaude special/non-skill topics (need contract.yaml in omniclaude) ---
     "onex.evt.omniclaude.agent-actions-dlq.v1": "DLQ topic, no contract.yaml yet; needs omniclaude node contract | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.agent-observability-dlq.v1": "DLQ topic, no contract.yaml yet; needs omniclaude node contract | owner: jonah | expiry: 2026-06-01",
+    "onex.evt.omniclaude.skill-lifecycle-dlq.v1": "DLQ topic for skill-lifecycle consumer (OMN-5445); provisioned in platform_topic_suffixes; needs omniclaude node contract | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.audit-compression-triggered.v1": "context audit topic [OMN-5240]; produced by omniclaude, needs contract.yaml | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.audit-context-budget-exceeded.v1": "context audit topic [OMN-5240]; produced by omniclaude, needs contract.yaml | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.audit-dispatch-validated.v1": "context audit topic [OMN-5240]; produced by omniclaude, needs contract.yaml | owner: jonah | expiry: 2026-06-01",

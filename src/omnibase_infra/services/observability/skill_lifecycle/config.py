@@ -13,6 +13,10 @@ from typing import Self
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_OMNICLAUDE_SKILL_LIFECYCLE_DLQ,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -141,7 +145,7 @@ class ConfigSkillLifecycleConsumer(BaseSettings):
 
     # Dead Letter Queue
     dlq_topic: str = Field(
-        default="onex.evt.omniclaude.skill-lifecycle-dlq.v1",
+        default=SUFFIX_OMNICLAUDE_SKILL_LIFECYCLE_DLQ,
         description=(
             "Dead letter topic for permanently failed skill lifecycle messages. "
             "Configure via OMNIBASE_INFRA_SKILL_LIFECYCLE_DLQ_TOPIC env var."
