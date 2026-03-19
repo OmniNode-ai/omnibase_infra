@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.models.core.model_feature_flags import ModelFeatureFlags
 from omnibase_core.types import JsonType
 from omnibase_infra.models.mcp.model_mcp_contract_config import ModelMCPContractConfig
 
@@ -95,6 +96,12 @@ class ModelNodeCapabilities(BaseModel):
     config: dict[str, JsonType] = Field(
         default_factory=dict,
         description="Nested configuration (JSON-serializable values)",
+    )
+
+    # Contract-declared feature flags with current state
+    feature_flags: ModelFeatureFlags = Field(
+        default_factory=ModelFeatureFlags,
+        description="Contract-declared feature flags with current state",
     )
 
     # MCP configuration for exposing node as AI agent tool
