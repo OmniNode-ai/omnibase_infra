@@ -318,6 +318,10 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.platform.resolution-decided.v1": "pre-migration; needs contract.yaml in omnibase_infra | owner: jonah | expiry: 2026-06-01",
     "onex.evt.platform.service-heartbeat.v1": "new topic added in OMN-5184; contract.yaml needed once consuming node is wired | owner: jonah | expiry: 2026-06-01",
     "onex.snapshot.platform.registration-snapshots.v1": "non-standard kind 'snapshot'; topic validated separately via ValidateTopicSuffix skip-list | owner: jonah | expiry: 2026-06-01",
+    # --- consumer health pipeline topics (OMN-5529) ---
+    "onex.evt.omnibase-infra.consumer-health.v1": "OMN-5515; contract.yaml will be added with NodeConsumerHealthTriageEffect in OMN-5520 | owner: jonah | expiry: 2026-06-01",
+    "onex.cmd.omnibase-infra.consumer-restart.v1": "OMN-5515; contract.yaml will be added with NodeConsumerHealthTriageEffect in OMN-5520 | owner: jonah | expiry: 2026-06-01",
+    "onex.evt.omnibase-infra.runtime-error.v1": "OMN-5517; contract.yaml will be added with NodeRuntimeErrorTriageEffect in OMN-5522 | owner: jonah | expiry: 2026-06-01",
 }
 # fmt: on
 
