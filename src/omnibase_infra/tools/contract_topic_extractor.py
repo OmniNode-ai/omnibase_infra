@@ -18,6 +18,9 @@
 from __future__ import annotations
 
 import ast
+import importlib.metadata
+import importlib.resources
+import logging
 import re
 import sys
 from pathlib import Path
@@ -26,9 +29,20 @@ from typing import Literal, cast
 import yaml
 from pydantic import BaseModel
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Constants / allowlists
 # ---------------------------------------------------------------------------
+
+_APPROVED_PACKAGES: tuple[str, ...] = (
+    "omnibase_core",
+    "omnibase_infra",
+    "omnibase_spi",
+    "omniintelligence",
+    "omnimemory",
+    "omniclaude",
+)
 
 _VALID_KINDS: frozenset[str] = frozenset({"evt", "cmd", "intent"})
 _RE_VERSION = re.compile(r"^v\d+$")
@@ -254,6 +268,90 @@ def _extract_topics_from_python_ast(source_path: Path) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Installed-package discovery helpers
+# ---------------------------------------------------------------------------
+
+
+def _collect_contracts_from_traversable(
+    nodes_ref: importlib.resources.abc.Traversable,
+) -> list[Path]:
+    """Recursively collect contract.yaml files from an importlib Traversable.
+
+    Args:
+        nodes_ref: A Traversable pointing to ``<package>.nodes``.
+
+    Returns:
+        List of concrete Path objects for each discovered contract.yaml.
+    """
+    results: list[Path] = []
+    try:
+        for child in nodes_ref.iterdir():
+            if child.is_dir():
+                contract = child.joinpath("contract.yaml")
+                # Traversable.is_file() is available in Python 3.12+
+                try:
+                    if contract.is_file():
+                        # Convert Traversable to Path for downstream compat
+                        # importlib.resources.as_file() is the safe way, but
+                        # for editable installs the Traversable IS a Path already
+                        concrete = Path(str(contract))
+                        if concrete.exists():
+                            results.append(concrete)
+                except (TypeError, AttributeError):
+                    pass
+                # Also recurse into subdirectories (nested node structures)
+                results.extend(_collect_contracts_from_traversable(child))
+    except (OSError, TypeError):
+        pass
+    return results
+
+
+def _find_package_root(
+    dist: importlib.metadata.Distribution, pkg_name: str
+) -> Path | None:
+    """Locate the on-disk root directory for a package.
+
+    For editable installs this resolves to the ``src/<pkg_name>`` directory.
+    For normal installs it resolves to the ``site-packages/<pkg_name>`` directory.
+
+    Args:
+        dist: The importlib.metadata Distribution for the package.
+        pkg_name: The package name (used to build the expected subpath).
+
+    Returns:
+        Path to the package root directory, or None if not found.
+    """
+    # Try direct_url.json for editable installs (PEP 610)
+    direct_url = dist.read_text("direct_url.json")
+    if direct_url is not None:
+        import json
+
+        try:
+            url_data = json.loads(direct_url)
+            url_str: str = url_data.get("url", "")
+            if url_str.startswith("file://"):
+                base = Path(url_str.removeprefix("file://"))
+                # Editable installs: base is the repo root, package is under src/
+                candidate = base / "src" / pkg_name
+                if candidate.is_dir():
+                    return candidate
+                # Some packages have flat layout (package at repo root)
+                candidate = base / pkg_name
+                if candidate.is_dir():
+                    return candidate
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
+
+    # Fallback: use dist.locate_file() to find the package directory
+    # This works for normal pip installs in site-packages
+    located = Path(str(dist.locate_file(pkg_name)))
+    if located.is_dir():
+        return located
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -264,7 +362,14 @@ class ContractTopicExtractor:
 
     This is the *sole* validator in the codebase.  Downstream consumers
     (TopicEnumGenerator, Kafka topic creator script) must not re-validate.
+
+    Args:
+        include_installed_packages: When True, ``extract_all()`` will also
+            discover contracts from approved installed packages via importlib.
     """
+
+    def __init__(self, *, include_installed_packages: bool = False) -> None:
+        self._include_installed_packages = include_installed_packages
 
     def extract(self, contracts_root: Path) -> list[ModelContractTopicEntry]:
         """
@@ -491,6 +596,204 @@ class ContractTopicExtractor:
             else:
                 accumulated[raw] = entry
 
+    def extract_from_installed_packages(
+        self,
+        approved_packages: tuple[str, ...] = _APPROVED_PACKAGES,
+    ) -> list[ModelContractTopicEntry]:
+        """Extract topics from contract.yaml files in approved installed packages.
+
+        Uses ``importlib.metadata`` and ``importlib.resources`` to discover
+        contract YAML files bundled inside approved packages.  Works with both
+        editable installs (``pip install -e .``) and normal installs.
+
+        The discovery strategy for each package:
+
+        1. Use ``importlib.resources`` to traverse ``<package>.nodes`` for
+           ``contract.yaml`` files (works for properly packaged resources).
+        2. Fall back to resolving the package install path via
+           ``importlib.metadata.Distribution.locate_file()`` and scanning
+           ``<install_root>/nodes/**/contract.yaml`` on the filesystem.
+
+        Args:
+            approved_packages: Tuple of package names to scan.  Defaults to
+                the platform-approved set (omnibase_core, omnibase_infra, etc.).
+
+        Returns:
+            Sorted, deduplicated list of ``ModelContractTopicEntry`` objects.
+
+        Raises:
+            ValueError: If the same logical package is discovered via multiple
+                install paths (duplicate discovery).
+
+        Ticket: OMN-5132
+        """
+        accumulated: dict[str, ModelContractTopicEntry] = {}
+        seen_package_roots: dict[str, Path] = {}
+
+        for pkg_name in approved_packages:
+            contract_paths = self._discover_package_contracts(pkg_name)
+            if contract_paths is None:
+                # Package not installed or has no contracts — non-fatal
+                continue
+
+            # Check for duplicate discovery (same package from multiple paths)
+            pkg_root = contract_paths[0].parent if contract_paths else None
+            if pkg_root is not None:
+                # Normalize: walk up to the package-level directory
+                # Contract paths look like .../nodes/<node>/contract.yaml
+                # We want the top-level package dir
+                normalized = self._package_root_from_contract(
+                    contract_paths[0], pkg_name
+                )
+                if normalized is not None:
+                    if pkg_name in seen_package_roots:
+                        existing_root = seen_package_roots[pkg_name]
+                        if existing_root != normalized:
+                            raise ValueError(
+                                f"Duplicate discovery for package {pkg_name!r}: "
+                                f"found at {existing_root} and {normalized}. "
+                                f"Only one install of each approved package is "
+                                f"allowed."
+                            )
+                    seen_package_roots[pkg_name] = normalized
+
+            for contract_path in contract_paths:
+                try:
+                    with contract_path.open(encoding="utf-8") as fh:
+                        raw_yaml = yaml.safe_load(fh)
+                except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
+                    _warn(
+                        f"Could not parse {contract_path} from package "
+                        f"{pkg_name}: {exc} — skipping"
+                    )
+                    continue
+
+                if not isinstance(raw_yaml, dict):
+                    _warn(
+                        f"contract.yaml is not a mapping: {contract_path} "
+                        f"(package {pkg_name}) — skipping"
+                    )
+                    continue
+
+                raw_topics = _extract_raw_topics_from_contract(raw_yaml, contract_path)
+
+                for raw in raw_topics:
+                    entry = _parse_topic(raw, contract_path)
+                    if entry is None:
+                        continue
+
+                    if raw in accumulated:
+                        existing = accumulated[raw]
+                        if (
+                            existing.kind != entry.kind
+                            or existing.producer != entry.producer
+                            or existing.event_name != entry.event_name
+                            or existing.version != entry.version
+                        ):
+                            _error(
+                                f"Inconsistent parsed components for topic "
+                                f"{raw!r} across installed packages: "
+                                f"first seen in "
+                                f"{existing.source_contracts[0]}, "
+                                f"now in {contract_path}."
+                            )
+                        accumulated[raw] = existing.merge_sources(entry)
+                    else:
+                        accumulated[raw] = entry
+
+        return sorted(accumulated.values(), key=lambda e: e.topic)
+
+    @staticmethod
+    def _package_root_from_contract(contract_path: Path, pkg_name: str) -> Path | None:
+        """Resolve the top-level package directory from a contract path.
+
+        Given a contract at ``<root>/<pkg>/nodes/<node>/contract.yaml``,
+        return ``<root>/<pkg>``.  Returns None if the path structure does
+        not match expectations.
+        """
+        # Walk up looking for a directory matching the package name
+        for parent in contract_path.parents:
+            if parent.name == pkg_name:
+                return parent
+        return None
+
+    @staticmethod
+    def _discover_package_contracts(pkg_name: str) -> list[Path] | None:
+        """Discover contract.yaml files inside an installed package.
+
+        Tries ``importlib.resources`` traversal first, then falls back to
+        filesystem discovery via ``importlib.metadata``.
+
+        Args:
+            pkg_name: The Python package name (e.g., ``omnibase_infra``).
+
+        Returns:
+            Sorted list of contract.yaml Paths, or None if the package is
+            not installed or contains no contracts.
+        """
+        # Strategy 1: importlib.resources traversal of <package>.nodes
+        try:
+            nodes_pkg = f"{pkg_name}.nodes"
+            nodes_ref = importlib.resources.files(nodes_pkg)
+            contracts = _collect_contracts_from_traversable(nodes_ref)
+            if contracts:
+                logger.debug(
+                    "Discovered %d contract(s) in %s via importlib.resources",
+                    len(contracts),
+                    nodes_pkg,
+                )
+                return sorted(contracts)
+        except (ModuleNotFoundError, TypeError, ValueError):
+            # Package or sub-package not found via resources — try fallback
+            pass
+
+        # Strategy 2: filesystem discovery via importlib.metadata
+        try:
+            dist = importlib.metadata.distribution(pkg_name)
+        except importlib.metadata.PackageNotFoundError:
+            logger.debug(
+                "Package %s not installed — skipping installed-package "
+                "contract discovery",
+                pkg_name,
+            )
+            return None
+
+        # Locate the package source directory
+        # For editable installs, dist.locate_file("") returns the repo src dir
+        # For normal installs, it returns the site-packages dir
+        pkg_root = _find_package_root(dist, pkg_name)
+        if pkg_root is None:
+            logger.debug(
+                "Could not locate source root for package %s — skipping",
+                pkg_name,
+            )
+            return None
+
+        nodes_dir = pkg_root / "nodes"
+        if not nodes_dir.is_dir():
+            logger.debug(
+                "No nodes/ directory in package %s at %s — skipping",
+                pkg_name,
+                pkg_root,
+            )
+            return None
+
+        contracts = sorted(nodes_dir.rglob("contract.yaml"))
+        if not contracts:
+            logger.debug(
+                "No contract.yaml files found in %s/nodes/ — skipping",
+                pkg_name,
+            )
+            return None
+
+        logger.debug(
+            "Discovered %d contract(s) in %s via filesystem at %s",
+            len(contracts),
+            pkg_name,
+            nodes_dir,
+        )
+        return contracts
+
     def extract_all(
         self,
         contracts_root: Path,
@@ -498,16 +801,16 @@ class ContractTopicExtractor:
         skill_manifests_root: Path | None = None,
         skill_manifests_roots: list[Path] | None = None,
     ) -> list[ModelContractTopicEntry]:
-        """Extract topics from contracts AND supplementary Python sources AND skill manifests.
+        """Extract topics from all sources: contracts, Python, skills, and installed packages.
 
         Combines results from contract.yaml scanning, Python source file
-        scanning, and omniclaude skill manifest scanning into a single
-        deduplicated list. Topics appearing in multiple sources are merged
-        (source_contracts combined).
+        scanning, omniclaude skill manifest scanning, and installed-package
+        contract discovery into a single deduplicated list.  Topics appearing
+        in multiple sources are merged (source_contracts combined).
 
         This is the single owner of topic-entry merge/dedup logic. All callers
         (TopicProvisioner, CLI scripts, validation) should use this method
-        rather than combining extract() + extract_from_skill_manifests() manually.
+        rather than combining individual extract methods manually.
 
         Args:
             contracts_root: Directory to scan for contract.yaml files.
@@ -528,8 +831,10 @@ class ContractTopicExtractor:
 
         Raises:
             RuntimeError: On inconsistent parsed components.
+            ValueError: If duplicate package discovery is detected (when
+                ``include_installed_packages`` was set at construction).
 
-        Ticket: OMN-4593, OMN-4622
+        Ticket: OMN-4593, OMN-4622, OMN-5132
         """
         # Start with contract-derived topics
         contract_entries = self.extract(contracts_root)
@@ -560,6 +865,16 @@ class ContractTopicExtractor:
         for root in all_roots:
             skill_entries = self.extract_from_skill_manifests(root)
             for entry in skill_entries:
+                if entry.topic in accumulated:
+                    existing = accumulated[entry.topic]
+                    accumulated[entry.topic] = existing.merge_sources(entry)
+                else:
+                    accumulated[entry.topic] = entry
+
+        # Merge installed-package contract topics (OMN-5132)
+        if self._include_installed_packages:
+            pkg_entries = self.extract_from_installed_packages()
+            for entry in pkg_entries:
                 if entry.topic in accumulated:
                     existing = accumulated[entry.topic]
                     accumulated[entry.topic] = existing.merge_sources(entry)
