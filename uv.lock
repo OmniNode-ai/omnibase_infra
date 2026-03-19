@@ -1860,7 +1860,7 @@ wheels = [
 [[package]]
 name = "omnibase-core"
 version = "0.29.0"
-source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=v0.29.0#69348a3167a8c29164d142c72b1da9eadcfbf612" }
+source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?branch=jonahgabriel%2Fomn-5566-contract-feature-flags#49bd2cb252003257def8d9a1b811b5c7a7f9b9f7" }
 dependencies = [
     { name = "blake3" },
     { name = "click" },
@@ -1967,7 +1967,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.20.0,<5.0.0" },
     { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<6.0.0" },
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=v0.29.0" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?branch=jonahgabriel%2Fomn-5566-contract-feature-flags" },
     { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?tag=v0.18.0" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },
