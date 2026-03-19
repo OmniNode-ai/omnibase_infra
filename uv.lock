@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -1859,8 +1859,8 @@ wheels = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.28.0"
-source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=v0.28.0#cbca65ee81a70973f635c13ff24e101cf8ef12f3" }
+version = "0.29.0"
+source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=v0.29.0#69348a3167a8c29164d142c72b1da9eadcfbf612" }
 dependencies = [
     { name = "blake3" },
     { name = "click" },
@@ -1869,7 +1869,6 @@ dependencies = [
     { name = "dependency-injector" },
     { name = "httpx" },
     { name = "jsonschema" },
-    { name = "omnibase-spi" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "ruamel-yaml" },
@@ -1877,7 +1876,7 @@ dependencies = [
 
 [[package]]
 name = "omnibase-infra"
-version = "0.21.1"
+version = "0.22.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -1968,8 +1967,8 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.20.0,<5.0.0" },
     { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<6.0.0" },
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=v0.28.0" },
-    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?tag=v0.17.1" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=v0.29.0" },
+    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?tag=v0.18.0" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-instrumentation", specifier = ">=0.48b0,<0.62" },
@@ -2022,8 +2021,8 @@ dev = [
 
 [[package]]
 name = "omnibase-spi"
-version = "0.17.1"
-source = { git = "https://github.com/OmniNode-ai/omnibase_spi.git?tag=v0.17.1#4d53a30ae531c6e7603309911c841952b664dfbe" }
+version = "0.18.0"
+source = { git = "https://github.com/OmniNode-ai/omnibase_spi.git?tag=v0.18.0#9d8f29a814d0ae7850f41656663c697e61663ed6" }
 dependencies = [
     { name = "omnibase-core" },
     { name = "pydantic" },
