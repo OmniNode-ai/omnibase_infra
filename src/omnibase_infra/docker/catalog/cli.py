@@ -118,6 +118,23 @@ def cmd_up(args: list[str]) -> int:
     if rc != 0:
         return rc
 
+    # Pre-cleanup: remove dead/exited containers to prevent restart delays (OMN-5468)
+    # and name collisions when core infra is already running (OMN-5469).
+    subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            _DEFAULT_OUTPUT,
+            "rm",
+            "-f",
+            "--stop",
+        ],
+        cwd=str(_REPO_ROOT),
+        check=False,
+        capture_output=True,
+    )
+
     # Start
     proc = subprocess.run(
         ["docker", "compose", "-f", _DEFAULT_OUTPUT, "up", "-d"],
