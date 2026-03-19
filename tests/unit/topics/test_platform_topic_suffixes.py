@@ -505,11 +505,13 @@ class TestOmniClaudeTopicSuffixes:
             SUFFIX_OMNICLAUDE_AUDIT_RETURN_BOUNDED,
             SUFFIX_OMNICLAUDE_AUDIT_SCOPE_VIOLATION,
             SUFFIX_OMNICLAUDE_CONTEXT_AUDIT_DLQ,
+            SUFFIX_OMNICLAUDE_SKILL_LIFECYCLE_DLQ,
         )
 
         three_partition_suffixes = {
             SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
             SUFFIX_OMNICLAUDE_AGENT_OBSERVABILITY_DLQ,
+            SUFFIX_OMNICLAUDE_SKILL_LIFECYCLE_DLQ,  # OMN-5445 — skill-lifecycle consumer DLQ
             SUFFIX_OMNICLAUDE_AGENT_TRACE_FIX_TRANSITION,
             # Context audit topics (OMN-5240) — observability consumer throughput
             SUFFIX_OMNICLAUDE_AUDIT_COMPRESSION_TRIGGERED,
