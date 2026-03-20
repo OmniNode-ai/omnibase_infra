@@ -166,6 +166,16 @@ confirming that the node acknowledges successful registration.
 """
 
 # Resolution event ledger (OMN-2895 / Phase 6 of OMN-2897)
+SUFFIX_FEATURE_FLAG_CHANGED: str = "onex.evt.platform.feature-flag-changed.v1"
+"""Topic suffix for feature flag state change events.
+
+Published when a feature flag is toggled via the control-plane API.
+Contains flag name, new value, previous value, and env_var reference.
+
+Producer: Registry API (update_feature_flag)
+Consumer: Runtime services for dynamic flag reload
+"""
+
 SUFFIX_RESOLUTION_DECIDED: str = "onex.evt.platform.resolution-decided.v1"
 """Topic suffix for resolution decision audit events.
 
@@ -1108,6 +1118,12 @@ ALL_PLATFORM_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_CONTRACT_DEREGISTERED, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION_ACCEPTED, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION_ACKED, partitions=6),
+    # Feature flag changes (OMN-5580)
+    ModelTopicSpec(
+        suffix=SUFFIX_FEATURE_FLAG_CHANGED,
+        partitions=1,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
     # Resolution event ledger (OMN-2895)
     ModelTopicSpec(suffix=SUFFIX_RESOLUTION_DECIDED, partitions=3),
     # Topic catalog topics (low-throughput coordination, 1 partition each)

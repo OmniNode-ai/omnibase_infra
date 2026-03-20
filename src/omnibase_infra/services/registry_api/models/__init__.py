@@ -25,6 +25,15 @@ from omnibase_infra.services.registry_api.models.model_contract_ref import (
 from omnibase_infra.services.registry_api.models.model_contract_view import (
     ModelContractView,
 )
+from omnibase_infra.services.registry_api.models.model_feature_flag_changed_event import (
+    ModelFeatureFlagChangedEvent,
+)
+from omnibase_infra.services.registry_api.models.model_feature_flag_toggle_result import (
+    ModelFeatureFlagToggleResult,
+)
+from omnibase_infra.services.registry_api.models.model_feature_flag_view import (
+    ModelFeatureFlagView,
+)
 from omnibase_infra.services.registry_api.models.model_pagination_info import (
     ModelPaginationInfo,
 )
@@ -73,6 +82,9 @@ __all__ = [
     "ModelCapabilityWidgetMapping",
     "ModelContractRef",
     "ModelContractView",
+    "ModelFeatureFlagChangedEvent",
+    "ModelFeatureFlagToggleResult",
+    "ModelFeatureFlagView",
     "ModelPaginationInfo",
     "ModelRegistryDiscoveryResponse",
     "ModelRegistryHealthResponse",

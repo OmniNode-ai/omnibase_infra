@@ -2788,6 +2788,26 @@ pattern_exemptions:
     documentation:
       - omnibase_spi contracts/measurement/contract_savings_estimate.py
     ticket: OMN-5547
+  # ==========================================================================
+  # Feature Flag Models flag_name Exemption (OMN-5579, OMN-5580)
+  # ==========================================================================
+  # flag_name is a feature flag identifier string, not an entity reference.
+  - file_pattern: 'model_feature_flag_toggle_result\.py'
+    violation_pattern: "Field 'flag_name' might reference an entity"
+    reason: >
+      flag_name is a feature flag identifier (e.g., "enable_caching"), not an entity reference requiring ID + display_name pattern. Feature flags are identified by name, not UUID.
+
+    documentation:
+      - CLAUDE.md (Feature Flag Registry API)
+    ticket: OMN-5580
+  - file_pattern: 'model_feature_flag_changed_event\.py'
+    violation_pattern: "Field 'flag_name' might reference an entity"
+    reason: >
+      flag_name is a feature flag identifier (e.g., "enable_caching"), not an entity reference requiring ID + display_name pattern. Feature flags are identified by name, not UUID.
+
+    documentation:
+      - CLAUDE.md (Feature Flag Registry API)
+    ticket: OMN-5580
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
