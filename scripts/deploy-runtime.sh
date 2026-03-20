@@ -859,6 +859,16 @@ sync_files() {
         --exclude='/overrides/' \
         "${repo_root}/docker/" "${deploy_target}/docker/"
 
+    # 5. Migration scripts (bind-mounted by docker-compose.infra.yml)
+    log_info "Syncing migration scripts..."
+    mkdir -p "${deploy_target}/scripts"
+    rsync -a \
+        --include='run-forward-migrations.sh' \
+        --include='check_migrations_complete.sh' \
+        --include='run-intelligence-migrations.sh' \
+        --exclude='*' \
+        "${repo_root}/scripts/" "${deploy_target}/scripts/"
+
     log_info "Sync complete."
 }
 
