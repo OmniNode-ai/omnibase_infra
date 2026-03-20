@@ -88,14 +88,19 @@ class ConsumerHealthEmitter:
         Returns:
             True if ENABLE_CONSUMER_HEALTH_EMITTER is truthy.
         """
-        return os.environ.get(  # ONEX_EXCLUDE: env
-            "ENABLE_CONSUMER_HEALTH_EMITTER", ""
-        ).strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
+        return (
+            os.environ.get(  # ONEX_FLAG_EXEMPT: declared in service-level contract (contracts/services/event_bus.contract.yaml)
+                "ENABLE_CONSUMER_HEALTH_EMITTER", ""
+            )
+            .strip()
+            .lower()
+            in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+        )
 
     def _is_rate_limited(self, fingerprint: str) -> bool:
         """Check if an event with this fingerprint is rate-limited.

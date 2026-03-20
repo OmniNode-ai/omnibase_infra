@@ -176,14 +176,19 @@ class RuntimeLogEventBridge(logging.Handler):
     @staticmethod
     def is_enabled() -> bool:
         """Check if runtime log bridge is enabled via feature flag."""
-        return os.environ.get(  # ONEX_EXCLUDE: env
-            "ENABLE_RUNTIME_LOG_BRIDGE", ""
-        ).strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
+        return (
+            os.environ.get(  # ONEX_FLAG_EXEMPT: declared in service-level contract (contracts/services/runtime.contract.yaml)
+                "ENABLE_RUNTIME_LOG_BRIDGE", ""
+            )
+            .strip()
+            .lower()
+            in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+        )
 
     def emit(self, record: logging.LogRecord) -> None:
         """Handle a log record (called by Python logging framework).
