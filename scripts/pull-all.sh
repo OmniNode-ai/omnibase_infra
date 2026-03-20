@@ -44,6 +44,10 @@ for repo in "${REPOS[@]}"; do
   is_bare=$(git -C "$dir" rev-parse --is-bare-repository 2>/dev/null)
 
   if [[ "$is_bare" == "true" ]]; then
+    # Prune stale worktrees before fetch — prevents "main is checked out"
+    # errors from dead worktrees that still hold a ref to main.
+    git -C "$dir" worktree prune 2>/dev/null || true
+
     # Bare clone: fetch origin main directly into the local main ref
     before=$(git -C "$dir" rev-parse main 2>/dev/null)
     if output=$(git -C "$dir" fetch origin main:main 2>&1); then
@@ -55,6 +59,15 @@ for repo in "${REPOS[@]}"; do
         echo "  UPDATED  $repo (+${commits} commit(s))"
       fi
       (( OK++ )) || true
+    elif echo "$output" | grep -q "checked out"; then
+      # Worktree has main checked out — force-fetch origin to FETCH_HEAD and update
+      echo "  WARN     $repo (main checked out in a worktree, using FETCH_HEAD)"
+      if git -C "$dir" fetch origin main 2>/dev/null; then
+        (( OK++ )) || true
+      else
+        echo "  FAILED   $repo (fetch failed even via FETCH_HEAD)"
+        FAILED+=("$repo")
+      fi
     else
       echo "  FAILED   $repo"
       echo "           $output"
