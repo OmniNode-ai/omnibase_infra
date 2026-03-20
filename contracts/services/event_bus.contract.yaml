@@ -1,0 +1,7 @@
+name: event_bus_service
+description: "Feature flags for Kafka event bus infrastructure services"
+feature_flags:
+  - name: "ENABLE_CONSUMER_HEALTH_EMITTER"
+    env_var: "ENABLE_CONSUMER_HEALTH_EMITTER"
+    default: "false"
+    description: "Gate for consumer health metric emission via Kafka events"
