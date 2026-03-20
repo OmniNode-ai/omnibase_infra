@@ -1509,7 +1509,7 @@ class ServiceRegistryDiscovery:
             try:
                 topic = SUFFIX_FEATURE_FLAG_CHANGED
                 # Use the AIOKafkaProducer send interface
-                await kafka_producer.send(  # type: ignore[union-attr]
+                await kafka_producer.send(  # type: ignore[attr-defined]
                     topic,
                     value=event.model_dump_json().encode(),
                     key=flag_name.encode(),
