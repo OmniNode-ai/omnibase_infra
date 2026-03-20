@@ -1709,7 +1709,10 @@ async def bootstrap() -> int:
             # OMN-5609: Wire introspection service so the runtime publishes
             # introspection events with metadata, capabilities, and event_bus
             # fields from the contract.
-            introspection_service=introspection_service,
+            # NOTE(OMN-5609): ServiceNodeIntrospection structurally satisfies
+            # ProtocolNodeIntrospection via MixinNodeIntrospection, but mypy
+            # cannot verify structural protocol conformance across mixin chains.
+            introspection_service=introspection_service,  # type: ignore[arg-type]
         )
         runtime_create_duration = time.time() - runtime_create_start_time
         logger.debug(
