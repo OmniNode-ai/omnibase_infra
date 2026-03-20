@@ -658,8 +658,7 @@ class EventBusKafka(
                     bootstrap_servers=self._bootstrap_servers,
                     acks=self._config.acks_aiokafka,
                     enable_idempotence=self._config.enable_idempotence,
-                    reconnect_backoff_ms=self._config.reconnect_backoff_ms,
-                    reconnect_backoff_max_ms=self._config.reconnect_backoff_max_ms,
+                    retry_backoff_ms=self._config.reconnect_backoff_ms,
                     **self._build_auth_kwargs(),
                 )
 
@@ -983,8 +982,7 @@ class EventBusKafka(
                 bootstrap_servers=self._bootstrap_servers,
                 acks=self._config.acks_aiokafka,
                 enable_idempotence=self._config.enable_idempotence,
-                reconnect_backoff_ms=self._config.reconnect_backoff_ms,
-                reconnect_backoff_max_ms=self._config.reconnect_backoff_max_ms,
+                retry_backoff_ms=self._config.reconnect_backoff_ms,
                 **self._build_auth_kwargs(),
             )
 
@@ -1587,8 +1585,7 @@ class EventBusKafka(
             enable_auto_commit=self._config.enable_auto_commit,
             session_timeout_ms=self._config.session_timeout_ms,
             heartbeat_interval_ms=self._config.heartbeat_interval_ms,
-            reconnect_backoff_ms=self._config.reconnect_backoff_ms,
-            reconnect_backoff_max_ms=self._config.reconnect_backoff_max_ms,
+            retry_backoff_ms=self._config.reconnect_backoff_ms,
             **self._build_auth_kwargs(),
         )
 
