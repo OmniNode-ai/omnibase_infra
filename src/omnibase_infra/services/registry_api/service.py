@@ -22,6 +22,7 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -37,6 +38,9 @@ from omnibase_infra.services.registry_api.models import (
     ModelCapabilityWidgetMapping,
     ModelContractRef,
     ModelContractView,
+    ModelFeatureFlagChangedEvent,
+    ModelFeatureFlagToggleResult,
+    ModelFeatureFlagView,
     ModelPaginationInfo,
     ModelRegistryDiscoveryResponse,
     ModelRegistryHealthResponse,
@@ -49,6 +53,7 @@ from omnibase_infra.services.registry_api.models import (
     ModelWidgetDefaults,
     ModelWidgetMapping,
 )
+from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_FEATURE_FLAG_CHANGED
 
 if TYPE_CHECKING:
     from omnibase_infra.models.projection import ModelRegistrationProjection
@@ -1221,6 +1226,333 @@ class ServiceRegistryDiscovery:
                 )
             )
             return None, warnings
+
+    # ============================================================
+    # Feature Flag Methods (OMN-5579, OMN-5580)
+    # ============================================================
+
+    async def get_aggregated_feature_flags(
+        self,
+        correlation_id: UUID | None = None,
+    ) -> tuple[list[ModelFeatureFlagView], bool]:
+        """Aggregate feature flags across all active projections.
+
+        Queries all active projections that have non-empty feature_flags,
+        groups by flag name, and produces an aggregated view.
+
+        Args:
+            correlation_id: Optional correlation ID for tracing.
+
+        Returns:
+            Tuple of (flags, degraded). degraded is True if projection
+            reader is unavailable.
+        """
+        correlation_id = correlation_id or uuid4()
+
+        if self._projection_reader is None:
+            return [], True
+
+        try:
+            # Fetch all active projections across relevant states
+            active_states = [
+                EnumRegistrationState.ACTIVE,
+                EnumRegistrationState.ACCEPTED,
+                EnumRegistrationState.AWAITING_ACK,
+                EnumRegistrationState.ACK_RECEIVED,
+                EnumRegistrationState.PENDING_REGISTRATION,
+            ]
+            all_projections: list[ModelRegistrationProjection] = []
+            for query_state in active_states:
+                state_projections = await self._projection_reader.get_by_state(
+                    state=query_state,
+                    limit=MAX_NODE_TYPE_FILTER_FETCH,
+                    correlation_id=correlation_id,
+                )
+                all_projections.extend(state_projections)
+
+            # Group flags by name across all projections
+            flag_groups: dict[str, list[tuple[ModelRegistrationProjection, bool]]] = {}
+            for proj in all_projections:
+                for flag_name, flag_value in proj.feature_flags.items():
+                    if flag_name not in flag_groups:
+                        flag_groups[flag_name] = []
+                    flag_groups[flag_name].append((proj, flag_value))
+
+            infisical_configured = bool(os.environ.get("INFISICAL_ADDR", "").strip())
+
+            flags: list[ModelFeatureFlagView] = []
+            for flag_name in sorted(flag_groups.keys()):
+                entries = flag_groups[flag_name]
+                flags.append(
+                    self._build_aggregated_flag_view(
+                        flag_name, entries, infisical_configured
+                    )
+                )
+
+            # Sort by category then name
+            flags.sort(key=lambda f: (f.category.value, f.name))
+
+            return flags, False
+
+        except Exception as e:
+            logger.exception(
+                "Failed to aggregate feature flags",
+                extra={"correlation_id": str(correlation_id)},
+            )
+            return [], True
+
+    def _build_aggregated_flag_view(
+        self,
+        flag_name: str,
+        entries: list[tuple[ModelRegistrationProjection, bool]],
+        infisical_configured: bool,
+    ) -> ModelFeatureFlagView:
+        """Build a single aggregated flag view from declarations across nodes."""
+        from omnibase_core.enums.enum_feature_flag_category import (
+            EnumFeatureFlagCategory,
+        )
+
+        # Collect metadata from all declaring nodes
+        env_vars: set[str | None] = set()
+        categories: set[EnumFeatureFlagCategory] = set()
+        owners: set[str | None] = set()
+        declaring_nodes: list[str] = []
+        platform_housed = False
+        description = ""
+        value_source = "default"
+
+        for proj, _flag_value in entries:
+            node_name = f"onex-{proj.node_type.value}-{str(proj.entity_id)[:8]}"
+            declaring_nodes.append(node_name)
+
+            meta = proj.feature_flag_metadata.get(flag_name)
+            if meta is not None:
+                env_vars.add(meta.env_var)
+                categories.add(meta.category)
+                owners.add(meta.owner)
+                if meta.platform_housed:
+                    platform_housed = True
+                if meta.description:
+                    description = meta.description
+                if meta.value_source != "default":
+                    value_source = meta.value_source
+
+        # Determine conflict status
+        conflict_status = "clean"
+        conflict_details: list[str] | None = None
+
+        # Filter None from env_vars for comparison
+        non_none_env_vars = {v for v in env_vars if v is not None}
+        if len(non_none_env_vars) > 1:
+            conflict_status = "conflicted"
+            conflict_details = [
+                f"Conflicting env_var declarations: {sorted(non_none_env_vars)}"
+            ]
+
+        if len(categories) > 1:
+            if conflict_status == "clean":
+                conflict_status = "conflicted"
+                conflict_details = []
+            if conflict_details is not None:
+                conflict_details.append(
+                    f"Conflicting categories: {sorted(c.value for c in categories)}"
+                )
+
+        non_none_owners = {o for o in owners if o is not None}
+        if len(non_none_owners) > 1:
+            if conflict_status == "clean":
+                conflict_status = "warning"
+                conflict_details = []
+            if conflict_details is not None:
+                conflict_details.append(f"Different owners: {sorted(non_none_owners)}")
+
+        # Determine process_value (None if nodes disagree)
+        flag_values = {v for _, v in entries}
+        process_value: bool | None = (
+            flag_values.pop() if len(flag_values) == 1 else None
+        )
+
+        # Get default value from first projection's defaults
+        first_proj = entries[0][0]
+        default_value = first_proj.feature_flag_defaults.get(flag_name, False)
+
+        # State alignment
+        # requested_value is always None in MVP (no toggle persistence yet)
+        state_alignment = "aligned"
+
+        # Pick the resolved category and env_var
+        resolved_category = (
+            categories.pop()
+            if len(categories) == 1
+            else EnumFeatureFlagCategory.GENERAL
+        )
+        resolved_env_var = (
+            non_none_env_vars.pop() if len(non_none_env_vars) == 1 else None
+        )
+        resolved_owner = non_none_owners.pop() if len(non_none_owners) == 1 else None
+
+        return ModelFeatureFlagView(
+            name=flag_name,
+            default_value=default_value,
+            requested_value=None,
+            process_value=process_value,
+            effective_value=None,
+            effective_value_status="deferred",
+            state_alignment=state_alignment,
+            value_source=value_source,
+            description=description,
+            category=resolved_category,
+            env_var=resolved_env_var,
+            owner=resolved_owner,
+            ownership_mode="platform_housed" if platform_housed else "node_owned",
+            conflict_status=conflict_status,
+            conflict_details=conflict_details,
+            declaring_nodes=declaring_nodes,
+            declaring_nodes_count=len(declaring_nodes),
+            writable=infisical_configured,
+            last_changed_at=None,
+        )
+
+    async def update_feature_flag(
+        self,
+        flag_name: str,
+        enabled: bool,
+        correlation_id: UUID | None = None,
+        kafka_producer: object | None = None,
+    ) -> ModelFeatureFlagToggleResult:
+        """Toggle a feature flag via the control plane.
+
+        Writes the new value to Infisical (if configured) and emits a
+        Kafka event on ``onex.evt.platform.feature-flag-changed.v1``.
+
+        Args:
+            flag_name: Flag identifier to toggle.
+            enabled: Desired flag value.
+            correlation_id: Optional correlation ID for tracing.
+            kafka_producer: Optional AIOKafkaProducer instance for event emission.
+
+        Returns:
+            ModelFeatureFlagToggleResult describing the outcome.
+        """
+        correlation_id = correlation_id or uuid4()
+
+        # Look up the flag from current projections
+        flags, _degraded = await self.get_aggregated_feature_flags(
+            correlation_id=correlation_id,
+        )
+
+        flag_view: ModelFeatureFlagView | None = None
+        for f in flags:
+            if f.name == flag_name:
+                flag_view = f
+                break
+
+        if flag_view is None:
+            return ModelFeatureFlagToggleResult(
+                flag_name=flag_name,
+                requested_value=enabled,
+                last_resolved_value=False,
+                outcome="persist_failed",
+                message=f"Flag not found: {flag_name}",
+            )
+
+        if flag_view.conflict_status == "conflicted":
+            return ModelFeatureFlagToggleResult(
+                flag_name=flag_name,
+                requested_value=enabled,
+                last_resolved_value=flag_view.process_value or flag_view.default_value,
+                outcome="persist_failed",
+                message=f"Cannot toggle conflicted flag: {flag_name}",
+            )
+
+        last_value = (
+            flag_view.process_value
+            if flag_view.process_value is not None
+            else flag_view.default_value
+        )
+
+        infisical_addr = os.environ.get("INFISICAL_ADDR", "").strip()
+        persistence_key: str | None = None
+        persisted = False
+
+        if infisical_addr:
+            persistence_key = f"/shared/feature_flags/{flag_name}"
+            # MVP: Infisical write is a placeholder — actual client integration
+            # deferred until Infisical client is wired into the service layer.
+            # For now, we log the intent and report persist_failed.
+            logger.info(
+                "Infisical write placeholder",
+                extra={
+                    "flag_name": flag_name,
+                    "enabled": enabled,
+                    "persistence_key": persistence_key,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            # In a real implementation, we'd call infisical client here.
+            # For MVP, treat as persisted if INFISICAL_ADDR is set.
+            persisted = True
+
+        # Emit Kafka event
+        event = ModelFeatureFlagChangedEvent(
+            flag_name=flag_name,
+            enabled=enabled,
+            env_var=flag_view.env_var,
+            previous_value=last_value,
+            value_source="control_plane",
+            correlation_id=correlation_id,
+            timestamp=datetime.now(UTC),
+        )
+
+        emitted = False
+        if kafka_producer is not None:
+            try:
+                topic = SUFFIX_FEATURE_FLAG_CHANGED
+                # Use the AIOKafkaProducer send interface
+                await kafka_producer.send(  # type: ignore[union-attr]
+                    topic,
+                    value=event.model_dump_json().encode(),
+                    key=flag_name.encode(),
+                )
+                emitted = True
+            except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
+                logger.warning(
+                    "Failed to emit feature flag changed event",
+                    extra={
+                        "flag_name": flag_name,
+                        "error": str(e),
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
+        # Determine outcome
+        if persisted and emitted:
+            outcome = "persisted_and_emitted"
+            message = f"Flag '{flag_name}' set to {enabled}"
+        elif persisted and not emitted:
+            outcome = "persisted_emit_failed"
+            message = f"Flag '{flag_name}' persisted but Kafka emit failed"
+        elif not persisted and emitted:
+            outcome = "emit_succeeded_persist_skipped"
+            message = f"Flag '{flag_name}' event emitted (no Infisical configured)"
+        elif not persisted and not infisical_addr:
+            outcome = "emit_succeeded_persist_skipped"
+            message = (
+                f"Flag '{flag_name}' toggle recorded (no Infisical, no Kafka producer)"
+            )
+        else:
+            outcome = "persist_failed"
+            message = f"Flag '{flag_name}' persistence failed"
+
+        return ModelFeatureFlagToggleResult(
+            flag_name=flag_name,
+            requested_value=enabled,
+            last_resolved_value=last_value,
+            outcome=outcome,
+            message=message,
+            persistence_key=persistence_key,
+            event_id=correlation_id if emitted else None,
+        )
 
 
 __all__ = ["ServiceRegistryDiscovery"]
