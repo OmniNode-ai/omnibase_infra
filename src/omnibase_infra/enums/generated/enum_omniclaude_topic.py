@@ -21,6 +21,7 @@ class EnumOmniclaudeTopic(str, Enum):
     EVT_AGENT_MATCH_V1 = "onex.evt.omniclaude.agent-match.v1"  # onex.evt.omniclaude.agent-match.v1
     EVT_AGENT_STATUS_V1 = "onex.evt.omniclaude.agent-status.v1"  # onex.evt.omniclaude.agent-status.v1
     EVT_CONTEXT_UTILIZATION_V1 = "onex.evt.omniclaude.context-utilization.v1"  # onex.evt.omniclaude.context-utilization.v1
+    EVT_HOOK_CONTEXT_INJECTED_V1 = "onex.evt.omniclaude.hook-context-injected.v1"  # onex.evt.omniclaude.hook-context-injected.v1
     EVT_LATENCY_BREAKDOWN_V1 = "onex.evt.omniclaude.latency-breakdown.v1"  # onex.evt.omniclaude.latency-breakdown.v1
     EVT_SESSION_OUTCOME_V1 = "onex.evt.omniclaude.session-outcome.v1"  # onex.evt.omniclaude.session-outcome.v1
     EVT_VALIDATOR_CATCH_V1 = "onex.evt.omniclaude.validator-catch.v1"  # onex.evt.omniclaude.validator-catch.v1
