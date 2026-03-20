@@ -362,7 +362,9 @@ class ModelKafkaEventBusConfig(BaseModel):
         description=(
             "Maximum reconnect backoff in milliseconds. Caps the exponential growth of "
             "reconnect delays. Must be >= reconnect_backoff_ms. "
-            "Override via KAFKA_RECONNECT_BACKOFF_MAX_MS."
+            "Override via KAFKA_RECONNECT_BACKOFF_MAX_MS. "
+            "NOTE: Not used by aiokafka 0.11.0 (no reconnect_backoff_max_ms parameter). "
+            "Retained in config model for forward-compatibility with future aiokafka versions."
         ),
         ge=0,
     )

@@ -2,9 +2,13 @@
 # SPDX-License-Identifier: MIT
 """Unit tests for EventBusKafka consumer/producer session timeout and reconnect kwargs (OMN-5445).
 
-Verifies that session_timeout_ms, heartbeat_interval_ms, reconnect_backoff_ms, and
-reconnect_backoff_max_ms are correctly passed from ModelKafkaEventBusConfig through
-to the AIOKafkaConsumer and AIOKafkaProducer constructors.
+Verifies that session_timeout_ms, heartbeat_interval_ms, and retry_backoff_ms are
+correctly passed from ModelKafkaEventBusConfig through to the AIOKafkaConsumer and
+AIOKafkaProducer constructors.
+
+Also verifies that reconnect_backoff_ms and reconnect_backoff_max_ms (config model
+fields) are NOT passed directly to aiokafka constructors, since aiokafka 0.11.0 uses
+retry_backoff_ms instead.
 """
 
 from __future__ import annotations
@@ -35,7 +39,7 @@ def bus(kafka_config: ModelKafkaEventBusConfig) -> EventBusKafka:
 
 
 class TestConsumerKwargs:
-    """Test that AIOKafkaConsumer receives session/heartbeat/reconnect kwargs."""
+    """Test that AIOKafkaConsumer receives session/heartbeat/retry kwargs."""
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -95,10 +99,10 @@ class TestConsumerKwargs:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_consumer_receives_reconnect_backoff_ms(
+    async def test_consumer_receives_retry_backoff_ms(
         self, bus: EventBusKafka, kafka_config: ModelKafkaEventBusConfig
     ) -> None:
-        """Consumer constructor must receive reconnect_backoff_ms from config."""
+        """Consumer constructor must receive retry_backoff_ms mapped from config.reconnect_backoff_ms."""
         mock_consumer = MagicMock()
         mock_consumer.start = AsyncMock()
 
@@ -119,14 +123,14 @@ class TestConsumerKwargs:
                 "test-topic", on_message=AsyncMock(), group_id="test-group"
             )
             call_kwargs = mock_consumer_cls.call_args
-            assert call_kwargs.kwargs["reconnect_backoff_ms"] == 3000
+            assert call_kwargs.kwargs["retry_backoff_ms"] == 3000
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_consumer_receives_reconnect_backoff_max_ms(
+    async def test_consumer_does_not_pass_reconnect_backoff_ms(
         self, bus: EventBusKafka, kafka_config: ModelKafkaEventBusConfig
     ) -> None:
-        """Consumer constructor must receive reconnect_backoff_max_ms from config."""
+        """Consumer constructor must NOT receive reconnect_backoff_ms (not a valid aiokafka kwarg)."""
         mock_consumer = MagicMock()
         mock_consumer.start = AsyncMock()
 
@@ -147,18 +151,19 @@ class TestConsumerKwargs:
                 "test-topic", on_message=AsyncMock(), group_id="test-group"
             )
             call_kwargs = mock_consumer_cls.call_args
-            assert call_kwargs.kwargs["reconnect_backoff_max_ms"] == 60000
+            assert "reconnect_backoff_ms" not in call_kwargs.kwargs
+            assert "reconnect_backoff_max_ms" not in call_kwargs.kwargs
 
 
 class TestProducerKwargs:
-    """Test that AIOKafkaProducer receives reconnect backoff kwargs."""
+    """Test that AIOKafkaProducer receives retry backoff kwargs."""
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_producer_start_receives_reconnect_backoff_ms(
+    async def test_producer_start_receives_retry_backoff_ms(
         self, bus: EventBusKafka
     ) -> None:
-        """Producer constructor in start() must receive reconnect_backoff_ms."""
+        """Producer constructor in start() must receive retry_backoff_ms mapped from config.reconnect_backoff_ms."""
         with patch(
             "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer"
         ) as mock_producer_cls:
@@ -168,14 +173,14 @@ class TestProducerKwargs:
             mock_producer_cls.return_value = mock_producer
             await bus.start()
             call_kwargs = mock_producer_cls.call_args
-            assert call_kwargs.kwargs["reconnect_backoff_ms"] == 3000
+            assert call_kwargs.kwargs["retry_backoff_ms"] == 3000
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_producer_start_receives_reconnect_backoff_max_ms(
+    async def test_producer_start_does_not_pass_reconnect_backoff_ms(
         self, bus: EventBusKafka
     ) -> None:
-        """Producer constructor in start() must receive reconnect_backoff_max_ms."""
+        """Producer constructor must NOT receive reconnect_backoff_ms or reconnect_backoff_max_ms."""
         with patch(
             "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer"
         ) as mock_producer_cls:
@@ -185,7 +190,8 @@ class TestProducerKwargs:
             mock_producer_cls.return_value = mock_producer
             await bus.start()
             call_kwargs = mock_producer_cls.call_args
-            assert call_kwargs.kwargs["reconnect_backoff_max_ms"] == 60000
+            assert "reconnect_backoff_ms" not in call_kwargs.kwargs
+            assert "reconnect_backoff_max_ms" not in call_kwargs.kwargs
 
 
 class TestDefaultValues:
