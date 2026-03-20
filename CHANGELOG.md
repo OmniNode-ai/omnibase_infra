@@ -1,3 +1,34 @@
+## v0.23.0 (2026-03-20)
+
+### Added
+- feat: feature flag model wiring [OMN-5575/5577/5578] (#918)
+- feat: Runtime Health Event Pipeline Waves 0-2 [OMN-5529] (#911)
+- feat: add ServiceSavingsEstimator Kafka consumer [OMN-5550] (#917)
+- feat(bifrost): shadow mode for learned routing policy comparison [OMN-5570] (#920)
+- feat(capabilities): extract feature flags from contract YAML [OMN-5574] (#916)
+- feat: populate contract YAMLs with feature_flags declarations [OMN-5584] (#914)
+- feat(infra): add savings estimation compute handler with tiered attribution [OMN-5547] (#913)
+- feat(ci): guard required docker-compose env vars [OMN-5440] (#900)
+- feat(kafka): wire session timeout to all consumers [OMN-5445] (#905)
+- feat(topics): package discovery + kill fallback paths [OMN-5492/5491] (#910)
+- ci: add compose required-env coverage guard [OMN-5439] (#899)
+
+### Fixed
+- fix(scripts): prune stale worktrees before fetch in pull-all.sh [OMN-5460] (#906)
+- fix(deploy): add timeout and --progress=plain to docker build [OMN-5462] (#907)
+- fix(catalog): pre-cleanup dead containers before compose up [OMN-5468] (#908)
+- fix(mypy): resolve no-any-return in _load_stack via explicit type narrowing (#903)
+- fix(docker): switch plugin pins to ranges for forward compatibility [OMN-5474] (#909)
+
+### Changed
+- chore: wire no-bare-feature-flags pre-commit hook [OMN-5585] (#915)
+- chore(infra): register savings and validator-catch topics [OMN-5545] (#912)
+- chore(deps): switch uv.sources from release branches to tags (#904)
+- Dependency pins will be updated in a follow-up after upstream releases are tagged
+
+### Tests
+- test: add e2e integration test for savings estimation pipeline [OMN-5555] (#919)
+
 ## v0.22.0 (2026-03-19)
 
 ### Added
