@@ -27,6 +27,6 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_GMAIL_INTENT_RECEIVED_V1 = "onex.evt.omnibase-infra.gmail-intent-received.v1"  # onex.evt.omnibase-infra.gmail-intent-received.v1
     EVT_LLM_CALL_COMPLETED_V1 = "onex.evt.omnibase-infra.llm-call-completed.v1"  # onex.evt.omnibase-infra.llm-call-completed.v1
     EVT_LLM_ENDPOINT_HEALTH_V1 = "onex.evt.omnibase-infra.llm-endpoint-health.v1"  # onex.evt.omnibase-infra.llm-endpoint-health.v1
-    EVT_SAVINGS_ESTIMATED_V1 = "onex.evt.omnibase-infra.savings-estimated.v1"  # onex.evt.omnibase-infra.savings-estimated.v1
     EVT_RUNTIME_ERROR_V1 = "onex.evt.omnibase-infra.runtime-error.v1"  # onex.evt.omnibase-infra.runtime-error.v1
+    EVT_SAVINGS_ESTIMATED_V1 = "onex.evt.omnibase-infra.savings-estimated.v1"  # onex.evt.omnibase-infra.savings-estimated.v1
     EVT_WIRING_HEALTH_SNAPSHOT_V1 = "onex.evt.omnibase-infra.wiring-health-snapshot.v1"  # onex.evt.omnibase-infra.wiring-health-snapshot.v1
