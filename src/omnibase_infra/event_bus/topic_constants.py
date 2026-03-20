@@ -592,6 +592,8 @@ TOPIC_VALIDATOR_CATCH: Final[str] = "onex.evt.omniclaude.validator-catch.v1"
 Producer: omniclaude (pre-commit hooks, CI guard, poly enforcer)
 Consumer: ServiceSavingsEstimator (for catch-based savings attribution)
 Ticket: OMN-5545
+"""
+
 # Consumer Health topics (OMN-5515 / OMN-5529)
 TOPIC_CONSUMER_HEALTH: Final[str] = "onex.evt.omnibase-infra.consumer-health.v1"
 """Consumer health events emitted by ConsumerHealthEmitter.
