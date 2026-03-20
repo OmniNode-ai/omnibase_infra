@@ -13,6 +13,14 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from omnibase_infra.event_bus.topic_constants import (
+    TOPIC_HOOK_CONTEXT_INJECTED,
+    TOPIC_LLM_CALL_COMPLETED,
+    TOPIC_SAVINGS_ESTIMATED,
+    TOPIC_SESSION_OUTCOME_CANONICAL,
+    TOPIC_VALIDATOR_CATCH,
+)
+
 
 class ConfigSavingsEstimation(BaseSettings):
     """Configuration for the savings estimation Kafka consumer."""
@@ -36,16 +44,16 @@ class ConfigSavingsEstimation(BaseSettings):
 
     consumed_topics: list[str] = Field(
         default_factory=lambda: [
-            "onex.evt.omniintelligence.llm-call-completed.v1",
-            "onex.evt.omniclaude.session-outcome.v1",
-            "onex.evt.omniclaude.hook-context-injected.v1",
-            "onex.evt.omniclaude.validator-catch.v1",
+            TOPIC_LLM_CALL_COMPLETED,
+            TOPIC_SESSION_OUTCOME_CANONICAL,
+            TOPIC_HOOK_CONTEXT_INJECTED,
+            TOPIC_VALIDATOR_CATCH,
         ],
         description="Kafka topics to consume.",
     )
 
     produce_topic: str = Field(
-        default="onex.evt.omnibase-infra.savings-estimated.v1",
+        default=TOPIC_SAVINGS_ESTIMATED,
         description="Kafka topic to produce savings estimates.",
     )
 

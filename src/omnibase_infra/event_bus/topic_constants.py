@@ -594,6 +594,14 @@ Consumer: ServiceSavingsEstimator (for catch-based savings attribution)
 Ticket: OMN-5545
 """
 
+TOPIC_HOOK_CONTEXT_INJECTED: Final[str] = "onex.evt.omniclaude.hook-context-injected.v1"
+"""Hook context injection events from omniclaude UserPromptSubmit hooks.
+
+Producer: omniclaude (hook context injector)
+Consumer: ServiceSavingsEstimator (for context-injection savings attribution)
+Ticket: OMN-5550
+"""
+
 # Grouped constants for wiring health monitoring
 WIRING_HEALTH_MONITORED_TOPICS: Final[tuple[str, ...]] = (
     TOPIC_SESSION_OUTCOME_CURRENT,
@@ -632,6 +640,7 @@ __all__ = [
     # Savings Estimation Topics (OMN-5545)
     "TOPIC_SAVINGS_ESTIMATED",
     "TOPIC_VALIDATOR_CATCH",
+    "TOPIC_HOOK_CONTEXT_INJECTED",
     # Wiring Health Topics
     "TOPIC_INJECTION_AGENT_MATCH",
     "TOPIC_INJECTION_CONTEXT_UTILIZATION",
