@@ -49,6 +49,7 @@ import sys
 import threading
 import time
 import urllib.request
+import uuid
 from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
@@ -651,6 +652,391 @@ class PostgresErrorTailer(threading.Thread):
 
 
 # ---------------------------------------------------------------------------
+# Runtime error emitter (OMN-5649)
+# ---------------------------------------------------------------------------
+# Classifies ERROR/CRITICAL/FATAL lines from application containers and emits
+# structured events to Kafka topic TOPIC_RUNTIME_ERROR_V1. Every classified
+# error is emitted (no dedup at emission layer). Dedup happens at the triage
+# layer (NodeRuntimeErrorTriageEffect). Recurrence count is tracked via Valkey.
+
+_TOPIC_RUNTIME_ERROR_V1 = "onex.evt.omnibase-infra.runtime-error.v1"
+
+# Error classification regexes
+_RE_SCHEMA_MISMATCH = re.compile(
+    r"column.*does not exist|relation.*does not exist|undefined column",
+    re.IGNORECASE,
+)
+_RE_MISSING_TOPIC = re.compile(
+    r"MISSING_TOPIC|topic.*not in broker|Required topic.*not in broker",
+    re.IGNORECASE,
+)
+_RE_CONNECTION = re.compile(
+    r"ConnectionRefused|ConnectionError|connection.*refused",
+    re.IGNORECASE,
+)
+_RE_TIMEOUT = re.compile(
+    r"TimeoutError|timed out|deadline exceeded",
+    re.IGNORECASE,
+)
+_RE_OOM = re.compile(
+    r"MemoryError|OOMKilled|Cannot allocate memory",
+    re.IGNORECASE,
+)
+_RE_AUTHENTICATION = re.compile(
+    r"AuthenticationError|permission denied|access denied",
+    re.IGNORECASE,
+)
+
+# Logger family extraction: "... omnibase_infra.event_bus.foo: message"
+_RE_LOGGER = re.compile(r"[\[\s]?(\w+(?:\.\w+){1,})\s*[:\]]")
+
+# Exception type extraction: "SomeError: message" or "raise SomeError"
+_RE_EXCEPTION_TYPE = re.compile(r"(\w+(?:Error|Exception|Failure))\b")
+
+# Missing topic name extraction
+_RE_MISSING_TOPIC_NAME = re.compile(
+    r"(?:topic|Required topic)\s+['\"]([^'\"]+)['\"]",
+    re.IGNORECASE,
+)
+
+# Missing relation/column name extraction
+_RE_MISSING_RELATION = re.compile(
+    r'(?:column|relation)\s+"([^"]+)"',
+    re.IGNORECASE,
+)
+
+# Timestamp extraction from container log lines
+# Matches: "2026-03-21 13:22:42" or "2026-03-21T13:22:42"
+_RE_LOG_TIMESTAMP = re.compile(r"(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})")
+
+# Severity mapping: category -> base severity
+_SEVERITY_MAP: dict[str, str] = {
+    "OOM": "CRITICAL",
+    "SCHEMA_MISMATCH": "HIGH",
+    "MISSING_TOPIC": "HIGH",
+    "AUTHENTICATION": "HIGH",
+    "CONNECTION": "MEDIUM",
+    "TIMEOUT": "MEDIUM",
+    "UNKNOWN": "MEDIUM",
+}
+
+
+def _classify_runtime_error(line: str) -> str:
+    """Classify a runtime error line into a category string."""
+    if _RE_OOM.search(line):
+        return "OOM"
+    if _RE_SCHEMA_MISMATCH.search(line):
+        return "SCHEMA_MISMATCH"
+    if _RE_MISSING_TOPIC.search(line):
+        return "MISSING_TOPIC"
+    if _RE_AUTHENTICATION.search(line):
+        return "AUTHENTICATION"
+    if _RE_CONNECTION.search(line):
+        return "CONNECTION"
+    if _RE_TIMEOUT.search(line):
+        return "TIMEOUT"
+    return "UNKNOWN"
+
+
+def _compute_runtime_fingerprint(
+    container: str, error_category: str, error_message: str
+) -> str:
+    """Return full 64-char SHA-256 hex fingerprint."""
+    parts = f"{container}:{error_category}:{error_message}"
+    return hashlib.sha256(parts.encode()).hexdigest()
+
+
+def _extract_logger_family(line: str) -> str:
+    """Extract the logger name from a log line, or return 'unknown'."""
+    m = _RE_LOGGER.search(line)
+    return m.group(1) if m else "unknown"
+
+
+def _extract_exception_type(line: str) -> str | None:
+    """Extract Python exception class name if present."""
+    m = _RE_EXCEPTION_TYPE.search(line)
+    return m.group(1) if m else None
+
+
+def _extract_log_timestamp(line: str) -> str | None:
+    """Extract ISO timestamp from log line, or return None."""
+    m = _RE_LOG_TIMESTAMP.search(line)
+    return m.group(1) if m else None
+
+
+class RuntimeErrorEmitter:
+    """Classifies runtime container errors and emits events to Kafka.
+
+    Every classified error is emitted (no dedup suppression). Recurrence
+    count is tracked via Valkey and included in the event payload.
+    """
+
+    def __init__(self, dry_run: bool) -> None:
+        self.dry_run = dry_run
+        from typing import Any
+
+        self._producer: Any = None
+        self._valkey: Any = None
+        self._init_ok = self._init_clients()
+        self._environment = os.environ.get("ONEX_ENVIRONMENT", "local")
+
+    def _init_clients(self) -> bool:
+        """Attempt to initialise Kafka producer and Valkey client."""
+        kafka_servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "")
+        if not kafka_servers:
+            print(
+                "[monitor] KAFKA_BOOTSTRAP_SERVERS not set; "
+                "runtime error Kafka emission disabled",
+                file=sys.stderr,
+            )
+            return False
+
+        try:
+            import confluent_kafka
+
+            self._producer = confluent_kafka.Producer(
+                {
+                    "bootstrap.servers": kafka_servers,
+                    "acks": "all",
+                    "enable.idempotence": "true",
+                    "retries": 5,
+                    "request.timeout.ms": 10000,
+                }
+            )
+        except ImportError:
+            print(
+                "[monitor] confluent-kafka not installed; "
+                "runtime error Kafka emission disabled",
+                file=sys.stderr,
+            )
+            return False
+        except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
+            print(
+                f"[monitor] Failed to create Kafka producer for runtime errors: {exc}",
+                file=sys.stderr,
+            )
+            return False
+
+        try:
+            import redis
+
+            valkey_host = os.environ.get("VALKEY_HOST", "localhost")
+            valkey_port = int(os.environ.get("VALKEY_PORT", "16379"))
+            valkey_db = int(os.environ.get("VALKEY_DB", "0"))
+            valkey_password = os.environ.get("VALKEY_PASSWORD")
+            self._valkey = redis.Redis(
+                host=valkey_host,
+                port=valkey_port,
+                db=valkey_db,
+                password=valkey_password,
+                socket_timeout=5,
+                decode_responses=True,
+            )
+        except ImportError:
+            print(
+                "[monitor] redis library not installed; "
+                "runtime error recurrence tracking disabled (emission still active)",
+                file=sys.stderr,
+            )
+            # Valkey is optional for emission — just tracking recurrence count
+        except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
+            print(
+                f"[monitor] Failed to create Valkey client for runtime errors: {exc}",
+                file=sys.stderr,
+            )
+
+        return True
+
+    def _get_recurrence_count(self, fingerprint: str) -> int:
+        """Get and increment recurrence count for fingerprint in Valkey."""
+        dedup_key = f"runtime_err:{fingerprint}"
+        try:
+            if self._valkey is not None:
+                count = self._valkey.incr(dedup_key)
+                # Set TTL on first occurrence (1 hour window)
+                if count == 1:
+                    self._valkey.expire(dedup_key, 3600)
+                return int(count)
+        except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
+            print(
+                f"[monitor] Valkey recurrence tracking failed: {exc}",
+                file=sys.stderr,
+            )
+        return 1
+
+    def maybe_emit(self, container: str, line: str) -> None:
+        """Classify and emit a runtime error event to Kafka."""
+        if not self._init_ok:
+            return
+
+        # Classify
+        error_category = _classify_runtime_error(line)
+        error_message = line.strip()
+        fingerprint = _compute_runtime_fingerprint(
+            container, error_category, error_message
+        )
+
+        # Extract metadata
+        logger_family = _extract_logger_family(line)
+        exception_type = _extract_exception_type(line)
+        log_timestamp = _extract_log_timestamp(line)
+
+        # Determine log level from the line
+        log_level = "ERROR"
+        if "CRITICAL" in line:
+            log_level = "CRITICAL"
+        elif "FATAL" in line:
+            log_level = "FATAL"
+
+        # Map severity
+        severity = _SEVERITY_MAP.get(error_category, "MEDIUM")
+
+        # Get recurrence count
+        recurrence = self._get_recurrence_count(fingerprint)
+
+        # Build timestamps
+        now = datetime.now(UTC)
+        first_seen = now
+        if log_timestamp:
+            try:
+                first_seen = datetime.fromisoformat(
+                    log_timestamp.replace(" ", "T")
+                ).replace(tzinfo=UTC)
+            except ValueError:
+                first_seen = now
+
+        # Generate event_id as UUID5 from fingerprint + detected_at
+
+        event_id = str(
+            uuid.uuid5(
+                uuid.UUID("12345678-1234-5678-1234-567812345678"),
+                f"{fingerprint}:{now.isoformat()}",
+            )
+        )
+
+        # Category-specific parsed fields
+        missing_topic_name = None
+        missing_relation_name = None
+        if error_category == "MISSING_TOPIC":
+            m = _RE_MISSING_TOPIC_NAME.search(line)
+            if m:
+                missing_topic_name = m.group(1)
+        elif error_category == "SCHEMA_MISMATCH":
+            m = _RE_MISSING_RELATION.search(line)
+            if m:
+                missing_relation_name = m.group(1)
+
+        event_payload = {
+            "event_id": event_id,
+            "container": container,
+            "source_service": container,
+            "logger_family": logger_family,
+            "log_level": log_level,
+            "error_category": error_category,
+            "severity": severity,
+            "error_message": error_message,
+            "exception_type": exception_type,
+            "stack_trace": None,
+            "fingerprint": fingerprint,
+            "detected_at": now.isoformat(),
+            "first_seen_at": first_seen.isoformat(),
+            "environment": self._environment,
+            "recurrence_count_at_emit": recurrence,
+            "raw_line": line,
+            "missing_topic_name": missing_topic_name,
+            "missing_relation_name": missing_relation_name,
+        }
+
+        if self.dry_run:
+            print(f"[DRY RUN] Would emit runtime error event for {container}:")
+            print(json.dumps(event_payload, indent=2))
+            return
+
+        # Kafka publish
+        try:
+            payload_bytes = json.dumps(event_payload).encode("utf-8")
+            if self._producer is not None:
+                self._producer.produce(
+                    topic=_TOPIC_RUNTIME_ERROR_V1,
+                    value=payload_bytes,
+                    key=fingerprint.encode("utf-8"),
+                )
+                self._producer.flush(timeout=10)
+                print(
+                    f"[monitor] Emitted runtime error event "
+                    f"(fingerprint={fingerprint[:16]}..., category={error_category}) "
+                    f"from {container}"
+                )
+        except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
+            print(
+                f"[monitor] Kafka publish failed for runtime error from {container}: {exc}",
+                file=sys.stderr,
+            )
+
+
+class RuntimeErrorTailer(threading.Thread):
+    """Tails application container log streams and classifies runtime errors.
+
+    Runs as a daemon thread alongside the existing ContainerTailer instances.
+    Watches for ERROR/CRITICAL/FATAL lines in application (non-postgres)
+    containers and delegates to RuntimeErrorEmitter for Kafka emission.
+    """
+
+    def __init__(
+        self,
+        container: str,
+        dry_run: bool,
+        stop_event: threading.Event,
+        emitter: RuntimeErrorEmitter | None = None,
+    ) -> None:
+        super().__init__(name=f"rt-err-{container}", daemon=True)
+        self.container = container
+        self.dry_run = dry_run
+        self.stop_event = stop_event
+        self._emitter = emitter or RuntimeErrorEmitter(dry_run)
+
+    def run(self) -> None:
+        cmd = [
+            _DOCKER,
+            "logs",
+            "--follow",
+            "--since",
+            "0s",
+            "--timestamps",
+            self.container,
+        ]
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
+            print(
+                f"[monitor] Cannot tail runtime errors for {self.container}: {exc}",
+                file=sys.stderr,
+            )
+            return
+
+        print(f"[monitor] Watching runtime errors: {self.container}")
+
+        try:
+            for line in proc.stdout:  # type: ignore[union-attr]
+                if self.stop_event.is_set():
+                    break
+                line = line.rstrip()
+
+                # Only classify lines that match the ERROR pattern and
+                # are not false positives
+                if ERROR_PATTERN.search(line) and not IGNORE_PATTERN.search(line):
+                    self._emitter.maybe_emit(self.container, line)
+        finally:
+            proc.terminate()
+            print(f"[monitor] Stopped watching runtime errors: {self.container}")
+
+
+# ---------------------------------------------------------------------------
 # Restart watcher (OMN-3596)
 # ---------------------------------------------------------------------------
 
@@ -1096,6 +1482,8 @@ class LogMonitor:
         self.dry_run = dry_run
         self._tailers: dict[str, ContainerTailer] = {}
         self._pg_tailers: dict[str, PostgresErrorTailer] = {}
+        self._rt_tailers: dict[str, RuntimeErrorTailer] = {}
+        self._rt_emitter = RuntimeErrorEmitter(dry_run)
         self._lock = threading.Lock()
 
     def _get_project_containers(self) -> list[str]:
@@ -1153,10 +1541,33 @@ class LogMonitor:
             tailer.start()
             self._pg_tailers[container] = tailer
 
+    def _is_postgres_container(self, container: str) -> bool:
+        """Return True if container is a postgres container (not an app container)."""
+        return container == "omnibase-infra-postgres" or container.startswith(
+            "omnibase-infra-postgres-"
+        )
+
+    def _start_rt_tailer(self, container: str) -> None:
+        """Start a RuntimeErrorTailer for application containers (not postgres)."""
+        if self._is_postgres_container(container):
+            return  # Postgres errors are handled by PostgresErrorTailer
+        with self._lock:
+            existing = self._rt_tailers.get(container)
+            if existing and existing.is_alive():
+                return
+            stop_event = threading.Event()
+            tailer = RuntimeErrorTailer(
+                container, self.dry_run, stop_event, self._rt_emitter
+            )
+            tailer.start()
+            self._rt_tailers[container] = tailer
+
     def run(self) -> None:
         # Start tailers for already-running project containers
         for container in self._get_project_containers():
             self._start_tailer(container)
+            # Also start runtime error tailers for app containers (OMN-5649)
+            self._start_rt_tailer(container)
 
         # Start postgres error tailers for any running postgres containers
         for pg_container in _discover_postgres_containers():
@@ -1211,10 +1622,10 @@ class LogMonitor:
                 if action == "start" and container in current:
                     self._start_tailer(container)
                     # Also start a postgres error tailer if this is a postgres container
-                    if container == "omnibase-infra-postgres" or container.startswith(
-                        "omnibase-infra-postgres-"
-                    ):
+                    if self._is_postgres_container(container):
                         self._start_pg_tailer(container)
+                    # Start runtime error tailer for app containers (OMN-5649)
+                    self._start_rt_tailer(container)
                 elif action == "die" and container in project_containers:
                     self._stop_tailer(container)
 
