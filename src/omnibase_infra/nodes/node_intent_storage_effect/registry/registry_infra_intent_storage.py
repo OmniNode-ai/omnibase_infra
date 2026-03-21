@@ -61,7 +61,7 @@ if TYPE_CHECKING:
 
 __all__ = ["RegistryInfraIntentStorage"]
 
-# TODO(ServiceRegistry-v2): Migrate to container.service_registry once v2.0
+# TODO(OMN-5764): Migrate to container.service_registry once v2.0
 # supports dict-style access for multi-handler routing. Current module-level
 # storage is a workaround for v1.0 limitations. See docstring Note section.
 #

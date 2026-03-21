@@ -656,7 +656,7 @@ class HandlerContractSource(ProtocolContractSource):
         # Validate against ModelHandlerContract
         contract = ModelHandlerContract.model_validate(raw_data)
 
-        # TODO [OMN-1420]: Extract handler_class from ModelHandlerContract
+        # TODO(OMN-1420): Extract handler_class from ModelHandlerContract
         #
         # handler_contract.yaml files include a `handler_class` field for dynamic import
         # (e.g., "omnibase_infra.handlers.handler_consul.HandlerConsul"), but
