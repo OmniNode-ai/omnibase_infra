@@ -42,8 +42,8 @@ healthcheck:
   test: curl -sf http://localhost:8085/health
   interval_s: 30
   timeout_s: 10
-  retries: 3
-  start_period_s: 90
+  retries: 5
+  start_period_s: 120
 volumes:
   - effects_logs:/app/logs
   - effects_data:/app/data
