@@ -9,7 +9,7 @@ omnibase_core (created in PR #575). It exists here as a local schema so
 the infra publisher can operate independently of the core package release
 cycle.
 
-TODO(OMN-2895): Replace this local model with the canonical import once
+TODO(OMN-5739): Replace this local model with the canonical import once
     omnibase_core PR #575 merges and a release containing
     ``omnibase_core.models.routing.model_resolution_event.ModelResolutionEvent``
     is available as a dependency.
@@ -54,7 +54,7 @@ class ModelResolutionEventLocal(BaseModel):
     This model represents a resolution decision audit event, recording the
     full context and outcome of a tiered dependency resolution attempt.
 
-    TODO(OMN-2895): Replace with ``ModelResolutionEvent`` from omnibase_core
+    TODO(OMN-5739): Replace with ``ModelResolutionEvent`` from omnibase_core
         once PR #575 merges and is available as a dependency.
     """
 

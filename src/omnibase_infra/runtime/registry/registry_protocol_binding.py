@@ -139,7 +139,7 @@ class RegistryProtocolBinding:
     "http", "db", "kafka") to handler classes that implement the ProtocolContainerAware
     protocol.
 
-    TODO(OMN-40): Migrate handler signature from tuple[str, str] to structured model.
+    TODO(OMN-5733): Migrate handler signature from tuple[str, str] to structured model.
         Current implementation uses bare strings for protocol types. Should migrate
         to ModelHandlerKey(handler_type: str, handler_kind: str) for consistency
         with RegistryPolicy's ModelPolicyKey pattern and improved type safety.
