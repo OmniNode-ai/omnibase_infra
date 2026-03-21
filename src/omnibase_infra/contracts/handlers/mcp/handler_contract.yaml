@@ -41,6 +41,17 @@ descriptor:
   concurrency_policy: parallel_ok
   isolation_policy: none
   observability_level: standard
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "mcp"
+      handler:
+        name: "HandlerMCP"
+        module: "omnibase_infra.handlers.handler_mcp"
+      supported_operations:
+        - "mcp.list_tools"
+        - "mcp.call_tool"
+        - "mcp.describe"
 capability_outputs:
   - mcp.list_tools
   - mcp.call_tool
