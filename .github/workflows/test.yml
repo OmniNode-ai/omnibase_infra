@@ -385,6 +385,42 @@ jobs:
             --extra-contracts-dir ../omniclaude/src/omniclaude/nodes \
             --warn-only
 
+  # Contract topic parity gate -- CI gate for provisioner-vs-constant drift (OMN-5636)
+  # Ensures ALL_PROVISIONED_SUFFIXES entries have a contract.yaml declaration
+  # or are explicitly allowlisted. Prevents startup failures from orphaned topics.
+  contract-topic-parity:
+    name: Contract Topic Parity (OMN-5636)
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+
+      - name: Check contract topic parity
+        run: |
+          echo "================================================================"
+          echo "Contract Topic Parity Gate (OMN-5636)"
+          echo "Checks ALL_PROVISIONED_SUFFIXES vs contract.yaml declarations"
+          echo "================================================================"
+          uv run python scripts/check_contract_topic_parity.py
+
   # Schema handshake gate -- validates producer->consumer Pydantic round-trip
   # across every registered Kafka boundary pair (OMN-3411).
   # Uses --changed-only in CI: only checks pairs whose models were touched by the PR.
@@ -534,7 +570,7 @@ jobs:
   # Split strategy: 9265 tests / 10 = ~927 tests per split (~3-4 min each)
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/10)
-    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness]
+    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, contract-topic-parity, arch-invariants, schema-handshake, plugin-env-service-completeness]
     # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
     runs-on: >-
       ${{
@@ -690,7 +726,7 @@ jobs:
         && fromJSON('["self-hosted","omnibase-ci"]')
         || fromJSON('["ubuntu-latest"]')
       }}
-    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check]
+    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, contract-topic-parity, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check]
     if: always()
 
     steps:
@@ -705,6 +741,7 @@ jobs:
           topicenumdrift="${{ needs.topic-enum-drift.result }}"
           topicnaminglint="${{ needs.topic-naming-lint.result }}"
           topicdriftcheck="${{ needs.topic-drift-check.result }}"
+          contracttopicparity="${{ needs.contract-topic-parity.result }}"
           archinvariants="${{ needs.arch-invariants.result }}"
           schemahandshake="${{ needs.schema-handshake.result }}"
           migrationintegration="${{ needs.migration-integration.result }}"
@@ -719,6 +756,7 @@ jobs:
              [[ "$topicenumdrift" == "success" ]] && \
              [[ "$topicnaminglint" == "success" ]] && \
              [[ "$topicdriftcheck" == "success" ]] && \
+             [[ "$contracttopicparity" == "success" ]] && \
              [[ "$archinvariants" == "success" ]] && \
              [[ "$schemahandshake" == "success" ]] && \
              [[ "$migrationintegration" == "success" ]] && \
@@ -733,6 +771,7 @@ jobs:
             echo "Topic Enum Drift Check: Passed"
             echo "Topic Naming Lint: Passed"
             echo "Topic Drift Check: Passed"
+            echo "Contract Topic Parity: Passed"
             echo "Arch Invariants: Passed"
             echo "Kafka Schema Handshake: Passed"
             echo "Migration Integration: Passed"
@@ -749,6 +788,7 @@ jobs:
             echo "Topic Enum Drift Check: $topicenumdrift"
             echo "Topic Naming Lint: $topicnaminglint"
             echo "Topic Drift Check: $topicdriftcheck"
+            echo "Contract Topic Parity: $contracttopicparity"
             echo "Arch Invariants: $archinvariants"
             echo "Kafka Schema Handshake: $schemahandshake"
             echo "Migration Integration: $migrationintegration"
