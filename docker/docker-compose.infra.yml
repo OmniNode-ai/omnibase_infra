@@ -591,6 +591,12 @@ services:
   # ONEX Runtime - Effects Handler (Runtime Profile)
   # ==========================================================================
   # Handles effect nodes for external service interactions.
+  # OMN-5637: Effects has an extended start_period (120s) and retries (5)
+  # because plugin initialization (1950+ Kafka consumer subscriptions,
+  # intelligence DB ownership, schema fingerprint, message type registration)
+  # must complete before /health returns 200.
+  # Unhealthy detection latency = start_period + (interval * retries) = 120s + 150s = 270s.
+  # AUTOHEAL_START_PERIOD (180s) must exceed start_period to avoid premature restarts.
   runtime-effects:
     !!merge <<: *runtime-base
     container_name: omninode-runtime-effects
@@ -618,8 +624,8 @@ services:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 90s
+      retries: 5
+      start_period: 120s
     labels:
       - "com.omninode.service=runtime-effects"
       - "com.omninode.layer=runtime"
