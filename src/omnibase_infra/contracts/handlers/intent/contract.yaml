@@ -2,17 +2,19 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
 # Contract for Intent Handler - Graph-based intent storage operations
+handler_id: effect.intent.handler
 name: "handler_intent"
-node_type: "EFFECT_GENERIC"
 description: "Intent handler wrapping HandlerGraph for intent-specific graph operations (DEMO)"
 contract_version:
   major: 1
   minor: 0
   patch: 0
-node_version:
-  major: 0
-  minor: 1
-  patch: 0
+descriptor:
+  node_archetype: effect
+  purity: side_effecting
+  idempotent: false
+  timeout_ms: 30000
+  concurrency_policy: serialized
 input_model:
   name: "ModelEventEnvelope"
   module: "omnibase_core.models.events.model_event_envelope"
@@ -56,7 +58,6 @@ operation_bindings:
 activation:
   optional: false
 metadata:
-  handler_id: "intent-handler"
   handler_type: "intent_handler"
   handler_category: "effect"
   transport_type: "graph"

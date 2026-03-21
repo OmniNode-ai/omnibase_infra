@@ -2,17 +2,19 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
 # Contract for HTTP Handler - REST API operations
+handler_id: effect.http.handler
 name: "handler_http"
-node_type: "EFFECT_GENERIC"
 description: "HTTP REST handler for GET and POST operations using httpx async client"
 contract_version:
   major: 1
   minor: 0
   patch: 0
-node_version:
-  major: 0
-  minor: 1
-  patch: 0
+descriptor:
+  node_archetype: effect
+  purity: side_effecting
+  idempotent: false
+  timeout_ms: 30000
+  concurrency_policy: concurrent
 input_model:
   name: "ModelEventEnvelope"
   module: "omnibase_core.models.events.model_event_envelope"
@@ -59,7 +61,6 @@ operation_bindings:
 activation:
   optional: false
 metadata:
-  handler_id: "http-handler"
   handler_type: "infra_handler"
   handler_category: "effect"
   transport_type: "http"
