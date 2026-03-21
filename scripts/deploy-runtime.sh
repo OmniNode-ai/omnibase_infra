@@ -837,11 +837,15 @@ sync_files() {
     rsync -a --delete \
         "${repo_root}/src/" "${deploy_target}/src/"
 
-    # 3. Contracts
-    log_info "Syncing contracts/..."
-    log_cmd "rsync -a --delete contracts/ -> deployed"
-    rsync -a --delete \
-        "${repo_root}/contracts/" "${deploy_target}/contracts/"
+    # 3. Contracts (if directory exists)
+    if [[ -d "${repo_root}/contracts/" ]]; then
+        log_info "Syncing contracts/..."
+        log_cmd "rsync -a --delete contracts/ -> deployed"
+        rsync -a --delete \
+            "${repo_root}/contracts/" "${deploy_target}/contracts/"
+    else
+        log_info "No contracts/ directory present, skipping contracts sync."
+    fi
 
     # 4. Docker files -- with preserve allowlist
     #    .env, .env.local, certs/, overrides/ survive --delete
@@ -858,6 +862,16 @@ sync_files() {
         --exclude='/certs/' \
         --exclude='/overrides/' \
         "${repo_root}/docker/" "${deploy_target}/docker/"
+
+    # 5. Migration scripts (bind-mounted by docker-compose.infra.yml)
+    log_info "Syncing migration scripts..."
+    mkdir -p "${deploy_target}/scripts"
+    rsync -a \
+        --include='run-forward-migrations.sh' \
+        --include='check_migrations_complete.sh' \
+        --include='run-intelligence-migrations.sh' \
+        --exclude='*' \
+        "${repo_root}/scripts/" "${deploy_target}/scripts/"
 
     log_info "Sync complete."
 }
@@ -1120,6 +1134,11 @@ build_images() {
         env_file_args=(--env-file "${deploy_target}/docker/.env")
     fi
 
+    # Build timeout in seconds (default: 15 minutes). Prevents the known issue
+    # where `docker compose build` hangs indefinitely after images are built.
+    # Override via DOCKER_BUILD_TIMEOUT_SECONDS env var. (OMN-5462)
+    local build_timeout="${DOCKER_BUILD_TIMEOUT_SECONDS:-900}"
+
     local cmd=(
         docker compose
         -p "${compose_project}"
@@ -1127,6 +1146,7 @@ build_images() {
         ${env_file_args[@]+"${env_file_args[@]}"}
         --profile "${COMPOSE_PROFILE}"
         build
+        --progress=plain
         --build-arg "VCS_REF=${git_sha}"
         --build-arg "BUILD_DATE=${build_date}"
         --build-arg "RUNTIME_SOURCE_HASH=${git_sha}"
@@ -1134,11 +1154,19 @@ build_images() {
     )
 
     log_info "Building images with VCS_REF=${git_sha} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
+    log_info "Build timeout: ${build_timeout}s (set DOCKER_BUILD_TIMEOUT_SECONDS to override)"
     log_cmd "${cmd[*]}"
 
-    "${cmd[@]}"
-
-    log_info "Image build complete."
+    # Use timeout to prevent indefinite hangs after build completes (OMN-5462).
+    # Exit code 124 = timeout fired; we treat this as success if images exist.
+    if timeout "${build_timeout}" "${cmd[@]}"; then
+        log_info "Image build complete."
+    elif [[ $? -eq 124 ]]; then
+        log_warn "Build timed out after ${build_timeout}s — images may still be usable. Continuing."
+    else
+        log_error "Image build failed."
+        return 1
+    fi
 }
 
 # =============================================================================

@@ -39,6 +39,14 @@ output_model:
   name: "ModelLlmInferenceResponse"
   module: "omnibase_infra.models.llm"
   description: "Output model containing inference result, usage, and tracing metadata."
+# Feature Flags [OMN-5584]
+feature_flags:
+  - name: local_inference_pipeline
+    description: "Enable local LLM inference pipeline"
+    default_value: false
+    env_var: ENABLE_LOCAL_INFERENCE_PIPELINE
+    category: intelligence
+    owner: omnibase_infra
 # =============================================================================
 # HANDLER ROUTING (Declarative Handler Dispatch)
 # =============================================================================

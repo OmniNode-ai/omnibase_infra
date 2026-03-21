@@ -73,6 +73,8 @@ from pydantic import BaseModel, ValidationError
 
 from omnibase_core.errors import OnexError
 from omnibase_core.types import JsonType
+from omnibase_infra.event_bus.consumer_health_emitter import ConsumerHealthEmitter
+from omnibase_infra.event_bus.mixin_consumer_health import MixinConsumerHealth
 from omnibase_infra.services.observability.agent_actions.config import (
     ConfigAgentActionsConsumer,
 )
@@ -497,7 +499,7 @@ class ConsumerMetrics:
 # =============================================================================
 
 
-class AgentActionsConsumer:
+class AgentActionsConsumer(MixinConsumerHealth):
     """Async Kafka consumer for agent observability events.
 
     Consumes events from multiple observability topics and persists them
@@ -564,6 +566,8 @@ class AgentActionsConsumer:
 
         # Dead Letter Queue producer (Phase 2 - OMN-1768)
         self._dlq_producer: AIOKafkaProducer | None = None
+        # Dedicated health producer when DLQ is disabled (OMN-5523)
+        self._health_producer: AIOKafkaProducer | None = None
 
         # Health check server
         self._health_app: web.Application | None = None
@@ -697,6 +701,8 @@ class AgentActionsConsumer:
                 auto_offset_reset=self._config.auto_offset_reset,
                 enable_auto_commit=False,  # Manual commits for at-least-once
                 max_poll_records=self._config.batch_size,
+                session_timeout_ms=self._config.session_timeout_ms,
+                heartbeat_interval_ms=self._config.heartbeat_interval_ms,
             )
 
             await self._consumer.start()
@@ -730,6 +736,24 @@ class AgentActionsConsumer:
 
             self._running = True
             self._shutdown_event.clear()
+
+            # Initialize consumer health emitter (OMN-5523)
+            if ConsumerHealthEmitter.is_enabled():
+                # Use DLQ producer if available, otherwise create dedicated one
+                health_prod = self._dlq_producer
+                if health_prod is None:
+                    self._health_producer = AIOKafkaProducer(
+                        bootstrap_servers=self._config.kafka_bootstrap_servers,
+                    )
+                    await self._health_producer.start()
+                    health_prod = self._health_producer
+                self._init_health_emitter(
+                    health_prod,
+                    consumer_identity="agent-actions-consumer",
+                    consumer_group=self._config.kafka_group_id,
+                    topic=",".join(self._config.topics),
+                    service_label="AgentActionsConsumer",
+                )
 
             logger.info(
                 "AgentActionsConsumer started",
@@ -814,6 +838,18 @@ class AgentActionsConsumer:
             self._health_runner = None
 
         self._health_app = None
+
+        # Stop dedicated health producer (OMN-5523)
+        if self._health_producer is not None:
+            try:
+                await self._health_producer.stop()
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "Error stopping health producer",
+                    extra={"consumer_id": self._consumer_id},
+                )
+            finally:
+                self._health_producer = None
 
         # Stop DLQ producer (Phase 2 - OMN-1768)
         if self._dlq_producer is not None:

@@ -5,13 +5,13 @@
 # ONEX Node Contract
 # Node: NodeRuntimeErrorTriageEffect
 #
-# Consumes onex.evt.omnibase-infra.runtime-error.v1 events, classifies them,
-# attempts auto-fixes for known categories, creates Linear tickets for unknowns,
-# and emits triage results to onex.evt.omnibase-infra.error-triaged.v1.
+# Consumes onex.evt.omnibase-infra.runtime-error.v1 events and applies
+# first-match-wins triage with cross-layer correlation to consumer health.
 #
 # Related Tickets:
-#   - OMN-5650: Runtime error triage consumer
-#   - OMN-5649: Runtime error Kafka emission (hard prerequisite)
+#   - OMN-5522: Create NodeRuntimeErrorTriageEffect
+#   - OMN-5529: Runtime Health Event Pipeline (epic)
+# Contract identifiers
 name: "node_runtime_error_triage_effect"
 contract_name: "node_runtime_error_triage_effect"
 node_name: "node_runtime_error_triage_effect"
@@ -23,10 +23,13 @@ node_version:
   major: 1
   minor: 0
   patch: 0
+# Node type
 node_type: "EFFECT_GENERIC"
+# Description
 description: >
-  Effect node that consumes runtime container error events from onex.evt.omnibase-infra.runtime-error.v1, performs action-level dedup via Valkey, attempts auto-fixes for known categories (MISSING_TOPIC via rpk), creates Linear tickets for non-auto-fixable errors, and emits triage results to onex.evt.omnibase-infra.error-triaged.v1.
+  Effect node that consumes runtime error events from onex.evt.omnibase-infra.runtime-error.v1 and applies first-match-wins triage. Default rules cover aiokafka, asyncpg, and aiohttp patterns. Includes cross-layer correlation with Layer 1 consumer health incidents. Uses runtime_error_triage PostgreSQL table.
 
+# Event bus subscription
 event_bus:
   version:
     major: 1
@@ -34,29 +37,33 @@ event_bus:
     patch: 0
   subscribe_topics:
     - "onex.evt.omnibase-infra.runtime-error.v1"
-  publish_topics:
-    - "onex.evt.omnibase-infra.error-triaged.v1"
+  publish_topics: []
+# I/O models
 input_model:
   name: "ModelRuntimeErrorEvent"
-  module: "omnibase_infra.handlers.models.model_runtime_error_event"
+  module: "omnibase_infra.models.health.model_runtime_error_event"
   description: "Structured runtime error event from Kafka."
 output_model:
   name: "ModelRuntimeErrorTriageResult"
-  module: "omnibase_infra.nodes.node_runtime_error_triage_effect.model_triage_result"
-  description: "Result of the triage: auto-fixed, ticket created, or deduped."
+  module: "omnibase_infra.nodes.node_runtime_error_triage_effect.handlers.handler_runtime_error_triage"
+  description: "Result of the first-match-wins triage."
+# Handler routing
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
-    - operation: "triage_error"
+    - operation: "triage_runtime_error"
       handler:
         name: "HandlerRuntimeErrorTriage"
-        module: "omnibase_infra.nodes.node_runtime_error_triage_effect.handler_triage"
-      description: "Dedup check -> auto-fix attempt -> Linear ticket create -> emit result"
+        module: "omnibase_infra.nodes.node_runtime_error_triage_effect.handlers.handler_runtime_error_triage"
+      description: "First-match-wins triage with cross-layer correlation"
       output_fields:
+        - fingerprint
         - action
-        - action_status
-        - ticket_id
-        - auto_fix_type
+        - matched_rule
+        - incident_state
+        - occurrence_count
+        - correlated_consumer_fingerprint
+# Error handling
 error_handling:
   retry_policy:
     max_retries: 3
@@ -64,54 +71,58 @@ error_handling:
     max_delay_ms: 8000
     exponential_base: 2
     retry_on:
-      - "LINEAR_API_TIMEOUT"
-      - "LINEAR_API_CONNECTION_ERROR"
-      - "VALKEY_CONNECTION_ERROR"
+      - "DB_POOL_TIMEOUT"
   error_types:
-    - name: "LINEAR_NOT_CONFIGURED"
-      description: "LINEAR_API_KEY not set"
+    - name: "DB_POOL_UNAVAILABLE"
+      description: "asyncpg pool not available"
       recoverable: false
       retry_strategy: "none"
-    - name: "VALKEY_CONNECTION_ERROR"
-      description: "Cannot reach Valkey for dedup"
+    - name: "DB_POOL_TIMEOUT"
+      description: "asyncpg pool query timed out"
       recoverable: true
       retry_strategy: "exponential_backoff"
+# IO operations
 io_operations:
-  - operation: "triage_error"
-    description: "Triage a runtime error: dedup, auto-fix, or create ticket"
+  - operation: "triage_runtime_error"
+    description: "Apply first-match-wins triage to runtime error event"
     input_fields:
-      - event_id
-      - container
-      - error_category
-      - error_message
       - fingerprint
+      - logger_family
+      - error_category
       - severity
+      - raw_message
+      - message_template
     output_fields:
+      - fingerprint
       - action
-      - action_status
-      - ticket_id
-      - ticket_url
-      - auto_fix_type
-      - auto_fix_verified
+      - rule_name
+      - incident_state
+      - occurrence_count
+      - correlated_consumer_fingerprint
+# Dependencies
 dependencies:
-  - name: "valkey"
+  - name: "db_pool"
     type: "service"
-    description: "Valkey/Redis for action-level dedup (24h TTL)"
+    description: "asyncpg pool for runtime_error_triage table"
+    required: true
+  - name: "slack_handler"
+    type: "service"
+    description: "Slack webhook handler for notifications"
     required: false
-  - name: "linear_api_key"
-    type: "environment"
-    env_var: "LINEAR_API_KEY"
-    description: "Linear API key for ticket creation"
+  - name: "linear_handler"
+    type: "service"
+    description: "Linear API handler for ticket creation"
     required: false
+# Metadata
 metadata:
   author: "OmniNode Team"
   license: "MIT"
-  created: "2026-03-21"
-  updated: "2026-03-21"
+  created: "2026-03-19"
+  updated: "2026-03-19"
   tags:
     - effect
+    - health
     - triage
     - runtime-error
-    - auto-fix
-    - linear
-    - kafka-consumer
+    - cross-layer
+    - rule-engine

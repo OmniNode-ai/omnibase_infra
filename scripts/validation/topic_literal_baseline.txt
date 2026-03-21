@@ -2,7 +2,7 @@
 # Pre-existing violations grandfathered in on 2026-03-02 (updated 2026-03-10 for SPDX line shifts).
 # Format: <repo-relative-path>:<lineno>
 # DO NOT add new entries here — fix violations instead.
-# Total entries: 131
+# Total entries: 122
 src/omnibase_infra/cli/git_hook_relay.py:72
 src/omnibase_infra/cli/git_hook_relay.py:74
 src/omnibase_infra/cli/infra_test/introspect.py:25
@@ -50,18 +50,13 @@ src/omnibase_infra/runtime/contract_registration_event_router.py:76
 src/omnibase_infra/runtime/contract_registration_event_router.py:77
 src/omnibase_infra/runtime/service_runtime_host_process.py:4299
 src/omnibase_infra/runtime/service_runtime_host_process.py:4303
-src/omnibase_infra/services/observability/agent_actions/config.py:131
-src/omnibase_infra/services/observability/agent_actions/config.py:134
-src/omnibase_infra/services/observability/agent_actions/config.py:55
-src/omnibase_infra/services/observability/agent_actions/config.py:56
-src/omnibase_infra/services/observability/agent_actions/config.py:57
-src/omnibase_infra/services/observability/agent_actions/config.py:58
-src/omnibase_infra/services/observability/agent_actions/config.py:59
-src/omnibase_infra/services/observability/agent_actions/config.py:60
-src/omnibase_infra/services/observability/agent_actions/config.py:61
 src/omnibase_infra/services/observability/agent_actions/config.py:62
 src/omnibase_infra/services/observability/agent_actions/config.py:63
 src/omnibase_infra/services/observability/agent_actions/config.py:64
+src/omnibase_infra/services/observability/agent_actions/config.py:65
+src/omnibase_infra/services/observability/agent_actions/config.py:66
+src/omnibase_infra/services/observability/agent_actions/config.py:67
+src/omnibase_infra/services/observability/agent_actions/config.py:68
 src/omnibase_infra/services/observability/agent_actions/consumer.py:178
 src/omnibase_infra/services/observability/agent_actions/consumer.py:179
 src/omnibase_infra/services/observability/agent_actions/consumer.py:180
@@ -109,12 +104,8 @@ src/omnibase_infra/services/observability/injection_effectiveness/consumer.py:17
 src/omnibase_infra/services/observability/injection_effectiveness/consumer.py:179
 src/omnibase_infra/services/observability/llm_cost_aggregation/config.py:61
 src/omnibase_infra/services/observability/llm_cost_aggregation/config.py:63
-src/omnibase_infra/services/observability/skill_lifecycle/config.py:124
-src/omnibase_infra/services/observability/skill_lifecycle/config.py:126
-src/omnibase_infra/services/observability/skill_lifecycle/config.py:53
-src/omnibase_infra/services/observability/skill_lifecycle/config.py:54
-src/omnibase_infra/services/observability/skill_lifecycle/config.py:55
-src/omnibase_infra/services/observability/skill_lifecycle/config.py:56
+src/omnibase_infra/services/observability/skill_lifecycle/config.py:57
+src/omnibase_infra/services/observability/skill_lifecycle/config.py:58
 src/omnibase_infra/services/observability/skill_lifecycle/consumer.py:272
 src/omnibase_infra/services/observability/skill_lifecycle/consumer.py:273
 src/omnibase_infra/services/observability/skill_lifecycle/consumer.py:274

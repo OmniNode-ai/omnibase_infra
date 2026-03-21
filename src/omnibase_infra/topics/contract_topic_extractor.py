@@ -2,8 +2,17 @@
 # SPDX-License-Identifier: MIT
 """Contract-driven topic discovery for ONEX infrastructure.
 
-Scans contract.yaml files across node directories and extracts all declared
-Kafka topic subscriptions and publications. Supports two schema variants:
+Direction-aware extraction: tracks subscribe vs publish per-topic,
+needed by ``check_topic_drift.py`` and tooling that cares about
+topic directionality.
+
+Canonical topic extraction and validation lives in
+:mod:`omnibase_infra.tools.contract_topic_extractor`.  The dataclass
+models here (``NodeTopics``, ``TopicManifest``, ``ExtractedTopic``)
+additionally track subscribe/publish direction and Schema B structured
+entries (``success_topic``, ``failure_topic``).
+
+Supports two schema variants:
 
 Schema A (flat lists)::
 
@@ -35,6 +44,11 @@ Usage::
 
 .. versionadded:: 0.22.0
     OMN-5247: Initial implementation.
+
+.. versionchanged:: 0.24.0
+    OMN-5132: Consolidated with tools/ extractor; added installed-package
+    discovery via delegation to
+    :class:`~omnibase_infra.tools.contract_topic_extractor.ContractTopicExtractor`.
 """
 
 from __future__ import annotations
@@ -174,9 +188,14 @@ def _extract_topics_from_list(
 class ContractTopicExtractor:
     """Extract topic declarations from ONEX contract YAML files.
 
-    Supports both Schema A (flat string lists) and Schema B (structured dicts)
-    in ``event_bus.subscribe_topics`` and ``event_bus.publish_topics``.
-    Also extracts topics from ``input_subscriptions`` blocks.
+    Tracks subscribe vs publish direction per topic and handles Schema B
+    entries (success_topic, failure_topic).  For validated, direction-agnostic
+    topic extraction, use
+    :class:`~omnibase_infra.tools.contract_topic_extractor.ContractTopicExtractor`.
+
+    .. versionchanged:: 0.24.0
+        OMN-5132: Added ``scan_installed_packages()`` delegation to the
+        canonical tools/ extractor for installed-package discovery.
     """
 
     def extract_from_file(self, path: Path) -> NodeTopics:
@@ -251,6 +270,59 @@ class ContractTopicExtractor:
                     contract_path,
                     exc_info=True,
                 )
+
+        return manifest
+
+    def scan_installed_packages(self) -> TopicManifest:
+        """Discover contracts from approved installed packages.
+
+        Delegates to the canonical
+        :class:`~omnibase_infra.tools.contract_topic_extractor.ContractTopicExtractor`
+        for package discovery, then re-parses the discovered contract files
+        through this class's direction-aware ``extract_from_file()`` method.
+
+        Returns:
+            TopicManifest with direction-aware topics from all installed
+            approved packages.
+
+        Raises:
+            ValueError: If duplicate package discovery is detected.
+
+        .. versionadded:: 0.24.0
+            OMN-5132
+        """
+        from omnibase_infra.tools.contract_topic_extractor import (
+            _APPROVED_PACKAGES,
+        )
+        from omnibase_infra.tools.contract_topic_extractor import (
+            ContractTopicExtractor as _CanonicalExtractor,
+        )
+
+        manifest = TopicManifest()
+        canonical = _CanonicalExtractor()
+
+        for pkg_name in _APPROVED_PACKAGES:
+            contract_paths = canonical._discover_package_contracts(pkg_name)
+            if contract_paths is None:
+                continue
+
+            for contract_path in contract_paths:
+                try:
+                    node_topics = self.extract_from_file(contract_path)
+                    manifest.nodes[node_topics.node_name] = node_topics
+                except (
+                    OSError,
+                    yaml.YAMLError,
+                    KeyError,
+                    TypeError,
+                    ValueError,
+                ):
+                    logger.warning(
+                        "Failed to parse contract from package %s: %s",
+                        pkg_name,
+                        contract_path,
+                        exc_info=True,
+                    )
 
         return manifest
 

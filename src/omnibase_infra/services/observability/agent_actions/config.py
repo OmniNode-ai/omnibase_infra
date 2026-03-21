@@ -16,6 +16,10 @@ from typing import Self
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -76,6 +80,26 @@ class ConfigAgentActionsConsumer(BaseSettings):
         description="Disable auto-commit for at-least-once delivery",
     )
 
+    # Session timeout (OMN-5445)
+    session_timeout_ms: int = Field(
+        default=30000,
+        ge=6000,
+        le=300000,
+        description=(
+            "Session timeout in milliseconds. Default raised from aiokafka's 10s "
+            "to 30s to prevent rebalance storms."
+        ),
+    )
+    heartbeat_interval_ms: int = Field(
+        default=10000,
+        ge=1000,
+        le=100000,
+        description=(
+            "Heartbeat interval in milliseconds. "
+            "Kafka recommends <= session_timeout_ms / 3."
+        ),
+    )
+
     # PostgreSQL connection
     postgres_dsn: str = Field(
         description=(
@@ -131,7 +155,7 @@ class ConfigAgentActionsConsumer(BaseSettings):
 
     # Dead Letter Queue (Phase 2 hardening - OMN-1768)
     dlq_topic: str = Field(
-        default="onex.evt.omniclaude.agent-actions-dlq.v1",
+        default=SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
         description=(
             "Dead letter topic for permanently failed messages. Messages that "
             "fail validation or exceed max retry count are forwarded here. "

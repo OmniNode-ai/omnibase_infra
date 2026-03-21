@@ -30,6 +30,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumContractType, EnumRegistrationState
+from omnibase_infra.models.projection.model_projected_flag_meta import (
+    ModelProjectedFlagMeta,
+)
 from omnibase_infra.models.projection.model_sequence_info import ModelSequenceInfo
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
@@ -278,6 +281,20 @@ class ModelRegistrationProjection(BaseModel):
     correlation_id: UUID | None = Field(
         default=None,
         description="Correlation ID for distributed tracing",
+    )
+
+    # Feature flags (OMN-5578)
+    feature_flags: dict[str, bool] = Field(
+        default_factory=dict,
+        description="Current resolved flag values (name -> enabled)",
+    )
+    feature_flag_defaults: dict[str, bool] = Field(
+        default_factory=dict,
+        description="Contract-declared default flag values (name -> enabled)",
+    )
+    feature_flag_metadata: dict[str, ModelProjectedFlagMeta] = Field(
+        default_factory=dict,
+        description="Per-flag metadata for display and API responses",
     )
 
     def get_sequence_info(self) -> ModelSequenceInfo:

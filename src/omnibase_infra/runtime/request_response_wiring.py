@@ -362,6 +362,8 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
             group_id=consumer_group,
             auto_offset_reset=instance.auto_offset_reset,
             enable_auto_commit=True,
+            session_timeout_ms=30000,
+            heartbeat_interval_ms=10000,
         )
 
         rr_instance.consumer = consumer

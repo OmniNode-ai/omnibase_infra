@@ -95,6 +95,7 @@ from omnibase_infra.nodes.node_contract_registry_reducer.reducer import (
 from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
     PluginRegistration,
 )
+from omnibase_infra.observability.runtime_log_event_bridge import RuntimeLogEventBridge
 from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 from omnibase_infra.runtime.models import (
     ModelDomainPluginConfig,
@@ -618,6 +619,7 @@ async def bootstrap() -> int:
     contract_unsub_deregistered: Callable[[], Awaitable[None]] | None = None
     contract_unsub_heartbeat: Callable[[], Awaitable[None]] | None = None
     plugin_config: ModelDomainPluginConfig | None = None
+    runtime_log_bridge: RuntimeLogEventBridge | None = None
     correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
 
@@ -880,10 +882,7 @@ async def bootstrap() -> int:
                     else:
                         _skill_manifests_root = _skill_manifests_path
 
-                _contracts_dir = _get_contracts_dir()
-                _contracts_root: Path | None = (
-                    _contracts_dir if _contracts_dir.exists() else None
-                )
+                _contracts_root = _get_contracts_dir()
 
                 # Infra standalone manifests (cli/topics.yaml, services/topics.yaml)
                 _infra_src = Path(__file__).resolve().parent.parent
@@ -961,6 +960,49 @@ async def bootstrap() -> int:
                     correlation_id,
                     exc_info=True,
                 )
+
+        # 3.6. Initialize RuntimeLogEventBridge if enabled (OMN-5525)
+        # Captures ERROR/WARNING log records from allowlisted loggers and emits
+        # them as structured Kafka events. Requires a dedicated producer.
+        if use_kafka and RuntimeLogEventBridge.is_enabled() and kafka_bootstrap_servers:
+            try:
+                from aiokafka import AIOKafkaProducer as _BridgeProducer
+
+                _bridge_producer = _BridgeProducer(
+                    bootstrap_servers=kafka_bootstrap_servers,
+                )
+                await _bridge_producer.start()
+
+                runtime_log_bridge = RuntimeLogEventBridge(
+                    producer=_bridge_producer,
+                    hostname=os.environ.get("HOSTNAME", ""),
+                    service_label="onex-kernel",
+                )
+
+                # Parse allowlist from env or use defaults
+                allowlist_raw = os.environ.get(
+                    "RUNTIME_LOG_BRIDGE_ALLOWLIST",
+                    "aiokafka.consumer,asyncpg,aiohttp",
+                )
+                allowlist = [
+                    name.strip() for name in allowlist_raw.split(",") if name.strip()
+                ]
+                runtime_log_bridge.attach_to_loggers(allowlist)
+                await runtime_log_bridge.start()
+
+                logger.info(
+                    "RuntimeLogEventBridge started (loggers=%s, correlation_id=%s)",
+                    allowlist,
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — best-effort, never blocks startup
+                logger.warning(
+                    "Failed to start RuntimeLogEventBridge, continuing without it "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+                runtime_log_bridge = None
 
         # 4. Create and wire container for dependency injection
         container_start_time = time.time()
@@ -1606,6 +1648,49 @@ async def bootstrap() -> int:
         if config.name:
             runtime_config_dict["service_name"] = config.name
             runtime_config_dict["node_name"] = config.name
+
+        # 6.1 Create introspection service (OMN-5609)
+        # Wire contract data into introspection so published events include
+        # metadata.description, event_bus topics, and contract_capabilities.
+        # Without this, RuntimeHostProcess receives introspection_service=None
+        # and silently skips all introspection publishing.
+        #
+        # The registration orchestrator contract is used as the primary
+        # contract source because it is the principal node in the kernel
+        # and declares all subscribe/publish topics.
+        introspection_service = None
+        if config.name:
+            try:
+                from omnibase_infra.services.service_node_introspection import (
+                    ServiceNodeIntrospection,
+                )
+
+                # Use registration orchestrator contract (primary kernel node)
+                _registration_contract_dir = (
+                    Path(__file__).resolve().parent.parent
+                    / "nodes"
+                    / "node_registration_orchestrator"
+                )
+                introspection_service = ServiceNodeIntrospection.from_contract_dir(
+                    contracts_dir=_registration_contract_dir,
+                    event_bus=event_bus,
+                    node_name=config.name,
+                    environment=environment,
+                )
+                logger.info(
+                    "Introspection service created for node '%s' (correlation_id=%s)",
+                    config.name,
+                    correlation_id,
+                )
+            except Exception as intro_err:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "Failed to create introspection service, introspection "
+                    "will be disabled: %s (correlation_id=%s)",
+                    intro_err,
+                    correlation_id,
+                    extra={"error_type": type(intro_err).__name__},
+                )
+
         runtime = RuntimeHostProcess(
             container=container,
             event_bus=event_bus,
@@ -1621,6 +1706,13 @@ async def bootstrap() -> int:
             # legacy _on_message subscription and routes through
             # EventBusSubcontractWiring instead.
             dispatch_engine=dispatch_engine,
+            # OMN-5609: Wire introspection service so the runtime publishes
+            # introspection events with metadata, capabilities, and event_bus
+            # fields from the contract.
+            # NOTE(OMN-5609): ServiceNodeIntrospection structurally satisfies
+            # ProtocolNodeIntrospection via MixinNodeIntrospection, but mypy
+            # cannot verify structural protocol conformance across mixin chains.
+            introspection_service=introspection_service,  # type: ignore[arg-type]
         )
         runtime_create_duration = time.time() - runtime_create_start_time
         logger.debug(
@@ -2030,6 +2122,33 @@ async def bootstrap() -> int:
         contract_unsub_deregistered = None
         contract_unsub_heartbeat = None
 
+        # Stop RuntimeLogEventBridge (OMN-5525)
+        if runtime_log_bridge is not None:
+            try:
+                allowlist_raw = os.environ.get(
+                    "RUNTIME_LOG_BRIDGE_ALLOWLIST",
+                    "aiokafka.consumer,asyncpg,aiohttp",
+                )
+                allowlist = [
+                    name.strip() for name in allowlist_raw.split(",") if name.strip()
+                ]
+                runtime_log_bridge.detach_from_loggers(allowlist)
+                await runtime_log_bridge.stop()
+                # Stop the bridge's producer
+                if runtime_log_bridge._producer is not None:
+                    await runtime_log_bridge._producer.stop()
+                logger.debug(
+                    "RuntimeLogEventBridge stopped (correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — boundary: best-effort cleanup
+                logger.warning(
+                    "Error stopping RuntimeLogEventBridge (correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+            runtime_log_bridge = None
+
         # Stop health server (fast, non-blocking)
         if health_server is not None:
             try:
@@ -2182,6 +2301,18 @@ async def bootstrap() -> int:
                         sanitize_error_message(cleanup_error),
                         correlation_id,
                     )
+
+        # Cleanup RuntimeLogEventBridge (OMN-5525)
+        if runtime_log_bridge is not None:
+            try:
+                await runtime_log_bridge.stop()
+                if runtime_log_bridge._producer is not None:
+                    await runtime_log_bridge._producer.stop()
+            except Exception:  # noqa: BLE001 — boundary: best-effort cleanup
+                logger.warning(
+                    "Failed to stop RuntimeLogEventBridge during cleanup (correlation_id=%s)",
+                    correlation_id,
+                )
 
         if health_server is not None:
             try:

@@ -362,9 +362,34 @@ class ModelKafkaEventBusConfig(BaseModel):
         description=(
             "Maximum reconnect backoff in milliseconds. Caps the exponential growth of "
             "reconnect delays. Must be >= reconnect_backoff_ms. "
-            "Override via KAFKA_RECONNECT_BACKOFF_MAX_MS."
+            "Override via KAFKA_RECONNECT_BACKOFF_MAX_MS. "
+            "NOTE: Not used by aiokafka 0.11.0 (no reconnect_backoff_max_ms parameter). "
+            "Retained in config model for forward-compatibility with future aiokafka versions."
         ),
         ge=0,
+    )
+
+    # Session timeout configuration (OMN-5445)
+    session_timeout_ms: int = Field(
+        default=30000,
+        description=(
+            "Session timeout in milliseconds. Consumer is removed from the group "
+            "if no heartbeat is received within this interval. Override via "
+            "KAFKA_SESSION_TIMEOUT_MS. Default raised from aiokafka's 10s to 30s "
+            "to prevent rebalance storms."
+        ),
+        ge=6000,
+        le=300000,
+    )
+    heartbeat_interval_ms: int = Field(
+        default=10000,
+        description=(
+            "Heartbeat interval in milliseconds. Kafka recommends <= session_timeout_ms / 3. "
+            "Override via KAFKA_HEARTBEAT_INTERVAL_MS. Override users are responsible "
+            "for coherent combinations with session_timeout_ms."
+        ),
+        ge=1000,
+        le=100000,
     )
 
     @model_validator(mode="after")
@@ -389,6 +414,28 @@ class ModelKafkaEventBusConfig(BaseModel):
                 context=context,
                 parameter="reconnect_backoff_max_ms",
                 value=self.reconnect_backoff_max_ms,
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_heartbeat_session_ratio(self) -> ModelKafkaEventBusConfig:
+        """Advisory: warn if heartbeat_interval_ms > session_timeout_ms / 3.
+
+        Kafka recommends heartbeat <= session_timeout / 3 to allow enough
+        missed heartbeats before the session expires. This is advisory only
+        (logs a warning) — it does not raise.
+
+        Returns:
+            Self after validation
+        """
+        if self.heartbeat_interval_ms > self.session_timeout_ms / 3:
+            logger.warning(
+                "heartbeat_interval_ms (%d) exceeds session_timeout_ms / 3 (%d). "
+                "Kafka recommends heartbeat_interval_ms <= session_timeout_ms / 3 "
+                "to prevent unnecessary rebalances. Current session_timeout_ms=%d.",
+                self.heartbeat_interval_ms,
+                self.session_timeout_ms // 3,
+                self.session_timeout_ms,
             )
         return self
 
@@ -690,6 +737,8 @@ class ModelKafkaEventBusConfig(BaseModel):
             - KAFKA_SSL_CA_FILE -> ssl_ca_file
             - KAFKA_RECONNECT_BACKOFF_MS -> reconnect_backoff_ms
             - KAFKA_RECONNECT_BACKOFF_MAX_MS -> reconnect_backoff_max_ms
+            - KAFKA_SESSION_TIMEOUT_MS -> session_timeout_ms
+            - KAFKA_HEARTBEAT_INTERVAL_MS -> heartbeat_interval_ms
 
         Returns:
             New configuration instance with environment overrides applied
@@ -719,6 +768,8 @@ class ModelKafkaEventBusConfig(BaseModel):
             "KAFKA_SSL_CA_FILE": "ssl_ca_file",
             "KAFKA_RECONNECT_BACKOFF_MS": "reconnect_backoff_ms",
             "KAFKA_RECONNECT_BACKOFF_MAX_MS": "reconnect_backoff_max_ms",
+            "KAFKA_SESSION_TIMEOUT_MS": "session_timeout_ms",
+            "KAFKA_HEARTBEAT_INTERVAL_MS": "heartbeat_interval_ms",
         }
 
         # Integer fields for type conversion
@@ -728,6 +779,8 @@ class ModelKafkaEventBusConfig(BaseModel):
             "circuit_breaker_threshold",
             "reconnect_backoff_ms",
             "reconnect_backoff_max_ms",
+            "session_timeout_ms",
+            "heartbeat_interval_ms",
         }
 
         # Float fields for type conversion

@@ -109,3 +109,23 @@ models:
     output_cost_per_1k: 0.0
     effective_date: "2026-02-01"
     note: "Local vision model on Mac Studio M2 Ultra - zero API cost"
+  qwen3-coder-30b-a3b:
+    input_cost_per_1k: 0.0
+    output_cost_per_1k: 0.0
+    effective_date: "2026-03-19"
+    note: "Local model on RTX 5090 (port 8000) - zero API cost"
+  qwen3-14b:
+    input_cost_per_1k: 0.0
+    output_cost_per_1k: 0.0
+    effective_date: "2026-03-19"
+    note: "Local model on RTX 4090 (port 8001) - zero API cost"
+  qwen3-embedding-8b:
+    input_cost_per_1k: 0.0
+    output_cost_per_1k: 0.0
+    effective_date: "2026-03-19"
+    note: "Local embedding model on M2 Ultra (port 8100) - zero API cost"
+  deepseek-r1-distill-qwen-32b:
+    input_cost_per_1k: 0.0
+    output_cost_per_1k: 0.0
+    effective_date: "2026-03-19"
+    note: "Local model on M2 Ultra (port 8101) - zero API cost"

@@ -1,0 +1,7 @@
+name: runtime_service
+description: "Feature flags for ONEX runtime services"
+feature_flags:
+  - name: "ENABLE_RUNTIME_LOG_BRIDGE"
+    env_var: "ENABLE_RUNTIME_LOG_BRIDGE"
+    default: "false"
+    description: "Gate for runtime log-to-Kafka event bridge"

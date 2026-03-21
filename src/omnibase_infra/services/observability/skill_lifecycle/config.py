@@ -13,6 +13,10 @@ from typing import Self
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_OMNICLAUDE_SKILL_LIFECYCLE_DLQ,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -64,6 +68,26 @@ class ConfigSkillLifecycleConsumer(BaseSettings):
     enable_auto_commit: bool = Field(
         default=False,
         description="Disable auto-commit for at-least-once delivery",
+    )
+
+    # Session timeout (OMN-5445)
+    session_timeout_ms: int = Field(
+        default=30000,
+        ge=6000,
+        le=300000,
+        description=(
+            "Session timeout in milliseconds. Default raised from aiokafka's 10s "
+            "to 30s to prevent rebalance storms."
+        ),
+    )
+    heartbeat_interval_ms: int = Field(
+        default=10000,
+        ge=1000,
+        le=100000,
+        description=(
+            "Heartbeat interval in milliseconds. "
+            "Kafka recommends <= session_timeout_ms / 3."
+        ),
     )
 
     # PostgreSQL connection
@@ -121,7 +145,7 @@ class ConfigSkillLifecycleConsumer(BaseSettings):
 
     # Dead Letter Queue
     dlq_topic: str = Field(
-        default="onex.evt.omniclaude.skill-lifecycle-dlq.v1",
+        default=SUFFIX_OMNICLAUDE_SKILL_LIFECYCLE_DLQ,
         description=(
             "Dead letter topic for permanently failed skill lifecycle messages. "
             "Configure via OMNIBASE_INFRA_SKILL_LIFECYCLE_DLQ_TOPIC env var."

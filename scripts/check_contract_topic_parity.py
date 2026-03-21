@@ -258,6 +258,7 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     # --- omniclaude special/non-skill topics (need contract.yaml in omniclaude) ---
     "onex.evt.omniclaude.agent-actions-dlq.v1": "DLQ topic, no contract.yaml yet; needs omniclaude node contract | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.agent-observability-dlq.v1": "DLQ topic, no contract.yaml yet; needs omniclaude node contract | owner: jonah | expiry: 2026-06-01",
+    "onex.evt.omniclaude.skill-lifecycle-dlq.v1": "DLQ topic for skill-lifecycle consumer (OMN-5445); provisioned in platform_topic_suffixes; needs omniclaude node contract | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.audit-compression-triggered.v1": "context audit topic [OMN-5240]; produced by omniclaude, needs contract.yaml | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.audit-context-budget-exceeded.v1": "context audit topic [OMN-5240]; produced by omniclaude, needs contract.yaml | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.audit-dispatch-validated.v1": "context audit topic [OMN-5240]; produced by omniclaude, needs contract.yaml | owner: jonah | expiry: 2026-06-01",
@@ -312,13 +313,16 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omnibase-infra.wiring-health-snapshot.v1": "emitted by WiringHealthChecker service; no contract.yaml node needed — service-level emission | owner: jonah | expiry: 2026-09-01",
     # --- platform/cross-cutting topics ---
     "onex.evt.omnibase-infra.circuit-breaker.v1": "new topic (OMN-5293); publisher-only, no node contract.yaml yet | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.omnibase-infra.runtime-error.v1": "new topic (OMN-5649); emitted by monitor_logs.py RuntimeErrorEmitter; contract.yaml added in OMN-5650 | owner: jonah | expiry: 2026-09-01",
-    "onex.evt.omnibase-infra.error-triaged.v1": "new topic (OMN-5650); emitted by NodeRuntimeErrorTriageEffect; contract.yaml added in OMN-5650 | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omnibase-infra.gmail-archive-purged.v1": "pre-migration; needs contract.yaml in omnibase_infra | owner: jonah | expiry: 2026-06-01",
     "onex.evt.pattern.discovered.v1": "pre-migration; needs contract.yaml in omniintelligence | owner: jonah | expiry: 2026-06-01",
     "onex.evt.platform.resolution-decided.v1": "pre-migration; needs contract.yaml in omnibase_infra | owner: jonah | expiry: 2026-06-01",
+    "onex.evt.platform.feature-flag-changed.v1": "new topic added in OMN-5580; contract.yaml needed once consuming node is wired | owner: jonah | expiry: 2026-06-01",
     "onex.evt.platform.service-heartbeat.v1": "new topic added in OMN-5184; contract.yaml needed once consuming node is wired | owner: jonah | expiry: 2026-06-01",
     "onex.snapshot.platform.registration-snapshots.v1": "non-standard kind 'snapshot'; topic validated separately via ValidateTopicSuffix skip-list | owner: jonah | expiry: 2026-06-01",
+    # --- consumer health pipeline topics (OMN-5529) ---
+    "onex.evt.omnibase-infra.consumer-health.v1": "OMN-5515; contract.yaml will be added with NodeConsumerHealthTriageEffect in OMN-5520 | owner: jonah | expiry: 2026-06-01",
+    "onex.cmd.omnibase-infra.consumer-restart.v1": "OMN-5515; contract.yaml will be added with NodeConsumerHealthTriageEffect in OMN-5520 | owner: jonah | expiry: 2026-06-01",
+    "onex.evt.omnibase-infra.runtime-error.v1": "OMN-5517; contract.yaml will be added with NodeRuntimeErrorTriageEffect in OMN-5522 | owner: jonah | expiry: 2026-06-01",
 }
 # fmt: on
 
