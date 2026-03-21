@@ -312,6 +312,8 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omnibase-infra.wiring-health-snapshot.v1": "emitted by WiringHealthChecker service; no contract.yaml node needed — service-level emission | owner: jonah | expiry: 2026-09-01",
     # --- platform/cross-cutting topics ---
     "onex.evt.omnibase-infra.circuit-breaker.v1": "new topic (OMN-5293); publisher-only, no node contract.yaml yet | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.runtime-error.v1": "new topic (OMN-5649); emitted by monitor_logs.py RuntimeErrorEmitter; contract.yaml added in OMN-5650 | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.error-triaged.v1": "new topic (OMN-5650); emitted by NodeRuntimeErrorTriageEffect; contract.yaml added in OMN-5650 | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omnibase-infra.gmail-archive-purged.v1": "pre-migration; needs contract.yaml in omnibase_infra | owner: jonah | expiry: 2026-06-01",
     "onex.evt.pattern.discovered.v1": "pre-migration; needs contract.yaml in omniintelligence | owner: jonah | expiry: 2026-06-01",
     "onex.evt.platform.resolution-decided.v1": "pre-migration; needs contract.yaml in omnibase_infra | owner: jonah | expiry: 2026-06-01",

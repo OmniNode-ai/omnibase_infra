@@ -458,6 +458,29 @@ unambiguous that callers use this string directly rather than composing it
 with a tenant/namespace prefix.
 """
 
+# Runtime error topics (OMN-5649)
+# Used by monitor_logs.py RuntimeErrorEmitter and downstream triage consumer.
+TOPIC_RUNTIME_ERROR_V1: str = "onex.evt.omnibase-infra.runtime-error.v1"
+"""Full topic name for runtime container error events (OMN-5649).
+
+Published by the runtime error emitter in ``scripts/monitor_logs.py`` when a
+container ERROR/CRITICAL/FATAL log line is classified and emitted. Each event
+carries a ``ModelRuntimeErrorEvent`` payload (JSON-serialized).
+
+Producer: monitor_logs.py RuntimeErrorEmitter
+Consumer: NodeRuntimeErrorTriageEffect (OMN-5650)
+"""
+
+TOPIC_ERROR_TRIAGED_V1: str = "onex.evt.omnibase-infra.error-triaged.v1"
+"""Full topic name for runtime error triage result events (OMN-5650).
+
+Published by NodeRuntimeErrorTriageEffect after processing a runtime error
+event. Each event carries a ``ModelRuntimeErrorTriageResult`` payload.
+
+Producer: NodeRuntimeErrorTriageEffect
+Consumer: omnidash /runtime-errors dashboard (OMN-5654)
+"""
+
 # =============================================================================
 # OMNIBASE_INFRA DOMAIN TOPIC SPEC REGISTRY
 # =============================================================================
@@ -467,6 +490,10 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_GMAIL_ARCHIVE_PURGED, partitions=3),
     # PostgreSQL error events (3 partitions — low-throughput, error-driven)
     ModelTopicSpec(suffix=TOPIC_DB_ERROR_V1, partitions=3),
+    # Runtime container error events (6 partitions — moderate throughput, error-driven)
+    ModelTopicSpec(suffix=TOPIC_RUNTIME_ERROR_V1, partitions=6),
+    # Runtime error triage results (6 partitions — matches runtime-error partitions)
+    ModelTopicSpec(suffix=TOPIC_ERROR_TRIAGED_V1, partitions=6),
     # Baselines ROI computation results (1 partition — low-throughput, per-cohort)
     ModelTopicSpec(
         suffix=SUFFIX_BASELINES_COMPUTED,
