@@ -372,7 +372,7 @@ class ModelTopicParser:
         routing semantics.
 
         External Documentation:
-            - ONEX Topic Taxonomy: docs/architecture/TOPIC_TAXONOMY.md (TODO(OMN-981): create)
+            - ONEX Topic Taxonomy: docs/architecture/TOPIC_TAXONOMY.md
             - Environment-Aware Topics: docs/patterns/ENVIRONMENT_TOPICS.md
             - Message Categories: EnumMessageCategory in omnibase_infra.enums
     """

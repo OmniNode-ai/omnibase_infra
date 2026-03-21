@@ -1072,12 +1072,9 @@ class MessageDispatchEngine:
         # Until it is, we trust the topic category as the source of truth for routing.
         # This is safe because the topic defines the message category, and handlers
         # are registered for specific categories - any mismatch would be a caller error.
-        # TODO(OMN-934): Re-enable envelope category validation when infer_category() is available
-        #
-        # The code below is disabled until infer_category() is available:
-        # envelope_category = envelope.infer_category()
-        # if envelope_category != topic_category:
-        #     ... (category mismatch handling with structured metrics)
+        # Envelope category validation is deferred: infer_category() exists but
+        # topic category is the source of truth for routing. Handlers are registered
+        # for specific categories, so mismatch would be a caller error.
 
         # Step 3: Get routing key from event_type (primary) or payload class name (fallback)
         #

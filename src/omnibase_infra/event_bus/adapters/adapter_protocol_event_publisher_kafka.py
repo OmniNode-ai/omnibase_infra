@@ -60,8 +60,6 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InfraUnavailableError
-
-# TODO: OMN-1767 - Move ModelPublisherMetrics out of testing/ directory
 from omnibase_infra.event_bus.testing.model_publisher_metrics import (
     ModelPublisherMetrics,
 )
