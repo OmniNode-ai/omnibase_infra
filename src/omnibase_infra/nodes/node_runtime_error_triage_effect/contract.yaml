@@ -1,0 +1,117 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeRuntimeErrorTriageEffect
+#
+# Consumes onex.evt.omnibase-infra.runtime-error.v1 events, classifies them,
+# attempts auto-fixes for known categories, creates Linear tickets for unknowns,
+# and emits triage results to onex.evt.omnibase-infra.error-triaged.v1.
+#
+# Related Tickets:
+#   - OMN-5650: Runtime error triage consumer
+#   - OMN-5649: Runtime error Kafka emission (hard prerequisite)
+name: "node_runtime_error_triage_effect"
+contract_name: "node_runtime_error_triage_effect"
+node_name: "node_runtime_error_triage_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  Effect node that consumes runtime container error events from onex.evt.omnibase-infra.runtime-error.v1, performs action-level dedup via Valkey, attempts auto-fixes for known categories (MISSING_TOPIC via rpk), creates Linear tickets for non-auto-fixable errors, and emits triage results to onex.evt.omnibase-infra.error-triaged.v1.
+
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.evt.omnibase-infra.runtime-error.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.error-triaged.v1"
+input_model:
+  name: "ModelRuntimeErrorEvent"
+  module: "omnibase_infra.handlers.models.model_runtime_error_event"
+  description: "Structured runtime error event from Kafka."
+output_model:
+  name: "ModelRuntimeErrorTriageResult"
+  module: "omnibase_infra.nodes.node_runtime_error_triage_effect.model_triage_result"
+  description: "Result of the triage: auto-fixed, ticket created, or deduped."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "triage_error"
+      handler:
+        name: "HandlerRuntimeErrorTriage"
+        module: "omnibase_infra.nodes.node_runtime_error_triage_effect.handler_triage"
+      description: "Dedup check -> auto-fix attempt -> Linear ticket create -> emit result"
+      output_fields:
+        - action
+        - action_status
+        - ticket_id
+        - auto_fix_type
+error_handling:
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 1000
+    max_delay_ms: 8000
+    exponential_base: 2
+    retry_on:
+      - "LINEAR_API_TIMEOUT"
+      - "LINEAR_API_CONNECTION_ERROR"
+      - "VALKEY_CONNECTION_ERROR"
+  error_types:
+    - name: "LINEAR_NOT_CONFIGURED"
+      description: "LINEAR_API_KEY not set"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "VALKEY_CONNECTION_ERROR"
+      description: "Cannot reach Valkey for dedup"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+io_operations:
+  - operation: "triage_error"
+    description: "Triage a runtime error: dedup, auto-fix, or create ticket"
+    input_fields:
+      - event_id
+      - container
+      - error_category
+      - error_message
+      - fingerprint
+      - severity
+    output_fields:
+      - action
+      - action_status
+      - ticket_id
+      - ticket_url
+      - auto_fix_type
+      - auto_fix_verified
+dependencies:
+  - name: "valkey"
+    type: "service"
+    description: "Valkey/Redis for action-level dedup (24h TTL)"
+    required: false
+  - name: "linear_api_key"
+    type: "environment"
+    env_var: "LINEAR_API_KEY"
+    description: "Linear API key for ticket creation"
+    required: false
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-03-21"
+  updated: "2026-03-21"
+  tags:
+    - effect
+    - triage
+    - runtime-error
+    - auto-fix
+    - linear
+    - kafka-consumer
