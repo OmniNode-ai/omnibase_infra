@@ -174,7 +174,7 @@ _HANDLER_CONTRACT_PATHS: dict[str, Path] = {
     HANDLER_TYPE_GRAPH: _HANDLERS_BASE / "graph" / "contract.yaml",
     HANDLER_TYPE_HTTP: _HANDLERS_BASE / "http" / "contract.yaml",
     HANDLER_TYPE_INTENT: _HANDLERS_BASE / "intent" / "contract.yaml",
-    HANDLER_TYPE_MCP: _HANDLERS_BASE / "mcp" / "contract.yaml",
+    HANDLER_TYPE_MCP: _HANDLERS_BASE / "mcp" / "handler_contract.yaml",
 }
 
 # Known event bus kinds that can be wired via this module.
