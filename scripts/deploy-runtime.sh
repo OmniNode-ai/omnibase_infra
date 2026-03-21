@@ -837,11 +837,15 @@ sync_files() {
     rsync -a --delete \
         "${repo_root}/src/" "${deploy_target}/src/"
 
-    # 3. Contracts
-    log_info "Syncing contracts/..."
-    log_cmd "rsync -a --delete contracts/ -> deployed"
-    rsync -a --delete \
-        "${repo_root}/contracts/" "${deploy_target}/contracts/"
+    # 3. Contracts (if directory exists)
+    if [[ -d "${repo_root}/contracts/" ]]; then
+        log_info "Syncing contracts/..."
+        log_cmd "rsync -a --delete contracts/ -> deployed"
+        rsync -a --delete \
+            "${repo_root}/contracts/" "${deploy_target}/contracts/"
+    else
+        log_info "No contracts/ directory present, skipping contracts sync."
+    fi
 
     # 4. Docker files -- with preserve allowlist
     #    .env, .env.local, certs/, overrides/ survive --delete
