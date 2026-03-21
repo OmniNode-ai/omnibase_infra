@@ -2,17 +2,27 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
 # Contract for Database Handler - PostgreSQL database operations
+handler_id: effect.db.handler
 name: "handler_db"
-node_type: "EFFECT_GENERIC"
 description: "PostgreSQL database handler for query and execute operations using asyncpg"
 contract_version:
   major: 1
   minor: 0
   patch: 0
-node_version:
-  major: 0
-  minor: 1
-  patch: 0
+descriptor:
+  node_archetype: effect
+  purity: side_effecting
+  idempotent: false
+  timeout_ms: 30000
+  retry_policy:
+    enabled: true
+    max_retries: 2
+    backoff_ms: 500
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    timeout_ms: 60000
+  concurrency_policy: serialized
 input_model:
   name: "ModelEventEnvelope"
   module: "omnibase_core.models.events.model_event_envelope"
@@ -61,7 +71,6 @@ operation_bindings:
 activation:
   optional: false
 metadata:
-  handler_id: "db-handler"
   handler_type: "infra_handler"
   handler_category: "effect"
   transport_type: "database"

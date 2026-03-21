@@ -28,6 +28,10 @@ contract_version:
   patch: 0
 # Node type context - this handler is used by COMPUTE_GENERIC nodes
 node_type: "COMPUTE_GENERIC"
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
 # Description
 description: >
   Handler for architecture validation operations. Validates ONEX nodes and handlers against configurable architecture rules. Supports pluggable rules via the ProtocolArchitectureRule protocol. Returns structured validation results with violations grouped by rule and severity.
