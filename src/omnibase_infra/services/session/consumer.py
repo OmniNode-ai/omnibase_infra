@@ -69,7 +69,7 @@ from omnibase_infra.services.session.protocol_session_aggregator import (
     ProtocolSessionAggregator,
 )
 
-# TODO(OMN-1526): These imports need resolution - schemas remain in omniclaude
+# TODO(OMN-5737): These imports need resolution - schemas remain in omniclaude
 # The consumer depends on hook event schemas which are domain-specific to omniclaude.
 # Options to resolve:
 # 1. Move schemas to a shared package (omnibase-schemas)
@@ -707,7 +707,7 @@ class SessionEventConsumer:
         if isinstance(value, bytes):
             value = value.decode("utf-8")
 
-        # TODO(OMN-1526): Schema parsing moved to aggregator
+        # TODO(OMN-5737): Schema parsing moved to aggregator
         # The original code parsed ModelHookEventEnvelope here, but that
         # creates a dependency on omniclaude.hooks.schemas. The aggregator
         # is now responsible for schema validation.
