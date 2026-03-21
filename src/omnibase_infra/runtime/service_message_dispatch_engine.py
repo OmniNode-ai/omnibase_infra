@@ -1662,7 +1662,7 @@ class MessageDispatchEngine:
 
         # Current implementation: delegate to standard dispatch()
         # The tx parameter is available for future handler context injection
-        # TODO(OMN-1740): Pass tx to handlers via dispatch context when needed
+        # TODO(OMN-5731): Pass tx to handlers via dispatch context when needed
         _ = tx  # Explicitly acknowledge tx parameter for future use
 
         return await self.dispatch(topic=topic, envelope=envelope)

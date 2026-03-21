@@ -248,7 +248,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
         """
         # NOTE: Both started_at and handler 'now' use direct datetime.now(UTC)
         # instead of ModelDispatchContext.now due to protocol signature limitation.
-        # See TODO(OMN-2050) below for details.
+        # See TODO(OMN-5738) below for details.
         started_at = datetime.now(UTC)
 
         correlation_id, raw_payload = extract_envelope_fields(envelope)
@@ -287,7 +287,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             # succeeded, or we returned early).
             assert isinstance(payload, ModelNodeIntrospectionEvent)
 
-            # TODO(OMN-2050): Use injected time from ModelDispatchContext instead
+            # TODO(OMN-5738): Use injected time from ModelDispatchContext instead
             # of datetime.now(UTC). Currently, the ProtocolMessageDispatcher.handle()
             # signature accepts only the envelope, so there is no way to receive the
             # dispatch engine's ModelDispatchContext.now timestamp. When the protocol

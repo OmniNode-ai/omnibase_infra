@@ -16,7 +16,7 @@ Note:
     Production implementation should use contract-driven handler routing.
 """
 
-# TODO(OMN-1515): Remove demo wiring after intent routing is contract-driven
+# TODO(OMN-5736): Remove demo wiring after intent routing is contract-driven
 
 from __future__ import annotations
 

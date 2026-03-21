@@ -20,7 +20,7 @@ entry in contract.yaml::
           require_proofs: ["node_identity", "capability_attested"]
           classification: "internal"
 
-TODO(OMN-2896): Replace this local model with the canonical import once
+TODO(OMN-5739): Replace this local model with the canonical import once
     omnibase_core PR #576 merges and a release containing
     ``ModelTieredResolutionConfig`` is available as a dependency.
 

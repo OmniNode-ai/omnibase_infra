@@ -836,7 +836,7 @@ class HandlerHttpRest(MixinEnvelopeExtraction):
         content_type = response.headers.get("content-type", "")
         body: object
 
-        # TODO(OMN-43): When rate limiting is implemented, extract and log rate limit
+        # TODO(OMN-5734): When rate limiting is implemented, extract and log rate limit
         # response headers: x-ratelimit-remaining, x-ratelimit-limit, x-ratelimit-reset
         # These headers will be added to the debug log metadata below for observability.
 
@@ -850,7 +850,7 @@ class HandlerHttpRest(MixinEnvelopeExtraction):
                 "content_type": content_type,
                 "status_code": response.status_code,
                 "correlation_id": str(correlation_id),
-                # TODO(OMN-43): Add rate limit metadata here when rate limiting is implemented:
+                # TODO(OMN-5734): Add rate limit metadata here when rate limiting is implemented:
                 # "ratelimit_remaining": response.headers.get("x-ratelimit-remaining"),
                 # "ratelimit_limit": response.headers.get("x-ratelimit-limit"),
                 # "ratelimit_reset": response.headers.get("x-ratelimit-reset"),
