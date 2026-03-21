@@ -1,7 +1,21 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-# Topics produced by infrastructure services (not nodes)
-# Scanned by ContractTopicExtractor.extract_from_skill_manifests()
-# Ticket: OMN-4622
+# Topics produced by infrastructure services (not nodes).
+# Scanned by ContractTopicExtractor.extract_from_skill_manifests().
+#
+# Topics listed here are NOT declared in any node contract.yaml but ARE
+# registered in ALL_PROVISIONED_TOPIC_SPECS (platform_topic_suffixes.py).
+# Without this manifest the contract-first TopicProvisioner would skip them,
+# causing TopicStartupValidator failures (OMN-5633).
+#
+# Ticket: OMN-4622, OMN-5633
 topics:
   - onex.evt.omnibase-infra.llm-endpoint-health.v1
+  # --- Platform topics not owned by any node contract (OMN-5633) ---
+  - onex.evt.platform.service-heartbeat.v1
+  - onex.evt.platform.feature-flag-changed.v1
+  - onex.evt.platform.resolution-decided.v1
+  # --- Omnibase-infra topics not owned by any node contract (OMN-5633) ---
+  - onex.evt.omnibase-infra.circuit-breaker.v1
+  - onex.evt.omnibase-infra.gmail-archive-purged.v1
+  - onex.evt.omnibase-infra.wiring-health-snapshot.v1
