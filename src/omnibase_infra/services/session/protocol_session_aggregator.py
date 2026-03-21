@@ -5,7 +5,7 @@
 Defines the interface that session aggregators must implement
 to work with the SessionEventConsumer.
 
-TODO(OMN-1526): This protocol was originally in omniclaude.aggregators.
+TODO(OMN-5737): This protocol was originally in omniclaude.aggregators.
 Consider moving to omnibase_infra.protocols for reuse.
 """
 

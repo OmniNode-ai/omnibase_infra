@@ -6,7 +6,7 @@
 
 Mirrors the essential fields from ``ModelTierAttempt`` in omnibase_core.
 
-TODO(OMN-2895): Replace with the canonical import once omnibase_core PR #575
+TODO(OMN-5739): Replace with the canonical import once omnibase_core PR #575
     merges and is available as a dependency.
 
 Related:
