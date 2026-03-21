@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.capabilities import ModelContractCapabilities
+from omnibase_core.models.core.model_feature_flags import ModelFeatureFlags
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumIntrospectionReason
 from omnibase_infra.models.discovery.model_discovered_capabilities import (
@@ -189,6 +190,13 @@ class ModelNodeIntrospectionEvent(BaseModel):
         description="Resolved event bus topic configuration. "
         "Contains environment-qualified topic strings for registry-driven routing. "
         "If None, node is NOT included in dynamic topic routing lookups.",
+    )
+
+    # Feature flags
+    resolved_feature_flags: ModelFeatureFlags = Field(
+        default_factory=ModelFeatureFlags,
+        description="Feature flag values after applying env/control-plane overrides. "
+        "Contrast with declared_capabilities.feature_flags which holds contract defaults only.",
     )
 
 

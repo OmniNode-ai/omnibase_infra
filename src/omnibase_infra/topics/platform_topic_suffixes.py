@@ -166,6 +166,16 @@ confirming that the node acknowledges successful registration.
 """
 
 # Resolution event ledger (OMN-2895 / Phase 6 of OMN-2897)
+SUFFIX_FEATURE_FLAG_CHANGED: str = "onex.evt.platform.feature-flag-changed.v1"
+"""Topic suffix for feature flag state change events.
+
+Published when a feature flag is toggled via the control-plane API.
+Contains flag name, new value, previous value, and env_var reference.
+
+Producer: Registry API (update_feature_flag)
+Consumer: Runtime services for dynamic flag reload
+"""
+
 SUFFIX_RESOLUTION_DECIDED: str = "onex.evt.platform.resolution-decided.v1"
 """Topic suffix for resolution decision audit events.
 
@@ -441,6 +451,44 @@ Producer: CircuitBreakerEventPublisher (MixinAsyncCircuitBreaker integrations)
 Consumer: omnidash /circuit-breaker dashboard (OMN-5293)
 """
 
+# =============================================================================
+# OMNIBASE_INFRA CONSUMER HEALTH TOPIC SUFFIXES (OMN-5515 / OMN-5529)
+# =============================================================================
+
+SUFFIX_CONSUMER_HEALTH: str = "onex.evt.omnibase-infra.consumer-health.v1"
+"""Topic suffix for consumer health events.
+
+Published by ConsumerHealthEmitter when consumer lifecycle events occur
+(heartbeat failures, session timeouts, rebalances, etc.).
+
+Producer: ConsumerHealthEmitter (EventBusKafka, standalone consumers via MixinConsumerHealth)
+Consumer: NodeConsumerHealthTriageEffect, omnidash /consumer-health dashboard
+"""
+
+SUFFIX_CONSUMER_RESTART_CMD: str = "onex.cmd.omnibase-infra.consumer-restart.v1"
+"""Topic suffix for consumer restart commands.
+
+Published by NodeConsumerHealthTriageEffect when graduated response
+escalates to automated restart.
+
+Producer: NodeConsumerHealthTriageEffect
+Consumer: MixinConsumerHealth (standalone consumers)
+"""
+
+# =============================================================================
+# OMNIBASE_INFRA RUNTIME ERROR TOPIC SUFFIXES (OMN-5517 / OMN-5529)
+# =============================================================================
+
+SUFFIX_RUNTIME_ERROR: str = "onex.evt.omnibase-infra.runtime-error.v1"
+"""Topic suffix for runtime error events.
+
+Published by RuntimeLogEventBridge (logging.Handler) when ERROR/WARNING
+log records are captured from allowlisted Python loggers.
+
+Producer: RuntimeLogEventBridge
+Consumer: NodeRuntimeErrorTriageEffect, omnidash /runtime-errors dashboard
+"""
+
 # Full topic name (not a suffix) — named as such to be unambiguous.
 # Used by monitor_logs.py postgres error emitter and downstream consumers.
 TOPIC_DB_ERROR_V1: str = "onex.evt.omnibase-infra.db-error.v1"
@@ -456,19 +504,6 @@ Consumer: OMN-3406 CI UUID cast misuse validator (omniintelligence)
 Note: Named ``TOPIC_DB_ERROR_V1`` (full name, not a suffix) to make it
 unambiguous that callers use this string directly rather than composing it
 with a tenant/namespace prefix.
-"""
-
-# Runtime error topics (OMN-5649)
-# Used by monitor_logs.py RuntimeErrorEmitter and downstream triage consumer.
-TOPIC_RUNTIME_ERROR_V1: str = "onex.evt.omnibase-infra.runtime-error.v1"
-"""Full topic name for runtime container error events (OMN-5649).
-
-Published by the runtime error emitter in ``scripts/monitor_logs.py`` when a
-container ERROR/CRITICAL/FATAL log line is classified and emitted. Each event
-carries a ``ModelRuntimeErrorEvent`` payload (JSON-serialized).
-
-Producer: monitor_logs.py RuntimeErrorEmitter
-Consumer: NodeRuntimeErrorTriageEffect (OMN-5650)
 """
 
 TOPIC_ERROR_TRIAGED_V1: str = "onex.evt.omnibase-infra.error-triaged.v1"
@@ -490,8 +525,6 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_GMAIL_ARCHIVE_PURGED, partitions=3),
     # PostgreSQL error events (3 partitions — low-throughput, error-driven)
     ModelTopicSpec(suffix=TOPIC_DB_ERROR_V1, partitions=3),
-    # Runtime container error events (6 partitions — moderate throughput, error-driven)
-    ModelTopicSpec(suffix=TOPIC_RUNTIME_ERROR_V1, partitions=6),
     # Runtime error triage results (6 partitions — matches runtime-error partitions)
     ModelTopicSpec(suffix=TOPIC_ERROR_TRIAGED_V1, partitions=6),
     # Baselines ROI computation results (1 partition — low-throughput, per-cohort)
@@ -515,6 +548,33 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     # Wiring health snapshots (3 partitions — low-throughput, per-evaluation-cycle)
     ModelTopicSpec(
         suffix=SUFFIX_WIRING_HEALTH_SNAPSHOT,
+        partitions=3,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
+    # Consumer health events (3 partitions — event-driven, OMN-5515)
+    ModelTopicSpec(
+        suffix=SUFFIX_CONSUMER_HEALTH,
+        partitions=3,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
+    # Consumer restart commands (1 partition — low-throughput commands, OMN-5515)
+    ModelTopicSpec(
+        suffix=SUFFIX_CONSUMER_RESTART_CMD,
+        partitions=1,
+        kafka_config={
+            "retention.ms": "86400000",
+            "cleanup.policy": "delete",
+        },  # 1 day — commands are short-lived
+    ),
+    # Runtime error events (3 partitions — event-driven, OMN-5517)
+    ModelTopicSpec(
+        suffix=SUFFIX_RUNTIME_ERROR,
         partitions=3,
         kafka_config={
             "retention.ms": "604800000",
@@ -665,9 +725,24 @@ Producer: legacy agent-observability consumer (consumers/agent_actions_consumer.
 Consumer: observability alerting, incident recovery tooling
 """
 
+SUFFIX_OMNICLAUDE_SKILL_LIFECYCLE_DLQ: str = (
+    "onex.evt.omniclaude.skill-lifecycle-dlq.v1"
+)
+"""Dead letter queue topic for the skill-lifecycle observability consumer.
+
+Messages that fail validation or exceed max retry count in
+ConfigSkillLifecycleConsumer are forwarded to this topic. Matches the
+hardcoded default in
+``omnibase_infra.services.observability.skill_lifecycle.config.ConfigSkillLifecycleConsumer.dlq_topic``.
+
+Producer: skill-lifecycle consumer (ServiceSkillLifecycleConsumer)
+Consumer: observability alerting, incident recovery tooling
+"""
+
 _OMNICLAUDE_OBSERVABILITY_DLQ_TOPIC_SUFFIXES: tuple[str, ...] = (
     SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
     SUFFIX_OMNICLAUDE_AGENT_OBSERVABILITY_DLQ,
+    SUFFIX_OMNICLAUDE_SKILL_LIFECYCLE_DLQ,
 )
 """DLQ topic suffixes for OmniClaude observability consumers.
 
@@ -1055,6 +1130,12 @@ ALL_PLATFORM_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_CONTRACT_DEREGISTERED, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION_ACCEPTED, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION_ACKED, partitions=6),
+    # Feature flag changes (OMN-5580)
+    ModelTopicSpec(
+        suffix=SUFFIX_FEATURE_FLAG_CHANGED,
+        partitions=1,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
     # Resolution event ledger (OMN-2895)
     ModelTopicSpec(suffix=SUFFIX_RESOLUTION_DECIDED, partitions=3),
     # Topic catalog topics (low-throughput coordination, 1 partition each)

@@ -207,7 +207,7 @@ class ProtocolDomainPlugin(Protocol):
                 return "my-domain"
 
             def should_activate(self, config: ModelDomainPluginConfig) -> bool:
-                return bool(os.getenv("MY_DOMAIN_ENABLED"))
+                return bool(os.getenv("MY_DOMAIN_ENABLED"))  # ONEX_FLAG_EXEMPT: docstring example
 
             async def initialize(
                 self, config: ModelDomainPluginConfig

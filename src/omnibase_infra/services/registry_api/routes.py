@@ -28,10 +28,12 @@ from typing import TYPE_CHECKING, Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from pydantic import BaseModel
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.services.registry_api.models import (
     ModelContractView,
+    ModelFeatureFlagToggleResult,
     ModelRegistryDiscoveryResponse,
     ModelRegistryHealthResponse,
     ModelRegistryNodeView,
@@ -565,6 +567,72 @@ async def get_topic(
         )
 
     return topic
+
+
+# ============================================================
+# Feature Flag Endpoints (OMN-5579, OMN-5580)
+# ============================================================
+
+
+@router.get(
+    "/feature-flags",
+    summary="List Aggregated Feature Flags",
+    description=(
+        "Returns aggregated feature flags across all active node projections. "
+        "Flags are grouped by name and include conflict detection, declaring nodes, "
+        "and control-plane writability status."
+    ),
+    responses={
+        200: {"description": "Successful response with aggregated feature flags"},
+    },
+)
+async def list_feature_flags(
+    service: Annotated[ServiceRegistryDiscovery, Depends(get_service)],
+    correlation_id: Annotated[UUID, Depends(get_correlation_id)],
+) -> dict:
+    """List aggregated feature flags from all active projections."""
+    flags, degraded = await service.get_aggregated_feature_flags(
+        correlation_id=correlation_id,
+    )
+
+    return {
+        "flags": [f.model_dump(mode="json") for f in flags],
+        "degraded": degraded,
+    }
+
+
+class ModelToggleRequestBody(BaseModel):
+    """Request body for feature flag toggle."""
+
+    enabled: bool
+
+
+@router.put(
+    "/feature-flags/{flag_name}",
+    response_model=ModelFeatureFlagToggleResult,
+    summary="Toggle Feature Flag",
+    description=(
+        "Toggle a feature flag value. Writes to Infisical (if configured) and "
+        "emits a Kafka event on onex.evt.platform.feature-flag-changed.v1."
+    ),
+    responses={
+        200: {"description": "Toggle result with outcome status"},
+        400: {"description": "Bad request (e.g., invalid correlation ID format)"},
+    },
+)
+async def update_feature_flag(
+    flag_name: str,
+    body: ModelToggleRequestBody,
+    service: Annotated[ServiceRegistryDiscovery, Depends(get_service)],
+    correlation_id: Annotated[UUID, Depends(get_correlation_id)],
+) -> ModelFeatureFlagToggleResult:
+    """Toggle a feature flag value."""
+    result = await service.update_feature_flag(
+        flag_name=flag_name,
+        enabled=body.enabled,
+        correlation_id=correlation_id,
+    )
+    return result
 
 
 __all__ = ["router", "get_service", "get_correlation_id"]

@@ -59,7 +59,7 @@ def _load_stack() -> list[str]:
     if not stack_path.exists():
         return ["core"]
     with open(stack_path) as f:
-        data = yaml.safe_load(f)
+        data: dict[str, list[str]] = yaml.safe_load(f) or {}
     return list(data.get("bundles", ["core"]))
 
 
@@ -117,6 +117,23 @@ def cmd_up(args: list[str]) -> int:
     rc = _resolve_and_generate(bundles, _DEFAULT_OUTPUT)
     if rc != 0:
         return rc
+
+    # Pre-cleanup: remove dead/exited containers to prevent restart delays (OMN-5468)
+    # and name collisions when core infra is already running (OMN-5469).
+    subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            _DEFAULT_OUTPUT,
+            "rm",
+            "-f",
+            "--stop",
+        ],
+        cwd=str(_REPO_ROOT),
+        check=False,
+        capture_output=True,
+    )
 
     # Start
     proc = subprocess.run(

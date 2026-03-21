@@ -21,6 +21,14 @@ Architecture:
     - HMAC-SHA256 ``X-ONEX-Signature`` headers authenticate outbound requests
     - Audit log entries are emitted for every routing decision
 
+Shadow Mode (OMN-5570):
+    - When ``shadow_config.enabled`` is True, a learned routing policy runs
+      in parallel with static rules via ``asyncio.create_task``
+    - Shadow computation is async and does NOT affect the actual routing decision
+    - Shadow decisions are collected via a callback (typically Kafka event emission)
+    - Shadow latency is bounded by ``shadow_config.max_shadow_latency_ms``
+    - Shadow mode adds < 5ms to request latency (fire-and-forget async)
+
 Handler Responsibilities:
     - Evaluate routing rules against ``ModelBifrostRequest`` fields
     - Attempt backends in rule-declared priority order
@@ -40,17 +48,21 @@ Coroutine Safety:
     - Per-backend circuit breaker state is protected by asyncio.Lock
     - No mutable state is shared across concurrent handle() calls
     - Config is immutable (ModelBifrostConfig is frozen)
+    - Shadow tasks are fire-and-forget — exceptions are logged, never raised
 
 Related Tickets:
     - OMN-2736: Adopt bifrost as LLM gateway handler for delegated task routing
     - OMN-2244: Local LLM SLO & Security Baseline (blocker, now done)
     - OMN-2248: Delegated Task Execution via Local Models (epic)
+    - OMN-5570: Shadow Mode + Comparison Dashboard
+    - OMN-5556: Learned Decision Optimization Platform (epic)
 
 See Also:
     - ModelBifrostConfig for gateway configuration
     - ModelBifrostRequest for input contract
     - ModelBifrostResponse for output contract
     - ModelBifrostRoutingRule for routing rule structure
+    - ModelBifrostShadowConfig for shadow mode configuration
 """
 
 from __future__ import annotations
@@ -59,15 +71,24 @@ import asyncio
 import hashlib
 import hmac
 import logging
+import random
 import time
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Protocol
 from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.llm.model_llm_inference_response import (
     ModelLlmInferenceResponse,
+)
+from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost.config.bifrost_shadow import (
+    ModelBifrostShadowConfig,
+)
+from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost.config.model_shadow_decision_log import (
+    ModelShadowDecisionLog,
 )
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost.model_bifrost_config import (
     ModelBifrostBackendConfig,
@@ -95,6 +116,44 @@ logger = logging.getLogger(__name__)
 _HMAC_HEADER_NAME = "X-ONEX-Signature"
 
 
+class ProtocolShadowPolicy(Protocol):
+    """Protocol for learned routing policies used in shadow mode.
+
+    Implementations must provide an async ``recommend`` method that takes
+    a bifrost request and the list of available backend IDs, and returns
+    the recommended backend ID along with a confidence score and the
+    full action probability distribution.
+
+    The protocol is intentionally minimal — policy implementations may
+    use ONNX, PyTorch, scikit-learn, or any other framework internally.
+    """
+
+    async def recommend(
+        self,
+        request: ModelBifrostRequest,
+        available_backends: tuple[str, ...],
+    ) -> tuple[str, float, dict[str, float]]:
+        """Recommend a backend for the given request.
+
+        Args:
+            request: The incoming bifrost routing request.
+            available_backends: Tuple of backend IDs currently configured
+                in the gateway (not filtered by circuit breaker state).
+
+        Returns:
+            A 3-tuple of:
+            - recommended_backend_id: The backend the policy recommends.
+            - confidence: Confidence score in [0.0, 1.0].
+            - action_distribution: Full probability distribution over
+              backends (keys are backend IDs, values sum to ~1.0).
+        """
+        ...  # pragma: no cover
+
+
+# Type alias for shadow decision log callbacks.
+ShadowDecisionCallback = Callable[[ModelShadowDecisionLog], Awaitable[None]]
+
+
 @dataclass
 class CircuitBreakerState:
     """Per-backend circuit breaker state.
@@ -114,7 +173,7 @@ class CircuitBreakerState:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
-class HandlerBifrostGateway:
+class HandlerBifrostGateway:  # ONEX_EXCLUDE: method_count - gateway is a single cohesive unit managing routing, failover, circuit-breaking, and shadow mode
     """Bifrost LLM gateway handler with declarative routing and failover.
 
     Receives a ``ModelBifrostRequest``, evaluates routing rules from
@@ -129,6 +188,14 @@ class HandlerBifrostGateway:
     using HMAC-SHA256. Backends without a configured secret receive
     unsigned requests.
 
+    Shadow Mode (OMN-5570):
+        When ``shadow_config.enabled`` is True and a ``shadow_policy`` is
+        provided, the gateway runs the learned policy in parallel with
+        static routing. Shadow computation is async (fire-and-forget via
+        ``asyncio.create_task``) and adds < 5ms latency. Shadow decisions
+        are emitted via the ``shadow_decision_callback`` for persistence
+        and dashboard comparison.
+
     Protocol Conformance Note:
         This handler does NOT implement ``ProtocolHandler`` or
         ``ProtocolMessageHandler``. It operates at the infrastructure
@@ -141,6 +208,9 @@ class HandlerBifrostGateway:
         _inference_handler: The underlying OpenAI-compatible inference
             handler used to execute HTTP calls to backends.
         _circuit_states: Per-backend circuit breaker state mapping.
+        _shadow_config: Shadow mode configuration (None = disabled).
+        _shadow_policy: Learned routing policy (None = no shadow).
+        _shadow_decision_callback: Async callback for shadow decision logs.
 
     Example:
         >>> from omnibase_infra.nodes.node_llm_inference_effect.handlers.bifrost import (
@@ -167,6 +237,9 @@ class HandlerBifrostGateway:
         self,
         config: ModelBifrostConfig,
         inference_handler: HandlerLlmOpenaiCompatible,
+        shadow_config: ModelBifrostShadowConfig | None = None,
+        shadow_policy: ProtocolShadowPolicy | None = None,
+        shadow_decision_callback: ShadowDecisionCallback | None = None,
     ) -> None:
         """Initialize the bifrost gateway with config and inference handler.
 
@@ -175,6 +248,13 @@ class HandlerBifrostGateway:
                 routing rules, and failover/circuit-breaker policy.
             inference_handler: The OpenAI-compatible handler used to
                 execute HTTP inference calls to backends.
+            shadow_config: Shadow mode configuration. When None or
+                ``enabled=False``, shadow mode is inactive.
+            shadow_policy: The learned routing policy to run in shadow
+                mode. Required when shadow_config.enabled is True.
+            shadow_decision_callback: Async callback invoked with each
+                shadow decision log entry. Typically publishes to Kafka.
+                Required when shadow_config.enabled is True.
         """
         self._config = config
         self._inference_handler = inference_handler
@@ -184,6 +264,33 @@ class HandlerBifrostGateway:
         )
         # Per-backend lock guard for lazy circuit state creation.
         self._state_init_lock: asyncio.Lock = asyncio.Lock()
+
+        # Shadow mode (OMN-5570)
+        self._shadow_config = shadow_config or ModelBifrostShadowConfig()
+        self._shadow_policy = shadow_policy
+        self._shadow_decision_callback = shadow_decision_callback
+
+        # Validate shadow mode configuration
+        if self._shadow_config.enabled:
+            if self._shadow_policy is None:
+                logger.warning(
+                    "Bifrost: shadow mode enabled but no shadow_policy provided. "
+                    "Shadow decisions will not be computed."
+                )
+            if self._shadow_decision_callback is None:
+                logger.warning(
+                    "Bifrost: shadow mode enabled but no shadow_decision_callback "
+                    "provided. Shadow decisions will be computed but not persisted."
+                )
+
+    @property
+    def shadow_config(self) -> ModelBifrostShadowConfig:
+        """Return the current shadow mode configuration.
+
+        Returns:
+            The ``ModelBifrostShadowConfig`` for this gateway instance.
+        """
+        return self._shadow_config
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -210,6 +317,10 @@ class HandlerBifrostGateway:
         backend list, then attempts each backend with exponential backoff
         and circuit breaker protection. Returns a structured error response
         if all backends are unavailable.
+
+        When shadow mode is enabled, the learned policy is evaluated in
+        parallel via ``asyncio.create_task``. The shadow computation does
+        NOT affect the actual routing decision and adds < 5ms latency.
 
         Args:
             request: Bifrost routing request with operation type,
@@ -243,6 +354,31 @@ class HandlerBifrostGateway:
         )
 
         latency_ms = (time.perf_counter() - start_time) * 1000
+
+        # Fire shadow policy evaluation (async, fire-and-forget).
+        # We store the task reference to prevent GC collection and satisfy RUF006,
+        # but intentionally do not await it — shadow must not delay the response.
+        # Inline check: shadow enabled + policy present + sample rate pass
+        _run_shadow = (
+            self._shadow_config.enabled
+            and self._shadow_policy is not None
+            and (
+                self._shadow_config.log_sample_rate >= 1.0
+                or random.random() <= self._shadow_config.log_sample_rate
+            )
+        )
+        if _run_shadow:
+            _shadow_task = asyncio.create_task(
+                self._evaluate_shadow_policy(
+                    request=request,
+                    static_backend_selected=backend_selected or "",
+                    static_rule_id=matched_rule_id,
+                    correlation_id=correlation_id,
+                )
+            )
+            _shadow_task.add_done_callback(
+                lambda t: t.exception() if not t.cancelled() else None
+            )
 
         if result is None:
             # All backends failed — return structured error
@@ -292,6 +428,101 @@ class HandlerBifrostGateway:
             inference_response=result,
             success=True,
         )
+
+    # ── Shadow mode ──────────────────────────────────────────────────────
+
+    async def _evaluate_shadow_policy(
+        self,
+        request: ModelBifrostRequest,
+        static_backend_selected: str,
+        static_rule_id: UUID | None,
+        correlation_id: UUID,
+    ) -> None:
+        """Evaluate the shadow policy and log the comparison result.
+
+        Runs the learned policy with a timeout to ensure < 5ms added
+        latency. On timeout or error, logs a warning and returns without
+        affecting the static routing decision.
+
+        This method is designed to be called via ``asyncio.create_task``
+        (fire-and-forget). Exceptions are caught and logged, never raised.
+
+        Args:
+            request: The original bifrost routing request.
+            static_backend_selected: Backend selected by static rules.
+            static_rule_id: UUID of the matched static rule (or None).
+            correlation_id: Request correlation ID for tracing.
+        """
+        shadow_start = time.perf_counter()
+        try:
+            assert self._shadow_policy is not None  # guaranteed by _should_run_shadow
+
+            available_backends = tuple(self._config.backends.keys())
+            timeout_s = self._shadow_config.max_shadow_latency_ms / 1000.0
+
+            # Run shadow policy with timeout
+            recommended, confidence, distribution = await asyncio.wait_for(
+                self._shadow_policy.recommend(
+                    request=request,
+                    available_backends=available_backends,
+                ),
+                timeout=timeout_s,
+            )
+
+            shadow_latency_ms = (time.perf_counter() - shadow_start) * 1000
+            agreed = recommended == static_backend_selected
+
+            log_entry = ModelShadowDecisionLog(
+                correlation_id=correlation_id,
+                static_backend_selected=static_backend_selected,
+                shadow_backend_recommended=recommended,
+                agreed=agreed,
+                static_rule_id=static_rule_id,
+                request_operation_type=request.operation_type.value,
+                request_cost_tier=request.cost_tier.value,
+                request_max_latency_ms=request.max_latency_ms,
+                shadow_confidence=confidence,
+                shadow_latency_ms=shadow_latency_ms,
+                policy_version=self._shadow_config.policy_version,
+                shadow_action_distribution=distribution,
+                tenant_id=request.tenant_id,
+            )
+
+            logger.debug(
+                "Bifrost shadow: agreed=%s static=%s shadow=%s confidence=%.3f "
+                "latency_ms=%.1f corr=%s",
+                agreed,
+                static_backend_selected,
+                recommended,
+                confidence,
+                shadow_latency_ms,
+                correlation_id,
+            )
+
+            # Emit the shadow decision log via callback
+            if (
+                self._shadow_decision_callback is not None
+                and self._shadow_config.comparison_logging_enabled
+            ):
+                await self._shadow_decision_callback(log_entry)
+
+        except TimeoutError:
+            shadow_latency_ms = (time.perf_counter() - shadow_start) * 1000
+            logger.warning(
+                "Bifrost shadow: policy evaluation timed out after %.1f ms "
+                "(limit=%.1f ms). corr=%s",
+                shadow_latency_ms,
+                self._shadow_config.max_shadow_latency_ms,
+                correlation_id,
+            )
+        except Exception:  # noqa: BLE001 — shadow must never crash the gateway
+            shadow_latency_ms = (time.perf_counter() - shadow_start) * 1000
+            logger.warning(
+                "Bifrost shadow: policy evaluation failed after %.1f ms. corr=%s",
+                shadow_latency_ms,
+                correlation_id,
+                exc_info=True,
+            )
 
     # ── Rule evaluation ─────────────────────────────────────────────────
 
@@ -491,8 +722,6 @@ class HandlerBifrostGateway:
         Returns:
             A ready-to-execute ``ModelLlmInferenceRequest``.
         """
-        from omnibase_infra.enums import EnumLlmOperationType
-
         # Resolve model name: request override → backend config → fallback
         model_name = (
             request.model or backend_cfg.model_name or request.operation_type.value
@@ -501,9 +730,6 @@ class HandlerBifrostGateway:
         # Resolve timeout: backend override → global config
         timeout_ms = backend_cfg.timeout_ms or self._config.request_timeout_ms
         timeout_seconds = timeout_ms / 1000.0
-
-        # operation_type is already an EnumLlmOperationType
-        operation_type = request.operation_type
 
         # Build HMAC signature as X-ONEX-Signature header if secret is configured
         extra_headers: dict[str, str] = {}
@@ -515,7 +741,7 @@ class HandlerBifrostGateway:
 
         return ModelLlmInferenceRequest(
             base_url=backend_cfg.base_url,
-            operation_type=operation_type,
+            operation_type=request.operation_type,
             model=model_name,
             messages=request.messages,
             prompt=request.prompt,
@@ -696,4 +922,8 @@ class HandlerBifrostGateway:
         return elapsed < self._config.circuit_breaker_window_seconds
 
 
-__all__: list[str] = ["HandlerBifrostGateway"]
+__all__: list[str] = [
+    "HandlerBifrostGateway",
+    "ProtocolShadowPolicy",
+    "ShadowDecisionCallback",
+]

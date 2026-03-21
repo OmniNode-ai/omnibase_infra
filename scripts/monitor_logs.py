@@ -49,6 +49,7 @@ import sys
 import threading
 import time
 import urllib.request
+import uuid
 from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
@@ -905,7 +906,6 @@ class RuntimeErrorEmitter:
                 first_seen = now
 
         # Generate event_id as UUID5 from fingerprint + detected_at
-        import uuid
 
         event_id = str(
             uuid.uuid5(

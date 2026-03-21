@@ -90,6 +90,40 @@ event_bus:
     - "onex.cmd.platform.topic-catalog-query.v1"
     - "onex.cmd.platform.request-introspection.v1"
     - "onex.snapshot.platform.registration-snapshots.v1"
+# Feature Flags [OMN-5584]
+# Platform-housed flags: multiple services depend on these, so they live in
+# the central registration orchestrator contract.
+feature_flags:
+  - name: real_time_events
+    description: "Enable WebSocket real-time event streaming to omnidash"
+    default_value: false
+    env_var: ENABLE_REAL_TIME_EVENTS
+    category: dashboard
+    owner: omnidash
+  - name: omnimemory_enabled
+    description: "Enable OmniMemory document ingestion and semantic retrieval"
+    default_value: false
+    env_var: OMNIMEMORY_ENABLED
+    category: infrastructure
+    owner: omnimemory
+  - name: local_delegation
+    description: "Enable local agent delegation"
+    default_value: false
+    env_var: ENABLE_LOCAL_DELEGATION
+    category: intelligence
+    owner: omnibase_infra
+  - name: phoenix_otel
+    description: "Enable Phoenix OpenTelemetry tracing"
+    default_value: false
+    env_var: PHOENIX_OTEL_ENABLED
+    category: observability
+    owner: omnibase_infra
+  - name: omnidash_auth
+    description: "Enable authentication for omnidash dashboard"
+    default_value: false
+    env_var: OMNIDASH_AUTH_ENABLED
+    category: dashboard
+    owner: omnidash
 input_model:
   name: "ModelOrchestratorInput"
   module: "omnibase_infra.nodes.node_registration_orchestrator.models"

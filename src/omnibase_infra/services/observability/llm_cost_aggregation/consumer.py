@@ -64,7 +64,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 from aiohttp import web
-from aiokafka import AIOKafkaConsumer, TopicPartition
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.errors import KafkaError
 from aiokafka.structs import OffsetAndMetadata
 from pydantic import ValidationError
@@ -73,6 +73,8 @@ from omnibase_core.errors import OnexError
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
+from omnibase_infra.event_bus.consumer_health_emitter import ConsumerHealthEmitter
+from omnibase_infra.event_bus.mixin_consumer_health import MixinConsumerHealth
 from omnibase_infra.services.observability.llm_cost_aggregation.config import (
     ConfigLlmCostAggregation,
 )
@@ -345,7 +347,7 @@ class ConsumerMetrics:
 # =============================================================================
 
 
-class ServiceLlmCostAggregator:
+class ServiceLlmCostAggregator(MixinConsumerHealth):
     """Async Kafka consumer for LLM cost aggregation.
 
     Consumes LLM call completed events, writes raw metrics to
@@ -379,6 +381,7 @@ class ServiceLlmCostAggregator:
         self._consumer: AIOKafkaConsumer | None = None
         self._pool: asyncpg.Pool | None = None
         self._writer: WriterLlmCostAggregationPostgres | None = None
+        self._health_producer: AIOKafkaProducer | None = None
         self._running = False
         self._shutdown_event = asyncio.Event()
 
@@ -474,6 +477,8 @@ class ServiceLlmCostAggregator:
                 auto_offset_reset=self._config.auto_offset_reset,
                 enable_auto_commit=False,
                 max_poll_records=self._config.batch_size,
+                session_timeout_ms=self._config.session_timeout_ms,
+                heartbeat_interval_ms=self._config.heartbeat_interval_ms,
             )
 
             await self._consumer.start()
@@ -483,6 +488,20 @@ class ServiceLlmCostAggregator:
 
             self._running = True
             self._shutdown_event.clear()
+
+            # Initialize consumer health emitter (OMN-5523)
+            if ConsumerHealthEmitter.is_enabled():
+                self._health_producer = AIOKafkaProducer(
+                    bootstrap_servers=self._config.kafka_bootstrap_servers,
+                )
+                await self._health_producer.start()
+                self._init_health_emitter(
+                    self._health_producer,
+                    consumer_identity="llm-cost-aggregation-consumer",
+                    consumer_group=self._config.kafka_group_id,
+                    topic=",".join(self._config.topics),
+                    service_label="ServiceLlmCostAggregator",
+                )
 
             logger.info(
                 "ServiceLlmCostAggregator started",
@@ -545,6 +564,18 @@ class ServiceLlmCostAggregator:
             self._health_runner = None
 
         self._health_app = None
+
+        # Stop health producer (OMN-5523)
+        if self._health_producer is not None:
+            try:
+                await self._health_producer.stop()
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "Error stopping health producer",
+                    extra={"consumer_id": self._consumer_id},
+                )
+            finally:
+                self._health_producer = None
 
         if self._consumer is not None:
             try:

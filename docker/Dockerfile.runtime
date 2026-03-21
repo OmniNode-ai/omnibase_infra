@@ -170,11 +170,16 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 #
 # After --no-deps plugin install, external (non-ONEX) deps are installed
 # in a separate step so plugins have their required third-party libraries.
+# Plugin version ranges: use >= latest published, < next major.
+# --no-deps prevents plugins from pulling conflicting ONEX foundation deps.
+# Exact pins (==) cause CI failures when new versions are published before
+# the Dockerfile is updated (OMN-5474). Range pins stay valid across releases.
+# Run `scripts/check_dockerfile_pins.py` to validate ranges against PyPI.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps \
-    "omninode-claude==0.8.0" \
-    "omninode-memory==0.8.0" \
-    "omninode-intelligence==0.14.0"
+    "omninode-claude>=0.9.0,<2.0.0" \
+    "omninode-memory>=0.9.0,<2.0.0" \
+    "omninode-intelligence>=0.15.0,<2.0.0"
 
 # Install CPU-only PyTorch (~2GB savings over CUDA wheels).
 # K8s runtime has no GPU; inference offloads to LLM servers via HTTP.

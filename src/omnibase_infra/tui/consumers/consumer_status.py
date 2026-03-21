@@ -113,6 +113,8 @@ async def consume_all(app: object) -> None:
             value_deserializer=lambda v: v,  # raw bytes; we JSON-decode below
             request_timeout_ms=5000,
             connections_max_idle_ms=10000,
+            session_timeout_ms=30000,
+            heartbeat_interval_ms=10000,
         )
         await consumer.start()
         logger.info("TUI consumer started. Topics: %s.", _ALL_TOPICS)

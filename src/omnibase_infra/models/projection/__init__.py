@@ -35,6 +35,9 @@ from omnibase_infra.models.projection.model_capability_fields import (
 from omnibase_infra.models.projection.model_contract_projection import (
     ModelContractProjection,
 )
+from omnibase_infra.models.projection.model_projected_flag_meta import (
+    ModelProjectedFlagMeta,
+)
 from omnibase_infra.models.projection.model_registration_projection import (
     ModelRegistrationProjection,
 )
@@ -52,6 +55,7 @@ from omnibase_infra.models.projection.model_topic_projection import (
 __all__ = [
     "ModelCapabilityFields",
     "ModelContractProjection",
+    "ModelProjectedFlagMeta",
     "ModelProjectionIntent",
     "ModelRegistrationProjection",
     "ModelRegistrationSnapshot",

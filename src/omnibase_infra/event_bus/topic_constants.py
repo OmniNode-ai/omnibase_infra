@@ -577,6 +577,69 @@ Consumer: Omnidash /wiring-health dashboard
 Ticket: OMN-5292
 """
 
+# Savings estimation topics (OMN-5545)
+TOPIC_SAVINGS_ESTIMATED: Final[str] = "onex.evt.omnibase-infra.savings-estimated.v1"
+"""Savings estimation event with tiered attribution breakdown.
+
+Producer: ServiceSavingsEstimator
+Consumer: Omnidash savings projection, analytics pipeline
+Ticket: OMN-5545
+"""
+
+TOPIC_VALIDATOR_CATCH: Final[str] = "onex.evt.omniclaude.validator-catch.v1"
+"""Validator catch events from pre-commit hooks, CI checks, and poly enforcer.
+
+Producer: omniclaude (pre-commit hooks, CI guard, poly enforcer)
+Consumer: ServiceSavingsEstimator (for catch-based savings attribution)
+Ticket: OMN-5545
+"""
+
+# Consumer Health topics (OMN-5515 / OMN-5529)
+TOPIC_CONSUMER_HEALTH: Final[str] = "onex.evt.omnibase-infra.consumer-health.v1"
+"""Consumer health events emitted by ConsumerHealthEmitter.
+
+Emitted on heartbeat failures, session timeouts, rebalance events,
+and other consumer lifecycle state changes. Consumed by
+NodeConsumerHealthTriageEffect for graduated response.
+
+Producer: ConsumerHealthEmitter (EventBusKafka, standalone consumers)
+Consumer: NodeConsumerHealthTriageEffect, Omnidash /consumer-health dashboard
+Ticket: OMN-5515
+"""
+
+TOPIC_CONSUMER_RESTART_CMD: Final[str] = "onex.cmd.omnibase-infra.consumer-restart.v1"
+"""Consumer restart commands issued by the triage node.
+
+Published when graduated response escalates to automated restart.
+Each standalone consumer subscribes to this topic to receive restart
+commands targeted at its consumer identity.
+
+Producer: NodeConsumerHealthTriageEffect
+Consumer: MixinConsumerHealth (standalone consumers)
+Ticket: OMN-5515
+"""
+
+# Runtime Error topics (OMN-5517 / OMN-5529)
+TOPIC_RUNTIME_ERROR: Final[str] = "onex.evt.omnibase-infra.runtime-error.v1"
+"""Runtime error events emitted by RuntimeLogEventBridge.
+
+Captures ERROR/WARNING log records from allowlisted Python loggers,
+fingerprints and deduplicates them, and emits structured events.
+Consumed by NodeRuntimeErrorTriageEffect for triage.
+
+Producer: RuntimeLogEventBridge (logging.Handler)
+Consumer: NodeRuntimeErrorTriageEffect, Omnidash /runtime-errors dashboard
+Ticket: OMN-5517
+"""
+
+TOPIC_HOOK_CONTEXT_INJECTED: Final[str] = "onex.evt.omniclaude.hook-context-injected.v1"
+"""Hook context injection events from omniclaude UserPromptSubmit hooks.
+
+Producer: omniclaude (hook context injector)
+Consumer: ServiceSavingsEstimator (for context-injection savings attribution)
+Ticket: OMN-5550
+"""
+
 # Grouped constants for wiring health monitoring
 WIRING_HEALTH_MONITORED_TOPICS: Final[tuple[str, ...]] = (
     TOPIC_SESSION_OUTCOME_CURRENT,
@@ -610,8 +673,17 @@ __all__ = [
     "TOPIC_LLM_CALL_COMPLETED_INFRA",
     # LLM Endpoint Health Topics
     "TOPIC_LLM_ENDPOINT_HEALTH",
+    # Consumer Health Topics (OMN-5515)
+    "TOPIC_CONSUMER_HEALTH",
+    "TOPIC_CONSUMER_RESTART_CMD",
+    # Runtime Error Topics (OMN-5517)
+    "TOPIC_RUNTIME_ERROR",
     # Wiring Health Snapshot Topics (OMN-5292)
     "TOPIC_WIRING_HEALTH_SNAPSHOT",
+    # Savings Estimation Topics (OMN-5545)
+    "TOPIC_SAVINGS_ESTIMATED",
+    "TOPIC_VALIDATOR_CATCH",
+    "TOPIC_HOOK_CONTEXT_INJECTED",
     # Wiring Health Topics
     "TOPIC_INJECTION_AGENT_MATCH",
     "TOPIC_INJECTION_CONTEXT_UTILIZATION",
