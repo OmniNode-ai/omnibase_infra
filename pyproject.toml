@@ -117,6 +117,7 @@ onex-infra-test = "omnibase_infra.cli.infra_test.cli:cli"
 onex-git-hook-relay = "omnibase_infra.cli.git_hook_relay:main"
 onex-linear-relay = "omnibase_infra.cli.linear_relay:main"
 onex-status = "omnibase_infra.tui.__main__:run_status_tui"
+verify-container-manifest = "omnibase_infra.scripts.verify_container_manifest:main"
 
 [project.entry-points."onex.domain_plugins"]
 registration = "omnibase_infra.nodes.node_registration_orchestrator.plugin:PluginRegistration"
