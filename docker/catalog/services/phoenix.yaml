@@ -28,5 +28,5 @@ restart: unless-stopped
 resources: null
 labels:
   com.omninode.service: phoenix
-  com.omninode.layer: runtime
+  com.omninode.layer: observability
   com.omninode.ticket: OMN-3542
