@@ -28,9 +28,15 @@ class PortMapping:
 
 @dataclass(frozen=True)
 class HealthCheck:
-    """Healthcheck with full timing parameters (matches compose healthcheck)."""
+    """Healthcheck with full timing parameters (matches compose healthcheck).
 
-    test: str
+    ``test`` accepts two forms:
+    - **str** — rendered as ``["CMD-SHELL", test]`` (requires ``/bin/sh``).
+    - **list[str]** — rendered as ``["CMD", *test]`` for distroless images
+      that lack a shell (e.g. Phoenix).
+    """
+
+    test: str | list[str]
     interval_s: int = 30
     timeout_s: int = 10
     retries: int = 3
