@@ -108,7 +108,7 @@ class ServiceStaleRegistrationCleanup:
         """
         corr_id = correlation_id or uuid4()
         now = datetime.now(UTC)
-        ctx = ModelInfraErrorContext(
+        ctx = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="cleanup_stale_registrations",
             target_name="service.stale_registration_cleanup",

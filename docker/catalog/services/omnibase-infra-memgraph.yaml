@@ -23,9 +23,7 @@ volumes:
 depends_on: []
 restart: unless-stopped
 resources: null
-command: '--storage-snapshot-retention-count=2 --storage-wal-enabled=true --storage-snapshot-interval-sec=3600 --log-level=WARNING
-
-'
+command: '--storage-snapshot-retention-count=2 --storage-wal-enabled=true --storage-snapshot-interval-sec=3600 --log-level=WARNING'
 labels:
   com.omninode.service: memgraph
   com.omninode.layer: infrastructure

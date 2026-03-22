@@ -13,3 +13,5 @@ class EnumInfraLayer(str, Enum):
     INFRASTRUCTURE = "infrastructure"
     RUNTIME = "runtime"
     OBSERVABILITY = "observability"
+    AUTH = "auth"
+    SECRETS = "secrets"

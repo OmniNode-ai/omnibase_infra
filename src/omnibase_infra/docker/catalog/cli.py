@@ -59,8 +59,11 @@ def _load_stack() -> list[str]:
     if not stack_path.exists():
         return ["core"]
     with open(stack_path) as f:
-        data: dict[str, list[str]] = yaml.safe_load(f) or {}
-    return list(data.get("bundles", ["core"]))
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        return ["core"]
+    bundles = data.get("bundles", ["core"])
+    return list(bundles) if isinstance(bundles, list) else ["core"]
 
 
 def cmd_generate(args: list[str]) -> int:
@@ -69,7 +72,10 @@ def cmd_generate(args: list[str]) -> int:
     bundles = []
     i = 0
     while i < len(args):
-        if args[i] == "--output" and i + 1 < len(args):
+        if args[i] == "--output":
+            if i + 1 >= len(args):
+                print("Missing value for --output", file=sys.stderr)
+                return 1
             output = args[i + 1]
             i += 2
         else:

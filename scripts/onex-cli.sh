@@ -27,10 +27,6 @@ onex_status() {
     (cd "$INFRA_DIR" && uv run python -m omnibase_infra.docker.catalog.cli status)
 }
 
-onex_init() {
-    (cd "$INFRA_DIR" && uv run python -m omnibase_infra.docker.catalog.cli init)
-}
-
 onex_generate() {
     local bundles="$*"
     # shellcheck disable=SC2086

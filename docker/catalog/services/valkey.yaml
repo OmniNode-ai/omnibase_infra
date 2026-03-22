@@ -3,10 +3,10 @@ description: Redis-compatible cache and pub/sub for session state and caching
 image: valkey/valkey:8.0-alpine
 layer: infrastructure
 container_name: omnibase-infra-valkey
-required_env: []
+required_env:
+  - VALKEY_PASSWORD
 hardcoded_env: {}
-operational_defaults:
-  VALKEY_PASSWORD: valkey-dev-password
+operational_defaults: {}
 ports:
   external: 16379
   internal: 6379
