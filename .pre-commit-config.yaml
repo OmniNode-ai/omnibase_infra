@@ -34,7 +34,7 @@ repos:
       - id: no-hardcoded-topics
         exclude: ^(src/omnibase_infra/(enums/generated|cli|tui|models/registration/model_event_bus_topic_entry\.py|nodes/.*/handlers|nodes/.*/services|runtime/contract_registration_event_router\.py|services/observability|services/service_timeout_emitter\.py|validation)|contracts/|scripts/|tests/)
       - id: no-bare-feature-flags
-  # YAML formatting (standard across ecosystem)
+        # YAML formatting (standard across ecosystem)
       - id: no-untracked-todos
         stages: [pre-commit]
   - repo: https://github.com/google/yamlfmt

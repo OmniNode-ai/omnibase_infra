@@ -17,7 +17,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import subprocess
+
+logger = logging.getLogger(__name__)
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -168,7 +171,7 @@ def verify_containers(
                     check=False,
                 )
             except FileNotFoundError:
-                pass
+                logger.debug("Docker CLI not found during restart of %s", name)
 
         # Recheck after restart
         try:
