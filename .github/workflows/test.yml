@@ -711,6 +711,22 @@ jobs:
           fi
           echo "All 10 test splits passed"
 
+  # ============================================================================
+  # CROSS-REPO MIGRATION CONFLICT CHECK (OMN-5772)
+  # Validates migration schema conflicts against onex_change_control.
+  # warn-only until all violations fixed (see OMN-5775).
+  # ============================================================================
+
+  migration-conflict-check:
+    name: Cross-Repo Migration Conflicts
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: OmniNode-ai/onex_change_control/.github/actions/validate-boundaries@main
+        with:
+          checks: "migration-conflicts"
+          warn-only: "true"
+
   ci-summary:
     name: CI Summary
     # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
