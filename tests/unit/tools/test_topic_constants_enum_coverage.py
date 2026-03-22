@@ -74,10 +74,10 @@ def test_generated_enum_files_importable() -> None:
 
     # Verify known topic constants are members of their producer enums
     assert (
-        EnumOmnibaseInfraTopic.EVT_EFFECTIVENESS_DATA_CHANGED_V1
-        == "onex.evt.omnibase-infra.effectiveness-data-changed.v1"
+        EnumOmnibaseInfraTopic.EVT_CONSUMER_HEALTH_V1
+        == "onex.evt.omnibase-infra.consumer-health.v1"
     )
     assert (
-        EnumPlatformTopic.EVT_RESOLUTION_DECIDED_V1
-        == "onex.evt.platform.resolution-decided.v1"
+        EnumPlatformTopic.EVT_CONTRACT_REGISTERED_V1
+        == "onex.evt.platform.contract-registered.v1"
     )
