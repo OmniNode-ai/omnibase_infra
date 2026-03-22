@@ -46,10 +46,6 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from omnibase_infra.event_bus.topic_constants import (
-    TOPIC_WIRING_HEALTH_SNAPSHOT,
-    WIRING_HEALTH_MONITORED_TOPICS,
-)
 from omnibase_infra.observability.wiring_health.model_topic_wiring_health import (
     DEFAULT_MISMATCH_THRESHOLD,
 )
@@ -68,6 +64,7 @@ from omnibase_infra.observability.wiring_health.protocol_consumption_count_sourc
 from omnibase_infra.observability.wiring_health.protocol_emission_count_source import (
     ProtocolEmissionCountSource,
 )
+from omnibase_infra.topics import topic_keys
 
 if TYPE_CHECKING:
     from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
@@ -123,7 +120,11 @@ class WiringHealthChecker:
         self._threshold = threshold
         self._prometheus_sink = prometheus_sink
         self._event_bus = event_bus
-        self._monitored_topics = frozenset(WIRING_HEALTH_MONITORED_TOPICS)
+        from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+        _registry = ServiceTopicRegistry.from_defaults()
+        self._monitored_topics = _registry.monitored_topics()
+        self._snapshot_topic = _registry.resolve(topic_keys.WIRING_HEALTH_SNAPSHOT)
 
         _logger.info(
             "WiringHealthChecker initialized",
@@ -296,7 +297,7 @@ class WiringHealthChecker:
         try:
             await self._event_bus.publish_envelope(
                 envelope=envelope,
-                topic=TOPIC_WIRING_HEALTH_SNAPSHOT,
+                topic=self._snapshot_topic,
             )
         except Exception:
             _logger.exception(

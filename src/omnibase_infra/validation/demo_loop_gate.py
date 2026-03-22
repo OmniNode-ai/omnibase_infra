@@ -43,21 +43,14 @@ import logging
 import sys
 from typing import Final
 
-from omnibase_infra.event_bus.topic_constants import (
-    TOPIC_AGENT_STATUS,
-    TOPIC_INJECTION_AGENT_MATCH,
-    TOPIC_INJECTION_CONTEXT_UTILIZATION,
-    TOPIC_INJECTION_LATENCY_BREAKDOWN,
-    TOPIC_LLM_CALL_COMPLETED,
-    TOPIC_SESSION_OUTCOME_CANONICAL,
-    TOPIC_SESSION_OUTCOME_CURRENT,
-)
 from omnibase_infra.runtime.emit_daemon.topics import (
     ALL_EVENT_REGISTRATIONS,
     TOPIC_NOTIFICATION_BLOCKED,
     TOPIC_NOTIFICATION_COMPLETED,
     TOPIC_PHASE_METRICS,
 )
+from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 from omnibase_infra.validation.enums.enum_assertion_status import EnumAssertionStatus
 from omnibase_infra.validation.models.model_assertion_result import (
     ModelAssertionResult,
@@ -73,31 +66,36 @@ logger = logging.getLogger(__name__)
 # Constants
 # =============================================================================
 
+# Resolve topic strings at module load time via ServiceTopicRegistry
+_REGISTRY = ServiceTopicRegistry.from_defaults()
+
 # The canonical event topics that MUST exist for the demo loop to work.
 # These are the topics the canonical pipeline emits to.
 CANONICAL_EVENT_TOPICS: Final[tuple[str, ...]] = (
     # Platform topics (runtime)
     "onex.evt.platform.node-introspection.v1",
     # Intelligence topics
-    TOPIC_SESSION_OUTCOME_CANONICAL,
-    TOPIC_LLM_CALL_COMPLETED,
+    _REGISTRY.resolve(topic_keys.SESSION_OUTCOME_CANONICAL),
+    _REGISTRY.resolve(topic_keys.LLM_CALL_COMPLETED),
     # Injection effectiveness topics
-    TOPIC_INJECTION_CONTEXT_UTILIZATION,
-    TOPIC_INJECTION_AGENT_MATCH,
-    TOPIC_INJECTION_LATENCY_BREAKDOWN,
+    _REGISTRY.resolve(topic_keys.INJECTION_CONTEXT_UTILIZATION),
+    _REGISTRY.resolve(topic_keys.INJECTION_AGENT_MATCH),
+    _REGISTRY.resolve(topic_keys.INJECTION_LATENCY_BREAKDOWN),
     # Phase metrics
     TOPIC_PHASE_METRICS,
     # Notification topics
     TOPIC_NOTIFICATION_BLOCKED,
     TOPIC_NOTIFICATION_COMPLETED,
     # Agent status
-    TOPIC_AGENT_STATUS,
+    _REGISTRY.resolve(topic_keys.AGENT_STATUS),
 )
 
 # Legacy topics that should NOT be emitting alongside canonical topics.
 # The "current" session-outcome topic uses 'cmd' prefix instead of 'evt'.
 LEGACY_TOPIC_MAPPINGS: Final[dict[str, str]] = {
-    TOPIC_SESSION_OUTCOME_CURRENT: TOPIC_SESSION_OUTCOME_CANONICAL,
+    _REGISTRY.resolve(topic_keys.SESSION_OUTCOME_CURRENT): _REGISTRY.resolve(
+        topic_keys.SESSION_OUTCOME_CANONICAL
+    ),
 }
 
 # Expected schema version for the demo loop (from event registrations).
