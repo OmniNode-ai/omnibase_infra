@@ -51,7 +51,6 @@ from omnibase_infra.services.service_circuit_breaker_event_publisher import (
     CircuitBreakerEventPublisher,
 )
 from omnibase_infra.services.service_llm_endpoint_health import (
-    TOPIC_LLM_ENDPOINT_HEALTH,
     ServiceLlmEndpointHealth,
 )
 from omnibase_infra.services.service_node_selector import (
@@ -117,7 +116,6 @@ __all__ = [
     "SessionStoreNotInitializedError",
     # LLM endpoint health checker (OMN-2255)
     "ServiceLlmEndpointHealth",
-    "TOPIC_LLM_ENDPOINT_HEALTH",
     # Topic catalog service (OMN-2311)
     "ServiceTopicCatalog",
     # Circuit breaker event publisher (OMN-5293)

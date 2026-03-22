@@ -301,6 +301,14 @@ async def wire_infrastructure_services(
         services_registered.append("RegistryCompute")
         logger.debug("Registered RegistryCompute in container (global scope)")
 
+        # Register ProtocolTopicRegistry (OMN-5839)
+        from omnibase_infra.topics.registry_topic_registry import (
+            RegistryTopicRegistry,
+        )
+
+        await RegistryTopicRegistry.register(container)
+        services_registered.append("ProtocolTopicRegistry")
+
     except AttributeError as e:
         # Container missing service_registry or registration method
         error_str = str(e)

@@ -2482,6 +2482,16 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (File & Class Naming - Service convention)
     ticket: OMN-2151
+  # ServiceTopicRegistry naming exemption (OMN-5839)
+  - file_pattern: 'service_topic_registry\.py'
+    class_pattern: "Class name 'ServiceTopicRegistry'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      Follows CLAUDE.md Service<Name> naming convention. ServiceTopicRegistry is the concrete implementation of ProtocolTopicRegistry, mapping logical topic keys to Kafka topic strings.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Service convention)
+    ticket: OMN-5839
   # ==========================================================================
   # SPI LLM Protocol Adapter Exemptions (OMN-2319)
   # ==========================================================================

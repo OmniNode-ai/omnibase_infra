@@ -59,11 +59,14 @@ def test_all_topic_constants_covered_by_generated_enums() -> None:
 
 @pytest.mark.unit
 def test_generated_enum_files_importable() -> None:
-    """Generated enum files can be imported without errors."""
+    """Generated enum files can be imported without errors.
+
+    Note: EnumOmniclaudeTopic and EnumOmniintelligenceTopic were consolidated
+    into ProtocolTopicRegistry in OMN-5839. Only remaining generated enums are
+    tested here.
+    """
     from omnibase_infra.enums.generated import (
         EnumOmnibaseInfraTopic,
-        EnumOmniclaudeTopic,
-        EnumOmniintelligenceTopic,
         EnumOmnimemoryTopic,
         EnumPlatformTopic,
         EnumValidationTopic,
@@ -71,21 +74,10 @@ def test_generated_enum_files_importable() -> None:
 
     # Verify known topic constants are members of their producer enums
     assert (
-        EnumOmniclaudeTopic.EVT_AGENT_STATUS_V1 == "onex.evt.omniclaude.agent-status.v1"
+        EnumOmnibaseInfraTopic.EVT_CONSUMER_HEALTH_V1
+        == "onex.evt.omnibase-infra.consumer-health.v1"
     )
     assert (
-        EnumOmniclaudeTopic.EVT_SESSION_OUTCOME_V1
-        == "onex.evt.omniclaude.session-outcome.v1"
-    )
-    assert (
-        EnumOmniintelligenceTopic.CMD_SESSION_OUTCOME_V1
-        == "onex.cmd.omniintelligence.session-outcome.v1"
-    )
-    assert (
-        EnumOmnibaseInfraTopic.EVT_EFFECTIVENESS_DATA_CHANGED_V1
-        == "onex.evt.omnibase-infra.effectiveness-data-changed.v1"
-    )
-    assert (
-        EnumPlatformTopic.EVT_RESOLUTION_DECIDED_V1
-        == "onex.evt.platform.resolution-decided.v1"
+        EnumPlatformTopic.EVT_CONTRACT_REGISTERED_V1
+        == "onex.evt.platform.contract-registered.v1"
     )

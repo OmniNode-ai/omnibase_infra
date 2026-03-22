@@ -47,7 +47,6 @@ class EnumPlatformTopic(str, Enum):
     EVT_NODE_REGISTRATION_REJECTED_V1 = "onex.evt.platform.node-registration-rejected.v1"  # onex.evt.platform.node-registration-rejected.v1
     EVT_NODE_REGISTRATION_RESULT_V1 = "onex.evt.platform.node-registration-result.v1"  # onex.evt.platform.node-registration-result.v1
     EVT_REGISTRY_REQUEST_INTROSPECTION_V1 = "onex.evt.platform.registry-request-introspection.v1"  # onex.evt.platform.registry-request-introspection.v1
-    EVT_RESOLUTION_DECIDED_V1 = "onex.evt.platform.resolution-decided.v1"  # onex.evt.platform.resolution-decided.v1
     EVT_TOPIC_CATALOG_CHANGED_V1 = "onex.evt.platform.topic-catalog-changed.v1"  # onex.evt.platform.topic-catalog-changed.v1
     EVT_TOPIC_CATALOG_RESPONSE_V1 = "onex.evt.platform.topic-catalog-response.v1"  # onex.evt.platform.topic-catalog-response.v1
     EVT_VALIDATION_ADJUDICATION_COMPLETED_V1 = "onex.evt.platform.validation-adjudication-completed.v1"  # onex.evt.platform.validation-adjudication-completed.v1

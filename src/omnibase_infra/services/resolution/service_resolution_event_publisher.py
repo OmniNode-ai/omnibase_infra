@@ -41,11 +41,11 @@ import json
 import logging
 from uuid import UUID, uuid4
 
-from omnibase_infra.event_bus.topic_constants import TOPIC_RESOLUTION_DECIDED
 from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.services.resolution.model_resolution_event_local import (
     ModelResolutionEventLocal,
 )
+from omnibase_infra.topics import topic_keys
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ class ServiceResolutionEventPublisher:
     def __init__(
         self,
         bus: ProtocolEventBusLike,
-        topic: str = TOPIC_RESOLUTION_DECIDED,
+        topic: str | None = None,
     ) -> None:
         """Initialize the publisher with an event bus.
 
@@ -91,9 +91,17 @@ class ServiceResolutionEventPublisher:
             bus: An event bus instance satisfying ``ProtocolEventBusLike``.
                 Both ``EventBusKafka`` and ``EventBusInmemory`` are supported.
                 Lifecycle is managed externally.
-            topic: Target topic for resolution events. Defaults to
-                ``TOPIC_RESOLUTION_DECIDED``.
+            topic: Target topic for resolution events. If ``None``,
+                resolves via ``ServiceTopicRegistry.from_defaults()``.
         """
+        if topic is None:
+            from omnibase_infra.topics.service_topic_registry import (
+                ServiceTopicRegistry,
+            )
+
+            topic = ServiceTopicRegistry.from_defaults().resolve(
+                topic_keys.RESOLUTION_DECIDED
+            )
         self._bus = bus
         self._topic = topic
 

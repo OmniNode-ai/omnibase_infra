@@ -44,12 +44,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
-
-from omnibase_infra.event_bus.topic_constants import WIRING_HEALTH_MONITORED_TOPICS
-
-if TYPE_CHECKING:
-    from typing import Final
 
 _logger = logging.getLogger(__name__)
 
@@ -58,53 +52,57 @@ class MixinConsumptionCounter:
     """Mixin providing consumption counting for wiring health monitoring.
 
     Tracks successful message consumption per-topic for comparison against
-    emission counts. Only tracks topics configured in WIRING_HEALTH_MONITORED_TOPICS
-    to bound memory usage. Does NOT count DLQ-routed messages.
+    emission counts. Only tracks topics in the provided monitored set to
+    bound memory usage. Does NOT count DLQ-routed messages.
 
     Attributes:
         _consumption_counts: Per-topic consumption counts (topic -> count)
         _consumption_counter_lock: asyncio.Lock for coroutine-safe updates
-        _consumption_monitored_topics: Set of topics to track (from constants)
+        _consumption_monitored_topics: Set of topics to track
 
     Example:
         >>> class EventBusSubcontractWiring(MixinConsumptionCounter):
         ...     def __init__(self):
-        ...         self._init_consumption_counter()
+        ...         from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+        ...         registry = ServiceTopicRegistry.from_defaults()
+        ...         self._init_consumption_counter(registry.monitored_topics())
         ...
         ...     async def callback(self, message):
         ...         # ... process message ...
         ...         await self._record_consumption(topic)
         ...
         >>> wiring = EventBusSubcontractWiring()
-        >>> await wiring.callback(message)  # topic = "onex.evt.omniclaude.agent-match.v1"
+        >>> await wiring.callback(message)
         >>> wiring.get_consumption_counts()
         {'onex.evt.omniclaude.agent-match.v1': 1}
     """
 
-    # Class-level constants
-    _CONSUMPTION_MONITORED_TOPICS: Final[frozenset[str]] = frozenset(
-        WIRING_HEALTH_MONITORED_TOPICS
-    )
-
-    def _init_consumption_counter(self) -> None:
+    def _init_consumption_counter(
+        self, monitored_topics: frozenset[str] | None = None
+    ) -> None:
         """Initialize consumption counter state.
 
         Must be called during __init__ of the class using this mixin.
         Creates the counter dict and asyncio.Lock.
 
-        Example:
-            >>> class EventBusSubcontractWiring(MixinConsumptionCounter):
-            ...     def __init__(self, ...):
-            ...         self._init_consumption_counter()
-            ...         # ... other initialization ...
+        Args:
+            monitored_topics: Set of topic strings to track. If ``None``,
+                resolves via ``ServiceTopicRegistry.from_defaults()``.
         """
+        if monitored_topics is None:
+            from omnibase_infra.topics.service_topic_registry import (
+                ServiceTopicRegistry,
+            )
+
+            monitored_topics = ServiceTopicRegistry.from_defaults().monitored_topics()
+        self._consumption_monitored_topics: frozenset[str] = monitored_topics
         self._consumption_counts: dict[str, int] = {}
         self._consumption_counter_lock: asyncio.Lock = asyncio.Lock()
 
         _logger.debug(
             "Consumption counter initialized",
             extra={
-                "monitored_topics": list(self._CONSUMPTION_MONITORED_TOPICS),
+                "monitored_topics": list(self._consumption_monitored_topics),
             },
         )
 
@@ -131,7 +129,7 @@ class MixinConsumptionCounter:
             ...     await self._record_consumption(topic)
         """
         # Fast path: skip topics not in monitored set
-        if topic not in self._CONSUMPTION_MONITORED_TOPICS:
+        if topic not in self._consumption_monitored_topics:
             return
 
         async with self._consumption_counter_lock:
@@ -207,7 +205,7 @@ class MixinConsumptionCounter:
             >>> topics = wiring.get_consumption_monitored_topics()
             >>> print(f"Monitoring {len(topics)} topics")
         """
-        return self._CONSUMPTION_MONITORED_TOPICS
+        return self._consumption_monitored_topics
 
 
 __all__ = ["MixinConsumptionCounter"]

@@ -31,7 +31,6 @@ from typing import TYPE_CHECKING, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.event_bus.topic_constants import TOPIC_CONSUMER_RESTART_CMD
 from omnibase_infra.models.health.enum_consumer_incident_state import (
     EnumConsumerIncidentState,
 )
@@ -41,6 +40,7 @@ from omnibase_infra.models.health.model_consumer_health_event import (
 from omnibase_infra.models.health.model_consumer_restart_command import (
     ModelConsumerRestartCommand,
 )
+from omnibase_infra.topics import topic_keys
 
 if TYPE_CHECKING:
     from aiokafka import AIOKafkaProducer
@@ -100,6 +100,13 @@ class HandlerConsumerHealthTriage:
             slack_handler: Async callable accepting a message string.
             linear_handler: Async callable accepting title and description kwargs.
         """
+        from omnibase_infra.topics.service_topic_registry import (
+            ServiceTopicRegistry,
+        )
+
+        self._restart_topic = ServiceTopicRegistry.from_defaults().resolve(
+            topic_keys.CONSUMER_RESTART_CMD
+        )
         self._db_pool = db_pool
         self._producer = producer
         self._slack_handler = slack_handler
@@ -325,7 +332,7 @@ class HandlerConsumerHealthTriage:
 
         try:
             payload = json.dumps(command.model_dump(mode="json")).encode("utf-8")
-            await self._producer.send(TOPIC_CONSUMER_RESTART_CMD, value=payload)
+            await self._producer.send(self._restart_topic, value=payload)
             logger.info(
                 "Emitted restart command for consumer %s",
                 event.consumer_identity,

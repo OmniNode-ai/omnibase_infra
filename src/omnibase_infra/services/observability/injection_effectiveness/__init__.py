@@ -33,9 +33,6 @@ Example:
     >>> await consumer.run()
 """
 
-from omnibase_infra.event_bus.topic_constants import (
-    TOPIC_EFFECTIVENESS_INVALIDATION,
-)
 from omnibase_infra.services.observability.injection_effectiveness.config import (
     ConfigInjectionEffectivenessConsumer,
 )
@@ -104,7 +101,6 @@ __all__ = [
     "ModelPatternUtilization",
     "ProtocolInjectionEffectivenessReader",
     "ReaderInjectionEffectivenessPostgres",
-    "TOPIC_EFFECTIVENESS_INVALIDATION",
     "TOPIC_TO_MODEL",
     "TOPIC_TO_WRITER_METHOD",
     "WriterInjectionEffectivenessPostgres",

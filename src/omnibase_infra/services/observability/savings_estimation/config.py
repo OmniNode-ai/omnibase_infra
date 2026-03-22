@@ -13,13 +13,27 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from omnibase_infra.event_bus.topic_constants import (
-    TOPIC_HOOK_CONTEXT_INJECTED,
-    TOPIC_LLM_CALL_COMPLETED,
-    TOPIC_SAVINGS_ESTIMATED,
-    TOPIC_SESSION_OUTCOME_CANONICAL,
-    TOPIC_VALIDATOR_CATCH,
-)
+from omnibase_infra.topics import topic_keys
+
+
+def _default_consumed_topics() -> list[str]:
+    """Resolve consumed topics lazily via ServiceTopicRegistry."""
+    from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+    reg = ServiceTopicRegistry.from_defaults()
+    return [
+        reg.resolve(topic_keys.LLM_CALL_COMPLETED),
+        reg.resolve(topic_keys.SESSION_OUTCOME_CANONICAL),
+        reg.resolve(topic_keys.HOOK_CONTEXT_INJECTED),
+        reg.resolve(topic_keys.VALIDATOR_CATCH),
+    ]
+
+
+def _default_produce_topic() -> str:
+    """Resolve produce topic lazily via ServiceTopicRegistry."""
+    from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+    return ServiceTopicRegistry.from_defaults().resolve(topic_keys.SAVINGS_ESTIMATED)
 
 
 class ConfigSavingsEstimation(BaseSettings):
@@ -43,17 +57,12 @@ class ConfigSavingsEstimation(BaseSettings):
     )
 
     consumed_topics: list[str] = Field(
-        default_factory=lambda: [
-            TOPIC_LLM_CALL_COMPLETED,
-            TOPIC_SESSION_OUTCOME_CANONICAL,
-            TOPIC_HOOK_CONTEXT_INJECTED,
-            TOPIC_VALIDATOR_CATCH,
-        ],
+        default_factory=_default_consumed_topics,
         description="Kafka topics to consume.",
     )
 
     produce_topic: str = Field(
-        default=TOPIC_SAVINGS_ESTIMATED,
+        default_factory=_default_produce_topic,
         description="Kafka topic to produce savings estimates.",
     )
 

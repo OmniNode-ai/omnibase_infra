@@ -31,7 +31,12 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.structs import ConsumerRecord
 
 from omnibase_infra.event_bus.consumer_health_emitter import ConsumerHealthEmitter
-from omnibase_infra.event_bus.topic_constants import TOPIC_CONSUMER_HEALTH
+from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+TOPIC_CONSUMER_HEALTH = ServiceTopicRegistry.from_defaults().resolve(
+    topic_keys.CONSUMER_HEALTH
+)
 from omnibase_infra.models.health.enum_consumer_health_event_type import (
     EnumConsumerHealthEventType,
 )

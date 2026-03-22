@@ -36,13 +36,14 @@ import pytest
 from pydantic import ValidationError
 
 from omnibase_infra.services.service_llm_endpoint_health import (
-    TOPIC_LLM_ENDPOINT_HEALTH,
     EndpointCircuitBreaker,
     ModelLlmEndpointHealthConfig,
     ModelLlmEndpointHealthEvent,
     ModelLlmEndpointStatus,
     ServiceLlmEndpointHealth,
 )
+from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 
 # =============================================================================
 # Fixtures
@@ -782,7 +783,10 @@ class TestServiceLlmEndpointHealthEventEmission:
 
         mock_event_bus.publish_envelope.assert_called_once()
         call_args = mock_event_bus.publish_envelope.call_args
-        assert call_args.kwargs["topic"] == TOPIC_LLM_ENDPOINT_HEALTH
+        _expected_topic = ServiceTopicRegistry.from_defaults().resolve(
+            topic_keys.LLM_ENDPOINT_HEALTH
+        )
+        assert call_args.kwargs["topic"] == _expected_topic
 
     @pytest.mark.asyncio
     async def test_no_emission_without_bus(
@@ -1028,6 +1032,9 @@ class TestTopicConstant:
 
     def test_topic_follows_onex_convention(self) -> None:
         """Topic should follow onex.evt.{domain}.{name}.v1 pattern."""
-        assert TOPIC_LLM_ENDPOINT_HEALTH.startswith("onex.evt.")
-        assert TOPIC_LLM_ENDPOINT_HEALTH.endswith(".v1")
-        assert "llm-endpoint-health" in TOPIC_LLM_ENDPOINT_HEALTH
+        _topic = ServiceTopicRegistry.from_defaults().resolve(
+            topic_keys.LLM_ENDPOINT_HEALTH
+        )
+        assert _topic.startswith("onex.evt.")
+        assert _topic.endswith(".v1")
+        assert "llm-endpoint-health" in _topic

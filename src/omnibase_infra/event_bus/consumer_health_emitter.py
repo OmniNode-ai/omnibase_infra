@@ -24,7 +24,6 @@ import os
 import time
 from typing import TYPE_CHECKING
 
-from omnibase_infra.event_bus.topic_constants import TOPIC_CONSUMER_HEALTH
 from omnibase_infra.models.health.enum_consumer_health_event_type import (
     EnumConsumerHealthEventType,
 )
@@ -34,6 +33,7 @@ from omnibase_infra.models.health.enum_consumer_health_severity import (
 from omnibase_infra.models.health.model_consumer_health_event import (
     ModelConsumerHealthEvent,
 )
+from omnibase_infra.topics import topic_keys
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -64,14 +64,23 @@ class ConsumerHealthEmitter:
         self,
         producer: AIOKafkaProducer,
         *,
-        topic: str = TOPIC_CONSUMER_HEALTH,
+        topic: str | None = None,
     ) -> None:
         """Initialize the emitter.
 
         Args:
             producer: An already-started AIOKafkaProducer.
-            topic: Topic to emit to (defaults to TOPIC_CONSUMER_HEALTH).
+            topic: Topic to emit to. If ``None``, resolves via
+                ``ServiceTopicRegistry.from_defaults()``.
         """
+        if topic is None:
+            from omnibase_infra.topics.service_topic_registry import (
+                ServiceTopicRegistry,
+            )
+
+            topic = ServiceTopicRegistry.from_defaults().resolve(
+                topic_keys.CONSUMER_HEALTH
+            )
         self._producer = producer
         self._topic = topic
         self._rate_limit_cache: dict[str, float] = {}

@@ -27,7 +27,12 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-from omnibase_infra.event_bus.topic_constants import TOPIC_RESOLUTION_DECIDED
+from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+TOPIC_RESOLUTION_DECIDED = ServiceTopicRegistry.from_defaults().resolve(
+    topic_keys.RESOLUTION_DECIDED
+)
 from omnibase_infra.services.resolution.model_resolution_event_local import (
     ModelResolutionEventLocal,
     ModelResolutionProofLocal,

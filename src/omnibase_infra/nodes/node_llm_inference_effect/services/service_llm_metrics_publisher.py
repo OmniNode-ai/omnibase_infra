@@ -28,7 +28,7 @@ Related:
     - OMN-2443: Wire NodeLlmInferenceEffect to emit llm-call-completed events
     - OMN-2238: Token usage normalization
     - OMN-2235: LLM cost tracking contracts (SPI layer)
-    - TOPIC_LLM_CALL_COMPLETED: ``onex.evt.omniintelligence.llm-call-completed.v1``
+    - topic_keys.LLM_CALL_COMPLETED: ``onex.evt.omniintelligence.llm-call-completed.v1``
     - ARCH-002: No handler publishing (validator_no_handler_publishing.py)
 """
 
@@ -42,13 +42,11 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from omnibase_infra.event_bus.topic_constants import (
-    TOPIC_LLM_CALL_COMPLETED,
-    TOPIC_LLM_CALL_COMPLETED_INFRA,
-)
 from omnibase_infra.nodes.node_llm_inference_effect.services.protocol_llm_handler import (
     ProtocolLlmHandler,
 )
+from omnibase_infra.protocols import ProtocolTopicRegistry
+from omnibase_infra.topics import topic_keys
 
 if TYPE_CHECKING:
     from omnibase_infra.models.llm.model_llm_inference_response import (
@@ -104,6 +102,7 @@ class ServiceLlmMetricsPublisher:
         self,
         handler: ProtocolLlmHandler,
         publisher: Callable[..., Awaitable[bool]],
+        topic_registry: ProtocolTopicRegistry | None = None,
     ) -> None:
         """Initialise with inner handler and publisher callable.
 
@@ -121,7 +120,19 @@ class ServiceLlmMetricsPublisher:
 
                 Typically ``AdapterProtocolEventPublisherKafka.publish`` or an
                 equivalent in-memory stub.
+            topic_registry: Optional topic registry for resolving topic strings.
+                If ``None``, uses ``ServiceTopicRegistry.from_defaults()``.
         """
+        if topic_registry is None:
+            from omnibase_infra.topics.service_topic_registry import (
+                ServiceTopicRegistry,
+            )
+
+            topic_registry = ServiceTopicRegistry.from_defaults()
+        self._topic_llm_call = topic_registry.resolve(topic_keys.LLM_CALL_COMPLETED)
+        self._topic_llm_call_infra = topic_registry.resolve(
+            topic_keys.LLM_CALL_COMPLETED_INFRA
+        )
         self._handler = handler
         self._publisher = publisher
         # Holds strong references to background tasks so they are not
@@ -215,9 +226,9 @@ class ServiceLlmMetricsPublisher:
         """Publish pre-captured last_call_metrics to Kafka.
 
         Emits two events fire-and-forget:
-        1. ``TOPIC_LLM_CALL_COMPLETED`` — full ``ContractLlmCallMetrics`` to
+        1. ``self._topic_llm_call`` — full ``ContractLlmCallMetrics`` to
            the omniintelligence cost aggregation pipeline.
-        2. ``TOPIC_LLM_CALL_COMPLETED_INFRA`` — lightweight raw dict to the
+        2. ``self._topic_llm_call_infra`` — lightweight raw dict to the
            omnibase-infra namespace for the omnidash Cost Trends dashboard.
 
         Safe wrapper around the publish path.  All exceptions are caught
@@ -247,14 +258,14 @@ class ServiceLlmMetricsPublisher:
         try:
             payload = json.loads(metrics.model_dump_json())
             await self._publisher(
-                TOPIC_LLM_CALL_COMPLETED,
+                self._topic_llm_call,
                 payload,
                 str(correlation_id),
             )
             logger.debug(
                 "Published LLM call metrics. topic=%s model=%s "
                 "prompt_tokens=%d completion_tokens=%d correlation_id=%s",
-                TOPIC_LLM_CALL_COMPLETED,
+                self._topic_llm_call,
                 metrics.model_id,
                 metrics.prompt_tokens,
                 metrics.completion_tokens,
@@ -264,7 +275,7 @@ class ServiceLlmMetricsPublisher:
             logger.warning(
                 "Failed to publish LLM call metrics to topic=%s; ignoring. "
                 "model=%s correlation_id=%s",
-                TOPIC_LLM_CALL_COMPLETED,
+                self._topic_llm_call,
                 getattr(metrics, "model_id", "<unknown>"),
                 correlation_id,
                 exc_info=True,
@@ -282,13 +293,13 @@ class ServiceLlmMetricsPublisher:
                 "timestamp": datetime.now(UTC).isoformat(),
             }
             await self._publisher(
-                TOPIC_LLM_CALL_COMPLETED_INFRA,
+                self._topic_llm_call_infra,
                 infra_payload,
                 str(correlation_id),
             )
             logger.debug(
                 "Published infra LLM call event. topic=%s model=%s correlation_id=%s",
-                TOPIC_LLM_CALL_COMPLETED_INFRA,
+                self._topic_llm_call_infra,
                 metrics.model_id,
                 correlation_id,
             )
@@ -296,7 +307,7 @@ class ServiceLlmMetricsPublisher:
             logger.warning(
                 "Failed to publish infra LLM call event to topic=%s; ignoring. "
                 "model=%s correlation_id=%s",
-                TOPIC_LLM_CALL_COMPLETED_INFRA,
+                self._topic_llm_call_infra,
                 getattr(metrics, "model_id", "<unknown>"),
                 correlation_id,
                 exc_info=True,
