@@ -271,7 +271,7 @@ fi
 # ============================================================================
 log_step "3" "Start Infisical (secrets management)"
 
-run_cmd $COMPOSE_CMD -f "${COMPOSE_FILE}" --profile secrets up -d infisical
+run_cmd $COMPOSE_CMD -f "${COMPOSE_FILE}" up -d infisical
 if [[ "${DRY_RUN}" != "true" ]]; then
     log_info "Waiting for Infisical to be healthy..."
     # Infisical has a 60s start_period, so be patient

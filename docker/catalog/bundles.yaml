@@ -6,11 +6,20 @@ core:
   services:
     - postgres
     - redpanda
+    - valkey
+    - infisical
   includes: []
+  inject_env:
+    INFISICAL_ADDR: "http://infisical:8080"
+  inject_required_env:
+    - INFISICAL_CLIENT_ID
+    - INFISICAL_CLIENT_SECRET
+    - INFISICAL_PROJECT_ID
+    - INFISICAL_ENCRYPTION_KEY
+    - INFISICAL_AUTH_SECRET
 runtime:
   description: "ONEX runtime platform — kernel, effects, workers, consumers"
   services:
-    - valkey
     - forward-migration
     - migration-gate
     - omninode-runtime
@@ -42,18 +51,12 @@ memgraph:
   inject_required_env:
     - OMNIMEMORY_DB_URL
 secrets:
-  description: "Infisical secrets management"
-  services:
-    - infisical
-  includes: []
-  inject_env:
-    INFISICAL_ADDR: "http://infisical:8080"
-  inject_required_env:
-    - INFISICAL_CLIENT_ID
-    - INFISICAL_CLIENT_SECRET
-    - INFISICAL_PROJECT_ID
-    - INFISICAL_ENCRYPTION_KEY
-    - INFISICAL_AUTH_SECRET
+  description: "Infisical secrets management (DEPRECATED — Infisical is now in core bundle)"
+  services: []
+  includes:
+    - core
+  inject_env: {}
+  inject_required_env: []
 auth:
   description: "Keycloak local OIDC/auth"
   services:
