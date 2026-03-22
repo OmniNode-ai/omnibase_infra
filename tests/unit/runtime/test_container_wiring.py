@@ -32,8 +32,9 @@ class TestWireInfrastructureServices:
         assert "RegistryProtocolBinding" in summary["services"]
         assert "RegistryCompute" in summary["services"]
 
-        # Verify register_instance was called three times (once for each registry)
-        assert mock_container.service_registry.register_instance.call_count == 3
+        # Verify register_instance was called four times
+        # (RegistryPolicy, RegistryProtocolBinding, RegistryCompute, ProtocolTopicRegistry)
+        assert mock_container.service_registry.register_instance.call_count == 4
 
     async def test_wire_infrastructure_services_returns_summary(
         self, mock_container: MagicMock

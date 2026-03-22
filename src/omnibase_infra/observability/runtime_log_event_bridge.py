@@ -30,7 +30,6 @@ import re
 import time
 from typing import TYPE_CHECKING
 
-from omnibase_infra.event_bus.topic_constants import TOPIC_RUNTIME_ERROR
 from omnibase_infra.models.health.enum_runtime_error_category import (
     EnumRuntimeErrorCategory,
 )
@@ -40,6 +39,7 @@ from omnibase_infra.models.health.enum_runtime_error_severity import (
 from omnibase_infra.models.health.model_runtime_error_event import (
     ModelRuntimeErrorEvent,
 )
+from omnibase_infra.topics import topic_keys
 
 if TYPE_CHECKING:
     from aiokafka import AIOKafkaProducer
@@ -142,7 +142,7 @@ class RuntimeLogEventBridge(logging.Handler):
         self,
         producer: AIOKafkaProducer,
         *,
-        topic: str = TOPIC_RUNTIME_ERROR,
+        topic: str | None = None,
         queue_size: int = _DEFAULT_QUEUE_SIZE,
         hostname: str = "",
         service_label: str = "",
@@ -156,6 +156,14 @@ class RuntimeLogEventBridge(logging.Handler):
             hostname: Machine hostname.
             service_label: Service display label.
         """
+        if topic is None:
+            from omnibase_infra.topics.service_topic_registry import (
+                ServiceTopicRegistry,
+            )
+
+            topic = ServiceTopicRegistry.from_defaults().resolve(
+                topic_keys.RUNTIME_ERROR
+            )
         super().__init__(level=logging.WARNING)
         self._producer = producer
         self._topic = topic

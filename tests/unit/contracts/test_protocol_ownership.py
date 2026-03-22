@@ -65,6 +65,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolRegistryMetrics": "protocols/protocol_registry_metrics.py",
     "ProtocolSnapshotPublisher": "protocols/protocol_snapshot_publisher.py",
     "ProtocolSnapshotStore": "protocols/protocol_snapshot_store.py",
+    "ProtocolTopicRegistry": "protocols/protocol_topic_registry.py",  # [DI] OMN-5839
     "ProtocolValidationLedgerRepository": "protocols/protocol_validation_ledger_repository.py",
     # === [DI] Dependency injection boundaries ===
     # ProtocolConsulClient removed in OMN-3540 (Consul removal)
