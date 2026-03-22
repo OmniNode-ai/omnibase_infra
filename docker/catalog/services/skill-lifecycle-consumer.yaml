@@ -4,8 +4,9 @@ image: runtime:latest
 layer: runtime
 container_name: omninode-skill-lifecycle-consumer
 required_env:
-  - OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN
+  - POSTGRES_PASSWORD
 hardcoded_env:
+  OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN: "postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omnibase_infra"
   OMNIBASE_INFRA_SKILL_LIFECYCLE_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   OMNIBASE_INFRA_SKILL_LIFECYCLE_HEALTH_CHECK_PORT: '8092'
   OMNIBASE_INFRA_SKILL_LIFECYCLE_HEALTH_CHECK_HOST: 0.0.0.0

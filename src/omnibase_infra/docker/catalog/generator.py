@@ -8,10 +8,30 @@ from __future__ import annotations
 # instead of dict[str, Any] to satisfy the ONEX Any-type ban.
 from omnibase_infra.docker.catalog.enum_infra_layer import EnumInfraLayer
 from omnibase_infra.docker.catalog.resolver import ResolvedStack
+from omnibase_infra.docker.catalog.validator import (
+    validate_no_localhost_in_container_env,
+)
 
 
 def generate_compose(resolved: ResolvedStack) -> dict[str, object]:
-    """Generate a docker-compose dict from a resolved stack."""
+    """Generate a docker-compose dict from a resolved stack.
+
+    Raises:
+        ValueError: If any manifest contains localhost in env vars that will
+            be set inside Docker containers.  DB URLs and broker addresses
+            must use Docker DNS names (e.g. ``postgres:5432``).
+    """
+    # Pre-generation validation: reject localhost in container env vars
+    violations = validate_no_localhost_in_container_env(resolved.manifests)
+    if violations:
+        details = "; ".join(
+            f"{v.service}.{v.env_section}.{v.var_name}={v.value!r}" for v in violations
+        )
+        raise ValueError(
+            f"localhost detected in Docker container env vars — use Docker "
+            f"DNS names (e.g. postgres:5432, redpanda:9092) instead: {details}"
+        )
+
     services: dict[str, dict[str, object]] = {}
     all_volumes: set[str] = set()
 

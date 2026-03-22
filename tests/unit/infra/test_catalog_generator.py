@@ -80,3 +80,59 @@ def test_generated_compose_includes_network_and_volumes() -> None:
     compose = generate_compose(resolved)
     assert "omnibase-infra-network" in compose["networks"]
     assert "postgres_data" in compose.get("volumes", {})
+
+
+@pytest.mark.unit
+def test_generated_compose_db_urls_use_docker_dns() -> None:
+    """DB URLs in the runtime bundle must use Docker-internal addresses."""
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["runtime"])
+    # generate_compose will raise ValueError if localhost is detected
+    compose = generate_compose(resolved)
+    # Also verify the actual URL values in the generated compose
+    rt_env = compose["services"]["omninode-runtime"]["environment"]
+    assert "postgres:5432" in rt_env["OMNIBASE_INFRA_DB_URL"]
+    assert "localhost" not in rt_env["OMNIBASE_INFRA_DB_URL"]
+    assert "postgres:5432" in rt_env["OMNIINTELLIGENCE_DB_URL"]
+    assert "localhost" not in rt_env["OMNIINTELLIGENCE_DB_URL"]
+
+
+@pytest.mark.unit
+def test_generated_compose_consumer_dsn_uses_docker_dns() -> None:
+    """Consumer DSN vars must use Docker-internal addresses."""
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["runtime"])
+    compose = generate_compose(resolved)
+    aac_env = compose["services"]["agent-actions-consumer"]["environment"]
+    assert "postgres:5432" in aac_env["OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN"]
+    assert "localhost" not in aac_env["OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN"]
+
+
+@pytest.mark.unit
+def test_generator_rejects_localhost_in_db_url() -> None:
+    """Generator must raise ValueError if a manifest has localhost in a DB URL."""
+    from omnibase_infra.docker.catalog.manifest_schema import CatalogManifest
+    from omnibase_infra.docker.catalog.resolver import ResolvedStack
+
+    bad_manifest = CatalogManifest(
+        name="bad-svc",
+        description="test",
+        image="test:latest",
+        layer="runtime",
+        required_env=["POSTGRES_PASSWORD"],
+        hardcoded_env={
+            "DB_URL": "postgresql://postgres:pw@localhost:5436/mydb",
+        },
+        operational_defaults={},
+        ports=None,
+        healthcheck=None,
+        volumes=[],
+        depends_on=[],
+    )
+    resolved = ResolvedStack(
+        manifests={"bad-svc": bad_manifest},
+        required_env={"POSTGRES_PASSWORD"},
+        injected_env={},
+    )
+    with pytest.raises(ValueError, match="localhost detected"):
+        generate_compose(resolved)
