@@ -50,8 +50,8 @@ def test_resolver_does_not_leak_feature_env_when_bundle_unselected() -> None:
         "OMNIMEMORY_DB_URL",
         "OTEL_EXPORTER_OTLP_ENDPOINT",
         "OTEL_TRACES_EXPORTER",
-        "INFISICAL_ADDR",
-        "INFISICAL_CLIENT_ID",
+        # INFISICAL_ADDR and INFISICAL_CLIENT_ID moved to core bundle
+        # as part of Infisical-first config (OMN-5831)
     }
     leaked = feature_vars & set(resolved.injected_env.keys())
     assert not leaked, f"Feature vars leaked into core bundle: {leaked}"

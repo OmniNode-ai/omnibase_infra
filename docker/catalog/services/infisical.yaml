@@ -4,11 +4,14 @@ image: infisical/infisical:v0.146.0-postgres
 layer: infrastructure
 container_name: omnibase-infra-infisical
 required_env:
-  - DB_CONNECTION_URI
-  - REDIS_URL
-  - ENCRYPTION_KEY
-  - AUTH_SECRET
+  - POSTGRES_PASSWORD
+  - INFISICAL_ENCRYPTION_KEY
+  - INFISICAL_AUTH_SECRET
 hardcoded_env:
+  DB_CONNECTION_URI: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/infisical?sslmode=disable'
+  REDIS_URL: 'redis://valkey:6379'
+  ENCRYPTION_KEY: '${INFISICAL_ENCRYPTION_KEY}'
+  AUTH_SECRET: '${INFISICAL_AUTH_SECRET}'
   TELEMETRY_ENABLED: 'false'
 operational_defaults:
   SITE_URL: http://localhost:8880

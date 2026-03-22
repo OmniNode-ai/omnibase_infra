@@ -150,8 +150,8 @@ x-runtime-env: &runtime-env
   VALKEY_HOST: "valkey"
   VALKEY_PORT: "6379"
   VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
-  # OmniIntelligence domain plugin
-  OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:?OMNIINTELLIGENCE_DB_URL must be set in ~/.omnibase/.env}
+  # OmniIntelligence domain plugin — Docker-internal hostname (same pattern as OMNIBASE_INFRA_DB_URL)
+  OMNIINTELLIGENCE_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omniintelligence"
   # --- OmniMemory (OMN-5382: removed from base env — injected per-bundle) ---
   # OMNIMEMORY_ENABLED, OMNIMEMORY_MEMGRAPH_HOST/PORT, OMNIMEMORY_DB_URL
   # are only present when the memgraph bundle is selected.
@@ -365,12 +365,11 @@ services:
       - "com.omninode.service=memgraph"
       - "com.omninode.layer=infrastructure"
   # ==========================================================================
-  # Infisical - Secrets Management (Optional)
+  # Infisical - Secrets Management (always-on since OMN-5831)
   # ==========================================================================
   infisical:
     image: infisical/infisical:v0.146.0-postgres
     container_name: omnibase-infra-infisical
-    profiles: ["secrets", "full", "bootstrap"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -695,10 +694,8 @@ services:
     environment:
       # OMN-3431: Local Docker Redpanda
       OMNIBASE_INFRA_AGENT_ACTIONS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
-      # NOTE: Uses dedicated OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN rather than
-      # OMNIBASE_INFRA_DB_URL because this consumer uses pydantic-settings with the
-      # OMNIBASE_INFRA_AGENT_ACTIONS_ prefix and may use a different DB role.
-      OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: ${OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN:?OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN must be set in ~/.omnibase/.env}
+      # OMN-5831: Docker-internal DB URL — no longer leaks localhost:5436 from host env.
+      OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_SIZE: ${AGENT_ACTIONS_BATCH_SIZE:-100}
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_TIMEOUT_MS: ${AGENT_ACTIONS_BATCH_TIMEOUT_MS:-1000}
       OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_PORT: "8087"
@@ -748,7 +745,8 @@ services:
     environment:
       # OMN-3431: Local Docker Redpanda
       OMNIBASE_INFRA_SKILL_LIFECYCLE_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
-      OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN: ${OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN:?OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN must be set in ~/.omnibase/.env}
+      # OMN-5831: Docker-internal DB URL
+      OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
       OMNIBASE_INFRA_SKILL_LIFECYCLE_BATCH_SIZE: ${SKILL_LIFECYCLE_BATCH_SIZE:-100}
       OMNIBASE_INFRA_SKILL_LIFECYCLE_BATCH_TIMEOUT_MS: ${SKILL_LIFECYCLE_BATCH_TIMEOUT_MS:-1000}
       OMNIBASE_INFRA_SKILL_LIFECYCLE_HEALTH_CHECK_PORT: "8092"
@@ -797,7 +795,8 @@ services:
     environment:
       # OMN-3431: Local Docker Redpanda
       OMNIBASE_INFRA_CONTEXT_AUDIT_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
-      OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN: ${OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN:?OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN must be set in ~/.omnibase/.env}
+      # OMN-5831: Docker-internal DB URL
+      OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
       OMNIBASE_INFRA_CONTEXT_AUDIT_BATCH_SIZE: ${CONTEXT_AUDIT_BATCH_SIZE:-100}
       OMNIBASE_INFRA_CONTEXT_AUDIT_BATCH_TIMEOUT_MS: ${CONTEXT_AUDIT_BATCH_TIMEOUT_MS:-1000}
       OMNIBASE_INFRA_CONTEXT_AUDIT_HEALTH_CHECK_PORT: "8093"
