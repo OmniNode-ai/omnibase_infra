@@ -248,7 +248,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
         """
         # NOTE: Both started_at and handler 'now' use direct datetime.now(UTC)
         # instead of ModelDispatchContext.now due to protocol signature limitation.
-        # See TODO(OMN-5738) below for details.
+        # See OMN-5738 below for details.
         started_at = datetime.now(UTC)
 
         correlation_id, raw_payload = extract_envelope_fields(envelope)

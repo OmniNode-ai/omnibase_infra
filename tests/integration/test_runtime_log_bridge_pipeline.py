@@ -28,6 +28,9 @@ from uuid import uuid4
 
 import pytest
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+
+# ONEX_FLAG_EXEMPT: test fixture — env var toggled in tests below
+_FLAG = "ENABLE_RUNTIME_LOG_BRIDGE"
 from aiokafka.structs import ConsumerRecord
 
 from omnibase_infra.event_bus.topic_constants import TOPIC_RUNTIME_ERROR
@@ -75,11 +78,11 @@ class _EnableBridgeCtx:
     """Context manager to enable the runtime log bridge feature flag."""
 
     def __enter__(self) -> _EnableBridgeCtx:
-        os.environ["ENABLE_RUNTIME_LOG_BRIDGE"] = "true"
+        os.environ[_FLAG] = "true"
         return self
 
     def __exit__(self, *args: object) -> None:
-        os.environ.pop("ENABLE_RUNTIME_LOG_BRIDGE", None)
+        os.environ.pop(_FLAG, None)
 
 
 class TestRuntimeLogBridgeIntegration:
@@ -92,7 +95,7 @@ class TestRuntimeLogBridgeIntegration:
         kafka_consumer: AIOKafkaConsumer,
     ) -> None:
         """Verify an ERROR log record flows through the bridge to Kafka."""
-        os.environ["ENABLE_RUNTIME_LOG_BRIDGE"] = "true"
+        os.environ[_FLAG] = "true"
         try:
             bridge = RuntimeLogEventBridge(
                 producer=kafka_producer,
@@ -132,7 +135,7 @@ class TestRuntimeLogBridgeIntegration:
             bridge.detach_from_loggers([test_logger_name])
             await bridge.stop()
         finally:
-            os.environ.pop("ENABLE_RUNTIME_LOG_BRIDGE", None)
+            os.environ.pop(_FLAG, None)
 
     @pytest.mark.asyncio
     async def test_circular_logging_prevention(
@@ -140,7 +143,7 @@ class TestRuntimeLogBridgeIntegration:
         kafka_producer: AIOKafkaProducer,
     ) -> None:
         """Verify the bridge does not capture its own log records."""
-        os.environ["ENABLE_RUNTIME_LOG_BRIDGE"] = "true"
+        os.environ[_FLAG] = "true"
         try:
             bridge = RuntimeLogEventBridge(
                 producer=kafka_producer,
@@ -172,7 +175,7 @@ class TestRuntimeLogBridgeIntegration:
             )
             await bridge.stop()
         finally:
-            os.environ.pop("ENABLE_RUNTIME_LOG_BRIDGE", None)
+            os.environ.pop(_FLAG, None)
 
     @pytest.mark.asyncio
     async def test_rate_limiting(
@@ -180,7 +183,7 @@ class TestRuntimeLogBridgeIntegration:
         kafka_producer: AIOKafkaProducer,
     ) -> None:
         """Verify rate limiter suppresses duplicate log events."""
-        os.environ["ENABLE_RUNTIME_LOG_BRIDGE"] = "true"
+        os.environ[_FLAG] = "true"
         try:
             bridge = RuntimeLogEventBridge(
                 producer=kafka_producer,
@@ -207,7 +210,7 @@ class TestRuntimeLogBridgeIntegration:
             bridge.detach_from_loggers([test_logger_name])
             await bridge.stop()
         finally:
-            os.environ.pop("ENABLE_RUNTIME_LOG_BRIDGE", None)
+            os.environ.pop(_FLAG, None)
 
     @pytest.mark.asyncio
     async def test_bridge_disabled_by_default(
@@ -215,7 +218,7 @@ class TestRuntimeLogBridgeIntegration:
         kafka_producer: AIOKafkaProducer,
     ) -> None:
         """Verify bridge is a no-op when feature flag is off."""
-        os.environ.pop("ENABLE_RUNTIME_LOG_BRIDGE", None)
+        os.environ.pop(_FLAG, None)
 
         bridge = RuntimeLogEventBridge(
             producer=kafka_producer,
@@ -241,7 +244,7 @@ class TestRuntimeLogBridgeIntegration:
         kafka_producer: AIOKafkaProducer,
     ) -> None:
         """Verify bridge self-metrics track correctly."""
-        os.environ["ENABLE_RUNTIME_LOG_BRIDGE"] = "true"
+        os.environ[_FLAG] = "true"
         try:
             bridge = RuntimeLogEventBridge(
                 producer=kafka_producer,
@@ -269,7 +272,7 @@ class TestRuntimeLogBridgeIntegration:
             bridge.detach_from_loggers([test_logger_name])
             await bridge.stop()
         finally:
-            os.environ.pop("ENABLE_RUNTIME_LOG_BRIDGE", None)
+            os.environ.pop(_FLAG, None)
 
 
 async def _get_one_message(

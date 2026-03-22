@@ -121,7 +121,7 @@ def _check_file_size(contract_path: Path, operation: str) -> None:
         )
 
 
-def _load_and_validate_contract_yaml(  # stub-ok: has tracked TODO
+def _load_and_validate_contract_yaml(  # stub-ok: tracked in OMN-41
     contract_path: Path,
     operation: str,
 ) -> tuple[dict, dict]:

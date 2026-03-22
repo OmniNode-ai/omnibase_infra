@@ -1,3 +1,29 @@
+## v0.24.0 (2026-03-22)
+
+### Added
+- feat: verify_container_manifest.py + CLI entry point [OMN-5796] (#947)
+- feat(ci): add cross-repo migration conflict check [OMN-5772] (#943)
+- feat(monitor): emit runtime errors to Kafka [OMN-5649] (#934)
+- feat(contracts): create service-level feature flag contracts [OMN-5628] (#926)
+- feat(introspection): wire contract data into introspection emission path [OMN-5609] (#923)
+- feat(scripts): add post-release version verification script [OMN-5608] (#922)
+
+### Fixed
+- fix(ci): skip infra-dependent scheduled jobs on ubuntu-latest [OMN-5776] (#945)
+- fix(deep-dive): include onex repos and add ticket summary section [OMN-5647] (#933)
+- fix(docker): extend runtime-effects healthcheck timing to prevent false unhealthy [OMN-5637] (#931)
+- fix(deploy): guard contracts/ rsync for missing directory [OMN-5630] (#928)
+- fix(topics): register 5 missing Kafka topics in services manifest [OMN-5633] (#929)
+- fix(deploy): add migration scripts rsync to deploy-runtime.sh [OMN-5627] (#925)
+- fix(event_bus): wire retry_backoff_ms into AIOKafka constructors [OMN-5626] (#924)
+
+### Changed
+- ci: deploy TODO enforcement hooks and workflows [OMN-5694, OMN-5695] (#941)
+- chore: remove stale/canceled TODOs [OMN-5690] (#937, #939)
+- chore: re-tag deferred and unfinished TODOs [OMN-5691, OMN-5692] (#940)
+- chore: delete orphaned handler contract scaffolds [OMN-5698] (#936)
+- chore: update exemption markers to ONEX_FLAG_EXEMPT [OMN-5629] (#927)
+
 ## v0.23.0 (2026-03-20)
 
 ### Added

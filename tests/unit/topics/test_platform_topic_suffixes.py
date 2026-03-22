@@ -8,6 +8,9 @@ import os
 
 import pytest
 
+# ONEX_FLAG_EXEMPT: test fixture — env var checked in tests below
+_OMNIMEMORY_FLAG = "OMNIMEMORY_ENABLED"
+
 from omnibase_core.validation import validate_topic_suffix
 from omnibase_infra.topics import (
     ALL_INTELLIGENCE_TOPIC_SPECS,
@@ -409,7 +412,7 @@ class TestProvisionedTopicSpecs:
     def test_provisioned_contains_all_omnimemory(self) -> None:
         """ALL_PROVISIONED_SUFFIXES includes OmniMemory suffixes iff OMNIMEMORY_ENABLED is truthy."""
         omnimemory_suffixes = {spec.suffix for spec in ALL_OMNIMEMORY_TOPIC_SPECS}
-        enabled = os.environ.get("OMNIMEMORY_ENABLED", "").strip().lower() in {
+        enabled = os.environ.get(_OMNIMEMORY_FLAG, "").strip().lower() in {
             "1",
             "true",
             "yes",
@@ -428,7 +431,7 @@ class TestProvisionedTopicSpecs:
 
     def test_provisioned_count(self) -> None:
         """Combined provisioned specs count reflects whether OMNIMEMORY_ENABLED is set."""
-        enabled = os.environ.get("OMNIMEMORY_ENABLED", "").strip().lower() in {
+        enabled = os.environ.get(_OMNIMEMORY_FLAG, "").strip().lower() in {
             "1",
             "true",
             "yes",
@@ -618,7 +621,7 @@ class TestOmnimemoryEnabledGating:
         try:
             os.environ.clear()
             os.environ.update(old_env)
-            for key in ["OMNIMEMORY_ENABLED"]:
+            for key in [_OMNIMEMORY_FLAG]:
                 os.environ.pop(key, None)
             os.environ.update(env)
 
@@ -653,7 +656,7 @@ class TestOmnimemoryEnabledGating:
 
     def test_omnimemory_topics_excluded_when_false(self) -> None:
         """When OMNIMEMORY_ENABLED=false, omnimemory topics must not be provisioned."""
-        _specs, suffixes = self._reload_specs({"OMNIMEMORY_ENABLED": "false"})
+        _specs, suffixes = self._reload_specs({_OMNIMEMORY_FLAG: "false"})
         omnimemory_suffixes = {spec.suffix for spec in ALL_OMNIMEMORY_TOPIC_SPECS}
         for suffix in omnimemory_suffixes:
             assert suffix not in suffixes, (
@@ -662,7 +665,7 @@ class TestOmnimemoryEnabledGating:
 
     def test_omnimemory_topics_included_when_true(self) -> None:
         """When OMNIMEMORY_ENABLED=true, omnimemory topics must be provisioned."""
-        _specs, suffixes = self._reload_specs({"OMNIMEMORY_ENABLED": "true"})
+        _specs, suffixes = self._reload_specs({_OMNIMEMORY_FLAG: "true"})
         omnimemory_suffixes = {spec.suffix for spec in ALL_OMNIMEMORY_TOPIC_SPECS}
         for suffix in omnimemory_suffixes:
             assert suffix in suffixes, (
