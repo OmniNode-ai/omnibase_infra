@@ -31,10 +31,12 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_infra.enums import EnumLlmOperationType
-from omnibase_infra.event_bus.topic_constants import (
-    TOPIC_LLM_CALL_COMPLETED,
-    TOPIC_LLM_CALL_COMPLETED_INFRA,
-)
+from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+_REG = ServiceTopicRegistry.from_defaults()
+TOPIC_LLM_CALL_COMPLETED = _REG.resolve(topic_keys.LLM_CALL_COMPLETED)
+TOPIC_LLM_CALL_COMPLETED_INFRA = _REG.resolve(topic_keys.LLM_CALL_COMPLETED_INFRA)
 from omnibase_infra.mixins.mixin_llm_http_transport import MixinLlmHttpTransport
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,

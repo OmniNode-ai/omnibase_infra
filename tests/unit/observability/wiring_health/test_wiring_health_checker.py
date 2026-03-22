@@ -10,10 +10,12 @@ from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.event_bus.topic_constants import (
-    TOPIC_WIRING_HEALTH_SNAPSHOT,
-    WIRING_HEALTH_MONITORED_TOPICS,
-)
+from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+_REG = ServiceTopicRegistry.from_defaults()
+TOPIC_WIRING_HEALTH_SNAPSHOT = _REG.resolve(topic_keys.WIRING_HEALTH_SNAPSHOT)
+WIRING_HEALTH_MONITORED_TOPICS = tuple(_REG.monitored_topics())
 from omnibase_infra.observability.wiring_health import (
     DEFAULT_MISMATCH_THRESHOLD,
     ModelTopicWiringHealth,

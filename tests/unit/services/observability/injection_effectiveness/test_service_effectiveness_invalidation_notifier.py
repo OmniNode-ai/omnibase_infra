@@ -19,8 +19,11 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from omnibase_infra.event_bus.topic_constants import (
-    TOPIC_EFFECTIVENESS_INVALIDATION,
+from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+TOPIC_EFFECTIVENESS_INVALIDATION = ServiceTopicRegistry.from_defaults().resolve(
+    topic_keys.EFFECTIVENESS_INVALIDATION
 )
 from omnibase_infra.services.observability.injection_effectiveness.service_effectiveness_invalidation_notifier import (
     ServiceEffectivenessInvalidationNotifier,

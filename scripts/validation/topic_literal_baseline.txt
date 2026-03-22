@@ -121,7 +121,4 @@ src/omnibase_infra/tui/consumers/consumer_status.py:39
 src/omnibase_infra/tui/consumers/consumer_status.py:40
 src/omnibase_infra/tui/consumers/consumer_status.py:41
 src/omnibase_infra/tui/consumers/consumer_status.py:42
-src/omnibase_infra/validation/demo_loop_gate.py:78
-src/omnibase_infra/validation/demo_loop_gate.py:79
-src/omnibase_infra/validation/demo_loop_gate.py:80
-src/omnibase_infra/validation/demo_loop_gate.py:81
+src/omnibase_infra/validation/demo_loop_gate.py:76

@@ -33,7 +33,12 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 _FLAG = "ENABLE_RUNTIME_LOG_BRIDGE"
 from aiokafka.structs import ConsumerRecord
 
-from omnibase_infra.event_bus.topic_constants import TOPIC_RUNTIME_ERROR
+from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+TOPIC_RUNTIME_ERROR = ServiceTopicRegistry.from_defaults().resolve(
+    topic_keys.RUNTIME_ERROR
+)
 from omnibase_infra.observability.runtime_log_event_bridge import (
     RuntimeLogEventBridge,
 )

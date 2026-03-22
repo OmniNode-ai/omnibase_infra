@@ -20,13 +20,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     """
     CMD_CONSUMER_RESTART_V1 = "onex.cmd.omnibase-infra.consumer-restart.v1"  # onex.cmd.omnibase-infra.consumer-restart.v1
     EVT_BASELINES_COMPUTED_V1 = "onex.evt.omnibase-infra.baselines-computed.v1"  # onex.evt.omnibase-infra.baselines-computed.v1
-    EVT_CIRCUIT_BREAKER_STATE_V1 = "onex.evt.omnibase-infra.circuit-breaker-state.v1"  # onex.evt.omnibase-infra.circuit-breaker-state.v1
     EVT_CONSUMER_HEALTH_V1 = "onex.evt.omnibase-infra.consumer-health.v1"  # onex.evt.omnibase-infra.consumer-health.v1
     EVT_DB_ERROR_V1 = "onex.evt.omnibase-infra.db-error.v1"  # onex.evt.omnibase-infra.db-error.v1
-    EVT_EFFECTIVENESS_DATA_CHANGED_V1 = "onex.evt.omnibase-infra.effectiveness-data-changed.v1"  # onex.evt.omnibase-infra.effectiveness-data-changed.v1
     EVT_GMAIL_INTENT_RECEIVED_V1 = "onex.evt.omnibase-infra.gmail-intent-received.v1"  # onex.evt.omnibase-infra.gmail-intent-received.v1
-    EVT_LLM_CALL_COMPLETED_V1 = "onex.evt.omnibase-infra.llm-call-completed.v1"  # onex.evt.omnibase-infra.llm-call-completed.v1
-    EVT_LLM_ENDPOINT_HEALTH_V1 = "onex.evt.omnibase-infra.llm-endpoint-health.v1"  # onex.evt.omnibase-infra.llm-endpoint-health.v1
     EVT_RUNTIME_ERROR_V1 = "onex.evt.omnibase-infra.runtime-error.v1"  # onex.evt.omnibase-infra.runtime-error.v1
-    EVT_SAVINGS_ESTIMATED_V1 = "onex.evt.omnibase-infra.savings-estimated.v1"  # onex.evt.omnibase-infra.savings-estimated.v1
-    EVT_WIRING_HEALTH_SNAPSHOT_V1 = "onex.evt.omnibase-infra.wiring-health-snapshot.v1"  # onex.evt.omnibase-infra.wiring-health-snapshot.v1
