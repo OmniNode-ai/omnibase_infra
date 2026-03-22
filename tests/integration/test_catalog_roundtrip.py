@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -14,9 +16,16 @@ from omnibase_infra.docker.catalog.resolver import CatalogResolver
 REPO_ROOT = str(Path(__file__).parent.parent.parent)
 CATALOG_DIR = str(Path(REPO_ROOT) / "docker" / "catalog")
 
+_HAS_DOCKER = shutil.which("docker") is not None
+_HAS_POSTGRES_PASSWORD = bool(os.environ.get("POSTGRES_PASSWORD"))
+
 
 @pytest.mark.integration
 @pytest.mark.slow
+@pytest.mark.skipif(
+    not _HAS_DOCKER or not _HAS_POSTGRES_PASSWORD,
+    reason="Requires Docker daemon and POSTGRES_PASSWORD env var",
+)
 def test_catalog_generates_and_starts_core_bundle() -> None:
     """Resolve core bundle, generate compose, start, health check, stop."""
     # Generate
