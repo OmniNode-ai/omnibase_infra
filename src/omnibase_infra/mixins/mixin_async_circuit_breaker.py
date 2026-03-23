@@ -99,6 +99,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from uuid import UUID, uuid4
 
 from omnibase_core.types import JsonType
@@ -284,6 +285,17 @@ class MixinAsyncCircuitBreaker:
         self._cb_enable_active_recovery = enable_active_recovery
         self._cb_recovery_task: asyncio.Task[None] | None = None
 
+        # Optional callback for state transition events (OMN-6137).
+        # Signature: (service_name, new_state, previous_state, failure_count, threshold) -> Awaitable[None]
+        # Set via set_transition_callback(). Errors are caught internally.
+        self._cb_transition_callback: (
+            Callable[
+                [str, EnumCircuitState, EnumCircuitState, int, int],
+                Awaitable[None],
+            ]
+            | None
+        ) = None
+
         # Coroutine-safety lock (asyncio.Lock for concurrent async access, not thread-safe)
         self._circuit_breaker_lock = asyncio.Lock()
 
@@ -433,6 +445,9 @@ class MixinAsyncCircuitBreaker:
                         "required_successes": self.circuit_breaker_half_open_successes,
                     },
                 )
+                self._fire_transition_event(
+                    EnumCircuitState.HALF_OPEN, EnumCircuitState.OPEN
+                )
             else:
                 # Circuit still open - block request
                 retry_after = int(self._circuit_breaker_open_until - current_time)
@@ -541,6 +556,9 @@ class MixinAsyncCircuitBreaker:
             )
             # Start active recovery timer for the re-opened circuit
             self._start_active_recovery_timer()
+            self._fire_transition_event(
+                EnumCircuitState.OPEN, EnumCircuitState.HALF_OPEN
+            )
             return
 
         # Don't re-process if circuit is already open (prevents indefinite
@@ -571,6 +589,7 @@ class MixinAsyncCircuitBreaker:
             )
             # Start active recovery timer
             self._start_active_recovery_timer()
+            self._fire_transition_event(EnumCircuitState.OPEN, EnumCircuitState.CLOSED)
 
     async def _reset_circuit_breaker(self) -> None:
         """Reset circuit breaker to closed state.
@@ -655,6 +674,9 @@ class MixinAsyncCircuitBreaker:
                 self._circuit_breaker_half_open_success_count = 0
                 self._circuit_breaker_failures = 0
                 self._circuit_breaker_open_until = 0.0
+                self._fire_transition_event(
+                    EnumCircuitState.CLOSED, EnumCircuitState.HALF_OPEN
+                )
             else:
                 # Still in half-open, waiting for more successes
                 logger.debug(
@@ -773,6 +795,9 @@ class MixinAsyncCircuitBreaker:
                         "required_successes": self.circuit_breaker_half_open_successes,
                     },
                 )
+                self._fire_transition_event(
+                    EnumCircuitState.HALF_OPEN, EnumCircuitState.OPEN
+                )
             # Only clear the task reference if it still points to us.
             # A new timer may have been started between our sleep completion
             # and lock acquisition, and we must not nullify that reference.
@@ -787,6 +812,66 @@ class MixinAsyncCircuitBreaker:
         """
         async with self._circuit_breaker_lock:
             self._cancel_active_recovery_timer()
+
+    def set_transition_callback(
+        self,
+        callback: Callable[
+            [str, EnumCircuitState, EnumCircuitState, int, int],
+            Awaitable[None],
+        ],
+    ) -> None:
+        """Register a callback for circuit breaker state transitions (OMN-6137).
+
+        The callback is invoked asynchronously (fire-and-forget) whenever the
+        circuit breaker transitions between states.  Errors in the callback are
+        logged but never propagate to the circuit breaker.
+
+        Args:
+            callback: Async callable with signature
+                ``(service_name, new_state, previous_state, failure_count, threshold)``.
+        """
+        self._cb_transition_callback = callback
+
+    def _fire_transition_event(
+        self,
+        new_state: EnumCircuitState,
+        previous_state: EnumCircuitState,
+    ) -> None:
+        """Schedule the transition callback as a fire-and-forget task.
+
+        Must be called while the circuit breaker lock is held.  The callback
+        itself runs outside the lock (in a new task) to avoid deadlocks.
+
+        Args:
+            new_state: The state after the transition.
+            previous_state: The state before the transition.
+        """
+        cb = self._cb_transition_callback
+        if cb is None:
+            return
+
+        async def _run() -> None:
+            try:
+                await cb(
+                    self.service_name,
+                    new_state,
+                    previous_state,
+                    self._circuit_breaker_failures,
+                    self.circuit_breaker_threshold,
+                )
+            except Exception:  # noqa: BLE001 — never block circuit breaker on callback errors
+                logger.debug(
+                    "Circuit breaker transition callback failed",
+                    exc_info=True,
+                )
+
+        try:
+            asyncio.get_running_loop().create_task(
+                _run(), name=f"cb-transition-{self.service_name}"
+            )
+        except RuntimeError:
+            # No running loop (e.g., during test teardown)
+            pass
 
     def _get_circuit_breaker_state(self) -> dict[str, JsonType]:
         """Return current circuit breaker state for introspection.

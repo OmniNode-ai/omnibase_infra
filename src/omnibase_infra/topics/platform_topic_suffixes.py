@@ -452,6 +452,22 @@ Consumer: omnidash /circuit-breaker dashboard (OMN-5293)
 """
 
 # =============================================================================
+# PLATFORM DLQ AGGREGATION TOPIC SUFFIX (OMN-6136)
+# =============================================================================
+
+SUFFIX_PLATFORM_DLQ_MESSAGE: str = "onex.evt.platform.dlq-message.v1"
+"""Topic suffix for DLQ aggregation events consumed by omnidash.
+
+Published by MixinKafkaDlq as a cross-publish alongside the category-specific
+DLQ topic (onex.dlq.{category}.v1).  Omnidash subscribes to this single
+aggregation topic to project DLQ messages into the dlq_messages read-model table.
+
+Producer: MixinKafkaDlq (cross-publish on each DLQ publish)
+Consumer: omnidash ReadModelConsumer (platform-projections.ts)
+Ticket: OMN-6136
+"""
+
+# =============================================================================
 # OMNIBASE_INFRA CONSUMER HEALTH TOPIC SUFFIXES (OMN-5515 / OMN-5529)
 # =============================================================================
 

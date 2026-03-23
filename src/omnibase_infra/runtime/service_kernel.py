@@ -68,7 +68,11 @@ from pydantic import ValidationError
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.protocols.event_bus import ProtocolEventBusPublisher
-from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportType
+from omnibase_infra.enums import (
+    EnumCircuitState,
+    EnumConsumerGroupPurpose,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import (
     DbOwnershipMismatchError,
     DbOwnershipMissingError,
@@ -85,6 +89,9 @@ from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.models import ModelNodeIdentity
+from omnibase_infra.models.health.model_llm_endpoint_health_config import (
+    ModelLlmEndpointHealthConfig,
+)
 from omnibase_infra.nodes.node_contract_registry_reducer.contract_registration_event_router import (
     ContractRegistrationEventRouter,
     ProtocolIntentEffect,
@@ -96,6 +103,9 @@ from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
     PluginRegistration,
 )
 from omnibase_infra.observability.runtime_log_event_bridge import RuntimeLogEventBridge
+from omnibase_infra.observability.wiring_health.wiring_health_checker import (
+    WiringHealthChecker,
+)
 from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 from omnibase_infra.runtime.models import (
     ModelDomainPluginConfig,
@@ -131,6 +141,12 @@ from omnibase_infra.runtime.util_container_wiring import (
 #
 # See also: omnibase_infra/services/__init__.py "ServiceHealth Import Guide" section
 from omnibase_infra.runtime.util_validation import validate_runtime_config
+from omnibase_infra.services.service_circuit_breaker_event_publisher import (
+    CircuitBreakerEventPublisher,
+)
+from omnibase_infra.services.service_llm_endpoint_health import (
+    ServiceLlmEndpointHealth,
+)
 from omnibase_infra.topics import (
     SUFFIX_CONTRACT_DEREGISTERED,
     SUFFIX_CONTRACT_REGISTERED,
@@ -832,6 +848,42 @@ async def bootstrap() -> int:
                     "consumer_group": config.consumer_group,
                 },
             )
+
+            # 3.4a. Wire CircuitBreakerEventPublisher to EventBusKafka (OMN-6137)
+            # Publishes state transition events to omnidash /circuit-breaker dashboard.
+            try:
+                _cb_publisher = CircuitBreakerEventPublisher(
+                    event_bus=event_bus,  # type: ignore[arg-type]
+                )
+
+                async def _cb_transition_handler(
+                    service_name: str,
+                    new_state: EnumCircuitState,
+                    previous_state: EnumCircuitState,
+                    failure_count: int,
+                    threshold: int,
+                ) -> None:
+                    await _cb_publisher.publish_transition(
+                        service_name=service_name,
+                        new_state=new_state,
+                        previous_state=previous_state,
+                        failure_count=failure_count,
+                        threshold=threshold,
+                    )
+
+                event_bus.set_transition_callback(_cb_transition_handler)
+                logger.info(
+                    "CircuitBreakerEventPublisher wired to EventBusKafka "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — best-effort, never blocks startup
+                logger.warning(
+                    "Failed to wire CircuitBreakerEventPublisher, continuing "
+                    "without circuit breaker event emission (correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
         else:
             # Use EventBusInmemory for local development/testing
             event_bus = EventBusInmemory(
@@ -1003,6 +1055,116 @@ async def bootstrap() -> int:
                     exc_info=True,
                 )
                 runtime_log_bridge = None
+
+        # 3.7. Initialize ServiceLlmEndpointHealth if LLM endpoints configured (OMN-6135)
+        # Probes configured LLM endpoints at a regular interval and emits health
+        # events to Kafka.  Best-effort: failure does not block kernel startup.
+        llm_health_service: ServiceLlmEndpointHealth | None = None
+        if use_kafka:
+            try:
+                _llm_endpoints: dict[str, str] = {}
+                for env_key, logical_name in [
+                    ("LLM_CODER_URL", "coder"),
+                    ("LLM_CODER_FAST_URL", "coder-fast"),
+                    ("LLM_EMBEDDING_URL", "embedding"),
+                    ("LLM_DEEPSEEK_R1_URL", "deepseek-r1"),
+                    ("LLM_SMALL_URL", "small"),
+                ]:
+                    _url = os.environ.get(env_key, "").strip()
+                    if _url:
+                        _llm_endpoints[logical_name] = _url
+
+                if _llm_endpoints:
+                    _llm_health_config = ModelLlmEndpointHealthConfig(
+                        endpoints=_llm_endpoints,
+                        probe_interval_seconds=float(
+                            os.environ.get("LLM_HEALTH_PROBE_INTERVAL", "30")
+                        ),
+                    )
+                    llm_health_service = ServiceLlmEndpointHealth(
+                        config=_llm_health_config,
+                        event_bus=event_bus,  # type: ignore[arg-type]
+                    )
+                    await llm_health_service.start()
+                    logger.info(
+                        "ServiceLlmEndpointHealth started (endpoints=%d, correlation_id=%s)",
+                        len(_llm_endpoints),
+                        correlation_id,
+                    )
+                else:
+                    logger.debug(
+                        "No LLM endpoints configured, skipping health probes "
+                        "(correlation_id=%s)",
+                        correlation_id,
+                    )
+            except Exception:  # noqa: BLE001 — best-effort, never blocks startup
+                logger.warning(
+                    "Failed to start ServiceLlmEndpointHealth, continuing without it "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+                llm_health_service = None
+
+        # 3.8. Initialize WiringHealthChecker periodic emission (OMN-6133)
+        # Computes emission/consumption health and emits snapshot events to Kafka
+        # for the omnidash /wiring-health dashboard.  Triggered periodically
+        # (default 60s) via a background asyncio task.
+        wiring_health_checker: WiringHealthChecker | None = None
+        wiring_health_task: asyncio.Task[None] | None = None
+        if use_kafka:
+            try:
+                _wiring_health_interval = float(
+                    os.environ.get("WIRING_HEALTH_EMIT_INTERVAL", "60")
+                )
+                wiring_health_checker = WiringHealthChecker(
+                    emission_source=event_bus,  # type: ignore[arg-type]
+                    consumption_source=event_bus,  # type: ignore[arg-type]
+                    environment=environment,
+                    event_bus=event_bus,  # type: ignore[arg-type]
+                )
+
+                async def _wiring_health_loop() -> None:
+                    """Periodic loop that computes and emits wiring health snapshots."""
+                    assert wiring_health_checker is not None  # narrowing for mypy
+                    while True:
+                        try:
+                            _cid = generate_correlation_id()
+                            metrics = wiring_health_checker.compute_health(
+                                correlation_id=_cid,
+                            )
+                            await wiring_health_checker.emit_snapshot(
+                                metrics=metrics,
+                                correlation_id=_cid,
+                            )
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:  # noqa: BLE001 — best-effort, never crashes kernel
+                            logger.warning(
+                                "Wiring health snapshot emission failed",
+                                exc_info=True,
+                            )
+                        await asyncio.sleep(_wiring_health_interval)
+
+                wiring_health_task = asyncio.create_task(
+                    _wiring_health_loop(),
+                    name="wiring-health-emit",
+                )
+                logger.info(
+                    "WiringHealthChecker periodic emission started "
+                    "(interval=%ss, correlation_id=%s)",
+                    _wiring_health_interval,
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — best-effort, never blocks startup
+                logger.warning(
+                    "Failed to start WiringHealthChecker emission, continuing without it "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+                wiring_health_checker = None
+                wiring_health_task = None
 
         # 4. Create and wire container for dependency injection
         container_start_time = time.time()
@@ -2122,6 +2284,35 @@ async def bootstrap() -> int:
         contract_unsub_deregistered = None
         contract_unsub_heartbeat = None
 
+        # Stop WiringHealthChecker periodic emission (OMN-6133)
+        if wiring_health_task is not None:
+            wiring_health_task.cancel()
+            try:
+                await wiring_health_task
+            except asyncio.CancelledError:
+                pass
+            logger.debug(
+                "WiringHealthChecker periodic emission stopped (correlation_id=%s)",
+                correlation_id,
+            )
+            wiring_health_task = None
+
+        # Stop ServiceLlmEndpointHealth (OMN-6135)
+        if llm_health_service is not None:
+            try:
+                await llm_health_service.stop()
+                logger.debug(
+                    "ServiceLlmEndpointHealth stopped (correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — boundary: best-effort cleanup
+                logger.warning(
+                    "Error stopping ServiceLlmEndpointHealth (correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+            llm_health_service = None
+
         # Stop RuntimeLogEventBridge (OMN-5525)
         if runtime_log_bridge is not None:
             try:
@@ -2301,6 +2492,25 @@ async def bootstrap() -> int:
                         sanitize_error_message(cleanup_error),
                         correlation_id,
                     )
+
+        # Cleanup WiringHealthChecker (OMN-6133)
+        if wiring_health_task is not None:
+            wiring_health_task.cancel()
+            try:
+                await wiring_health_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+
+        # Cleanup ServiceLlmEndpointHealth (OMN-6135)
+        if llm_health_service is not None:
+            try:
+                await llm_health_service.stop()
+            except Exception:  # noqa: BLE001 — boundary: best-effort cleanup
+                logger.warning(
+                    "Failed to stop ServiceLlmEndpointHealth during cleanup "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                )
 
         # Cleanup RuntimeLogEventBridge (OMN-5525)
         if runtime_log_bridge is not None:

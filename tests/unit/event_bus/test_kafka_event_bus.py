@@ -2123,7 +2123,9 @@ class TestKafkaEventBusDLQRouting:
 
             # Verify DLQ publish was called (using send_and_wait for cleaner timeout handling)
             assert mock_producer.send_and_wait.called
-            call_args = mock_producer.send_and_wait.call_args
+            # First send_and_wait call is the DLQ topic; second is the aggregation
+            # cross-publish (OMN-6136).  Use call_args_list[0] for the DLQ call.
+            call_args = mock_producer.send_and_wait.call_args_list[0]
 
             # Verify the topic is the DLQ topic
             assert call_args[0][0] == "dlq-events"
@@ -2201,7 +2203,9 @@ class TestKafkaEventBusDLQRouting:
 
             # Verify DLQ publish was called (using send_and_wait for cleaner timeout handling)
             assert mock_producer.send_and_wait.called
-            call_args = mock_producer.send_and_wait.call_args
+            # First send_and_wait call is the DLQ topic; second is the aggregation
+            # cross-publish (OMN-6136).  Use call_args_list[0] for the DLQ call.
+            call_args = mock_producer.send_and_wait.call_args_list[0]
 
             # Verify the topic is the DLQ topic
             assert call_args[0][0] == "dlq-events"
