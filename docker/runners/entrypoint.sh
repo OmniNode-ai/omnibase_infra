@@ -227,7 +227,7 @@ while true; do
     if [[ ${exit_code} -eq 0 ]]; then
         # GitHub runner exits 0 even when registration is server-side deleted
         # ("no retry needed" from its perspective). Check log for this case.
-        if echo "${log_content}" | grep -qi "registration has been deleted"; then
+        if echo "${log_content}" | grep -qiE "registration has been deleted|Not configured"; then
             echo "[entrypoint] Runner registration was deleted by GitHub (exit 0 but stale)."
             echo "[entrypoint] Clearing cached credentials and will re-register on next attempt."
             _clear_cached_creds

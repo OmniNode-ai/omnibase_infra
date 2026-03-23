@@ -123,10 +123,12 @@ run_local() {
 
 fetch_registration_token() {
     log "Fetching GitHub Actions registration token for org ${RUNNER_ORG}..."
+    # Separate declaration from assignment so set -e catches gh api failures
     local token
-    token=$(gh api "/orgs/${RUNNER_ORG}/actions/runners/registration-token" --jq .token)
+    token=$(gh api --method POST "/orgs/${RUNNER_ORG}/actions/runners/registration-token" --jq .token) \
+        || err "gh api failed. Check gh auth and org admin permissions (need admin:org scope)."
     if [[ -z "${token}" ]]; then
-        err "Failed to fetch registration token. Check gh auth and org admin permissions."
+        err "Registration token is empty. Check gh auth and org admin permissions."
     fi
     echo "${token}"
 }
@@ -137,7 +139,8 @@ fetch_registration_token() {
 
 encode_token() {
     local token="${1}"
-    echo -n "${token}" | base64
+    # -w 0 prevents line wrapping (macOS base64 wraps at 76 chars by default)
+    echo -n "${token}" | base64 -w 0 2>/dev/null || echo -n "${token}" | base64 -b 0 2>/dev/null || echo -n "${token}" | base64
 }
 
 # ---------------------------------------------------------------------------
