@@ -29,8 +29,8 @@ dependencies = [
     #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
     # Remember to switch back to PyPI versions before merging to main.
     #
-    "omnibase-core==0.29.0",
-    "omnibase-spi==0.18.0",
+    "omnibase-core>=0.30.2",
+    "omnibase-spi>=0.19.1",
     # ============================================================================
     # External Dependency Security Guidance
     # ============================================================================
@@ -151,8 +151,6 @@ dev = [
 ]
 
 [tool.uv.sources]
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", branch = "jonahgabriel/omn-5566-contract-feature-flags" }
-omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", tag = "v0.18.0" }
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 
 [tool.ruff]
