@@ -324,6 +324,8 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     # --- consumer health pipeline topics (OMN-5529) ---
     "onex.evt.omnibase-infra.consumer-health.v1": "OMN-5515; contract.yaml will be added with NodeConsumerHealthTriageEffect in OMN-5520 | owner: jonah | expiry: 2026-06-01",
     "onex.cmd.omnibase-infra.consumer-restart.v1": "OMN-5515; contract.yaml will be added with NodeConsumerHealthTriageEffect in OMN-5520 | owner: jonah | expiry: 2026-06-01",
+    # --- runner health pipeline topics (OMN-6082) ---
+    "onex.evt.omnibase-infra.runner-health-snapshot.v1": "OMN-6082; Phase 1 CLI-based, contract.yaml deferred to OMN-6091 (true ONEX node conversion) | owner: jonah | expiry: 2026-09-01",
 }
 # fmt: on
 
