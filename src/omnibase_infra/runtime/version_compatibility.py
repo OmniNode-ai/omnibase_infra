@@ -75,8 +75,9 @@ def _locate_pyproject() -> Path | None:
 def _parse_dep_bounds(spec: str) -> tuple[str, str] | None:
     """Extract (min_version, max_version) from a PEP 508 specifier.
 
-    Supports both range pins (``>=0.23.0,<0.24.0``) and exact pins
-    (``==0.24.0``).  For exact pins, the max version is derived as
+    Supports range pins (``>=0.23.0,<0.24.0``), exact pins
+    (``==0.24.0``), and open-ended lower bounds (``>=0.30.2``).
+    For exact and open-ended pins, the max version is derived as
     the next minor release (e.g. ``0.24.0`` -> ``0.25.0``).
 
     Args:
@@ -90,6 +91,15 @@ def _parse_dep_bounds(spec: str) -> tuple[str, str] | None:
     max_match = re.search(r"<\s*([0-9][^\s,;\"']*)", spec)
     if min_match and max_match:
         return min_match.group(1), max_match.group(1)
+
+    # Open-ended lower bound: >=X (no upper bound)
+    # Derive max as next minor release so the compatibility check still works.
+    if min_match:
+        pinned = min_match.group(1)
+        parts = pinned.split(".")
+        if len(parts) >= 2:
+            next_minor = f"{parts[0]}.{int(parts[1]) + 1}.0"
+            return pinned, next_minor
 
     # Exact pin: ==X.Y.Z
     eq_match = re.search(r"==\s*([0-9][^\s,;\"']*)", spec)
@@ -165,13 +175,13 @@ def _build_matrix_from_pyproject(
 _FALLBACK_MATRIX: list[VersionConstraint] = [
     VersionConstraint(
         package="omnibase_core",
-        min_version="0.29.0",
-        max_version="0.30.0",
+        min_version="0.30.2",
+        max_version="0.31.0",
     ),
     VersionConstraint(
         package="omnibase_spi",
-        min_version="0.18.0",
-        max_version="0.19.0",
+        min_version="0.19.1",
+        max_version="0.20.0",
     ),
 ]
 

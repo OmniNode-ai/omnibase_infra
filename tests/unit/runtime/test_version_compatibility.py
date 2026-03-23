@@ -233,14 +233,15 @@ class TestVersionMatrixConsistency:
 
             spec = pyproject_specs[constraint.package]
 
-            # Exact pins (==X.Y.Z): min_version matches the pinned version,
-            # max_version is derived (next minor) and won't appear in spec.
+            # Exact pins (==X.Y.Z) and open-ended lower bounds (>=X):
+            # min_version matches the pinned version, max_version is derived
+            # (next minor) and won't appear in the spec string.
             if "==" in spec:
                 assert constraint.min_version in spec, (
                     f"{constraint.package}: VERSION_MATRIX min_version "
                     f"{constraint.min_version} not found in exact pin spec: {spec}"
                 )
-            else:
+            elif "<" in spec:
                 # Range pins (>=X,<Y): both bounds appear in spec
                 assert constraint.min_version in spec, (
                     f"{constraint.package}: VERSION_MATRIX min_version "
@@ -249,6 +250,13 @@ class TestVersionMatrixConsistency:
                 assert constraint.max_version in spec, (
                     f"{constraint.package}: VERSION_MATRIX max_version "
                     f"{constraint.max_version} not found in pyproject.toml spec: {spec}"
+                )
+            else:
+                # Open-ended lower bound (>=X only): min_version in spec,
+                # max_version is derived (next minor) and won't appear.
+                assert constraint.min_version in spec, (
+                    f"{constraint.package}: VERSION_MATRIX min_version "
+                    f"{constraint.min_version} not found in pyproject.toml spec: {spec}"
                 )
 
     def test_constraint_is_frozen_dataclass(self) -> None:
