@@ -225,8 +225,24 @@ while true; do
     log_content=$(cat "${LOG_FILE}" 2>/dev/null || echo "")
 
     if [[ ${exit_code} -eq 0 ]]; then
-        echo "[entrypoint] Runner exited cleanly (exit 0). Exiting."
-        break
+        # GitHub runner exits 0 even when registration is server-side deleted
+        # ("no retry needed" from its perspective). Check log for this case.
+        if echo "${log_content}" | grep -qi "registration has been deleted"; then
+            echo "[entrypoint] Runner registration was deleted by GitHub (exit 0 but stale)."
+            echo "[entrypoint] Clearing cached credentials and will re-register on next attempt."
+            _clear_cached_creds
+            # Remove in-place credentials so fresh registration can proceed
+            rm -f "${RUNNER_HOME}/.runner" "${RUNNER_HOME}/.credentials" "${RUNNER_HOME}/.credentials_rsaparams"
+            if [[ -z "${RUNNER_TOKEN:-}" ]]; then
+                echo "[entrypoint] ERROR: Cannot re-register — RUNNER_TOKEN is not set."
+                echo "[entrypoint] Generate a token at: https://github.com/organizations/OmniNode-ai/settings/actions/runners/new"
+                exit 1
+            fi
+            # Fall through to the registration retry loop below
+        else
+            echo "[entrypoint] Runner exited cleanly (exit 0). Exiting."
+            break
+        fi
     fi
 
     echo "[entrypoint] Runner exited with code ${exit_code}"

@@ -332,15 +332,19 @@ soft_deploy() {
     log "Rebuilding runner image on ${RUNNER_HOST}..."
     run_ssh "cd ${RUNNER_HOST_DIR} && docker build -t omninode-runner:latest docker/runners/"
 
-    # Copy the new entrypoint into each running container and restart
-    log "Updating entrypoint in ${RUNNER_COUNT} running containers..."
+    # Ensure entrypoint is executable on host (docker cp preserves source permissions)
+    run_ssh "chmod +x ${RUNNER_HOST_DIR}/docker/runners/entrypoint.sh"
+
+    # Copy the new entrypoint into each container and restart.
+    # docker cp works on both running and stopped containers.
+    # docker stop first to avoid the container restarting mid-copy.
+    log "Updating entrypoint in ${RUNNER_COUNT} containers..."
     for i in $(seq 1 "${RUNNER_COUNT}"); do
         local container="${RUNNER_NAME_PREFIX}-${i}"
         log "  Updating ${container}..."
-
-        # docker cp overwrites the file inside the container's writable layer
+        run_ssh "docker stop ${container} 2>/dev/null || true"
         run_ssh "docker cp ${RUNNER_HOST_DIR}/docker/runners/entrypoint.sh ${container}:/usr/local/bin/entrypoint.sh"
-        run_ssh "docker restart ${container}"
+        run_ssh "docker start ${container}"
     done
 
     log "Soft deploy complete. Waiting for runners to come online..."
