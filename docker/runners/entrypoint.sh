@@ -188,11 +188,23 @@ _deregister() {
 RUNNER_HOME="${RUNNER_HOME:-/home/runner/actions-runner}"
 cd "${RUNNER_HOME}"
 
-# Attempt to restore cached credentials to avoid re-registration on clean restart
-if _restore_cached_creds; then
-    echo "[entrypoint] Using cached credentials — skipping registration"
+# Check for credentials in priority order:
+# 1. In-place (container restart — files already in RUNNER_HOME)
+# 2. Volume cache (fresh container — restore from mounted volume)
+# 3. Fresh registration (first-time setup — requires RUNNER_TOKEN)
+if [[ -f "${RUNNER_HOME}/.runner" && -f "${RUNNER_HOME}/.credentials" ]]; then
+    echo "[entrypoint] Found in-place credentials — skipping registration (container restart)"
+elif _restore_cached_creds; then
+    echo "[entrypoint] Restored credentials from volume cache — skipping registration"
 else
-    echo "[entrypoint] No valid cached credentials found — registering..."
+    if [[ -z "${RUNNER_TOKEN:-}" ]]; then
+        echo "[entrypoint] ERROR: No credentials found and RUNNER_TOKEN is not set."
+        echo "[entrypoint] For first-time registration, set RUNNER_TOKEN in the environment."
+        echo "[entrypoint] Generate a token at: https://github.com/organizations/OmniNode-ai/settings/actions/runners/new"
+        echo "[entrypoint] Token is valid for 1 hour. After registration, cached credentials are used."
+        exit 1
+    fi
+    echo "[entrypoint] No cached credentials found — registering with RUNNER_TOKEN..."
     _register
     _save_creds
 fi
