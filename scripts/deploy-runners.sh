@@ -372,6 +372,7 @@ deploy_with_retry() {
         deploy_runners "${token_b64}"
         install_prune_cron
         install_monitor_cron
+        install_health_cron
 
         if poll_runners_online; then
             log "Deploy succeeded on attempt ${attempt}."
@@ -445,6 +446,36 @@ print_stale_runner_report() {
         warn "Stale runners reported above require MANUAL deletion."
         warn "Do not auto-delete: runners may be restarting between jobs."
     fi
+}
+
+# ---------------------------------------------------------------------------
+# Step 10: Install local runner health check cron (OMN-6083)
+# ---------------------------------------------------------------------------
+# Installs a LOCAL cron (on this dev machine) that runs the runner health
+# CLI every 3 minutes. The CLI SSHes to RUNNER_HOST for Docker status.
+# Uses marker-based idempotence: exactly one entry managed via
+# '# runner-health-check' comment, never clobbers unrelated cron entries.
+
+install_health_cron() {
+    log "Installing LOCAL runner health check cron..."
+
+    if "${DRY_RUN}"; then
+        log "[DRY RUN] Would install local runner-health-check cron (every 3 min)."
+        return 0
+    fi
+
+    # Determine the repo root (this script lives in scripts/)
+    local repo_root
+    repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+    local cron_line="*/3 * * * * set -a && source ~/.omnibase/.env && set +a && cd ${repo_root} && RUNNER_HEALTH_HOST=${RUNNER_HOST} uv run python -m omnibase_infra.observability.runner_health.cli_runner_health --emit --alert >> /tmp/runner-health.log 2>&1 # runner-health-check"
+
+    # Filter out any existing runner-health-check line, then append new one
+    local existing
+    existing=$(crontab -l 2>/dev/null || true)
+    echo "${existing}" | grep -v 'runner-health-check' | { cat; echo "${cron_line}"; } | crontab -
+
+    log "Runner health check cron installed locally (every 3 minutes)."
 }
 
 # ---------------------------------------------------------------------------
