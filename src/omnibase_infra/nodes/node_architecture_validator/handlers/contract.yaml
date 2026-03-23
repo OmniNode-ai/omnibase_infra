@@ -59,7 +59,7 @@ handler_routing:
         module: "omnibase_infra.nodes.node_architecture_validator.handlers.handler_architecture_validation"
       supported_operations:
         - "architecture.validate"
-# Supported rules (from contract_architecture_validator.yaml)
+# Supported rules (from contract.yaml)
 # These are the only rules that this handler is designed to process.
 supported_rules:
   - rule_id: "NO_HANDLER_PUBLISHING"

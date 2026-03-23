@@ -1346,7 +1346,7 @@ class TestRuleIdValidation:
         - Error message: Includes the invalid rule_id and list of supported rules
         - Mixed valid/invalid: Fails on first invalid rule_id encountered
 
-    Supported rule IDs (from contract_architecture_validator.yaml):
+    Supported rule IDs (from contract.yaml):
         - NO_HANDLER_PUBLISHING
         - PURE_REDUCERS
         - NO_FSM_IN_ORCHESTRATORS
@@ -1357,7 +1357,7 @@ class TestRuleIdValidation:
     Related:
         - OMN-1138: Architecture Validator implementation
         - OMN-1726: Refactor to declarative pattern with handler
-        - contract_architecture_validator.yaml: Source of supported_rules
+        - contract.yaml: Source of supported_rules
 
     .. versionadded:: 0.8.0
         Created as part of OMN-1138 rule_id validation coverage.
