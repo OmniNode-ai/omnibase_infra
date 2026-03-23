@@ -636,6 +636,9 @@ async def bootstrap() -> int:
     contract_unsub_heartbeat: Callable[[], Awaitable[None]] | None = None
     plugin_config: ModelDomainPluginConfig | None = None
     runtime_log_bridge: RuntimeLogEventBridge | None = None
+    llm_health_service: ServiceLlmEndpointHealth | None = None
+    wiring_health_checker: WiringHealthChecker | None = None
+    wiring_health_task: asyncio.Task[None] | None = None
     correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
 
@@ -1059,7 +1062,6 @@ async def bootstrap() -> int:
         # 3.7. Initialize ServiceLlmEndpointHealth if LLM endpoints configured (OMN-6135)
         # Probes configured LLM endpoints at a regular interval and emits health
         # events to Kafka.  Best-effort: failure does not block kernel startup.
-        llm_health_service: ServiceLlmEndpointHealth | None = None
         if use_kafka:
             try:
                 _llm_endpoints: dict[str, str] = {}
@@ -1110,8 +1112,6 @@ async def bootstrap() -> int:
         # Computes emission/consumption health and emits snapshot events to Kafka
         # for the omnidash /wiring-health dashboard.  Triggered periodically
         # (default 60s) via a background asyncio task.
-        wiring_health_checker: WiringHealthChecker | None = None
-        wiring_health_task: asyncio.Task[None] | None = None
         if use_kafka:
             try:
                 _wiring_health_interval = float(

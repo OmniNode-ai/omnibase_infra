@@ -1170,6 +1170,8 @@ ALL_PLATFORM_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
         partitions=1,
         kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
     ),
+    # DLQ aggregation topic (OMN-6136) — consumed by omnidash /dlq dashboard
+    ModelTopicSpec(suffix=SUFFIX_PLATFORM_DLQ_MESSAGE, partitions=3),
 )
 """Complete tuple of all platform topic specs with per-topic configuration.
 
