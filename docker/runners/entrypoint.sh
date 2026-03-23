@@ -84,7 +84,7 @@ _restore_cached_creds() {
     local key
     key=$(_cache_key)
     local cache_file="${CRED_CACHE_DIR}/${key}"
-    if [[ -f "${cache_file}" ]]; then
+    if [[ -d "${cache_file}" ]]; then
         echo "[entrypoint] Restoring cached runner credentials (key=${key:0:12}...)"
         cp -r "${cache_file}/"* "${RUNNER_HOME}/" 2>/dev/null || true
         return 0
