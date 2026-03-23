@@ -59,7 +59,8 @@ fi
 # ---------------------------------------------------------------------------
 # Required environment variables
 # ---------------------------------------------------------------------------
-: "${RUNNER_TOKEN:?RUNNER_TOKEN must be set}"
+# RUNNER_TOKEN is optional — only required for first-time registration.
+# After initial setup, cached credentials are used and the token is not needed.
 : "${RUNNER_NAME:?RUNNER_NAME must be set}"
 : "${RUNNER_LABELS:?RUNNER_LABELS must be set}"
 : "${GITHUB_ORG_URL:?GITHUB_ORG_URL must be set}"
@@ -177,6 +178,10 @@ _register() {
 }
 
 _deregister() {
+    if [[ -z "${RUNNER_TOKEN:-}" ]]; then
+        echo "[entrypoint] Skipping de-registration (no RUNNER_TOKEN available)"
+        return 0
+    fi
     echo "[entrypoint] Attempting graceful de-registration..."
     _as_runner "${RUNNER_HOME}/config.sh" remove --token "${RUNNER_TOKEN}" 2>/dev/null || true
 }
