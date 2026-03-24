@@ -3,7 +3,10 @@
 """Unit tests for standalone consumer config session timeout fields (OMN-5445).
 
 Verifies that all 6 standalone consumer configs have session_timeout_ms and
-heartbeat_interval_ms fields with correct defaults (30000/10000).
+heartbeat_interval_ms fields with correct defaults (45000/15000).
+
+Updated in OMN-6066..OMN-6072: defaults raised from 30000/10000 to 45000/15000
+to prevent rebalance storms during brief processing delays.
 """
 
 from __future__ import annotations
@@ -73,12 +76,12 @@ class TestStandaloneConsumerConfigDefaults:
         _STANDALONE_CONFIGS,
         ids=[c.__name__ for c in _STANDALONE_CONFIGS],
     )
-    def test_session_timeout_ms_default_is_30000(self, config_cls: type) -> None:
-        """session_timeout_ms default must be 30000."""
+    def test_session_timeout_ms_default_is_45000(self, config_cls: type) -> None:
+        """session_timeout_ms default must be 45000 (raised from 30000 in OMN-6066..OMN-6072)."""
         field_info = config_cls.model_fields["session_timeout_ms"]
-        assert field_info.default == 30000, (
+        assert field_info.default == 45000, (
             f"{config_cls.__name__}.session_timeout_ms default is "
-            f"{field_info.default}, expected 30000"
+            f"{field_info.default}, expected 45000"
         )
 
     @pytest.mark.unit
@@ -87,10 +90,10 @@ class TestStandaloneConsumerConfigDefaults:
         _STANDALONE_CONFIGS,
         ids=[c.__name__ for c in _STANDALONE_CONFIGS],
     )
-    def test_heartbeat_interval_ms_default_is_10000(self, config_cls: type) -> None:
-        """heartbeat_interval_ms default must be 10000."""
+    def test_heartbeat_interval_ms_default_is_15000(self, config_cls: type) -> None:
+        """heartbeat_interval_ms default must be 15000 (raised from 10000 in OMN-6066..OMN-6072)."""
         field_info = config_cls.model_fields["heartbeat_interval_ms"]
-        assert field_info.default == 10000, (
+        assert field_info.default == 15000, (
             f"{config_cls.__name__}.heartbeat_interval_ms default is "
-            f"{field_info.default}, expected 10000"
+            f"{field_info.default}, expected 15000"
         )

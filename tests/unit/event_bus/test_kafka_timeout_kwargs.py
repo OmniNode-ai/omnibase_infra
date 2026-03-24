@@ -200,7 +200,11 @@ class TestDefaultValues:
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_default_session_timeout_wired_to_consumer(self) -> None:
-        """Default 30000ms session timeout must reach consumer constructor."""
+        """Default 45000ms session timeout must reach consumer constructor.
+
+        Updated in OMN-6066..OMN-6072: default raised from 30000 to 45000 to
+        prevent rebalance storms during brief processing delays.
+        """
         config = ModelKafkaEventBusConfig()
         bus = EventBusKafka(config=config)
 
@@ -224,5 +228,5 @@ class TestDefaultValues:
                 "test-topic", on_message=AsyncMock(), group_id="test-group"
             )
             call_kwargs = mock_consumer_cls.call_args
-            assert call_kwargs.kwargs["session_timeout_ms"] == 30000
-            assert call_kwargs.kwargs["heartbeat_interval_ms"] == 10000
+            assert call_kwargs.kwargs["session_timeout_ms"] == 45000
+            assert call_kwargs.kwargs["heartbeat_interval_ms"] == 15000
