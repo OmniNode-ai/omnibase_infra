@@ -11,28 +11,16 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 
-def test_wire_default_handlers_includes_intent() -> None:
-    """Test that wire_default_handlers registers the intent handler.
-
-    The intent handler (HANDLER_TYPE_INTENT) should be included in the
-    default handlers wired by wire_default_handlers(). This test verifies
-    that the handler is present in the summary returned by the function.
-
-    Note:
-        We mock the singleton registries to isolate this test from handler
-        implementation issues (e.g., missing execute() methods in some handlers).
-    """
+def test_wire_default_handlers_registers_core_handlers() -> None:
+    """Test that wire_default_handlers registers the core handlers (no intent)."""
     from omnibase_infra.runtime.util_wiring import wire_default_handlers
 
-    # Create mock registries that accept any registration
     mock_handler_registry = MagicMock()
     mock_handler_registry.list_protocols.return_value = [
         "db",
         "graph",
         "http",
-        "intent",
         "mcp",
-        "vault",
     ]
 
     mock_event_bus_registry = MagicMock()
@@ -51,58 +39,18 @@ def test_wire_default_handlers_includes_intent() -> None:
     ):
         summary = wire_default_handlers()
 
-    assert "intent" in summary["handlers"], "Intent handler should be registered"
-
-
-def test_intent_handler_in_known_handlers() -> None:
-    """Test that HANDLER_TYPE_INTENT is included in _HANDLER_CONTRACT_PATHS.
-
-    This is a direct unit test that verifies the intent handler type
-    constant is properly mapped in the _HANDLER_CONTRACT_PATHS dictionary.
-    """
-    from pathlib import Path
-
-    from omnibase_infra.runtime.handler_registry import HANDLER_TYPE_INTENT
-    from omnibase_infra.runtime.util_wiring import _HANDLER_CONTRACT_PATHS
-
-    assert HANDLER_TYPE_INTENT in _HANDLER_CONTRACT_PATHS, (
-        f"HANDLER_TYPE_INTENT ('{HANDLER_TYPE_INTENT}') should be in _HANDLER_CONTRACT_PATHS"
+    # Intent handler was removed (TEMPORARY demo wiring)
+    assert "intent" not in summary["handlers"], (
+        "Intent handler should not be registered"
     )
-
-    contract_path = _HANDLER_CONTRACT_PATHS[HANDLER_TYPE_INTENT]
-    assert isinstance(contract_path, Path), (
-        f"Contract path should be a Path object, got {type(contract_path)}"
-    )
-    assert contract_path.name == "contract.yaml", (
-        f"Contract path should end with 'contract.yaml', got '{contract_path.name}'"
-    )
-    assert "intent" in str(contract_path), (
-        f"Contract path should contain 'intent', got '{contract_path}'"
-    )
-
-
-def test_intent_handler_type_constant_value() -> None:
-    """Test that HANDLER_TYPE_INTENT has the expected value.
-
-    Verifies that the handler type constant matches what would be
-    used in envelope routing.
-    """
-    from omnibase_infra.runtime.handler_registry import HANDLER_TYPE_INTENT
-
-    assert HANDLER_TYPE_INTENT == "intent", (
-        f"HANDLER_TYPE_INTENT should be 'intent', got '{HANDLER_TYPE_INTENT}'"
-    )
+    for handler in ("db", "graph", "http", "mcp"):
+        assert handler in summary["handlers"], f"{handler} handler should be registered"
 
 
 def test_wire_default_handlers_returns_expected_structure() -> None:
-    """Test that wire_default_handlers returns the expected summary structure.
-
-    The function should return a dict with 'handlers' and 'event_buses' keys,
-    each containing a list of registered type/kind strings.
-    """
+    """Test that wire_default_handlers returns the expected summary structure."""
     from omnibase_infra.runtime.util_wiring import wire_default_handlers
 
-    # Create mock registries
     mock_handler_registry = MagicMock()
     mock_handler_registry.list_protocols.return_value = ["http", "db"]
 
@@ -129,18 +77,13 @@ def test_wire_default_handlers_returns_expected_structure() -> None:
 
 
 def test_known_handlers_includes_all_expected_types() -> None:
-    """Test that _HANDLER_CONTRACT_PATHS includes all expected handler types.
-
-    Verifies that the core infrastructure handlers are all present in the
-    _HANDLER_CONTRACT_PATHS dictionary that drives wire_default_handlers().
-    """
+    """Test that _HANDLER_CONTRACT_PATHS includes all expected handler types."""
     from pathlib import Path
 
     from omnibase_infra.runtime.handler_registry import (
         HANDLER_TYPE_DATABASE,
         HANDLER_TYPE_GRAPH,
         HANDLER_TYPE_HTTP,
-        HANDLER_TYPE_INTENT,
         HANDLER_TYPE_MCP,
     )
     from omnibase_infra.runtime.util_wiring import _HANDLER_CONTRACT_PATHS
@@ -149,7 +92,6 @@ def test_known_handlers_includes_all_expected_types() -> None:
         HANDLER_TYPE_DATABASE,
         HANDLER_TYPE_GRAPH,
         HANDLER_TYPE_HTTP,
-        HANDLER_TYPE_INTENT,
         HANDLER_TYPE_MCP,
     ]
 
@@ -163,16 +105,52 @@ def test_known_handlers_includes_all_expected_types() -> None:
         )
 
 
-def test_wire_default_handlers_includes_inmemory_event_bus() -> None:
-    """Test that wire_default_handlers registers the in-memory event bus.
+def test_intent_handler_not_in_known_handlers() -> None:
+    """Test that HANDLER_TYPE_INTENT is NOT in _HANDLER_CONTRACT_PATHS (removed)."""
+    from omnibase_infra.runtime.handler_registry import HANDLER_TYPE_INTENT
+    from omnibase_infra.runtime.util_wiring import _HANDLER_CONTRACT_PATHS
 
-    The in-memory event bus should be included in the default wiring
-    for local/testing deployments.
-    """
+    assert HANDLER_TYPE_INTENT not in _HANDLER_CONTRACT_PATHS, (
+        "Intent handler (TEMPORARY demo wiring) should have been removed"
+    )
+
+
+def test_all_handler_contracts_use_canonical_name() -> None:
+    """Every handler dir must have handler_contract.yaml, not contract.yaml."""
+    from pathlib import Path
+
+    HANDLERS_BASE = (
+        Path(__file__).parent.parent.parent.parent
+        / "src/omnibase_infra/contracts/handlers"
+    )
+
+    for handler_dir in HANDLERS_BASE.iterdir():
+        if not handler_dir.is_dir() or handler_dir.name.startswith("_"):
+            continue
+        assert (handler_dir / "handler_contract.yaml").exists(), (
+            f"{handler_dir.name}/ missing handler_contract.yaml"
+        )
+        assert not (handler_dir / "contract.yaml").exists(), (
+            f"{handler_dir.name}/ has ambiguous dual contract files"
+        )
+
+
+def test_intent_handler_dir_removed() -> None:
+    """Intent handler directory (TEMPORARY demo wiring) must be deleted."""
+    from pathlib import Path
+
+    HANDLERS_BASE = (
+        Path(__file__).parent.parent.parent.parent
+        / "src/omnibase_infra/contracts/handlers"
+    )
+    assert not (HANDLERS_BASE / "intent").exists()
+
+
+def test_wire_default_handlers_includes_inmemory_event_bus() -> None:
+    """Test that wire_default_handlers registers the in-memory event bus."""
     from omnibase_infra.runtime.handler_registry import EVENT_BUS_INMEMORY
     from omnibase_infra.runtime.util_wiring import wire_default_handlers
 
-    # Create mock registries
     mock_handler_registry = MagicMock()
     mock_handler_registry.list_protocols.return_value = ["http"]
 

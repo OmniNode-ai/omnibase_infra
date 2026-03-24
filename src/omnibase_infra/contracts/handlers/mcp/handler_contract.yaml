@@ -48,6 +48,17 @@ capability_outputs:
 # NOTE: Models defined in OMN-1288 (MCP Handler)
 input_model: omnibase_infra.handlers.models.mcp.ModelMcpToolCall
 output_model: omnibase_infra.handlers.models.mcp.ModelMcpToolResult
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "mcp"
+      handler:
+        name: "HandlerMCP"
+        module: "omnibase_infra.handlers.handler_mcp"
+      supported_operations:
+        - "mcp.list_tools"
+        - "mcp.call_tool"
+        - "mcp.describe"
 supports_lifecycle: true
 supports_health_check: true
 supports_provisioning: false
