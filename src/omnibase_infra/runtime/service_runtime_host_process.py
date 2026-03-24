@@ -4829,6 +4829,10 @@ class RuntimeHostProcess:
         # Create wiring instance
         # Cast to protocol type - both EventBusKafka and EventBusInmemory implement
         # the ProtocolEventBusSubscriber interface (subscribe method)
+        # Thread topic_deny_patterns from runtime node graph config [OMN-6334]
+        topic_deny_patterns: tuple[str, ...] = ()
+        if self._runtime_node_graph_config is not None:
+            topic_deny_patterns = self._runtime_node_graph_config.topic_deny_patterns
         self._event_bus_wiring = EventBusSubcontractWiring(
             event_bus=cast("ProtocolEventBusSubscriber", self._event_bus),
             dispatch_engine=self._dispatch_engine,
@@ -4836,6 +4840,7 @@ class RuntimeHostProcess:
             node_name="runtime-host",
             service=self._node_identity.service,
             version=self._node_identity.version,
+            topic_deny_patterns=topic_deny_patterns,
         )
 
         # Wire subscriptions for each handler with a contract

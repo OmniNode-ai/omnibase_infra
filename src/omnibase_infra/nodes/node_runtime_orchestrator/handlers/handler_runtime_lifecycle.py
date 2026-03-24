@@ -74,7 +74,14 @@ class HandlerRuntimeLifecycle:
             msg = "No boot steps provided to HandlerRuntimeLifecycle"
             raise ValueError(msg)
 
-        for step_name, step_callable in zip(_STEP_NAMES, active_steps, strict=False):
+        if len(active_steps) != len(_STEP_NAMES):
+            msg = (
+                f"Expected {len(_STEP_NAMES)} boot steps "
+                f"({', '.join(_STEP_NAMES)}), got {len(active_steps)}"
+            )
+            raise ValueError(msg)
+
+        for step_name, step_callable in zip(_STEP_NAMES, active_steps, strict=True):
             logger.info("Runtime boot step: %s", step_name)
             await step_callable()
             logger.info("Runtime boot step complete: %s", step_name)

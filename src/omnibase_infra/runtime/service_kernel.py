@@ -1923,6 +1923,9 @@ async def bootstrap() -> int:
             # ProtocolNodeIntrospection via MixinNodeIntrospection, but mypy
             # cannot verify structural protocol conformance across mixin chains.
             introspection_service=introspection_service,  # type: ignore[arg-type]
+            # OMN-6334: Pass contract-driven runtime config so RuntimeHostProcess
+            # uses contract values instead of DEFAULT_* constants.
+            runtime_node_graph_config=node_graph_config,
         )
         runtime_create_duration = time.time() - runtime_create_start_time
         logger.debug(
