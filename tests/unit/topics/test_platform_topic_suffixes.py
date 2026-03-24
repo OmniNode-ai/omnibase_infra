@@ -501,17 +501,24 @@ class TestOmniClaudeTopicSuffixes:
         )
 
     def test_omniclaude_skill_topics_use_1_partition(self) -> None:
-        """Skill dispatch topics should use 1 partition; DLQ and agent trace topics use 3 partitions."""
+        """Skill dispatch topics should use 1 partition; DLQ and observability topics use 3 partitions."""
         from omnibase_infra.topics import (
+            SUFFIX_OMNICLAUDE_AGENT_ACTIONS,
             SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
+            SUFFIX_OMNICLAUDE_AGENT_EXECUTION_LOGS,
             SUFFIX_OMNICLAUDE_AGENT_OBSERVABILITY_DLQ,
+            SUFFIX_OMNICLAUDE_AGENT_STATUS,
             SUFFIX_OMNICLAUDE_AGENT_TRACE_FIX_TRANSITION,
+            SUFFIX_OMNICLAUDE_AGENT_TRANSFORMATION,
             SUFFIX_OMNICLAUDE_AUDIT_COMPRESSION_TRIGGERED,
             SUFFIX_OMNICLAUDE_AUDIT_CONTEXT_BUDGET_EXCEEDED,
             SUFFIX_OMNICLAUDE_AUDIT_DISPATCH_VALIDATED,
             SUFFIX_OMNICLAUDE_AUDIT_RETURN_BOUNDED,
             SUFFIX_OMNICLAUDE_AUDIT_SCOPE_VIOLATION,
             SUFFIX_OMNICLAUDE_CONTEXT_AUDIT_DLQ,
+            SUFFIX_OMNICLAUDE_DETECTION_FAILURE,
+            SUFFIX_OMNICLAUDE_PERFORMANCE_METRICS,
+            SUFFIX_OMNICLAUDE_ROUTING_DECISION,
             SUFFIX_OMNICLAUDE_SKILL_LIFECYCLE_DLQ,
         )
 
@@ -527,6 +534,14 @@ class TestOmniClaudeTopicSuffixes:
             SUFFIX_OMNICLAUDE_AUDIT_RETURN_BOUNDED,
             SUFFIX_OMNICLAUDE_AUDIT_SCOPE_VIOLATION,
             SUFFIX_OMNICLAUDE_CONTEXT_AUDIT_DLQ,
+            # Agent observability topics (OMN-6066..OMN-6072) — matches consumer throughput
+            SUFFIX_OMNICLAUDE_AGENT_ACTIONS,
+            SUFFIX_OMNICLAUDE_ROUTING_DECISION,
+            SUFFIX_OMNICLAUDE_AGENT_TRANSFORMATION,
+            SUFFIX_OMNICLAUDE_PERFORMANCE_METRICS,
+            SUFFIX_OMNICLAUDE_DETECTION_FAILURE,
+            SUFFIX_OMNICLAUDE_AGENT_EXECUTION_LOGS,
+            SUFFIX_OMNICLAUDE_AGENT_STATUS,
         }
         for spec in ALL_OMNICLAUDE_TOPIC_SPECS:
             if spec.suffix in three_partition_suffixes:
