@@ -131,6 +131,34 @@ if TYPE_CHECKING:
     )
 
 
+def validate_topic(topic: str, deny_patterns: tuple[str, ...] = ()) -> None:
+    """Validate a topic name against contract-declared deny patterns [OMN-6342].
+
+    Checks the topic against deny patterns from ``event_bus_wiring_effect.yaml``.
+    If any deny pattern matches, raises ``ProtocolConfigurationError``.
+
+    Args:
+        topic: Topic name to validate.
+        deny_patterns: Regex deny patterns from ``ModelRuntimeNodeGraphConfig``.
+
+    Raises:
+        ProtocolConfigurationError: If topic matches a deny pattern.
+    """
+    import re
+
+    for pattern in deny_patterns:
+        if re.search(pattern, topic):
+            context = ModelInfraErrorContext.with_correlation(
+                operation="validate_topic",
+                target_name=topic,
+            )
+            raise ProtocolConfigurationError(
+                f"Topic name denied by contract security policy: '{topic}' "
+                f"(matched deny pattern: {pattern})",
+                context=context,
+            )
+
+
 class EventBusSubcontractWiring(MixinConsumptionCounter):
     """Wires event_bus subcontracts to Kafka subscriptions and publishers.
 
