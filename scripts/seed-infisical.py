@@ -544,6 +544,32 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--profile",
+        choices=["local", "cloud"],
+        default=None,
+        help=(
+            "Environment profile — selects hostname and credential templates "
+            "for the target environment. Requires --service."
+        ),
+    )
+    parser.add_argument(
+        "--service",
+        default=None,
+        help=(
+            "Service name for profile-based seeding (e.g., omniweb). "
+            "Loads seed-profiles/<profile>-<service>.env as the value source."
+        ),
+    )
+    parser.add_argument(
+        "--cloud-password",
+        default=None,
+        help=(
+            "Cloud postgres password for profile substitution. "
+            "Replaces ${CLOUD_POSTGRES_PASSWORD} in cloud profile files. "
+            "If not provided and --profile cloud is used, prompts interactively."
+        ),
+    )
+    parser.add_argument(
         "--export",
         action="store_true",
         default=False,
@@ -575,6 +601,90 @@ def main() -> int:
             logger.exception("Export failed with unhandled error: %s", _msg)
             return 1
         return 0 if ok else 1
+
+    # Handle profile-based seeding
+    if args.profile is not None:
+        if args.service is None:
+            logger.error("--profile requires --service (e.g., --service omniweb)")
+            return 1
+        profile_file = (
+            Path(__file__).resolve().parent
+            / "seed-profiles"
+            / f"{args.profile}-{args.service}.env"
+        )
+        if not profile_file.exists():
+            logger.error("Profile file not found: %s", profile_file)
+            return 1
+        logger.info("Loading profile: %s", profile_file)
+        profile_values = _parse_env_file(profile_file)
+
+        # Substitute ${CLOUD_POSTGRES_PASSWORD} in cloud profile
+        if args.profile == "cloud":
+            cloud_pw = args.cloud_password
+            if cloud_pw is None:
+                import getpass
+
+                cloud_pw = getpass.getpass(
+                    "Enter cloud postgres password (CLOUD_POSTGRES_PASSWORD): "
+                )
+            for key in profile_values:
+                profile_values[key] = profile_values[key].replace(
+                    "${CLOUD_POSTGRES_PASSWORD}", cloud_pw
+                )
+        # Substitute ${POSTGRES_PASSWORD} in local profile
+        elif args.profile == "local":
+            local_pw = os.environ.get("POSTGRES_PASSWORD", "")
+            for key in profile_values:
+                profile_values[key] = profile_values[key].replace(
+                    "${POSTGRES_PASSWORD}", local_pw
+                )
+
+        # Override env_values with profile values and seed directly
+        profile_env = profile_values
+        profile_reqs = [
+            {
+                "key": k,
+                "transport_type": "profile",
+                "folder": f"/dev/{args.service}/",
+                "source": "profile",
+            }
+            for k in profile_values
+        ]
+
+        _print_diff_summary(
+            profile_reqs,
+            profile_env,
+            create_missing=args.create_missing_keys,
+            set_values=True,
+            overwrite_existing=args.overwrite_existing,
+        )
+
+        if args.execute or not args.dry_run:
+            logger.info(
+                "Executing profile-based seed for %s/%s...",
+                args.profile,
+                args.service,
+            )
+            created, updated, skipped, error_count = _do_seed(
+                profile_reqs,
+                profile_env,
+                create_missing=args.create_missing_keys,
+                set_values=True,
+                overwrite_existing=args.overwrite_existing,
+            )
+            logger.info(
+                "Profile seed complete: %d created, %d updated, %d skipped, %d errors",
+                created,
+                updated,
+                skipped,
+                error_count,
+            )
+            if error_count > 0:
+                logger.error("%d secret(s) failed to process", error_count)
+                return 1
+        else:
+            logger.info("Dry run complete. Use --execute to write to Infisical.")
+        return 0
 
     # Extract requirements from contracts (nodes/ + contracts/ for handler plugin contracts)
     contracts_base = _PROJECT_ROOT / "src" / "omnibase_infra" / "contracts"
