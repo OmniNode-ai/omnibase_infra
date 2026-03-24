@@ -149,6 +149,12 @@ POSTGRES_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
 # RUNTIME_BIND_HOST=0.0.0.0
 
 # =============================================================================
+# ONEX Platform Service URLs
+# =============================================================================
+# OmniIntelligence HTTP API (context injection, pattern discovery)
+# INTELLIGENCE_SERVICE_URL=http://localhost:8053
+
+# =============================================================================
 # Main Runtime Service Configuration
 # =============================================================================
 # Host port mapping for the main runtime service
