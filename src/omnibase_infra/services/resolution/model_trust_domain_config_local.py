@@ -18,7 +18,7 @@ of a contract YAML file::
         tier: "org_trusted"
         trust_root_ref: "secrets://keys/org-omninode-trust-root"
 
-TODO(OMN-2896): Replace this local model with the canonical import once
+TODO(OMN-5739): Replace this local model with the canonical import once
     omnibase_core PR #576 merges and a release containing
     ``ModelTrustDomainConfig`` is available as a dependency.
 

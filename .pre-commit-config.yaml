@@ -29,11 +29,14 @@ repos:
   # Hardcoded topic guard — sourced from onex_change_control (OMN-5256/OMN-5259)
   # Pre-existing violations excluded pending migration to canonical constants (OMN-5259)
   - repo: https://github.com/OmniNode-ai/onex_change_control
-    rev: 1b0d2f0374bca1f39d9bab22a02251208cdce196 # pragma: allowlist secret
+    rev: 8d7e85bc00e7f1b1306d1cb40949be1ab6e7e91a # pragma: allowlist secret
     hooks:
       - id: no-hardcoded-topics
-        exclude: ^(src/omnibase_infra/(enums/generated|cli|tui|models/registration/model_event_bus_topic_entry\.py|nodes/.*/handlers|nodes/.*/services|runtime/contract_registration_event_router\.py|services/observability|services/service_timeout_emitter\.py|validation)|contracts/|scripts/|tests/)
-  # YAML formatting (standard across ecosystem)
+        exclude: ^(src/omnibase_infra/(enums/generated|cli|tui|models/registration/model_event_bus_topic_entry\.py|nodes/.*/handlers|nodes/.*/services|runtime/contract_registration_event_router\.py|services/observability|services/service_timeout_emitter\.py|topics/service_topic_registry\.py|event_bus/topic_constants\.py|validation)|contracts/|scripts/|tests/)
+      - id: no-bare-feature-flags
+        # YAML formatting (standard across ecosystem)
+      - id: no-untracked-todos
+        stages: [pre-commit]
   - repo: https://github.com/google/yamlfmt
     rev: v0.17.2
     hooks:
@@ -347,6 +350,13 @@ repos:
         pass_filenames: false
         files: (platform_topic_suffixes\.py|contract\.yaml|topics\.yaml)
         stages: [pre-commit]
+      # OMN-5440: Verify required docker-compose env vars are set in ~/.omnibase/.env
+      - id: check-required-env-vars
+        name: Check required env vars are set in ~/.omnibase/.env
+        entry: python scripts/check_required_env_vars.py
+        language: python
+        files: docker/docker-compose\.infra\.yml
+        pass_filenames: false
       # OMN-4857: Block Consul references in source (decommissioned service)
       # Prevents reintroduction of CONSUL_HOST or consul.connect.io references in src/.
       - id: no-consul-references

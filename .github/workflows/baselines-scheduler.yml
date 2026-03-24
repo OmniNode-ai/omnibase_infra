@@ -39,7 +39,10 @@ env:
 jobs:
   baselines-compute:
     name: Baselines Batch Compute
-    # Self-hosted runner required: needs PostgreSQL and Kafka access
+    # Self-hosted runner required: needs PostgreSQL and Kafka access.
+    # When USE_SELF_HOSTED_RUNNERS is false, skip entirely — ubuntu-latest
+    # has no PostgreSQL and the OMNIBASE_INFRA_DB_URL secret is not configured.
+    if: vars.USE_SELF_HOSTED_RUNNERS == 'true'
     # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
     runs-on: >-
       ${{

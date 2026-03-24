@@ -1,3 +1,93 @@
+## v0.24.0 (2026-03-22)
+
+### Added
+- feat: verify_container_manifest.py + CLI entry point [OMN-5796] (#947)
+- feat(ci): add cross-repo migration conflict check [OMN-5772] (#943)
+- feat(monitor): emit runtime errors to Kafka [OMN-5649] (#934)
+- feat(contracts): create service-level feature flag contracts [OMN-5628] (#926)
+- feat(introspection): wire contract data into introspection emission path [OMN-5609] (#923)
+- feat(scripts): add post-release version verification script [OMN-5608] (#922)
+
+### Fixed
+- fix(ci): skip infra-dependent scheduled jobs on ubuntu-latest [OMN-5776] (#945)
+- fix(deep-dive): include onex repos and add ticket summary section [OMN-5647] (#933)
+- fix(docker): extend runtime-effects healthcheck timing to prevent false unhealthy [OMN-5637] (#931)
+- fix(deploy): guard contracts/ rsync for missing directory [OMN-5630] (#928)
+- fix(topics): register 5 missing Kafka topics in services manifest [OMN-5633] (#929)
+- fix(deploy): add migration scripts rsync to deploy-runtime.sh [OMN-5627] (#925)
+- fix(event_bus): wire retry_backoff_ms into AIOKafka constructors [OMN-5626] (#924)
+
+### Changed
+- ci: deploy TODO enforcement hooks and workflows [OMN-5694, OMN-5695] (#941)
+- chore: remove stale/canceled TODOs [OMN-5690] (#937, #939)
+- chore: re-tag deferred and unfinished TODOs [OMN-5691, OMN-5692] (#940)
+- chore: delete orphaned handler contract scaffolds [OMN-5698] (#936)
+- chore: update exemption markers to ONEX_FLAG_EXEMPT [OMN-5629] (#927)
+
+## v0.23.0 (2026-03-20)
+
+### Added
+- feat: feature flag model wiring [OMN-5575/5577/5578] (#918)
+- feat: Runtime Health Event Pipeline Waves 0-2 [OMN-5529] (#911)
+- feat: add ServiceSavingsEstimator Kafka consumer [OMN-5550] (#917)
+- feat(bifrost): shadow mode for learned routing policy comparison [OMN-5570] (#920)
+- feat(capabilities): extract feature flags from contract YAML [OMN-5574] (#916)
+- feat: populate contract YAMLs with feature_flags declarations [OMN-5584] (#914)
+- feat(infra): add savings estimation compute handler with tiered attribution [OMN-5547] (#913)
+- feat(ci): guard required docker-compose env vars [OMN-5440] (#900)
+- feat(kafka): wire session timeout to all consumers [OMN-5445] (#905)
+- feat(topics): package discovery + kill fallback paths [OMN-5492/5491] (#910)
+- ci: add compose required-env coverage guard [OMN-5439] (#899)
+
+### Fixed
+- fix(scripts): prune stale worktrees before fetch in pull-all.sh [OMN-5460] (#906)
+- fix(deploy): add timeout and --progress=plain to docker build [OMN-5462] (#907)
+- fix(catalog): pre-cleanup dead containers before compose up [OMN-5468] (#908)
+- fix(mypy): resolve no-any-return in _load_stack via explicit type narrowing (#903)
+- fix(docker): switch plugin pins to ranges for forward compatibility [OMN-5474] (#909)
+
+### Changed
+- chore: wire no-bare-feature-flags pre-commit hook [OMN-5585] (#915)
+- chore(infra): register savings and validator-catch topics [OMN-5545] (#912)
+- chore(deps): switch uv.sources from release branches to tags (#904)
+- Dependency pins will be updated in a follow-up after upstream releases are tagged
+
+### Tests
+- test: add e2e integration test for savings estimation pipeline [OMN-5555] (#919)
+
+## v0.22.0 (2026-03-19)
+
+### Added
+- feat(ci): deploy CodeQL security scanning to omnibase_infra [OMN-5425] (#896)
+- feat: service catalog architecture with typed manifests and bundle definitions [OMN-5379] (#897)
+- feat: activation-aware handler wiring [OMN-5356] (#886)
+- feat(ci): add INV-4 contract-declared handler wiring completeness check [OMN-5345] (#889)
+- feat: contract-driven topic discovery and drift CI [OMN-5247] (#865)
+- feat(event_bus): wire ONEX topic format gate into publish() [OMN-5209] (#863)
+- feat(event_bus): add debounced Slack alerting for topic violations [OMN-5206] (#862)
+- feat(consumers): add ContextAuditConsumer for context integrity audit events [OMN-5240] (#877)
+- feat(infra): centralized onboarding system [OMN-5261] (#869)
+- feat: emit wiring-health-snapshot.v1 and llm-call-completed.v1 events [OMN-5292, OMN-5201]
+- feat(validation): cross-repo validation event models [OMN-5184] (#864)
+- feat: multi-package entry point discovery for create_kafka_topics.py [OMN-5371] (#891)
+- feat(ci): upgrade plugin-pin-cascade to full reconciliation workflow [OMN-5375] (#893)
+
+### Fixed
+- fix: eliminate empty-default env var fallbacks from compose [OMN-5382]
+- fix: hardcode container-internal addresses for valkey, memgraph, keycloak [OMN-5381]
+- fix: graph handler reads OMNIMEMORY_MEMGRAPH_HOST/PORT for URI resolution [OMN-5357] (#884)
+- fix: replace wrong localhost:9092 defaults with localhost:19092 [OMN-5220] (#867)
+- fix: remove vestigial ONEX_ENV and environment-prefixed topic names [OMN-5189] (#860)
+- fix(docker): remove --admin-addr crash-loop and fix Memgraph healthcheck [OMN-5176] (#876)
+- fix(mypy): resolve 25 pre-existing mypy errors, make CI job fully blocking [OMN-5405] (#895)
+
+### Changed
+- chore(deps): bump omnibase-core to 0.29.0, omnibase-spi to 0.18.0
+- chore(deps): bump plugin pins (omninode-claude 0.9.0, omninode-memory 0.9.0, omninode-intelligence 0.15.0)
+- refactor: replace legacy Consul ServiceTopicCatalog with contract-driven impl [OMN-5300] (#871)
+- ci(omnibase_infra): add standards compliance workflow with blocking UP007 [std-sweep-v2] (#894)
+- chore(deps): multiple Dependabot updates (trivy-action, setup-buildx, codeql-action, etc.)
+
 ## v0.20.0 (2026-03-13)
 
 ### Features

@@ -166,6 +166,16 @@ confirming that the node acknowledges successful registration.
 """
 
 # Resolution event ledger (OMN-2895 / Phase 6 of OMN-2897)
+SUFFIX_FEATURE_FLAG_CHANGED: str = "onex.evt.platform.feature-flag-changed.v1"
+"""Topic suffix for feature flag state change events.
+
+Published when a feature flag is toggled via the control-plane API.
+Contains flag name, new value, previous value, and env_var reference.
+
+Producer: Registry API (update_feature_flag)
+Consumer: Runtime services for dynamic flag reload
+"""
+
 SUFFIX_RESOLUTION_DECIDED: str = "onex.evt.platform.resolution-decided.v1"
 """Topic suffix for resolution decision audit events.
 
@@ -441,6 +451,60 @@ Producer: CircuitBreakerEventPublisher (MixinAsyncCircuitBreaker integrations)
 Consumer: omnidash /circuit-breaker dashboard (OMN-5293)
 """
 
+# =============================================================================
+# PLATFORM DLQ AGGREGATION TOPIC SUFFIX (OMN-6136)
+# =============================================================================
+
+SUFFIX_PLATFORM_DLQ_MESSAGE: str = "onex.evt.platform.dlq-message.v1"
+"""Topic suffix for DLQ aggregation events consumed by omnidash.
+
+Published by MixinKafkaDlq as a cross-publish alongside the category-specific
+DLQ topic (onex.dlq.{category}.v1).  Omnidash subscribes to this single
+aggregation topic to project DLQ messages into the dlq_messages read-model table.
+
+Producer: MixinKafkaDlq (cross-publish on each DLQ publish)
+Consumer: omnidash ReadModelConsumer (platform-projections.ts)
+Ticket: OMN-6136
+"""
+
+# =============================================================================
+# OMNIBASE_INFRA CONSUMER HEALTH TOPIC SUFFIXES (OMN-5515 / OMN-5529)
+# =============================================================================
+
+SUFFIX_CONSUMER_HEALTH: str = "onex.evt.omnibase-infra.consumer-health.v1"
+"""Topic suffix for consumer health events.
+
+Published by ConsumerHealthEmitter when consumer lifecycle events occur
+(heartbeat failures, session timeouts, rebalances, etc.).
+
+Producer: ConsumerHealthEmitter (EventBusKafka, standalone consumers via MixinConsumerHealth)
+Consumer: NodeConsumerHealthTriageEffect, omnidash /consumer-health dashboard
+"""
+
+SUFFIX_CONSUMER_RESTART_CMD: str = "onex.cmd.omnibase-infra.consumer-restart.v1"
+"""Topic suffix for consumer restart commands.
+
+Published by NodeConsumerHealthTriageEffect when graduated response
+escalates to automated restart.
+
+Producer: NodeConsumerHealthTriageEffect
+Consumer: MixinConsumerHealth (standalone consumers)
+"""
+
+# =============================================================================
+# OMNIBASE_INFRA RUNTIME ERROR TOPIC SUFFIXES (OMN-5517 / OMN-5529)
+# =============================================================================
+
+SUFFIX_RUNTIME_ERROR: str = "onex.evt.omnibase-infra.runtime-error.v1"
+"""Topic suffix for runtime error events.
+
+Published by RuntimeLogEventBridge (logging.Handler) when ERROR/WARNING
+log records are captured from allowlisted Python loggers.
+
+Producer: RuntimeLogEventBridge
+Consumer: NodeRuntimeErrorTriageEffect, omnidash /runtime-errors dashboard
+"""
+
 # Full topic name (not a suffix) — named as such to be unambiguous.
 # Used by monitor_logs.py postgres error emitter and downstream consumers.
 TOPIC_DB_ERROR_V1: str = "onex.evt.omnibase-infra.db-error.v1"
@@ -458,6 +522,26 @@ unambiguous that callers use this string directly rather than composing it
 with a tenant/namespace prefix.
 """
 
+TOPIC_ERROR_TRIAGED_V1: str = "onex.evt.omnibase-infra.error-triaged.v1"
+"""Full topic name for runtime error triage result events (OMN-5650).
+
+Published by NodeRuntimeErrorTriageEffect after processing a runtime error
+event. Each event carries a ``ModelRuntimeErrorTriageResult`` payload.
+
+Producer: NodeRuntimeErrorTriageEffect
+Consumer: omnidash /runtime-errors dashboard (OMN-5654)
+"""
+
+SUFFIX_RUNNER_HEALTH_SNAPSHOT: str = "onex.evt.omnibase-infra.runner-health-snapshot.v1"
+"""Topic suffix for runner health snapshot events (OMN-6082).
+
+Published by the runner health CLI (cli_runner_health.py) every collection
+cycle. Each event carries a ``ModelRunnerHealthSnapshot`` payload.
+
+Producer: cli_runner_health.py (cron-scheduled)
+Consumer: omnidash (future)
+"""
+
 # =============================================================================
 # OMNIBASE_INFRA DOMAIN TOPIC SPEC REGISTRY
 # =============================================================================
@@ -467,6 +551,8 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_GMAIL_ARCHIVE_PURGED, partitions=3),
     # PostgreSQL error events (3 partitions — low-throughput, error-driven)
     ModelTopicSpec(suffix=TOPIC_DB_ERROR_V1, partitions=3),
+    # Runtime error triage results (6 partitions — matches runtime-error partitions)
+    ModelTopicSpec(suffix=TOPIC_ERROR_TRIAGED_V1, partitions=6),
     # Baselines ROI computation results (1 partition — low-throughput, per-cohort)
     ModelTopicSpec(
         suffix=SUFFIX_BASELINES_COMPUTED,
@@ -494,12 +580,45 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
             "cleanup.policy": "delete",
         },  # 7 days
     ),
+    # Consumer health events (3 partitions — event-driven, OMN-5515)
+    ModelTopicSpec(
+        suffix=SUFFIX_CONSUMER_HEALTH,
+        partitions=3,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
+    # Consumer restart commands (1 partition — low-throughput commands, OMN-5515)
+    ModelTopicSpec(
+        suffix=SUFFIX_CONSUMER_RESTART_CMD,
+        partitions=1,
+        kafka_config={
+            "retention.ms": "86400000",
+            "cleanup.policy": "delete",
+        },  # 1 day — commands are short-lived
+    ),
+    # Runtime error events (3 partitions — event-driven, OMN-5517)
+    ModelTopicSpec(
+        suffix=SUFFIX_RUNTIME_ERROR,
+        partitions=3,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
+    # Runner health snapshot events (1 partition — low-throughput, OMN-6082)
+    ModelTopicSpec(
+        suffix=SUFFIX_RUNNER_HEALTH_SNAPSHOT,
+        partitions=1,
+        kafka_config={},
+    ),
 )
 """Omnibase_infra domain topic specs for internal effect nodes.
 
-Covers gmail cleanup events and PostgreSQL error events. Topics are
-provisioned so the correct broker topic name exists even if no consumer
-is registered yet.
+Covers gmail cleanup events, PostgreSQL error events, and runner health
+snapshots. Topics are provisioned so the correct broker topic name exists
+even if no consumer is registered yet.
 """
 
 # =============================================================================
@@ -604,6 +723,73 @@ by omniclaude. No consumer is currently registered for these topics.
 """
 
 # =============================================================================
+# OMNICLAUDE AGENT OBSERVABILITY TOPIC SUFFIXES
+# =============================================================================
+# Canonical topic names for omniclaude agent observability events consumed by
+# omnibase_infra observability services. These are the source (non-DLQ) topics.
+# Reference via these constants instead of raw string literals (OMN-3343).
+
+SUFFIX_OMNICLAUDE_AGENT_ACTIONS: str = "onex.evt.omniclaude.agent-actions.v1"
+"""Agent actions observability topic. Emitted by omniclaude agent hooks.
+
+Consumed by omnibase_infra ServiceAgentActionsConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_ROUTING_DECISION: str = "onex.evt.omniclaude.routing-decision.v1"
+"""Routing decision observability topic. Emitted by omniclaude routing hooks.
+
+Consumed by omnibase_infra ServiceAgentActionsConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_AGENT_TRANSFORMATION: str = (
+    "onex.evt.omniclaude.agent-transformation.v1"
+)
+"""Agent transformation observability topic. Emitted by omniclaude polymorphic agent.
+
+Consumed by omnibase_infra ServiceAgentActionsConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_PERFORMANCE_METRICS: str = (
+    "onex.evt.omniclaude.performance-metrics.v1"
+)
+"""Performance metrics observability topic. Emitted by omniclaude hooks.
+
+Consumed by omnibase_infra ServiceAgentActionsConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_DETECTION_FAILURE: str = "onex.evt.omniclaude.detection-failure.v1"
+"""Detection failure observability topic. Emitted by omniclaude hooks.
+
+Consumed by omnibase_infra ServiceAgentActionsConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_AGENT_EXECUTION_LOGS: str = (
+    "onex.evt.omniclaude.agent-execution-logs.v1"
+)
+"""Agent execution logs observability topic. Emitted by omniclaude TopicBase.EXECUTION_LOGS (OMN-2902).
+
+Consumed by omnibase_infra ServiceAgentActionsConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_AGENT_STATUS: str = "onex.evt.omniclaude.agent-status.v1"
+"""Agent status observability topic. Emitted by omniclaude TopicBase.AGENT_STATUS (OMN-2846, OMN-2903).
+
+Consumed by omnibase_infra ServiceAgentActionsConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_SKILL_STARTED: str = "onex.evt.omniclaude.skill-started.v1"
+"""Skill lifecycle start topic. Emitted by omniclaude skill dispatch hooks.
+
+Consumed by omnibase_infra ServiceSkillLifecycleConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_SKILL_COMPLETED: str = "onex.evt.omniclaude.skill-completed.v1"
+"""Skill lifecycle completion topic. Emitted by omniclaude skill dispatch hooks.
+
+Consumed by omnibase_infra ServiceSkillLifecycleConsumer.
+"""
+
+# =============================================================================
 # OMNICLAUDE OBSERVABILITY DLQ TOPIC SUFFIXES
 # =============================================================================
 # Dead letter queue topics for OmniClaude observability consumers. These are
@@ -638,15 +824,51 @@ Producer: legacy agent-observability consumer (consumers/agent_actions_consumer.
 Consumer: observability alerting, incident recovery tooling
 """
 
+SUFFIX_OMNICLAUDE_SKILL_LIFECYCLE_DLQ: str = (
+    "onex.evt.omniclaude.skill-lifecycle-dlq.v1"
+)
+"""Dead letter queue topic for the skill-lifecycle observability consumer.
+
+Messages that fail validation or exceed max retry count in
+ConfigSkillLifecycleConsumer are forwarded to this topic. Matches the
+hardcoded default in
+``omnibase_infra.services.observability.skill_lifecycle.config.ConfigSkillLifecycleConsumer.dlq_topic``.
+
+Producer: skill-lifecycle consumer (ServiceSkillLifecycleConsumer)
+Consumer: observability alerting, incident recovery tooling
+"""
+
 _OMNICLAUDE_OBSERVABILITY_DLQ_TOPIC_SUFFIXES: tuple[str, ...] = (
     SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
     SUFFIX_OMNICLAUDE_AGENT_OBSERVABILITY_DLQ,
+    SUFFIX_OMNICLAUDE_SKILL_LIFECYCLE_DLQ,
 )
 """DLQ topic suffixes for OmniClaude observability consumers.
 
 These topics are provisioned separately from skill topics to make the
 DLQ contract explicit and auditable via the provisioning registry.
 """
+
+# =============================================================================
+# OMNICLAUDE AGENT OBSERVABILITY TOPIC SUFFIXES (OMN-6066..OMN-6072, OMN-3343)
+# =============================================================================
+# Live observability event topics consumed by ServiceAgentActionsConsumer and
+# ServiceSkillLifecycleConsumer in omnibase_infra. These topics are produced by
+# omniclaude agent hooks and the skill dispatch pipeline.
+#
+# Partitions: 3 each — matches the throughput of the agent-actions consumer.
+# Provisioned to guarantee broker topic existence when auto-creation is disabled.
+
+_OMNICLAUDE_AGENT_OBSERVABILITY_TOPIC_SUFFIXES: tuple[str, ...] = (
+    SUFFIX_OMNICLAUDE_AGENT_ACTIONS,
+    SUFFIX_OMNICLAUDE_ROUTING_DECISION,
+    SUFFIX_OMNICLAUDE_AGENT_TRANSFORMATION,
+    SUFFIX_OMNICLAUDE_PERFORMANCE_METRICS,
+    SUFFIX_OMNICLAUDE_DETECTION_FAILURE,
+    SUFFIX_OMNICLAUDE_AGENT_EXECUTION_LOGS,
+    SUFFIX_OMNICLAUDE_AGENT_STATUS,
+)
+"""Agent observability topic suffixes consumed by ServiceAgentActionsConsumer."""
 
 # =============================================================================
 # OMNICLAUDE CONTEXT AUDIT TOPIC SUFFIXES (OMN-5240)
@@ -1028,6 +1250,12 @@ ALL_PLATFORM_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_CONTRACT_DEREGISTERED, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION_ACCEPTED, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION_ACKED, partitions=6),
+    # Feature flag changes (OMN-5580)
+    ModelTopicSpec(
+        suffix=SUFFIX_FEATURE_FLAG_CHANGED,
+        partitions=1,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
     # Resolution event ledger (OMN-2895)
     ModelTopicSpec(suffix=SUFFIX_RESOLUTION_DECIDED, partitions=3),
     # Topic catalog topics (low-throughput coordination, 1 partition each)
@@ -1046,6 +1274,8 @@ ALL_PLATFORM_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
         partitions=1,
         kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
     ),
+    # DLQ aggregation topic (OMN-6136) — consumed by omnidash /dlq dashboard
+    ModelTopicSpec(suffix=SUFFIX_PLATFORM_DLQ_MESSAGE, partitions=3),
 )
 """Complete tuple of all platform topic specs with per-topic configuration.
 
@@ -1163,6 +1393,11 @@ ALL_OMNICLAUDE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     *tuple(
         ModelTopicSpec(suffix=suffix, partitions=3)
         for suffix in _OMNICLAUDE_CONTEXT_AUDIT_TOPIC_SUFFIXES
+    ),
+    # Agent observability topics (3 partitions -- OMN-6066..OMN-6072 live event topics)
+    *tuple(
+        ModelTopicSpec(suffix=suffix, partitions=3)
+        for suffix in _OMNICLAUDE_AGENT_OBSERVABILITY_TOPIC_SUFFIXES
     ),
 )
 """OmniClaude topic specs provisioned for skill orchestrator nodes and observability.

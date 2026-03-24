@@ -11,7 +11,12 @@ ports:
   external: 6006
   internal: 6006
 healthcheck:
-  test: curl -sf http://localhost:6006/healthz || exit 1
+  # Phoenix uses a distroless image with no /bin/sh — use CMD list form
+  # with the embedded Python interpreter instead of CMD-SHELL.
+  test:
+    - /usr/bin/python3.13
+    - -c
+    - "import urllib.request; urllib.request.urlopen('http://localhost:6006/healthz')"
   interval_s: 30
   timeout_s: 10
   retries: 3
@@ -23,5 +28,5 @@ restart: unless-stopped
 resources: null
 labels:
   com.omninode.service: phoenix
-  com.omninode.layer: runtime
+  com.omninode.layer: observability
   com.omninode.ticket: OMN-3542

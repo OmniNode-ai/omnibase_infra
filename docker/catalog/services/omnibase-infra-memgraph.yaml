@@ -12,7 +12,9 @@ ports:
   external: 7687
   internal: 7687
 healthcheck:
-  test: echo > /dev/tcp/localhost/7687 || exit 1
+  # /dev/tcp is a bash-ism; the default CMD-SHELL uses /bin/sh (dash on Debian)
+  # which does not support it. Invoke bash explicitly.
+  test: bash -c 'echo > /dev/tcp/localhost/7687' || exit 1
   interval_s: 10
   timeout_s: 5
   retries: 5
@@ -23,9 +25,7 @@ volumes:
 depends_on: []
 restart: unless-stopped
 resources: null
-command: '--storage-snapshot-retention-count=2 --storage-wal-enabled=true --storage-snapshot-interval-sec=3600 --log-level=WARNING
-
-'
+command: '--storage-snapshot-retention-count=2 --storage-wal-enabled=true --storage-snapshot-interval-sec=3600 --log-level=WARNING'
 labels:
   com.omninode.service: memgraph
   com.omninode.layer: infrastructure

@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
-  "package_version": "0.16.0",
-  "protocol_count": 19,
+  "package_version": "0.24.0",
+  "protocol_count": 20,
   "protocols": {
     "ProtocolCapabilityProjection": {
       "runtime_checkable": true,
@@ -1131,6 +1131,31 @@
             }
           ],
           "return_annotation": "UUID"
+        }
+      }
+    },
+    "ProtocolTopicRegistry": {
+      "runtime_checkable": true,
+      "method_count": 3,
+      "methods": {
+        "all_keys": {
+          "parameters": [],
+          "return_annotation": "frozenset[str]"
+        },
+        "monitored_topics": {
+          "parameters": [],
+          "return_annotation": "frozenset[str]"
+        },
+        "resolve": {
+          "parameters": [
+            {
+              "name": "topic_key",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            }
+          ],
+          "return_annotation": "str"
         }
       }
     },

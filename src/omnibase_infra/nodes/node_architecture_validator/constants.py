@@ -19,7 +19,7 @@ Related:
 
 from __future__ import annotations
 
-# Supported rule IDs from contract_architecture_validator.yaml
+# Supported rule IDs from contract.yaml
 # These are the only rules that this validator node is designed to handle.
 # Any rule not in this set indicates a misconfiguration or version mismatch.
 SUPPORTED_RULE_IDS: frozenset[str] = frozenset(

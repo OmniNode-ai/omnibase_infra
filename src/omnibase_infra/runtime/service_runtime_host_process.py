@@ -5009,7 +5009,7 @@ class RuntimeHostProcess:
 
         async def handle_deregistration(msg: ModelEventMessage) -> None:
             """Handle contract deregistration event from Kafka."""
-            # TODO(OMN-1989): Live handler teardown on deregistration.
+            # TODO(OMN-5732): Live handler teardown on deregistration.
             # Phase 1 supports addition only -- deregistered handlers remain
             # active until the next runtime restart. This callback clears the
             # contract cache but does NOT remove the handler from _handlers,

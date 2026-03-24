@@ -45,6 +45,14 @@ event_bus:
     patch: 0
   publish_topics:
     - "onex.evt.platform.validation-candidate-submitted.v1"
+# Feature Flags [OMN-5584]
+feature_flags:
+  - name: pattern_enforcement
+    description: "Enable code pattern enforcement checks"
+    default_value: false
+    env_var: ENABLE_PATTERN_ENFORCEMENT
+    category: intelligence
+    owner: omniintelligence
 # Capability declaration
 capabilities:
   - name: "lifecycle.update"

@@ -8,6 +8,9 @@ import os
 
 import pytest
 
+# ONEX_FLAG_EXEMPT: test fixture — env var checked in tests below
+_OMNIMEMORY_FLAG = "OMNIMEMORY_ENABLED"
+
 from omnibase_core.validation import validate_topic_suffix
 from omnibase_infra.topics import (
     ALL_INTELLIGENCE_TOPIC_SPECS,
@@ -21,6 +24,7 @@ from omnibase_infra.topics import (
     ALL_VALIDATION_TOPIC_SPECS,
     SUFFIX_CONTRACT_DEREGISTERED,
     SUFFIX_CONTRACT_REGISTERED,
+    SUFFIX_FEATURE_FLAG_CHANGED,
     SUFFIX_FSM_STATE_TRANSITIONS,
     SUFFIX_INTELLIGENCE_CLAUDE_HOOK_EVENT,
     SUFFIX_INTELLIGENCE_INTENT_CLASSIFIED,
@@ -43,6 +47,7 @@ from omnibase_infra.topics import (
     SUFFIX_OMNIMEMORY_DOCUMENT_DISCOVERED,
     SUFFIX_OMNIMEMORY_DOCUMENT_INDEXED,
     SUFFIX_OMNIMEMORY_DOCUMENT_REMOVED,
+    SUFFIX_PLATFORM_DLQ_MESSAGE,
     SUFFIX_REGISTRATION_SNAPSHOTS,
     SUFFIX_REGISTRY_REQUEST_INTROSPECTION,
     SUFFIX_REQUEST_INTROSPECTION,
@@ -79,6 +84,7 @@ class TestPlatformTopicSuffixes:
             SUFFIX_REGISTRATION_SNAPSHOTS,
             SUFFIX_CONTRACT_REGISTERED,
             SUFFIX_CONTRACT_DEREGISTERED,
+            SUFFIX_FEATURE_FLAG_CHANGED,
             SUFFIX_NODE_REGISTRATION_ACCEPTED,
             SUFFIX_NODE_REGISTRATION_ACKED,
             SUFFIX_RESOLUTION_DECIDED,
@@ -86,6 +92,7 @@ class TestPlatformTopicSuffixes:
             SUFFIX_TOPIC_CATALOG_QUERY,
             SUFFIX_TOPIC_CATALOG_RESPONSE,
             SUFFIX_TOPIC_CATALOG_CHANGED,
+            SUFFIX_PLATFORM_DLQ_MESSAGE,
         }
         assert set(ALL_PLATFORM_SUFFIXES) == expected_suffixes
 
@@ -407,7 +414,7 @@ class TestProvisionedTopicSpecs:
     def test_provisioned_contains_all_omnimemory(self) -> None:
         """ALL_PROVISIONED_SUFFIXES includes OmniMemory suffixes iff OMNIMEMORY_ENABLED is truthy."""
         omnimemory_suffixes = {spec.suffix for spec in ALL_OMNIMEMORY_TOPIC_SPECS}
-        enabled = os.environ.get("OMNIMEMORY_ENABLED", "").strip().lower() in {
+        enabled = os.environ.get(_OMNIMEMORY_FLAG, "").strip().lower() in {
             "1",
             "true",
             "yes",
@@ -426,7 +433,7 @@ class TestProvisionedTopicSpecs:
 
     def test_provisioned_count(self) -> None:
         """Combined provisioned specs count reflects whether OMNIMEMORY_ENABLED is set."""
-        enabled = os.environ.get("OMNIMEMORY_ENABLED", "").strip().lower() in {
+        enabled = os.environ.get(_OMNIMEMORY_FLAG, "").strip().lower() in {
             "1",
             "true",
             "yes",
@@ -494,22 +501,31 @@ class TestOmniClaudeTopicSuffixes:
         )
 
     def test_omniclaude_skill_topics_use_1_partition(self) -> None:
-        """Skill dispatch topics should use 1 partition; DLQ and agent trace topics use 3 partitions."""
+        """Skill dispatch topics should use 1 partition; DLQ and observability topics use 3 partitions."""
         from omnibase_infra.topics import (
+            SUFFIX_OMNICLAUDE_AGENT_ACTIONS,
             SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
+            SUFFIX_OMNICLAUDE_AGENT_EXECUTION_LOGS,
             SUFFIX_OMNICLAUDE_AGENT_OBSERVABILITY_DLQ,
+            SUFFIX_OMNICLAUDE_AGENT_STATUS,
             SUFFIX_OMNICLAUDE_AGENT_TRACE_FIX_TRANSITION,
+            SUFFIX_OMNICLAUDE_AGENT_TRANSFORMATION,
             SUFFIX_OMNICLAUDE_AUDIT_COMPRESSION_TRIGGERED,
             SUFFIX_OMNICLAUDE_AUDIT_CONTEXT_BUDGET_EXCEEDED,
             SUFFIX_OMNICLAUDE_AUDIT_DISPATCH_VALIDATED,
             SUFFIX_OMNICLAUDE_AUDIT_RETURN_BOUNDED,
             SUFFIX_OMNICLAUDE_AUDIT_SCOPE_VIOLATION,
             SUFFIX_OMNICLAUDE_CONTEXT_AUDIT_DLQ,
+            SUFFIX_OMNICLAUDE_DETECTION_FAILURE,
+            SUFFIX_OMNICLAUDE_PERFORMANCE_METRICS,
+            SUFFIX_OMNICLAUDE_ROUTING_DECISION,
+            SUFFIX_OMNICLAUDE_SKILL_LIFECYCLE_DLQ,
         )
 
         three_partition_suffixes = {
             SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
             SUFFIX_OMNICLAUDE_AGENT_OBSERVABILITY_DLQ,
+            SUFFIX_OMNICLAUDE_SKILL_LIFECYCLE_DLQ,  # OMN-5445 — skill-lifecycle consumer DLQ
             SUFFIX_OMNICLAUDE_AGENT_TRACE_FIX_TRANSITION,
             # Context audit topics (OMN-5240) — observability consumer throughput
             SUFFIX_OMNICLAUDE_AUDIT_COMPRESSION_TRIGGERED,
@@ -518,6 +534,14 @@ class TestOmniClaudeTopicSuffixes:
             SUFFIX_OMNICLAUDE_AUDIT_RETURN_BOUNDED,
             SUFFIX_OMNICLAUDE_AUDIT_SCOPE_VIOLATION,
             SUFFIX_OMNICLAUDE_CONTEXT_AUDIT_DLQ,
+            # Agent observability topics (OMN-6066..OMN-6072) — matches consumer throughput
+            SUFFIX_OMNICLAUDE_AGENT_ACTIONS,
+            SUFFIX_OMNICLAUDE_ROUTING_DECISION,
+            SUFFIX_OMNICLAUDE_AGENT_TRANSFORMATION,
+            SUFFIX_OMNICLAUDE_PERFORMANCE_METRICS,
+            SUFFIX_OMNICLAUDE_DETECTION_FAILURE,
+            SUFFIX_OMNICLAUDE_AGENT_EXECUTION_LOGS,
+            SUFFIX_OMNICLAUDE_AGENT_STATUS,
         }
         for spec in ALL_OMNICLAUDE_TOPIC_SPECS:
             if spec.suffix in three_partition_suffixes:
@@ -614,7 +638,7 @@ class TestOmnimemoryEnabledGating:
         try:
             os.environ.clear()
             os.environ.update(old_env)
-            for key in ["OMNIMEMORY_ENABLED"]:
+            for key in [_OMNIMEMORY_FLAG]:
                 os.environ.pop(key, None)
             os.environ.update(env)
 
@@ -649,7 +673,7 @@ class TestOmnimemoryEnabledGating:
 
     def test_omnimemory_topics_excluded_when_false(self) -> None:
         """When OMNIMEMORY_ENABLED=false, omnimemory topics must not be provisioned."""
-        _specs, suffixes = self._reload_specs({"OMNIMEMORY_ENABLED": "false"})
+        _specs, suffixes = self._reload_specs({_OMNIMEMORY_FLAG: "false"})
         omnimemory_suffixes = {spec.suffix for spec in ALL_OMNIMEMORY_TOPIC_SPECS}
         for suffix in omnimemory_suffixes:
             assert suffix not in suffixes, (
@@ -658,7 +682,7 @@ class TestOmnimemoryEnabledGating:
 
     def test_omnimemory_topics_included_when_true(self) -> None:
         """When OMNIMEMORY_ENABLED=true, omnimemory topics must be provisioned."""
-        _specs, suffixes = self._reload_specs({"OMNIMEMORY_ENABLED": "true"})
+        _specs, suffixes = self._reload_specs({_OMNIMEMORY_FLAG: "true"})
         omnimemory_suffixes = {spec.suffix for spec in ALL_OMNIMEMORY_TOPIC_SPECS}
         for suffix in omnimemory_suffixes:
             assert suffix in suffixes, (

@@ -8,7 +8,11 @@ import asyncio
 
 import pytest
 
-from omnibase_infra.event_bus.topic_constants import WIRING_HEALTH_MONITORED_TOPICS
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+WIRING_HEALTH_MONITORED_TOPICS = tuple(
+    ServiceTopicRegistry.from_defaults().monitored_topics()
+)
 from omnibase_infra.observability.wiring_health import MixinEmissionCounter
 
 pytestmark = pytest.mark.unit

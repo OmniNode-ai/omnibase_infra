@@ -323,6 +323,9 @@ class ContextAuditConsumer:
             group_id=self.config.kafka_group_id,
             auto_offset_reset=self.config.auto_offset_reset,
             enable_auto_commit=self.config.enable_auto_commit,
+            session_timeout_ms=self.config.session_timeout_ms,
+            heartbeat_interval_ms=self.config.heartbeat_interval_ms,
+            max_poll_interval_ms=self.config.max_poll_interval_ms,
             value_deserializer=lambda v: v,
         )
         await self._consumer.start()
@@ -679,6 +682,8 @@ async def _main() -> None:
     """Main entry point for running the consumer as a module."""
     import os
 
+    from omnibase_infra.utils.util_consumer_restart import run_with_restart
+
     logging.basicConfig(
         level=getattr(
             logging, os.getenv("ONEX_LOG_LEVEL", "INFO").upper(), logging.INFO
@@ -686,17 +691,38 @@ async def _main() -> None:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
-    config = ConfigContextAuditConsumer()  # type: ignore[call-arg]
-    consumer = ContextAuditConsumer(config)
+    shutdown_event = asyncio.Event()
+    # Mutable ref so signal handler can stop the active consumer instance
+    active_consumer: list[ContextAuditConsumer | None] = [None]
 
-    try:
-        await consumer.start()
-        await consumer.run_with_health_check()
-    except Exception:
-        logger.exception("ContextAuditConsumer terminated with error")
-        raise
-    finally:
-        await consumer.stop()
+    def _on_signal() -> None:
+        shutdown_event.set()
+        if active_consumer[0] is not None:
+            asyncio.get_running_loop().create_task(active_consumer[0].stop())
+
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, _on_signal)
+
+    async def _run_once() -> None:
+        config = ConfigContextAuditConsumer()  # type: ignore[call-arg]
+        consumer = ContextAuditConsumer(config)
+        active_consumer[0] = consumer
+        try:
+            await consumer.start()
+            await consumer.run_with_health_check()
+        finally:
+            active_consumer[0] = None
+            try:
+                await asyncio.wait_for(consumer.stop(), timeout=10.0)
+            except TimeoutError:
+                logger.warning("consumer.stop() timed out after 10s")
+
+    await run_with_restart(
+        _run_once,
+        name="ContextAuditConsumer",
+        shutdown_event=shutdown_event,
+    )
 
 
 if __name__ == "__main__":

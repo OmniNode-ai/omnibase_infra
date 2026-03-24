@@ -19,7 +19,12 @@ from __future__ import annotations
 
 import pytest
 
-from omnibase_infra.event_bus.topic_constants import TOPIC_RESOLUTION_DECIDED
+from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+TOPIC_RESOLUTION_DECIDED = ServiceTopicRegistry.from_defaults().resolve(
+    topic_keys.RESOLUTION_DECIDED
+)
 from omnibase_infra.topics import ALL_PLATFORM_SUFFIXES, ALL_PLATFORM_TOPIC_SPECS
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_RESOLUTION_DECIDED
 

@@ -143,6 +143,23 @@ pattern_exemptions:
       - OMN-1519 PR description
     ticket: OMN-1519
   # ==========================================================================
+  # ModelKafkaEventBusConfig Exemptions (OMN-5445)
+  # ==========================================================================
+  # Config model with Pydantic model_validators for cross-field validation
+  # (reconnect backoff, heartbeat/session ratio, auth config, bootstrap servers,
+  # environment, instance_id) plus factory methods (default, from_yaml,
+  # apply_environment_overrides) and computed properties (acks_aiokafka,
+  # get_dlq_topic). All methods are cohesive config-related concerns.
+  - file_pattern: 'model_kafka_event_bus_config\.py'
+    class_pattern: "Class 'ModelKafkaEventBusConfig'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Pydantic config model with model_validators for cross-field validation (reconnect backoff, heartbeat/session ratio, auth, bootstrap servers), factory methods (default, from_yaml, apply_environment_overrides), and computed properties. All methods are cohesive config concerns.
+
+    documentation:
+      - OMN-5445 (Kafka session timeout fix)
+    ticket: OMN-5445
+  # ==========================================================================
   # EventBusKafka Exemptions (OMN-934, OMN-1305)
   # ==========================================================================
   # Event bus pattern requires many methods for lifecycle (start/stop/health),
@@ -168,6 +185,18 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Accepted Pattern Exceptions - EventBusKafka Complexity)
     ticket: OMN-1305
+  # ModelKafkaEventBusConfig method count exemption
+  # Config model with multiple cross-field validators: reconnect_backoff, session_timeout_ratio,
+  # auth_config, plus factory methods (default, from_yaml_file, from_yaml_content) and
+  # env override methods. All validators operate on the same config fields.
+  - file_pattern: 'model_kafka_event_bus_config\.py'
+    class_pattern: "Class 'ModelKafkaEventBusConfig'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Kafka config model requires cross-field validators (reconnect_backoff, session_timeout_ratio, auth_config), factory methods (default, from_yaml_file, from_yaml_content), and env override support. All methods operate on the same configuration namespace. Splitting would fragment validation logic.
+
+    documentation:
+      - CLAUDE.md (Kafka Event Bus Configuration)
   # ==========================================================================
   # PostgresRepositoryRuntime Exemptions (OMN-1783)
   # ==========================================================================
@@ -2465,6 +2494,16 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (File & Class Naming - Service convention)
     ticket: OMN-2151
+  # ServiceTopicRegistry naming exemption (OMN-5839)
+  - file_pattern: 'service_topic_registry\.py'
+    class_pattern: "Class name 'ServiceTopicRegistry'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      Follows CLAUDE.md Service<Name> naming convention. ServiceTopicRegistry is the concrete implementation of ProtocolTopicRegistry, mapping logical topic keys to Kafka topic strings.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Service convention)
+    ticket: OMN-5839
   # ==========================================================================
   # SPI LLM Protocol Adapter Exemptions (OMN-2319)
   # ==========================================================================
@@ -2733,6 +2772,64 @@ pattern_exemptions:
     documentation:
       - omnidash worker-health consumer contract
     ticket: OMN-5184
+  # ==========================================================================
+  # Savings Estimation Model Exemptions (OMN-5547)
+  # ==========================================================================
+  # model_id and reference_model_id are human-readable LLM model names
+  # (e.g., "claude-opus-4-6", "qwen3-coder-30b-a3b"), not UUID entity references.
+  # session_id and correlation_id are wire-format strings matching SPI contracts.
+  - file_pattern: 'model_llm_call_record\.py'
+    violation_pattern: "Field 'model_id' should use UUID"
+    reason: >
+      model_id is a human-readable LLM model name (e.g., "claude-opus-4-6"), not a UUID entity reference.
+
+    documentation:
+      - configs/pricing_manifest.yaml (model ID examples)
+    ticket: OMN-5547
+  - file_pattern: 'model_savings_baseline_config\.py'
+    violation_pattern: "Field 'reference_model_id' should use UUID"
+    reason: >
+      reference_model_id is a human-readable LLM model name for counterfactual pricing, not a UUID.
+
+    documentation:
+      - configs/pricing_manifest.yaml (model ID examples)
+    ticket: OMN-5547
+  - file_pattern: 'model_savings_input\.py'
+    violation_pattern: "Field 'session_id' should use UUID"
+    reason: >
+      session_id is a wire-format string matching the SPI ContractSavingsEstimate contract.
+
+    documentation:
+      - omnibase_spi contracts/measurement/contract_savings_estimate.py
+    ticket: OMN-5547
+  - file_pattern: 'model_savings_input\.py'
+    violation_pattern: "Field 'correlation_id' should use UUID"
+    reason: >
+      correlation_id is a wire-format string matching the SPI ContractSavingsEstimate contract.
+
+    documentation:
+      - omnibase_spi contracts/measurement/contract_savings_estimate.py
+    ticket: OMN-5547
+  # ==========================================================================
+  # Feature Flag Models flag_name Exemption (OMN-5579, OMN-5580)
+  # ==========================================================================
+  # flag_name is a feature flag identifier string, not an entity reference.
+  - file_pattern: 'model_feature_flag_toggle_result\.py'
+    violation_pattern: "Field 'flag_name' might reference an entity"
+    reason: >
+      flag_name is a feature flag identifier (e.g., "enable_caching"), not an entity reference requiring ID + display_name pattern. Feature flags are identified by name, not UUID.
+
+    documentation:
+      - CLAUDE.md (Feature Flag Registry API)
+    ticket: OMN-5580
+  - file_pattern: 'model_feature_flag_changed_event\.py'
+    violation_pattern: "Field 'flag_name' might reference an entity"
+    reason: >
+      flag_name is a feature flag identifier (e.g., "enable_caching"), not an entity reference requiring ID + display_name pattern. Feature flags are identified by name, not UUID.
+
+    documentation:
+      - CLAUDE.md (Feature Flag Registry API)
+    ticket: OMN-5580
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

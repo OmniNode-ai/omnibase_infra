@@ -83,7 +83,7 @@ jobs:
           uv run pytest tests/ \
             --ignore=tests/integration/docker \
             -m "$FILTER" \
-            -n auto \
+            -n 2 \
             --timeout=600 \
             --timeout-method=thread \
             --tb=short \

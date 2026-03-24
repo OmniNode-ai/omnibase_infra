@@ -7,7 +7,7 @@
 # Ticket: OMN-3277 / Epic: OMN-3273
 #
 # Usage:
-#   ./scripts/deploy-runners.sh [--dry-run] [--skip-build]
+#   ./scripts/deploy-runners.sh [--dry-run] [--skip-build] [--soft]
 #
 # What it does (in order):
 #   1. Fetch a fresh GitHub Actions registration token (valid 1 hour)
@@ -19,6 +19,14 @@
 #   7. Poll GitHub API until all 10 runners online (max 5 min, 15s interval)
 #   8. Retry once with fresh token if poll times out
 #   9. Print stale runner report (offline runners with no host container)
+#
+# --soft mode (entrypoint-only update, no recreate):
+#   1. Rsync runner artifacts to host
+#   2. Rebuild the Docker image (for future containers)
+#   3. docker cp the new entrypoint into each running container
+#   4. docker restart each container (preserves filesystem + cached credentials)
+#   Skips: registration token fetch, force-recreate, cron installs
+#   Use when: updating entrypoint logic without needing fresh registration
 #
 # Requirements:
 #   - gh CLI authenticated with org admin scope
@@ -34,7 +42,8 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 
 RUNNER_HOST="192.168.86.201"
-RUNNER_HOST_DIR="${HOME}/.omnibase/runners"
+# Remote path on the CI host — NOT local $HOME (which differs between macOS and Linux)
+RUNNER_HOST_DIR="/home/jonah/.omnibase/runners"
 RUNNER_ORG="OmniNode-ai"
 RUNNER_GROUP="omnibase-ci"
 RUNNER_NAME_PREFIX="omninode-runner"
@@ -59,15 +68,19 @@ SYNC_PATHS=(
 
 DRY_RUN=false
 SKIP_BUILD=false
+SOFT_DEPLOY=false
 
 for arg in "$@"; do
     case "${arg}" in
-        --dry-run)   DRY_RUN=true ;;
+        --dry-run)    DRY_RUN=true ;;
         --skip-build) SKIP_BUILD=true ;;
+        --soft)       SOFT_DEPLOY=true ;;
         --help|-h)
-            echo "Usage: $0 [--dry-run] [--skip-build]"
+            echo "Usage: $0 [--dry-run] [--skip-build] [--soft]"
             echo "  --dry-run     Print actions without executing remote commands"
             echo "  --skip-build  Skip docker build (use existing image)"
+            echo "  --soft        Update entrypoint in-place without destroying containers"
+            echo "                (preserves cached credentials, skips registration token)"
             exit 0
             ;;
         *)
@@ -110,10 +123,12 @@ run_local() {
 
 fetch_registration_token() {
     log "Fetching GitHub Actions registration token for org ${RUNNER_ORG}..."
+    # Separate declaration from assignment so set -e catches gh api failures
     local token
-    token=$(gh api "/orgs/${RUNNER_ORG}/actions/runners/registration-token" --jq .token)
+    token=$(gh api --method POST "/orgs/${RUNNER_ORG}/actions/runners/registration-token" --jq .token) \
+        || err "gh api failed. Check gh auth and org admin permissions (need admin:org scope)."
     if [[ -z "${token}" ]]; then
-        err "Failed to fetch registration token. Check gh auth and org admin permissions."
+        err "Registration token is empty. Check gh auth and org admin permissions."
     fi
     echo "${token}"
 }
@@ -124,7 +139,8 @@ fetch_registration_token() {
 
 encode_token() {
     local token="${1}"
-    echo -n "${token}" | base64
+    # -w 0 prevents line wrapping (macOS base64 wraps at 76 chars by default)
+    echo -n "${token}" | base64 -w 0 2>/dev/null || echo -n "${token}" | base64 -b 0 2>/dev/null || echo -n "${token}" | base64
 }
 
 # ---------------------------------------------------------------------------
@@ -302,6 +318,42 @@ poll_runners_online() {
 }
 
 # ---------------------------------------------------------------------------
+# Soft deploy: update entrypoint in-place, restart containers
+# ---------------------------------------------------------------------------
+# Preserves container filesystems (and cached runner credentials).
+# Use when updating entrypoint logic without needing fresh registration.
+#
+# Flow: rsync → rebuild image → docker cp entrypoint → docker restart
+# Skips: registration token, force-recreate, cron installs
+
+soft_deploy() {
+    log "=== Soft deploy (entrypoint-only update) ==="
+
+    rsync_artifacts
+
+    # Rebuild the image so future containers (from force-recreate deploys) use it
+    log "Rebuilding runner image on ${RUNNER_HOST}..."
+    run_ssh "cd ${RUNNER_HOST_DIR} && docker build -t omninode-runner:latest docker/runners/"
+
+    # Ensure entrypoint is executable on host (docker cp preserves source permissions)
+    run_ssh "chmod +x ${RUNNER_HOST_DIR}/docker/runners/entrypoint.sh"
+
+    # Copy the new entrypoint into each container and restart.
+    # docker cp works on both running and stopped containers.
+    # docker stop first to avoid the container restarting mid-copy.
+    log "Updating entrypoint in ${RUNNER_COUNT} containers..."
+    for i in $(seq 1 "${RUNNER_COUNT}"); do
+        local container="${RUNNER_NAME_PREFIX}-${i}"
+        log "  Updating ${container}..."
+        run_ssh "docker stop ${container} 2>/dev/null || true"
+        run_ssh "docker cp ${RUNNER_HOST_DIR}/docker/runners/entrypoint.sh ${container}:/usr/local/bin/entrypoint.sh"
+        run_ssh "docker start ${container}"
+    done
+
+    log "Soft deploy complete. Waiting for runners to come online..."
+}
+
+# ---------------------------------------------------------------------------
 # Step 8: Retry once with fresh token if poll fails
 # ---------------------------------------------------------------------------
 
@@ -320,6 +372,7 @@ deploy_with_retry() {
         deploy_runners "${token_b64}"
         install_prune_cron
         install_monitor_cron
+        install_health_cron
 
         if poll_runners_online; then
             log "Deploy succeeded on attempt ${attempt}."
@@ -396,11 +449,41 @@ print_stale_runner_report() {
 }
 
 # ---------------------------------------------------------------------------
+# Step 10: Install local runner health check cron (OMN-6083)
+# ---------------------------------------------------------------------------
+# Installs a LOCAL cron (on this dev machine) that runs the runner health
+# CLI every 3 minutes. The CLI SSHes to RUNNER_HOST for Docker status.
+# Uses marker-based idempotence: exactly one entry managed via
+# '# runner-health-check' comment, never clobbers unrelated cron entries.
+
+install_health_cron() {
+    log "Installing LOCAL runner health check cron..."
+
+    if "${DRY_RUN}"; then
+        log "[DRY RUN] Would install local runner-health-check cron (every 3 min)."
+        return 0
+    fi
+
+    # Determine the repo root (this script lives in scripts/)
+    local repo_root
+    repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+    local cron_line="*/3 * * * * set -a && source ~/.omnibase/.env && set +a && cd ${repo_root} && RUNNER_HEALTH_HOST=${RUNNER_HOST} uv run python -m omnibase_infra.observability.runner_health.cli_runner_health --emit --alert >> /tmp/runner-health.log 2>&1 # runner-health-check"
+
+    # Filter out any existing runner-health-check line, then append new one
+    local existing
+    existing=$(crontab -l 2>/dev/null || true)
+    echo "${existing}" | grep -v 'runner-health-check' | { cat; echo "${cron_line}"; } | crontab -
+
+    log "Runner health check cron installed locally (every 3 minutes)."
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 main() {
-    log "Starting deploy-runners.sh (dry_run=${DRY_RUN}, skip_build=${SKIP_BUILD})"
+    log "Starting deploy-runners.sh (dry_run=${DRY_RUN}, skip_build=${SKIP_BUILD}, soft=${SOFT_DEPLOY})"
     log "Target host: ${RUNNER_HOST} | Org: ${RUNNER_ORG} | Group: ${RUNNER_GROUP}"
     log "Runner count: ${RUNNER_COUNT} | Compose file: ${COMPOSE_FILE}"
 
@@ -408,7 +491,13 @@ main() {
         log "[DRY RUN MODE] No remote commands will be executed."
     fi
 
-    deploy_with_retry
+    if "${SOFT_DEPLOY}"; then
+        soft_deploy
+        poll_runners_online || warn "Not all runners came online. Check logs on ${RUNNER_HOST}."
+    else
+        deploy_with_retry
+    fi
+
     print_stale_runner_report
 
     log "=== deploy-runners.sh complete ==="

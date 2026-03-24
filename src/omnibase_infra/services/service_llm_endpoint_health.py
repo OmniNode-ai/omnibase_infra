@@ -46,7 +46,6 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InfraUnavailableError
-from omnibase_infra.event_bus.topic_constants import TOPIC_LLM_ENDPOINT_HEALTH
 from omnibase_infra.mixins.mixin_async_circuit_breaker import MixinAsyncCircuitBreaker
 from omnibase_infra.models.health.model_llm_endpoint_health_config import (
     ModelLlmEndpointHealthConfig,
@@ -57,6 +56,8 @@ from omnibase_infra.models.health.model_llm_endpoint_health_event import (
 from omnibase_infra.models.health.model_llm_endpoint_status import (
     ModelLlmEndpointStatus,
 )
+from omnibase_infra.protocols import ProtocolTopicRegistry
+from omnibase_infra.topics import topic_keys
 from omnibase_infra.utils.correlation import generate_correlation_id
 from omnibase_infra.utils.util_error_sanitization import (
     sanitize_error_message,
@@ -232,6 +233,7 @@ class ServiceLlmEndpointHealth:
         self,
         config: ModelLlmEndpointHealthConfig,
         event_bus: ProtocolEventBusLike | None = None,
+        topic_registry: ProtocolTopicRegistry | None = None,
     ) -> None:
         """Initialize the health checker.
 
@@ -239,7 +241,16 @@ class ServiceLlmEndpointHealth:
             config: Endpoint configuration and probe settings.
             event_bus: Optional event bus for emitting health events.
                 If ``None``, events are not emitted (probe-only mode).
+            topic_registry: Optional topic registry for resolving topic strings.
+                If ``None``, uses ``ServiceTopicRegistry.from_defaults()``.
         """
+        if topic_registry is None:
+            from omnibase_infra.topics.service_topic_registry import (
+                ServiceTopicRegistry,
+            )
+
+            topic_registry = ServiceTopicRegistry.from_defaults()
+        self._health_topic = topic_registry.resolve(topic_keys.LLM_ENDPOINT_HEALTH)
         self._config = config
         self._event_bus = event_bus
 
@@ -626,7 +637,7 @@ class ServiceLlmEndpointHealth:
         try:
             await self._event_bus.publish_envelope(
                 envelope=envelope,
-                topic=TOPIC_LLM_ENDPOINT_HEALTH,
+                topic=self._health_topic,
             )
         except Exception:
             # Health event emission failure should not crash the probe loop.
@@ -643,5 +654,4 @@ __all__: list[str] = [
     "ModelLlmEndpointHealthEvent",
     "ModelLlmEndpointStatus",
     "ServiceLlmEndpointHealth",
-    "TOPIC_LLM_ENDPOINT_HEALTH",
 ]

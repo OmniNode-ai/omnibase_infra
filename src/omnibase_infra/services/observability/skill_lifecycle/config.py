@@ -13,6 +13,12 @@ from typing import Self
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_OMNICLAUDE_SKILL_COMPLETED,
+    SUFFIX_OMNICLAUDE_SKILL_LIFECYCLE_DLQ,
+    SUFFIX_OMNICLAUDE_SKILL_STARTED,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,10 +54,11 @@ class ConfigSkillLifecycleConsumer(BaseSettings):
     )
 
     # Topics to subscribe (OMN-2934: skill lifecycle observability)
+    # Use platform_topic_suffixes constants for OMN-3343 topic literal enforcement.
     topics: list[str] = Field(
         default_factory=lambda: [
-            "onex.evt.omniclaude.skill-started.v1",
-            "onex.evt.omniclaude.skill-completed.v1",
+            SUFFIX_OMNICLAUDE_SKILL_STARTED,
+            SUFFIX_OMNICLAUDE_SKILL_COMPLETED,
         ],
         description="Kafka topics to consume for skill lifecycle observability",
     )
@@ -64,6 +71,26 @@ class ConfigSkillLifecycleConsumer(BaseSettings):
     enable_auto_commit: bool = Field(
         default=False,
         description="Disable auto-commit for at-least-once delivery",
+    )
+
+    # Session timeout tuning — prevents rebalance storms during brief processing delays
+    session_timeout_ms: int = Field(
+        default=45000,
+        ge=6000,
+        le=300000,
+        description="Kafka session timeout in ms. Default 45s prevents rebalance storms.",
+    )
+    heartbeat_interval_ms: int = Field(
+        default=15000,
+        ge=1000,
+        le=60000,
+        description="Kafka heartbeat interval in ms. Should be ~1/3 of session_timeout_ms.",
+    )
+    max_poll_interval_ms: int = Field(
+        default=300000,
+        ge=10000,
+        le=600000,
+        description="Max time between poll() calls in ms before consumer eviction. Default 5 min.",
     )
 
     # PostgreSQL connection
@@ -121,7 +148,7 @@ class ConfigSkillLifecycleConsumer(BaseSettings):
 
     # Dead Letter Queue
     dlq_topic: str = Field(
-        default="onex.evt.omniclaude.skill-lifecycle-dlq.v1",
+        default=SUFFIX_OMNICLAUDE_SKILL_LIFECYCLE_DLQ,
         description=(
             "Dead letter topic for permanently failed skill lifecycle messages. "
             "Configure via OMNIBASE_INFRA_SKILL_LIFECYCLE_DLQ_TOPIC env var."
@@ -180,6 +207,21 @@ class ConfigSkillLifecycleConsumer(BaseSettings):
             "Configure via OMNIBASE_INFRA_SKILL_LIFECYCLE_HEALTH_CHECK_POLL_STALENESS_SECONDS env var."
         ),
     )
+
+    @model_validator(mode="after")
+    def validate_session_timeout_ratio(self) -> Self:
+        """Validate heartbeat < session_timeout and max_poll >= session_timeout."""
+        if self.heartbeat_interval_ms >= self.session_timeout_ms:
+            raise ValueError(
+                f"heartbeat_interval_ms ({self.heartbeat_interval_ms}) must be "
+                f"< session_timeout_ms ({self.session_timeout_ms})"
+            )
+        if self.max_poll_interval_ms < self.session_timeout_ms:
+            raise ValueError(
+                f"max_poll_interval_ms ({self.max_poll_interval_ms}) must be "
+                f">= session_timeout_ms ({self.session_timeout_ms})"
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_topic_configuration(self) -> Self:

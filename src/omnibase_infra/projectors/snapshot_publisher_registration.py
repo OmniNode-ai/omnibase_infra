@@ -130,6 +130,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Kafka session timeout constants — prevents rebalance storms
+_KAFKA_SESSION_TIMEOUT_MS = 45000
+_KAFKA_HEARTBEAT_INTERVAL_MS = 15000
+_KAFKA_MAX_POLL_INTERVAL_MS = 300000
+
 
 class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
     """Publishes registration snapshots to a compacted Kafka topic.
@@ -910,6 +915,9 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                 group_id=consumer_group,
                 auto_offset_reset="earliest",
                 enable_auto_commit=False,
+                session_timeout_ms=_KAFKA_SESSION_TIMEOUT_MS,
+                heartbeat_interval_ms=_KAFKA_HEARTBEAT_INTERVAL_MS,
+                max_poll_interval_ms=_KAFKA_MAX_POLL_INTERVAL_MS,
             )
 
             try:

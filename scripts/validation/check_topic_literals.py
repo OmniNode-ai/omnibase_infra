@@ -53,6 +53,7 @@ _EXCLUDED_FILENAMES: frozenset[str] = frozenset(
     {
         "topics.py",
         "topic_constants.py",
+        "service_topic_registry.py",
         "platform_topic_suffixes.py",
         "contract.yaml",
     }

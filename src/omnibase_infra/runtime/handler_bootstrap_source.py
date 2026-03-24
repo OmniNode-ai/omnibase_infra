@@ -246,7 +246,7 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[BootstrapEffectDefinition] = [
         "handler_class": "omnibase_infra.handlers.handler_db.HandlerDb",
         "input_model": "omnibase_infra.models.types.JsonDict",
         "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
-        "contract_path": "contracts/handlers/db/handler_contract.yaml",
+        "contract_path": "src/omnibase_infra/contracts/handlers/db/contract.yaml",
     },
     {
         "handler_id": handler_identity(_HANDLER_TYPE_HTTP),
@@ -256,7 +256,7 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[BootstrapEffectDefinition] = [
         "handler_class": "omnibase_infra.handlers.handler_http.HandlerHttpRest",
         "input_model": "omnibase_infra.models.types.JsonDict",
         "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
-        "contract_path": "contracts/handlers/http/handler_contract.yaml",
+        "contract_path": "src/omnibase_infra/contracts/handlers/http/contract.yaml",
     },
     {
         "handler_id": handler_identity(_HANDLER_TYPE_MCP),

@@ -211,6 +211,7 @@ from omnibase_infra.errors import (
     ModelTimeoutErrorContext,
     ProtocolConfigurationError,
 )
+from omnibase_infra.event_bus.consumer_health_emitter import ConsumerHealthEmitter
 from omnibase_infra.event_bus.mixin_kafka_broadcast import MixinKafkaBroadcast
 from omnibase_infra.event_bus.mixin_kafka_dlq import MixinKafkaDlq
 from omnibase_infra.event_bus.models import (
@@ -222,6 +223,12 @@ from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.topic_violation_alerter import TopicViolationAlerter
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models import ModelNodeIdentity
+from omnibase_infra.models.health.enum_consumer_health_event_type import (
+    EnumConsumerHealthEventType,
+)
+from omnibase_infra.models.health.enum_consumer_health_severity import (
+    EnumConsumerHealthSeverity,
+)
 from omnibase_infra.observability.wiring_health import MixinEmissionCounter
 from omnibase_infra.utils import apply_instance_discriminator, compute_consumer_group_id
 from omnibase_infra.utils.util_consumer_group import KAFKA_CONSUMER_GROUP_MAX_LENGTH
@@ -462,6 +469,10 @@ class EventBusKafka(
             TopicViolationAlerter() if self._topic_enforcement_mode != "off" else None
         )
 
+        # Consumer health emitter (OMN-5518) — initialized after producer starts
+        # Gated by ENABLE_CONSUMER_HEALTH_EMITTER env var
+        self._health_emitter: ConsumerHealthEmitter | None = None
+
     # =========================================================================
     # Factory Methods
     # =========================================================================
@@ -563,6 +574,14 @@ class EventBusKafka(
         """
         return self._environment
 
+    @property
+    def health_emitter(self) -> ConsumerHealthEmitter | None:
+        """Get the consumer health emitter (OMN-5518).
+
+        Returns None if the feature flag is off or bus has not started.
+        """
+        return self._health_emitter
+
     # =========================================================================
     # Auth / TLS helpers
     # =========================================================================
@@ -639,6 +658,7 @@ class EventBusKafka(
                     bootstrap_servers=self._bootstrap_servers,
                     acks=self._config.acks_aiokafka,
                     enable_idempotence=self._config.enable_idempotence,
+                    retry_backoff_ms=self._config.reconnect_backoff_ms,
                     **self._build_auth_kwargs(),
                 )
 
@@ -650,6 +670,13 @@ class EventBusKafka(
                 self._started = True
                 self._shutdown = False
                 self._closing = False
+
+                # Initialize consumer health emitter if feature flag is on (OMN-5518)
+                if ConsumerHealthEmitter.is_enabled() and self._producer is not None:
+                    self._health_emitter = ConsumerHealthEmitter(self._producer)
+                    logger.info(
+                        "ConsumerHealthEmitter initialized (ENABLE_CONSUMER_HEALTH_EMITTER=on)"
+                    )
 
                 # Reset circuit breaker on success
                 async with self._circuit_breaker_lock:
@@ -955,6 +982,7 @@ class EventBusKafka(
                 bootstrap_servers=self._bootstrap_servers,
                 acks=self._config.acks_aiokafka,
                 enable_idempotence=self._config.enable_idempotence,
+                retry_backoff_ms=self._config.reconnect_backoff_ms,
                 **self._build_auth_kwargs(),
             )
 
@@ -1555,6 +1583,10 @@ class EventBusKafka(
             group_id=effective_group_id,
             auto_offset_reset=self._config.auto_offset_reset,
             enable_auto_commit=self._config.enable_auto_commit,
+            session_timeout_ms=self._config.session_timeout_ms,
+            heartbeat_interval_ms=self._config.heartbeat_interval_ms,
+            max_poll_interval_ms=self._config.max_poll_interval_ms,
+            retry_backoff_ms=self._config.reconnect_backoff_ms,
             **self._build_auth_kwargs(),
         )
 
@@ -1579,6 +1611,23 @@ class EventBusKafka(
                     "servers": sanitized_servers,
                 },
             )
+
+            # Emit consumer started health event (OMN-5518)
+            if self._health_emitter is not None:
+                try:
+                    await self._health_emitter.emit_event(
+                        consumer_identity=f"eventbus.{topic}",
+                        consumer_group=effective_group_id,
+                        topic=topic,
+                        event_type=EnumConsumerHealthEventType.CONSUMER_STARTED,
+                        severity=EnumConsumerHealthSeverity.INFO,
+                        correlation_id=correlation_id,
+                        service_label="EventBusKafka",
+                    )
+                except Exception:  # noqa: BLE001 - best-effort emission
+                    logger.debug(
+                        "Failed to emit consumer started health event", exc_info=True
+                    )
 
         except TimeoutError as e:
             # Clean up consumer on failure to prevent resource leak
@@ -1852,6 +1901,46 @@ class EventBusKafka(
                     "error_type": type(e).__name__,
                 },
             )
+
+            # Emit consumer health event if emitter is available (OMN-5518)
+            if self._health_emitter is not None:
+                # Classify error type for severity
+                error_type_name = type(e).__name__
+                is_session_timeout = (
+                    "session" in error_type_name.lower() or "timeout" in str(e).lower()
+                )
+                event_type = (
+                    EnumConsumerHealthEventType.SESSION_TIMEOUT
+                    if is_session_timeout
+                    else EnumConsumerHealthEventType.CONNECTION_LOST
+                )
+                severity = (
+                    EnumConsumerHealthSeverity.CRITICAL
+                    if is_session_timeout
+                    else EnumConsumerHealthSeverity.ERROR
+                )
+                try:
+                    # Derive consumer group from subscriber registry
+                    _subs = self._subscribers.get(topic, [])
+                    _consumer_group = _subs[0][0] if _subs else "unknown"
+                    await self._health_emitter.emit_event(
+                        consumer_identity=f"eventbus.{topic}",
+                        consumer_group=_consumer_group,
+                        topic=topic,
+                        event_type=event_type,
+                        severity=severity,
+                        correlation_id=correlation_id,
+                        error_message=str(e)[:500],
+                        error_type=error_type_name,
+                        hostname=os.environ.get("HOSTNAME", ""),  # ONEX_EXCLUDE: env
+                        service_label="EventBusKafka",
+                    )
+                except Exception:  # noqa: BLE001 - best-effort emission must not propagate
+                    logger.debug(
+                        "Failed to emit health event for consumer loop error",
+                        exc_info=True,
+                    )
+
             # Don't raise - allow task to complete and cleanup to proceed
 
         finally:

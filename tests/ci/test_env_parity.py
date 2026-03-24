@@ -125,7 +125,7 @@ CONFIGMAP_DEBT_KEYS: frozenset[str] = frozenset(
         "OMNIMEMORY_DB_URL",
         "OMNIMEMORY_MEMGRAPH_HOST",
         "OMNIMEMORY_MEMGRAPH_PORT",
-        # OMNICLAUDE_CONTRACTS_ROOT removed in OMN-5372 (entry point discovery replaces it)
+        "OMNICLAUDE_CONTRACTS_ROOT",  # container-internal path (OMN-5382: re-added for PluginClaude.wire_dispatchers)
         "OMNICLAUDE_SKILLS_ROOT",  # container-internal path — same as CONTRACTS_ROOT
         "ONEX_REGISTRATION_AUTO_ACK",
         "USE_EVENT_ROUTING",

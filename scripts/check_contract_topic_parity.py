@@ -258,6 +258,7 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     # --- omniclaude special/non-skill topics (need contract.yaml in omniclaude) ---
     "onex.evt.omniclaude.agent-actions-dlq.v1": "DLQ topic, no contract.yaml yet; needs omniclaude node contract | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.agent-observability-dlq.v1": "DLQ topic, no contract.yaml yet; needs omniclaude node contract | owner: jonah | expiry: 2026-06-01",
+    "onex.evt.omniclaude.skill-lifecycle-dlq.v1": "DLQ topic for skill-lifecycle consumer (OMN-5445); provisioned in platform_topic_suffixes; needs omniclaude node contract | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.audit-compression-triggered.v1": "context audit topic [OMN-5240]; produced by omniclaude, needs contract.yaml | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.audit-context-budget-exceeded.v1": "context audit topic [OMN-5240]; produced by omniclaude, needs contract.yaml | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.audit-dispatch-validated.v1": "context audit topic [OMN-5240]; produced by omniclaude, needs contract.yaml | owner: jonah | expiry: 2026-06-01",
@@ -267,6 +268,17 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omniclaude.fix-transition.v1": "lifecycle transition topic added in OMN-4572; needs contract.yaml | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.skill-completed.v1": "global skill lifecycle topic [OMN-2934]; needs contract.yaml | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.skill-started.v1": "global skill lifecycle topic [OMN-2934]; needs contract.yaml | owner: jonah | expiry: 2026-06-01",
+    # --- omniclaude agent observability topics (OMN-6066..OMN-6072) ---
+    # Produced by omniclaude agent hooks, consumed by ServiceAgentActionsConsumer.
+    # Added to platform_topic_suffixes in this PR to replace raw string literals.
+    # Contract.yaml coverage tracked in omniclaude repo.
+    "onex.evt.omniclaude.agent-actions.v1": "observability topic produced by omniclaude [OMN-6066]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.routing-decision.v1": "observability topic produced by omniclaude [OMN-6066]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.agent-transformation.v1": "observability topic produced by omniclaude [OMN-6066]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.performance-metrics.v1": "observability topic produced by omniclaude [OMN-6066]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.detection-failure.v1": "observability topic produced by omniclaude [OMN-6066]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.agent-execution-logs.v1": "observability topic produced by omniclaude [OMN-6066]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.agent-status.v1": "observability topic produced by omniclaude [OMN-6066]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
     # --- omniintelligence topics (need contract.yaml in omniintelligence) ---
     "onex.cmd.omniintelligence.claude-hook-event.v1": "pre-migration; needs contract.yaml in omniintelligence repo | owner: jonah | expiry: 2026-06-01",
     "onex.cmd.omniintelligence.decision-recorded.v1": "pre-migration; needs contract.yaml in omniintelligence repo | owner: jonah | expiry: 2026-06-01",
@@ -312,11 +324,21 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omnibase-infra.wiring-health-snapshot.v1": "emitted by WiringHealthChecker service; no contract.yaml node needed — service-level emission | owner: jonah | expiry: 2026-09-01",
     # --- platform/cross-cutting topics ---
     "onex.evt.omnibase-infra.circuit-breaker.v1": "new topic (OMN-5293); publisher-only, no node contract.yaml yet | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.runtime-error.v1": "new topic (OMN-5649); emitted by monitor_logs.py RuntimeErrorEmitter; contract.yaml added in OMN-5650 | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnibase-infra.error-triaged.v1": "new topic (OMN-5650); emitted by NodeRuntimeErrorTriageEffect; contract.yaml added in OMN-5650 | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omnibase-infra.gmail-archive-purged.v1": "pre-migration; needs contract.yaml in omnibase_infra | owner: jonah | expiry: 2026-06-01",
     "onex.evt.pattern.discovered.v1": "pre-migration; needs contract.yaml in omniintelligence | owner: jonah | expiry: 2026-06-01",
     "onex.evt.platform.resolution-decided.v1": "pre-migration; needs contract.yaml in omnibase_infra | owner: jonah | expiry: 2026-06-01",
+    "onex.evt.platform.feature-flag-changed.v1": "new topic added in OMN-5580; contract.yaml needed once consuming node is wired | owner: jonah | expiry: 2026-06-01",
     "onex.evt.platform.service-heartbeat.v1": "new topic added in OMN-5184; contract.yaml needed once consuming node is wired | owner: jonah | expiry: 2026-06-01",
     "onex.snapshot.platform.registration-snapshots.v1": "non-standard kind 'snapshot'; topic validated separately via ValidateTopicSuffix skip-list | owner: jonah | expiry: 2026-06-01",
+    # --- consumer health pipeline topics (OMN-5529) ---
+    "onex.evt.omnibase-infra.consumer-health.v1": "OMN-5515; contract.yaml will be added with NodeConsumerHealthTriageEffect in OMN-5520 | owner: jonah | expiry: 2026-06-01",
+    "onex.cmd.omnibase-infra.consumer-restart.v1": "OMN-5515; contract.yaml will be added with NodeConsumerHealthTriageEffect in OMN-5520 | owner: jonah | expiry: 2026-06-01",
+    # --- DLQ aggregation topic (OMN-6136) ---
+    "onex.evt.platform.dlq-message.v1": "OMN-6136; cross-published by MixinKafkaDlq for omnidash /dlq dashboard | owner: jonah | expiry: 2026-06-01",
+    # --- runner health pipeline topics (OMN-6082) ---
+    "onex.evt.omnibase-infra.runner-health-snapshot.v1": "OMN-6082; Phase 1 CLI-based, contract.yaml deferred to OMN-6091 (true ONEX node conversion) | owner: jonah | expiry: 2026-09-01",
 }
 # fmt: on
 

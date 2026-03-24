@@ -59,7 +59,8 @@ fi
 # ---------------------------------------------------------------------------
 # Required environment variables
 # ---------------------------------------------------------------------------
-: "${RUNNER_TOKEN:?RUNNER_TOKEN must be set}"
+# RUNNER_TOKEN is optional — only required for first-time registration.
+# After initial setup, cached credentials are used and the token is not needed.
 : "${RUNNER_NAME:?RUNNER_NAME must be set}"
 : "${RUNNER_LABELS:?RUNNER_LABELS must be set}"
 : "${GITHUB_ORG_URL:?GITHUB_ORG_URL must be set}"
@@ -84,7 +85,7 @@ _restore_cached_creds() {
     local key
     key=$(_cache_key)
     local cache_file="${CRED_CACHE_DIR}/${key}"
-    if [[ -f "${cache_file}" ]]; then
+    if [[ -d "${cache_file}" ]]; then
         echo "[entrypoint] Restoring cached runner credentials (key=${key:0:12}...)"
         cp -r "${cache_file}/"* "${RUNNER_HOME}/" 2>/dev/null || true
         return 0
@@ -177,6 +178,10 @@ _register() {
 }
 
 _deregister() {
+    if [[ -z "${RUNNER_TOKEN:-}" ]]; then
+        echo "[entrypoint] Skipping de-registration (no RUNNER_TOKEN available)"
+        return 0
+    fi
     echo "[entrypoint] Attempting graceful de-registration..."
     _as_runner "${RUNNER_HOME}/config.sh" remove --token "${RUNNER_TOKEN}" 2>/dev/null || true
 }
@@ -188,11 +193,23 @@ _deregister() {
 RUNNER_HOME="${RUNNER_HOME:-/home/runner/actions-runner}"
 cd "${RUNNER_HOME}"
 
-# Attempt to restore cached credentials to avoid re-registration on clean restart
-if _restore_cached_creds; then
-    echo "[entrypoint] Using cached credentials — skipping registration"
+# Check for credentials in priority order:
+# 1. In-place (container restart — files already in RUNNER_HOME)
+# 2. Volume cache (fresh container — restore from mounted volume)
+# 3. Fresh registration (first-time setup — requires RUNNER_TOKEN)
+if [[ -f "${RUNNER_HOME}/.runner" && -f "${RUNNER_HOME}/.credentials" ]]; then
+    echo "[entrypoint] Found in-place credentials — skipping registration (container restart)"
+elif _restore_cached_creds; then
+    echo "[entrypoint] Restored credentials from volume cache — skipping registration"
 else
-    echo "[entrypoint] No valid cached credentials found — registering..."
+    if [[ -z "${RUNNER_TOKEN:-}" ]]; then
+        echo "[entrypoint] ERROR: No credentials found and RUNNER_TOKEN is not set."
+        echo "[entrypoint] For first-time registration, set RUNNER_TOKEN in the environment."
+        echo "[entrypoint] Generate a token at: https://github.com/organizations/OmniNode-ai/settings/actions/runners/new"
+        echo "[entrypoint] Token is valid for 1 hour. After registration, cached credentials are used."
+        exit 1
+    fi
+    echo "[entrypoint] No cached credentials found — registering with RUNNER_TOKEN..."
     _register
     _save_creds
 fi
@@ -208,8 +225,24 @@ while true; do
     log_content=$(cat "${LOG_FILE}" 2>/dev/null || echo "")
 
     if [[ ${exit_code} -eq 0 ]]; then
-        echo "[entrypoint] Runner exited cleanly (exit 0). Exiting."
-        break
+        # GitHub runner exits 0 even when registration is server-side deleted
+        # ("no retry needed" from its perspective). Check log for this case.
+        if echo "${log_content}" | grep -qiE "registration has been deleted|Not configured"; then
+            echo "[entrypoint] Runner registration was deleted by GitHub (exit 0 but stale)."
+            echo "[entrypoint] Clearing cached credentials and will re-register on next attempt."
+            _clear_cached_creds
+            # Remove in-place credentials so fresh registration can proceed
+            rm -f "${RUNNER_HOME}/.runner" "${RUNNER_HOME}/.credentials" "${RUNNER_HOME}/.credentials_rsaparams"
+            if [[ -z "${RUNNER_TOKEN:-}" ]]; then
+                echo "[entrypoint] ERROR: Cannot re-register — RUNNER_TOKEN is not set."
+                echo "[entrypoint] Generate a token at: https://github.com/organizations/OmniNode-ai/settings/actions/runners/new"
+                exit 1
+            fi
+            # Fall through to the registration retry loop below
+        else
+            echo "[entrypoint] Runner exited cleanly (exit 0). Exiting."
+            break
+        fi
     fi
 
     echo "[entrypoint] Runner exited with code ${exit_code}"

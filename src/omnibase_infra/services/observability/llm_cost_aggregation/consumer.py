@@ -64,7 +64,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 from aiohttp import web
-from aiokafka import AIOKafkaConsumer, TopicPartition
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.errors import KafkaError
 from aiokafka.structs import OffsetAndMetadata
 from pydantic import ValidationError
@@ -73,6 +73,8 @@ from omnibase_core.errors import OnexError
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
+from omnibase_infra.event_bus.consumer_health_emitter import ConsumerHealthEmitter
+from omnibase_infra.event_bus.mixin_consumer_health import MixinConsumerHealth
 from omnibase_infra.services.observability.llm_cost_aggregation.config import (
     ConfigLlmCostAggregation,
 )
@@ -345,7 +347,7 @@ class ConsumerMetrics:
 # =============================================================================
 
 
-class ServiceLlmCostAggregator:
+class ServiceLlmCostAggregator(MixinConsumerHealth):
     """Async Kafka consumer for LLM cost aggregation.
 
     Consumes LLM call completed events, writes raw metrics to
@@ -379,6 +381,7 @@ class ServiceLlmCostAggregator:
         self._consumer: AIOKafkaConsumer | None = None
         self._pool: asyncpg.Pool | None = None
         self._writer: WriterLlmCostAggregationPostgres | None = None
+        self._health_producer: AIOKafkaProducer | None = None
         self._running = False
         self._shutdown_event = asyncio.Event()
 
@@ -473,6 +476,9 @@ class ServiceLlmCostAggregator:
                 group_id=self._config.kafka_group_id,
                 auto_offset_reset=self._config.auto_offset_reset,
                 enable_auto_commit=False,
+                session_timeout_ms=self._config.session_timeout_ms,
+                heartbeat_interval_ms=self._config.heartbeat_interval_ms,
+                max_poll_interval_ms=self._config.max_poll_interval_ms,
                 max_poll_records=self._config.batch_size,
             )
 
@@ -483,6 +489,20 @@ class ServiceLlmCostAggregator:
 
             self._running = True
             self._shutdown_event.clear()
+
+            # Initialize consumer health emitter (OMN-5523)
+            if ConsumerHealthEmitter.is_enabled():
+                self._health_producer = AIOKafkaProducer(
+                    bootstrap_servers=self._config.kafka_bootstrap_servers,
+                )
+                await self._health_producer.start()
+                self._init_health_emitter(
+                    self._health_producer,
+                    consumer_identity="llm-cost-aggregation-consumer",
+                    consumer_group=self._config.kafka_group_id,
+                    topic=",".join(self._config.topics),
+                    service_label="ServiceLlmCostAggregator",
+                )
 
             logger.info(
                 "ServiceLlmCostAggregator started",
@@ -545,6 +565,18 @@ class ServiceLlmCostAggregator:
             self._health_runner = None
 
         self._health_app = None
+
+        # Stop health producer (OMN-5523)
+        if self._health_producer is not None:
+            try:
+                await self._health_producer.stop()
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "Error stopping health producer",
+                    extra={"consumer_id": self._consumer_id},
+                )
+            finally:
+                self._health_producer = None
 
         if self._consumer is not None:
             try:
@@ -1114,11 +1146,13 @@ class ServiceLlmCostAggregator:
 
 async def _main() -> None:
     """Main entry point for running the consumer as a module."""
+    from omnibase_infra.utils.util_consumer_restart import run_with_restart
+
+    # Validate config eagerly — fatal errors (ValidationError) will be re-raised
+    # by run_with_restart without retry, so the operator sees them immediately.
     try:
-        config = ConfigLlmCostAggregation()
+        ConfigLlmCostAggregation()
     except ValidationError as exc:
-        # Translate Pydantic's raw ValidationError into a user-friendly
-        # message that tells the operator which env vars to set.
         missing = [str(e["loc"][-1]) for e in exc.errors() if e["type"] == "missing"]
         prefix = "OMNIBASE_INFRA_LLM_COST_"
         if missing:
@@ -1135,56 +1169,47 @@ async def _main() -> None:
             )
         sys.exit(1)
 
-    logger.info(
-        "Starting LLM cost aggregation consumer",
-        extra={
-            "topics": config.topics,
-            "bootstrap_servers": config.kafka_bootstrap_servers,
-            "postgres_dsn": mask_dsn_password(config.postgres_dsn),
-            "group_id": config.kafka_group_id,
-            "health_port": config.health_check_port,
-        },
-    )
+    shutdown_event = asyncio.Event()
+    active_consumer: list[ServiceLlmCostAggregator | None] = [None]
 
-    consumer = ServiceLlmCostAggregator(config)
+    def _on_signal() -> None:
+        shutdown_event.set()
+        if active_consumer[0] is not None:
+            asyncio.get_running_loop().create_task(active_consumer[0].stop())
 
     loop = asyncio.get_running_loop()
-    shutdown_task: asyncio.Task[None] | None = None
-
-    def _shutdown_task_done(task: asyncio.Task[None]) -> None:
-        """Log errors from the shutdown task so they are not silently swallowed."""
-        if task.cancelled():
-            logger.warning("Shutdown task was cancelled")
-            return
-        exc = task.exception()
-        if exc is not None:
-            logger.error(
-                "Shutdown task raised an exception",
-                exc_info=(type(exc), exc, exc.__traceback__),
-            )
-
-    def signal_handler() -> None:
-        nonlocal shutdown_task
-        logger.info("Received shutdown signal")
-        if shutdown_task is None:
-            shutdown_task = asyncio.create_task(consumer.stop())
-            shutdown_task.add_done_callback(_shutdown_task_done)
-
-    # Note: add_signal_handler is Unix-only; this consumer targets Linux/Docker.
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, signal_handler)
+        loop.add_signal_handler(sig, _on_signal)
 
-    try:
-        await consumer.start()
-        await consumer.run()
-    except asyncio.CancelledError:
-        logger.info("Consumer cancelled")
-    finally:
-        if shutdown_task is not None:
-            if not shutdown_task.done():
-                await shutdown_task
-        else:
-            await consumer.stop()
+    async def _run_once() -> None:
+        config = ConfigLlmCostAggregation()
+        logger.info(
+            "Starting LLM cost aggregation consumer",
+            extra={
+                "topics": config.topics,
+                "bootstrap_servers": config.kafka_bootstrap_servers,
+                "postgres_dsn": mask_dsn_password(config.postgres_dsn),
+                "group_id": config.kafka_group_id,
+                "health_port": config.health_check_port,
+            },
+        )
+        consumer = ServiceLlmCostAggregator(config)
+        active_consumer[0] = consumer
+        try:
+            await consumer.start()
+            await consumer.run()
+        finally:
+            active_consumer[0] = None
+            try:
+                await asyncio.wait_for(consumer.stop(), timeout=10.0)
+            except TimeoutError:
+                logger.warning("consumer.stop() timed out after 10s")
+
+    await run_with_restart(
+        _run_once,
+        name="ServiceLlmCostAggregator",
+        shutdown_event=shutdown_event,
+    )
 
 
 if __name__ == "__main__":

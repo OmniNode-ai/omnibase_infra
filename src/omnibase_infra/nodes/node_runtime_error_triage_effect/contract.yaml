@@ -1,0 +1,128 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeRuntimeErrorTriageEffect
+#
+# Consumes onex.evt.omnibase-infra.runtime-error.v1 events and applies
+# first-match-wins triage with cross-layer correlation to consumer health.
+#
+# Related Tickets:
+#   - OMN-5522: Create NodeRuntimeErrorTriageEffect
+#   - OMN-5529: Runtime Health Event Pipeline (epic)
+# Contract identifiers
+name: "node_runtime_error_triage_effect"
+contract_name: "node_runtime_error_triage_effect"
+node_name: "node_runtime_error_triage_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+# Node type
+node_type: "EFFECT_GENERIC"
+# Description
+description: >
+  Effect node that consumes runtime error events from onex.evt.omnibase-infra.runtime-error.v1 and applies first-match-wins triage. Default rules cover aiokafka, asyncpg, and aiohttp patterns. Includes cross-layer correlation with Layer 1 consumer health incidents. Uses runtime_error_triage PostgreSQL table.
+
+# Event bus subscription
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.evt.omnibase-infra.runtime-error.v1"
+  publish_topics: []
+# I/O models
+input_model:
+  name: "ModelRuntimeErrorEvent"
+  module: "omnibase_infra.models.health.model_runtime_error_event"
+  description: "Structured runtime error event from Kafka."
+output_model:
+  name: "ModelRuntimeErrorTriageResult"
+  module: "omnibase_infra.nodes.node_runtime_error_triage_effect.handlers.handler_runtime_error_triage"
+  description: "Result of the first-match-wins triage."
+# Handler routing
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "triage_runtime_error"
+      handler:
+        name: "HandlerRuntimeErrorTriage"
+        module: "omnibase_infra.nodes.node_runtime_error_triage_effect.handlers.handler_runtime_error_triage"
+      description: "First-match-wins triage with cross-layer correlation"
+      output_fields:
+        - fingerprint
+        - action
+        - matched_rule
+        - incident_state
+        - occurrence_count
+        - correlated_consumer_fingerprint
+# Error handling
+error_handling:
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 1000
+    max_delay_ms: 8000
+    exponential_base: 2
+    retry_on:
+      - "DB_POOL_TIMEOUT"
+  error_types:
+    - name: "DB_POOL_UNAVAILABLE"
+      description: "asyncpg pool not available"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "DB_POOL_TIMEOUT"
+      description: "asyncpg pool query timed out"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+# IO operations
+io_operations:
+  - operation: "triage_runtime_error"
+    description: "Apply first-match-wins triage to runtime error event"
+    input_fields:
+      - fingerprint
+      - logger_family
+      - error_category
+      - severity
+      - raw_message
+      - message_template
+    output_fields:
+      - fingerprint
+      - action
+      - rule_name
+      - incident_state
+      - occurrence_count
+      - correlated_consumer_fingerprint
+# Dependencies
+dependencies:
+  - name: "db_pool"
+    type: "service"
+    description: "asyncpg pool for runtime_error_triage table"
+    required: true
+  - name: "slack_handler"
+    type: "service"
+    description: "Slack webhook handler for notifications"
+    required: false
+  - name: "linear_handler"
+    type: "service"
+    description: "Linear API handler for ticket creation"
+    required: false
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-03-19"
+  updated: "2026-03-19"
+  tags:
+    - effect
+    - health
+    - triage
+    - runtime-error
+    - cross-layer
+    - rule-engine

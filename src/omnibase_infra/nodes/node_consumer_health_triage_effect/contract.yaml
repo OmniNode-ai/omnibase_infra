@@ -1,0 +1,149 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeConsumerHealthTriageEffect
+#
+# Consumes onex.evt.omnibase-infra.consumer-health.v1 events and applies
+# graduated triage: Slack warning -> Slack repeated -> restart -> Linear.
+#
+# Related Tickets:
+#   - OMN-5520: Create NodeConsumerHealthTriageEffect
+#   - OMN-5529: Runtime Health Event Pipeline (epic)
+# Contract identifiers
+name: "node_consumer_health_triage_effect"
+contract_name: "node_consumer_health_triage_effect"
+node_name: "node_consumer_health_triage_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+# Node type
+node_type: "EFFECT_GENERIC"
+# Description
+description: >
+  Effect node that consumes consumer health events from onex.evt.omnibase-infra.consumer-health.v1 and applies graduated triage response. First occurrence triggers Slack WARNING, second triggers Slack REPEATED, third in 30 minutes triggers restart command (gated by ENABLE_CONSUMER_AUTO_RESTART), restart failure triggers Linear ticket. Uses consumer_health_triage and consumer_restart_state PostgreSQL tables.
+
+# Event bus subscription
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.evt.omnibase-infra.consumer-health.v1"
+  publish_topics:
+    - "onex.cmd.omnibase-infra.consumer-restart.v1"
+# I/O models
+input_model:
+  name: "ModelConsumerHealthEvent"
+  module: "omnibase_infra.models.health.model_consumer_health_event"
+  description: "Structured consumer health event from Kafka."
+output_model:
+  name: "ModelTriageResult"
+  module: "omnibase_infra.nodes.node_consumer_health_triage_effect.handlers.handler_consumer_health_triage"
+  description: "Result of the graduated triage response."
+# Handler routing
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "triage_health_event"
+      handler:
+        name: "HandlerConsumerHealthTriage"
+        module: "omnibase_infra.nodes.node_consumer_health_triage_effect.handlers.handler_consumer_health_triage"
+      description: "Graduated triage: Slack warning -> repeated -> restart -> Linear"
+      output_fields:
+        - fingerprint
+        - action
+        - incident_state
+        - occurrence_count
+# Error handling
+error_handling:
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 1000
+    max_delay_ms: 8000
+    exponential_base: 2
+    retry_on:
+      - "DB_POOL_TIMEOUT"
+      - "SLACK_API_ERROR"
+  error_types:
+    - name: "DB_POOL_UNAVAILABLE"
+      description: "asyncpg pool not available for triage state"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "DB_POOL_TIMEOUT"
+      description: "asyncpg pool query timed out"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "SLACK_API_ERROR"
+      description: "Slack notification failed"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "LINEAR_API_ERROR"
+      description: "Linear ticket creation failed"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+# IO operations
+io_operations:
+  - operation: "triage_health_event"
+    description: "Apply graduated triage response to consumer health event"
+    input_fields:
+      - fingerprint
+      - consumer_identity
+      - consumer_group
+      - topic
+      - event_type
+      - severity
+      - error_message
+    output_fields:
+      - fingerprint
+      - action
+      - incident_state
+      - occurrence_count
+# Dependencies
+dependencies:
+  - name: "db_pool"
+    type: "service"
+    description: "asyncpg pool for consumer_health_triage and consumer_restart_state tables"
+    required: true
+  - name: "producer"
+    type: "service"
+    description: "AIOKafkaProducer for restart commands"
+    required: false
+  - name: "slack_handler"
+    type: "service"
+    description: "Slack webhook handler for notifications"
+    required: false
+  - name: "linear_handler"
+    type: "service"
+    description: "Linear API handler for ticket creation"
+    required: false
+# Feature flags
+feature_flags:
+  - name: "ENABLE_CONSUMER_HEALTH_TRIAGE"
+    env_var: "ENABLE_CONSUMER_HEALTH_TRIAGE"
+    default: "false"
+    description: "Master gate for consumer health triage"
+  - name: "ENABLE_CONSUMER_AUTO_RESTART"
+    env_var: "ENABLE_CONSUMER_AUTO_RESTART"
+    default: "false"
+    description: "Gate for automated restart commands"
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-03-19"
+  updated: "2026-03-19"
+  tags:
+    - effect
+    - health
+    - triage
+    - consumer
+    - kafka
+    - graduated-response

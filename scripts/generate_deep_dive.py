@@ -81,6 +81,17 @@ def extract_ticket_ids(subject: str) -> list[str]:
     return sorted(set(TICKET_RE.findall(subject)))
 
 
+def collect_all_ticket_ids(repo_days: list[RepoDay]) -> list[str]:
+    """Extract all unique ticket IDs (matching the TICKET_RE pattern) from commit messages."""
+    ids: set[str] = set()
+    for rd in repo_days:
+        for c in rd.commits:
+            ids.update(extract_ticket_ids(c.subject))
+        for m in rd.merges:
+            ids.update(extract_ticket_ids(m.subject))
+    return sorted(ids, key=lambda x: int(x.split("-")[1]))
+
+
 @dataclass(frozen=True)
 class CommitEntry:
     full: str
@@ -871,8 +882,13 @@ def main() -> int:
 
     repos = find_git_repos_direct_children(root)
 
-    # Filter to only include repos with 'omni' prefix
-    repos = [r for r in repos if r.name.lower().startswith("omni")]
+    # Filter to only include ONEX ecosystem repos
+    _ONEX_REPO_PREFIXES = ("omni", "onex_")
+    repos = [
+        r
+        for r in repos
+        if any(r.name.lower().startswith(p) for p in _ONEX_REPO_PREFIXES)
+    ]
 
     repo_days: list[RepoDay] = []
     all_active_worktrees: list[ActiveWorktree] = []
@@ -1248,6 +1264,23 @@ def main() -> int:
             lines.append("")
     lines.append("---")
     lines.append("")
+
+    # Ticket Summary
+    all_tickets = collect_all_ticket_ids(repo_days)
+    if all_tickets:
+        lines.append("## Ticket Summary")
+        lines.append("")
+        lines.append(
+            f"**{len(all_tickets)} unique tickets** referenced in today's commits:"
+        )
+        lines.append("")
+        # Group into rows of 8 for readability
+        for i in range(0, len(all_tickets), 8):
+            chunk = all_tickets[i : i + 8]
+            lines.append("  " + ", ".join(chunk))
+        lines.append("")
+        lines.append("---")
+        lines.append("")
 
     # Metrics
     lines.append("## Metrics & Statistics")

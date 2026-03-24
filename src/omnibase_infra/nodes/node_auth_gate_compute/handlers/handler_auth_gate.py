@@ -71,7 +71,7 @@ EXPECTED_OPERATION: str = "auth_gate.evaluate"
 # Tools NOT in this set with an empty target_path skip the path check
 # entirely (step 7). Forgetting to add a file-targeting tool here would
 # allow it to bypass path authorization silently.
-# TODO: Derive this set from tool metadata/registry instead of hardcoding
+# TODO(OMN-5763): Derive this set from tool metadata/registry instead of hardcoding
 # to eliminate the risk of forgetting to update it when new tools are added.
 FILE_TARGETING_TOOLS: frozenset[str] = frozenset(
     {

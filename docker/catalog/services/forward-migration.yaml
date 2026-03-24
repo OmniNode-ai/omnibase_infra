@@ -22,10 +22,10 @@ depends_on:
     condition: service_healthy
 restart: 'no'
 resources:
-  cpus: '0.2'
-  memory: 64M
-  cpus_reservation: '0.25'
-  memory_reservation: 128M
+  cpus: '0.25'
+  memory: 128M
+  cpus_reservation: '0.1'
+  memory_reservation: 64M
 command:
   - sh
   - /run-forward-migrations.sh

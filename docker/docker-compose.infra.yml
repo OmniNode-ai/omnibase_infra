@@ -150,18 +150,16 @@ x-runtime-env: &runtime-env
   VALKEY_HOST: "valkey"
   VALKEY_PORT: "6379"
   VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
-  # OmniIntelligence domain plugin
-  OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:?OMNIINTELLIGENCE_DB_URL must be set in ~/.omnibase/.env}
-  # OmniMemory domain plugin
-  OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-}
-  # OMN-4311: Memgraph connection passthrough (required by PluginMemory after OMN-4310)
-  # Default: Docker service name resolvable via omnibase-infra-network DNS.
-  # When OMNIMEMORY_ENABLED is unset, PluginMemory.validate_handshake() skips the probe.
-  OMNIMEMORY_MEMGRAPH_HOST: ${OMNIMEMORY_MEMGRAPH_HOST:-omnibase-infra-memgraph}
-  OMNIMEMORY_MEMGRAPH_PORT: ${OMNIMEMORY_MEMGRAPH_PORT:-7687}
-  # OMNIMEMORY_DB_URL uses :- (empty default) so non-memory deployments are unaffected.
-  OMNIMEMORY_DB_URL: ${OMNIMEMORY_DB_URL:-}
-  # OmniClaude domain plugin (OMN-3182): contracts discovered via entry points (OMN-5371/5372)
+  # OmniIntelligence domain plugin — Docker-internal hostname (same pattern as OMNIBASE_INFRA_DB_URL)
+  OMNIINTELLIGENCE_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omniintelligence"
+  # --- OmniMemory (OMN-5382: removed from base env — injected per-bundle) ---
+  # OMNIMEMORY_ENABLED, OMNIMEMORY_MEMGRAPH_HOST/PORT, OMNIMEMORY_DB_URL
+  # are only present when the memgraph bundle is selected.
+  # OmniClaude domain plugin (OMN-3182): required by PluginClaude.wire_dispatchers()
+  # Hardcoded to venv path — host OMNICLAUDE_CONTRACTS_ROOT points at /Volumes/...
+  # which doesn't exist inside the container. The pip-installed package has its
+  # nodes at the site-packages path below.
+  OMNICLAUDE_CONTRACTS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/nodes
   # OMN-4622: Skills root for topic provisioning (flat-list topics.yaml manifests)
   OMNICLAUDE_SKILLS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/plugins/onex/skills
   # --- Infisical config store ---
@@ -367,12 +365,11 @@ services:
       - "com.omninode.service=memgraph"
       - "com.omninode.layer=infrastructure"
   # ==========================================================================
-  # Infisical - Secrets Management (Optional)
+  # Infisical - Secrets Management (always-on since OMN-5831)
   # ==========================================================================
   infisical:
     image: infisical/infisical:v0.146.0-postgres
     container_name: omnibase-infra-infisical
-    profiles: ["secrets", "full", "bootstrap"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -591,6 +588,12 @@ services:
   # ONEX Runtime - Effects Handler (Runtime Profile)
   # ==========================================================================
   # Handles effect nodes for external service interactions.
+  # OMN-5637: Effects has an extended start_period (120s) and retries (5)
+  # because plugin initialization (1950+ Kafka consumer subscriptions,
+  # intelligence DB ownership, schema fingerprint, message type registration)
+  # must complete before /health returns 200.
+  # Unhealthy detection latency = start_period + (interval * retries) = 120s + 150s = 270s.
+  # AUTOHEAL_START_PERIOD (180s) must exceed start_period to avoid premature restarts.
   runtime-effects:
     !!merge <<: *runtime-base
     container_name: omninode-runtime-effects
@@ -618,8 +621,8 @@ services:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 90s
+      retries: 5
+      start_period: 120s
     labels:
       - "com.omninode.service=runtime-effects"
       - "com.omninode.layer=runtime"
@@ -691,10 +694,8 @@ services:
     environment:
       # OMN-3431: Local Docker Redpanda
       OMNIBASE_INFRA_AGENT_ACTIONS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
-      # NOTE: Uses dedicated OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN rather than
-      # OMNIBASE_INFRA_DB_URL because this consumer uses pydantic-settings with the
-      # OMNIBASE_INFRA_AGENT_ACTIONS_ prefix and may use a different DB role.
-      OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: ${OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN:?OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN must be set in ~/.omnibase/.env}
+      # OMN-5831: Docker-internal DB URL — no longer leaks localhost:5436 from host env.
+      OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_SIZE: ${AGENT_ACTIONS_BATCH_SIZE:-100}
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_TIMEOUT_MS: ${AGENT_ACTIONS_BATCH_TIMEOUT_MS:-1000}
       OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_PORT: "8087"
@@ -744,7 +745,8 @@ services:
     environment:
       # OMN-3431: Local Docker Redpanda
       OMNIBASE_INFRA_SKILL_LIFECYCLE_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
-      OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN: ${OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN:?OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN must be set in ~/.omnibase/.env}
+      # OMN-5831: Docker-internal DB URL
+      OMNIBASE_INFRA_SKILL_LIFECYCLE_POSTGRES_DSN: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
       OMNIBASE_INFRA_SKILL_LIFECYCLE_BATCH_SIZE: ${SKILL_LIFECYCLE_BATCH_SIZE:-100}
       OMNIBASE_INFRA_SKILL_LIFECYCLE_BATCH_TIMEOUT_MS: ${SKILL_LIFECYCLE_BATCH_TIMEOUT_MS:-1000}
       OMNIBASE_INFRA_SKILL_LIFECYCLE_HEALTH_CHECK_PORT: "8092"
@@ -793,7 +795,8 @@ services:
     environment:
       # OMN-3431: Local Docker Redpanda
       OMNIBASE_INFRA_CONTEXT_AUDIT_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
-      OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN: ${OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN:?OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN must be set in ~/.omnibase/.env}
+      # OMN-5831: Docker-internal DB URL
+      OMNIBASE_INFRA_CONTEXT_AUDIT_POSTGRES_DSN: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
       OMNIBASE_INFRA_CONTEXT_AUDIT_BATCH_SIZE: ${CONTEXT_AUDIT_BATCH_SIZE:-100}
       OMNIBASE_INFRA_CONTEXT_AUDIT_BATCH_TIMEOUT_MS: ${CONTEXT_AUDIT_BATCH_TIMEOUT_MS:-1000}
       OMNIBASE_INFRA_CONTEXT_AUDIT_HEALTH_CHECK_PORT: "8093"

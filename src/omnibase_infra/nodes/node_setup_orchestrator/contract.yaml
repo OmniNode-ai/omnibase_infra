@@ -20,6 +20,14 @@ output_model:
   name: "ModelSetupOrchestratorOutput"
   module: "omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_orchestrator_output"
   description: "Ordered sequence of setup lifecycle events. No result field (I5)."
+# Feature Flags [OMN-5584]
+feature_flags:
+  - name: env_sync_probe
+    description: "Enable environment sync probe during setup"
+    default_value: false
+    env_var: ENABLE_ENV_SYNC_PROBE
+    category: infrastructure
+    owner: omnibase_infra
 io_operations:
   - name: "orchestrate_setup"
     description: "Coordinate all 4 effect nodes sequentially with cloud gate, preflight, provision, infisical, and validate steps."

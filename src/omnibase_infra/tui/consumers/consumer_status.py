@@ -41,6 +41,11 @@ TOPIC_LINEAR_SNAPSHOT = "onex.evt.linear.snapshot.v1"
 
 _ALL_TOPICS = (TOPIC_PR_STATUS, TOPIC_GIT_HOOK, TOPIC_LINEAR_SNAPSHOT)
 
+# Kafka session timeout constants — prevents rebalance storms
+_KAFKA_SESSION_TIMEOUT_MS = 45000
+_KAFKA_HEARTBEAT_INTERVAL_MS = 15000
+_KAFKA_MAX_POLL_INTERVAL_MS = 300000
+
 
 # ---------------------------------------------------------------------------
 # Message types posted to the TUI app
@@ -110,6 +115,9 @@ async def consume_all(app: object) -> None:
             group_id="onex-tui-status",
             auto_offset_reset="latest",
             enable_auto_commit=True,
+            session_timeout_ms=_KAFKA_SESSION_TIMEOUT_MS,
+            heartbeat_interval_ms=_KAFKA_HEARTBEAT_INTERVAL_MS,
+            max_poll_interval_ms=_KAFKA_MAX_POLL_INTERVAL_MS,
             value_deserializer=lambda v: v,  # raw bytes; we JSON-decode below
             request_timeout_ms=5000,
             connections_max_idle_ms=10000,

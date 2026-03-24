@@ -121,7 +121,7 @@ def _check_file_size(contract_path: Path, operation: str) -> None:
         )
 
 
-def _load_and_validate_contract_yaml(  # stub-ok: has tracked TODO
+def _load_and_validate_contract_yaml(  # stub-ok: tracked in OMN-41
     contract_path: Path,
     operation: str,
 ) -> tuple[dict, dict]:
@@ -136,13 +136,7 @@ def _load_and_validate_contract_yaml(  # stub-ok: has tracked TODO
 
     Note on direct file operations:
         This function uses direct file I/O rather than a FileRegistry abstraction.
-        See handler_contract_source.py for the same pattern and rationale:
-        - RegistryFileBased (FileRegistry) does not yet exist in omnibase_core
-        - Once available, this should be refactored for consistency
-        - See: docs/architecture/RUNTIME_HOST_IMPLEMENTATION_PLAN.md
-
-        TODO [OMN-1352]: Refactor to use RegistryFileBased once available in omnibase_core.
-        This will provide consistent file access patterns across all contract loaders.
+        See handler_contract_source.py for the same pattern and rationale.
 
     Security Note:
         File size is checked BEFORE YAML parsing (line 164) to prevent memory

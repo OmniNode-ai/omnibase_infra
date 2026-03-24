@@ -15,6 +15,7 @@ This package provides common utilities used across the infrastructure:
     - util_pydantic_validators: Shared Pydantic field validator utilities
     - util_retry_optimistic: Optimistic locking retry helper with exponential backoff
     - util_semver: Semantic versioning validation utilities
+    - util_consumer_restart: Process-level restart-with-backoff for standalone Kafka consumers
     - util_topic_validation: Kafka topic name validation (non-empty, max 255 chars, valid chars)
 """
 
@@ -35,6 +36,7 @@ from omnibase_infra.utils.util_consumer_group import (
     compute_consumer_group_id,
     normalize_kafka_identifier,
 )
+from omnibase_infra.utils.util_consumer_restart import run_with_restart
 from omnibase_infra.utils.util_datetime import (
     ensure_timezone_aware,
     is_timezone_aware,
@@ -112,6 +114,7 @@ __all__: list[str] = [
     "parse_env_int",
     "redact_llm_response",
     "retry_on_optimistic_conflict",
+    "run_with_restart",
     "sanitize_backend_error",
     "sanitize_dsn",
     "sanitize_error_message",

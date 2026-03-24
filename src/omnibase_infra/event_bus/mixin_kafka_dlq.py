@@ -54,6 +54,7 @@ from omnibase_infra.event_bus.models import (
     ModelEventHeaders,
     ModelEventMessage,
 )
+from omnibase_infra.topics import SUFFIX_PLATFORM_DLQ_MESSAGE
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
@@ -432,6 +433,44 @@ class MixinKafkaDlq:
                     "duration_ms": round(duration_ms, 2),
                 },
             )
+
+        # Cross-publish to omnidash aggregation topic (OMN-6136)
+        # The omnidash /dlq dashboard consumes onex.evt.platform.dlq-message.v1
+        # rather than individual onex.dlq.*.v1 topics.  This fire-and-forget
+        # publish mirrors the DLQ payload so omnidash can project it into the
+        # dlq_messages table.
+        if success:
+            try:
+                _agg_topic = SUFFIX_PLATFORM_DLQ_MESSAGE
+                _agg_payload = {
+                    "original_topic": original_topic,
+                    "error_message": sanitized_failure_reason,
+                    "error_type": error_type,
+                    "retry_count": failed_message.headers.retry_count,
+                    "consumer_group": consumer_group,
+                    "message_key": key_str,
+                    "timestamp": start_time.isoformat(),
+                    "correlation_id": str(correlation_id),
+                }
+                _agg_value = json.dumps(_agg_payload).encode("utf-8")
+                _agg_producer = None
+                async with self._producer_lock:
+                    _agg_producer = self._producer
+                if _agg_producer is not None:
+                    await asyncio.wait_for(
+                        _agg_producer.send_and_wait(
+                            _agg_topic,
+                            value=_agg_value,
+                            key=failed_message.key,
+                        ),
+                        timeout=self._timeout_seconds,
+                    )
+            except Exception:  # noqa: BLE001 — best-effort cross-publish
+                logger.debug(
+                    "DLQ aggregation cross-publish to %s failed (non-blocking)",
+                    _agg_topic,
+                    exc_info=True,
+                )
 
         # Create DLQ event for metrics and callbacks
         # Convert message_offset to string for type consistency with ModelDlqEvent

@@ -211,6 +211,9 @@ from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.capabilities import ContractCapabilityExtractor
+from omnibase_infra.capabilities.contract_node_capability_extractor import (
+    ContractNodeCapabilityExtractor,
+)
 from omnibase_infra.constants_topic_patterns import TOPIC_NAME_PATTERN
 from omnibase_infra.enums import EnumInfraTransportType, EnumIntrospectionReason
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
@@ -254,6 +257,9 @@ PERF_THRESHOLD_CACHE_HIT_MS = 1.0
 
 # Module-level capability extractor instance (stateless, can be shared)
 _CAPABILITY_EXTRACTOR = ContractCapabilityExtractor()
+
+# Module-level feature flag extractor (OMN-5577)
+_FEATURE_FLAG_EXTRACTOR = ContractNodeCapabilityExtractor()
 
 
 class PerformanceMetricsCacheDict(TypedDict, total=False):
@@ -1491,6 +1497,42 @@ class MixinNodeIntrospection:
                 self._introspection_contract
             )
 
+        # Extract feature flags from contract (OMN-5577)
+        # Declared flags come from contract defaults; resolved flags apply env overrides.
+        resolved_feature_flags = None
+        if self._introspection_contract is not None:
+            contract_ff = getattr(self._introspection_contract, "feature_flags", None)
+            if contract_ff:
+                from omnibase_core.models.core.model_feature_flags import (
+                    ModelFeatureFlags,
+                )
+
+                declared_ff = ModelFeatureFlags.from_contract_declarations(contract_ff)
+                # Set declared defaults on declared_capabilities
+                self._introspection_declared_capabilities = (
+                    self._introspection_declared_capabilities.model_copy(
+                        update={"feature_flags": declared_ff}
+                    )
+                )
+                # Build resolved flags by applying env-var overrides
+                import os
+
+                resolved_flags: dict[str, bool] = dict(declared_ff.flags)
+                for decl in contract_ff:
+                    if decl.env_var:
+                        env_val = os.environ.get(decl.env_var)
+                        if env_val is not None:
+                            resolved_flags[decl.name] = env_val.lower() in (
+                                "true",
+                                "1",
+                                "yes",
+                                "on",
+                            )
+                resolved_feature_flags = ModelFeatureFlags(
+                    flags=resolved_flags,
+                    flag_metadata=dict(declared_ff.flag_metadata),
+                )
+
         # Extract event_bus config from contract (OMN-1613)
         # Topics are realm-agnostic -- no environment prefix.
         # ValueError from _extract_event_bus_config (unresolved placeholders) is
@@ -1521,22 +1563,26 @@ class MixinNodeIntrospection:
 
         # Create event with performance metrics (metrics is already Pydantic model)
         # Use declared_capabilities from config (OMN-5049: not a blank default)
-        event = ModelNodeIntrospectionEvent(
-            node_id=node_id_uuid,
-            node_type=node_type,
-            node_version=node_version,
-            declared_capabilities=self._introspection_declared_capabilities,
-            discovered_capabilities=discovered_capabilities,
-            contract_capabilities=contract_capabilities,
-            endpoints=endpoints,
-            current_state=current_state,
-            reason=EnumIntrospectionReason.HEARTBEAT,  # cache_refresh maps to heartbeat
-            correlation_id=uuid4(),
-            timestamp=datetime.now(UTC),
-            performance_metrics=metrics,
-            event_bus=event_bus_config,
-            metadata=ModelNodeMetadata(description=contract_description),
-        )
+        # Build event kwargs; resolved_feature_flags is optional (OMN-5577)
+        event_kwargs: dict[str, object] = {
+            "node_id": node_id_uuid,
+            "node_type": node_type,
+            "node_version": node_version,
+            "declared_capabilities": self._introspection_declared_capabilities,
+            "discovered_capabilities": discovered_capabilities,
+            "contract_capabilities": contract_capabilities,
+            "endpoints": endpoints,
+            "current_state": current_state,
+            "reason": EnumIntrospectionReason.HEARTBEAT,
+            "correlation_id": uuid4(),
+            "timestamp": datetime.now(UTC),
+            "performance_metrics": metrics,
+            "event_bus": event_bus_config,
+            "metadata": ModelNodeMetadata(description=contract_description),
+        }
+        if resolved_feature_flags is not None:
+            event_kwargs["resolved_feature_flags"] = resolved_feature_flags
+        event = ModelNodeIntrospectionEvent(**event_kwargs)  # type: ignore[arg-type]
 
         # Update cache - cast the model_dump output to our typed dict since we know
         # the structure matches (model_dump returns dict[str, Any] by default)

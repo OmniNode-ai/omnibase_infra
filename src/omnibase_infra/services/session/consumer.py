@@ -60,16 +60,18 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import UUID, uuid4
 
-from aiokafka import AIOKafkaConsumer
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.errors import KafkaError
 from pydantic import ValidationError
 
+from omnibase_infra.event_bus.consumer_health_emitter import ConsumerHealthEmitter
+from omnibase_infra.event_bus.mixin_consumer_health import MixinConsumerHealth
 from omnibase_infra.services.session.config_consumer import ConfigSessionConsumer
 from omnibase_infra.services.session.protocol_session_aggregator import (
     ProtocolSessionAggregator,
 )
 
-# TODO(OMN-1526): These imports need resolution - schemas remain in omniclaude
+# TODO(OMN-5737): These imports need resolution - schemas remain in omniclaude
 # The consumer depends on hook event schemas which are domain-specific to omniclaude.
 # Options to resolve:
 # 1. Move schemas to a shared package (omnibase-schemas)
@@ -195,7 +197,7 @@ class ConsumerMetrics:
 # =============================================================================
 
 
-class SessionEventConsumer:
+class SessionEventConsumer(MixinConsumerHealth):
     """Kafka consumer for Claude Code hook events.
 
     Consumes events from session/prompt/tool topics and processes
@@ -266,6 +268,7 @@ class SessionEventConsumer:
         self._config = config
         self._aggregator = aggregator
         self._consumer: AIOKafkaConsumer | None = None
+        self._health_producer: AIOKafkaProducer | None = None
         self._running = False
         self._shutdown_event = asyncio.Event()
 
@@ -367,12 +370,29 @@ class SessionEventConsumer:
                 group_id=self._config.group_id,
                 auto_offset_reset=self._config.auto_offset_reset,
                 enable_auto_commit=False,  # Manual commits for at-least-once
+                session_timeout_ms=self._config.session_timeout_ms,
+                heartbeat_interval_ms=self._config.heartbeat_interval_ms,
+                max_poll_interval_ms=self._config.max_poll_interval_ms,
                 max_poll_records=self._config.max_poll_records,
             )
 
             await self._consumer.start()
             self._running = True
             self._shutdown_event.clear()
+
+            # Initialize consumer health emitter (OMN-5523)
+            if ConsumerHealthEmitter.is_enabled():
+                self._health_producer = AIOKafkaProducer(
+                    bootstrap_servers=self._config.bootstrap_servers,
+                )
+                await self._health_producer.start()
+                self._init_health_emitter(
+                    self._health_producer,
+                    consumer_identity="session-event-consumer",
+                    consumer_group=self._config.group_id,
+                    topic=",".join(self._config.topics),
+                    service_label="SessionEventConsumer",
+                )
 
             logger.info(
                 "SessionEventConsumer started",
@@ -430,6 +450,15 @@ class SessionEventConsumer:
         # Resume consumer if paused (cleanup before stop)
         if self._consumer is not None and self._consumer_paused:
             await self._resume_consumer(correlation_id)
+
+        # Stop health producer (OMN-5523)
+        if self._health_producer is not None:
+            try:
+                await self._health_producer.stop()
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning("Error stopping health producer", exc_info=True)
+            finally:
+                self._health_producer = None
 
         # Close consumer connection
         if self._consumer is not None:
@@ -707,7 +736,7 @@ class SessionEventConsumer:
         if isinstance(value, bytes):
             value = value.decode("utf-8")
 
-        # TODO(OMN-1526): Schema parsing moved to aggregator
+        # TODO(OMN-5737): Schema parsing moved to aggregator
         # The original code parsed ModelHookEventEnvelope here, but that
         # creates a dependency on omniclaude.hooks.schemas. The aggregator
         # is now responsible for schema validation.

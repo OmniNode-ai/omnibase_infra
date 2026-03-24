@@ -5,13 +5,13 @@ layer: runtime
 container_name: omninode-runtime-effects
 required_env:
   - POSTGRES_PASSWORD
-  - OMNIBASE_INFRA_DB_URL
   - VALKEY_PASSWORD
-  - OMNIINTELLIGENCE_DB_URL
   - KEYCLOAK_ADMIN_CLIENT_SECRET
   - ONEX_SERVICE_CLIENT_SECRET
   - ONEX_REGISTRATION_AUTO_ACK
 hardcoded_env:
+  OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omnibase_infra'
+  OMNIINTELLIGENCE_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omniintelligence'
   KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   KAFKA_BROKER_ALLOWLIST: 'redpanda:'
   BUS_ID: local
@@ -42,8 +42,8 @@ healthcheck:
   test: curl -sf http://localhost:8085/health
   interval_s: 30
   timeout_s: 10
-  retries: 3
-  start_period_s: 90
+  retries: 5
+  start_period_s: 120
 volumes:
   - effects_logs:/app/logs
   - effects_data:/app/data

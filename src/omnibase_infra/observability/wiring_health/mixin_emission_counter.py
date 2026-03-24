@@ -42,11 +42,6 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from omnibase_infra.event_bus.topic_constants import WIRING_HEALTH_MONITORED_TOPICS
-
-if TYPE_CHECKING:
-    from typing import Final
-
 _logger = logging.getLogger(__name__)
 
 
@@ -54,18 +49,19 @@ class MixinEmissionCounter:
     """Mixin providing emission counting for wiring health monitoring.
 
     Tracks message emissions per-topic for comparison against consumption counts.
-    Only tracks topics configured in WIRING_HEALTH_MONITORED_TOPICS to bound
-    memory usage.
+    Only tracks topics in the provided monitored set to bound memory usage.
 
     Attributes:
         _emission_counts: Per-topic emission counts (topic -> count)
         _emission_counter_lock: asyncio.Lock for coroutine-safe updates
-        _monitored_topics: Set of topics to track (from constants)
+        _monitored_topics: Set of topics to track
 
     Example:
         >>> class MyEventBus(MixinEmissionCounter):
         ...     def __init__(self):
-        ...         self._init_emission_counter()
+        ...         from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+        ...         registry = ServiceTopicRegistry.from_defaults()
+        ...         self._init_emission_counter(registry.monitored_topics())
         ...
         ...     async def publish(self, topic: str, value: bytes) -> None:
         ...         # ... publish logic ...
@@ -77,28 +73,38 @@ class MixinEmissionCounter:
         {'onex.evt.omniclaude.agent-match.v1': 1}
     """
 
-    # Class-level constants
-    _MONITORED_TOPICS: Final[frozenset[str]] = frozenset(WIRING_HEALTH_MONITORED_TOPICS)
-
-    def _init_emission_counter(self) -> None:
+    def _init_emission_counter(
+        self, monitored_topics: frozenset[str] | None = None
+    ) -> None:
         """Initialize emission counter state.
 
         Must be called during __init__ of the class using this mixin.
         Creates the counter dict and asyncio.Lock.
 
+        Args:
+            monitored_topics: Set of topic strings to track. If ``None``,
+                resolves via ``ServiceTopicRegistry.from_defaults()``.
+
         Example:
             >>> class EventBusKafka(MixinEmissionCounter):
             ...     def __init__(self, config):
-            ...         self._init_emission_counter()
+            ...         self._init_emission_counter(registry.monitored_topics())
             ...         # ... other initialization ...
         """
+        if monitored_topics is None:
+            from omnibase_infra.topics.service_topic_registry import (
+                ServiceTopicRegistry,
+            )
+
+            monitored_topics = ServiceTopicRegistry.from_defaults().monitored_topics()
+        self._monitored_topics: frozenset[str] = monitored_topics
         self._emission_counts: dict[str, int] = {}
         self._emission_counter_lock: asyncio.Lock = asyncio.Lock()
 
         _logger.debug(
             "Emission counter initialized",
             extra={
-                "monitored_topics": list(self._MONITORED_TOPICS),
+                "monitored_topics": list(self._monitored_topics),
             },
         )
 
@@ -121,7 +127,7 @@ class MixinEmissionCounter:
             ...     await self._record_emission(topic)
         """
         # Fast path: skip topics not in monitored set
-        if topic not in self._MONITORED_TOPICS:
+        if topic not in self._monitored_topics:
             return
 
         async with self._emission_counter_lock:
@@ -197,7 +203,7 @@ class MixinEmissionCounter:
             >>> topics = bus.get_monitored_topics()
             >>> print(f"Monitoring {len(topics)} topics")
         """
-        return self._MONITORED_TOPICS
+        return self._monitored_topics
 
 
 __all__ = ["MixinEmissionCounter"]

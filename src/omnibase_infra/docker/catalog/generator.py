@@ -64,8 +64,12 @@ def generate_compose(resolved: ResolvedStack) -> dict[str, object]:
 
         # Healthcheck
         if manifest.healthcheck:
+            if isinstance(manifest.healthcheck.test, list):
+                test_cmd: list[str] = ["CMD", *manifest.healthcheck.test]
+            else:
+                test_cmd = ["CMD-SHELL", manifest.healthcheck.test]
             svc["healthcheck"] = {
-                "test": ["CMD-SHELL", manifest.healthcheck.test],
+                "test": test_cmd,
                 "interval": f"{manifest.healthcheck.interval_s}s",
                 "timeout": f"{manifest.healthcheck.timeout_s}s",
                 "retries": manifest.healthcheck.retries,

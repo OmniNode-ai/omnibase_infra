@@ -1027,16 +1027,8 @@ class TestDockerComposeProfiles:
             f"Found profiles: {sorted(profiles)}"
         )
 
-    def test_secrets_profile_defined(
-        self,
-        compose_file_path: Path,
-    ) -> None:
-        """Verify secrets profile is defined in docker-compose."""
-        profiles = extract_profiles_from_compose(compose_file_path)
-        assert "secrets" in profiles, (
-            f"docker-compose should define 'secrets' profile. "
-            f"Found profiles: {sorted(profiles)}"
-        )
+    # test_secrets_profile_defined removed: secrets profile merged into core
+    # as part of Infisical-first config (OMN-5831)
 
     def test_full_profile_defined(
         self,

@@ -27,10 +27,10 @@ depends_on:
     condition: service_completed_successfully
 restart: unless-stopped
 resources:
-  cpus: '0.1'
-  memory: 32M
-  cpus_reservation: '0.25'
-  memory_reservation: 128M
+  cpus: '0.25'
+  memory: 128M
+  cpus_reservation: '0.1'
+  memory_reservation: 32M
 command:
   - sh
   - -c

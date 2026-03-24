@@ -73,6 +73,8 @@ from pydantic import BaseModel, ValidationError
 
 from omnibase_core.errors import OnexError
 from omnibase_core.types import JsonType
+from omnibase_infra.event_bus.consumer_health_emitter import ConsumerHealthEmitter
+from omnibase_infra.event_bus.mixin_consumer_health import MixinConsumerHealth
 from omnibase_infra.services.observability.agent_actions.config import (
     ConfigAgentActionsConsumer,
 )
@@ -497,7 +499,7 @@ class ConsumerMetrics:
 # =============================================================================
 
 
-class AgentActionsConsumer:
+class AgentActionsConsumer(MixinConsumerHealth):
     """Async Kafka consumer for agent observability events.
 
     Consumes events from multiple observability topics and persists them
@@ -564,6 +566,8 @@ class AgentActionsConsumer:
 
         # Dead Letter Queue producer (Phase 2 - OMN-1768)
         self._dlq_producer: AIOKafkaProducer | None = None
+        # Dedicated health producer when DLQ is disabled (OMN-5523)
+        self._health_producer: AIOKafkaProducer | None = None
 
         # Health check server
         self._health_app: web.Application | None = None
@@ -696,6 +700,9 @@ class AgentActionsConsumer:
                 group_id=self._config.kafka_group_id,
                 auto_offset_reset=self._config.auto_offset_reset,
                 enable_auto_commit=False,  # Manual commits for at-least-once
+                session_timeout_ms=self._config.session_timeout_ms,
+                heartbeat_interval_ms=self._config.heartbeat_interval_ms,
+                max_poll_interval_ms=self._config.max_poll_interval_ms,
                 max_poll_records=self._config.batch_size,
             )
 
@@ -730,6 +737,24 @@ class AgentActionsConsumer:
 
             self._running = True
             self._shutdown_event.clear()
+
+            # Initialize consumer health emitter (OMN-5523)
+            if ConsumerHealthEmitter.is_enabled():
+                # Use DLQ producer if available, otherwise create dedicated one
+                health_prod = self._dlq_producer
+                if health_prod is None:
+                    self._health_producer = AIOKafkaProducer(
+                        bootstrap_servers=self._config.kafka_bootstrap_servers,
+                    )
+                    await self._health_producer.start()
+                    health_prod = self._health_producer
+                self._init_health_emitter(
+                    health_prod,
+                    consumer_identity="agent-actions-consumer",
+                    consumer_group=self._config.kafka_group_id,
+                    topic=",".join(self._config.topics),
+                    service_label="AgentActionsConsumer",
+                )
 
             logger.info(
                 "AgentActionsConsumer started",
@@ -814,6 +839,18 @@ class AgentActionsConsumer:
             self._health_runner = None
 
         self._health_app = None
+
+        # Stop dedicated health producer (OMN-5523)
+        if self._health_producer is not None:
+            try:
+                await self._health_producer.stop()
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "Error stopping health producer",
+                    extra={"consumer_id": self._consumer_id},
+                )
+            finally:
+                self._health_producer = None
 
         # Stop DLQ producer (Phase 2 - OMN-1768)
         if self._dlq_producer is not None:
@@ -1752,50 +1789,49 @@ class AgentActionsConsumer:
 
 async def _main() -> None:
     """Main entry point for running the consumer as a module."""
-    # Load configuration from environment
-    config = ConfigAgentActionsConsumer()
+    from omnibase_infra.utils.util_consumer_restart import run_with_restart
 
-    logger.info(
-        "Starting agent actions consumer",
-        extra={
-            "topics": config.topics,
-            "bootstrap_servers": config.kafka_bootstrap_servers,
-            "postgres_dsn": mask_dsn_password(config.postgres_dsn),
-            "group_id": config.kafka_group_id,
-            "health_port": config.health_check_port,
-        },
-    )
+    shutdown_event = asyncio.Event()
+    active_consumer: list[AgentActionsConsumer | None] = [None]
 
-    consumer = AgentActionsConsumer(config)
+    def _on_signal() -> None:
+        shutdown_event.set()
+        if active_consumer[0] is not None:
+            asyncio.get_running_loop().create_task(active_consumer[0].stop())
 
-    # Set up signal handlers
     loop = asyncio.get_running_loop()
-    shutdown_task: asyncio.Task[None] | None = None
-
-    def signal_handler() -> None:
-        nonlocal shutdown_task
-        logger.info("Received shutdown signal")
-        # Only create shutdown task once to avoid race conditions
-        if shutdown_task is None:
-            shutdown_task = asyncio.create_task(consumer.stop())
-
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, signal_handler)
+        loop.add_signal_handler(sig, _on_signal)
 
-    try:
-        await consumer.start()
-        await consumer.run()
-    except asyncio.CancelledError:
-        logger.info("Consumer cancelled")
-    finally:
-        # Ensure shutdown task completes if it was started by signal handler
-        if shutdown_task is not None:
-            if not shutdown_task.done():
-                await shutdown_task
-            # Task already completed, no action needed
-        else:
-            # No signal received, perform clean shutdown
-            await consumer.stop()
+    async def _run_once() -> None:
+        config = ConfigAgentActionsConsumer()
+        logger.info(
+            "Starting agent actions consumer",
+            extra={
+                "topics": config.topics,
+                "bootstrap_servers": config.kafka_bootstrap_servers,
+                "postgres_dsn": mask_dsn_password(config.postgres_dsn),
+                "group_id": config.kafka_group_id,
+                "health_port": config.health_check_port,
+            },
+        )
+        consumer = AgentActionsConsumer(config)
+        active_consumer[0] = consumer
+        try:
+            await consumer.start()
+            await consumer.run()
+        finally:
+            active_consumer[0] = None
+            try:
+                await asyncio.wait_for(consumer.stop(), timeout=10.0)
+            except TimeoutError:
+                logger.warning("consumer.stop() timed out after 10s")
+
+    await run_with_restart(
+        _run_once,
+        name="AgentActionsConsumer",
+        shutdown_event=shutdown_event,
+    )
 
 
 if __name__ == "__main__":

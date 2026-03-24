@@ -28,6 +28,10 @@ contract_version:
   patch: 0
 # Node type context - this handler is used by COMPUTE_GENERIC nodes
 node_type: "COMPUTE_GENERIC"
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
 # Description
 description: >
   Handler for architecture validation operations. Validates ONEX nodes and handlers against configurable architecture rules. Supports pluggable rules via the ProtocolArchitectureRule protocol. Returns structured validation results with violations grouped by rule and severity.
@@ -55,7 +59,7 @@ handler_routing:
         module: "omnibase_infra.nodes.node_architecture_validator.handlers.handler_architecture_validation"
       supported_operations:
         - "architecture.validate"
-# Supported rules (from contract_architecture_validator.yaml)
+# Supported rules (from contract.yaml)
 # These are the only rules that this handler is designed to process.
 supported_rules:
   - rule_id: "NO_HANDLER_PUBLISHING"

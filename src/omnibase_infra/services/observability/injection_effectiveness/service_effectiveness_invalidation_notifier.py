@@ -47,12 +47,10 @@ from uuid import UUID, uuid4
 
 from aiokafka import AIOKafkaProducer
 
-from omnibase_infra.event_bus.topic_constants import (
-    TOPIC_EFFECTIVENESS_INVALIDATION,
-)
 from omnibase_infra.services.observability.injection_effectiveness.models.model_invalidation_event import (
     ModelEffectivenessInvalidationEvent,
 )
+from omnibase_infra.topics import topic_keys
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +78,7 @@ class ServiceEffectivenessInvalidationNotifier:
     def __init__(
         self,
         producer: AIOKafkaProducer,
-        topic: str = TOPIC_EFFECTIVENESS_INVALIDATION,
+        topic: str | None = None,
     ) -> None:
         """Initialize the notifier with a Kafka producer.
 
@@ -90,6 +88,14 @@ class ServiceEffectivenessInvalidationNotifier:
             topic: Kafka topic for invalidation events. Defaults to
                 the standard effectiveness invalidation topic.
         """
+        if topic is None:
+            from omnibase_infra.topics.service_topic_registry import (
+                ServiceTopicRegistry,
+            )
+
+            topic = ServiceTopicRegistry.from_defaults().resolve(
+                topic_keys.EFFECTIVENESS_INVALIDATION
+            )
         self._producer = producer
         self._topic = topic
 

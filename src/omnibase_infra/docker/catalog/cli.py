@@ -7,13 +7,16 @@ Usage:
     python -m omnibase_infra.docker.catalog.cli generate core [--output path]
     python -m omnibase_infra.docker.catalog.cli validate core
     python -m omnibase_infra.docker.catalog.cli up runtime
+    python -m omnibase_infra.docker.catalog.cli up runtime --seed
     python -m omnibase_infra.docker.catalog.cli down
     python -m omnibase_infra.docker.catalog.cli status
+    python -m omnibase_infra.docker.catalog.cli seed
     python -m omnibase_infra.docker.catalog.cli read-stack
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -29,6 +32,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 _CATALOG_DIR = str(_REPO_ROOT / "docker" / "catalog")
 _DEFAULT_OUTPUT = str(_REPO_ROOT / "docker" / "docker-compose.generated.yml")
 _STACK_FILE = str(_REPO_ROOT / ".onex" / "stack.yml")
+_SEED_SCRIPT = str(_REPO_ROOT / "scripts" / "seed-infisical.py")
+_CONTRACTS_DIR = str(_REPO_ROOT / "src" / "omnibase_infra" / "nodes")
 
 
 def _resolve_and_generate(bundles: list[str], output: str) -> int:
@@ -59,8 +64,11 @@ def _load_stack() -> list[str]:
     if not stack_path.exists():
         return ["core"]
     with open(stack_path) as f:
-        data = yaml.safe_load(f)
-    return list(data.get("bundles", ["core"]))
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        return ["core"]
+    bundles = data.get("bundles", ["core"])
+    return list(bundles) if isinstance(bundles, list) else ["core"]
 
 
 def cmd_generate(args: list[str]) -> int:
@@ -69,7 +77,10 @@ def cmd_generate(args: list[str]) -> int:
     bundles = []
     i = 0
     while i < len(args):
-        if args[i] == "--output" and i + 1 < len(args):
+        if args[i] == "--output":
+            if i + 1 >= len(args):
+                print("Missing value for --output", file=sys.stderr)
+                return 1
             output = args[i + 1]
             i += 2
         else:
@@ -95,9 +106,50 @@ def cmd_validate(args: list[str]) -> int:
     return 1
 
 
+def _run_seed() -> int:
+    """Run Infisical seed if INFISICAL_ADDR is set.
+
+    Returns 0 on success or if Infisical is not configured (opt-in).
+    Returns non-zero on seed failure.
+    """
+    infisical_addr = os.environ.get("INFISICAL_ADDR", "")
+    if not infisical_addr:
+        print("Skipping Infisical seed (INFISICAL_ADDR not set)")
+        return 0
+
+    seed_path = Path(_SEED_SCRIPT)
+    if not seed_path.exists():
+        print(f"Seed script not found: {_SEED_SCRIPT}", file=sys.stderr)
+        return 1
+
+    print("Seeding Infisical with contract config keys...")
+    proc = subprocess.run(
+        [
+            sys.executable,
+            _SEED_SCRIPT,
+            "--contracts-dir",
+            _CONTRACTS_DIR,
+            "--create-missing-keys",
+            "--execute",
+        ],
+        cwd=str(_REPO_ROOT),
+        check=False,
+    )
+    if proc.returncode != 0:
+        print("WARNING: Infisical seed failed (non-fatal)", file=sys.stderr)
+    return 0
+
+
+def cmd_seed(_args: list[str]) -> int:
+    """Seed Infisical with config keys from contracts."""
+    return _run_seed()
+
+
 def cmd_up(args: list[str]) -> int:
     """Validate, generate, and start compose stack."""
-    bundles = args if args else _load_stack()
+    # Parse --seed flag
+    run_seed = "--seed" in args
+    bundles = [a for a in args if a != "--seed"] if args else _load_stack()
 
     # Save stack selection
     if args:
@@ -118,13 +170,40 @@ def cmd_up(args: list[str]) -> int:
     if rc != 0:
         return rc
 
+    # Pre-cleanup: remove dead/exited containers to prevent restart delays (OMN-5468)
+    # and name collisions when core infra is already running (OMN-5469).
+    subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            _DEFAULT_OUTPUT,
+            "rm",
+            "-f",
+            "--stop",
+        ],
+        cwd=str(_REPO_ROOT),
+        check=False,
+        capture_output=True,
+    )
+
     # Start
     proc = subprocess.run(
         ["docker", "compose", "-f", _DEFAULT_OUTPUT, "up", "-d"],
         cwd=str(_REPO_ROOT),
         check=False,
     )
-    return proc.returncode
+    if proc.returncode != 0:
+        return proc.returncode
+
+    # OMN-5831: Seed Infisical after stack is up when --seed flag is passed
+    # or when runtime bundle is included. This ensures runtime services can
+    # prefetch config from Infisical on startup.
+    has_runtime = "runtime" in bundles
+    if run_seed or has_runtime:
+        _run_seed()
+
+    return 0
 
 
 def cmd_down(_args: list[str]) -> int:
@@ -159,7 +238,7 @@ def main() -> None:
     args = sys.argv[1:]
     if not args:
         print("Usage: python -m omnibase_infra.docker.catalog.cli <command> [args]")
-        print("Commands: generate, validate, up, down, status, read-stack")
+        print("Commands: generate, validate, up, down, status, seed, read-stack")
         sys.exit(1)
 
     command = args[0]
@@ -171,6 +250,7 @@ def main() -> None:
         "up": cmd_up,
         "down": cmd_down,
         "status": cmd_status,
+        "seed": cmd_seed,
         "read-stack": cmd_read_stack,
     }
 

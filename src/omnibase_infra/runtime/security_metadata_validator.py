@@ -109,7 +109,7 @@ Integration Status:
     will integrate this validator into the handler loading flow at the
     HandlerBootstrapSource level.
 
-    TODO(OMN-1137): Integrate SecurityMetadataValidator into HandlerBootstrapSource
+    TODO(OMN-5735): Integrate SecurityMetadataValidator into HandlerBootstrapSource
     when ModelHandlerDescriptor includes security_policy field.
 
 See Also:
@@ -221,7 +221,7 @@ class SecurityMetadataValidator:
         See the module docstring for detailed integration examples and code.
 
         **Current Status**: NOT YET INTEGRATED. The validator must be called
-        manually. See TODO(OMN-1137) for integration tracking.
+        manually. See TODO(OMN-5735) for integration tracking.
 
     Example:
         >>> from omnibase_infra.enums import EnumHandlerTypeCategory

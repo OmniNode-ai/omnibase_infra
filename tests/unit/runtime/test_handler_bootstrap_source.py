@@ -272,7 +272,7 @@ class TestHandlerBootstrapSourceDiscovery:
         Bootstrap handlers now load their configuration from contract YAML files.
         Each handler should have a contract_path that points to an existing file.
 
-        Basic handlers use: contracts/handlers/<type>/handler_contract.yaml
+        Basic handlers use: src/omnibase_infra/contracts/handlers/<type>/contract.yaml
         MCP uses rich contract: src/omnibase_infra/contracts/handlers/mcp/handler_contract.yaml
         """
         source = HandlerBootstrapSource()
@@ -280,8 +280,8 @@ class TestHandlerBootstrapSourceDiscovery:
         result = await source.discover_handlers()
 
         expected_paths = {
-            "proto.db": "contracts/handlers/db/handler_contract.yaml",
-            "proto.http": "contracts/handlers/http/handler_contract.yaml",
+            "proto.db": "src/omnibase_infra/contracts/handlers/db/contract.yaml",
+            "proto.http": "src/omnibase_infra/contracts/handlers/http/contract.yaml",
             "proto.mcp": "src/omnibase_infra/contracts/handlers/mcp/handler_contract.yaml",
         }
 
