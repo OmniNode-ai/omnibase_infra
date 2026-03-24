@@ -34,6 +34,7 @@ command:
   - --smp 1
   - --memory ${REDPANDA_MEMORY:-8G}
   - --default-log-level=warn
+  - --set redpanda.kafka_batch_max_bytes=4194304
 labels:
   com.omninode.service: redpanda
   com.omninode.layer: infrastructure
