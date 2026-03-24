@@ -288,6 +288,37 @@ class ModelKafkaEventBusConfig(BaseModel):
         default=True,
         description="Enable auto-commit for consumer offsets",
     )
+    session_timeout_ms: int = Field(
+        default=45000,
+        ge=6000,
+        le=300000,
+        description=(
+            "Timeout in ms for consumer group session. If the broker receives no "
+            "heartbeat within this window, the consumer is evicted and a rebalance "
+            "is triggered. Default 45s (aiokafka default is 10s which causes "
+            "rebalance storms during brief processing delays)."
+        ),
+    )
+    heartbeat_interval_ms: int = Field(
+        default=15000,
+        ge=1000,
+        le=60000,
+        description=(
+            "Interval in ms between heartbeats to the consumer group coordinator. "
+            "Must be less than session_timeout_ms (typically 1/3). "
+            "Default 15s (aiokafka default is 3s)."
+        ),
+    )
+    max_poll_interval_ms: int = Field(
+        default=300000,
+        ge=10000,
+        le=600000,
+        description=(
+            "Maximum time in ms between poll() calls before the consumer is "
+            "considered failed. Default 300s (5 min). Set high enough to "
+            "accommodate slow batch processing without triggering rebalances."
+        ),
+    )
 
     # Dead letter queue configuration
     dead_letter_topic: str | None = Field(
@@ -369,29 +400,6 @@ class ModelKafkaEventBusConfig(BaseModel):
         ge=0,
     )
 
-    # Session timeout configuration (OMN-5445)
-    session_timeout_ms: int = Field(
-        default=30000,
-        description=(
-            "Session timeout in milliseconds. Consumer is removed from the group "
-            "if no heartbeat is received within this interval. Override via "
-            "KAFKA_SESSION_TIMEOUT_MS. Default raised from aiokafka's 10s to 30s "
-            "to prevent rebalance storms."
-        ),
-        ge=6000,
-        le=300000,
-    )
-    heartbeat_interval_ms: int = Field(
-        default=10000,
-        description=(
-            "Heartbeat interval in milliseconds. Kafka recommends <= session_timeout_ms / 3. "
-            "Override via KAFKA_HEARTBEAT_INTERVAL_MS. Override users are responsible "
-            "for coherent combinations with session_timeout_ms."
-        ),
-        ge=1000,
-        le=100000,
-    )
-
     @model_validator(mode="after")
     def validate_reconnect_backoff(self) -> ModelKafkaEventBusConfig:
         """Validate that reconnect_backoff_max_ms >= reconnect_backoff_ms.
@@ -414,6 +422,48 @@ class ModelKafkaEventBusConfig(BaseModel):
                 context=context,
                 parameter="reconnect_backoff_max_ms",
                 value=self.reconnect_backoff_max_ms,
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_session_timeout_ratio(self) -> ModelKafkaEventBusConfig:
+        """Validate session timeout / heartbeat / max-poll-interval relationships.
+
+        Ensures:
+        - heartbeat_interval_ms < session_timeout_ms (heartbeats must fit within session)
+        - max_poll_interval_ms >= session_timeout_ms (poll interval must not be shorter)
+
+        Returns:
+            Self after validation
+
+        Raises:
+            ProtocolConfigurationError: If relationships are violated
+        """
+        if self.heartbeat_interval_ms >= self.session_timeout_ms:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="validate_session_timeout_ratio",
+                target_name="kafka_config",
+            )
+            raise ProtocolConfigurationError(
+                f"heartbeat_interval_ms ({self.heartbeat_interval_ms}) must be "
+                f"< session_timeout_ms ({self.session_timeout_ms})",
+                context=context,
+                parameter="heartbeat_interval_ms",
+                value=self.heartbeat_interval_ms,
+            )
+        if self.max_poll_interval_ms < self.session_timeout_ms:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="validate_session_timeout_ratio",
+                target_name="kafka_config",
+            )
+            raise ProtocolConfigurationError(
+                f"max_poll_interval_ms ({self.max_poll_interval_ms}) must be "
+                f">= session_timeout_ms ({self.session_timeout_ms})",
+                context=context,
+                parameter="max_poll_interval_ms",
+                value=self.max_poll_interval_ms,
             )
         return self
 
@@ -758,6 +808,9 @@ class ModelKafkaEventBusConfig(BaseModel):
             "KAFKA_ENABLE_IDEMPOTENCE": "enable_idempotence",
             "KAFKA_AUTO_OFFSET_RESET": "auto_offset_reset",
             "KAFKA_ENABLE_AUTO_COMMIT": "enable_auto_commit",
+            "KAFKA_SESSION_TIMEOUT_MS": "session_timeout_ms",
+            "KAFKA_HEARTBEAT_INTERVAL_MS": "heartbeat_interval_ms",
+            "KAFKA_MAX_POLL_INTERVAL_MS": "max_poll_interval_ms",
             "KAFKA_DEAD_LETTER_TOPIC": "dead_letter_topic",
             "KAFKA_INSTANCE_ID": "instance_id",
             "KAFKA_SECURITY_PROTOCOL": "security_protocol",
@@ -768,8 +821,6 @@ class ModelKafkaEventBusConfig(BaseModel):
             "KAFKA_SSL_CA_FILE": "ssl_ca_file",
             "KAFKA_RECONNECT_BACKOFF_MS": "reconnect_backoff_ms",
             "KAFKA_RECONNECT_BACKOFF_MAX_MS": "reconnect_backoff_max_ms",
-            "KAFKA_SESSION_TIMEOUT_MS": "session_timeout_ms",
-            "KAFKA_HEARTBEAT_INTERVAL_MS": "heartbeat_interval_ms",
         }
 
         # Integer fields for type conversion
@@ -781,6 +832,7 @@ class ModelKafkaEventBusConfig(BaseModel):
             "reconnect_backoff_max_ms",
             "session_timeout_ms",
             "heartbeat_interval_ms",
+            "max_poll_interval_ms",
         }
 
         # Float fields for type conversion

@@ -700,9 +700,10 @@ class AgentActionsConsumer(MixinConsumerHealth):
                 group_id=self._config.kafka_group_id,
                 auto_offset_reset=self._config.auto_offset_reset,
                 enable_auto_commit=False,  # Manual commits for at-least-once
-                max_poll_records=self._config.batch_size,
                 session_timeout_ms=self._config.session_timeout_ms,
                 heartbeat_interval_ms=self._config.heartbeat_interval_ms,
+                max_poll_interval_ms=self._config.max_poll_interval_ms,
+                max_poll_records=self._config.batch_size,
             )
 
             await self._consumer.start()
@@ -1788,50 +1789,49 @@ class AgentActionsConsumer(MixinConsumerHealth):
 
 async def _main() -> None:
     """Main entry point for running the consumer as a module."""
-    # Load configuration from environment
-    config = ConfigAgentActionsConsumer()
+    from omnibase_infra.utils.util_consumer_restart import run_with_restart
 
-    logger.info(
-        "Starting agent actions consumer",
-        extra={
-            "topics": config.topics,
-            "bootstrap_servers": config.kafka_bootstrap_servers,
-            "postgres_dsn": mask_dsn_password(config.postgres_dsn),
-            "group_id": config.kafka_group_id,
-            "health_port": config.health_check_port,
-        },
-    )
+    shutdown_event = asyncio.Event()
+    active_consumer: list[AgentActionsConsumer | None] = [None]
 
-    consumer = AgentActionsConsumer(config)
+    def _on_signal() -> None:
+        shutdown_event.set()
+        if active_consumer[0] is not None:
+            asyncio.get_running_loop().create_task(active_consumer[0].stop())
 
-    # Set up signal handlers
     loop = asyncio.get_running_loop()
-    shutdown_task: asyncio.Task[None] | None = None
-
-    def signal_handler() -> None:
-        nonlocal shutdown_task
-        logger.info("Received shutdown signal")
-        # Only create shutdown task once to avoid race conditions
-        if shutdown_task is None:
-            shutdown_task = asyncio.create_task(consumer.stop())
-
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, signal_handler)
+        loop.add_signal_handler(sig, _on_signal)
 
-    try:
-        await consumer.start()
-        await consumer.run()
-    except asyncio.CancelledError:
-        logger.info("Consumer cancelled")
-    finally:
-        # Ensure shutdown task completes if it was started by signal handler
-        if shutdown_task is not None:
-            if not shutdown_task.done():
-                await shutdown_task
-            # Task already completed, no action needed
-        else:
-            # No signal received, perform clean shutdown
-            await consumer.stop()
+    async def _run_once() -> None:
+        config = ConfigAgentActionsConsumer()
+        logger.info(
+            "Starting agent actions consumer",
+            extra={
+                "topics": config.topics,
+                "bootstrap_servers": config.kafka_bootstrap_servers,
+                "postgres_dsn": mask_dsn_password(config.postgres_dsn),
+                "group_id": config.kafka_group_id,
+                "health_port": config.health_check_port,
+            },
+        )
+        consumer = AgentActionsConsumer(config)
+        active_consumer[0] = consumer
+        try:
+            await consumer.start()
+            await consumer.run()
+        finally:
+            active_consumer[0] = None
+            try:
+                await asyncio.wait_for(consumer.stop(), timeout=10.0)
+            except TimeoutError:
+                logger.warning("consumer.stop() timed out after 10s")
+
+    await run_with_restart(
+        _run_once,
+        name="AgentActionsConsumer",
+        shutdown_event=shutdown_event,
+    )
 
 
 if __name__ == "__main__":

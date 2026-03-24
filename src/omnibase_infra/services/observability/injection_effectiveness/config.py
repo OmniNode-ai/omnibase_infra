@@ -123,24 +123,24 @@ class ConfigInjectionEffectivenessConsumer(BaseSettings):
         description="Disable auto-commit for at-least-once delivery",
     )
 
-    # Session timeout (OMN-5445)
+    # Session timeout tuning — prevents rebalance storms during brief processing delays
     session_timeout_ms: int = Field(
-        default=30000,
+        default=45000,
         ge=6000,
         le=300000,
-        description=(
-            "Session timeout in milliseconds. Default raised from aiokafka's 10s "
-            "to 30s to prevent rebalance storms."
-        ),
+        description="Kafka session timeout in ms. Default 45s prevents rebalance storms.",
     )
     heartbeat_interval_ms: int = Field(
-        default=10000,
+        default=15000,
         ge=1000,
-        le=100000,
-        description=(
-            "Heartbeat interval in milliseconds. "
-            "Kafka recommends <= session_timeout_ms / 3."
-        ),
+        le=60000,
+        description="Kafka heartbeat interval in ms. Should be ~1/3 of session_timeout_ms.",
+    )
+    max_poll_interval_ms: int = Field(
+        default=300000,
+        ge=10000,
+        le=600000,
+        description="Max time between poll() calls in ms before consumer eviction. Default 5 min.",
     )
 
     # PostgreSQL connection
@@ -251,6 +251,21 @@ class ConfigInjectionEffectivenessConsumer(BaseSettings):
             "initial Kafka partition assignment and first message processing."
         ),
     )
+
+    @model_validator(mode="after")
+    def validate_session_timeout_ratio(self) -> Self:
+        """Validate heartbeat < session_timeout and max_poll >= session_timeout."""
+        if self.heartbeat_interval_ms >= self.session_timeout_ms:
+            raise ValueError(
+                f"heartbeat_interval_ms ({self.heartbeat_interval_ms}) must be "
+                f"< session_timeout_ms ({self.session_timeout_ms})"
+            )
+        if self.max_poll_interval_ms < self.session_timeout_ms:
+            raise ValueError(
+                f"max_poll_interval_ms ({self.max_poll_interval_ms}) must be "
+                f">= session_timeout_ms ({self.session_timeout_ms})"
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_topic_configuration(self) -> Self:

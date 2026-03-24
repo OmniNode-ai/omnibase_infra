@@ -1585,6 +1585,7 @@ class EventBusKafka(
             enable_auto_commit=self._config.enable_auto_commit,
             session_timeout_ms=self._config.session_timeout_ms,
             heartbeat_interval_ms=self._config.heartbeat_interval_ms,
+            max_poll_interval_ms=self._config.max_poll_interval_ms,
             retry_backoff_ms=self._config.reconnect_backoff_ms,
             **self._build_auth_kwargs(),
         )

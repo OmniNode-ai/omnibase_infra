@@ -723,6 +723,73 @@ by omniclaude. No consumer is currently registered for these topics.
 """
 
 # =============================================================================
+# OMNICLAUDE AGENT OBSERVABILITY TOPIC SUFFIXES
+# =============================================================================
+# Canonical topic names for omniclaude agent observability events consumed by
+# omnibase_infra observability services. These are the source (non-DLQ) topics.
+# Reference via these constants instead of raw string literals (OMN-3343).
+
+SUFFIX_OMNICLAUDE_AGENT_ACTIONS: str = "onex.evt.omniclaude.agent-actions.v1"
+"""Agent actions observability topic. Emitted by omniclaude agent hooks.
+
+Consumed by omnibase_infra ServiceAgentActionsConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_ROUTING_DECISION: str = "onex.evt.omniclaude.routing-decision.v1"
+"""Routing decision observability topic. Emitted by omniclaude routing hooks.
+
+Consumed by omnibase_infra ServiceAgentActionsConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_AGENT_TRANSFORMATION: str = (
+    "onex.evt.omniclaude.agent-transformation.v1"
+)
+"""Agent transformation observability topic. Emitted by omniclaude polymorphic agent.
+
+Consumed by omnibase_infra ServiceAgentActionsConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_PERFORMANCE_METRICS: str = (
+    "onex.evt.omniclaude.performance-metrics.v1"
+)
+"""Performance metrics observability topic. Emitted by omniclaude hooks.
+
+Consumed by omnibase_infra ServiceAgentActionsConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_DETECTION_FAILURE: str = "onex.evt.omniclaude.detection-failure.v1"
+"""Detection failure observability topic. Emitted by omniclaude hooks.
+
+Consumed by omnibase_infra ServiceAgentActionsConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_AGENT_EXECUTION_LOGS: str = (
+    "onex.evt.omniclaude.agent-execution-logs.v1"
+)
+"""Agent execution logs observability topic. Emitted by omniclaude TopicBase.EXECUTION_LOGS (OMN-2902).
+
+Consumed by omnibase_infra ServiceAgentActionsConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_AGENT_STATUS: str = "onex.evt.omniclaude.agent-status.v1"
+"""Agent status observability topic. Emitted by omniclaude TopicBase.AGENT_STATUS (OMN-2846, OMN-2903).
+
+Consumed by omnibase_infra ServiceAgentActionsConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_SKILL_STARTED: str = "onex.evt.omniclaude.skill-started.v1"
+"""Skill lifecycle start topic. Emitted by omniclaude skill dispatch hooks.
+
+Consumed by omnibase_infra ServiceSkillLifecycleConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_SKILL_COMPLETED: str = "onex.evt.omniclaude.skill-completed.v1"
+"""Skill lifecycle completion topic. Emitted by omniclaude skill dispatch hooks.
+
+Consumed by omnibase_infra ServiceSkillLifecycleConsumer.
+"""
+
+# =============================================================================
 # OMNICLAUDE OBSERVABILITY DLQ TOPIC SUFFIXES
 # =============================================================================
 # Dead letter queue topics for OmniClaude observability consumers. These are

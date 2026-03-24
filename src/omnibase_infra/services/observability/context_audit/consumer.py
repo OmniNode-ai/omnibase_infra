@@ -65,8 +65,6 @@ from aiohttp import web
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.errors import KafkaError
 
-from omnibase_infra.event_bus.consumer_health_emitter import ConsumerHealthEmitter
-from omnibase_infra.event_bus.mixin_consumer_health import MixinConsumerHealth
 from omnibase_infra.services.observability.context_audit.config import (
     ConfigContextAuditConsumer,
 )
@@ -251,7 +249,7 @@ class ConsumerMetrics:
 # =============================================================================
 
 
-class ContextAuditConsumer(MixinConsumerHealth):
+class ContextAuditConsumer:
     """Async Kafka consumer for context integrity audit observability events.
 
     Subscribes to all context audit topics and persists events to PostgreSQL
@@ -327,6 +325,7 @@ class ContextAuditConsumer(MixinConsumerHealth):
             enable_auto_commit=self.config.enable_auto_commit,
             session_timeout_ms=self.config.session_timeout_ms,
             heartbeat_interval_ms=self.config.heartbeat_interval_ms,
+            max_poll_interval_ms=self.config.max_poll_interval_ms,
             value_deserializer=lambda v: v,
         )
         await self._consumer.start()
@@ -340,17 +339,6 @@ class ContextAuditConsumer(MixinConsumerHealth):
             await self._producer.start()
 
         self._running = True
-
-        # Initialize consumer health emitter (OMN-5523)
-        if ConsumerHealthEmitter.is_enabled() and self._producer is not None:
-            self._init_health_emitter(
-                self._producer,
-                consumer_identity="context-audit-consumer",
-                consumer_group=self.config.kafka_group_id,
-                topic=",".join(self.config.topics),
-                service_label="ContextAuditConsumer",
-            )
-
         logger.info("ContextAuditConsumer started successfully")
 
     async def stop(self) -> None:
@@ -694,6 +682,8 @@ async def _main() -> None:
     """Main entry point for running the consumer as a module."""
     import os
 
+    from omnibase_infra.utils.util_consumer_restart import run_with_restart
+
     logging.basicConfig(
         level=getattr(
             logging, os.getenv("ONEX_LOG_LEVEL", "INFO").upper(), logging.INFO
@@ -701,17 +691,38 @@ async def _main() -> None:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
-    config = ConfigContextAuditConsumer()  # type: ignore[call-arg]
-    consumer = ContextAuditConsumer(config)
+    shutdown_event = asyncio.Event()
+    # Mutable ref so signal handler can stop the active consumer instance
+    active_consumer: list[ContextAuditConsumer | None] = [None]
 
-    try:
-        await consumer.start()
-        await consumer.run_with_health_check()
-    except Exception:
-        logger.exception("ContextAuditConsumer terminated with error")
-        raise
-    finally:
-        await consumer.stop()
+    def _on_signal() -> None:
+        shutdown_event.set()
+        if active_consumer[0] is not None:
+            asyncio.get_running_loop().create_task(active_consumer[0].stop())
+
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, _on_signal)
+
+    async def _run_once() -> None:
+        config = ConfigContextAuditConsumer()  # type: ignore[call-arg]
+        consumer = ContextAuditConsumer(config)
+        active_consumer[0] = consumer
+        try:
+            await consumer.start()
+            await consumer.run_with_health_check()
+        finally:
+            active_consumer[0] = None
+            try:
+                await asyncio.wait_for(consumer.stop(), timeout=10.0)
+            except TimeoutError:
+                logger.warning("consumer.stop() timed out after 10s")
+
+    await run_with_restart(
+        _run_once,
+        name="ContextAuditConsumer",
+        shutdown_event=shutdown_event,
+    )
 
 
 if __name__ == "__main__":

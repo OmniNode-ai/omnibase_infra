@@ -370,9 +370,10 @@ class SessionEventConsumer(MixinConsumerHealth):
                 group_id=self._config.group_id,
                 auto_offset_reset=self._config.auto_offset_reset,
                 enable_auto_commit=False,  # Manual commits for at-least-once
-                max_poll_records=self._config.max_poll_records,
                 session_timeout_ms=self._config.session_timeout_ms,
                 heartbeat_interval_ms=self._config.heartbeat_interval_ms,
+                max_poll_interval_ms=self._config.max_poll_interval_ms,
+                max_poll_records=self._config.max_poll_records,
             )
 
             await self._consumer.start()

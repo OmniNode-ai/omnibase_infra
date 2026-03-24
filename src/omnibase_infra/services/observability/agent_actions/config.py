@@ -17,7 +17,14 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_OMNICLAUDE_AGENT_ACTIONS,
     SUFFIX_OMNICLAUDE_AGENT_ACTIONS_DLQ,
+    SUFFIX_OMNICLAUDE_AGENT_EXECUTION_LOGS,
+    SUFFIX_OMNICLAUDE_AGENT_STATUS,
+    SUFFIX_OMNICLAUDE_AGENT_TRANSFORMATION,
+    SUFFIX_OMNICLAUDE_DETECTION_FAILURE,
+    SUFFIX_OMNICLAUDE_PERFORMANCE_METRICS,
+    SUFFIX_OMNICLAUDE_ROUTING_DECISION,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,15 +64,16 @@ class ConfigAgentActionsConsumer(BaseSettings):
     # Topics to subscribe (7 observability topics)
     # NOTE: All omniclaude-produced topics use canonical ONEX names (OMN-2621, OMN-2902, OMN-2903).
     # "onex.evt.omniclaude.agent-status.v1" renamed from "onex.evt.agent.status.v1" (OMN-2846).
+    # Use platform_topic_suffixes constants for OMN-3343 topic literal enforcement.
     topics: list[str] = Field(
         default_factory=lambda: [
-            "onex.evt.omniclaude.agent-actions.v1",
-            "onex.evt.omniclaude.routing-decision.v1",
-            "onex.evt.omniclaude.agent-transformation.v1",
-            "onex.evt.omniclaude.performance-metrics.v1",
-            "onex.evt.omniclaude.detection-failure.v1",
-            "onex.evt.omniclaude.agent-execution-logs.v1",  # omniclaude TopicBase.EXECUTION_LOGS (OMN-2902)
-            "onex.evt.omniclaude.agent-status.v1",  # omniclaude TopicBase.AGENT_STATUS (OMN-2846, OMN-2903)
+            SUFFIX_OMNICLAUDE_AGENT_ACTIONS,
+            SUFFIX_OMNICLAUDE_ROUTING_DECISION,
+            SUFFIX_OMNICLAUDE_AGENT_TRANSFORMATION,
+            SUFFIX_OMNICLAUDE_PERFORMANCE_METRICS,
+            SUFFIX_OMNICLAUDE_DETECTION_FAILURE,
+            SUFFIX_OMNICLAUDE_AGENT_EXECUTION_LOGS,
+            SUFFIX_OMNICLAUDE_AGENT_STATUS,
         ],
         description="Kafka topics to consume for agent observability",
     )
@@ -80,24 +88,24 @@ class ConfigAgentActionsConsumer(BaseSettings):
         description="Disable auto-commit for at-least-once delivery",
     )
 
-    # Session timeout (OMN-5445)
+    # Session timeout tuning — prevents rebalance storms during brief processing delays
     session_timeout_ms: int = Field(
-        default=30000,
+        default=45000,
         ge=6000,
         le=300000,
-        description=(
-            "Session timeout in milliseconds. Default raised from aiokafka's 10s "
-            "to 30s to prevent rebalance storms."
-        ),
+        description="Kafka session timeout in ms. Default 45s prevents rebalance storms.",
     )
     heartbeat_interval_ms: int = Field(
-        default=10000,
+        default=15000,
         ge=1000,
-        le=100000,
-        description=(
-            "Heartbeat interval in milliseconds. "
-            "Kafka recommends <= session_timeout_ms / 3."
-        ),
+        le=60000,
+        description="Kafka heartbeat interval in ms. Should be ~1/3 of session_timeout_ms.",
+    )
+    max_poll_interval_ms: int = Field(
+        default=300000,
+        ge=10000,
+        le=600000,
+        description="Max time between poll() calls in ms before consumer eviction. Default 5 min.",
     )
 
     # PostgreSQL connection
@@ -244,6 +252,21 @@ class ConfigAgentActionsConsumer(BaseSettings):
             "Configure via OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_DLQ_MIN_MESSAGES env var."
         ),
     )
+
+    @model_validator(mode="after")
+    def validate_session_timeout_ratio(self) -> Self:
+        """Validate heartbeat < session_timeout and max_poll >= session_timeout."""
+        if self.heartbeat_interval_ms >= self.session_timeout_ms:
+            raise ValueError(
+                f"heartbeat_interval_ms ({self.heartbeat_interval_ms}) must be "
+                f"< session_timeout_ms ({self.session_timeout_ms})"
+            )
+        if self.max_poll_interval_ms < self.session_timeout_ms:
+            raise ValueError(
+                f"max_poll_interval_ms ({self.max_poll_interval_ms}) must be "
+                f">= session_timeout_ms ({self.session_timeout_ms})"
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_topic_configuration(self) -> Self:

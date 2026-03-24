@@ -185,6 +185,18 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Accepted Pattern Exceptions - EventBusKafka Complexity)
     ticket: OMN-1305
+  # ModelKafkaEventBusConfig method count exemption
+  # Config model with multiple cross-field validators: reconnect_backoff, session_timeout_ratio,
+  # auth_config, plus factory methods (default, from_yaml_file, from_yaml_content) and
+  # env override methods. All validators operate on the same config fields.
+  - file_pattern: 'model_kafka_event_bus_config\.py'
+    class_pattern: "Class 'ModelKafkaEventBusConfig'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Kafka config model requires cross-field validators (reconnect_backoff, session_timeout_ratio, auth_config), factory methods (default, from_yaml_file, from_yaml_content), and env override support. All methods operate on the same configuration namespace. Splitting would fragment validation logic.
+
+    documentation:
+      - CLAUDE.md (Kafka Event Bus Configuration)
   # ==========================================================================
   # PostgresRepositoryRuntime Exemptions (OMN-1783)
   # ==========================================================================
