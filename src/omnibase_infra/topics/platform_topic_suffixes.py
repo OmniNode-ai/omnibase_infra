@@ -532,6 +532,16 @@ Producer: NodeRuntimeErrorTriageEffect
 Consumer: omnidash /runtime-errors dashboard (OMN-5654)
 """
 
+SUFFIX_RUNNER_HEALTH_SNAPSHOT: str = "onex.evt.omnibase-infra.runner-health-snapshot.v1"
+"""Topic suffix for runner health snapshot events (OMN-6082).
+
+Published by the runner health CLI (cli_runner_health.py) every collection
+cycle. Each event carries a ``ModelRunnerHealthSnapshot`` payload.
+
+Producer: cli_runner_health.py (cron-scheduled)
+Consumer: omnidash (future)
+"""
+
 # =============================================================================
 # OMNIBASE_INFRA DOMAIN TOPIC SPEC REGISTRY
 # =============================================================================
@@ -597,12 +607,18 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
             "cleanup.policy": "delete",
         },  # 7 days
     ),
+    # Runner health snapshot events (1 partition — low-throughput, OMN-6082)
+    ModelTopicSpec(
+        suffix=SUFFIX_RUNNER_HEALTH_SNAPSHOT,
+        partitions=1,
+        kafka_config={},
+    ),
 )
 """Omnibase_infra domain topic specs for internal effect nodes.
 
-Covers gmail cleanup events and PostgreSQL error events. Topics are
-provisioned so the correct broker topic name exists even if no consumer
-is registered yet.
+Covers gmail cleanup events, PostgreSQL error events, and runner health
+snapshots. Topics are provisioned so the correct broker topic name exists
+even if no consumer is registered yet.
 """
 
 # =============================================================================
