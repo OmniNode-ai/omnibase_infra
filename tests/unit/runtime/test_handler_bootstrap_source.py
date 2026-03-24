@@ -280,8 +280,8 @@ class TestHandlerBootstrapSourceDiscovery:
         result = await source.discover_handlers()
 
         expected_paths = {
-            "proto.db": "src/omnibase_infra/contracts/handlers/db/contract.yaml",
-            "proto.http": "src/omnibase_infra/contracts/handlers/http/contract.yaml",
+            "proto.db": "src/omnibase_infra/contracts/handlers/db/handler_contract.yaml",
+            "proto.http": "src/omnibase_infra/contracts/handlers/http/handler_contract.yaml",
             "proto.mcp": "src/omnibase_infra/contracts/handlers/mcp/handler_contract.yaml",
         }
 

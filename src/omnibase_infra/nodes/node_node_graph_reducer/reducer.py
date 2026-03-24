@@ -9,9 +9,10 @@ all state is passed in and returned. No self.current_state tracking.
 FSM Transitions:
     initializing -> wiring      (trigger: registry_ready)
     wiring       -> running     (trigger: wiring_complete)
-    running      -> draining    (trigger: drain_requested)
+    running      -> draining    (trigger: shutdown_requested)
     draining     -> stopped     (trigger: drain_complete)
-    ANY          -> stopped     (trigger: fatal_error) -- wildcard
+    ANY          -> stopped     (trigger: fatal_error)  -- wildcard
+    ANY          -> stopped     (trigger: timeout)      -- wildcard
 
 Ticket: OMN-6349
 """
@@ -31,13 +32,14 @@ logger = logging.getLogger(__name__)
 _TRANSITIONS: dict[tuple[str, str], str] = {
     ("initializing", "registry_ready"): "wiring",
     ("wiring", "wiring_complete"): "running",
-    ("running", "drain_requested"): "draining",
+    ("running", "shutdown_requested"): "draining",
     ("draining", "drain_complete"): "stopped",
 }
 
 # Wildcard transitions: event_type -> next_state (from any state)
 _WILDCARD_TRANSITIONS: dict[str, str] = {
     "fatal_error": "stopped",
+    "timeout": "stopped",
 }
 
 

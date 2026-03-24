@@ -48,7 +48,7 @@ def test_catalog_generates_and_starts_core_bundle() -> None:
     )
     assert result.returncode == 0, f"Generate failed: {result.stderr}"
 
-    # Start
+    # Start -- wrap in try/finally immediately to ensure cleanup
     result = subprocess.run(
         [
             "docker",
@@ -63,9 +63,10 @@ def test_catalog_generates_and_starts_core_bundle() -> None:
         cwd=REPO_ROOT,
         check=False,
     )
-    assert result.returncode == 0, f"Start failed: {result.stderr}"
 
     try:
+        assert result.returncode == 0, f"Start failed: {result.stderr}"
+
         # Health check postgres
         result = subprocess.run(
             [

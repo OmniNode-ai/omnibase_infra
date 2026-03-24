@@ -3,12 +3,14 @@
 # Source: omnibase_core/contracts/runtime/node_graph_reducer.yaml
 node_type: REDUCER_GENERIC
 name: node_node_graph_reducer
+node_version: {major: 1, minor: 1, patch: 0}
+description: Node graph lifecycle reducer using FSM pattern for ONEX runtime self-hosting
 input_model:
-  name: ModelRuntimeContractConfig
-  module: omnibase_infra.runtime.models.model_runtime_contract_config
+  name: ModelNodeGraphState
+  module: omnibase_infra.nodes.node_node_graph_reducer.models.model_node_graph_state
 output_model:
-  name: ModelRuntimeContractConfig
-  module: omnibase_infra.runtime.models.model_runtime_contract_config
+  name: ModelNodeGraphState
+  module: omnibase_infra.nodes.node_node_graph_reducer.models.model_node_graph_state
 contract_version: {major: 1, minor: 1, patch: 0}
 # Fingerprint: SHA-256 hash of canonical normalized contract content (excluding fingerprint field).
 # See docs/architecture/CONTRACT_STABILITY_SPEC.md for normalization specification.

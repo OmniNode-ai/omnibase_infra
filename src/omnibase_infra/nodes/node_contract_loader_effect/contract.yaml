@@ -4,6 +4,8 @@
 # Contract Metadata
 node_type: EFFECT_GENERIC
 name: node_contract_loader_effect
+node_version: {major: 1, minor: 1, patch: 0}
+description: Contract loader effect node for scanning and discovering ONEX contract YAML files from the filesystem
 input_model:
   name: ModelRuntimeContractConfig
   module: omnibase_infra.runtime.models.model_runtime_contract_config

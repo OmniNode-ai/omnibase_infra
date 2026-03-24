@@ -679,7 +679,18 @@ async def bootstrap() -> int:
         # are operator overrides on top. The node_graph_config is passed to
         # RuntimeHostProcess and other components that previously used DEFAULT_*
         # constants.
-        node_graph_config = _load_node_graph_config()
+        try:
+            node_graph_config = _load_node_graph_config()
+        except (FileNotFoundError, ValueError) as exc:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                operation="load_node_graph_config",
+                target_name=str(contracts_dir),
+            )
+            raise ProtocolConfigurationError(
+                f"Failed to load runtime node graph config: {exc}",
+                context=context,
+            ) from exc
         logger.debug(
             "Runtime contract config loaded: startup_timeout=%dms, step_timeout=%dms "
             "(correlation_id=%s)",

@@ -238,6 +238,9 @@ class RuntimeContractConfigLoader:
         contract_paths: list[Path] = []
 
         for search_path in search_paths:
+            # Validate search path against deny list
+            self.validate_path(search_path)
+
             if not search_path.exists():
                 logger.warning(
                     "Search path does not exist, skipping: %s",
@@ -259,7 +262,42 @@ class RuntimeContractConfigLoader:
                 len(found),
                 search_path,
             )
-            contract_paths.extend(found)
+
+            # Filter out excluded patterns and denied paths
+            filtered: list[Path] = []
+            for p in found:
+                # Check deny paths
+                path_str = str(p)
+                denied = False
+                for deny in self._scan_deny_paths:
+                    if deny in path_str:
+                        logger.debug("Denied path skipped: %s (pattern: %s)", p, deny)
+                        denied = True
+                        break
+                if denied:
+                    continue
+
+                # Check exclude patterns
+                excluded = False
+                for pattern in self._scan_exclude_patterns:
+                    if p.match(pattern):
+                        logger.debug(
+                            "Excluded path skipped: %s (pattern: %s)", p, pattern
+                        )
+                        excluded = True
+                        break
+                if excluded:
+                    continue
+
+                filtered.append(p)
+
+            logger.debug(
+                "After filtering: %d of %d contract.yaml files in %s",
+                len(filtered),
+                len(found),
+                search_path,
+            )
+            contract_paths.extend(filtered)
 
         # Sort for deterministic ordering
         return sorted(contract_paths)

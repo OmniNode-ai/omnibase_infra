@@ -808,13 +808,14 @@ class RuntimeHostProcess:
                 timeout_value = float(_timeout_raw)
             except ValueError:
                 logger.warning(
-                    "Invalid health_check_timeout_seconds string value, using default",
+                    "Invalid health_check_timeout_seconds string value, "
+                    "using contract baseline",
                     extra={
                         "invalid_value": _timeout_raw,
-                        "default_value": DEFAULT_HEALTH_CHECK_TIMEOUT,
+                        "baseline_value": timeout_value,
                     },
                 )
-                timeout_value = DEFAULT_HEALTH_CHECK_TIMEOUT
+                # timeout_value retains the contract baseline (not DEFAULT_*)
 
         # Validate bounds and clamp if necessary
         if (
@@ -856,13 +857,14 @@ class RuntimeHostProcess:
                 drain_timeout_value = float(_drain_timeout_raw)
             except ValueError:
                 logger.warning(
-                    "Invalid drain_timeout_seconds string value, using default",
+                    "Invalid drain_timeout_seconds string value, "
+                    "using contract baseline",
                     extra={
                         "invalid_value": _drain_timeout_raw,
-                        "default_value": DEFAULT_DRAIN_TIMEOUT_SECONDS,
+                        "baseline_value": drain_timeout_value,
                     },
                 )
-                drain_timeout_value = DEFAULT_DRAIN_TIMEOUT_SECONDS
+                # drain_timeout_value retains the contract baseline (not DEFAULT_*)
 
         # Validate drain timeout bounds and clamp if necessary
         if (
@@ -3325,9 +3327,16 @@ class RuntimeHostProcess:
             )
             return
 
-        # Create loader - no namespace restrictions by default
-        # (namespace allowlisting can be added via constructor parameter if needed)
-        loader = RuntimeContractConfigLoader()
+        # Create loader with scan policies from runtime node graph config
+        exclude_patterns: tuple[str, ...] = ()
+        deny_paths: tuple[str, ...] = ()
+        if self._runtime_node_graph_config is not None:
+            exclude_patterns = self._runtime_node_graph_config.scan_exclude_patterns
+            deny_paths = self._runtime_node_graph_config.scan_deny_paths
+        loader = RuntimeContractConfigLoader(
+            scan_exclude_patterns=exclude_patterns,
+            scan_deny_paths=deny_paths,
+        )
 
         # Load all contracts from configured paths
         self._contract_config = loader.load_all_contracts(

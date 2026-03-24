@@ -139,7 +139,7 @@ class ModelRuntimeNodeGraphConfig(BaseModel):
         """
         # Load all contracts
         orchestrator = cls._load_yaml(contracts_dir / "runtime_orchestrator.yaml")
-        _node_graph = cls._load_yaml(contracts_dir / "node_graph_reducer.yaml")
+        node_graph = cls._load_yaml(contracts_dir / "node_graph_reducer.yaml")
         event_bus = cls._load_yaml(contracts_dir / "event_bus_wiring_effect.yaml")
         contract_loader = cls._load_yaml(contracts_dir / "contract_loader_effect.yaml")
 
@@ -167,19 +167,32 @@ class ModelRuntimeNodeGraphConfig(BaseModel):
         )
 
         # Extract from lifecycle section (runtime_orchestrator.yaml)
-        # and node_graph operational defaults
+        # and node_graph_reducer.yaml operational defaults
+        node_graph_ops = _get_dict(node_graph, "operational_defaults")
         drain_timeout_ms = _env_override_int(
             "drain_timeout_ms",
             _get_int(lifecycle, "graceful_shutdown_timeout_ms", 60000),
         )
-        max_concurrent_handlers = _env_override_int("max_concurrent_handlers", 10)
-        handler_pool_size = _env_override_int("handler_pool_size", 4)
+        max_concurrent_handlers = _env_override_int(
+            "max_concurrent_handlers",
+            _get_int(node_graph_ops, "max_concurrent_handlers", 10),
+        )
+        handler_pool_size = _env_override_int(
+            "handler_pool_size",
+            _get_int(node_graph_ops, "handler_pool_size", 4),
+        )
         health_check_timeout_ms = _env_override_int(
             "health_check_timeout_ms",
             _get_int(lifecycle, "health_check_interval_ms", 30000),
         )
-        batch_response_size = _env_override_int("batch_response_size", 100)
-        batch_flush_interval_ms = _env_override_int("batch_flush_interval_ms", 500)
+        batch_response_size = _env_override_int(
+            "batch_response_size",
+            _get_int(node_graph_ops, "batch_response_size", 100),
+        )
+        batch_flush_interval_ms = _env_override_int(
+            "batch_flush_interval_ms",
+            _get_int(node_graph_ops, "batch_flush_interval_ms", 500),
+        )
 
         # Extract from event_bus_wiring_effect.yaml
         wiring_config = _get_dict(event_bus, "wiring_config")

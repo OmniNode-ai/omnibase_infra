@@ -4,6 +4,8 @@
 # Contract Metadata
 node_type: ORCHESTRATOR_GENERIC
 name: node_runtime_orchestrator
+node_version: {major: 1, minor: 1, patch: 0}
+description: Self-hosted ONEX runtime orchestrator using 4-node architecture
 input_model:
   name: ModelRuntimeContractConfig
   module: omnibase_infra.runtime.models.model_runtime_contract_config
