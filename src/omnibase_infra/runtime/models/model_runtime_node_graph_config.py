@@ -21,6 +21,8 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.types import JsonType
+
 
 def _env_override_int(field_name: str, contract_value: int) -> int:
     """Check for ONEX_RUNTIME_{FIELD_NAME} env var override."""
@@ -40,15 +42,38 @@ def _env_override_float(field_name: str, contract_value: float) -> float:
     return contract_value
 
 
-def _deep_get(data: dict, path: str, default: object = None) -> object:
-    """Get a nested value from a dict by dot-separated path."""
-    keys = path.split(".")
-    current: object = data
-    for key in keys:
-        if not isinstance(current, dict):
-            return default
-        current = current.get(key, default)  # type: ignore[union-attr]
-    return current
+def _get_dict(data: dict[str, JsonType], key: str) -> dict[str, JsonType]:
+    """Get a nested dict, returning empty dict if missing or wrong type."""
+    val = data.get(key)
+    if isinstance(val, dict):
+        return val
+    return {}
+
+
+def _get_int(data: dict[str, JsonType], key: str, default: int) -> int:
+    """Get an int value from a dict, returning default if missing."""
+    val = data.get(key, default)
+    return int(val)  # type: ignore[arg-type]
+
+
+def _get_float(data: dict[str, JsonType], key: str, default: float) -> float:
+    """Get a float value from a dict, returning default if missing."""
+    val = data.get(key, default)
+    return float(val)  # type: ignore[arg-type]
+
+
+def _get_str(data: dict[str, JsonType], key: str, default: str) -> str:
+    """Get a str value from a dict, returning default if missing."""
+    val = data.get(key, default)
+    return str(val)
+
+
+def _get_list(data: dict[str, JsonType], key: str) -> list[JsonType]:
+    """Get a list value from a dict, returning empty list if missing."""
+    val = data.get(key)
+    if isinstance(val, list):
+        return val
+    return []
 
 
 class ModelRuntimeNodeGraphConfig(BaseModel):
@@ -69,8 +94,7 @@ class ModelRuntimeNodeGraphConfig(BaseModel):
     retry_backoff_ms: int = Field(..., description="Initial retry backoff")
     retry_backoff_multiplier: float = Field(..., description="Retry multiplier")
 
-    # From node_graph_reducer.yaml (no metadata.defaults section exists,
-    # so these use sensible defaults matching the old DEFAULT_* constants)
+    # From node_graph_reducer.yaml (operational defaults matching old DEFAULT_* constants)
     drain_timeout_ms: int = Field(..., description="Graceful drain timeout")
     max_concurrent_handlers: int = Field(..., description="Max concurrent handlers")
     handler_pool_size: int = Field(..., description="Handler pool size")
@@ -115,121 +139,117 @@ class ModelRuntimeNodeGraphConfig(BaseModel):
         """
         # Load all contracts
         orchestrator = cls._load_yaml(contracts_dir / "runtime_orchestrator.yaml")
-        node_graph = cls._load_yaml(contracts_dir / "node_graph_reducer.yaml")
+        _node_graph = cls._load_yaml(contracts_dir / "node_graph_reducer.yaml")
         event_bus = cls._load_yaml(contracts_dir / "event_bus_wiring_effect.yaml")
         contract_loader = cls._load_yaml(contracts_dir / "contract_loader_effect.yaml")
 
         # Extract from runtime_orchestrator.yaml
-        coord = orchestrator.get("workflow_coordination", {})
-        coord_def = coord.get("workflow_definition", {})
-        coord_rules = coord_def.get("coordination_rules", {})
+        coord = _get_dict(orchestrator, "workflow_coordination")
+        coord_def = _get_dict(coord, "workflow_definition")
+        coord_rules = _get_dict(coord_def, "coordination_rules")
+        lifecycle = _get_dict(coord, "lifecycle")
 
         startup_timeout_ms = _env_override_int(
-            "startup_timeout_ms",
-            int(_deep_get(coord_rules, "timeout_ms", 120000)),  # type: ignore[arg-type]
+            "startup_timeout_ms", _get_int(coord_rules, "timeout_ms", 120000)
         )
         step_timeout_ms = _env_override_int(
-            "step_timeout_ms",
-            int(_deep_get(coord_rules, "step_timeout_ms", 30000)),  # type: ignore[arg-type]
+            "step_timeout_ms", _get_int(coord_rules, "step_timeout_ms", 30000)
         )
         max_step_retries = _env_override_int(
-            "max_step_retries",
-            int(_deep_get(coord_rules, "max_retries", 3)),  # type: ignore[arg-type]
+            "max_step_retries", _get_int(coord_rules, "max_retries", 3)
         )
         retry_backoff_ms = _env_override_int(
-            "retry_backoff_ms",
-            int(_deep_get(coord_rules, "retry_backoff_ms", 2000)),  # type: ignore[arg-type]
+            "retry_backoff_ms", _get_int(coord_rules, "retry_backoff_ms", 2000)
         )
         retry_backoff_multiplier = _env_override_float(
             "retry_backoff_multiplier",
-            float(
-                _deep_get(coord_rules, "retry_backoff_multiplier", 2.0)  # type: ignore[arg-type]
-            ),
+            _get_float(coord_rules, "retry_backoff_multiplier", 2.0),
         )
 
-        # Extract from node_graph_reducer.yaml
-        # The node_graph contract defines FSM states but not operational defaults.
-        # These values match the old DEFAULT_* constants from service_runtime_host_process.py.
-        # The lifecycle section has graceful_shutdown_timeout_ms which maps to drain_timeout.
-        lifecycle = coord.get("lifecycle", {})
-        graceful_shutdown_ms = int(lifecycle.get("graceful_shutdown_timeout_ms", 60000))
-
-        drain_timeout_ms = _env_override_int("drain_timeout_ms", graceful_shutdown_ms)
+        # Extract from lifecycle section (runtime_orchestrator.yaml)
+        # and node_graph operational defaults
+        drain_timeout_ms = _env_override_int(
+            "drain_timeout_ms",
+            _get_int(lifecycle, "graceful_shutdown_timeout_ms", 60000),
+        )
         max_concurrent_handlers = _env_override_int("max_concurrent_handlers", 10)
         handler_pool_size = _env_override_int("handler_pool_size", 4)
         health_check_timeout_ms = _env_override_int(
             "health_check_timeout_ms",
-            int(lifecycle.get("health_check_interval_ms", 30000)),
+            _get_int(lifecycle, "health_check_interval_ms", 30000),
         )
         batch_response_size = _env_override_int("batch_response_size", 100)
         batch_flush_interval_ms = _env_override_int("batch_flush_interval_ms", 500)
 
         # Extract from event_bus_wiring_effect.yaml
-        wiring_config = event_bus.get("wiring_config", {})
-        topic_validation = wiring_config.get("topic_validation", {})
-        effect = event_bus.get("effect", {})
-        retry_policy = effect.get("retry_policy", {})
-        circuit_breaker = effect.get("circuit_breaker", {})
+        wiring_config = _get_dict(event_bus, "wiring_config")
+        topic_validation = _get_dict(wiring_config, "topic_validation")
+        effect = _get_dict(event_bus, "effect")
+        retry_policy = _get_dict(effect, "retry_policy")
+        circuit_breaker = _get_dict(effect, "circuit_breaker")
 
-        topic_validation_pattern = str(
-            topic_validation.get(
-                "allowed_pattern", r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,254}$"
-            )
+        topic_validation_pattern = _get_str(
+            topic_validation,
+            "allowed_pattern",
+            r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,254}$",
         )
-        topic_deny_patterns = tuple(topic_validation.get("deny_patterns", []))
+        deny_patterns_raw = _get_list(topic_validation, "deny_patterns")
+        topic_deny_patterns = tuple(str(p) for p in deny_patterns_raw)
+
         max_topic_length = _env_override_int(
             "max_topic_length",
-            int(topic_validation.get("max_topic_length", 255)),
+            _get_int(topic_validation, "max_topic_length", 255),
         )
         max_subscriptions_per_node = _env_override_int(
             "max_subscriptions_per_node",
-            int(topic_validation.get("max_subscriptions_per_node", 100)),
+            _get_int(topic_validation, "max_subscriptions_per_node", 100),
         )
         subscription_timeout_ms = _env_override_int(
             "subscription_timeout_ms",
-            int(wiring_config.get("subscription_timeout_ms", 5000)),
+            _get_int(wiring_config, "subscription_timeout_ms", 5000),
         )
         circuit_breaker_failure_threshold = _env_override_int(
             "circuit_breaker_failure_threshold",
-            int(circuit_breaker.get("failure_threshold", 5)),
+            _get_int(circuit_breaker, "failure_threshold", 5),
         )
         circuit_breaker_timeout_ms = _env_override_int(
             "circuit_breaker_timeout_ms",
-            int(circuit_breaker.get("timeout_ms", 30000)),
+            _get_int(circuit_breaker, "timeout_ms", 30000),
         )
         wiring_retry_max = _env_override_int(
-            "wiring_retry_max",
-            int(retry_policy.get("max_retries", 3)),
+            "wiring_retry_max", _get_int(retry_policy, "max_retries", 3)
         )
         wiring_retry_base_delay_ms = _env_override_int(
             "wiring_retry_base_delay_ms",
-            int(retry_policy.get("base_delay_ms", 1000)),
+            _get_int(retry_policy, "base_delay_ms", 1000),
         )
         wiring_retry_max_delay_ms = _env_override_int(
             "wiring_retry_max_delay_ms",
-            int(retry_policy.get("max_delay_ms", 10000)),
+            _get_int(retry_policy, "max_delay_ms", 10000),
         )
 
         # Extract from contract_loader_effect.yaml
-        effect_ops = contract_loader.get("effect_operations", {})
-        operations = effect_ops.get("operations", [])
-        scan_op = next(
-            (
-                op
-                for op in operations
-                if op.get("operation_name") == "scan_contracts_directory"
-            ),
-            {},
-        )
-        scan_metadata = scan_op.get("metadata", {})
-        scan_security = scan_op.get("io_config", {}).get("security", {})
-        path_validation = scan_security.get("path_validation", {})
+        effect_ops = _get_dict(contract_loader, "effect_operations")
+        operations = _get_list(effect_ops, "operations")
+        scan_op: dict[str, JsonType] = {}
+        for op in operations:
+            if (
+                isinstance(op, dict)
+                and op.get("operation_name") == "scan_contracts_directory"
+            ):
+                scan_op = op
+                break
+        scan_metadata = _get_dict(scan_op, "metadata")
+        io_config = _get_dict(scan_op, "io_config")
+        scan_security = _get_dict(io_config, "security")
+        path_validation = _get_dict(scan_security, "path_validation")
 
-        scan_exclude_patterns = tuple(scan_metadata.get("exclude_patterns", []))
-        scan_deny_paths = tuple(path_validation.get("deny_patterns", []))
+        exclude_raw = _get_list(scan_metadata, "exclude_patterns")
+        scan_exclude_patterns = tuple(str(p) for p in exclude_raw)
+        deny_raw = _get_list(path_validation, "deny_patterns")
+        scan_deny_paths = tuple(str(p) for p in deny_raw)
         scan_timeout_ms = _env_override_int(
-            "scan_timeout_ms",
-            int(scan_op.get("operation_timeout_ms", 60000)),
+            "scan_timeout_ms", _get_int(scan_op, "operation_timeout_ms", 60000)
         )
 
         return cls(
@@ -260,7 +280,7 @@ class ModelRuntimeNodeGraphConfig(BaseModel):
         )
 
     @staticmethod
-    def _load_yaml(path: Path) -> dict:
+    def _load_yaml(path: Path) -> dict[str, JsonType]:
         """Load a YAML file, raising FileNotFoundError if missing."""
         if not path.exists():
             raise FileNotFoundError(f"Runtime contract not found: {path}")
@@ -269,4 +289,4 @@ class ModelRuntimeNodeGraphConfig(BaseModel):
         if not isinstance(data, dict):
             msg = f"Expected dict in {path}, got {type(data).__name__}"
             raise ValueError(msg)
-        return data
+        return data  # type: ignore[return-value]
