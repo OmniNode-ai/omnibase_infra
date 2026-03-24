@@ -45,7 +45,7 @@ class HandlerContractScan:
 
         loader = RuntimeContractConfigLoader()
         # Use provided paths or default scan behavior
-        results = loader.discover_contracts(scan_paths or [])
+        results = loader.load_all_contracts(scan_paths or [])
         logger.info(
             "Contract scan complete: %d contracts discovered",
             len(results),
