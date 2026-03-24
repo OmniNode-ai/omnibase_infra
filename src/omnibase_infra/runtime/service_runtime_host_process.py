@@ -151,6 +151,9 @@ if TYPE_CHECKING:
     from omnibase_infra.runtime.contract_handler_discovery import (
         ContractHandlerDiscovery,
     )
+    from omnibase_infra.runtime.models.model_runtime_node_graph_config import (
+        ModelRuntimeNodeGraphConfig,
+    )
     from omnibase_infra.runtime.service_message_dispatch_engine import (
         MessageDispatchEngine,
     )
@@ -518,6 +521,7 @@ class RuntimeHostProcess:
         introspection_service: ProtocolNodeIntrospection | None = None,
         introspection_config: ModelRuntimeIntrospectionConfig | None = None,
         dispatch_engine: MessageDispatchEngine | None = None,
+        runtime_node_graph_config: ModelRuntimeNodeGraphConfig | None = None,
     ) -> None:
         """Initialize the runtime host process.
 
@@ -713,6 +717,10 @@ class RuntimeHostProcess:
         """
         # Store container reference for dependency resolution
         self._container: ModelONEXContainer | None = container
+        # Contract-driven config (OMN-6343): when provided, sources defaults
+        # from runtime contract YAMLs instead of module-level DEFAULT_* constants.
+        # Env-var override layer is handled by ModelRuntimeNodeGraphConfig.from_contracts_dir().
+        self._runtime_node_graph_config = runtime_node_graph_config
         # Handler registry (container-based DI or singleton fallback)
         self._handler_registry: RegistryProtocolBinding | None = handler_registry
 
@@ -788,7 +796,11 @@ class RuntimeHostProcess:
         # Default: 5.0 seconds, valid range: 1-60 seconds per ModelLifecycleSubcontract
         # Values outside bounds are clamped with a warning
         _timeout_raw = config.get("health_check_timeout_seconds")
-        timeout_value: float = DEFAULT_HEALTH_CHECK_TIMEOUT
+        timeout_value: float = (
+            runtime_node_graph_config.health_check_timeout_ms / 1000.0
+            if runtime_node_graph_config is not None
+            else DEFAULT_HEALTH_CHECK_TIMEOUT
+        )
         if isinstance(_timeout_raw, int | float):
             timeout_value = float(_timeout_raw)
         elif isinstance(_timeout_raw, str):
@@ -832,7 +844,11 @@ class RuntimeHostProcess:
         # Default: 30.0 seconds, valid range: 1-300 seconds
         # Values outside bounds are clamped with a warning
         _drain_timeout_raw = config.get("drain_timeout_seconds")
-        drain_timeout_value: float = DEFAULT_DRAIN_TIMEOUT_SECONDS
+        drain_timeout_value: float = (
+            runtime_node_graph_config.drain_timeout_ms / 1000.0
+            if runtime_node_graph_config is not None
+            else DEFAULT_DRAIN_TIMEOUT_SECONDS
+        )
         if isinstance(_drain_timeout_raw, int | float):
             drain_timeout_value = float(_drain_timeout_raw)
         elif isinstance(_drain_timeout_raw, str):
@@ -876,7 +892,11 @@ class RuntimeHostProcess:
         # Controls max number of envelopes processed concurrently.
         # Default: 1 (sequential, backwards compatible with MVP behavior).
         _max_concurrent_raw = config.get("max_concurrent_handlers")
-        max_concurrent_value: int = DEFAULT_MAX_CONCURRENT_HANDLERS
+        max_concurrent_value: int = (
+            runtime_node_graph_config.max_concurrent_handlers
+            if runtime_node_graph_config is not None
+            else DEFAULT_MAX_CONCURRENT_HANDLERS
+        )
         if isinstance(_max_concurrent_raw, int):
             max_concurrent_value = _max_concurrent_raw
         elif isinstance(_max_concurrent_raw, str):
@@ -933,7 +953,11 @@ class RuntimeHostProcess:
         # When > 1, creates a pool of handler instances per handler type
         # to eliminate contention under parallel execution.
         _pool_size_raw = config.get("handler_pool_size")
-        pool_size_value: int = DEFAULT_HANDLER_POOL_SIZE
+        pool_size_value: int = (
+            runtime_node_graph_config.handler_pool_size
+            if runtime_node_graph_config is not None
+            else DEFAULT_HANDLER_POOL_SIZE
+        )
         if isinstance(_pool_size_raw, int):
             pool_size_value = _pool_size_raw
         elif isinstance(_pool_size_raw, str):
@@ -1108,7 +1132,11 @@ class RuntimeHostProcess:
 
         if batch_enabled:
             _batch_size_raw = config.get("batch_response_size")
-            batch_size = DEFAULT_BATCH_RESPONSE_SIZE
+            batch_size = (
+                runtime_node_graph_config.batch_response_size
+                if runtime_node_graph_config is not None
+                else DEFAULT_BATCH_RESPONSE_SIZE
+            )
             if isinstance(_batch_size_raw, int):
                 batch_size = _batch_size_raw
             elif isinstance(_batch_size_raw, str):
@@ -1124,7 +1152,11 @@ class RuntimeHostProcess:
                     )
 
             _flush_interval_raw = config.get("batch_flush_interval_ms")
-            flush_interval_ms = DEFAULT_BATCH_FLUSH_INTERVAL_MS
+            flush_interval_ms: float = (
+                float(runtime_node_graph_config.batch_flush_interval_ms)
+                if runtime_node_graph_config is not None
+                else DEFAULT_BATCH_FLUSH_INTERVAL_MS
+            )
             if isinstance(_flush_interval_raw, (int, float)):
                 flush_interval_ms = float(_flush_interval_raw)
             elif isinstance(_flush_interval_raw, str):
