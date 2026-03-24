@@ -850,6 +850,27 @@ DLQ contract explicit and auditable via the provisioning registry.
 """
 
 # =============================================================================
+# OMNICLAUDE AGENT OBSERVABILITY TOPIC SUFFIXES (OMN-6066..OMN-6072, OMN-3343)
+# =============================================================================
+# Live observability event topics consumed by ServiceAgentActionsConsumer and
+# ServiceSkillLifecycleConsumer in omnibase_infra. These topics are produced by
+# omniclaude agent hooks and the skill dispatch pipeline.
+#
+# Partitions: 3 each — matches the throughput of the agent-actions consumer.
+# Provisioned to guarantee broker topic existence when auto-creation is disabled.
+
+_OMNICLAUDE_AGENT_OBSERVABILITY_TOPIC_SUFFIXES: tuple[str, ...] = (
+    SUFFIX_OMNICLAUDE_AGENT_ACTIONS,
+    SUFFIX_OMNICLAUDE_ROUTING_DECISION,
+    SUFFIX_OMNICLAUDE_AGENT_TRANSFORMATION,
+    SUFFIX_OMNICLAUDE_PERFORMANCE_METRICS,
+    SUFFIX_OMNICLAUDE_DETECTION_FAILURE,
+    SUFFIX_OMNICLAUDE_AGENT_EXECUTION_LOGS,
+    SUFFIX_OMNICLAUDE_AGENT_STATUS,
+)
+"""Agent observability topic suffixes consumed by ServiceAgentActionsConsumer."""
+
+# =============================================================================
 # OMNICLAUDE CONTEXT AUDIT TOPIC SUFFIXES (OMN-5240)
 # =============================================================================
 # Context integrity audit event topics produced by the omniclaude context
@@ -1372,6 +1393,11 @@ ALL_OMNICLAUDE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     *tuple(
         ModelTopicSpec(suffix=suffix, partitions=3)
         for suffix in _OMNICLAUDE_CONTEXT_AUDIT_TOPIC_SUFFIXES
+    ),
+    # Agent observability topics (3 partitions -- OMN-6066..OMN-6072 live event topics)
+    *tuple(
+        ModelTopicSpec(suffix=suffix, partitions=3)
+        for suffix in _OMNICLAUDE_AGENT_OBSERVABILITY_TOPIC_SUFFIXES
     ),
 )
 """OmniClaude topic specs provisioned for skill orchestrator nodes and observability.

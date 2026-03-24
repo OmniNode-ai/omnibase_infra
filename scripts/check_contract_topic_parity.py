@@ -268,6 +268,17 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omniclaude.fix-transition.v1": "lifecycle transition topic added in OMN-4572; needs contract.yaml | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.skill-completed.v1": "global skill lifecycle topic [OMN-2934]; needs contract.yaml | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.skill-started.v1": "global skill lifecycle topic [OMN-2934]; needs contract.yaml | owner: jonah | expiry: 2026-06-01",
+    # --- omniclaude agent observability topics (OMN-6066..OMN-6072) ---
+    # Produced by omniclaude agent hooks, consumed by ServiceAgentActionsConsumer.
+    # Added to platform_topic_suffixes in this PR to replace raw string literals.
+    # Contract.yaml coverage tracked in omniclaude repo.
+    "onex.evt.omniclaude.agent-actions.v1": "observability topic produced by omniclaude [OMN-6066]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.routing-decision.v1": "observability topic produced by omniclaude [OMN-6066]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.agent-transformation.v1": "observability topic produced by omniclaude [OMN-6066]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.performance-metrics.v1": "observability topic produced by omniclaude [OMN-6066]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.detection-failure.v1": "observability topic produced by omniclaude [OMN-6066]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.agent-execution-logs.v1": "observability topic produced by omniclaude [OMN-6066]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.agent-status.v1": "observability topic produced by omniclaude [OMN-6066]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
     # --- omniintelligence topics (need contract.yaml in omniintelligence) ---
     "onex.cmd.omniintelligence.claude-hook-event.v1": "pre-migration; needs contract.yaml in omniintelligence repo | owner: jonah | expiry: 2026-06-01",
     "onex.cmd.omniintelligence.decision-recorded.v1": "pre-migration; needs contract.yaml in omniintelligence repo | owner: jonah | expiry: 2026-06-01",
