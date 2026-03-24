@@ -29,6 +29,21 @@ input_model:
 output_model:
   name: "ModelHandlerOutput"
   module: "omnibase_core.models.dispatch.model_handler_output"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "graph"
+      handler:
+        name: "HandlerGraph"
+        module: "omnibase_infra.handlers.handler_graph"
+      supported_operations:
+        - "graph.execute_query"
+        - "graph.execute_query_batch"
+        - "graph.create_node"
+        - "graph.create_relationship"
+        - "graph.delete_node"
+        - "graph.delete_relationship"
+        - "graph.traverse"
 operation_bindings:
   version:
     major: 1

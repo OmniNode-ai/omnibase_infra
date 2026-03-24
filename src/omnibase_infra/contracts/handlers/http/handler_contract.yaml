@@ -21,6 +21,16 @@ input_model:
 output_model:
   name: "ModelHandlerOutput"
   module: "omnibase_core.models.dispatch.model_handler_output"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "http"
+      handler:
+        name: "HandlerHttpRest"
+        module: "omnibase_infra.handlers.handler_http"
+      supported_operations:
+        - "http.get"
+        - "http.post"
 operation_bindings:
   version:
     major: 1

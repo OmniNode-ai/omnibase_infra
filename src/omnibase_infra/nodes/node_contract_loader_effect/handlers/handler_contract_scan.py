@@ -10,7 +10,6 @@ contract scanning infrastructure.
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,10 +20,6 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
-
-# Default contracts directory env var
-_DEFAULT_CONTRACTS_DIR_ENV = "ONEX_CONTRACTS_DIR"
-_DEFAULT_CONTRACTS_DIR_FALLBACK = "./contracts"
 
 
 class HandlerContractScan:
@@ -39,6 +34,7 @@ class HandlerContractScan:
         container: ModelONEXContainer,
         *,
         node_graph_config: ModelRuntimeNodeGraphConfig | None = None,
+        default_scan_path: str = "./contracts",
     ) -> None:
         """Initialize with ONEX container for dependency resolution.
 
@@ -46,16 +42,20 @@ class HandlerContractScan:
             container: ONEX container for service resolution.
             node_graph_config: Optional runtime node graph config providing
                 scan_exclude_patterns and scan_deny_paths.
+            default_scan_path: Fallback scan path when no explicit paths are
+                provided. Typically set from ``ONEX_CONTRACTS_DIR`` env var
+                by the caller (kernel bootstrap), not read from env here.
         """
         self._container = container
         self._node_graph_config = node_graph_config
+        self._default_scan_path = default_scan_path
 
     async def handle(self, scan_paths: list[str] | None = None) -> dict[str, object]:
         """Execute contract scan across configured directories.
 
         Args:
             scan_paths: Optional override paths to scan. If None, uses
-                ONEX_CONTRACTS_DIR env var or falls back to ./contracts.
+                the default_scan_path from constructor.
 
         Returns:
             Summary dict with scan status.
@@ -64,14 +64,12 @@ class HandlerContractScan:
             RuntimeContractConfigLoader,
         )
 
-        # Resolve scan paths: explicit > env var > fallback
-        if scan_paths:
-            path_objects = [Path(p) for p in scan_paths]
-        else:
-            contracts_dir = os.environ.get(
-                _DEFAULT_CONTRACTS_DIR_ENV, _DEFAULT_CONTRACTS_DIR_FALLBACK
-            )
-            path_objects = [Path(contracts_dir)]
+        # Resolve scan paths: explicit > default from constructor
+        path_objects = (
+            [Path(p) for p in scan_paths]
+            if scan_paths
+            else [Path(self._default_scan_path)]
+        )
 
         # Thread scan policies from node_graph_config
         exclude_patterns: tuple[str, ...] = ()
