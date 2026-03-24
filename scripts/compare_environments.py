@@ -28,6 +28,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -304,6 +305,111 @@ def probe_infisical_paths(
                     detail=f"Could not reach Infisical at {infisical_addr}: {exc}",
                     auto_fixable=False,
                     fix_hint="Verify INFISICAL_ADDR is set and Infisical is running.",
+                )
+            )
+
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# checks — env_var_name_alignment (local-only, no SSM)
+# ---------------------------------------------------------------------------
+
+
+def _extract_manifest_env_vars(deploy_path: Path) -> set[str]:
+    """Extract env var names from a k8s deployment YAML.
+
+    Parses ``spec.template.spec.containers[].env[].name`` from the manifest.
+    """
+    import re
+
+    import yaml
+
+    with open(deploy_path) as f:
+        doc = yaml.safe_load(f)
+
+    names: set[str] = set()
+    try:
+        containers = doc["spec"]["template"]["spec"]["containers"]
+        for container in containers:
+            for env_entry in container.get("env", []):
+                name = env_entry.get("name", "")
+                # Only include names that look like env vars (all-caps + underscores)
+                if re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
+                    names.add(name)
+    except (KeyError, TypeError):
+        pass
+    return names
+
+
+def _extract_app_env_vars(repo_path: Path, service_name: str) -> set[str]:
+    """Extract env var names read by application code.
+
+    Scans for ``process.env.X`` (TypeScript/JavaScript) and
+    ``os.getenv("X")`` / ``os.environ["X"]`` (Python) patterns.
+    """
+    import re
+
+    names: set[str] = set()
+    ts_pattern = re.compile(r"process\.env\.([A-Z][A-Z0-9_]*)")
+    py_getenv = re.compile(r'os\.getenv\(\s*["\']([A-Z][A-Z0-9_]*)["\']')
+    py_environ = re.compile(r'os\.environ\[\s*["\']([A-Z][A-Z0-9_]*)["\']')
+
+    extensions = {".ts", ".tsx", ".js", ".jsx", ".py"}
+
+    for path in repo_path.rglob("*"):
+        if path.suffix not in extensions:
+            continue
+        if "node_modules" in path.parts or ".next" in path.parts:
+            continue
+        try:
+            content = path.read_text(errors="ignore")
+        except OSError:
+            continue
+        names.update(ts_pattern.findall(content))
+        names.update(py_getenv.findall(content))
+        names.update(py_environ.findall(content))
+
+    return names
+
+
+def check_env_var_name_alignment(
+    infra_repo: Path,
+    service_repos: dict[str, Path],
+) -> list[ModelParityFinding]:
+    """Check that env vars read by app code are injected by k8s deployment manifests.
+
+    Runs locally against checked-out repos (no SSM). Requires both
+    ``omninode_infra`` (for k8s manifests) and each service repo to be
+    available on the local filesystem.
+    """
+    findings: list[ModelParityFinding] = []
+    k8s_dir = infra_repo / "k8s" / "onex-dev"
+
+    for service_name, repo_path in service_repos.items():
+        deploy_path = k8s_dir / service_name / "deployment.yaml"
+        if not deploy_path.exists():
+            continue
+
+        manifest_vars = _extract_manifest_env_vars(deploy_path)
+        app_vars = _extract_app_env_vars(repo_path, service_name)
+
+        missing = app_vars - manifest_vars
+        for var in sorted(missing):
+            findings.append(
+                ModelParityFinding(
+                    check_id="env_var_alignment",
+                    severity="CRITICAL",
+                    title=f"Missing env var injection: {var}",
+                    detail=(
+                        f"{service_name}: app reads {var} but deployment "
+                        f"manifest does not inject it"
+                    ),
+                    auto_fixable=False,
+                    fix_hint=(
+                        f"Add {var} to {deploy_path.relative_to(infra_repo)} "
+                        f"env section from the appropriate secret"
+                    ),
                 )
             )
 
@@ -798,6 +904,7 @@ ALL_CHECKS = [
     "credential",
     "ecr",
     "infisical",
+    "env_var_alignment",
     "schema",
     "services",
     "flags",
