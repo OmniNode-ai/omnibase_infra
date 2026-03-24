@@ -3,19 +3,19 @@
 """Handler for runtime boot sequence orchestration [OMN-6351].
 
 Coordinates the 4-step sequential boot:
-    1. ProtocolContractLoader -- scan filesystem for contracts
-    2. ProtocolContractRegistry -- project contracts to registry
-    3. ProtocolNodeGraph -- instantiate node graph
-    4. ProtocolEventBusWiring -- wire nodes to Kafka
+    1. contract_loader -- scan filesystem for contracts
+    2. contract_registry -- project contracts to registry
+    3. node_graph -- instantiate node graph
+    4. event_bus_wiring -- wire nodes to Kafka
 
-Step dependencies are resolved via container.get_service() at execution
-time, not stored as private attributes. Fail-fast: if any step raises,
-subsequent steps are not executed.
+Step callables are injected through the constructor for testability.
+Fail-fast: if any step raises, subsequent steps are not executed.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -23,35 +23,63 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_BOOT_STEPS: tuple[str, ...] = (
-    "ProtocolContractLoader",
-    "ProtocolContractRegistry",
-    "ProtocolNodeGraph",
-    "ProtocolEventBusWiring",
+BootStep = Callable[[], Awaitable[None]]
+
+_STEP_NAMES: tuple[str, ...] = (
+    "contract_loader",
+    "contract_registry",
+    "node_graph",
+    "event_bus_wiring",
 )
 
 
 class HandlerRuntimeLifecycle:
     """Orchestrates the 4-step runtime boot sequence.
 
-    Each step is resolved from the container at execution time.
+    Steps are injected as callables for testability.
     Sequential execution with fail-fast semantics.
     """
 
-    def __init__(self, container: ModelONEXContainer) -> None:
-        """Initialize with ONEX container for step resolution."""
-        self._container = container
+    def __init__(
+        self,
+        container: ModelONEXContainer | None = None,
+        *,
+        steps: tuple[BootStep, ...] | None = None,
+    ) -> None:
+        """Initialize with either container or explicit step callables.
 
-    async def execute_startup(self) -> None:
-        """Execute the 4-step boot sequence in order.
+        Args:
+            container: ONEX container (stored for future resolution).
+            steps: Optional explicit step callables in boot order.
+                If provided, used directly. If None, steps must be
+                provided via execute_startup(steps=...).
+        """
+        self._container = container
+        self._steps = steps
+
+    async def execute_startup(
+        self,
+        steps: tuple[BootStep, ...] | None = None,
+    ) -> None:
+        """Execute the boot sequence in order.
+
+        Args:
+            steps: Optional override for step callables.
 
         Raises:
             Any exception from a step -- fail-fast, no subsequent steps run.
         """
-        for step_name in _BOOT_STEPS:
+        active_steps = steps or self._steps
+        if not active_steps:
+            msg = "No boot steps provided to HandlerRuntimeLifecycle"
+            raise ValueError(msg)
+
+        for step_name, step_callable in zip(_STEP_NAMES, active_steps, strict=False):
             logger.info("Runtime boot step: %s", step_name)
-            step_callable = self._container.get_service(step_name)
             await step_callable()
             logger.info("Runtime boot step complete: %s", step_name)
 
-        logger.info("Runtime boot sequence complete (all %d steps)", len(_BOOT_STEPS))
+        logger.info(
+            "Runtime boot sequence complete (all %d steps)",
+            len(active_steps),
+        )

@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -32,15 +32,14 @@ async def test_boot_sequence_ordering() -> None:
     mock_node_graph = AsyncMock()
     mock_event_bus_wiring = AsyncMock()
 
-    container = MagicMock()
-    container.get_service.side_effect = lambda name: {
-        "ProtocolContractLoader": mock_contract_loader,
-        "ProtocolContractRegistry": mock_contract_registry,
-        "ProtocolNodeGraph": mock_node_graph,
-        "ProtocolEventBusWiring": mock_event_bus_wiring,
-    }[name]
-
-    handler = HandlerRuntimeLifecycle(container=container)
+    handler = HandlerRuntimeLifecycle(
+        steps=(
+            mock_contract_loader,
+            mock_contract_registry,
+            mock_node_graph,
+            mock_event_bus_wiring,
+        ),
+    )
     await handler.execute_startup()
 
     mock_contract_loader.assert_awaited_once()
@@ -60,17 +59,29 @@ async def test_fail_fast_on_step_failure() -> None:
     mock_contract_loader = AsyncMock(side_effect=RuntimeError("scan failed"))
     mock_contract_registry = AsyncMock()
 
-    container = MagicMock()
-    container.get_service.side_effect = lambda name: {
-        "ProtocolContractLoader": mock_contract_loader,
-        "ProtocolContractRegistry": mock_contract_registry,
-        "ProtocolNodeGraph": AsyncMock(),
-        "ProtocolEventBusWiring": AsyncMock(),
-    }[name]
-
-    handler = HandlerRuntimeLifecycle(container=container)
+    handler = HandlerRuntimeLifecycle(
+        steps=(
+            mock_contract_loader,
+            mock_contract_registry,
+            AsyncMock(),
+            AsyncMock(),
+        ),
+    )
 
     with pytest.raises(RuntimeError, match="scan failed"):
         await handler.execute_startup()
 
     mock_contract_registry.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_no_steps_raises() -> None:
+    """If no steps are provided, must raise ValueError."""
+    from omnibase_infra.nodes.node_runtime_orchestrator.handlers.handler_runtime_lifecycle import (
+        HandlerRuntimeLifecycle,
+    )
+
+    handler = HandlerRuntimeLifecycle()
+    with pytest.raises(ValueError, match="No boot steps"):
+        await handler.execute_startup()
