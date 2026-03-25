@@ -34,6 +34,39 @@ jobs:
   # Phase 3 - Aggregation
   # =============================================================================
 
+  contract-path-preflight:
+    name: Contract Path Pre-flight
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate contract module paths resolve
+        run: |
+          # Find all contract.yaml files and verify their module paths exist
+          FAILURES=0
+          for contract in $(find src/ -name "contract.yaml" -o -name "*.contract.yaml" 2>/dev/null); do
+            MODULE=$(python3 -c "
+          import yaml
+          with open('$contract') as f:
+              data = yaml.safe_load(f)
+          if data and 'module' in data:
+              print(data['module'])
+          " 2>/dev/null)
+            if [ -n "$MODULE" ]; then
+              # Convert dotted module path to file path
+              MODULE_PATH=$(echo "$MODULE" | tr '.' '/')
+              if [ ! -f "src/${MODULE_PATH}.py" ] && [ ! -f "src/${MODULE_PATH}/__init__.py" ]; then
+                echo "ERROR: ${contract} references module '${MODULE}' but src/${MODULE_PATH}.py does not exist"
+                FAILURES=$((FAILURES + 1))
+              fi
+            fi
+          done
+          if [ "$FAILURES" -gt 0 ]; then
+            echo "::error::${FAILURES} contract(s) reference non-existent module paths"
+            exit 1
+          fi
+          echo "OK: All contract module paths resolve"
+
   lint:
     name: Lint
     # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
@@ -604,10 +637,12 @@ jobs:
             -m "not slow and not chaos and not kafka" \
             --splits 10 \
             --group ${{ matrix.split }} \
+            --splitting-algorithm least_duration \
             -n auto --dist loadgroup \
             --timeout=60 \
             --timeout-method=thread \
             --tb=short \
+            --store-durations --durations-path .test_durations \
             --junitxml=junit-${{ matrix.split }}.xml
 
       - name: Upload test results
@@ -739,7 +774,7 @@ jobs:
         && fromJSON('["self-hosted","omnibase-ci"]')
         || fromJSON('["ubuntu-latest"]')
       }}
-    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check]
+    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, contract-path-preflight]
     if: always()
 
     steps:
