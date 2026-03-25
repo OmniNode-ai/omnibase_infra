@@ -24,6 +24,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from omnibase_infra.runtime.models import ModelEventBusConfig, ModelRuntimeConfig
+from omnibase_infra.runtime.models.model_runtime_node_graph_config import (
+    ModelRuntimeNodeGraphConfig,
+)
 from omnibase_infra.runtime.registry import RegistryProtocolBinding
 
 # Import handler seeding utilities from canonical location.
@@ -119,3 +122,48 @@ def mock_inmemory_runtime_config(
     # Return MagicMock for backwards compatibility with tests that
     # reference the fixture but don't actually use the mock object
     return MagicMock()
+
+
+def _default_node_graph_config() -> ModelRuntimeNodeGraphConfig:
+    """Build a sensible default config for tests that don't need real contract YAMLs."""
+    return ModelRuntimeNodeGraphConfig(
+        startup_timeout_ms=120000,
+        step_timeout_ms=30000,
+        max_step_retries=3,
+        retry_backoff_ms=2000,
+        retry_backoff_multiplier=2.0,
+        drain_timeout_ms=30000,
+        max_concurrent_handlers=10,
+        handler_pool_size=10,
+        health_check_timeout_ms=5000,
+        batch_response_size=100,
+        batch_flush_interval_ms=1000,
+        topic_validation_pattern=r"^[a-z][a-z0-9._-]*$",
+        topic_deny_patterns=("__consumer_offsets", "_schemas"),
+        max_topic_length=255,
+        max_subscriptions_per_node=100,
+        subscription_timeout_ms=5000,
+        circuit_breaker_failure_threshold=5,
+        circuit_breaker_timeout_ms=30000,
+        wiring_retry_max=3,
+        wiring_retry_base_delay_ms=1000,
+        wiring_retry_max_delay_ms=10000,
+        scan_exclude_patterns=("__pycache__", ".git"),
+        scan_deny_paths=("/etc", "/var"),
+        scan_timeout_ms=60000,
+    )
+
+
+@pytest.fixture(autouse=True)
+def mock_load_node_graph_config() -> Generator[MagicMock, None, None]:
+    """Mock _load_node_graph_config to avoid FileNotFoundError in CI.
+
+    The real function navigates to omnibase_core's contracts/runtime/ directory
+    on disk, which doesn't exist when core is installed from PyPI. This fixture
+    returns a sensible default config for all runtime tests.
+    """
+    with patch(
+        "omnibase_infra.runtime.service_kernel._load_node_graph_config",
+        return_value=_default_node_graph_config(),
+    ) as mock_fn:
+        yield mock_fn
