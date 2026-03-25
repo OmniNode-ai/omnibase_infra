@@ -27,6 +27,9 @@ from omnibase_infra.topics import (
     SUFFIX_FEATURE_FLAG_CHANGED,
     SUFFIX_FSM_STATE_TRANSITIONS,
     SUFFIX_INTELLIGENCE_CLAUDE_HOOK_EVENT,
+    SUFFIX_INTELLIGENCE_CODE_CRAWL_REQUESTED,
+    SUFFIX_INTELLIGENCE_CODE_ENTITIES_EXTRACTED,
+    SUFFIX_INTELLIGENCE_CODE_FILE_DISCOVERED,
     SUFFIX_INTELLIGENCE_INTENT_CLASSIFIED,
     SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED,
     SUFFIX_INTELLIGENCE_PATTERN_LEARNED,
@@ -263,8 +266,13 @@ class TestIntelligenceTopicSuffixes:
         )
 
     def test_intelligence_topics_use_3_partitions(self) -> None:
-        """Most intelligence topics should use 3 partitions; routing-decision CMD uses 1 (short-lived command)."""
-        one_partition_topics = {SUFFIX_OMNIINTELLIGENCE_ROUTING_DECISION_CMD}
+        """Most intelligence topics should use 3 partitions; routing-decision CMD and AST pipeline use 1."""
+        one_partition_topics = {
+            SUFFIX_OMNIINTELLIGENCE_ROUTING_DECISION_CMD,
+            SUFFIX_INTELLIGENCE_CODE_CRAWL_REQUESTED,
+            SUFFIX_INTELLIGENCE_CODE_FILE_DISCOVERED,
+            SUFFIX_INTELLIGENCE_CODE_ENTITIES_EXTRACTED,
+        }
         for spec in ALL_INTELLIGENCE_TOPIC_SPECS:
             if spec.suffix in one_partition_topics:
                 assert spec.partitions == 1, (

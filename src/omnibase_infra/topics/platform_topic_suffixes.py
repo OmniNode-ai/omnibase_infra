@@ -280,6 +280,34 @@ Lifecycle: internal_control (OMN-3294)
 Governance: topic_allowlist.yaml (not a contract topic_base)
 """
 
+# AST code extraction pipeline topics (OMN-5669)
+SUFFIX_INTELLIGENCE_CODE_CRAWL_REQUESTED: str = (
+    "onex.cmd.omniintelligence.code-crawl-requested.v1"
+)
+"""Command topic to initiate code crawl for AST extraction.
+
+Producer: crawl_code_entities.py CLI or scheduled batch job
+Consumer: omniintelligence dispatch handler 12 (code-crawl-requested)
+"""
+
+SUFFIX_INTELLIGENCE_CODE_FILE_DISCOVERED: str = (
+    "onex.evt.omniintelligence.code-file-discovered.v1"
+)
+"""Event topic emitted when a code file is discovered during crawl.
+
+Producer: node_code_crawler_effect
+Consumer: omniintelligence dispatch handler 13 (code-file-discovered)
+"""
+
+SUFFIX_INTELLIGENCE_CODE_ENTITIES_EXTRACTED: str = (
+    "onex.evt.omniintelligence.code-entities-extracted.v1"
+)
+"""Event topic emitted when AST entities are extracted from a code file.
+
+Producer: node_ast_extraction_compute
+Consumer: omniintelligence dispatch handlers 14-15 (persist + embed_graph)
+"""
+
 # =============================================================================
 # OMNIMEMORY DOMAIN TOPIC SUFFIXES (omnimemory plugin)
 # =============================================================================
@@ -1316,6 +1344,10 @@ ALL_INTELLIGENCE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
             "retention.ms": "86400000"
         },  # 1 day — command topics are short-lived
     ),
+    # AST code extraction pipeline topics (OMN-5669 — low volume, 1 partition)
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_CRAWL_REQUESTED, partitions=1),
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_FILE_DISCOVERED, partitions=1),
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_ENTITIES_EXTRACTED, partitions=1),
 )
 """Intelligence domain topic specs provisioned for PluginIntelligence."""
 

@@ -339,6 +339,10 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.platform.dlq-message.v1": "OMN-6136; cross-published by MixinKafkaDlq for omnidash /dlq dashboard | owner: jonah | expiry: 2026-06-01",
     # --- runner health pipeline topics (OMN-6082) ---
     "onex.evt.omnibase-infra.runner-health-snapshot.v1": "OMN-6082; Phase 1 CLI-based, contract.yaml deferred to OMN-6091 (true ONEX node conversion) | owner: jonah | expiry: 2026-09-01",
+    # --- AST code extraction pipeline topics (OMN-5669) ---
+    "onex.cmd.omniintelligence.code-crawl-requested.v1": "OMN-5669; contract.yaml in omniintelligence repo (cross-repo provisioning) | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniintelligence.code-file-discovered.v1": "OMN-5669; contract.yaml in omniintelligence repo (cross-repo provisioning) | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniintelligence.code-entities-extracted.v1": "OMN-5669; contract.yaml in omniintelligence repo (cross-repo provisioning) | owner: jonah | expiry: 2026-09-01",
 }
 # fmt: on
 
