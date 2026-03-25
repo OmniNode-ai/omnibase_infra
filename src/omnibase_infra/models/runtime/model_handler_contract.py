@@ -28,6 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 logger = logging.getLogger(__name__)
 
 from omnibase_core.models.primitives import ModelSemVer
+from omnibase_core.types import JsonType
 from omnibase_infra.enums.enum_handler_type_category import EnumHandlerTypeCategory
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.runtime.model_contract_security_config import (
@@ -135,6 +136,13 @@ class ModelHandlerContract(BaseModel):
     handler_version: ModelSemVer | None = Field(
         default=None,
         description="Handler version in semantic versioning format. If not provided, defaults to 1.0.0",
+    )
+    handler_routing: dict[str, JsonType] | None = Field(
+        default=None,
+        description=(
+            "Optional routing configuration for multi-handler contracts. "
+            "Defines routing strategy and handler dispatch rules."
+        ),
     )
 
     @field_validator("handler_type", mode="before")

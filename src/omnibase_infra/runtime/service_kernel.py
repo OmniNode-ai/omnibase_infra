@@ -112,14 +112,6 @@ from omnibase_infra.runtime.models import (
     ModelRuntimeConfig,
     ModelSecurityConfig,
 )
-from omnibase_infra.runtime.protocol_domain_plugin import (
-    ProtocolDomainPlugin,
-    RegistryDomainPlugin,
-)
-from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
-from omnibase_infra.runtime.util_container_wiring import (
-    wire_infrastructure_services,
-)
 
 # Circular Import Note (OMN-529):
 # ---------------------------------
@@ -140,6 +132,17 @@ from omnibase_infra.runtime.util_container_wiring import (
 #     to prevent accidental circular imports from other modules
 #
 # See also: omnibase_infra/services/__init__.py "ServiceHealth Import Guide" section
+from omnibase_infra.runtime.models.model_runtime_node_graph_config import (
+    ModelRuntimeNodeGraphConfig,
+)
+from omnibase_infra.runtime.protocol_domain_plugin import (
+    ProtocolDomainPlugin,
+    RegistryDomainPlugin,
+)
+from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.util_container_wiring import (
+    wire_infrastructure_services,
+)
 from omnibase_infra.runtime.util_validation import validate_runtime_config
 from omnibase_infra.services.service_circuit_breaker_event_publisher import (
     CircuitBreakerEventPublisher,
@@ -272,6 +275,25 @@ def validate_kafka_broker_allowlist(
                     rejected_broker=broker,
                     parameter="KAFKA_BOOTSTRAP_SERVERS",
                 )
+
+
+def _load_node_graph_config() -> ModelRuntimeNodeGraphConfig:
+    """Load typed runtime config from the 5 runtime contract YAMLs.
+
+    Resolution uses ``get_runtime_contracts_dir()`` from omnibase_core, which checks
+    ``ONEX_RUNTIME_CONTRACTS_DIR`` env var first, then falls back to the repository-
+    relative path.
+
+    Returns:
+        Frozen config model with all runtime parameters.
+
+    Raises:
+        FileNotFoundError: If runtime contracts directory cannot be found.
+    """
+    from omnibase_core.contracts.runtime_contracts import get_runtime_contracts_dir
+
+    contracts_dir = get_runtime_contracts_dir()
+    return ModelRuntimeNodeGraphConfig.from_contracts_dir(contracts_dir)
 
 
 def _get_contracts_dir() -> Path:
@@ -648,6 +670,32 @@ async def bootstrap() -> int:
         logger.info(
             "ONEX Kernel starting with contracts_dir=%s (correlation_id=%s)",
             contracts_dir,
+            correlation_id,
+        )
+
+        # 1b. Load contract-driven runtime config [OMN-6339]
+        # This loads typed configuration from the 5 runtime contract YAMLs
+        # in omnibase_core. Values are source of truth; ONEX_RUNTIME_* env vars
+        # are operator overrides on top. The node_graph_config is passed to
+        # RuntimeHostProcess and other components that previously used DEFAULT_*
+        # constants.
+        try:
+            node_graph_config = _load_node_graph_config()
+        except (FileNotFoundError, ValueError) as exc:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                operation="load_node_graph_config",
+                target_name=str(contracts_dir),
+            )
+            raise ProtocolConfigurationError(
+                f"Failed to load runtime node graph config: {exc}",
+                context=context,
+            ) from exc
+        logger.debug(
+            "Runtime contract config loaded: startup_timeout=%dms, step_timeout=%dms "
+            "(correlation_id=%s)",
+            node_graph_config.startup_timeout_ms,
+            node_graph_config.step_timeout_ms,
             correlation_id,
         )
 
@@ -1875,6 +1923,9 @@ async def bootstrap() -> int:
             # ProtocolNodeIntrospection via MixinNodeIntrospection, but mypy
             # cannot verify structural protocol conformance across mixin chains.
             introspection_service=introspection_service,  # type: ignore[arg-type]
+            # OMN-6334: Pass contract-driven runtime config so RuntimeHostProcess
+            # uses contract values instead of DEFAULT_* constants.
+            runtime_node_graph_config=node_graph_config,
         )
         runtime_create_duration = time.time() - runtime_create_start_time
         logger.debug(

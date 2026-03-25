@@ -59,6 +59,10 @@ _RUNTIME_UTILITY_EXCLUSIONS: frozenset[str] = frozenset(
         "handler_risk.py",
         # Onboarding orchestrator utility (module-level async function, not ONEX handler class)
         "handler_onboarding.py",
+        # Declarative runtime boot wrappers (lightweight callables, not full ONEX handler protocol)
+        "handler_contract_scan.py",
+        "handler_event_bus_wiring.py",
+        "handler_runtime_lifecycle.py",
     }
 )
 
