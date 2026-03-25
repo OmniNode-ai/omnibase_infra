@@ -37,7 +37,10 @@ import pytest
 
 from tests.helpers.path_utils import find_project_root
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.xdist_group("topic_pipeline_e2e"),
+]
 
 _REPO_ROOT = find_project_root(Path(__file__).resolve().parent)
 _SCRIPT = _REPO_ROOT / "scripts" / "generate_topic_enums.py"
