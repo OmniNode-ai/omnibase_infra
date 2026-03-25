@@ -1422,6 +1422,18 @@ class RuntimeHostProcess:
         """
         return self._pending_message_count
 
+    @property
+    def event_bus_wiring(self) -> EventBusSubcontractWiring | None:
+        """Expose the event bus wiring for kernel-level health monitoring.
+
+        This is a runtime-lifecycle-owned reference:
+        - Returns None before start() or if dispatch_engine was not provided.
+        - Valid between start() and stop().
+        - Callers must not cache it before start() expecting later mutation.
+        - Not valid after stop() — cleanup runs during shutdown.
+        """
+        return self._event_bus_wiring
+
     async def shutdown_ready(self) -> bool:
         """Check if process is ready for shutdown (no pending messages).
 
