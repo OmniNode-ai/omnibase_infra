@@ -149,6 +149,7 @@ UNCOVERED_MODELS: dict[str, str] = {
     "ModelTransitionNotificationOutboxConfig": "Config with outbox dependencies",
     "ModelTransitionNotificationOutboxMetrics": "Metrics model, low priority",
     "ModelTransitionNotificationPublisherMetrics": "Metrics model, low priority",
+    "ModelRuntimeNodeGraphConfig": "Runtime config loaded from contracts dir with env overrides",
 }
 
 
