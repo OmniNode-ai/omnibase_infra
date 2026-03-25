@@ -34,6 +34,9 @@ from omnibase_infra.mixins.mixin_node_introspection import MixinNodeIntrospectio
 from omnibase_infra.models.discovery.model_introspection_config import (
     ModelIntrospectionConfig,
 )
+from omnibase_infra.models.registration.model_node_introspection_event import (
+    ModelNodeIntrospectionEvent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +92,27 @@ class ServiceNodeIntrospection(MixinNodeIntrospection):
         )
         await service.publish_introspection(EnumIntrospectionReason.STARTUP)
     """
+
+    # Instance attribute for description override when contract parsing fails
+    _description_override: str | None = None
+
+    async def get_introspection_data(self) -> ModelNodeIntrospectionEvent:
+        """Override to inject description from raw YAML when contract parsing fails.
+
+        OMN-6405: ModelContractBase uses extra='forbid' and rejects rich contract
+        YAML fields. When the contract can't be parsed, the mixin produces
+        metadata.description=None. This override injects the description extracted
+        directly from the YAML file.
+        """
+        event = await super().get_introspection_data()
+        if (
+            self._description_override
+            and event.metadata is not None
+            and event.metadata.description is None
+        ):
+            # ModelNodeMetadata is not frozen — direct assignment is safe
+            event.metadata.description = self._description_override
+        return event
 
     @classmethod
     def from_kernel_config(
@@ -146,6 +170,13 @@ class ServiceNodeIntrospection(MixinNodeIntrospection):
         )
         instance.initialize_introspection(config)
 
+        # OMN-6405: When full contract parsing fails (extra="forbid" rejects
+        # rich YAML fields), the mixin's _introspection_contract is None and
+        # get_introspection_data() produces metadata.description=None. Store
+        # the description extracted from raw YAML so our get_introspection_data
+        # override can inject it into the event metadata.
+        instance._description_override = effective_description
+
         logger.info(
             "ServiceNodeIntrospection created for %s (description=%s, "
             "has_contract=%s, has_event_bus_sub=%s)",
@@ -185,7 +216,7 @@ class ServiceNodeIntrospection(MixinNodeIntrospection):
         """
         contract, event_bus_sub = _try_load_contract(contracts_dir)
 
-        # Extract metadata from contract if available
+        # Extract metadata from contract Pydantic model if available
         description = None
         version = "1.0.0"
         node_type = EnumNodeKind.ORCHESTRATOR
@@ -201,6 +232,24 @@ class ServiceNodeIntrospection(MixinNodeIntrospection):
             raw_node_type = getattr(contract, "node_type", None)
             if raw_node_type is not None:
                 node_type = _map_node_type(raw_node_type)
+        else:
+            # OMN-6405: Contract Pydantic parsing may fail when the YAML has
+            # fields not declared in the model (extra="forbid"). Fall back to
+            # reading description, node_type, and version directly from the
+            # raw YAML so introspection events still carry useful metadata.
+            raw_yaml = _try_read_raw_yaml(contracts_dir)
+            if raw_yaml is not None:
+                description = raw_yaml.get("description")
+                if isinstance(description, str) and description:
+                    pass  # Keep it
+                else:
+                    description = None
+                raw_nt = raw_yaml.get("node_type")
+                if raw_nt is not None:
+                    node_type = _map_node_type(raw_nt)
+                cv = raw_yaml.get("contract_version")
+                if isinstance(cv, dict):
+                    version = f"{cv.get('major', 0)}.{cv.get('minor', 0)}.{cv.get('patch', 0)}"
 
         return cls.from_kernel_config(
             event_bus=event_bus,
@@ -213,6 +262,33 @@ class ServiceNodeIntrospection(MixinNodeIntrospection):
             contract=contract,
             event_bus_subcontract=event_bus_sub,
         )
+
+
+def _try_read_raw_yaml(contracts_dir: Path) -> dict[str, object] | None:
+    """Read the first contract.yaml as a raw dict without Pydantic validation.
+
+    Used as a fallback when full contract parsing fails (OMN-6405) to extract
+    description, node_type, and version directly from YAML.
+    """
+    candidates = [contracts_dir / "contract.yaml"]
+    if contracts_dir.is_dir():
+        for child in sorted(contracts_dir.iterdir()):
+            if child.is_dir():
+                candidate = child / "contract.yaml"
+                if candidate.exists():
+                    candidates.append(candidate)
+
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            with path.open(encoding="utf-8") as fh:
+                data = yaml.safe_load(fh)
+            if isinstance(data, dict):
+                return data
+        except Exception:  # noqa: BLE001
+            continue
+    return None
 
 
 def _try_load_contract(
@@ -313,9 +389,12 @@ def _parse_contract_dict(raw: dict[str, object]) -> ModelContractBase | None:
     else:
         contract_class = ModelContractEffect
 
-    # Strip keys that are not part of the contract model (extra="forbid")
-    # The event_bus section is parsed separately.
-    filtered = {k: v for k, v in raw.items() if k != "event_bus"}
+    # Strip keys that are not part of the contract model (extra="forbid").
+    # Contract YAMLs may contain extra sections (event_bus, mcp, time_injection,
+    # workflow_coordination, etc.) that are NOT declared as Pydantic fields.
+    # Only pass keys that the model actually declares. (OMN-6405)
+    model_fields = set(contract_class.model_fields.keys())
+    filtered = {k: v for k, v in raw.items() if k in model_fields}
 
     try:
         return contract_class(**filtered)
