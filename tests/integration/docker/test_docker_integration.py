@@ -40,6 +40,7 @@ import yaml
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.infrastructure,
+    pytest.mark.slow,
 ]
 
 # Container naming prefix for test isolation
