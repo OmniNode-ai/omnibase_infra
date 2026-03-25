@@ -31,6 +31,10 @@ from omnibase_infra.event_bus.mixin_kafka_broadcast import MixinKafkaBroadcast
 from omnibase_infra.event_bus.mixin_kafka_dlq import MixinKafkaDlq
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.observability.wiring_health import (
+    MixinConsumptionCounter,
+    MixinEmissionCounter,
+)
 
 
 class TestEventBusKafkaMROComposition:
@@ -76,6 +80,8 @@ class TestEventBusKafkaMROComposition:
             MixinKafkaBroadcast,
             MixinKafkaDlq,
             MixinAsyncCircuitBreaker,
+            MixinEmissionCounter,
+            MixinConsumptionCounter,
             object,
         ]
 
@@ -557,3 +563,14 @@ class TestMRODiagnostics:
             f"MixinAsyncCircuitBreaker should only inherit from object, "
             f"got {MixinAsyncCircuitBreaker.__bases__}"
         )
+
+
+class TestHealthProtocolConformance:
+    """OMN-6441/OMN-6443: Verify EventBusKafka satisfies both health protocols."""
+
+    def test_event_bus_kafka_satisfies_both_health_protocols(self) -> None:
+        """EventBusKafka must satisfy both emission and consumption count protocols."""
+        assert MixinEmissionCounter in EventBusKafka.__mro__
+        assert MixinConsumptionCounter in EventBusKafka.__mro__
+        assert hasattr(EventBusKafka, "get_emission_counts")
+        assert hasattr(EventBusKafka, "get_consumption_counts")

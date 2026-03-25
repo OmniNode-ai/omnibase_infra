@@ -57,14 +57,22 @@ TRACKED_PACKAGES: tuple[str, ...] = ("omnibase_core", "omnibase_spi")
 def _parse_dep_bounds(spec: str) -> tuple[str, str] | None:
     """Return (min_version, max_version) from a PEP 508 specifier, or None.
 
-    Supports range pins (``>=X,<Y``) and exact pins (``==X.Y.Z``).
-    For exact pins, max is derived as the next minor (e.g. 0.24.0 -> 0.25.0).
+    Supports range pins (``>=X,<Y``), exact pins (``==X.Y.Z``), and
+    open lower bounds (``>=X.Y.Z`` without upper cap).
+    For exact pins and open lower bounds, max is derived as the next
+    minor (e.g. 0.24.0 -> 0.25.0).
     """
     # Range pin: >=X,<Y
     min_match = re.search(r">=\s*([0-9][^\s,;\"']*)", spec)
     max_match = re.search(r"<\s*([0-9][^\s,;\"']*)", spec)
     if min_match and max_match:
         return min_match.group(1), max_match.group(1)
+    # Open lower bound: >=X.Y.Z (no upper cap) — derive max as next minor
+    if min_match:
+        min_ver = min_match.group(1)
+        parts = min_ver.split(".")
+        if len(parts) >= 2:
+            return min_ver, f"{parts[0]}.{int(parts[1]) + 1}.0"
     # Exact pin: ==X.Y.Z
     eq_match = re.search(r"==\s*([0-9][^\s,;\"']*)", spec)
     if eq_match:

@@ -229,7 +229,10 @@ from omnibase_infra.models.health.enum_consumer_health_event_type import (
 from omnibase_infra.models.health.enum_consumer_health_severity import (
     EnumConsumerHealthSeverity,
 )
-from omnibase_infra.observability.wiring_health import MixinEmissionCounter
+from omnibase_infra.observability.wiring_health import (
+    MixinConsumptionCounter,
+    MixinEmissionCounter,
+)
 from omnibase_infra.utils import apply_instance_discriminator, compute_consumer_group_id
 from omnibase_infra.utils.util_consumer_group import KAFKA_CONSUMER_GROUP_MAX_LENGTH
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
@@ -292,7 +295,11 @@ class OAuthBearerTokenProvider(AbstractTokenProvider):
 
 
 class EventBusKafka(
-    MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker, MixinEmissionCounter
+    MixinKafkaBroadcast,
+    MixinKafkaDlq,
+    MixinAsyncCircuitBreaker,
+    MixinEmissionCounter,
+    MixinConsumptionCounter,
 ):
     """Kafka-backed event bus for production message streaming.
 
@@ -321,6 +328,7 @@ class EventBusKafka(
         - MixinKafkaDlq: Dead letter queue handling and metrics
         - MixinAsyncCircuitBreaker: Circuit breaker resilience pattern
         - MixinEmissionCounter: Wiring health emission tracking (OMN-1895)
+        - MixinConsumptionCounter: Wiring health consumption tracking (OMN-6441)
 
         The core class provides:
         - Factory methods (3): from_config, from_yaml, default
@@ -456,6 +464,9 @@ class EventBusKafka(
 
         # Initialize emission counter mixin (wiring health monitoring)
         self._init_emission_counter()
+
+        # Initialize consumption counter mixin (OMN-6441: wiring health consumption tracking)
+        self._init_consumption_counter()
 
         # ONEX topic format enforcement (OMN-5209)
 

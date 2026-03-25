@@ -152,6 +152,9 @@ dev = [
 
 [tool.uv.sources]
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
+# OMN-6440: Point at local worktree for runtime contracts package-data fix.
+# TODO: Remove after omnibase_core releases with the contracts fix.
+omnibase-core = { path = "/Volumes/PRO-G40/Code/omni_worktrees/OMN-6439/omnibase_core", editable = true }
 
 [tool.ruff]
 target-version = "py312"
