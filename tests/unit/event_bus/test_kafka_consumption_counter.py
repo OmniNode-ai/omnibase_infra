@@ -1,10 +1,12 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Test that EventBusKafka implements ProtocolConsumptionCountSource.
+"""Test that EventBusKafka does NOT implement consumption counting.
 
-Bug (OMN-6441): WiringHealthChecker calls get_consumption_counts() on
-EventBusKafka, which raises AttributeError because MixinConsumptionCounter
-was not mixed in.
+Bug history:
+- OMN-6441: Quick-fixed by adding MixinConsumptionCounter to EventBusKafka.
+- OMN-6515: Corrected fix — consumption counting belongs on
+  EventBusSubcontractWiring, which tracks messages successfully processed
+  by handlers. EventBusKafka only handles emission counting.
 """
 
 from __future__ import annotations
@@ -16,28 +18,21 @@ from omnibase_infra.observability.wiring_health import MixinConsumptionCounter
 
 
 @pytest.mark.unit
-class TestEventBusKafkaConsumptionCounter:
-    """Verify EventBusKafka provides get_consumption_counts()."""
+class TestEventBusKafkaNoConsumptionCounter:
+    """Verify EventBusKafka does NOT provide get_consumption_counts().
 
-    def test_has_get_consumption_counts_method(self) -> None:
-        """EventBusKafka must have get_consumption_counts() method."""
-        assert hasattr(EventBusKafka, "get_consumption_counts")
-        assert callable(EventBusKafka.get_consumption_counts)
+    Consumption counting belongs on EventBusSubcontractWiring (OMN-6515).
+    """
 
-    def test_mixin_in_mro(self) -> None:
-        """MixinConsumptionCounter must appear in EventBusKafka MRO."""
-        assert MixinConsumptionCounter in EventBusKafka.__mro__
+    def test_does_not_have_get_consumption_counts_method(self) -> None:
+        """EventBusKafka must NOT have get_consumption_counts() method."""
+        assert not hasattr(EventBusKafka, "get_consumption_counts"), (
+            "EventBusKafka must NOT implement get_consumption_counts(). "
+            "Consumption counting belongs on EventBusSubcontractWiring (OMN-6515)."
+        )
 
-    def test_satisfies_protocol_structurally(self) -> None:
-        """EventBusKafka must have the method required by ProtocolConsumptionCountSource."""
-        bus = EventBusKafka()
-        # Structural protocol check: method exists and returns correct type
-        assert hasattr(bus, "get_consumption_counts")
-        result = bus.get_consumption_counts()
-        assert isinstance(result, dict)
-
-    def test_returns_dict(self) -> None:
-        """get_consumption_counts() must return a dict[str, int]."""
-        bus = EventBusKafka()
-        counts = bus.get_consumption_counts()
-        assert isinstance(counts, dict)
+    def test_mixin_not_in_mro(self) -> None:
+        """MixinConsumptionCounter must NOT appear in EventBusKafka MRO."""
+        assert MixinConsumptionCounter not in EventBusKafka.__mro__, (
+            "EventBusKafka must NOT inherit MixinConsumptionCounter (OMN-6515)."
+        )

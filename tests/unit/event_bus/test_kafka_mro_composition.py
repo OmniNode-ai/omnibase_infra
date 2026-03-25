@@ -81,7 +81,6 @@ class TestEventBusKafkaMROComposition:
             MixinKafkaDlq,
             MixinAsyncCircuitBreaker,
             MixinEmissionCounter,
-            MixinConsumptionCounter,
             object,
         ]
 
@@ -568,9 +567,12 @@ class TestMRODiagnostics:
 class TestHealthProtocolConformance:
     """OMN-6441/OMN-6443: Verify EventBusKafka satisfies both health protocols."""
 
-    def test_event_bus_kafka_satisfies_both_health_protocols(self) -> None:
-        """EventBusKafka must satisfy both emission and consumption count protocols."""
+    def test_event_bus_kafka_satisfies_emission_protocol_only(self) -> None:
+        """EventBusKafka must satisfy emission (not consumption) count protocol.
+
+        Consumption counting belongs on EventBusSubcontractWiring (OMN-6515).
+        """
         assert MixinEmissionCounter in EventBusKafka.__mro__
-        assert MixinConsumptionCounter in EventBusKafka.__mro__
+        assert MixinConsumptionCounter not in EventBusKafka.__mro__
         assert hasattr(EventBusKafka, "get_emission_counts")
-        assert hasattr(EventBusKafka, "get_consumption_counts")
+        assert not hasattr(EventBusKafka, "get_consumption_counts")
