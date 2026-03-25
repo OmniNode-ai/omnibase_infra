@@ -655,12 +655,15 @@ class HandlerContractSource(ProtocolContractSource):
 
         # Normalize YAML data to match core's ModelHandlerContract schema.
         # handler_contract.yaml files in infra use an extended format with fields
-        # not yet in omnibase_core (extra="forbid"). Strip/convert as needed.
+        # not in omnibase_core's model (which has extra="forbid"). We whitelist
+        # known fields and convert dict-form model references to dotted strings.
+        _KNOWN_FIELDS = frozenset(ModelHandlerContract.model_fields.keys())
         validation_data = dict(raw_data) if isinstance(raw_data, dict) else raw_data
         if isinstance(validation_data, dict):
-            # Strip fields not in core's model
-            for extra_field in ("handler_routing", "operation_bindings"):
-                validation_data.pop(extra_field, None)
+            # Strip all top-level keys not in core's model
+            extra_keys = set(validation_data.keys()) - _KNOWN_FIELDS
+            for key in extra_keys:
+                validation_data.pop(key)
             # Convert dict-form input_model/output_model to dotted string
             for model_field in ("input_model", "output_model"):
                 val = validation_data.get(model_field)
