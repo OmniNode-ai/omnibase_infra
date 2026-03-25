@@ -653,12 +653,25 @@ class HandlerContractSource(ProtocolContractSource):
         with contract_path.open("r", encoding="utf-8") as f:
             raw_data = yaml.safe_load(f)
 
-        # Strip fields not yet in core's ModelHandlerContract (extra="forbid").
-        # handler_routing is used by infra's contract schema but not yet
-        # reflected in omnibase_core's model. Similar to handler_class (OMN-1420).
+        # Normalize YAML data to match core's ModelHandlerContract schema.
+        # handler_contract.yaml files in infra use an extended format with fields
+        # not yet in omnibase_core (extra="forbid"). Strip/convert as needed.
         validation_data = dict(raw_data) if isinstance(raw_data, dict) else raw_data
         if isinstance(validation_data, dict):
-            validation_data.pop("handler_routing", None)
+            # Strip fields not in core's model
+            for extra_field in ("handler_routing", "operation_bindings"):
+                validation_data.pop(extra_field, None)
+            # Convert dict-form input_model/output_model to dotted string
+            for model_field in ("input_model", "output_model"):
+                val = validation_data.get(model_field)
+                if isinstance(val, dict) and "module" in val and "name" in val:
+                    validation_data[model_field] = f"{val['module']}.{val['name']}"
+            # Strip extra fields in nested descriptor.retry_policy
+            descriptor = validation_data.get("descriptor")
+            if isinstance(descriptor, dict):
+                retry_policy = descriptor.get("retry_policy")
+                if isinstance(retry_policy, dict):
+                    retry_policy.pop("backoff_ms", None)
 
         # Validate against ModelHandlerContract
         contract = ModelHandlerContract.model_validate(validation_data)
