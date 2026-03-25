@@ -91,12 +91,45 @@ class RuntimeContractConfigLoader:
         See CLAUDE.md Handler Plugin Loader security patterns.
     """
 
-    def __init__(self) -> None:  # stub-ok: stateless loader, no init needed
+    def __init__(
+        self,
+        scan_exclude_patterns: tuple[str, ...] = (),
+        scan_deny_paths: tuple[str, ...] = (),
+    ) -> None:
         """Initialize the contract config loader.
 
-        The loader is stateless and delegates to individual subcontract
-        loaders for handler_routing and operation_bindings sections.
+        Args:
+            scan_exclude_patterns: Glob patterns for paths to exclude from scanning.
+                Loaded from ``contract_loader_effect.yaml`` via
+                ``ModelRuntimeNodeGraphConfig.scan_exclude_patterns``.
+            scan_deny_paths: Path prefixes that are denied for security reasons.
+                Loaded from ``contract_loader_effect.yaml`` via
+                ``ModelRuntimeNodeGraphConfig.scan_deny_paths``.
         """
+        self._scan_exclude_patterns = scan_exclude_patterns
+        self._scan_deny_paths = scan_deny_paths
+
+    def validate_path(self, path: Path) -> None:
+        """Validate that a path is not in the deny list.
+
+        Args:
+            path: Path to validate.
+
+        Raises:
+            ProtocolConfigurationError: If the path matches a deny pattern.
+        """
+        path_str = str(path)
+        for deny in self._scan_deny_paths:
+            if path_str.startswith(deny) or deny in path_str:
+                context = ModelInfraErrorContext.with_correlation(
+                    operation="validate_scan_path",
+                    target_name=path_str,
+                )
+                raise ProtocolConfigurationError(
+                    f"Path denied by contract security policy: {path_str} "
+                    f"(matched deny pattern: {deny})",
+                    context=context,
+                )
 
     def load_all_contracts(
         self,
@@ -205,6 +238,9 @@ class RuntimeContractConfigLoader:
         contract_paths: list[Path] = []
 
         for search_path in search_paths:
+            # Validate search path against deny list
+            self.validate_path(search_path)
+
             if not search_path.exists():
                 logger.warning(
                     "Search path does not exist, skipping: %s",
@@ -226,7 +262,42 @@ class RuntimeContractConfigLoader:
                 len(found),
                 search_path,
             )
-            contract_paths.extend(found)
+
+            # Filter out excluded patterns and denied paths
+            filtered: list[Path] = []
+            for p in found:
+                # Check deny paths
+                path_str = str(p)
+                denied = False
+                for deny in self._scan_deny_paths:
+                    if deny in path_str:
+                        logger.debug("Denied path skipped: %s (pattern: %s)", p, deny)
+                        denied = True
+                        break
+                if denied:
+                    continue
+
+                # Check exclude patterns
+                excluded = False
+                for pattern in self._scan_exclude_patterns:
+                    if p.match(pattern):
+                        logger.debug(
+                            "Excluded path skipped: %s (pattern: %s)", p, pattern
+                        )
+                        excluded = True
+                        break
+                if excluded:
+                    continue
+
+                filtered.append(p)
+
+            logger.debug(
+                "After filtering: %d of %d contract.yaml files in %s",
+                len(filtered),
+                len(found),
+                search_path,
+            )
+            contract_paths.extend(filtered)
 
         # Sort for deterministic ordering
         return sorted(contract_paths)

@@ -161,10 +161,15 @@ class CatalogResolver:
 
             # Add entries
             for svc_name in bundle.services:
-                if svc_name in self._manifests:
-                    manifest = self._manifests[svc_name]
-                    selected_entries[svc_name] = manifest
-                    required_env.update(manifest.required_env)
+                if svc_name not in self._manifests:
+                    raise ValueError(
+                        f"Unknown service '{svc_name}' referenced by bundle "
+                        f"'{bundle_name}'. Available services: "
+                        f"{sorted(self._manifests)}"
+                    )
+                manifest = self._manifests[svc_name]
+                selected_entries[svc_name] = manifest
+                required_env.update(manifest.required_env)
 
             # Add injected env
             for k, v in bundle.inject_env.items():
@@ -184,10 +189,13 @@ class CatalogResolver:
             next_pending: list[CatalogManifest] = []
             for manifest in pending:
                 for dep in manifest.depends_on:
-                    if (
-                        dep.service in self._manifests
-                        and dep.service not in selected_entries
-                    ):
+                    if dep.service not in self._manifests:
+                        raise ValueError(
+                            f"Unknown dependency '{dep.service}' referenced by "
+                            f"service '{manifest.name}'. Available services: "
+                            f"{sorted(self._manifests)}"
+                        )
+                    if dep.service not in selected_entries:
                         dep_manifest = self._manifests[dep.service]
                         selected_entries[dep.service] = dep_manifest
                         required_env.update(dep_manifest.required_env)

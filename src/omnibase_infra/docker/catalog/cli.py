@@ -27,6 +27,32 @@ from omnibase_infra.docker.catalog.generator import generate_compose
 from omnibase_infra.docker.catalog.resolver import CatalogResolver
 from omnibase_infra.docker.catalog.validator import validate_env
 
+_OMNIBASE_ENV = Path.home() / ".omnibase" / ".env"
+
+
+def _load_omnibase_env() -> None:
+    """Load ~/.omnibase/.env into os.environ if it exists.
+
+    Only sets vars not already present in the environment (existing values
+    take precedence). This makes the CLI self-contained without requiring
+    the caller to manually ``source ~/.omnibase/.env``.
+    """
+    if not _OMNIBASE_ENV.exists():
+        return
+    with open(_OMNIBASE_ENV) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip("'\"")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
 # Default paths relative to repo root
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _CATALOG_DIR = str(_REPO_ROOT / "docker" / "catalog")
@@ -93,6 +119,7 @@ def cmd_generate(args: list[str]) -> int:
 
 def cmd_validate(args: list[str]) -> int:
     """Validate env vars for selected bundles."""
+    _load_omnibase_env()
     bundles = args if args else _load_stack()
     resolver = CatalogResolver(catalog_dir=_CATALOG_DIR)
     resolved = resolver.resolve(bundles=bundles)
@@ -147,6 +174,7 @@ def cmd_seed(_args: list[str]) -> int:
 
 def cmd_up(args: list[str]) -> int:
     """Validate, generate, and start compose stack."""
+    _load_omnibase_env()
     # Parse --seed flag
     run_seed = "--seed" in args
     bundles = [a for a in args if a != "--seed"] if args else _load_stack()

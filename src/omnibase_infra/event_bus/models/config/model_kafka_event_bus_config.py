@@ -277,6 +277,17 @@ class ModelKafkaEventBusConfig(BaseModel):
         default=True,
         description="Enable producer idempotence for exactly-once semantics",
     )
+    max_request_size: int = Field(
+        default=4 * 1024 * 1024,  # 4 MB
+        description=(
+            "Maximum size in bytes for a Kafka produce request. "
+            "Passed to AIOKafkaProducer(max_request_size=...). "
+            "Must also align with broker-side max.message.bytes. "
+            "Override via KAFKA_MAX_REQUEST_SIZE."
+        ),
+        ge=1024,  # 1 KB minimum
+        le=52428800,  # 50 MB maximum
+    )
 
     # Kafka consumer settings
     auto_offset_reset: str = Field(
@@ -821,6 +832,7 @@ class ModelKafkaEventBusConfig(BaseModel):
             "KAFKA_SSL_CA_FILE": "ssl_ca_file",
             "KAFKA_RECONNECT_BACKOFF_MS": "reconnect_backoff_ms",
             "KAFKA_RECONNECT_BACKOFF_MAX_MS": "reconnect_backoff_max_ms",
+            "KAFKA_MAX_REQUEST_SIZE": "max_request_size",
         }
 
         # Integer fields for type conversion
@@ -833,6 +845,7 @@ class ModelKafkaEventBusConfig(BaseModel):
             "session_timeout_ms",
             "heartbeat_interval_ms",
             "max_poll_interval_ms",
+            "max_request_size",
         }
 
         # Float fields for type conversion

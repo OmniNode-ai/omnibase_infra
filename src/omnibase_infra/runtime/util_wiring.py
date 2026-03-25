@@ -149,7 +149,6 @@ from omnibase_infra.runtime.handler_registry import (
     HANDLER_TYPE_DATABASE,
     HANDLER_TYPE_GRAPH,
     HANDLER_TYPE_HTTP,
-    HANDLER_TYPE_INTENT,
     HANDLER_TYPE_MCP,
     RegistryEventBusBinding,
     RegistryProtocolBinding,
@@ -170,11 +169,10 @@ _HANDLERS_BASE = Path(__file__).parent.parent / "contracts" / "handlers"
 # Mapping of handler types to their contract paths.
 # Each entry maps a handler type constant to the path of its contract.yaml file.
 _HANDLER_CONTRACT_PATHS: dict[str, Path] = {
-    HANDLER_TYPE_DATABASE: _HANDLERS_BASE / "db" / "contract.yaml",
-    HANDLER_TYPE_GRAPH: _HANDLERS_BASE / "graph" / "contract.yaml",
-    HANDLER_TYPE_HTTP: _HANDLERS_BASE / "http" / "contract.yaml",
-    HANDLER_TYPE_INTENT: _HANDLERS_BASE / "intent" / "contract.yaml",
-    HANDLER_TYPE_MCP: _HANDLERS_BASE / "mcp" / "contract.yaml",
+    HANDLER_TYPE_DATABASE: _HANDLERS_BASE / "db" / "handler_contract.yaml",
+    HANDLER_TYPE_GRAPH: _HANDLERS_BASE / "graph" / "handler_contract.yaml",
+    HANDLER_TYPE_HTTP: _HANDLERS_BASE / "http" / "handler_contract.yaml",
+    HANDLER_TYPE_MCP: _HANDLERS_BASE / "mcp" / "handler_contract.yaml",
 }
 
 # Known event bus kinds that can be wired via this module.

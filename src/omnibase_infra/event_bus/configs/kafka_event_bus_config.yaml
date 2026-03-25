@@ -91,3 +91,6 @@ acks: "${KAFKA_ACKS:-all}"
 # Enable idempotent producer to prevent duplicate messages
 # Recommended for exactly-once semantics
 enable_idempotence: ${KAFKA_ENABLE_IDEMPOTENCE:-true}
+# Maximum size in bytes for a Kafka produce request (passed to AIOKafkaProducer)
+# Must align with broker-side max.message.bytes
+max_request_size: ${KAFKA_MAX_REQUEST_SIZE:-4194304}

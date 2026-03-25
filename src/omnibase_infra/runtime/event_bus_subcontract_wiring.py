@@ -131,6 +131,34 @@ if TYPE_CHECKING:
     )
 
 
+def validate_topic(topic: str, deny_patterns: tuple[str, ...] = ()) -> None:
+    """Validate a topic name against contract-declared deny patterns [OMN-6342].
+
+    Checks the topic against deny patterns from ``event_bus_wiring_effect.yaml``.
+    If any deny pattern matches, raises ``ProtocolConfigurationError``.
+
+    Args:
+        topic: Topic name to validate.
+        deny_patterns: Regex deny patterns from ``ModelRuntimeNodeGraphConfig``.
+
+    Raises:
+        ProtocolConfigurationError: If topic matches a deny pattern.
+    """
+    import re
+
+    for pattern in deny_patterns:
+        if re.search(pattern, topic):
+            context = ModelInfraErrorContext.with_correlation(
+                operation="validate_topic",
+                target_name=topic,
+            )
+            raise ProtocolConfigurationError(
+                f"Topic name denied by contract security policy: '{topic}' "
+                f"(matched deny pattern: {pattern})",
+                context=context,
+            )
+
+
 class EventBusSubcontractWiring(MixinConsumptionCounter):
     """Wires event_bus subcontracts to Kafka subscriptions and publishers.
 
@@ -243,6 +271,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         dlq_config: ModelDlqConfig | None = None,
         retry_config: ModelConsumerRetryConfig | None = None,
         offset_policy: ModelOffsetPolicyConfig | None = None,
+        topic_deny_patterns: tuple[str, ...] = (),
     ) -> None:
         """Initialize event bus wiring.
 
@@ -279,6 +308,9 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
             offset_policy: Optional configuration for offset commit strategy.
                 Controls when offsets are committed relative to handler execution.
                 If None, uses commit_after_handler (at-least-once delivery).
+            topic_deny_patterns: Regex deny patterns from
+                ``ModelRuntimeNodeGraphConfig.topic_deny_patterns``. Topics
+                matching any pattern are rejected before subscription.
 
         Note:
             The dispatch_engine should be frozen before wiring subscriptions.
@@ -306,6 +338,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         self._dlq_config = dlq_config or ModelDlqConfig()
         self._retry_config = retry_config or ModelConsumerRetryConfig.create_standard()
         self._offset_policy = offset_policy or ModelOffsetPolicyConfig()
+        self._topic_deny_patterns = topic_deny_patterns
         self._unsubscribe_callables: list[Callable[[], Awaitable[None]]] = []
         self._logger = logging.getLogger(__name__)
         # Track retry attempts per correlation_id for infrastructure errors.
@@ -409,6 +442,9 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
 
         for topic_suffix in subcontract.subscribe_topics:
             full_topic = self.resolve_topic(topic_suffix)
+
+            # Validate topic against deny patterns before subscribing
+            validate_topic(full_topic, self._topic_deny_patterns)
 
             # Create typed node identity for consumer group derivation
             # The event bus derives consumer group as: {env}.{service}.{node_name}.{purpose}.{version}

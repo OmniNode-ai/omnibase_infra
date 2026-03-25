@@ -1859,7 +1859,7 @@ wheels = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.30.2"
+version = "0.31.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "blake3" },
@@ -1873,9 +1873,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "ruamel-yaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ec/d3/7da4de1756e08909e0cda979837c71a66342d96a9fe432db8ba5dd49aad8/omnibase_core-0.30.2.tar.gz", hash = "sha256:bb2fbf85d5a8f3dad1797680b46dbd9e90351617234b34a7277a47bc3afb930d", size = 8010899, upload-time = "2026-03-23T00:15:37.501Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/93/07/39247d847354c0950e46f1537148b899a2408c2db7c0bb0bff8808e86e21/omnibase_core-0.31.1.tar.gz", hash = "sha256:5dbea0d604565e1538e33384662476223ed2d1f736cc22dc1505e539506d33d4", size = 8030231, upload-time = "2026-03-25T02:13:07.173Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/10/84/8d5feacc720668bb2caddc0daf952e4622e5fb4aba39a3f4222034fe87c9/omnibase_core-0.30.2-py3-none-any.whl", hash = "sha256:74def267fa9d1305f71b90b7504e60e0c3027d8d92ee3077e650273e28d0bec1", size = 5205149, upload-time = "2026-03-23T00:15:40.325Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/e8/d75a6936b91a0deb9c5bf298ab1562aa19c5b7cdddfece73146f91f0243a/omnibase_core-0.31.1-py3-none-any.whl", hash = "sha256:75b053b0efa575d8ac25bc8575d6356699304482eee0cc8ea0c3ab45e911b796", size = 5221586, upload-time = "2026-03-25T02:13:10.184Z" },
 ]
 
 [[package]]
@@ -1971,7 +1971,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.20.0,<5.0.0" },
     { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<6.0.0" },
-    { name = "omnibase-core", specifier = ">=0.30.2" },
+    { name = "omnibase-core", specifier = ">=0.31.1" },
     { name = "omnibase-spi", specifier = ">=0.19.1" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },
