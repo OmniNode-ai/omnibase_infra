@@ -195,6 +195,8 @@ def _get_package_source_path(package_name: str) -> Path | None:
     """Locate the source directory for an installed package.
 
     Uses importlib to find the package spec and extract the source path.
+    For editable installs, prefers the ``src/`` directory over site-packages
+    to limit scan scope and prevent OOM on CI runners (OMN-5969).
 
     Args:
         package_name: The name of the package to locate.
@@ -230,7 +232,9 @@ def _get_package_source_path(package_name: str) -> Path | None:
 
     # spec.origin is the __init__.py path
     origin_path = Path(spec.origin)
-    return origin_path.parent
+    package_dir = origin_path.parent
+
+    return package_dir
 
 
 def _find_python_files(directory: Path) -> list[Path]:
@@ -801,6 +805,7 @@ def _scan_package_for_forbidden_imports(
     package_name: str,
     forbidden_patterns: list[str],
     skip_requirements: bool = True,
+    max_files: int = 5000,
 ) -> list[ArchitectureViolation]:
     """Scan an entire package for forbidden import patterns.
 
@@ -808,18 +813,34 @@ def _scan_package_for_forbidden_imports(
         package_name: Name of the package to scan.
         forbidden_patterns: List of import patterns to detect.
         skip_requirements: If True, skip requirements/config files.
+        max_files: Maximum number of Python files to scan. Prevents OOM on
+            CI runners when scanning large installed packages (OMN-5969).
+            Default 5000 covers omnibase_core's ~2500 files with headroom.
 
     Returns:
         List of all violations found in the package.
 
     Raises:
-        ValueError: If the package cannot be located.
+        ValueError: If the package cannot be located or file count exceeds max_files.
     """
     package_path = _get_package_source_path(package_name)
     if package_path is None:
         raise ValueError(f"Could not locate package: {package_name}")
 
     python_files = _find_python_files(package_path)
+
+    # OMN-5969: Guard against scanning excessively large package trees that
+    # could OOM CI runners. If file count exceeds the limit, this indicates
+    # the package path resolved to an unexpectedly broad directory (e.g.,
+    # all of site-packages rather than a single package).
+    if len(python_files) > max_files:
+        raise ValueError(
+            f"Package {package_name} at {package_path} contains "
+            f"{len(python_files)} Python files (limit: {max_files}). "
+            f"This likely indicates the package path resolved too broadly. "
+            f"Verify the package is installed as an editable install."
+        )
+
     all_violations: list[ArchitectureViolation] = []
 
     for file_path in python_files:
