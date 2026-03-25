@@ -47,6 +47,14 @@ class MockConsumptionSource:
         return dict(self._counts)
 
 
+class BrokenConsumptionSource:
+    """Mock source that raises AttributeError on get_consumption_counts."""
+
+
+class BrokenEmissionSource:
+    """Mock source that raises AttributeError on get_emission_counts."""
+
+
 class TestModelTopicWiringHealth:
     """Tests for ModelTopicWiringHealth."""
 
@@ -382,6 +390,51 @@ class TestWiringHealthChecker:
 
         assert alert is not None
         assert alert.correlation_id == correlation_id
+
+    def test_compute_health_consumption_source_attribute_error(
+        self, topic: str
+    ) -> None:
+        """Should degrade gracefully when consumption source raises AttributeError."""
+        emission_source = MockEmissionSource({topic: 100})
+        consumption_source = BrokenConsumptionSource()
+
+        handler = WiringHealthChecker(
+            emission_source=emission_source,
+            consumption_source=consumption_source,  # type: ignore[arg-type]
+            environment="dev",
+        )
+
+        # Should NOT raise — degrades gracefully
+        metrics = handler.compute_health()
+
+        # With empty consumption counts, all monitored topics show mismatch
+        # but the key point is: no crash
+        assert isinstance(metrics, ModelWiringHealthMetrics)
+
+    def test_compute_health_emission_only_mode(self, topic: str) -> None:
+        """Should return valid metrics when consumption source is unavailable.
+
+        In emission-only mode (consumption source broken), metrics should still
+        be computable — the health check reports degraded status but does not crash.
+        """
+        emission_source = MockEmissionSource({topic: 50})
+        consumption_source = BrokenConsumptionSource()
+
+        handler = WiringHealthChecker(
+            emission_source=emission_source,
+            consumption_source=consumption_source,  # type: ignore[arg-type]
+            environment="dev",
+        )
+
+        metrics = handler.compute_health()
+
+        # Metrics exist and contain topic data
+        assert isinstance(metrics, ModelWiringHealthMetrics)
+        assert metrics.topics is not None
+
+        # Response formatting should not crash either
+        response = handler.to_health_response(metrics)
+        assert "status" in response
 
 
 # =============================================================================

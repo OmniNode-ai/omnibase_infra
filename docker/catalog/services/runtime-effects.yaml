@@ -40,10 +40,10 @@ ports:
   internal: 8085
 healthcheck:
   test: curl -sf http://localhost:8085/health
-  interval_s: 30
+  interval_s: 45
   timeout_s: 10
   retries: 5
-  start_period_s: 120
+  start_period_s: 480
 volumes:
   - effects_logs:/app/logs
   - effects_data:/app/data

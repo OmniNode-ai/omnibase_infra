@@ -153,9 +153,24 @@ class WiringHealthChecker:
         """
         correlation_id = correlation_id or uuid4()
 
-        # Gather counts
-        emit_counts = self._emission_source.get_emission_counts()
-        consume_counts = self._consumption_source.get_consumption_counts()
+        # Gather counts — degrade gracefully if either source is unavailable
+        try:
+            emit_counts = self._emission_source.get_emission_counts()
+        except AttributeError:
+            _logger.warning(
+                "Emission source missing get_emission_counts — using empty counts",
+                extra={"correlation_id": str(correlation_id)},
+            )
+            emit_counts = {}
+
+        try:
+            consume_counts = self._consumption_source.get_consumption_counts()
+        except AttributeError:
+            _logger.warning(
+                "Consumption source missing get_consumption_counts — using empty counts",
+                extra={"correlation_id": str(correlation_id)},
+            )
+            consume_counts = {}
 
         # Compute metrics
         metrics = ModelWiringHealthMetrics.from_counts(
