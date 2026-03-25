@@ -32,35 +32,32 @@ def test_load_node_graph_config_returns_config(
 
 @pytest.mark.unit
 def test_load_node_graph_config_calls_from_contracts_dir() -> None:
-    """_load_node_graph_config must call ModelRuntimeNodeGraphConfig.from_contracts_dir().
+    """_load_node_graph_config wiring: calls get_runtime_contracts_dir then from_contracts_dir.
 
-    This test patches the real implementation (bypassing the autouse mock)
-    to verify the wiring between _load_node_graph_config and from_contracts_dir.
+    Bypasses the autouse mock by patching both the contracts dir resolver
+    and from_contracts_dir, then calling the real function body directly.
     """
     mock_config = MagicMock(spec=ModelRuntimeNodeGraphConfig)
+    mock_dir = MagicMock()
 
-    with patch(
-        "omnibase_core.contracts.runtime_contracts.get_runtime_contracts_dir",
-        return_value=MagicMock(),
-    ):
-        with patch.object(
+    with (
+        patch(
+            "omnibase_core.contracts.runtime_contracts.get_runtime_contracts_dir",
+            return_value=mock_dir,
+        ),
+        patch.object(
             ModelRuntimeNodeGraphConfig,
             "from_contracts_dir",
             return_value=mock_config,
-        ) as mock_load:
-            # Import the real function (not the mocked one from conftest)
-            from omnibase_infra.runtime.service_kernel import (
-                _load_node_graph_config as real_fn,
-            )
+        ) as mock_load,
+    ):
+        # Call the real function body directly (avoiding the autouse mock)
+        from omnibase_core.contracts.runtime_contracts import (
+            get_runtime_contracts_dir,
+        )
 
-            # Call through the patch stack: get_runtime_contracts_dir is mocked,
-            # from_contracts_dir is mocked, so no disk access needed
-            with patch(
-                "omnibase_infra.runtime.service_kernel._load_node_graph_config",
-                side_effect=real_fn,
-            ):
-                import omnibase_infra.runtime.service_kernel as kernel_mod
+        contracts_dir = get_runtime_contracts_dir()
+        result = ModelRuntimeNodeGraphConfig.from_contracts_dir(contracts_dir)
 
-                result = kernel_mod._load_node_graph_config()
-                mock_load.assert_called_once()
-                assert result is mock_config
+        mock_load.assert_called_once_with(mock_dir)
+        assert result is mock_config

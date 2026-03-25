@@ -18,7 +18,9 @@ from omnibase_infra.runtime.models.model_runtime_node_graph_config import (
     ModelRuntimeNodeGraphConfig,
 )
 
-# Minimal contract YAML content for testing
+# Minimal contract YAML content matching the extraction paths in from_contracts_dir().
+# Each fixture mirrors the nested structure the code actually reads.
+
 _RUNTIME_ORCHESTRATOR = {
     "workflow_coordination": {
         "workflow_definition": {
@@ -27,19 +29,20 @@ _RUNTIME_ORCHESTRATOR = {
                 "step_timeout_ms": 30000,
                 "max_retries": 3,
                 "retry_backoff_ms": 2000,
-                "retry_multiplier": 2.0,
+                "retry_backoff_multiplier": 2.0,
             }
         },
-        "lifecycle": {},
+        "lifecycle": {
+            "graceful_shutdown_timeout_ms": 45000,
+            "health_check_interval_ms": 5000,
+        },
     }
 }
 
 _NODE_GRAPH_REDUCER = {
-    "state_management": {
-        "drain_timeout_ms": 30000,
+    "operational_defaults": {
         "max_concurrent_handlers": 10,
-        "handler_pool_size": 10,
-        "health_check_timeout_ms": 5000,
+        "handler_pool_size": 8,
         "batch_response_size": 100,
         "batch_flush_interval_ms": 1000,
     }
@@ -47,11 +50,15 @@ _NODE_GRAPH_REDUCER = {
 
 _EVENT_BUS_WIRING = {
     "wiring_config": {
-        "topic_validation_pattern": r"^[a-z][a-z0-9._-]*$",
-        "topic_deny_patterns": ["__consumer_offsets", "_schemas"],
-        "max_topic_length": 255,
-        "max_subscriptions_per_node": 100,
+        "topic_validation": {
+            "allowed_pattern": r"^[a-z][a-z0-9._-]*$",
+            "deny_patterns": ["__consumer_offsets", "_schemas"],
+            "max_topic_length": 255,
+            "max_subscriptions_per_node": 100,
+        },
         "subscription_timeout_ms": 5000,
+    },
+    "effect": {
         "circuit_breaker": {
             "failure_threshold": 5,
             "timeout_ms": 30000,
@@ -61,14 +68,27 @@ _EVENT_BUS_WIRING = {
             "base_delay_ms": 1000,
             "max_delay_ms": 10000,
         },
-    }
+    },
 }
 
 _CONTRACT_LOADER = {
-    "scan_config": {
-        "exclude_patterns": ["__pycache__", ".git"],
-        "deny_paths": ["/etc", "/var"],
-        "timeout_ms": 60000,
+    "effect_operations": {
+        "operations": [
+            {
+                "operation_name": "scan_contracts_directory",
+                "operation_timeout_ms": 60000,
+                "metadata": {
+                    "exclude_patterns": ["__pycache__", ".git"],
+                },
+                "io_config": {
+                    "security": {
+                        "path_validation": {
+                            "deny_patterns": ["/etc", "/var"],
+                        }
+                    }
+                },
+            }
+        ]
     }
 }
 
@@ -88,33 +108,35 @@ def contracts_dir(tmp_path: Path) -> Path:
 
 @pytest.mark.unit
 def test_loads_from_runtime_contracts(contracts_dir: Path) -> None:
-    """Load config from temp contract YAMLs."""
+    """Load config from temp contract YAMLs and verify values."""
     config = ModelRuntimeNodeGraphConfig.from_contracts_dir(contracts_dir)
 
-    # runtime_orchestrator values
+    # runtime_orchestrator values (from coordination_rules)
     assert config.startup_timeout_ms == 120000
     assert config.step_timeout_ms == 30000
     assert config.max_step_retries == 3
     assert config.retry_backoff_ms == 2000
     assert config.retry_backoff_multiplier == 2.0
 
-    # node_graph / lifecycle values
-    assert config.drain_timeout_ms > 0
-    assert config.max_concurrent_handlers > 0
-    assert config.handler_pool_size > 0
-    assert config.health_check_timeout_ms > 0
-    assert config.batch_response_size > 0
-    assert config.batch_flush_interval_ms > 0
+    # lifecycle values (from runtime_orchestrator lifecycle section)
+    assert config.drain_timeout_ms == 45000
+    assert config.health_check_timeout_ms == 5000
+
+    # node_graph operational_defaults
+    assert config.max_concurrent_handlers == 10
+    assert config.handler_pool_size == 8
+    assert config.batch_response_size == 100
+    assert config.batch_flush_interval_ms == 1000
 
     # event_bus_wiring values
-    assert config.topic_validation_pattern is not None
-    assert len(config.topic_deny_patterns) > 0
+    assert config.topic_validation_pattern == r"^[a-z][a-z0-9._-]*$"
+    assert len(config.topic_deny_patterns) == 2
     assert config.max_topic_length == 255
     assert config.max_subscriptions_per_node == 100
 
     # contract_loader values
-    assert len(config.scan_exclude_patterns) > 0
-    assert len(config.scan_deny_paths) > 0
+    assert len(config.scan_exclude_patterns) == 2
+    assert len(config.scan_deny_paths) == 2
     assert config.scan_timeout_ms == 60000
 
 

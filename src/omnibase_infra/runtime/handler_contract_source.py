@@ -653,8 +653,15 @@ class HandlerContractSource(ProtocolContractSource):
         with contract_path.open("r", encoding="utf-8") as f:
             raw_data = yaml.safe_load(f)
 
+        # Strip fields not yet in core's ModelHandlerContract (extra="forbid").
+        # handler_routing is used by infra's contract schema but not yet
+        # reflected in omnibase_core's model. Similar to handler_class (OMN-1420).
+        validation_data = dict(raw_data) if isinstance(raw_data, dict) else raw_data
+        if isinstance(validation_data, dict):
+            validation_data.pop("handler_routing", None)
+
         # Validate against ModelHandlerContract
-        contract = ModelHandlerContract.model_validate(raw_data)
+        contract = ModelHandlerContract.model_validate(validation_data)
 
         # TODO(OMN-1420): Extract handler_class from ModelHandlerContract
         #
