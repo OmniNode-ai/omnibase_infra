@@ -14,7 +14,7 @@ descriptor:
   purity: side_effecting
   idempotent: false
   timeout_ms: 30000
-  concurrency_policy: concurrent
+  concurrency_policy: parallel_ok
 input_model:
   name: "ModelEventEnvelope"
   module: "omnibase_core.models.events.model_event_envelope"
