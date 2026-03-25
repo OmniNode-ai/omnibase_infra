@@ -172,6 +172,7 @@ jobs:
           BUMP_PACKAGE: ${{ inputs.package }}
         run: |
           PKG_HYPHEN="${BUMP_PACKAGE//_/-}"
+          export PKG_HYPHEN
 
           RESOLVED=$(python3 - <<'PYEOF'
           import re, sys, os
@@ -188,7 +189,7 @@ jobs:
           PYEOF
           )
           echo "Resolved version for ${PKG_HYPHEN}: ${RESOLVED}"
-          export RESOLVED PKG_HYPHEN
+          export RESOLVED
 
           python3 - <<'PYEOF'
           import re, os
