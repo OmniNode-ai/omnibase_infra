@@ -1156,64 +1156,6 @@ async def bootstrap() -> int:
                 )
                 llm_health_service = None
 
-        # 3.8. Initialize WiringHealthChecker periodic emission (OMN-6133)
-        # Computes emission/consumption health and emits snapshot events to Kafka
-        # for the omnidash /wiring-health dashboard.  Triggered periodically
-        # (default 60s) via a background asyncio task.
-        if use_kafka:
-            try:
-                _wiring_health_interval = float(
-                    os.environ.get("WIRING_HEALTH_EMIT_INTERVAL", "60")
-                )
-                wiring_health_checker = WiringHealthChecker(
-                    emission_source=event_bus,  # type: ignore[arg-type]
-                    consumption_source=event_bus,  # type: ignore[arg-type]
-                    environment=environment,
-                    event_bus=event_bus,  # type: ignore[arg-type]
-                )
-
-                async def _wiring_health_loop() -> None:
-                    """Periodic loop that computes and emits wiring health snapshots."""
-                    assert wiring_health_checker is not None  # narrowing for mypy
-                    while True:
-                        try:
-                            _cid = generate_correlation_id()
-                            metrics = wiring_health_checker.compute_health(
-                                correlation_id=_cid,
-                            )
-                            await wiring_health_checker.emit_snapshot(
-                                metrics=metrics,
-                                correlation_id=_cid,
-                            )
-                        except asyncio.CancelledError:
-                            raise
-                        except Exception:  # noqa: BLE001 — best-effort, never crashes kernel
-                            logger.warning(
-                                "Wiring health snapshot emission failed",
-                                exc_info=True,
-                            )
-                        await asyncio.sleep(_wiring_health_interval)
-
-                wiring_health_task = asyncio.create_task(
-                    _wiring_health_loop(),
-                    name="wiring-health-emit",
-                )
-                logger.info(
-                    "WiringHealthChecker periodic emission started "
-                    "(interval=%ss, correlation_id=%s)",
-                    _wiring_health_interval,
-                    correlation_id,
-                )
-            except Exception:  # noqa: BLE001 — best-effort, never blocks startup
-                logger.warning(
-                    "Failed to start WiringHealthChecker emission, continuing without it "
-                    "(correlation_id=%s)",
-                    correlation_id,
-                    exc_info=True,
-                )
-                wiring_health_checker = None
-                wiring_health_task = None
-
         # 4. Create and wire container for dependency injection
         container_start_time = time.time()
         container = ModelONEXContainer()
@@ -2006,6 +1948,79 @@ async def bootstrap() -> int:
                 "duration_seconds": runtime_start_duration,
             },
         )
+
+        # Initialize WiringHealthChecker with correct sources (OMN-6515)
+        # MUST be after runtime.start() because EventBusSubcontractWiring
+        # is created during RuntimeHostProcess.start().
+        #
+        # Source roles:
+        #   emission_source  = event_bus (EventBusKafka -> MixinEmissionCounter)
+        #   consumption_source = runtime.event_bus_wiring (EventBusSubcontractWiring -> MixinConsumptionCounter)
+        #
+        # Previously, event_bus was incorrectly used for both, causing
+        # AttributeError on get_consumption_counts() (OMN-6515).
+        if use_kafka:
+            try:
+                consumption_source = runtime.event_bus_wiring
+                emission_source = event_bus
+                if consumption_source is not None:
+                    _wiring_health_interval = float(
+                        os.environ.get("WIRING_HEALTH_EMIT_INTERVAL", "60")
+                    )
+                    wiring_health_checker = WiringHealthChecker(
+                        emission_source=emission_source,  # type: ignore[arg-type]
+                        consumption_source=consumption_source,
+                        environment=environment,
+                        event_bus=event_bus,  # type: ignore[arg-type]
+                    )
+
+                    async def _wiring_health_loop() -> None:
+                        """Periodic loop that computes and emits wiring health snapshots."""
+                        assert wiring_health_checker is not None
+                        while True:
+                            try:
+                                _cid = generate_correlation_id()
+                                metrics = wiring_health_checker.compute_health(
+                                    correlation_id=_cid,
+                                )
+                                await wiring_health_checker.emit_snapshot(
+                                    metrics=metrics,
+                                    correlation_id=_cid,
+                                )
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception:  # noqa: BLE001
+                                logger.warning(
+                                    "Wiring health snapshot emission failed",
+                                    exc_info=True,
+                                )
+                            await asyncio.sleep(_wiring_health_interval)
+
+                    wiring_health_task = asyncio.create_task(
+                        _wiring_health_loop(),
+                        name="wiring-health-emit",
+                    )
+                    logger.info(
+                        "WiringHealthChecker periodic emission started "
+                        "(interval=%ss, correlation_id=%s)",
+                        _wiring_health_interval,
+                        correlation_id,
+                    )
+                else:
+                    logger.info(
+                        "WiringHealthChecker skipped: no EventBusSubcontractWiring "
+                        "(dispatch_engine not configured) (correlation_id=%s)",
+                        correlation_id,
+                    )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Failed to start WiringHealthChecker emission, continuing without it "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+                wiring_health_checker = None
+                wiring_health_task = None
 
         # 9. Start HTTP health server for Docker/K8s probes
         # Port can be configured via ONEX_HTTP_PORT environment variable
