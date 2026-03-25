@@ -608,6 +608,7 @@ jobs:
             --timeout=60 \
             --timeout-method=thread \
             --tb=short \
+            --store-durations \
             --junitxml=junit-${{ matrix.split }}.xml
 
       - name: Upload test results
@@ -616,6 +617,14 @@ jobs:
         with:
           name: test-results-${{ matrix.split }}
           path: junit-${{ matrix.split }}.xml
+          retention-days: 7
+
+      - name: Upload test durations (for split rebalancing)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-durations-split-${{ matrix.split }}
+          path: .test_durations
           retention-days: 7
 
   # ---------------------------------------------------------------------------
