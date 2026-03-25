@@ -573,21 +573,33 @@ jobs:
       - name: Verify all referenced contract paths exist
         run: |
           EXIT_CODE=0
+          SKIPPED=0
+          CHECKED=0
           # Find all contract.yaml files and verify referenced module paths
           for contract in $(find src/ -name "contract.yaml" -o -name "*.contract.yaml" 2>/dev/null); do
             # Extract module paths from contract YAML (lines like "  module: some.module.path")
             MODULES=$(grep -E '^\s+module:' "$contract" | sed 's/.*module:\s*"\?\([^"]*\)"\?/\1/' || true)
             for mod in $MODULES; do
-              # Convert dotted module path to file path
-              MOD_PATH=$(echo "$mod" | tr '.' '/')
-              if [ ! -f "src/${MOD_PATH}.py" ] && [ ! -f "src/${MOD_PATH}/__init__.py" ]; then
-                echo "::error file=${contract}::Contract references module '${mod}' but neither src/${MOD_PATH}.py nor src/${MOD_PATH}/__init__.py exists"
-                EXIT_CODE=1
-              fi
+              # Only validate modules within this repo (omnibase_infra).
+              # Cross-repo references (omnibase_core, omnibase_spi, etc.) are
+              # external dependencies and cannot be validated locally.
+              case "$mod" in
+                omnibase_infra.*)
+                  CHECKED=$((CHECKED + 1))
+                  MOD_PATH=$(echo "$mod" | tr '.' '/')
+                  if [ ! -f "src/${MOD_PATH}.py" ] && [ ! -f "src/${MOD_PATH}/__init__.py" ]; then
+                    echo "::error file=${contract}::Contract references module '${mod}' but neither src/${MOD_PATH}.py nor src/${MOD_PATH}/__init__.py exists"
+                    EXIT_CODE=1
+                  fi
+                  ;;
+                *)
+                  SKIPPED=$((SKIPPED + 1))
+                  ;;
+              esac
             done
           done
           if [ "$EXIT_CODE" -eq 0 ]; then
-            echo "OK: All contract module paths verified"
+            echo "OK: All ${CHECKED} local contract module paths verified (${SKIPPED} cross-repo references skipped)"
           fi
           exit $EXIT_CODE
 
