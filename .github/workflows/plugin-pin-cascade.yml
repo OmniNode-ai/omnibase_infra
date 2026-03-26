@@ -93,12 +93,18 @@ jobs:
         # the requested version. If PyPI propagation lag caused update-plugin-pins.py
         # to fetch an older version, fail loudly rather than silently succeed with
         # stale data.
+        #
+        # The dispatched version may carry a 'v' prefix (e.g. v0.15.0 from the
+        # release tag) while the Dockerfile pin is bare (0.15.0). Strip the prefix
+        # before comparing.
         run: |
           PKG="${{ steps.inputs.outputs.package }}"
           EXPECTED_VER="${{ steps.inputs.outputs.version }}"
+          # Strip leading 'v' prefix if present (e.g. v0.15.0 → 0.15.0)
+          EXPECTED_VER="${EXPECTED_VER#v}"
           ACTUAL=$(grep -oP "(?<=${PKG}==)[0-9]+\.[0-9]+\.[0-9]+" docker/Dockerfile.runtime || true)
           if [ "$ACTUAL" != "$EXPECTED_VER" ]; then
-            echo "ERROR: Dockerfile pin for ${PKG} did not reach expected version ${EXPECTED_VER} — PyPI propagation lag. Re-run workflow after 60s." >&2
+            echo "ERROR: Dockerfile pin for ${PKG} did not reach expected version ${EXPECTED_VER} (actual: ${ACTUAL}) — PyPI propagation lag. Re-run workflow after 60s." >&2
             exit 1
           fi
           echo "Pin confirmed: ${PKG}==${ACTUAL}"
