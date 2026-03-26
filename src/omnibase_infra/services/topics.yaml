@@ -21,3 +21,5 @@ topics:
   - onex.evt.omnibase-infra.wiring-health-snapshot.v1
   # --- DLQ aggregation topic for omnidash (OMN-6136) ---
   - onex.evt.platform.dlq-message.v1
+  # --- GitHub PR merged event (OMN-6726) ---
+  - onex.evt.github.pr-merged.v1

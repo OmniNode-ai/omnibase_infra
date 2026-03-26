@@ -1,0 +1,83 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# pr-merged-event.yml
+#
+# Publishes a PR merged event to onex.evt.github.pr-merged.v1 when a PR
+# is closed with merged == true.  The event contains PR metadata (repo,
+# branch, author, PR number, merge SHA, changed files, ticket IDs).
+#
+# Downstream consumers subscribe to this topic for post-merge automation
+# (e.g. artifact reconciliation, Linear ticket close, deploy triggers).
+#
+# Ticket: OMN-6726
+#
+# Required GitHub Secrets:
+#   KAFKA_BOOTSTRAP_SERVERS  -- e.g. pkc-xxx.us-east-1.aws.confluent.cloud:9092
+#   KAFKA_SASL_USERNAME      -- Confluent Cloud API key (or SASL username)
+#   KAFKA_SASL_PASSWORD      -- Confluent Cloud API secret (or SASL password)
+
+name: PR Merged Event Producer
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+jobs:
+  publish-pr-merged-event:
+    name: Publish PR Merged Event
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v47
+        with:
+          separator: ","
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install --quiet confluent-kafka pydantic click
+
+      - name: Publish PR merged event
+        # All potentially attacker-controlled inputs (head_ref, author, title)
+        # are passed through environment variables, not interpolated directly
+        # into the run command, to prevent shell injection.
+        env:
+          KAFKA_BOOTSTRAP_SERVERS: ${{ secrets.KAFKA_BOOTSTRAP_SERVERS }}
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
+          PR_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_HEAD_REF: ${{ github.head_ref }}
+          PR_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_MERGED_AT: ${{ github.event.pull_request.merged_at }}
+          PR_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
+        run: |
+          python scripts/publish_pr_merged_event.py \
+            --repo "$PR_REPO" \
+            --pr-number "$PR_NUMBER" \
+            --base-ref "$PR_BASE_REF" \
+            --head-ref "$PR_HEAD_REF" \
+            --merge-sha "$PR_MERGE_SHA" \
+            --author "$PR_AUTHOR" \
+            --title "$PR_TITLE" \
+            --pr-body "$PR_BODY" \
+            --merged-at "$PR_MERGED_AT" \
+            --changed-files "$PR_CHANGED_FILES"
