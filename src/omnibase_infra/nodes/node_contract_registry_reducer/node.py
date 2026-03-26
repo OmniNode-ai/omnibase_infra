@@ -51,6 +51,12 @@ from typing import TYPE_CHECKING
 
 from omnibase_core.nodes.node_reducer import NodeReducer
 
+if TYPE_CHECKING:
+    # Import needed for string annotation in class definition
+    from omnibase_infra.nodes.node_contract_registry_reducer.models.model_contract_registry_state import (
+        ModelContractRegistryState,
+    )
+
 
 class NodeContractRegistryReducer(
     NodeReducer["ModelContractRegistryState", "ModelContractRegistryState"]

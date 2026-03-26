@@ -37,6 +37,9 @@ from omnibase_core.nodes.node_reducer import NodeReducer
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
+    from omnibase_infra.nodes.node_update_plan_reducer.models.model_update_plan_state import (
+        ModelUpdatePlanState,
+    )
 
 
 class NodeUpdatePlanReducer(
