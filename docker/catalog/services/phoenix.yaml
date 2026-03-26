@@ -11,17 +11,16 @@ ports:
   external: 6006
   internal: 6006
 healthcheck:
-  # Phoenix distroless image — use embedded Python to probe the OTLP endpoint.
-  # /healthz may not exist in all versions; POST /v1/traces with empty body
-  # returns 200 when Phoenix is ready to accept spans (confirmed manually).
+  # Phoenix distroless image — use embedded Python to probe /healthz.
+  # Retry generously since Phoenix can be slow to start (large model loads).
   test:
     - /usr/bin/python3
     - -c
     - "import urllib.request; urllib.request.urlopen('http://localhost:6006/healthz')"
   interval_s: 30
   timeout_s: 10
-  retries: 5
-  start_period_s: 40
+  retries: 3
+  start_period_s: 20
 volumes:
   - phoenix_data:/data
 depends_on: []
