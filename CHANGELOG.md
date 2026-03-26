@@ -1,3 +1,17 @@
+## v0.27.1 (2026-03-26)
+
+### Fixed
+- fix(tests): remove dead Consul skips, convert flaky CI benchmarks [OMN-6684] (#1002)
+
+### Changed
+- chore: remove dead imports across src/ and tests/ [OMN-6696] (#1004)
+- chore: standardize TODO markers with ticket references [OMN-6655] (#1005)
+- chore: bump omnibase-spi to 0.20.1, omnibase-core to 0.33.0
+
+### Dependencies
+- omnibase-core 0.32.0 -> 0.33.0
+- omnibase-spi 0.20.0 -> 0.20.1
+
 ## v0.27.0 (2026-03-25)
 
 ### Fixed
