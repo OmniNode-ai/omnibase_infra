@@ -332,7 +332,7 @@ COPY --chown=omniinfra:omniinfra src/omnibase_infra/nodes/ /app/contracts/nodes/
 # OMN-6440: Copy omnibase_core runtime contract YAMLs from the installed package.
 # get_runtime_contracts_dir() resolves via ONEX_RUNTIME_CONTRACTS_DIR env var in Docker.
 COPY --from=builder --chown=omniinfra:omniinfra \
-    /app/.venv/lib/python3.12/site-packages/omnibase_core/contracts/runtime/ \
+    /app/.venv/lib/python3.12/site-packages/omnibase_core/contracts/runtime_data/ \
     /app/contracts/runtime/
 
 # Copy entrypoint script that stamps schema fingerprint before kernel start
