@@ -861,8 +861,8 @@ if spec and spec.origin:
     pkg_dir = pathlib.Path(spec.origin).parent
     runtime_data = pkg_dir / 'contracts' / 'runtime_data'
     if not runtime_data.is_dir():
-        # Fallback: check sibling contracts/ directory (editable installs)
-        runtime_data = pkg_dir.parent.parent / 'contracts' / 'runtime'
+        # Fallback: check sibling contracts/runtime_data directory (editable installs)
+        runtime_data = pkg_dir.parent.parent / 'contracts' / 'runtime_data'
     if runtime_data.is_dir():
         print(runtime_data)
 " 2>/dev/null || true)"
@@ -877,11 +877,17 @@ if spec and spec.origin:
                 yaml_count=$((yaml_count + 1))
             fi
         done
+        if (( yaml_count == 0 )); then
+            log_error "No runtime contract YAMLs found in ${core_contracts_dir}."
+            log_error "Aborting deployment to avoid runtime startup failure."
+            exit 1
+        fi
         log_info "Copied ${yaml_count} runtime contract YAMLs from omnibase_core."
     else
-        log_warn "Could not locate omnibase_core runtime contracts."
-        log_warn "The runtime may fail to load core contracts at startup."
-        log_warn "Ensure omnibase_core is installed: uv pip install omnibase-core"
+        log_error "Could not locate omnibase_core runtime contracts."
+        log_error "Aborting deployment to avoid runtime startup failure."
+        log_error "Ensure omnibase_core is installed: uv pip install omnibase-core"
+        exit 1
     fi
 
     # 4. Docker files -- with preserve allowlist
