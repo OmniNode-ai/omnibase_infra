@@ -847,6 +847,43 @@ sync_files() {
         log_info "No contracts/ directory present, skipping contracts sync."
     fi
 
+    # 3b. Copy omnibase_core runtime contract YAMLs into contracts/runtime/
+    # OMN-6698: The bind-mount (../contracts:/app/contracts:ro) in docker-compose
+    # overrides the Dockerfile's baked-in contracts. The Dockerfile copies these
+    # from the installed omnibase_core package (contracts/runtime_data/), but
+    # the bind-mount hides them. We must copy them into the deployed contracts/
+    # directory so they survive the bind-mount override.
+    local core_contracts_dir
+    core_contracts_dir="$(python3 -c "
+import importlib.util, pathlib
+spec = importlib.util.find_spec('omnibase_core')
+if spec and spec.origin:
+    pkg_dir = pathlib.Path(spec.origin).parent
+    runtime_data = pkg_dir / 'contracts' / 'runtime_data'
+    if not runtime_data.is_dir():
+        # Fallback: check sibling contracts/ directory (editable installs)
+        runtime_data = pkg_dir.parent.parent / 'contracts' / 'runtime'
+    if runtime_data.is_dir():
+        print(runtime_data)
+" 2>/dev/null || true)"
+
+    if [[ -n "${core_contracts_dir}" && -d "${core_contracts_dir}" ]]; then
+        log_info "Copying omnibase_core runtime contracts from ${core_contracts_dir}..."
+        mkdir -p "${deploy_target}/contracts/runtime"
+        local yaml_count=0
+        for yaml_file in "${core_contracts_dir}"/*.yaml; do
+            if [[ -f "${yaml_file}" ]]; then
+                cp -f "${yaml_file}" "${deploy_target}/contracts/runtime/"
+                yaml_count=$((yaml_count + 1))
+            fi
+        done
+        log_info "Copied ${yaml_count} runtime contract YAMLs from omnibase_core."
+    else
+        log_warn "Could not locate omnibase_core runtime contracts."
+        log_warn "The runtime may fail to load core contracts at startup."
+        log_warn "Ensure omnibase_core is installed: uv pip install omnibase-core"
+    fi
+
     # 4. Docker files -- with preserve allowlist
     #    .env, .env.local, certs/, overrides/ survive --delete
     #    Excludes use a leading '/' to anchor them to the transfer root (docker/),
