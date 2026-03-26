@@ -31,8 +31,7 @@
 - fix(kafka): session timeout tuning + consumer self-healing restart (#962)
 
 ### Dependencies
-- chore(deps): bump omnibase_core to 0.31.1 (#984)
-- chore(deps): bump omnibase-core to 0.31.0 (#981)
+- chore(deps): bump omnibase-core from 0.31.0 to 0.31.1 (#981, #984)
 
 ### Docs
 - docs: add INTELLIGENCE_SERVICE_URL to env-example-full.txt [OMN-6259] (#977)
