@@ -30,7 +30,7 @@ dependencies = [
     # Remember to switch back to PyPI versions before merging to main.
     #
     "omnibase-core==0.32.0",
-    "omnibase-spi>=0.19.1",
+    "omnibase-spi==0.20.0",
     # ============================================================================
     # External Dependency Security Guidance
     # ============================================================================
