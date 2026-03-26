@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import os
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -162,88 +161,7 @@ class TestRegistrationHandlerProperties:
         assert "ModelNodeIntrospectionEvent" in handler.message_types
 
 
-@pytest.mark.skip(reason="Consul removed from runtime in OMN-3540")
-class TestConsulRegistrationVisible:
-    """Tests that Consul registration is visible after introspection processing."""
-
-    @staticmethod
-    def _consul_connection() -> tuple[str, int]:
-        """Read Consul host/port from the environment at call time.
-
-        Fallback values match the remote infrastructure topology documented
-        in ``~/.claude/CLAUDE.md`` (Consul external port 28500 on
-        192.168.86.200).  They are only used when ``CONSUL_HOST`` /
-        ``CONSUL_PORT`` environment variables are not set.
-
-        Returns:
-            Tuple of (host, port) for the Consul agent.
-        """
-        host = os.environ.get("CONSUL_HOST", "192.168.86.200")
-        port = int(os.environ.get("CONSUL_PORT", "28500"))
-        return host, port
-
-    @pytest.mark.consul
-    @pytest.mark.asyncio
-    async def test_consul_registration_visible(
-        self,
-        consul_available: bool,
-    ) -> None:
-        """Verify service appears in Consul after registration.
-
-        This test requires a live Consul instance. It is automatically
-        skipped if Consul is not available (via the consul_available fixture).
-
-        The test registers a dummy service, verifies it appears in the
-        Consul catalog, then deregisters it for cleanup.
-        """
-        if not consul_available:
-            pytest.skip("Consul not available")
-
-        import consul.aio
-
-        consul_host, consul_port = self._consul_connection()
-        client = consul.aio.Consul(host=consul_host, port=consul_port)
-
-        service_id = f"test-omn2081-{uuid4().hex[:8]}"
-        service_name = "test-omn2081-introspection"
-
-        try:
-            # Register a test service (simulating what the effect handler does)
-            success = await client.agent.service.register(
-                name=service_name,
-                service_id=service_id,
-                tags=["test", "omn-2081", "introspection"],
-            )
-            assert success is True
-
-            # Verify the service is visible in the catalog
-            _, services = await client.catalog.service(service_name)
-            service_ids = [s["ServiceID"] for s in services]
-            assert service_id in service_ids, (
-                f"Service {service_id} not found in Consul catalog. "
-                f"Found: {service_ids}"
-            )
-        finally:
-            # Cleanup: deregister the test service
-            try:
-                await client.agent.service.deregister(service_id)
-            except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
-                import warnings
-
-                warnings.warn(
-                    f"Consul cleanup failed for service '{service_id}': "
-                    f"{type(exc).__name__}: {exc}",
-                    stacklevel=1,
-                )
-            # Close the async Consul client to prevent resource leaks
-            try:
-                await client.close()
-            except Exception:  # noqa: BLE001 — boundary: swallows for resilience
-                pass
-
-
 __all__: list[str] = [
     "TestRegistrationHandlerInterface",
     "TestRegistrationHandlerProperties",
-    "TestConsulRegistrationVisible",
 ]

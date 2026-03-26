@@ -948,7 +948,7 @@ class TestContainerIntegration:
         """Test that real container fixture provides RegistryCompute."""
         # Skip if ServiceRegistry not available (omnibase_core 0.6.x)
         if container_with_registries.service_registry is None:
-            pytest.skip("ServiceRegistry not available in omnibase_core 0.6.x")
+            pytest.skip("ServiceRegistry not configured in container")
 
         # Resolve from container (async in omnibase_core 0.4+)
         registry: RegistryCompute = (
@@ -964,7 +964,7 @@ class TestContainerIntegration:
         """Test full workflow using container-based DI."""
         # Skip if ServiceRegistry not available (omnibase_core 0.6.x)
         if container_with_registries.service_registry is None:
-            pytest.skip("ServiceRegistry not available in omnibase_core 0.6.x")
+            pytest.skip("ServiceRegistry not configured in container")
 
         # Step 1: Resolve registry from container
         registry: RegistryCompute = (

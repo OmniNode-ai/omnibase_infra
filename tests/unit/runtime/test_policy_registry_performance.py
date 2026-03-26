@@ -15,9 +15,12 @@ Key optimizations tested:
 
 from __future__ import annotations
 
+import os
 import time
 
 import pytest
+
+_IS_CI: bool = os.environ.get("CI", "false").lower() == "true"
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError
@@ -183,8 +186,8 @@ class TestPolicyRegistryPerformance:
             f"Fast path too slow: {elapsed_ms:.2f}ms for 1000 lookups (expected < 150ms)"
         )
 
-    @pytest.mark.skip(
-        reason="Flaky in CI: microbenchmark variance can show warm > cold time"
+    @pytest.mark.skipif(
+        _IS_CI, reason="Flaky in CI: microbenchmark variance can show warm > cold time"
     )
     def test_semver_cache_performance(
         self, large_policy_registry: RegistryPolicy
@@ -518,8 +521,9 @@ class TestPolicyRegistryPerformanceRegression:
                 )
         return registry
 
-    @pytest.mark.skip(
-        reason="Flaky in CI: P99 latency microbenchmark too sensitive to environment variance"
+    @pytest.mark.skipif(
+        _IS_CI,
+        reason="Flaky in CI: P99 latency microbenchmark too sensitive to environment variance",
     )
     def test_get_p99_latency_under_threshold(
         self, large_registry: RegistryPolicy
@@ -569,8 +573,9 @@ class TestPolicyRegistryPerformanceRegression:
             f"This indicates potential secondary index regression."
         )
 
-    @pytest.mark.skip(
-        reason="Flaky in CI: registration throughput microbenchmark too sensitive to shared runner variance"
+    @pytest.mark.skipif(
+        _IS_CI,
+        reason="Flaky in CI: registration throughput microbenchmark too sensitive to shared runner variance",
     )
     def test_registration_throughput_regression(self) -> None:
         """Registration of 1000 policies must complete in < 500ms.
@@ -665,8 +670,9 @@ class TestPolicyRegistryPerformanceRegression:
             f"This indicates lock contention regression."
         )
 
-    @pytest.mark.skip(
-        reason="Flaky in CI: simulated O(n) is too fast for accurate comparison"
+    @pytest.mark.skipif(
+        _IS_CI,
+        reason="Flaky in CI: simulated O(n) is too fast for accurate comparison",
     )
     def test_secondary_index_speedup(self) -> None:
         """Secondary index must provide >1.1x speedup vs simulated O(n) scan.
