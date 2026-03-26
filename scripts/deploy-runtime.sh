@@ -853,6 +853,7 @@ sync_files() {
     # from the installed omnibase_core package (contracts/runtime_data/), but
     # the bind-mount hides them. We must copy them into the deployed contracts/
     # directory so they survive the bind-mount override.
+    check_command python3 "locating omnibase_core runtime contracts"
     local core_contracts_dir
     core_contracts_dir="$(python3 -c "
 import importlib.util, pathlib
@@ -870,6 +871,7 @@ if spec and spec.origin:
     if [[ -n "${core_contracts_dir}" && -d "${core_contracts_dir}" ]]; then
         log_info "Copying omnibase_core runtime contracts from ${core_contracts_dir}..."
         mkdir -p "${deploy_target}/contracts/runtime"
+        local expected_core_runtime_count=5
         local yaml_count=0
         for yaml_file in "${core_contracts_dir}"/*.yaml; do
             if [[ -f "${yaml_file}" ]]; then
@@ -877,8 +879,8 @@ if spec and spec.origin:
                 yaml_count=$((yaml_count + 1))
             fi
         done
-        if (( yaml_count == 0 )); then
-            log_error "No runtime contract YAMLs found in ${core_contracts_dir}."
+        if (( yaml_count < expected_core_runtime_count )); then
+            log_error "Expected at least ${expected_core_runtime_count} runtime contract YAMLs in ${core_contracts_dir}, found ${yaml_count}."
             log_error "Aborting deployment to avoid runtime startup failure."
             exit 1
         fi
