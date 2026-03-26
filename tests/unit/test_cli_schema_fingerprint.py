@@ -103,7 +103,7 @@ class TestMain:
         ):
             _main()
 
-        mock_stamp.assert_awaited_once_with(_FAKE_DSN, dry_run=False)
+        mock_stamp.assert_called_once_with(_FAKE_DSN, dry_run=False, manifest=None)
 
     def test_stamp_dry_run_passes_flag(self) -> None:
         """'stamp --dry-run' dispatches to _cli_stamp with dry_run=True."""
@@ -117,7 +117,7 @@ class TestMain:
         ):
             _main()
 
-        mock_stamp.assert_awaited_once_with(_FAKE_DSN, dry_run=True)
+        mock_stamp.assert_called_once_with(_FAKE_DSN, dry_run=True, manifest=None)
 
     def test_verify_subcommand_calls_cli_verify(self) -> None:
         """'verify' subcommand dispatches to _cli_verify."""
@@ -131,7 +131,7 @@ class TestMain:
         ):
             _main()
 
-        mock_verify.assert_awaited_once_with(_FAKE_DSN)
+        mock_verify.assert_called_once_with(_FAKE_DSN, manifest=None)
 
     def test_fingerprint_mismatch_exits_2(self) -> None:
         """SchemaFingerprintMismatchError causes exit code 2."""
