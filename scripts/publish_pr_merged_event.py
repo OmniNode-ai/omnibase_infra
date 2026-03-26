@@ -126,7 +126,7 @@ def _build_event(
         title=title,
         merged_at=merged_at if merged_at else None,
     )
-    return dict(json.loads(event.model_dump_json()))
+    return json.loads(event.model_dump_json())
 
 
 def _publish(

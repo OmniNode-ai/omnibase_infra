@@ -570,6 +570,18 @@ Producer: cli_runner_health.py (cron-scheduled)
 Consumer: omnidash (future)
 """
 
+SUFFIX_GITHUB_PR_MERGED: str = "onex.evt.github.pr-merged.v1"
+"""Topic suffix for GitHub PR merged events (OMN-6726).
+
+Published by the GitHub Actions workflow (pr-merged-event.yml) via
+``scripts/publish_pr_merged_event.py`` when a pull request is merged to main.
+Each event carries a ``ModelPRMergedEvent`` payload with repo, branch, author,
+changed files, ticket IDs, and merge SHA.
+
+Producer: GitHub Actions workflow (pr-merged-event.yml)
+Consumer: post-merge consumer chain (OMN-6727)
+"""
+
 # =============================================================================
 # OMNIBASE_INFRA DOMAIN TOPIC SPEC REGISTRY
 # =============================================================================
@@ -640,6 +652,15 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
         suffix=SUFFIX_RUNNER_HEALTH_SNAPSHOT,
         partitions=1,
         kafka_config={},
+    ),
+    # GitHub PR merged events (1 partition — low-throughput, one event per merge, OMN-6726)
+    ModelTopicSpec(
+        suffix=SUFFIX_GITHUB_PR_MERGED,
+        partitions=1,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
     ),
 )
 """Omnibase_infra domain topic specs for internal effect nodes.
