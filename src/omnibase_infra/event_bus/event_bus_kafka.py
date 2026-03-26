@@ -179,7 +179,7 @@ Protocol Compatibility:
     Duck-typed against ProtocolEventBus (omnibase_core). No explicit inheritance
     per ONEX patterns — structural compatibility is verified at startup.
 
-    TODO: Consider formalizing the EventBusKafka interface as a Protocol
+    TODO(OMN-6655): Consider formalizing the EventBusKafka interface as a Protocol
     (ProtocolEventBusKafka) in the future to enable better static type checking
     and IDE support for consumers that depend on Kafka-specific features.
 """

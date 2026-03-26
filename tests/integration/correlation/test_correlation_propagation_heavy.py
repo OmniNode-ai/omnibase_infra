@@ -332,7 +332,7 @@ class TestCorrelationDatabase:
         - Skips if OMNIBASE_INFRA_DB_URL (or POSTGRES_HOST/POSTGRES_PASSWORD fallback) not set
         - Uses class-level skip condition from POSTGRES_AVAILABLE flag
 
-    TODO [OMN-1349]: Add edge case tests for database correlation handling:
+    TODO(OMN-1349): Add edge case tests for database correlation handling:
     - test_correlation_in_transaction_rollback: Verify correlation preserved when transaction fails
     - test_correlation_with_connection_pool_exhaustion: Correlation in pool timeout errors
     - test_correlation_in_concurrent_queries: Multiple queries with different correlation IDs
@@ -460,7 +460,7 @@ class TestCorrelationKafka:
         - KAFKA_BOOTSTRAP_SERVERS environment variable must be set
         - Real Kafka/Redpanda broker must be available
 
-    TODO [OMN-1349]: Add edge case tests for Kafka correlation handling:
+    TODO(OMN-1349): Add edge case tests for Kafka correlation handling:
     - test_correlation_with_broker_disconnect: Correlation preserved during broker failover
     - test_correlation_in_message_retry: Correlation maintained across retry attempts
     - test_correlation_with_consumer_rebalance: Correlation during partition rebalancing

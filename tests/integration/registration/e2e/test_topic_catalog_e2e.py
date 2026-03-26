@@ -1194,7 +1194,7 @@ class TestIntegrationGoldenPath:
             len(response.topics),
         )
 
-    # TODO: move to unit tests to avoid infra-gated skip — see OMN-2317
+    # TODO(OMN-2317): move to unit tests to avoid infra-gated skip
     def test_golden_path_published_to_changed_topic_suffix_exists(
         self,
     ) -> None:

@@ -546,7 +546,7 @@ def _upsert_secret(
         # therefore a best-effort heuristic that may break if the SDK
         # changes its error message wording in a future release.
         #
-        # TODO: Replace this heuristic with proper error code inspection
+        # TODO(OMN-6655): Replace this heuristic with proper error code inspection
         # once the Infisical SDK exposes typed status codes or a dedicated
         # SecretNotFoundError subclass.  Track against the SDK changelog
         # (https://github.com/Infisical/infisical-python) and remove the

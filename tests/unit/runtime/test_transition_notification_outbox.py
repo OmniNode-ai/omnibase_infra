@@ -30,7 +30,7 @@ Test Organization:
 
 Related:
     - docs/patterns/retry_backoff_compensation_strategy.md (Outbox Pattern)
-    - OMN-XXX: State Transition Notifications via Outbox Pattern
+    - OMN-6655: State Transition Notifications via Outbox Pattern
 """
 
 from __future__ import annotations
@@ -1394,12 +1394,11 @@ class TestTransitionNotificationOutboxIntegration:
         # Step 1: Store notification
         # NOTE: f-string SQL is safe - table name from trusted config
         mock_conn.execute = AsyncMock(return_value="INSERT 0 1")
+        table = outbox_config.outbox_table
         await mock_conn.execute(
-            f"""
-            INSERT INTO {outbox_config.outbox_table}
-            (id, aggregate_type, aggregate_id, payload, created_at)
-            VALUES ($1, $2, $3, $4, $5)
-            """,  # noqa: S608
+            f"INSERT INTO {table}"  # noqa: S608
+            " (id, aggregate_type, aggregate_id, payload, created_at)"
+            " VALUES ($1, $2, $3, $4, $5)",
             notification_id,
             sample_notification.aggregate_type,
             sample_notification.aggregate_id,
