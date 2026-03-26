@@ -565,11 +565,19 @@ _STAMP_QUERY = (
 )
 
 
-async def _cli_stamp(db_url: str, *, dry_run: bool = False) -> None:
+async def _cli_stamp(
+    db_url: str,
+    *,
+    dry_run: bool = False,
+    manifest: ModelSchemaManifest | None = None,
+) -> None:
     """Compute live fingerprint and stamp it into db_metadata."""
-    from omnibase_infra.runtime.model_schema_manifest import (
-        OMNIBASE_INFRA_SCHEMA_MANIFEST,
-    )
+    if manifest is None:
+        from omnibase_infra.runtime.model_schema_manifest import (
+            OMNIBASE_INFRA_SCHEMA_MANIFEST,
+        )
+
+        manifest = OMNIBASE_INFRA_SCHEMA_MANIFEST
 
     pool = await asyncpg.create_pool(db_url)
     if pool is None:
@@ -578,7 +586,7 @@ async def _cli_stamp(db_url: str, *, dry_run: bool = False) -> None:
         )
         raise SystemExit(1)
     try:
-        result = await compute_schema_fingerprint(pool, OMNIBASE_INFRA_SCHEMA_MANIFEST)
+        result = await compute_schema_fingerprint(pool, manifest)
         print(f"fingerprint: {result.fingerprint}")
         print(f"table_count: {result.table_count}")
         print(f"column_count: {result.column_count}")
@@ -604,11 +612,18 @@ async def _cli_stamp(db_url: str, *, dry_run: bool = False) -> None:
         await pool.close()
 
 
-async def _cli_verify(db_url: str) -> None:
+async def _cli_verify(
+    db_url: str,
+    *,
+    manifest: ModelSchemaManifest | None = None,
+) -> None:
     """Run validation only -- exits non-zero on mismatch."""
-    from omnibase_infra.runtime.model_schema_manifest import (
-        OMNIBASE_INFRA_SCHEMA_MANIFEST,
-    )
+    if manifest is None:
+        from omnibase_infra.runtime.model_schema_manifest import (
+            OMNIBASE_INFRA_SCHEMA_MANIFEST,
+        )
+
+        manifest = OMNIBASE_INFRA_SCHEMA_MANIFEST
 
     pool = await asyncpg.create_pool(db_url)
     if pool is None:
@@ -617,7 +632,7 @@ async def _cli_verify(db_url: str) -> None:
         )
         raise SystemExit(1)
     try:
-        await validate_schema_fingerprint(pool, OMNIBASE_INFRA_SCHEMA_MANIFEST)
+        await validate_schema_fingerprint(pool, manifest)
         print("Schema fingerprint OK")
     finally:
         await pool.close()
@@ -632,6 +647,25 @@ def _main() -> None:
     parser = argparse.ArgumentParser(
         prog="python -m omnibase_infra.runtime.util_schema_fingerprint",
         description="Schema fingerprint CLI for omnibase_infra.",
+    )
+    parser.add_argument(
+        "--db-url",
+        default=None,
+        help=(
+            "PostgreSQL DSN. Overrides the env-var lookup. "
+            "If not provided, defaults to OMNIBASE_INFRA_DB_URL "
+            "(or the env var matching --manifest)."
+        ),
+    )
+    parser.add_argument(
+        "--manifest",
+        default="omnibase_infra",
+        choices=["omnibase_infra", "omniintelligence"],
+        help=(
+            "Which schema manifest to use (default: omnibase_infra). "
+            "When omniintelligence is selected, the default env var "
+            "becomes OMNIINTELLIGENCE_DB_URL."
+        ),
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -656,22 +690,44 @@ def _main() -> None:
         parser.print_help()
         sys.exit(1)
 
-    db_url = os.environ.get("OMNIBASE_INFRA_DB_URL")
+    # Resolve manifest and DB URL based on --manifest selection
+    manifest_obj: ModelSchemaManifest | None = None
+    env_var_name = "OMNIBASE_INFRA_DB_URL"
+
+    if args.manifest == "omniintelligence":
+        env_var_name = "OMNIINTELLIGENCE_DB_URL"
+        try:
+            from omniintelligence.runtime.model_schema_manifest import (
+                OMNIINTELLIGENCE_SCHEMA_MANIFEST,
+            )
+
+            manifest_obj = OMNIINTELLIGENCE_SCHEMA_MANIFEST
+        except ImportError:
+            print(
+                "ERROR: omniintelligence package not installed. "
+                "Cannot use --manifest omniintelligence without it.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    db_url = args.db_url or os.environ.get(env_var_name)
     if not db_url:
         print(
-            "ERROR: OMNIBASE_INFRA_DB_URL environment variable is required. "
+            f"ERROR: {env_var_name} environment variable is required "
+            f"(or pass --db-url). "
             "For host-side scripts set: "
-            "OMNIBASE_INFRA_DB_URL=postgresql://postgres:PASSWORD@localhost:5436/omnibase_infra "
-            "(use localhost:5436 — the Docker-exposed port, not postgres:5432 which is Docker-internal only).",
+            f"{env_var_name}=postgresql://postgres:PASSWORD@localhost:5436/<db> "
+            "(use localhost:5436 — the Docker-exposed port, not postgres:5432 "
+            "which is Docker-internal only).",
             file=sys.stderr,
         )
         sys.exit(1)
 
     try:
         if args.command == "stamp":
-            asyncio.run(_cli_stamp(db_url, dry_run=args.dry_run))
+            asyncio.run(_cli_stamp(db_url, dry_run=args.dry_run, manifest=manifest_obj))
         elif args.command == "verify":
-            asyncio.run(_cli_verify(db_url))
+            asyncio.run(_cli_verify(db_url, manifest=manifest_obj))
     except (
         SchemaFingerprintMismatchError,
         SchemaFingerprintMissingError,
