@@ -30,7 +30,7 @@ class ModelPRMergedEvent(BaseModel):
         - OMN-6726: GitHub merge event producer
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     repo: str = Field(
         description="Repository full name, e.g. 'OmniNode-ai/omnibase_infra'",
