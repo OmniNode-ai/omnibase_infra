@@ -20,7 +20,7 @@ import time
 
 import pytest
 
-_IS_CI: bool = os.environ.get("CI", "false").lower() == "true"
+_IS_CI: bool = os.environ.get("CI", "").strip().lower() in {"1", "true", "yes", "on"}
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError

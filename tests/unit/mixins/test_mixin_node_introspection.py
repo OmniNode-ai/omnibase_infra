@@ -70,7 +70,7 @@ from omnibase_infra.models.registration import (
 from omnibase_infra.topics import SUFFIX_NODE_HEARTBEAT, SUFFIX_NODE_INTROSPECTION
 
 # CI environments may be slower - apply multiplier for performance thresholds
-_CI_MODE: bool = os.environ.get("CI", "false").lower() == "true"
+_CI_MODE: bool = os.environ.get("CI", "").strip().lower() in {"1", "true", "yes", "on"}
 PERF_MULTIPLIER: float = 3.0 if _CI_MODE else 2.0
 
 # Type alias for event bus published event structure
