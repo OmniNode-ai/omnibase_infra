@@ -67,6 +67,10 @@ from omnibase_infra.services.observability.skill_lifecycle.config import (
 from omnibase_infra.services.observability.skill_lifecycle.writer_postgres import (
     WriterSkillLifecyclePostgres,
 )
+from omnibase_infra.topics import (
+    SUFFIX_OMNICLAUDE_SKILL_COMPLETED,
+    SUFFIX_OMNICLAUDE_SKILL_STARTED,
+)
 
 if TYPE_CHECKING:
     from aiokafka.structs import ConsumerRecord
@@ -268,8 +272,8 @@ class ConsumerMetrics:
 # Skill Lifecycle Consumer
 # =============================================================================
 
-TOPIC_STARTED = "onex.evt.omniclaude.skill-started.v1"
-TOPIC_COMPLETED = "onex.evt.omniclaude.skill-completed.v1"
+TOPIC_STARTED = SUFFIX_OMNICLAUDE_SKILL_STARTED
+TOPIC_COMPLETED = SUFFIX_OMNICLAUDE_SKILL_COMPLETED
 
 
 class SkillLifecycleConsumer:
