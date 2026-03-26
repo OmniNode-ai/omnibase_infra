@@ -11,10 +11,10 @@ ports:
   external: 6006
   internal: 6006
 healthcheck:
-  # Phoenix uses a distroless image with no /bin/sh — use CMD list form
-  # with the embedded Python interpreter instead of CMD-SHELL.
+  # Phoenix distroless image — use embedded Python to probe /healthz.
+  # Retry generously since Phoenix can be slow to start (large model loads).
   test:
-    - /usr/bin/python3.13
+    - /usr/bin/python3
     - -c
     - "import urllib.request; urllib.request.urlopen('http://localhost:6006/healthz')"
   interval_s: 30
