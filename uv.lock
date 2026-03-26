@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -1859,8 +1859,8 @@ wheels = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.31.1"
-source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?branch=jonahgabriel%2Fomn-6440-runtime-contract-yamls#2cba61b87c4d990c824c260f9a3addfd53692346" }
+version = "0.32.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "blake3" },
     { name = "click" },
@@ -1873,10 +1873,14 @@ dependencies = [
     { name = "pyyaml" },
     { name = "ruamel-yaml" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/c7/5f/9d5fd6b868447fea8108bb483fc4019b8f1e79b6b305d1c8cf6882daf1a7/omnibase_core-0.32.0.tar.gz", hash = "sha256:bc4e92f980731766b88fb6d6655b895a0b0ff0583a8ebac1161d5a9eb2aeb16c", size = 8051275, upload-time = "2026-03-25T23:49:20.954Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a3/27/43433ee8bcd42b63532baef708011a06297ce252c41ecf178117a387dff4/omnibase_core-0.32.0-py3-none-any.whl", hash = "sha256:a48b86518c10b0896c266d6963220b929d299ed332eddad16bd6bdf74235e3ba", size = 5246810, upload-time = "2026-03-25T23:49:23.503Z" },
+]
 
 [[package]]
 name = "omnibase-infra"
-version = "0.26.0"
+version = "0.27.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -1967,7 +1971,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.20.0,<5.0.0" },
     { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<6.0.0" },
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?branch=jonahgabriel%2Fomn-6440-runtime-contract-yamls" },
+    { name = "omnibase-core", specifier = "==0.32.0" },
     { name = "omnibase-spi", specifier = ">=0.19.1" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },

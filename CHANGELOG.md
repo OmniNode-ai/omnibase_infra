@@ -1,3 +1,63 @@
+## v0.27.0 (2026-03-25)
+
+### Fixed
+- fix: register AST extraction Kafka topics in platform topic suffixes [OMN-5669] (#999)
+- fix(tests): add max_files guard to prevent OOM in infra scan [OMN-5969] (#998)
+- fix: health check graceful degradation and start_period increase [OMN-6565] (#997)
+- fix(ci): enable cancel-in-progress for merge queue events [OMN-6488] (#995)
+- fix(ci): skip health check progression test when Postgres unavailable [OMN-6485] (#992)
+- fix(ci): add contract path pre-flight validation before test splits (#989)
+- fix: redeploy bugfix trio -- 3 Docker runtime bugs [OMN-6439] (#987)
+- fix(ci): add test duration tracking for split rebalancing (#990)
+- fix(ci): export PKG_HYPHEN before Python subprocess in dependency cascade (#986)
+
+### Tests
+- test: regression test for introspection_service wiring in ServiceKernel [OMN-6405] (#993)
+
+### Dependencies
+- chore(deps): bump requests in the uv group (#996)
+- chore(deps): pin omnibase-core==0.32.0
+
+## v0.26.0 (2026-03-24)
+
+### Added
+- feat: contract health Phase A+B -- handler unification + runtime config model [OMN-6336, OMN-6339] (#983)
+- feat(kafka): add max_request_size config, pass to producer, set broker default 4MB [OMN-6341] (#980)
+- feat: env var alignment probe + seed profiles for cloud parity [OMN-6010] (#960)
+
+### Fixed
+- fix(ci): prevent xdist race in topic pipeline E2E tests (#985)
+- fix(ci): use correct GHCR tag for Trivy and image size jobs [OMN-6291] (#979)
+- fix(kafka): session timeout tuning + consumer self-healing restart (#962)
+
+### Dependencies
+- chore(deps): bump omnibase_core to 0.31.1 (#984)
+- chore(deps): bump omnibase-core to 0.31.0 (#981)
+
+### Docs
+- docs: add INTELLIGENCE_SERVICE_URL to env-example-full.txt [OMN-6259] (#977)
+
+## v0.25.0 (2026-03-23)
+
+### Added
+- feat(runtime): wire emission pipelines for omnidash infra monitoring [OMN-6153] (#965)
+- feat(runner-health): Runner Health Monitoring MVP [OMN-6075] (#961)
+
+### Fixed
+- fix(deps): update stale omnibase-core and spi version pins [OMN-6112] (#963)
+
+### Dependencies
+- chore(deps): bump tj-actions/changed-files from 45 to 47 (#967)
+- chore(deps): bump aws-actions/configure-aws-credentials from 4 to 6 (#968)
+- chore(deps): update opentelemetry-instrumentation-kafka-python (#969)
+- chore(deps): update opentelemetry-instrumentation-fastapi (#970)
+- chore(deps): update structlog (#971)
+- chore(deps): bump actions/setup-python from 5 to 6 (#972)
+- chore(deps): update uvicorn (#973)
+- chore(deps): update aiofiles (#974)
+- chore(deps): bump actions/checkout from 4 to 6 (#975)
+- chore(ci): rename test.yml -> ci.yml for cross-repo standardization [OMN-6213] (#966)
+
 ## v0.24.0 (2026-03-22)
 
 ### Added
