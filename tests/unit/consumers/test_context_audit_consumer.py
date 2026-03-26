@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -30,7 +30,6 @@ from omnibase_infra.services.observability.context_audit.config import (
     ConfigContextAuditConsumer,
 )
 from omnibase_infra.services.observability.context_audit.consumer import (
-    ConsumerMetrics,
     ContextAuditConsumer,
     EnumHealthStatus,
     mask_dsn_password,

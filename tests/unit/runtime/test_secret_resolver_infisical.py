@@ -11,11 +11,9 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from pydantic import SecretStr
 
 from omnibase_infra.runtime.models.model_secret_source_spec import (
     ModelSecretSourceSpec,
-    SecretSourceType,
 )
 
 

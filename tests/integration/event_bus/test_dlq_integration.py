@@ -34,7 +34,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models import ModelNodeIdentity
 

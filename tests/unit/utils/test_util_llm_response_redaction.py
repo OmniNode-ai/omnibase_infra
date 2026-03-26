@@ -24,7 +24,6 @@ from typing import Any
 import pytest
 
 from omnibase_infra.utils.util_llm_response_redaction import (
-    MAX_RAW_BLOB_BYTES,
     _enforce_size_cap,
     _redact_messages,
     _redact_tool_calls,

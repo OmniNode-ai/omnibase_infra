@@ -40,7 +40,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
 
 _logger = logging.getLogger(__name__)
 

@@ -67,9 +67,7 @@ def test_generated_enum_files_importable() -> None:
     """
     from omnibase_infra.enums.generated import (
         EnumOmnibaseInfraTopic,
-        EnumOmnimemoryTopic,
         EnumPlatformTopic,
-        EnumValidationTopic,
     )
 
     # Verify known topic constants are members of their producer enums

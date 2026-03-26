@@ -25,7 +25,6 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_infra.enums import EnumLlmFinishReason, EnumLlmOperationType
-from omnibase_infra.enums.enum_cost_tier import EnumCostTier
 from omnibase_infra.mixins.mixin_llm_http_transport import MixinLlmHttpTransport
 from omnibase_infra.models.llm.model_llm_inference_response import (
     ModelLlmInferenceResponse,

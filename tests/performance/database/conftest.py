@@ -65,7 +65,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 from collections.abc import AsyncGenerator, Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -95,9 +94,6 @@ from tests.helpers.util_postgres import (
     PostgresConfig,
     check_postgres_reachable,
     should_skip_migration,
-)
-from tests.infrastructure_config import (
-    DEFAULT_POSTGRES_PORT,
 )
 
 _logger = logging.getLogger(__name__)

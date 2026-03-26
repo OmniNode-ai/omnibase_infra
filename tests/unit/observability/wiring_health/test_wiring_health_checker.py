@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 from uuid import uuid4
 
@@ -17,7 +16,6 @@ _REG = ServiceTopicRegistry.from_defaults()
 TOPIC_WIRING_HEALTH_SNAPSHOT = _REG.resolve(topic_keys.WIRING_HEALTH_SNAPSHOT)
 WIRING_HEALTH_MONITORED_TOPICS = tuple(_REG.monitored_topics())
 from omnibase_infra.observability.wiring_health import (
-    DEFAULT_MISMATCH_THRESHOLD,
     ModelTopicWiringHealth,
     ModelWiringHealthAlert,
     ModelWiringHealthMetrics,

@@ -7,7 +7,6 @@ from __future__ import annotations
 import importlib
 import json
 import sys
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch

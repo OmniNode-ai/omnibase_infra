@@ -37,7 +37,6 @@ from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
     EnumInfraTransportType,
-    EnumResponseStatus,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders

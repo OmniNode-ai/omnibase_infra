@@ -8,10 +8,8 @@ to validate HandlerQdrant behavior without requiring actual Qdrant server infras
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
-from uuid import uuid4
 
 import pytest
 from pydantic import SecretStr
@@ -29,9 +27,6 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.handlers.handler_qdrant import HandlerQdrant
-
-if TYPE_CHECKING:
-    from collections.abc import Generator
 
 
 @pytest.fixture

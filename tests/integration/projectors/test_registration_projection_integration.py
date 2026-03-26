@@ -46,7 +46,6 @@ if TYPE_CHECKING:
     import asyncpg
 
     from omnibase_infra.projectors import ProjectionReaderRegistration
-    from omnibase_infra.runtime import ProjectorShell
 
     # Legacy type alias - ProjectorRegistration has been superseded by ProjectorShell
     # Tests using this type require the legacy_projector fixture

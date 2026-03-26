@@ -18,8 +18,6 @@ import pytest
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.models.snapshot import (
-    ModelSnapshot,
-    ModelSnapshotDiff,
     ModelSubjectRef,
 )
 from omnibase_infra.services.snapshot import (

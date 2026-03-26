@@ -55,7 +55,7 @@ from __future__ import annotations
 import logging
 import time
 from enum import Enum
-from typing import Final, Literal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel

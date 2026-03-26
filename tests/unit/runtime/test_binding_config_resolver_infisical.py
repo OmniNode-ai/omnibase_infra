@@ -8,8 +8,6 @@ Tests the infisical: config_ref scheme parsing and resolution.
 
 from __future__ import annotations
 
-import pytest
-
 from omnibase_infra.runtime.enums.enum_config_ref_scheme import EnumConfigRefScheme
 from omnibase_infra.runtime.models.model_config_ref import ModelConfigRef
 

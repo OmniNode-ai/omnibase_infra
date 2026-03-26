@@ -58,8 +58,6 @@ from omnibase_infra.models.registration.model_node_capabilities import (
 if TYPE_CHECKING:
     import asyncpg
 
-    from omnibase_infra.runtime import ProjectorShell
-
     # Legacy type alias - ProjectorRegistration has been superseded by ProjectorShell
     # Tests using this type require the legacy_projector fixture
     ProjectorRegistration = object  # type: ignore[misc]

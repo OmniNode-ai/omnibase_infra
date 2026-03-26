@@ -31,9 +31,6 @@ import pytest
 pytestmark = pytest.mark.unit
 
 from omnibase_infra.errors import (
-    InfraConnectionError,
-    InfraTimeoutError,
-    InfraUnavailableError,
     ProtocolConfigurationError,
 )
 from omnibase_infra.services.observability.agent_actions.config_ttl_cleanup import (

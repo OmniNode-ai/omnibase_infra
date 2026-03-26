@@ -15,7 +15,6 @@ Implementation: INSERT ... ON CONFLICT DO NOTHING RETURNING
 
 from __future__ import annotations
 
-import base64
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4

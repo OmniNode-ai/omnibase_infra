@@ -36,15 +36,13 @@ import os
 import tempfile
 import threading
 import time
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
 import yaml
-from pydantic import SecretStr
 
 from omnibase_infra.errors import ProtocolConfigurationError, SecretResolutionError
 from omnibase_infra.runtime.binding_config_resolver import BindingConfigResolver
@@ -59,9 +57,6 @@ from omnibase_infra.runtime.models.model_config_ref import (
     EnumConfigRefScheme,
     ModelConfigRef,
 )
-
-if TYPE_CHECKING:
-    from omnibase_core.container import ModelONEXContainer
 
 
 def create_mock_container(

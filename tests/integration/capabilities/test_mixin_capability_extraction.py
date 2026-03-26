@@ -37,9 +37,6 @@ from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.mixins import MixinNodeIntrospection
 from omnibase_infra.models.discovery import ModelIntrospectionConfig
 
-if TYPE_CHECKING:
-    from omnibase_core.models.capabilities import ModelContractCapabilities
-
 # Module-level markers
 pytestmark = [
     pytest.mark.asyncio,

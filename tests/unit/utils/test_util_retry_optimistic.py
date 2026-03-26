@@ -27,7 +27,6 @@ Coverage Goals:
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 

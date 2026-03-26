@@ -662,7 +662,6 @@ def test_extract_from_real_nodes_directory() -> None:
     Must return a non-empty list of valid ModelContractTopicEntry objects.
     """
     import importlib.util
-    import os
 
     # Locate the installed package's nodes directory
     spec = importlib.util.find_spec("omnibase_infra")

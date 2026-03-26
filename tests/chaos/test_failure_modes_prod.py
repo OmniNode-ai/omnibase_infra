@@ -59,7 +59,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -76,9 +76,7 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.models.errors import ModelTimeoutErrorContext
 from tests.chaos.conftest import (
-    FailureInjector,
     NetworkPartitionSimulator,
-    get_chaos_profile,
 )
 from tests.conftest import make_test_node_identity
 

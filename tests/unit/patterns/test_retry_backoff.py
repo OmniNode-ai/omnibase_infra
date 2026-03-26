@@ -22,7 +22,6 @@ from typing import TypeVar
 from uuid import UUID
 
 import pytest
-from pydantic import ValidationError
 
 T = TypeVar("T")
 

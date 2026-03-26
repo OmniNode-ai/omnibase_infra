@@ -24,9 +24,6 @@ from omnibase_infra.errors import (
 from omnibase_infra.handlers.handler_graph import HandlerGraph
 from tests.helpers import filter_handler_warnings
 
-if TYPE_CHECKING:
-    from collections.abc import Generator
-
 
 @pytest.fixture
 def handler(mock_container: MagicMock) -> HandlerGraph:

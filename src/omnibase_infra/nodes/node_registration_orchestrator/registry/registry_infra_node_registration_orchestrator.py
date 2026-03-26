@@ -93,12 +93,11 @@ from __future__ import annotations
 import importlib
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from omnibase_core.services.service_handler_registry import ServiceHandlerRegistry
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
-from omnibase_infra.protocols import ProtocolContainerAware
 from omnibase_infra.runtime.constants_security import (
     TRUSTED_HANDLER_NAMESPACE_PREFIXES,
 )

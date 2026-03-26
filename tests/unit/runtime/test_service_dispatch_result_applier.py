@@ -18,7 +18,7 @@ Key behaviors validated:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4, uuid5
 
 import pytest

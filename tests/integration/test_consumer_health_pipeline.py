@@ -43,9 +43,6 @@ from omnibase_infra.models.health.enum_consumer_health_event_type import (
 from omnibase_infra.models.health.enum_consumer_health_severity import (
     EnumConsumerHealthSeverity,
 )
-from omnibase_infra.models.health.model_consumer_health_event import (
-    ModelConsumerHealthEvent,
-)
 
 pytestmark = [
     pytest.mark.integration,

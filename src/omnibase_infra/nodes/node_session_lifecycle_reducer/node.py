@@ -40,9 +40,6 @@ from omnibase_core.nodes.node_reducer import NodeReducer
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-    from omnibase_infra.nodes.node_session_lifecycle_reducer.models.model_session_lifecycle_state import (
-        ModelSessionLifecycleState,
-    )
 
 
 class NodeSessionLifecycleReducer(

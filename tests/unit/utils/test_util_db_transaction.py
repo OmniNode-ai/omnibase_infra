@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest

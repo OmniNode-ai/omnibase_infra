@@ -24,10 +24,8 @@ Factory Pattern:
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -43,7 +41,6 @@ from omnibase_infra.observability.handlers import (
 
 if TYPE_CHECKING:
     from omnibase_infra.observability.sinks import (
-        SinkLoggingStructured,
         SinkMetricsPrometheus,
     )
 

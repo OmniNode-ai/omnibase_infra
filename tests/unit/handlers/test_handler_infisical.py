@@ -22,7 +22,6 @@ from omnibase_infra.adapters._internal.adapter_infisical import (
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.handlers.handler_infisical import (
-    HANDLER_ID_INFISICAL,
     HandlerInfisical,
 )
 

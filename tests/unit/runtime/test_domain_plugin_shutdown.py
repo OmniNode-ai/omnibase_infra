@@ -10,9 +10,8 @@ These tests verify that:
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -26,9 +25,6 @@ from omnibase_infra.runtime.protocol_domain_plugin import (
     ProtocolDomainPlugin,
     RegistryDomainPlugin,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Generator
 
 
 class MockPlugin:
@@ -244,7 +240,6 @@ class TestPluginSelfContainedConstraint:
         - Self-contained constraint
         - Error handling guidance
         """
-        import inspect
 
         # Get shutdown method from protocol
         shutdown_doc = ProtocolDomainPlugin.shutdown.__doc__

@@ -38,7 +38,6 @@ from pydantic import ValidationError
 
 from omnibase_core.models.contracts.model_handler_contract import ModelHandlerContract
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
-from omnibase_core.models.primitives import ModelSemVer
 from omnibase_infra.enums import EnumHandlerErrorType, EnumHandlerSourceType
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import (

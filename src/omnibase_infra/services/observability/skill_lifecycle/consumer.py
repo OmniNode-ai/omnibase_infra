@@ -55,7 +55,6 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse, urlunparse
-from uuid import uuid4
 
 import asyncpg
 from aiohttp import web

@@ -7,9 +7,6 @@ from uuid import UUID
 import pytest
 
 from omnibase_infra.registry.loader import load_artifact_registry
-from omnibase_infra.registry.models.model_artifact_registry import (
-    ModelArtifactRegistry,
-)
 from omnibase_infra.registry.models.model_artifact_registry_entry import (
     ModelArtifactRegistryEntry,
 )

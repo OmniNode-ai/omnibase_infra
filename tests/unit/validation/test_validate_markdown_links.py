@@ -10,25 +10,20 @@ GitHub's anchor generation conventions.
 from __future__ import annotations
 
 import os
-import stat
 from pathlib import Path
-from urllib.parse import quote
 
 import pytest
 
 from scripts.validation.validate_markdown_links import (
     BrokenLink,
     LinkInfo,
-    MarkdownLinkConfig,
     ValidationResult,
     _heading_to_anchor,
     extract_headings_as_anchors,
-    find_markdown_files,
     is_external_link,
     is_http_link,
     normalize_url_for_validation,
     validate_internal_link,
-    validate_markdown_links,
 )
 
 

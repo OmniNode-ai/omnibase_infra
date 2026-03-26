@@ -19,7 +19,6 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -66,7 +65,6 @@ from omnibase_infra.nodes.node_registration_orchestrator.services import (
 )
 from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_update_registration import (
     ModelPayloadPostgresUpdateRegistration,
-    ModelRegistrationAckUpdate,
     ModelRegistrationHeartbeatUpdate,
 )
 from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_upsert_registration import (

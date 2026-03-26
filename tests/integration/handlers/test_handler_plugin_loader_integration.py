@@ -34,7 +34,6 @@ from uuid import UUID
 
 import pytest
 
-from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumHandlerTypeCategory
 from omnibase_infra.runtime.handler_plugin_loader import (
     CONTRACT_YAML_FILENAME,

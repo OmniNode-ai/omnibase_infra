@@ -22,8 +22,6 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from tests.conftest import make_test_node_identity
-
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
     from omnibase_infra.event_bus.models import ModelEventMessage

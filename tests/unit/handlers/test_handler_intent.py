@@ -21,7 +21,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
@@ -35,10 +35,6 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.handlers.handler_graph import HandlerGraph
 from omnibase_infra.handlers.handler_intent import HANDLER_ID_INTENT, HandlerIntent
-
-if TYPE_CHECKING:
-    from collections.abc import Generator
-
 
 # =============================================================================
 # Fixtures

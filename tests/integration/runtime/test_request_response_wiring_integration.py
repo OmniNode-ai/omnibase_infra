@@ -26,15 +26,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
 
 from omnibase_core.models.contracts.subcontracts import (
-    ModelCorrelationConfig,
     ModelReplyTopics,
     ModelRequestResponseConfig,
     ModelRequestResponseInstance,

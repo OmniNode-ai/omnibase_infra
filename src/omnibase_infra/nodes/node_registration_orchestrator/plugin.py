@@ -105,7 +105,6 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.runtime.projector_shell import ProjectorShell
     from omnibase_infra.runtime.service_intent_executor import IntentExecutor
-    from omnibase_infra.services.service_topic_catalog import ServiceTopicCatalog
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (

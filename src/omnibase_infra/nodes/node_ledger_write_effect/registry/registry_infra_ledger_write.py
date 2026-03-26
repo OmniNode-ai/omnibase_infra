@@ -25,8 +25,6 @@ Example:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 # Handlers
 from omnibase_infra.nodes.node_ledger_write_effect.handlers import (
     HandlerLedgerAppend,

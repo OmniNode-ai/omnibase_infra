@@ -80,7 +80,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from omnibase_core.container import ModelONEXContainer
 from tests.integration.handlers.conftest import POSTGRES_AVAILABLE
 
 if TYPE_CHECKING:

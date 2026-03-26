@@ -21,15 +21,12 @@ Related:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
 
 from omnibase_infra.errors import RuntimeHostError
-from omnibase_infra.runtime.protocols.protocol_intent_payload import (
-    ProtocolIntentPayload,
-)
 from omnibase_infra.runtime.service_intent_executor import (
     IntentExecutor,
     ProtocolIntentEffect,

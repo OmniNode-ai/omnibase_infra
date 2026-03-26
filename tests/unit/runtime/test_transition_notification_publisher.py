@@ -27,15 +27,12 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID, uuid4
+from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
 from omnibase_core.models.notifications import ModelStateTransitionNotification
-
-if TYPE_CHECKING:
-    from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 
 # =============================================================================
 # TDD Skip Helper - Check if TransitionNotificationPublisher is implemented
@@ -506,7 +503,6 @@ class TestTransitionNotificationPublisherCircuitBreaker:
         sample_notification: ModelStateTransitionNotification,
     ) -> None:
         """Circuit breaker in HALF_OPEN state allows probe request."""
-        from omnibase_infra.errors import InfraUnavailableError
 
         publisher = TransitionNotificationPublisher(
             event_bus=mock_event_bus,
@@ -702,7 +698,6 @@ class TestTransitionNotificationPublisherErrors:
         mock_event_bus: AsyncMock,
     ) -> None:
         """Serialization errors are handled gracefully."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         # Create notification with problematic data
         # This tests that serialization issues are caught properly

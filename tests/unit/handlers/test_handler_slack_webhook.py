@@ -15,7 +15,6 @@ All tests use mocked HTTP responses to avoid external dependencies.
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -23,8 +22,6 @@ import aiohttp
 import pytest
 
 from omnibase_infra.handlers.handler_slack_webhook import (
-    _DEFAULT_MAX_RETRIES,
-    _DEFAULT_RETRY_BACKOFF_SECONDS,
     _SEVERITY_EMOJI,
     _SEVERITY_TITLES,
     _SLACK_WEB_API_URL,

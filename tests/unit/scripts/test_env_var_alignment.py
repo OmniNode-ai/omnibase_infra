@@ -41,7 +41,6 @@ def test_env_var_alignment_detects_mismatch() -> None:
     from compare_environments import (
         _extract_app_env_vars,
         _extract_manifest_env_vars,
-        check_env_var_name_alignment,
     )
 
     # Build a minimal infra_repo structure that points to our fixture

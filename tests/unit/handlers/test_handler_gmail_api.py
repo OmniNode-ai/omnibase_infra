@@ -17,22 +17,20 @@ from __future__ import annotations
 
 import base64
 import time
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 
 from omnibase_infra.handlers.handler_gmail_api import (
-    _LABEL_CACHE_TTL_SECONDS,
     _TOKEN_REFRESH_BUFFER_SECONDS,
     HandlerGmailApi,
 )
 from omnibase_infra.handlers.models.model_gmail_message import (
     ModelGmailMessage,
     _decode_body_data,
-    _extract_body_text,
 )
 
 # ---------------------------------------------------------------------------

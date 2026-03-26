@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
-from uuid import uuid4
 
 import pytest
 
@@ -33,9 +32,6 @@ from omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_query
 )
 from omnibase_infra.nodes.node_ledger_write_effect.models.model_ledger_query import (
     ModelLedgerQuery,
-)
-from omnibase_infra.nodes.node_ledger_write_effect.protocols.protocol_ledger_persistence import (
-    ProtocolLedgerPersistence,
 )
 
 # =============================================================================

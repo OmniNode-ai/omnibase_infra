@@ -25,7 +25,7 @@ Tracking:
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from omnibase_infra.enums import (

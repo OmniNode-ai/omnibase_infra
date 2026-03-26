@@ -60,9 +60,6 @@ if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
     # Import needed for string annotation in class definition (NodeReducer["ModelRegistrationState", ...])
-    from omnibase_infra.nodes.node_registration_reducer.models.model_registration_state import (
-        ModelRegistrationState,
-    )
 
 
 class NodeRegistrationReducer(

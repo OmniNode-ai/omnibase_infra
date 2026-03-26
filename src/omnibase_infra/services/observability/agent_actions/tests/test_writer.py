@@ -41,10 +41,6 @@ from omnibase_infra.services.observability.agent_actions.writer_postgres import 
     WriterAgentActionsPostgres,
 )
 
-if TYPE_CHECKING:
-    import asyncpg
-
-
 # =============================================================================
 # Fixtures
 # =============================================================================

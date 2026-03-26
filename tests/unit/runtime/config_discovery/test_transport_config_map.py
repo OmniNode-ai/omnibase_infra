@@ -7,9 +7,6 @@ from __future__ import annotations
 import pytest
 
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.runtime.config_discovery.models.model_transport_config_spec import (
-    ModelTransportConfigSpec,
-)
 from omnibase_infra.runtime.config_discovery.transport_config_map import (
     TransportConfigMap,
 )

@@ -19,7 +19,6 @@ Related Ticket: OMN-2700
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -34,9 +33,6 @@ from omnibase_infra.models.registration.model_node_capabilities import (
 from omnibase_infra.services.mcp.service_mcp_tool_discovery import (
     ServiceMCPToolDiscovery,
 )
-
-if TYPE_CHECKING:
-    from omnibase_infra.projectors import ProjectionReaderRegistration
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +51,6 @@ def _make_projection(
     state: EnumRegistrationState = EnumRegistrationState.ACTIVE,
 ) -> MagicMock:
     """Build a mock ModelRegistrationProjection with MCP metadata."""
-    from omnibase_core.enums import EnumNodeKind
 
     mcp_config = (
         ModelMCPContractConfig(

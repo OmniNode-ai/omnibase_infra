@@ -13,8 +13,6 @@ Test Organization:
     - TestEventBusInGetIntrospectionData: Integration with get_introspection_data()
 """
 
-import os
-from unittest.mock import MagicMock, patch
 from uuid import UUID
 
 import pytest
@@ -23,10 +21,6 @@ from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.mixins.mixin_node_introspection import MixinNodeIntrospection
 from omnibase_infra.models.discovery import ModelIntrospectionConfig
-from omnibase_infra.models.registration.model_node_event_bus_config import (
-    ModelEventBusTopicEntry,
-    ModelNodeEventBusConfig,
-)
 
 # Test UUIDs - use deterministic values for reproducible tests
 TEST_NODE_UUID = UUID("00000000-0000-0000-0000-000000000001")

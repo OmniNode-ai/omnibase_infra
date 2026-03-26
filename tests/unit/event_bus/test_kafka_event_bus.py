@@ -19,7 +19,6 @@ import pytest
 from aiokafka.errors import KafkaError
 from pydantic import BaseModel
 
-from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,

@@ -33,9 +33,6 @@ from omnibase_infra.models.runtime import ModelRuntimeIntrospectionConfig
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 
-if TYPE_CHECKING:
-    from omnibase_infra.protocols import ProtocolNodeIntrospection
-
 pytestmark = pytest.mark.integration
 
 

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime
-from typing import Annotated, Union
+from typing import Annotated
 from uuid import UUID
 
 from pydantic import (

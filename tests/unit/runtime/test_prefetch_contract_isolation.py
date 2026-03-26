@@ -9,7 +9,6 @@ Also validates _config_prefetch_status state transitions.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 

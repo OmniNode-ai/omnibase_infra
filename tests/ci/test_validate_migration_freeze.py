@@ -15,10 +15,8 @@ Ticket: OMN-3533
 from __future__ import annotations
 
 import textwrap
-from datetime import UTC, date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-
-import pytest
 
 from scripts.validation.validate_migration_freeze import (
     FreezeAgeStatus,

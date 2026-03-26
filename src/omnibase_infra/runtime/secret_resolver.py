@@ -89,12 +89,11 @@ import time
 from collections import defaultdict, deque
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID, uuid4
 
 from pydantic import SecretStr
 
-from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraAuthenticationError,

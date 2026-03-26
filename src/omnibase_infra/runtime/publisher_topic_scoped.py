@@ -79,10 +79,6 @@ from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.topics import TopicResolver
 
-if TYPE_CHECKING:
-    from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
-
 logger = logging.getLogger(__name__)
 
 

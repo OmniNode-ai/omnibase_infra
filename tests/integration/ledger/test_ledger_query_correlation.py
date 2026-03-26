@@ -21,8 +21,6 @@ from uuid import UUID, uuid4
 import pytest
 
 if TYPE_CHECKING:
-    import asyncpg
-
     from omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_append import (
         HandlerLedgerAppend,
     )

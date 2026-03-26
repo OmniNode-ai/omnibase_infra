@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import base64
 import json
-from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock

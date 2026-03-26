@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest

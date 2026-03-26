@@ -20,14 +20,14 @@ from __future__ import annotations
 import json
 import logging
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
 from omnibase_infra.handlers.mcp.transport_streamable_http import MCPAuthMiddleware
 
 if TYPE_CHECKING:
-    from starlette.types import ASGIApp, Receive, Scope, Send
+    from starlette.types import Receive, Send
 
 pytestmark = pytest.mark.unit
 
@@ -408,9 +408,7 @@ def test_model_mcp_server_config_auth_disabled() -> None:
 async def test_handler_mcp_raises_when_auth_enabled_no_api_key() -> None:
     """HandlerMCP.initialize raises ProtocolConfigurationError when auth_enabled=True
     but api_key is not set (prevents silent misconfiguration)."""
-    import pytest
 
-    from omnibase_infra.errors import ProtocolConfigurationError
     from omnibase_infra.handlers.handler_mcp import HandlerMCP
 
     handler = HandlerMCP()

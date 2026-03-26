@@ -34,7 +34,6 @@ from pydantic import BaseModel
 
 from omnibase_infra.errors import BindingResolutionError
 from omnibase_infra.models.bindings import (
-    ModelBindingResolutionResult,
     ModelOperationBindingsSubcontract,
     ModelParsedBinding,
 )

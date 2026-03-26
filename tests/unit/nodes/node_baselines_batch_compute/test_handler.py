@@ -13,7 +13,6 @@ Ticket: OMN-3044
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -26,12 +25,6 @@ from omnibase_infra.nodes.node_baselines_batch_compute.handlers.handler_baseline
 )
 from omnibase_infra.nodes.node_baselines_batch_compute.models.model_baselines_batch_compute_command import (
     ModelBaselinesBatchComputeCommand,
-)
-from omnibase_infra.nodes.node_baselines_batch_compute.models.model_baselines_batch_compute_output import (
-    ModelBaselinesBatchComputeOutput,
-)
-from omnibase_infra.services.observability.baselines.models.model_batch_compute_baselines_result import (
-    ModelBatchComputeBaselinesResult,
 )
 
 

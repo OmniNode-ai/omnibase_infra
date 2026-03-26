@@ -9,8 +9,6 @@ All tests should verify deterministic, sorted output.
 
 from __future__ import annotations
 
-import pytest
-
 from omnibase_infra.capabilities import CapabilityInferenceRules
 
 

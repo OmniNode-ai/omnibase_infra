@@ -53,10 +53,6 @@ from omnibase_infra.nodes.node_registration_reducer.models.model_payload_ledger_
     ModelPayloadLedgerAppend,
 )
 
-if TYPE_CHECKING:
-    from omnibase_core.models.reducer.model_intent import ModelIntent
-
-
 # =============================================================================
 # Path Constants
 # =============================================================================

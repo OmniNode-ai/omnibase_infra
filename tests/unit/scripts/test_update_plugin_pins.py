@@ -8,7 +8,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -144,7 +144,6 @@ def test_no_change_when_current(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_pypi_fetch_failure(tmp_path: Path) -> None:
     """main() returns non-zero exit code on PyPI network error."""
-    import urllib.error
 
     dockerfile = tmp_path / "Dockerfile.runtime"
     dockerfile.write_text(_DOCKERFILE_RANGE_PINS, encoding="utf-8")

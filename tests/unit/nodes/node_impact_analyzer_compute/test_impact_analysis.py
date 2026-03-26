@@ -15,7 +15,7 @@ Tests the deterministic scoring table from OMN-3925:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest

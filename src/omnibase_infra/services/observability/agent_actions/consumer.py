@@ -84,7 +84,6 @@ from omnibase_infra.services.observability.agent_actions.models import (
     ModelDetectionFailure,
     ModelExecutionLog,
     ModelPerformanceMetric,
-    ModelRoutingDecision,
     ModelTransformationEvent,
 )
 from omnibase_infra.services.observability.agent_actions.models.model_routing_decision_ingest import (

@@ -35,10 +35,6 @@ import pytest
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.observability.sinks import SinkLoggingStructured
 
-if TYPE_CHECKING:
-    from omnibase_core.enums import EnumLogLevel
-
-
 # =============================================================================
 # INITIALIZATION TESTS
 # =============================================================================

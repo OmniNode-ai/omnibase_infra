@@ -30,9 +30,6 @@ from omnibase_infra.handlers.models import ModelDbQueryPayload, ModelDbQueryResp
 from omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_append import (
     HandlerLedgerAppend,
 )
-from omnibase_infra.nodes.node_ledger_write_effect.protocols.protocol_ledger_persistence import (
-    ProtocolLedgerPersistence,
-)
 from omnibase_infra.nodes.node_registration_reducer.models.model_payload_ledger_append import (
     ModelPayloadLedgerAppend,
 )

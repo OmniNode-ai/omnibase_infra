@@ -12,7 +12,6 @@ Validates startup topic existence checking with five scenarios:
 
 from __future__ import annotations
 
-import importlib
 import logging
 import sys
 from types import ModuleType
@@ -20,10 +19,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-
-from omnibase_infra.event_bus.model_topic_validation_result import (
-    ModelTopicValidationResult,
-)
 
 # Test-local suffixes to avoid depending on real platform topics
 SAMPLE_SUFFIXES: tuple[str, ...] = (

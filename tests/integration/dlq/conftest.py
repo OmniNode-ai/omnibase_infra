@@ -27,7 +27,6 @@ Related Ticket: OMN-1032 - Complete DLQ Replay PostgreSQL Tracking Integration
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import AsyncGenerator
 from uuid import UUID, uuid4
 

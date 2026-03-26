@@ -29,7 +29,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -43,9 +43,6 @@ from omnibase_core.models.projectors import (
     ModelProjectorColumn,
     ModelProjectorContract,
     ModelProjectorSchema,
-)
-from omnibase_core.protocols.notifications import (
-    ProtocolTransitionNotificationPublisher,
 )
 from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime import (

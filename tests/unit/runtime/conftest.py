@@ -23,7 +23,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from omnibase_infra.runtime.models import ModelEventBusConfig, ModelRuntimeConfig
 from omnibase_infra.runtime.models.model_runtime_node_graph_config import (
     ModelRuntimeNodeGraphConfig,
 )

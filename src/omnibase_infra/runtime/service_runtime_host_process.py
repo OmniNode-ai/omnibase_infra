@@ -66,8 +66,6 @@ from omnibase_infra.enums import (
 )
 from omnibase_infra.errors import (
     EnvelopeValidationError,
-    InfraTimeoutError,
-    InfraUnavailableError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
@@ -179,7 +177,6 @@ from omnibase_infra.runtime.handler_identity import (
 )
 from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 from omnibase_infra.runtime.handler_pool import (
-    DEFAULT_POOL_SIZE,
     MAX_POOL_SIZE,
     MIN_POOL_SIZE,
     HandlerPool,
@@ -187,8 +184,6 @@ from omnibase_infra.runtime.handler_pool import (
 from omnibase_infra.runtime.kafka_contract_source import KafkaContractSource
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
 from omnibase_infra.topics import (
-    SUFFIX_CONTRACT_DEREGISTERED,
-    SUFFIX_CONTRACT_REGISTERED,
     TopicResolutionError,
     TopicResolver,
 )
@@ -4965,9 +4960,6 @@ class RuntimeHostProcess:
             ) from e
 
         # Import ModelEventMessage type for handler signature
-        from omnibase_infra.event_bus.models.model_event_message import (
-            ModelEventMessage,
-        )
 
         async def handle_registration(msg: ModelEventMessage) -> None:
             """Handle contract registration event from Kafka.

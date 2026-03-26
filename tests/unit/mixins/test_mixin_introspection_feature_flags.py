@@ -8,8 +8,7 @@ OMN-5577: Wire introspection to populate feature flags from contract.
 
 from __future__ import annotations
 
-import os
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 

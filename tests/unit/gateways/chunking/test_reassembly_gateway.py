@@ -3,12 +3,10 @@
 # Copyright (c) 2025 OmniNode Team
 """Unit tests for ReassemblyGateway."""
 
-from datetime import UTC, datetime, timezone
-from uuid import uuid4
+from datetime import UTC, datetime
 
 import pytest
 
-from omnibase_core.models.chunking.model_chunk_metadata import ModelChunkMetadata
 from omnibase_core.models.chunking.model_chunk_series_failed import (
     EnumChunkFailureReason,
     ModelChunkSeriesFailed,

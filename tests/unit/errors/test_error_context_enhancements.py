@@ -21,7 +21,6 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     get_resolution,
 )
-from omnibase_infra.errors.error_catalog import _CATALOG
 from omnibase_infra.errors.error_infra import (
     InfraAuthenticationError,
     InfraConnectionError,

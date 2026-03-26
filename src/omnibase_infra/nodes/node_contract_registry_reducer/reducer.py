@@ -65,7 +65,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import assert_never
 from uuid import UUID, uuid4
 

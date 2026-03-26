@@ -23,7 +23,6 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
-import os
 from typing import TYPE_CHECKING
 
 from omnibase_infra.event_bus.consumer_health_emitter import ConsumerHealthEmitter

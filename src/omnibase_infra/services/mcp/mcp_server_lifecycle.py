@@ -40,7 +40,6 @@ from omnibase_infra.services.mcp.service_mcp_tool_sync import ServiceMCPToolSync
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
-    from omnibase_infra.handlers.handler_mcp import HandlerMCP
     from omnibase_infra.models.mcp.model_mcp_tool_definition import (
         ModelMCPToolDefinition,
     )

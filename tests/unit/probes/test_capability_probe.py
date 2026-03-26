@@ -11,8 +11,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from omnibase_infra.probes.capability_probe import (
     http_health_check,
     kafka_reachable,

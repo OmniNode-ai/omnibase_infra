@@ -26,7 +26,6 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING
-from unittest.mock import patch
 
 import pytest
 
@@ -36,7 +35,6 @@ from omnibase_infra.observability.sinks.sink_metrics_prometheus import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_core.enums import EnumMetricsPolicyViolationAction
     from omnibase_core.models.observability import ModelMetricsPolicy
 
 

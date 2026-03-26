@@ -9,8 +9,6 @@ broker restarts.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from omnibase_infra.errors import ProtocolConfigurationError

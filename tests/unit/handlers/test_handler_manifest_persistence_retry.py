@@ -36,16 +36,13 @@ import time
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 from omnibase_infra.enums import EnumRetryErrorCategory
 from omnibase_infra.errors import (
-    InfraAuthenticationError,
-    InfraConnectionError,
-    InfraTimeoutError,
     InfraUnavailableError,
 )
 from omnibase_infra.handlers.handler_manifest_persistence import (

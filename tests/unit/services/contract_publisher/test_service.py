@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -14,10 +14,6 @@ from omnibase_infra.services.contract_publisher import (
     ModelContractPublisherConfig,
     NoContractsFoundError,
     ServiceContractPublisher,
-)
-from omnibase_infra.services.contract_publisher.models import (
-    ModelContractError,
-    ModelInfraError,
 )
 from omnibase_infra.services.contract_publisher.sources import (
     ModelDiscoveredContract,

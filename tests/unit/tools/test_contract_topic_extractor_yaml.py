@@ -19,7 +19,6 @@ import pytest
 
 from omnibase_infra.tools.contract_topic_extractor import (
     ContractTopicExtractor,
-    ModelContractTopicEntry,
 )
 
 # ---------------------------------------------------------------------------

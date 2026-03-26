@@ -19,9 +19,6 @@ import pytest
 
 from omnibase_core.enums import EnumDeploymentMode
 from omnibase_core.models.core.model_deployment_topology import ModelDeploymentTopology
-from omnibase_core.models.core.model_deployment_topology_local_config import (
-    ModelDeploymentTopologyLocalConfig,
-)
 from omnibase_core.models.core.model_deployment_topology_service import (
     ModelDeploymentTopologyService,
 )

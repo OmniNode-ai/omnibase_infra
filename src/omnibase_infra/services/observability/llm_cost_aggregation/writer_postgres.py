@@ -39,7 +39,6 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
-from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker

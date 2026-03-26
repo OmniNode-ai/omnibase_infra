@@ -14,12 +14,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from omnibase_infra.services.observability.skill_lifecycle.writer_postgres import (
-    _REQUIRED_COMPLETED_FIELDS,
     _REQUIRED_STARTED_FIELDS,
     _validate_event_fields,
 )

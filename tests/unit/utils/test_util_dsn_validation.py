@@ -927,7 +927,7 @@ class TestCorrelationIdPropagation:
 
     def test_parse_dsn_propagates_correlation_id_on_error(self) -> None:
         """Test that parse_and_validate_dsn propagates caller's correlation_id."""
-        from uuid import UUID, uuid4
+        from uuid import uuid4
 
         caller_id = uuid4()
 

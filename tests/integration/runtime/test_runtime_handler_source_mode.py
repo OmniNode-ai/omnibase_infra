@@ -31,7 +31,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -44,7 +44,6 @@ from omnibase_infra.models.handlers import (
     ModelHandlerDescriptor,
 )
 from omnibase_infra.runtime.handler_bootstrap_source import (
-    SOURCE_TYPE_BOOTSTRAP,
     HandlerBootstrapSource,
 )
 from omnibase_infra.runtime.handler_registry import (
@@ -56,10 +55,6 @@ from omnibase_infra.runtime.handler_registry import (
 )
 from omnibase_infra.runtime.handler_source_resolver import HandlerSourceResolver
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
-
-if TYPE_CHECKING:
-    from omnibase_infra.models.handlers import ModelHandlerSourceConfig
-
 
 # =============================================================================
 # Constants for Handler Contract Templates

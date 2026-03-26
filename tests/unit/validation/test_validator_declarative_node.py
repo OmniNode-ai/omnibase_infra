@@ -10,8 +10,6 @@ from __future__ import annotations
 from pathlib import Path
 from textwrap import dedent
 
-import pytest
-
 from omnibase_core.models.common.model_validation_result import ModelValidationResult
 from omnibase_core.models.contracts.subcontracts.model_validator_rule import (
     ModelValidatorRule,

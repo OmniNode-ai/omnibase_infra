@@ -51,9 +51,6 @@ from omnibase_infra.runtime.event_bus_subcontract_wiring import (
 )
 from omnibase_infra.runtime.publisher_topic_scoped import PublisherTopicScoped
 
-if TYPE_CHECKING:
-    from omnibase_infra.event_bus.models import ModelEventMessage
-
 
 class TestContractDrivenSubscription:
     """Test that contracts with subscribe_topics start consumers automatically.

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -34,7 +34,6 @@ pytestmark = pytest.mark.unit
 
 from omnibase_infra.errors import (
     InfraConnectionError,
-    InfraTimeoutError,
     InfraUnavailableError,
 )
 from omnibase_infra.services.retry_worker.config_retry_worker import ConfigRetryWorker

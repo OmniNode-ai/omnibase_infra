@@ -37,9 +37,8 @@ See Also:
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -58,10 +57,6 @@ from omnibase_infra.models.handlers import (
 # Since we import ModelHandlerValidationError above, we can call model_rebuild() here
 # to resolve the forward reference. This call is idempotent - multiple calls are harmless.
 ModelContractDiscoveryResult.model_rebuild()
-
-if TYPE_CHECKING:
-    from omnibase_infra.runtime.handler_bootstrap_source import HandlerBootstrapSource
-    from omnibase_infra.runtime.handler_contract_source import HandlerContractSource
 
 
 # =============================================================================

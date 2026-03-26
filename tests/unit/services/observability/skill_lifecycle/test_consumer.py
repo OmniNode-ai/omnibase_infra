@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 

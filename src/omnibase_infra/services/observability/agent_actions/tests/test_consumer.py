@@ -16,7 +16,6 @@ Related Tickets:
 
 from __future__ import annotations
 
-import asyncio
 import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -24,7 +23,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from aiohttp.test_utils import TestClient
 
 from omnibase_core.errors import OnexError
 from omnibase_core.types import JsonType
@@ -39,10 +37,6 @@ from omnibase_infra.services.observability.agent_actions.consumer import (
     EnumHealthStatus,
     mask_dsn_password,
 )
-
-if TYPE_CHECKING:
-    from aiokafka import TopicPartition
-
 
 # =============================================================================
 # Fixtures

@@ -158,7 +158,6 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
 )
 from omnibase_infra.models.bindings import (
-    ModelBindingResolutionResult,
     ModelOperationBindingsSubcontract,
 )
 from omnibase_infra.models.dispatch.model_debug_trace_snapshot import (

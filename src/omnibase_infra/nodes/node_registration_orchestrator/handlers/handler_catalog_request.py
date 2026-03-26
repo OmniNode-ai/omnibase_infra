@@ -60,7 +60,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind

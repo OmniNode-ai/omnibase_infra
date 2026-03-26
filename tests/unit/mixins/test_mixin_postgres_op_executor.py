@@ -35,7 +35,6 @@ from omnibase_infra.errors import (
     RepositoryExecutionError,
 )
 from omnibase_infra.mixins.mixin_postgres_op_executor import MixinPostgresOpExecutor
-from omnibase_infra.models.model_backend_result import ModelBackendResult
 
 
 class ConcreteExecutor(MixinPostgresOpExecutor):

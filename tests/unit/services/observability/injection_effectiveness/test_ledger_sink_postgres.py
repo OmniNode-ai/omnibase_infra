@@ -13,7 +13,6 @@ Related Tickets:
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 

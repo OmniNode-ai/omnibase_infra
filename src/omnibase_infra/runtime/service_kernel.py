@@ -57,7 +57,6 @@ import signal
 import sys
 import time
 from collections.abc import Awaitable, Callable
-from functools import partial
 from importlib.metadata import version as get_package_version
 from pathlib import Path
 from typing import cast

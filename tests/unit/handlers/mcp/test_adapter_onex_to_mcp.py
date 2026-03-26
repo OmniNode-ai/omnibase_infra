@@ -45,7 +45,6 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
 )
 from omnibase_infra.handlers.mcp.adapter_onex_to_mcp import (
-    MCPToolDefinition,
     MCPToolParameter,
     ONEXToMCPAdapter,
 )

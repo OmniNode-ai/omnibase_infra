@@ -85,7 +85,6 @@ from omnibase_infra.errors import (
     InfraRequestRejectedError,
     InfraTimeoutError,
     InfraUnavailableError,
-    ModelInfraErrorContext,
     ModelTimeoutErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
@@ -96,9 +95,6 @@ from omnibase_infra.models.model_retry_error_classification import (
     ModelRetryErrorClassification,
 )
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
-
-if TYPE_CHECKING:
-    from omnibase_infra.handlers.models.model_retry_state import ModelRetryState
 
 logger = logging.getLogger(__name__)
 

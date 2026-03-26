@@ -34,7 +34,6 @@ pytest.importorskip("pytest_httpserver")
 # werkzeug is a transitive dependency of pytest-httpserver, used for Response handling
 from werkzeug import Response
 
-from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.errors import InfraTimeoutError, InfraUnavailableError
 from omnibase_infra.handlers import HandlerHttpRest
 

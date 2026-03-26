@@ -31,9 +31,6 @@ from omnibase_infra.runtime.models.model_batch_publisher_config import (
     MIN_FLUSH_INTERVAL_MS,
     ModelBatchPublisherConfig,
 )
-from omnibase_infra.runtime.models.model_batch_publisher_metrics import (
-    ModelBatchPublisherMetrics,
-)
 
 # =============================================================================
 # Fixtures
