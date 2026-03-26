@@ -837,7 +837,7 @@ class MCPConsulServerFixture:
             )
             def no_tools_discovered() -> str:
                 """Fallback when no tools discovered from Consul."""
-                return "No MCP-enabled tools discovered from Consul"
+                return "No MCP-enabled tools discovered from service registry"
 
         # Get the Starlette app
         app = mcp.streamable_http_app()
@@ -920,7 +920,7 @@ class TestRealMCPWithConsul:
 
         if not mcp_consul_server_fixture.discovered_tools:
             pytest.skip(
-                "No MCP-enabled tools discovered from Consul. "
+                "No MCP-enabled tools discovered from service registry. "
                 "Register services with tags: mcp-enabled, node-type:orchestrator, mcp-tool:<name>"
             )
 
@@ -946,7 +946,7 @@ class TestRealMCPWithConsul:
         - tools/list returns the tools discovered from Consul
         """
         if not mcp_consul_server_fixture.discovered_tools:
-            pytest.skip("No MCP-enabled tools discovered from Consul")
+            pytest.skip("No MCP-enabled tools discovered from service registry")
 
         async with create_mcp_client(mcp_consul_server_fixture.url) as session:
             result = await session.list_tools()
@@ -979,7 +979,7 @@ class TestRealMCPWithConsul:
         - Tool has input schema
         """
         if not mcp_consul_server_fixture.discovered_tools:
-            pytest.skip("No MCP-enabled tools discovered from Consul")
+            pytest.skip("No MCP-enabled tools discovered from service registry")
 
         async with create_mcp_client(mcp_consul_server_fixture.url) as session:
             result = await session.list_tools()
@@ -1006,7 +1006,7 @@ class TestRealMCPWithConsul:
         - Correlation ID is included for tracing
         """
         if not mcp_consul_server_fixture.discovered_tools:
-            pytest.skip("No MCP-enabled tools discovered from Consul")
+            pytest.skip("No MCP-enabled tools discovered from service registry")
 
         # Get first discovered tool
         first_tool = mcp_consul_server_fixture.discovered_tools[0]
@@ -1091,7 +1091,7 @@ class TestRealMCPWithConsul:
         Verifies the MCP server correctly reports it supports tools.
         """
         if not mcp_consul_server_fixture.discovered_tools:
-            pytest.skip("No MCP-enabled tools discovered from Consul")
+            pytest.skip("No MCP-enabled tools discovered from service registry")
 
         async with create_mcp_client(mcp_consul_server_fixture.url) as session:
             capabilities = session.get_server_capabilities()
@@ -1108,7 +1108,7 @@ class TestRealMCPWithConsul:
         but no MCP-enabled services are registered.
         """
         if not infra_availability.get("consul", False):
-            pytest.skip("Consul not available")
+            pytest.skip("Service registry backend not available")
 
         # Create server with discovery (may find no tools)
         server = MCPConsulServerFixture()
