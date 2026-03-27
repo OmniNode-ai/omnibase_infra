@@ -426,13 +426,6 @@ def _check_boundary_imports(event: ModelPRMergedEvent) -> list[ModelPostMergeFin
     """Flag files that import across known package boundaries."""
     findings: list[ModelPostMergeFinding] = []
 
-    # Cross-package import boundary pairs that warrant attention
-    boundary_packages = [
-        ("omnibase_core", "omnibase_infra"),
-        ("omnibase_spi", "omnibase_infra"),
-        ("omnibase_infra", "omniclaude"),
-    ]
-
     # Check changed files for __init__.py modifications that export public API
     init_files = [f for f in event.changed_files if f.endswith("__init__.py")]
     if init_files:
