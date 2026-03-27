@@ -3,9 +3,9 @@ description: Persists LLM model selection decisions from Kafka to PostgreSQL
 image: runtime:latest
 layer: runtime
 container_name: omninode-decision-store-consumer
-required_env:
-  - OMNIINTELLIGENCE_DB_URL
+required_env: []
 hardcoded_env:
+  OMNIINTELLIGENCE_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omniintelligence'
   DECISION_STORE_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   DECISION_STORE_HEALTH_CHECK_PORT: '8091'
   DECISION_STORE_HEALTH_CHECK_HOST: 0.0.0.0
