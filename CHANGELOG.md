@@ -1,3 +1,21 @@
+## v0.28.0 (2026-03-27)
+
+### Added
+- feat: post-merge consumer chain [OMN-6727] (#1015)
+- feat: GitHub PR merged event producer (webhook -> Kafka) [OMN-6726] (#1013)
+
+### Fixed
+- fix: wire correct consumption_source for WiringHealthChecker [OMN-6515] (#994)
+- fix: deploy-runtime.sh copies omnibase_core runtime contracts [OMN-6698] (#1010)
+- fix: entrypoint stamps schema fingerprints for all databases [OMN-6699] (#1011)
+- fix: adjust Phoenix health check Python path and timings [OMN-6714] (#1008)
+- fix: Phoenix health check uses python3 instead of missing curl [OMN-6700] (#1012)
+- fix: strip v-prefix in plugin pin cascade verification [OMN-6717] (#1009)
+
+### Changed
+- chore: register custom noqa codes as ruff external linters (#1014)
+- chore(deps): bump omnibase_core to 0.33.1, omnibase_spi to 0.20.2
+
 ## v0.27.1 (2026-03-26)
 
 ### Fixed
