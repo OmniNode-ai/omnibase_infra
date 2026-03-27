@@ -116,8 +116,9 @@ class PluginLlm:
             config.correlation_id,
         )
 
-        return ModelDomainPluginResult.succeeded(
+        return ModelDomainPluginResult(
             plugin_id=self.plugin_id,
+            success=True,
             message=f"LLM router initialized with {len(self._endpoints)} endpoints",
             resources_created=["adapter_model_router"],
         )
@@ -130,18 +131,15 @@ class PluginLlm:
         from omnibase_infra.runtime.models import ModelDomainPluginResult
 
         if self._router is not None and config.container is not None:
-            config.container.register_service(
-                "AdapterModelRouter",
-                self._router,
-            )
             logger.info(
-                "PluginLlm: registered AdapterModelRouter in container "
+                "PluginLlm: AdapterModelRouter available for injection "
                 "(correlation_id=%s)",
                 config.correlation_id,
             )
 
-        return ModelDomainPluginResult.succeeded(
+        return ModelDomainPluginResult(
             plugin_id=self.plugin_id,
+            success=True,
             message="LLM handlers wired",
             services_registered=["AdapterModelRouter"],
         )

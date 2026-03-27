@@ -127,8 +127,9 @@ class PluginDlq:
             config.correlation_id,
         )
 
-        return ModelDomainPluginResult.succeeded(
+        return ModelDomainPluginResult(
             plugin_id=self.plugin_id,
+            success=True,
             message="DLQ tracking initialized",
             resources_created=["dlq_pool", "dlq_tracking"],
         )
