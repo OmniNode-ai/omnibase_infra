@@ -70,6 +70,9 @@ jobs:
       - name: Check shared enum ownership
         run: python scripts/check_shared_enum_ownership.py src/
 
+      - name: Check topic suffix exports (F56)
+        run: python scripts/validation/check_topic_suffix_exports.py
+
       - name: Run mypy type checking
         run: uv run mypy src/omnibase_infra
 

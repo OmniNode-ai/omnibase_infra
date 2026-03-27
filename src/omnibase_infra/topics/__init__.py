@@ -181,6 +181,9 @@ __all__: list[str] = [
     "SUFFIX_CIRCUIT_BREAKER_STATE",
     "SUFFIX_GMAIL_ARCHIVE_PURGED",
     "SUFFIX_WIRING_HEALTH_SNAPSHOT",
+    # GitHub integration events (OMN-6489)
+    "SUFFIX_GITHUB_PR_MERGED",
+    "SUFFIX_GITHUB_POST_MERGE_RESULT",
     # Runner health monitoring (OMN-6075)
     "SUFFIX_RUNNER_HEALTH_SNAPSHOT",
     # Runtime health event pipeline (OMN-5529)
