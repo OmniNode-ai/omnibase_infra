@@ -135,7 +135,7 @@ class ConfigConsumerHealthProjection(BaseSettings):
         default=60,
         ge=10,
         le=300,
-        description="Max age in seconds for last poll before DEGRADED status.",
+        description="Max age in seconds for last poll before UNHEALTHY status.",
     )
 
     @model_validator(mode="after")
@@ -157,9 +157,7 @@ class ConfigConsumerHealthProjection(BaseSettings):
     def validate_topic_configuration(self) -> Self:
         """Ensure topics are configured."""
         if not self.topics:
-            from omnibase_infra.errors import ProtocolConfigurationError
-
-            raise ProtocolConfigurationError(
+            raise ValueError(
                 "No topics configured for consumer health projection consumer."
             )
         return self

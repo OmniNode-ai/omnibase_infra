@@ -157,6 +157,10 @@ class WriterConsumerHealthPostgres(MixinAsyncCircuitBreaker):
             async with self._pool.acquire() as conn:
                 await conn.executemany(_INSERT_SQL, rows)
             written = len(rows)
+
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
             logger.debug("Wrote %d consumer health events", written)
             return written
         except asyncpg.QueryCanceledError as exc:

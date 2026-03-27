@@ -80,8 +80,8 @@ def _mask_dsn_password(dsn: str) -> str:
                 parsed.fragment,
             )
         )
-    except Exception:  # noqa: BLE001 — boundary: returns degraded response
-        return dsn
+    except Exception:  # noqa: BLE001 — boundary: returns redacted fallback
+        return "***redacted***"
 
 
 class EnumHealthStatus(StrEnum):
