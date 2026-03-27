@@ -14,7 +14,7 @@
 
 ### Changed
 - chore: register custom noqa codes as ruff external linters (#1014)
-- chore(deps): bump omnibase_core to 0.33.1, omnibase_spi to 0.20.2
+- chore(deps): bump omnibase-core to 0.33.1, omnibase-spi to 0.20.2
 
 ## v0.27.1 (2026-03-26)
 
