@@ -1010,9 +1010,9 @@ services:
       - omnibase-infra-network
     healthcheck:
       !!merge <<: *healthcheck-defaults
-      # OMN-6700: Phoenix slim image does not include curl. Use python3 urllib
-      # (always available in the Phoenix image) to probe the health endpoint.
-      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:6006/healthz')\" || exit 1"]
+      # OMN-6700: Phoenix slim image has no /bin/sh or curl. Use CMD (not
+      # CMD-SHELL) with python3 directly to probe the health endpoint.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:6006/healthz')"]
       start_period: 20s
     logging: *logging-defaults
     restart: unless-stopped
