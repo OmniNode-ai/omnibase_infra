@@ -174,6 +174,8 @@ line-ending = "auto"
 [tool.ruff.lint]
 # Matches omnibase_core settings for consistency across ONEX ecosystem
 select = ["E", "F", "W", "C90", "I", "N", "UP", "YTT", "S", "BLE", "FBT", "B", "A", "COM", "C4", "DTZ", "T10", "EM", "EXE", "ISC", "ICN", "G", "INP", "PIE", "T20", "PT", "Q", "RSE", "RET", "SLF", "SIM", "TID", "TCH", "ARG", "PTH", "ERA", "PD", "PGH", "PL", "TRY", "NPY", "RUF"]
+# Custom pre-commit hook codes — registered so ruff doesn't warn about unknown noqa directives
+external = ["model-dump-bare", "ONEX-PATTERN-PARAMS", "arch-topic-naming"]
 ignore = [
     # UP007 (Union[X, Y] -> X | Y) is NOT ignored — PEP 604 syntax enforced
     "S101",      # Allow assert statements in tests
