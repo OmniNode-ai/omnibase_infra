@@ -16,6 +16,7 @@ Idempotency Contract:
     |------------------------|------------|-----------------|
     | consumer_health_events | event_id   | DO NOTHING      |
 """
+# no-migration: schema created in migration 056 (same PR, prior commit)
 
 from __future__ import annotations
 
@@ -25,7 +26,6 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
-from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
@@ -99,7 +99,7 @@ class WriterConsumerHealthPostgres(MixinAsyncCircuitBreaker):
 
     async def write_batch(
         self,
-        events: list[JsonType],
+        events: list[dict[str, object]],
         *,
         correlation_id: UUID | None = None,
     ) -> int:
@@ -117,11 +117,16 @@ class WriterConsumerHealthPostgres(MixinAsyncCircuitBreaker):
             InfraTimeoutError: If the query times out.
         """
         cid = correlation_id or uuid4()
+        context = ModelInfraErrorContext.with_correlation(
+            correlation_id=cid,
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="write_consumer_health_batch",
+        )
 
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("write_batch", cid)
 
-        valid = [e for e in events if _validate_event(e, "consumer_health")]  # type: ignore[arg-type]
+        valid = [e for e in events if _validate_event(e, "consumer_health")]
         if not valid:
             return 0
 
@@ -152,47 +157,41 @@ class WriterConsumerHealthPostgres(MixinAsyncCircuitBreaker):
             async with self._pool.acquire() as conn:
                 await conn.executemany(_INSERT_SQL, rows)
             written = len(rows)
-            async with self._circuit_breaker_lock:
-                self._record_success()
             logger.debug("Wrote %d consumer health events", written)
             return written
+        except asyncpg.QueryCanceledError as exc:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="write_consumer_health_batch",
+                    correlation_id=cid,
+                )
+            raise InfraTimeoutError(
+                "Write consumer health events timed out",
+                context=ModelTimeoutErrorContext(
+                    transport_type=context.transport_type,
+                    operation=context.operation,
+                    target_name=context.target_name,
+                    correlation_id=context.correlation_id,
+                    timeout_seconds=30.0,
+                ),
+            ) from exc
+        except asyncpg.PostgresConnectionError as exc:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="write_consumer_health_batch",
+                    correlation_id=cid,
+                )
+            raise InfraConnectionError(
+                f"Database connection failed during write_consumer_health_batch: {exc}",
+                context=context,
+            ) from exc
         except asyncpg.PostgresError as exc:
             async with self._circuit_breaker_lock:
-                self._record_failure()
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=cid,
-                transport_type=EnumInfraTransportType.DATABASE,
-                operation="write_consumer_health_batch",
-            )
-            raise InfraConnectionError(
-                f"Failed to write consumer health batch: {exc}",
-                context=context,
-            ) from exc
-        except TimeoutError as exc:
-            async with self._circuit_breaker_lock:
-                self._record_failure()
-            context = ModelTimeoutErrorContext.with_correlation(
-                correlation_id=cid,
-                transport_type=EnumInfraTransportType.DATABASE,
-                operation="write_consumer_health_batch",
-                timeout_ms=30000,
-            )
-            raise InfraTimeoutError(
-                f"Timeout writing consumer health batch: {exc}",
-                context=context,
-            ) from exc
-        except RuntimeHostError:
-            raise
-        except Exception as exc:
-            async with self._circuit_breaker_lock:
-                self._record_failure()
-            logger.exception("Unexpected error writing consumer health batch")
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=cid,
-                transport_type=EnumInfraTransportType.DATABASE,
-                operation="write_consumer_health_batch",
-            )
-            raise InfraConnectionError(
-                f"Unexpected error writing consumer health batch: {exc}",
+                await self._record_circuit_failure(
+                    operation="write_consumer_health_batch",
+                    correlation_id=cid,
+                )
+            raise RuntimeHostError(
+                f"Database error during write_consumer_health_batch: {type(exc).__name__}",
                 context=context,
             ) from exc
