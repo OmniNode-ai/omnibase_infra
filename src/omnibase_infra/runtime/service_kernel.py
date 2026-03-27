@@ -1284,6 +1284,40 @@ async def bootstrap() -> int:
                 exc_info=True,
             )
 
+        # Try to register PluginLlm (OMN-6600: LLM domain plugin).
+        try:
+            from omnibase_infra.adapters.llm.plugin_llm import PluginLlm
+
+            plugin_registry.register(PluginLlm())
+            logger.info(
+                "PluginLlm registered (correlation_id=%s)",
+                correlation_id,
+            )
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+            logger.warning(
+                "PluginLlm failed to initialize, continuing without it "
+                "(correlation_id=%s)",
+                correlation_id,
+                exc_info=True,
+            )
+
+        # Try to register PluginDlq (OMN-6601: DLQ + retry worker).
+        try:
+            from omnibase_infra.dlq.plugin_dlq import PluginDlq
+
+            plugin_registry.register(PluginDlq())
+            logger.info(
+                "PluginDlq registered (correlation_id=%s)",
+                correlation_id,
+            )
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+            logger.warning(
+                "PluginDlq failed to initialize, continuing without it "
+                "(correlation_id=%s)",
+                correlation_id,
+                exc_info=True,
+            )
+
         # 4.6. Discover domain plugins from entry_points (OMN-2000)
         #
         # After explicit registration, scan installed packages for plugins
