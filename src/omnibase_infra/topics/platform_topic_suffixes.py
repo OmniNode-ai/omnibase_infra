@@ -582,6 +582,17 @@ Producer: GitHub Actions workflow (pr-merged-event.yml)
 Consumer: post-merge consumer chain (OMN-6727)
 """
 
+SUFFIX_GITHUB_POST_MERGE_RESULT: str = "onex.evt.github.post-merge-result.v1"
+"""Topic suffix for post-merge check chain results (OMN-6727).
+
+Published by the post-merge consumer after all quality check stages
+(hostile review, contract sweep, integration check) complete for a merged PR.
+Contains aggregated findings, tickets created, and stage completion status.
+
+Producer: PostMergeConsumer (OMN-6727)
+Consumer: omnidash (future)
+"""
+
 # =============================================================================
 # OMNIBASE_INFRA DOMAIN TOPIC SPEC REGISTRY
 # =============================================================================
@@ -656,6 +667,15 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     # GitHub PR merged events (1 partition — low-throughput, one event per merge, OMN-6726)
     ModelTopicSpec(
         suffix=SUFFIX_GITHUB_PR_MERGED,
+        partitions=1,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
+    # Post-merge check chain results (1 partition — low-throughput, OMN-6727)
+    ModelTopicSpec(
+        suffix=SUFFIX_GITHUB_POST_MERGE_RESULT,
         partitions=1,
         kafka_config={
             "retention.ms": "604800000",

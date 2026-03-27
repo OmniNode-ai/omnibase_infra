@@ -23,3 +23,5 @@ topics:
   - onex.evt.platform.dlq-message.v1
   # --- GitHub PR merged event (OMN-6726) ---
   - onex.evt.github.pr-merged.v1
+  # --- Post-merge check chain result (OMN-6727) ---
+  - onex.evt.github.post-merge-result.v1

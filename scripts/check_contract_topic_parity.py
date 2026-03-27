@@ -345,6 +345,8 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omniintelligence.code-entities-extracted.v1": "OMN-5669; contract.yaml in omniintelligence repo (cross-repo provisioning) | owner: jonah | expiry: 2026-09-01",
     # --- GitHub PR merged event (OMN-6726) ---
     "onex.evt.github.pr-merged.v1": "OMN-6726; produced by GHA workflow, no node contract — external event source | owner: jonah | expiry: 2026-09-01",
+    # --- Post-merge check chain result (OMN-6727) ---
+    "onex.evt.github.post-merge-result.v1": "OMN-6727; produced by PostMergeConsumer service, no node contract — service-level topic | owner: jonah | expiry: 2026-09-01",
 }
 # fmt: on
 
