@@ -1162,7 +1162,7 @@ async def bootstrap() -> int:
         # and emits baselines-computed.v1 snapshot events for omnidash.
         # Creates its own asyncpg pool for isolation from plugin pools.
         baselines_task: asyncio.Task[None] | None = None
-        _baselines_pool: object | None = None
+        _baselines_pool = None  # asyncpg.Pool, assigned inside try block
         if use_kafka:
             try:
                 import asyncpg as _asyncpg
