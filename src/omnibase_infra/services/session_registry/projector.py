@@ -32,10 +32,6 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from omnibase_infra.event_bus.topic_constants import (
-    TOPIC_SESSION_COORDINATION_SIGNAL,
-    TOPIC_SESSION_STATUS_CHANGED,
-)
 from omnibase_infra.services.session_registry.enum_session_phase import EnumSessionPhase
 from omnibase_infra.services.session_registry.enum_session_registry_status import (
     EnumSessionRegistryStatus,
