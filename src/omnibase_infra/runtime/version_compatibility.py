@@ -175,8 +175,8 @@ def _build_matrix_from_pyproject(
 _FALLBACK_MATRIX: list[VersionConstraint] = [
     VersionConstraint(
         package="omnibase_core",
-        min_version="0.33.1",
-        max_version="0.34.0",
+        min_version="0.34.0",
+        max_version="0.35.0",
     ),
     VersionConstraint(
         package="omnibase_spi",
