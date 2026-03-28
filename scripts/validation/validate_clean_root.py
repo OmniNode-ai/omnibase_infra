@@ -105,6 +105,8 @@ ALLOWED_ROOT_FILES: frozenset[str] = frozenset(
         ".dockerignore",
         # Makefile
         "Makefile",
+        # Architecture compliance allowlists (CI-consumed)
+        "arch-handler-contract-compliance-allowlist.yaml",
         # CI/CD configuration (some systems require root placement)
         ".travis.yml",
         "tox.ini",

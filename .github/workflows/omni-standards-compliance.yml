@@ -88,6 +88,32 @@ jobs:
       - name: Check for Optional/Union usage (PEP 604)
         run: uv run ruff check src/ --select UP007,UP006
 
+  handler-contract-compliance:
+    name: Handler Contract Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Install onex_change_control (pinned)
+        run: uv pip install --system "onex_change_control @ git+https://github.com/OmniNode-ai/onex_change_control.git@6f08269895488c9ce30a866e6415f1de9f6d1afc"
+
+      - name: Run handler contract compliance check
+        run: |
+          python -m onex_change_control.validators.arch_handler_contract_compliance \
+            --repo-root . \
+            --allowlist-path arch-handler-contract-compliance-allowlist.yaml
+
   omni-standards-gate:
     name: Omni Standards Gate
     # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
@@ -103,13 +129,15 @@ jobs:
     needs:
       - type-safety
       - type-union-check
+      - handler-contract-compliance
     if: always()
     steps:
       - name: Check standards results
         run: |
           FAILED=false
           for check in \
-            "type-union-check=${{ needs.type-union-check.result }}"; do
+            "type-union-check=${{ needs.type-union-check.result }}" \
+            "handler-contract-compliance=${{ needs.handler-contract-compliance.result }}"; do
             NAME="${check%%=*}"
             RESULT="${check##*=}"
             if [ "$RESULT" != "success" ] && [ "$RESULT" != "skipped" ]; then
