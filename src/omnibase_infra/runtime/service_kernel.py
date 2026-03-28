@@ -1291,7 +1291,7 @@ async def bootstrap() -> int:
                 )
 
                 _savings_config = ConfigSavingsEstimation()
-                _pricing_table = ModelPricingTable.from_defaults()
+                _pricing_table = ModelPricingTable.from_yaml()
                 _savings_estimator = ServiceSavingsEstimator(
                     config=_savings_config,
                     pricing_table=_pricing_table,
@@ -1317,15 +1317,22 @@ async def bootstrap() -> int:
 
                     for _input_topic in _savings_input_topics:
                         try:
-                            await event_bus.subscribe(
-                                _input_topic,
-                                lambda msg,
-                                t=_input_topic: _savings_estimator.ingest_event(
-                                    t,
-                                    _json.loads(msg)
+
+                            async def _savings_on_message(
+                                msg: object,
+                                *,
+                                _topic: str = _input_topic,
+                            ) -> None:
+                                _savings_estimator.ingest_event(
+                                    _topic,
+                                    _json.loads(msg)  # type: ignore[arg-type]
                                     if isinstance(msg, (str, bytes))
                                     else msg,
-                                ),
+                                )
+
+                            await event_bus.subscribe(
+                                _input_topic,
+                                on_message=_savings_on_message,  # type: ignore[arg-type]
                             )
                         except Exception:  # noqa: BLE001
                             logger.debug(
