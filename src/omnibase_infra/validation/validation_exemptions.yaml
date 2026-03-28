@@ -2843,6 +2843,36 @@ pattern_exemptions:
     documentation:
       - docs/plans/2026-03-27-multi-session-coordination.md (Doctrine D2)
     ticket: OMN-6853
+  # ==========================================================================
+  # Decision Embedder Exemptions (OMN-6862)
+  # ==========================================================================
+  # task_id and session_id in ModelDecisionRecord are human-readable string
+  # identifiers, not UUIDs. task_id is a Linear ticket ID (e.g., "OMN-1234")
+  # and session_id is a CLI session identifier string.
+  - file_pattern: 'decision_embedder\.py'
+    violation_pattern: "Field 'task_id' should use UUID"
+    reason: >
+      task_id is a human-readable Linear ticket identifier (e.g., "OMN-1234"), not a UUID. Matches ModelSessionRegistryEntry.task_id convention.
+
+    documentation:
+      - docs/plans/2026-03-27-multi-session-coordination.md
+    ticket: OMN-6862
+  - file_pattern: 'decision_embedder\.py'
+    violation_pattern: "Field 'session_id' should use UUID"
+    reason: >
+      session_id is a CLI session identifier string, not a UUID. Matches existing session_id conventions in the session registry.
+
+    documentation:
+      - docs/plans/2026-03-27-multi-session-coordination.md
+    ticket: OMN-6862
+  - file_pattern: 'decision_search\.py'
+    violation_pattern: "Field 'task_id' should use UUID"
+    reason: >
+      task_id is a human-readable Linear ticket identifier (e.g., "OMN-1234"), not a UUID. Part of the decision search query interface.
+
+    documentation:
+      - docs/plans/2026-03-27-multi-session-coordination.md
+    ticket: OMN-6864
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
@@ -2952,7 +2982,29 @@ architecture_exemptions:
     documentation:
       - CLAUDE.md (Protocol File Naming - domain-grouping convention)
     ticket: OMN-5060
-# These handle complex union type violations
+    # These handle complex union type violations
+  # ==========================================================================
+  # Decision Embedder Exemptions (OMN-6862)
+  # ==========================================================================
+  # task_id and session_id in ModelDecisionRecord are human-readable string
+  # identifiers, not UUIDs. task_id is a Linear ticket ID (e.g., 'OMN-1234')
+  # and session_id is a CLI session identifier string.
+  - file_pattern: 'decision_embedder\.py'
+    violation_pattern: "Field 'task_id' should use UUID"
+    reason: >
+      task_id is a human-readable Linear ticket identifier (e.g., 'OMN-1234'), not a UUID. Matches ModelSessionRegistryEntry.task_id convention.
+
+    documentation:
+      - docs/plans/2026-03-27-multi-session-coordination.md
+    ticket: OMN-6862
+  - file_pattern: 'decision_embedder\.py'
+    violation_pattern: "Field 'session_id' should use UUID"
+    reason: >
+      session_id is a CLI session identifier string, not a UUID. Matches existing session_id conventions in the session registry.
+
+    documentation:
+      - docs/plans/2026-03-27-multi-session-coordination.md
+    ticket: OMN-6862
 union_exemptions:
   # ==========================================================================
   # ModelNodeCapabilities Config Field Exemption
