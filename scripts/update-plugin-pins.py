@@ -49,12 +49,22 @@ DEFAULT_DOCKERFILE = _REPO_ROOT / "docker" / "Dockerfile.runtime"
 def fetch_latest_version(package: str) -> str:
     """Return the latest stable version of *package* from PyPI.
 
+    Sends cache-bust headers to avoid stale index pages from HTTP caches
+    (OMN-6811).
+
     Raises:
         RuntimeError: if the HTTP request fails or the JSON is malformed.
     """
     url = f"https://pypi.org/pypi/{package}/json"
+    req = urllib.request.Request(  # noqa: S310
+        url,
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
     try:
-        with urllib.request.urlopen(url, timeout=15) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
             data = json.loads(resp.read())
     except (urllib.error.URLError, urllib.error.HTTPError, OSError) as exc:
         raise RuntimeError(
