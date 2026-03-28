@@ -2860,6 +2860,14 @@ pattern_exemptions:
       session_id is a CLI session identifier string, not a UUID. It comes from Claude Code hook events where session IDs are opaque strings.
 
     ticket: OMN-6863
+  - file_pattern: 'session_registry.*decision_search\.py'
+    violation_pattern: "Field 'task_id' should use UUID type instead of str"
+    reason: >
+      task_id in ModelDecisionSearchResult is a human-readable Linear ticket identifier (e.g., "OMN-1234"), not a UUID. Consistent with ModelSessionRegistryEntry in the same package. See plan Doctrine D2.
+
+    documentation:
+      - docs/plans/2026-03-27-multi-session-coordination.md (Doctrine D2)
+    ticket: OMN-6864
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
