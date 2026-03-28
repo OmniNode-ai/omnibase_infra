@@ -7,7 +7,7 @@
 #
 # This contract defines the interface for the LLM Inference Effect node,
 # which handles provider-agnostic LLM inference operations via delegated
-# handlers (OpenAI-compatible, Ollama).
+# handlers (OpenAI-compatible).
 # Contract identifiers
 name: "node_llm_inference_effect"
 contract_name: "node_llm_inference_effect"
@@ -24,11 +24,11 @@ node_version:
 node_type: "EFFECT_GENERIC"
 # Description
 description: >
-  LLM inference effect node for provider-agnostic inference operations. Delegates to provider-specific handlers (OpenAI-compatible, Ollama) via declarative operation routing. Supports chat completions and text completions with tool calling, generation parameters, and structured response parsing.
+  LLM inference effect node for provider-agnostic inference operations. Delegates to provider-specific handlers (OpenAI-compatible) via declarative operation routing. Supports chat completions and text completions with tool calling, generation parameters, and structured response parsing.
 
 # Strongly typed I/O models
 # Note: These models live in the shared omnibase_infra.models.llm package.
-# They are shared across all LLM inference handlers (OpenAI-compatible, Ollama)
+# They are shared across all LLM inference handlers (OpenAI-compatible)
 # to ensure a single canonical request/response contract for the inference effect layer.
 # Migrated from omnibase_infra.nodes.effects.models (OMN-3989).
 input_model:
@@ -59,12 +59,6 @@ handler_routing:
         name: "HandlerLlmOpenaiCompatible"
         module: "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible"
       description: "Execute LLM inference via OpenAI-compatible API (vLLM, OpenAI, etc.)"
-    # Ollama Inference Handler
-    - operation: "inference.ollama"
-      handler:
-        name: "HandlerLlmOllama"
-        module: "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_ollama"
-      description: "Execute LLM inference via Ollama API (/api/chat, /api/generate)"
   execution_mode: "single"
   max_timeout_seconds: 600
 # =============================================================================
@@ -76,10 +70,6 @@ error_handling:
     per_backend: true
     backends:
       - name: "openai_compatible"
-        failure_threshold: 5
-        reset_timeout_ms: 60000
-        half_open_max_requests: 2
-      - name: "ollama"
         failure_threshold: 5
         reset_timeout_ms: 60000
         half_open_max_requests: 2
@@ -109,8 +99,27 @@ error_handling:
 io_operations:
   - operation: "inference.openai_compatible"
     description: "Execute LLM inference via OpenAI-compatible API"
-  - operation: "inference.ollama"
-    description: "Execute LLM inference via Ollama API"
+# =============================================================================
+# EVENT BUS TOPICS
+# =============================================================================
+event_bus:
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.llm-inference-request.v1"
+  publish_topics:
+    - "onex.evt.omniintelligence.llm-call-completed.v1"
+    - "onex.evt.omnibase-infra.llm-call-completed.v1"
+consumed_events:
+  - topic: "onex.cmd.omnibase-infra.llm-inference-request.v1"
+    event_type: "LlmInferenceRequestCommand"
+    message_category: "COMMAND"
+    description: "Inbound LLM inference request routed to handler via bifrost"
+published_events:
+  - topic: "onex.evt.omniintelligence.llm-call-completed.v1"
+    event_type: "LlmCallCompletedEvent"
+    description: "Per-call metrics emitted after each inference call"
+  - topic: "onex.evt.omnibase-infra.llm-call-completed.v1"
+    event_type: "LlmCallCompletedInfraEvent"
+    description: "Lightweight per-call metrics for infra-owned consumers"
 # Dependencies
 dependencies:
   - name: "protocol_llm_http_transport"
@@ -122,8 +131,6 @@ dependencies:
 capabilities:
   - name: "openai_compatible_inference"
     description: "Execute inference via OpenAI-compatible API (vLLM, OpenAI, etc.)"
-  - name: "ollama_inference"
-    description: "Execute inference via Ollama native API"
   - name: "chat_completion"
     description: "Multi-turn chat completion with tool calling support"
   - name: "tool_calling"
@@ -141,6 +148,5 @@ metadata:
     - llm
     - inference
     - openai-compatible
-    - ollama
     - circuit-breaker
     - tool-calling

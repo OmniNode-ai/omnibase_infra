@@ -520,6 +520,30 @@ Consumer: MixinConsumerHealth (standalone consumers)
 """
 
 # =============================================================================
+# OMNIBASE_INFRA LLM REQUEST COMMAND TOPIC SUFFIXES (Plan D WS1)
+# =============================================================================
+
+SUFFIX_LLM_INFERENCE_REQUEST: str = "onex.cmd.omnibase-infra.llm-inference-request.v1"
+"""Topic suffix for inbound LLM inference request commands.
+
+Published by services needing LLM inference. The runtime consumes
+these and routes to the appropriate LLM handler via bifrost gateway.
+
+Producer: Any ONEX service requiring LLM inference
+Consumer: NodeLlmInferenceEffect runtime handler
+"""
+
+SUFFIX_LLM_EMBEDDING_REQUEST: str = "onex.cmd.omnibase-infra.llm-embedding-request.v1"
+"""Topic suffix for inbound LLM embedding request commands.
+
+Published by services needing embedding generation. The runtime
+consumes these and routes to the embedding handler.
+
+Producer: Any ONEX service requiring embeddings
+Consumer: NodeLlmEmbeddingEffect runtime handler
+"""
+
+# =============================================================================
 # OMNIBASE_INFRA RUNTIME ERROR TOPIC SUFFIXES (OMN-5517 / OMN-5529)
 # =============================================================================
 
@@ -681,6 +705,24 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
             "retention.ms": "604800000",
             "cleanup.policy": "delete",
         },  # 7 days
+    ),
+    # LLM inference request commands (3 partitions — Plan D WS1)
+    ModelTopicSpec(
+        suffix=SUFFIX_LLM_INFERENCE_REQUEST,
+        partitions=3,
+        kafka_config={
+            "retention.ms": "86400000",
+            "cleanup.policy": "delete",
+        },  # 1 day — commands are short-lived
+    ),
+    # LLM embedding request commands (3 partitions — Plan D WS1)
+    ModelTopicSpec(
+        suffix=SUFFIX_LLM_EMBEDDING_REQUEST,
+        partitions=3,
+        kafka_config={
+            "retention.ms": "86400000",
+            "cleanup.policy": "delete",
+        },  # 1 day — commands are short-lived
     ),
 )
 """Omnibase_infra domain topic specs for internal effect nodes.
