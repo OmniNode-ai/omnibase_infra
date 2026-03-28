@@ -299,3 +299,153 @@ class TestHandlerRuntimeErrorTriage:
 
         assert result.matched_rule == "high_priority"
         assert result.action == "ticket"
+
+    async def test_emit_triage_event_on_alert(self) -> None:
+        """Alert action emits error-triaged event to Kafka."""
+        db_pool = MagicMock()
+        conn = AsyncMock()
+        conn.fetchrow = AsyncMock(
+            side_effect=[
+                None,  # correlation query
+                {"occurrence_count": 1, "incident_state": "open"},  # upsert
+            ]
+        )
+        db_pool.acquire = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=conn), __aexit__=AsyncMock()
+            )
+        )
+
+        event_bus = AsyncMock()
+        event_bus.publish_envelope = AsyncMock()
+        rules = [ModelTriageRule(name="alert_all", priority=1, action="alert")]
+        handler = HandlerRuntimeErrorTriage(
+            db_pool=db_pool, rules=rules, event_bus=event_bus
+        )
+        event = _make_error_event()
+
+        result = await handler.handle(event)
+
+        assert result.action == "alert"
+        event_bus.publish_envelope.assert_awaited_once()
+        call_kwargs = event_bus.publish_envelope.call_args
+        assert "error-triaged" in call_kwargs.kwargs.get("topic", "")
+
+    async def test_no_emit_without_event_bus(self) -> None:
+        """No emit when event_bus is None (DB-only mode)."""
+        db_pool = MagicMock()
+        conn = AsyncMock()
+        conn.fetchrow = AsyncMock(
+            side_effect=[
+                None,  # correlation query
+                {"occurrence_count": 1, "incident_state": "open"},  # upsert
+            ]
+        )
+        db_pool.acquire = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=conn), __aexit__=AsyncMock()
+            )
+        )
+
+        rules = [ModelTriageRule(name="alert_all", priority=1, action="alert")]
+        handler = HandlerRuntimeErrorTriage(
+            db_pool=db_pool, rules=rules, event_bus=None
+        )
+        event = _make_error_event()
+
+        # Should complete without error even without event bus
+        result = await handler.handle(event)
+        assert result.action == "alert"
+
+    async def test_emit_failure_does_not_block_triage(self) -> None:
+        """Emit failure does not prevent triage result from being returned."""
+        db_pool = MagicMock()
+        conn = AsyncMock()
+        conn.fetchrow = AsyncMock(
+            side_effect=[
+                None,  # correlation query
+                {"occurrence_count": 1, "incident_state": "open"},  # upsert
+            ]
+        )
+        db_pool.acquire = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=conn), __aexit__=AsyncMock()
+            )
+        )
+
+        event_bus = AsyncMock()
+        event_bus.publish_envelope = AsyncMock(
+            side_effect=RuntimeError("Kafka unavailable")
+        )
+        rules = [ModelTriageRule(name="alert_all", priority=1, action="alert")]
+        handler = HandlerRuntimeErrorTriage(
+            db_pool=db_pool, rules=rules, event_bus=event_bus
+        )
+        event = _make_error_event()
+
+        # Should still return result despite emit failure
+        result = await handler.handle(event)
+        assert result.action == "alert"
+        assert result.matched_rule == "alert_all"
+
+    async def test_emit_triage_event_on_ticket(self) -> None:
+        """Ticket action also emits error-triaged event."""
+        db_pool = MagicMock()
+        conn = AsyncMock()
+        conn.fetchrow = AsyncMock(
+            return_value={"occurrence_count": 5, "incident_state": "open"}
+        )
+        conn.execute = AsyncMock()
+        db_pool.acquire = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=conn), __aexit__=AsyncMock()
+            )
+        )
+
+        event_bus = AsyncMock()
+        event_bus.publish_envelope = AsyncMock()
+        rules = [ModelTriageRule(name="ticket_all", priority=1, action="ticket")]
+        handler = HandlerRuntimeErrorTriage(
+            db_pool=db_pool, rules=rules, event_bus=event_bus
+        )
+        event = _make_error_event(
+            logger_family="asyncpg",
+            error_category=EnumRuntimeErrorCategory.DATABASE,
+            raw_message="connection refused",
+        )
+
+        result = await handler.handle(event)
+
+        assert result.action == "ticket"
+        event_bus.publish_envelope.assert_awaited_once()
+
+    async def test_emit_triage_event_on_suppress(self) -> None:
+        """Suppress action also emits error-triaged event."""
+        db_pool = MagicMock()
+        conn = AsyncMock()
+        conn.fetchrow = AsyncMock(
+            return_value={"occurrence_count": 1, "incident_state": "open"}
+        )
+        conn.execute = AsyncMock()
+        db_pool.acquire = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=conn), __aexit__=AsyncMock()
+            )
+        )
+
+        event_bus = AsyncMock()
+        event_bus.publish_envelope = AsyncMock()
+        rules = [ModelTriageRule(name="suppress_all", priority=1, action="suppress")]
+        handler = HandlerRuntimeErrorTriage(
+            db_pool=db_pool, rules=rules, event_bus=event_bus
+        )
+        event = _make_error_event(
+            logger_family="asyncpg",
+            error_category=EnumRuntimeErrorCategory.DATABASE,
+            raw_message="some error",
+        )
+
+        result = await handler.handle(event)
+
+        assert result.action == "suppress"
+        event_bus.publish_envelope.assert_awaited_once()
