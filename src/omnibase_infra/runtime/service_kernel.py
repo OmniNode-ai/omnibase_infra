@@ -2206,7 +2206,13 @@ async def bootstrap() -> int:
                     version="v1",
                 )
 
-                async def _triage_on_message(message: bytes) -> None:
+                from omnibase_infra.event_bus.models.model_event_message import (
+                    ModelEventMessage,
+                )
+
+                async def _triage_on_message(
+                    message: ModelEventMessage,
+                ) -> None:
                     """Deserialize runtime error event and dispatch to triage handler."""
                     import json as _json
 
@@ -2215,7 +2221,7 @@ async def bootstrap() -> int:
                     )
 
                     try:
-                        payload = _json.loads(message)
+                        payload = _json.loads(message.value)
                         event = ModelRuntimeErrorEvent.model_validate(payload)
                         await triage_handler.handle(event)
                     except Exception:  # noqa: BLE001 — boundary: consumer must not crash
