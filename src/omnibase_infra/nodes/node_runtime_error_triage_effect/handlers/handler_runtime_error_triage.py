@@ -11,19 +11,27 @@ when a runtime error's logger_family matches a known Kafka consumer pattern,
 the handler queries consumer_health_triage for active incidents with the
 same consumer identity.
 
+After triage, emits an ``error-triaged.v1`` event to Kafka for downstream
+consumers (omnidash /runtime-errors dashboard).
+
 Related Tickets:
     - OMN-5522: Create NodeRuntimeErrorTriageEffect
     - OMN-5529: Runtime Health Event Pipeline (epic)
+    - OMN-5650: Error triage result emission
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.health.enum_runtime_error_category import (
     EnumRuntimeErrorCategory,
@@ -38,6 +46,8 @@ from omnibase_infra.nodes.node_runtime_error_triage_effect.models.model_triage_r
 
 if TYPE_CHECKING:
     from asyncpg import Pool
+
+    from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +98,7 @@ class HandlerRuntimeErrorTriage:
         rules: list[ModelTriageRule] | None = None,
         slack_handler: Callable[[str], Awaitable[None]] | None = None,
         linear_handler: Callable[..., Awaitable[None]] | None = None,
+        event_bus: ProtocolEventBusLike | None = None,
     ) -> None:
         """Initialize the triage handler.
 
@@ -96,11 +107,17 @@ class HandlerRuntimeErrorTriage:
             rules: Triage rules in priority order. Defaults to DEFAULT_TRIAGE_RULES.
             slack_handler: Async callable accepting a message string.
             linear_handler: Async callable accepting title and description kwargs.
+            event_bus: Optional event bus for emitting error-triaged events.
+                If ``None``, triage events are not emitted (DB-only mode).
         """
         self._db_pool = db_pool
         self._rules = sorted(rules or DEFAULT_TRIAGE_RULES, key=lambda r: r.priority)
         self._slack_handler = slack_handler
         self._linear_handler = linear_handler
+        self._event_bus = event_bus
+
+        # Resolve triage topic lazily to avoid import cycles at module level
+        self._triage_topic: str | None = None
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -141,11 +158,12 @@ class HandlerRuntimeErrorTriage:
         occurrence_count = cast("int", incident["occurrence_count"])
         incident_state = cast("str", incident["incident_state"])
 
-        # Execute the triage action
+        # Execute the triage action and build result
+        result: ModelRuntimeErrorTriageResult
         if matched_rule.action == "suppress":
             # Check if suppression window is active
             if incident_state == "suppressed":
-                return ModelRuntimeErrorTriageResult(
+                result = ModelRuntimeErrorTriageResult(
                     fingerprint=event.fingerprint,
                     action="suppress",
                     matched_rule=matched_rule.name,
@@ -153,26 +171,27 @@ class HandlerRuntimeErrorTriage:
                     occurrence_count=occurrence_count,
                     correlated_consumer_fingerprint=correlated_fingerprint,
                 )
-            # First time or suppression expired — suppress and alert once
-            await self._update_incident_state(event.fingerprint, "suppressed")
-            await self._send_slack_notification(
-                event, matched_rule, correlated_fingerprint
-            )
-            return ModelRuntimeErrorTriageResult(
-                fingerprint=event.fingerprint,
-                action="suppress",
-                matched_rule=matched_rule.name,
-                incident_state="suppressed",
-                occurrence_count=occurrence_count,
-                correlated_consumer_fingerprint=correlated_fingerprint,
-            )
+            else:
+                # First time or suppression expired — suppress and alert once
+                await self._update_incident_state(event.fingerprint, "suppressed")
+                await self._send_slack_notification(
+                    event, matched_rule, correlated_fingerprint
+                )
+                result = ModelRuntimeErrorTriageResult(
+                    fingerprint=event.fingerprint,
+                    action="suppress",
+                    matched_rule=matched_rule.name,
+                    incident_state="suppressed",
+                    occurrence_count=occurrence_count,
+                    correlated_consumer_fingerprint=correlated_fingerprint,
+                )
 
         elif matched_rule.action == "ticket":
             await self._create_linear_ticket(
                 event, occurrence_count, correlated_fingerprint
             )
             await self._update_incident_state(event.fingerprint, "ticketed")
-            return ModelRuntimeErrorTriageResult(
+            result = ModelRuntimeErrorTriageResult(
                 fingerprint=event.fingerprint,
                 action="ticket",
                 matched_rule=matched_rule.name,
@@ -186,13 +205,84 @@ class HandlerRuntimeErrorTriage:
             await self._send_slack_notification(
                 event, matched_rule, correlated_fingerprint
             )
-            return ModelRuntimeErrorTriageResult(
+            result = ModelRuntimeErrorTriageResult(
                 fingerprint=event.fingerprint,
                 action="alert",
                 matched_rule=matched_rule.name,
                 incident_state=incident_state,
                 occurrence_count=occurrence_count,
                 correlated_consumer_fingerprint=correlated_fingerprint,
+            )
+
+        # Emit triage result to Kafka for omnidash projection (OMN-5650)
+        await self._emit_triage_event(result, event)
+
+        return result
+
+    def _resolve_triage_topic(self) -> str:
+        """Lazily resolve the error-triaged topic string."""
+        if self._triage_topic is None:
+            from omnibase_infra.topics import topic_keys
+            from omnibase_infra.topics.service_topic_registry import (
+                ServiceTopicRegistry,
+            )
+
+            self._triage_topic = ServiceTopicRegistry.from_defaults().resolve(
+                topic_keys.ERROR_TRIAGED
+            )
+        return self._triage_topic
+
+    async def _emit_triage_event(
+        self,
+        result: ModelRuntimeErrorTriageResult,
+        source_event: ModelRuntimeErrorEvent,
+    ) -> None:
+        """Emit an error-triaged event to Kafka for omnidash projection.
+
+        Fire-and-forget: publish errors are logged but do not propagate,
+        so triage results are still returned even if Kafka is unavailable.
+
+        Args:
+            result: The triage result to emit.
+            source_event: The original runtime error event for correlation.
+        """
+        if self._event_bus is None:
+            return
+
+        now = datetime.now(UTC)
+        payload = json.loads(result.model_dump_json())
+        payload["triaged_at"] = now.isoformat()
+        payload["source_error_category"] = source_event.error_category.value
+        payload["source_severity"] = source_event.severity.value
+        payload["source_logger_family"] = source_event.logger_family
+
+        envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+            envelope_id=uuid4(),
+            payload=payload,
+            envelope_timestamp=now,
+            correlation_id=source_event.correlation_id,
+            source="runtime_error_triage",
+        )
+
+        try:
+            topic = self._resolve_triage_topic()
+            await self._event_bus.publish_envelope(
+                envelope,  # type: ignore[arg-type]
+                topic=topic,
+            )
+            logger.debug(
+                "Emitted error-triaged event",
+                extra={
+                    "fingerprint": result.fingerprint,
+                    "action": result.action,
+                    "topic": topic,
+                },
+            )
+        except Exception:  # noqa: BLE001 — never block triage on bus errors
+            logger.warning(
+                "Failed to emit error-triaged event (non-fatal)",
+                extra={"fingerprint": result.fingerprint},
+                exc_info=True,
             )
 
     def _find_matching_rule(

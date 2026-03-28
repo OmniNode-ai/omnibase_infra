@@ -136,13 +136,25 @@ CONSUMER_RESTART_CMD: Final[str] = "CONSUMER_RESTART_CMD"
 RUNTIME_ERROR: Final[str] = "RUNTIME_ERROR"
 """Runtime error events from RuntimeLogEventBridge."""
 
+ERROR_TRIAGED: Final[str] = "ERROR_TRIAGED"
+"""Runtime error triage result events from NodeRuntimeErrorTriageEffect."""
+
+# ==============================================================================
+# Baselines Topics
+# ==============================================================================
+
+BASELINES_COMPUTED: Final[str] = "BASELINES_COMPUTED"
+"""Baselines batch computation snapshot events."""
+
 
 __all__: list[str] = [
     "AGENT_STATUS",
+    "BASELINES_COMPUTED",
     "CIRCUIT_BREAKER_STATE",
     "CONSUMER_HEALTH",
     "CONSUMER_RESTART_CMD",
     "EFFECTIVENESS_INVALIDATION",
+    "ERROR_TRIAGED",
     "HOOK_CONTEXT_INJECTED",
     "INJECTION_AGENT_MATCH",
     "INJECTION_CONTEXT_UTILIZATION",

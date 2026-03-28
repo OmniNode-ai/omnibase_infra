@@ -1155,6 +1155,242 @@ async def bootstrap() -> int:
                 )
                 llm_health_service = None
 
+        # 3.8. Wire baselines batch compute periodic task
+        # Runs the 3-phase baselines computation at a configurable interval
+        # and emits baselines-computed.v1 snapshot events for omnidash.
+        # Creates its own asyncpg pool for isolation from plugin pools.
+        baselines_task: asyncio.Task[None] | None = None
+        _baselines_pool = None  # asyncpg.Pool, assigned inside try block
+        if use_kafka:
+            try:
+                import asyncpg as _asyncpg
+
+                from omnibase_core.models.events.model_event_envelope import (
+                    ModelEventEnvelope,
+                )
+
+                _baselines_dsn = os.environ.get("OMNIBASE_INFRA_DB_URL", "").strip()
+                if _baselines_dsn:
+                    _baselines_interval = float(
+                        os.environ.get("BASELINES_COMPUTE_INTERVAL", "300")
+                    )
+                    _baselines_pool = await _asyncpg.create_pool(
+                        _baselines_dsn, min_size=1, max_size=2
+                    )
+
+                    from omnibase_infra.topics import topic_keys as _bl_topic_keys
+                    from omnibase_infra.topics.service_topic_registry import (
+                        ServiceTopicRegistry as _BlTopicRegistry,
+                    )
+
+                    _baselines_default_topic = _BlTopicRegistry.from_defaults().resolve(
+                        _bl_topic_keys.BASELINES_COMPUTED
+                    )
+
+                    async def _baselines_publish(
+                        event_type: str,
+                        payload: object,
+                        topic: str | None,
+                        correlation_id: object,
+                        **kwargs: object,
+                    ) -> bool:
+                        """Publisher callback for baselines batch compute."""
+                        _env: ModelEventEnvelope[object] = ModelEventEnvelope(
+                            payload=payload,
+                            correlation_id=correlation_id,  # type: ignore[arg-type]
+                            event_type=event_type,
+                            source="baselines_batch_compute",
+                        )
+                        await event_bus.publish_envelope(
+                            _env,  # type: ignore[arg-type]
+                            topic=topic or _baselines_default_topic,
+                        )
+                        return True
+
+                    from omnibase_infra.nodes.node_baselines_batch_compute.handlers.handler_baselines_batch_compute import (
+                        HandlerBaselinesBatchCompute,
+                    )
+                    from omnibase_infra.nodes.node_baselines_batch_compute.models.model_baselines_batch_compute_command import (
+                        ModelBaselinesBatchComputeCommand,
+                    )
+
+                    _baselines_handler = HandlerBaselinesBatchCompute(
+                        pool=_baselines_pool,
+                        publisher=_baselines_publish,
+                    )
+
+                    async def _baselines_loop() -> None:
+                        """Periodic baselines batch computation loop."""
+                        while True:
+                            try:
+                                await asyncio.sleep(_baselines_interval)
+                                _cmd = ModelBaselinesBatchComputeCommand(
+                                    correlation_id=generate_correlation_id(),
+                                )
+                                _output = await _baselines_handler.handle(_cmd)
+                                logger.info(
+                                    "Baselines batch compute completed "
+                                    "(rows=%d, emitted=%s, correlation_id=%s)",
+                                    _output.result.total_rows,
+                                    _output.snapshot_emitted,
+                                    _cmd.correlation_id,
+                                )
+                            except asyncio.CancelledError:
+                                break
+                            except Exception:  # noqa: BLE001 — never crash the loop
+                                logger.warning(
+                                    "Baselines batch compute failed (will retry in %ds)",
+                                    int(_baselines_interval),
+                                    exc_info=True,
+                                )
+
+                    baselines_task = asyncio.create_task(
+                        _baselines_loop(), name="baselines-batch-compute"
+                    )
+                    logger.info(
+                        "Baselines batch compute loop started "
+                        "(interval=%ds, correlation_id=%s)",
+                        int(_baselines_interval),
+                        correlation_id,
+                    )
+                else:
+                    logger.debug(
+                        "OMNIBASE_INFRA_DB_URL not set, skipping baselines batch compute "
+                        "(correlation_id=%s)",
+                        correlation_id,
+                    )
+            except Exception:  # noqa: BLE001 — best-effort, never blocks startup
+                logger.warning(
+                    "Failed to start baselines batch compute loop, continuing "
+                    "without it (correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+                baselines_task = None
+
+        # 3.9. Wire savings estimation consumer
+        # Correlates session events and produces savings-estimated.v1 events.
+        savings_task: asyncio.Task[None] | None = None
+        if use_kafka:
+            try:
+                from omnibase_core.models.events.model_event_envelope import (
+                    ModelEventEnvelope,
+                )
+                from omnibase_infra.models.pricing.model_pricing_table import (
+                    ModelPricingTable,
+                )
+                from omnibase_infra.services.observability.savings_estimation.config import (
+                    ConfigSavingsEstimation,
+                )
+                from omnibase_infra.services.observability.savings_estimation.consumer import (
+                    ServiceSavingsEstimator,
+                )
+                from omnibase_infra.topics import topic_keys
+                from omnibase_infra.topics.service_topic_registry import (
+                    ServiceTopicRegistry,
+                )
+
+                _savings_config = ConfigSavingsEstimation()
+                _pricing_table = ModelPricingTable.from_yaml()
+                _savings_estimator = ServiceSavingsEstimator(
+                    config=_savings_config,
+                    pricing_table=_pricing_table,
+                )
+                _savings_topic = ServiceTopicRegistry.from_defaults().resolve(
+                    topic_keys.SAVINGS_ESTIMATED
+                )
+
+                # Subscribe to input topics (resolved via topic registry)
+                _savings_registry = ServiceTopicRegistry.from_defaults()
+                _savings_input_topics = [
+                    _savings_registry.resolve(topic_keys.LLM_CALL_COMPLETED),
+                    _savings_registry.resolve(topic_keys.SESSION_OUTCOME_CANONICAL),
+                    _savings_registry.resolve(topic_keys.HOOK_CONTEXT_INJECTED),
+                    _savings_registry.resolve(topic_keys.VALIDATOR_CATCH),
+                ]
+
+                async def _savings_consumer_loop() -> None:
+                    """Consume input events and produce savings estimates."""
+                    import json as _json
+
+                    _poll_interval = 2.0
+
+                    for _input_topic in _savings_input_topics:
+                        try:
+
+                            async def _savings_on_message(
+                                msg: object,
+                                *,
+                                _topic: str = _input_topic,
+                            ) -> None:
+                                _savings_estimator.ingest_event(
+                                    _topic,
+                                    _json.loads(msg)  # type: ignore[arg-type]
+                                    if isinstance(msg, (str, bytes))
+                                    else msg,
+                                )
+
+                            await event_bus.subscribe(
+                                _input_topic,
+                                on_message=_savings_on_message,  # type: ignore[arg-type]
+                            )
+                        except Exception:  # noqa: BLE001
+                            logger.debug(
+                                "Could not subscribe to %s for savings estimation",
+                                _input_topic,
+                            )
+
+                    while True:
+                        try:
+                            await asyncio.sleep(_poll_interval)
+                            estimates = (
+                                await _savings_estimator.finalize_ready_sessions()
+                            )
+                            for estimate in estimates:
+                                try:
+                                    _envelope: ModelEventEnvelope[object] = (
+                                        ModelEventEnvelope(
+                                            payload=estimate,
+                                            correlation_id=str(
+                                                estimate.get("correlation_id", "")
+                                            ),
+                                            event_type="savings.estimated",
+                                            source="savings_estimation_consumer",
+                                        )
+                                    )
+                                    await event_bus.publish_envelope(
+                                        _envelope,  # type: ignore[arg-type]
+                                        topic=_savings_topic,
+                                    )
+                                except Exception:  # noqa: BLE001
+                                    logger.warning(
+                                        "Failed to emit savings estimate",
+                                        exc_info=True,
+                                    )
+                        except asyncio.CancelledError:
+                            break
+                        except Exception:  # noqa: BLE001 — never crash the loop
+                            logger.warning(
+                                "Savings estimation loop iteration failed",
+                                exc_info=True,
+                            )
+
+                savings_task = asyncio.create_task(
+                    _savings_consumer_loop(), name="savings-estimation-consumer"
+                )
+                logger.info(
+                    "Savings estimation consumer started (correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — best-effort, never blocks startup
+                logger.warning(
+                    "Failed to start savings estimation consumer, continuing "
+                    "without it (correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+                savings_task = None
+
         # 4. Create and wire container for dependency injection
         container_start_time = time.time()
         container = ModelONEXContainer()
@@ -2362,6 +2598,38 @@ async def bootstrap() -> int:
             )
             wiring_health_task = None
 
+        # Stop baselines batch compute loop and close its pool
+        if baselines_task is not None:
+            baselines_task.cancel()
+            try:
+                await baselines_task
+            except asyncio.CancelledError:
+                pass
+            logger.debug(
+                "Baselines batch compute loop stopped (correlation_id=%s)",
+                correlation_id,
+            )
+            baselines_task = None
+        if _baselines_pool is not None:
+            try:
+                await _baselines_pool.close()
+            except Exception:  # noqa: BLE001 — best-effort cleanup
+                pass
+            _baselines_pool = None
+
+        # Stop savings estimation consumer
+        if savings_task is not None:
+            savings_task.cancel()
+            try:
+                await savings_task
+            except asyncio.CancelledError:
+                pass
+            logger.debug(
+                "Savings estimation consumer stopped (correlation_id=%s)",
+                correlation_id,
+            )
+            savings_task = None
+
         # Stop ServiceLlmEndpointHealth (OMN-6135)
         if llm_health_service is not None:
             try:
@@ -2563,6 +2831,27 @@ async def bootstrap() -> int:
             wiring_health_task.cancel()
             try:
                 await wiring_health_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+
+        # Cleanup baselines batch compute loop and pool
+        if baselines_task is not None:
+            baselines_task.cancel()
+            try:
+                await baselines_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+        if _baselines_pool is not None:
+            try:
+                await _baselines_pool.close()
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+
+        # Cleanup savings estimation consumer
+        if savings_task is not None:
+            savings_task.cancel()
+            try:
+                await savings_task
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
 
