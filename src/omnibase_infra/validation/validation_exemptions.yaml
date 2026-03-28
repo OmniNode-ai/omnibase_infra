@@ -2830,6 +2830,19 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Feature Flag Registry API)
     ticket: OMN-5580
+  # ==========================================================================
+  # ModelSessionRegistryEntry task_id Exemption (OMN-6853)
+  # ==========================================================================
+  # task_id is a human-readable Linear ticket identifier (e.g., "OMN-1234"),
+  # not a UUID. It's the primary key for cross-session coordination.
+  - file_pattern: 'session_registry.*models\.py'
+    violation_pattern: "Field 'task_id' should use UUID type instead of str"
+    reason: >
+      task_id is a human-readable Linear ticket identifier (e.g., "OMN-1234") that serves as the primary key for cross-session coordination. It is NOT a UUID but a string identifier from Linear's ticket numbering system. See plan Doctrine D2 in docs/plans/2026-03-27-multi-session-coordination.md.
+
+    documentation:
+      - docs/plans/2026-03-27-multi-session-coordination.md (Doctrine D2)
+    ticket: OMN-6853
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
