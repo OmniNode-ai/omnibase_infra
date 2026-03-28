@@ -64,6 +64,12 @@ LLM_CALL_COMPLETED_INFRA: Final[str] = "LLM_CALL_COMPLETED_INFRA"
 LLM_ENDPOINT_HEALTH: Final[str] = "LLM_ENDPOINT_HEALTH"
 """LLM endpoint health probe events."""
 
+LLM_INFERENCE_REQUEST: Final[str] = "LLM_INFERENCE_REQUEST"
+"""Inbound LLM inference request commands."""
+
+LLM_EMBEDDING_REQUEST: Final[str] = "LLM_EMBEDDING_REQUEST"
+"""Inbound LLM embedding request commands."""
+
 # ==============================================================================
 # Effectiveness Topics
 # ==============================================================================
@@ -149,7 +155,9 @@ __all__: list[str] = [
     "INJECTION_LATENCY_BREAKDOWN",
     "LLM_CALL_COMPLETED",
     "LLM_CALL_COMPLETED_INFRA",
+    "LLM_EMBEDDING_REQUEST",
     "LLM_ENDPOINT_HEALTH",
+    "LLM_INFERENCE_REQUEST",
     "RESOLUTION_DECIDED",
     "REWARD_ASSIGNED",
     "RUNTIME_ERROR",
