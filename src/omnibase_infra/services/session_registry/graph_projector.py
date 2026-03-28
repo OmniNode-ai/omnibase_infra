@@ -21,6 +21,10 @@ from __future__ import annotations
 import json
 import logging
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from aiokafka import AIOKafkaConsumer  # type: ignore[import-untyped]
 
 from omnibase_infra.services.session_registry.enum_node_label import (
     EnumNodeLabel,
@@ -157,9 +161,10 @@ def build_graph_mutations(
         # PR merged
         if signal_type == "pr_merged":
             pr_number = payload.get("pr_number")
-            repo = payload.get("repo")
+            repo_raw = payload.get("repo")
+            repo_name: str | None = str(repo_raw) if repo_raw else None
             if pr_number is not None:
-                pr_id = f"{repo}#{pr_number}" if repo else str(pr_number)
+                pr_id = f"{repo_name}#{pr_number}" if repo_name else str(pr_number)
                 mutations.append(
                     ModelGraphMutation(
                         cypher=(
@@ -170,8 +175,8 @@ def build_graph_mutations(
                         params={"task_id": str(task_id), "pr_id": pr_id},
                     )
                 )
-                if repo:
-                    repo_str = str(repo)
+                if repo_name:
+                    repo_str = repo_name
                     mutations.append(
                         ModelGraphMutation(
                             cypher=(
@@ -235,8 +240,8 @@ class SessionGraphProjector:
     def __init__(self, config: ModelConfigGraphProjector) -> None:
         self._config = config
         self._running = False
-        self._consumer: object = None  # AIOKafkaConsumer (lazy import)
-        self._mgclient: object = None  # mgclient connection (lazy import)
+        self._consumer: AIOKafkaConsumer | None = None
+        self._mgclient: object | None = None  # mgclient.Connection (no stub)
 
     async def start(self) -> None:
         """Connect to Kafka and Memgraph."""
@@ -275,7 +280,7 @@ class SessionGraphProjector:
         consumer = self._consumer
         if consumer is not None:
             try:
-                await consumer.stop()  # type: ignore[union-attr]
+                await consumer.stop()
             except Exception:  # noqa: BLE001 -- boundary
                 logger.warning("Error stopping Kafka consumer", exc_info=True)
             finally:
@@ -284,7 +289,7 @@ class SessionGraphProjector:
         mgconn = self._mgclient
         if mgconn is not None:
             try:
-                mgconn.close()  # type: ignore[union-attr]
+                mgconn.close()  # type: ignore[attr-defined]
             except Exception:  # noqa: BLE001 -- boundary
                 logger.warning("Error closing Memgraph connection", exc_info=True)
             finally:
@@ -294,11 +299,11 @@ class SessionGraphProjector:
 
     async def run(self) -> None:
         """Main consume loop. Blocks until ``stop()`` is called."""
-        if not self._running or self._consumer is None:
+        consumer = self._consumer
+        if not self._running or consumer is None:
             raise RuntimeError("Projector not started. Call start() first.")
 
-        consumer = self._consumer
-        async for message in consumer:  # type: ignore[union-attr]
+        async for message in consumer:
             if not self._running:
                 break
 
@@ -313,14 +318,14 @@ class SessionGraphProjector:
                 if mutations:
                     self._execute_mutations(mutations)
 
-                await consumer.commit()  # type: ignore[union-attr]
+                await consumer.commit()
 
             except json.JSONDecodeError:
                 logger.warning(
                     "Skipping malformed JSON message",
                     extra={"topic": message.topic, "offset": message.offset},
                 )
-                await consumer.commit()  # type: ignore[union-attr]
+                await consumer.commit()
 
             except Exception:
                 logger.exception(
@@ -335,7 +340,7 @@ class SessionGraphProjector:
             logger.error("Memgraph connection not available")
             return
 
-        cursor = mgconn.cursor()  # type: ignore[union-attr]
+        cursor = mgconn.cursor()  # type: ignore[attr-defined]
         for mutation in mutations:
             try:
                 cursor.execute(mutation.cypher, mutation.params)
@@ -345,6 +350,6 @@ class SessionGraphProjector:
                     extra={"cypher": mutation.cypher, "params": mutation.params},
                 )
         try:
-            mgconn.commit()  # type: ignore[union-attr]
+            mgconn.commit()  # type: ignore[attr-defined]
         except Exception:
             logger.exception("Failed to commit Memgraph transaction")
