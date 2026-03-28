@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.omninode.bare-clone-sync</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Volumes/PRO-G40/Code/omni_home/omnibase_infra/scripts/pull-all.sh</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>300</integer>
+    <key>StandardOutPath</key>
+    <string>/tmp/bare-clone-sync.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/bare-clone-sync.log</string>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>
