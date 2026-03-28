@@ -24,7 +24,7 @@ _INIT_MODULE = _TOPICS_PKG / "__init__.py"
 
 def _extract_suffix_names(path: Path) -> set[str]:
     """Return all module-level names starting with ``SUFFIX_`` from *path*."""
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     names: set[str] = set()
     for node in ast.iter_child_nodes(tree):
         if isinstance(node, ast.Assign):
@@ -39,7 +39,7 @@ def _extract_suffix_names(path: Path) -> set[str]:
 
 def _extract_init_imports(path: Path) -> set[str]:
     """Return all names imported from platform_topic_suffixes in __init__.py."""
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     names: set[str] = set()
     for node in ast.walk(tree):
         if (
@@ -55,7 +55,7 @@ def _extract_init_imports(path: Path) -> set[str]:
 
 def _extract_init_all(path: Path) -> set[str]:
     """Return all SUFFIX_* entries in __all__ from __init__.py."""
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     names: set[str] = set()
 
     def _collect_from_list(value: ast.expr) -> None:
