@@ -13,12 +13,14 @@ from omnibase_infra.probes.capability_probe import (
 )
 from omnibase_infra.probes.model_verification_result import ModelVerificationResult
 from omnibase_infra.probes.model_verification_spec import ModelVerificationSpec
+from omnibase_infra.probes.probe_row_count import RowCountProbe
 from omnibase_infra.probes.protocol_verification_spec import VerificationSpec
 from omnibase_infra.probes.verification_executor import execute_verification
 
 __all__ = [
     "ModelVerificationResult",
     "ModelVerificationSpec",
+    "RowCountProbe",
     "VerificationSpec",
     "execute_verification",
     "http_health_check",

@@ -570,6 +570,17 @@ Producer: cli_runner_health.py (cron-scheduled)
 Consumer: omnidash (future)
 """
 
+SUFFIX_ROW_COUNT_DIAGNOSTIC: str = "onex.evt.omnibase-infra.row-count-diagnostic.v1"
+"""Topic suffix for row count probe diagnostic events (OMN-5653).
+
+Published by ServiceRowCountProbe when the probe detects empty projection
+tables. Each event carries a ``ModelRowCountProbeResult`` payload with
+per-table row counts and the list of empty tables.
+
+Producer: ServiceRowCountProbe (begin-day diagnostics / periodic probe)
+Consumer: omnidash (future)
+"""
+
 SUFFIX_GITHUB_PR_MERGED: str = "onex.evt.github.pr-merged.v1"
 """Topic suffix for GitHub PR merged events (OMN-6726).
 
@@ -663,6 +674,15 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
         suffix=SUFFIX_RUNNER_HEALTH_SNAPSHOT,
         partitions=1,
         kafka_config={},
+    ),
+    # Row count diagnostic events (1 partition — low-throughput, OMN-5653)
+    ModelTopicSpec(
+        suffix=SUFFIX_ROW_COUNT_DIAGNOSTIC,
+        partitions=1,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
     ),
     # GitHub PR merged events (1 partition — low-throughput, one event per merge, OMN-6726)
     ModelTopicSpec(

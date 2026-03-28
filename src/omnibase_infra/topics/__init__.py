@@ -114,6 +114,7 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_REGISTRY_REQUEST_INTROSPECTION,
     SUFFIX_REQUEST_INTROSPECTION,
     SUFFIX_RESOLUTION_DECIDED,
+    SUFFIX_ROW_COUNT_DIAGNOSTIC,
     SUFFIX_RUNNER_HEALTH_SNAPSHOT,
     SUFFIX_RUNTIME_ERROR,
     SUFFIX_RUNTIME_TICK,
@@ -186,6 +187,8 @@ __all__: list[str] = [
     "SUFFIX_GITHUB_POST_MERGE_RESULT",
     # Runner health monitoring (OMN-6075)
     "SUFFIX_RUNNER_HEALTH_SNAPSHOT",
+    # Row count probe diagnostic (OMN-5653)
+    "SUFFIX_ROW_COUNT_DIAGNOSTIC",
     # Runtime health event pipeline (OMN-5529)
     "SUFFIX_CONSUMER_HEALTH",
     "SUFFIX_CONSUMER_RESTART_CMD",
