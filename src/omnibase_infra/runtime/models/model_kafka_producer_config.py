@@ -36,6 +36,16 @@ class ModelKafkaProducerConfig(BaseModel):
         default=EnumKafkaAcks.ALL,
         description="Producer acknowledgment policy",
     )
+    max_request_size: int = Field(
+        default=4 * 1024 * 1024,  # 4 MB
+        ge=1024,
+        le=52428800,
+        description=(
+            "Maximum size in bytes for a Kafka produce request. "
+            "Passed to AIOKafkaProducer(max_request_size=...). "
+            "Override via KAFKA_MAX_REQUEST_SIZE env var."
+        ),
+    )
 
     @classmethod
     def from_env(cls) -> ModelKafkaProducerConfig:
@@ -54,10 +64,14 @@ class ModelKafkaProducerConfig(BaseModel):
                 "KAFKA_REQUEST_TIMEOUT_MS", "10000"
             )  # kafka-fallback-ok
             acks_raw = os.getenv("KAFKA_ACKS", "all")  # kafka-fallback-ok
+            max_request_size_raw = os.getenv(
+                "KAFKA_MAX_REQUEST_SIZE", str(4 * 1024 * 1024)
+            )  # kafka-fallback-ok
             return cls(
                 bootstrap_servers=bootstrap,
                 timeout_seconds=float(timeout_ms) / 1000.0,
                 acks=EnumKafkaAcks(acks_raw),
+                max_request_size=int(max_request_size_raw),
             )
         except (ValueError, TypeError) as e:
             msg = f"Invalid Kafka producer configuration: {e}"

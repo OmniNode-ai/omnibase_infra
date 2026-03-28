@@ -50,6 +50,9 @@ Exports:
     ModelSecretCacheStats: Cache statistics for observability
     ModelSecretResolverMetrics: Resolution metrics for observability
     ModelSecretSourceInfo: Non-sensitive source information for introspection
+    ModelNodeConfig: Configuration for a single node in the runtime graph (OMN-6306)
+    ModelNodeEdge: Directed dependency edge between two nodes (OMN-6306)
+    ModelRuntimeNodeGraph: Declarative runtime node graph definition (OMN-6306)
     ModelRetryPolicy: Retry policy configuration for handler operations
     ModelTransitionNotificationPublisherMetrics: Metrics for transition notification publisher
     ModelTransitionNotificationOutboxMetrics: Metrics for transition notification outbox
@@ -143,6 +146,8 @@ from omnibase_infra.runtime.models.model_materialized_resources import (
 from omnibase_infra.runtime.models.model_materializer_config import (
     ModelMaterializerConfig,
 )
+from omnibase_infra.runtime.models.model_node_config import ModelNodeConfig
+from omnibase_infra.runtime.models.model_node_edge import ModelNodeEdge
 from omnibase_infra.runtime.models.model_optional_correlation_id import (
     ModelOptionalCorrelationId,
 )
@@ -178,6 +183,9 @@ from omnibase_infra.runtime.models.model_retry_policy import ModelRetryPolicy
 from omnibase_infra.runtime.models.model_runtime_config import ModelRuntimeConfig
 from omnibase_infra.runtime.models.model_runtime_contract_config import (
     ModelRuntimeContractConfig,
+)
+from omnibase_infra.runtime.models.model_runtime_node_graph import (
+    ModelRuntimeNodeGraph,
 )
 from omnibase_infra.runtime.models.model_runtime_scheduler_config import (
     ModelRuntimeSchedulerConfig,
@@ -254,6 +262,9 @@ __all__: list[str] = [
     "ModelProtocolRegistrationConfig",
     "ModelRetryPolicy",
     "ModelRuntimeConfig",
+    "ModelNodeConfig",
+    "ModelNodeEdge",
+    "ModelRuntimeNodeGraph",
     "ModelRuntimeSchedulerConfig",
     "ModelRuntimeSchedulerMetrics",
     "ModelRuntimeTick",
