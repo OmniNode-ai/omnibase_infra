@@ -2786,15 +2786,7 @@ pattern_exemptions:
     documentation:
       - configs/pricing_manifest.yaml (model ID examples)
     ticket: OMN-5547
-  - file_pattern: 'model_savings_baseline_config\.py'
-    violation_pattern: "Field 'reference_model_id' should use UUID"
-    reason: >
-      reference_model_id is a human-readable LLM model name for counterfactual pricing, not a UUID.
-
-    documentation:
-      - configs/pricing_manifest.yaml (model ID examples)
-    ticket: OMN-5547
-  - file_pattern: 'model_savings_input\.py'
+  - file_pattern: 'model_savings_estimation_input\.py'
     violation_pattern: "Field 'session_id' should use UUID"
     reason: >
       session_id is a wire-format string matching the SPI ContractSavingsEstimate contract.
@@ -2802,10 +2794,10 @@ pattern_exemptions:
     documentation:
       - omnibase_spi contracts/measurement/contract_savings_estimate.py
     ticket: OMN-5547
-  - file_pattern: 'model_savings_input\.py'
-    violation_pattern: "Field 'correlation_id' should use UUID"
+  - file_pattern: 'model_savings_estimate\.py'
+    violation_pattern: "Field 'session_id' should use UUID"
     reason: >
-      correlation_id is a wire-format string matching the SPI ContractSavingsEstimate contract.
+      session_id is a free-form session identifier, not a UUID.
 
     documentation:
       - omnibase_spi contracts/measurement/contract_savings_estimate.py
