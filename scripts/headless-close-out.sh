@@ -107,7 +107,7 @@ run_headless() {
 
   if [[ "$DRY_RUN" == "true" ]]; then
     echo "[DRY-RUN] Would run: claude -p for ${repo}/${stage}"
-    echo "{\"status\": \"dry-run\", \"repo\": \"${repo}\", \"stage\": \"${stage}\"}" > "$output_file"
+    echo "{\"schema_version\": \"1.0\", \"status\": \"dry-run\", \"repo\": \"${repo}\", \"stage\": \"${stage}\"}" > "$output_file"
     return 0
   fi
 
