@@ -450,6 +450,8 @@ class DriftReport:
     penalty: int  # 0, -2, or -5
     # Informational (not scored)
     active_worktrees: int  # total dirty worktrees (parallelism, not risk)
+    unlinked_pr_count: int = 0  # PRs without OMN-XXXX and not exempt
+    total_pr_count: int = 0  # total PRs for the day
 
 
 def compute_drift(repo_days: list[RepoDay], root: Path, date: dt.date) -> DriftReport:
@@ -555,6 +557,19 @@ def compute_drift(repo_days: list[RepoDay], root: Path, date: dt.date) -> DriftR
         )
     )
 
+    # Count unlinked PRs (no OMN-XXXX and not exempt/workflow)
+    import re as _re
+
+    _ticket_re = _re.compile(r"OMN-\d+")
+    all_prs = [pr for rd in active_repo_days for pr in rd.github_merged_prs]
+    unlinked = [
+        pr
+        for pr in all_prs
+        if not pr.is_exempt
+        and not pr.is_workflow_pr
+        and not _ticket_re.search(pr.title)
+    ]
+
     return DriftReport(
         level=level,
         main_dirty=main_dirty,
@@ -563,6 +578,8 @@ def compute_drift(repo_days: list[RepoDay], root: Path, date: dt.date) -> DriftR
         risks=risks[:5],
         penalty=penalty,
         active_worktrees=active_worktrees,
+        unlinked_pr_count=len(unlinked),
+        total_pr_count=len(all_prs),
     )
 
 
@@ -1374,6 +1391,13 @@ def main() -> int:
     lines.append(
         f"| Active parallel worktrees | {drift.active_worktrees} | ✅ (normal) |"
     )
+    # Unlinked PR telemetry (OMN-6922)
+    if drift.total_pr_count > 0:
+        unlinked_pct = drift.unlinked_pr_count / drift.total_pr_count * 100
+        unlinked_status = "⚠️ HIGH" if unlinked_pct > 5 else "✅"
+        lines.append(
+            f"| Unlinked PRs (no OMN-XXXX) | {drift.unlinked_pr_count}/{drift.total_pr_count} ({unlinked_pct:.0f}%) | {unlinked_status} |"
+        )
     lines.append("")
     if drift.risks:
         lines.append("**Action items**:")
