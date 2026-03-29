@@ -2778,14 +2778,6 @@ pattern_exemptions:
   # model_id and reference_model_id are human-readable LLM model names
   # (e.g., "claude-opus-4-6", "qwen3-coder-30b-a3b"), not UUID entity references.
   # session_id and correlation_id are wire-format strings matching SPI contracts.
-  - file_pattern: 'model_llm_call_record\.py'
-    violation_pattern: "Field 'model_id' should use UUID"
-    reason: >
-      model_id is a human-readable LLM model name (e.g., "claude-opus-4-6"), not a UUID entity reference.
-
-    documentation:
-      - configs/pricing_manifest.yaml (model ID examples)
-    ticket: OMN-5547
   - file_pattern: 'model_savings_estimation_input\.py'
     violation_pattern: "Field 'session_id' should use UUID"
     reason: >
