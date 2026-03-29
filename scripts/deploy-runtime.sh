@@ -25,6 +25,12 @@
 
 set -euo pipefail
 
+# Source the single env file so all ${VAR} references in docker-compose.infra.yml
+# resolve from the shell environment. This replaces the old setup_env() approach
+# that copied a stale snapshot into the deployed docker/.env. (F65 / OMN-6910)
+# shellcheck source=/dev/null
+source "${HOME}/.omnibase/.env"
+
 # =============================================================================
 # Constants
 # =============================================================================
@@ -899,8 +905,8 @@ if spec and spec.origin:
     #    subdirectories are synced normally.
     log_info "Syncing docker/ (preserving .env, .env.local, certs/, overrides/)..."
     log_cmd "rsync -a --delete --exclude='/.env' --exclude='/.env.local' --exclude='/certs/' --exclude='/overrides/' docker/ -> deployed"
-    # Note: -a preserves source permissions, but the .env file is excluded from
-    # rsync and instead copied via install -m 600 in setup_env() for restricted perms.
+    # Note: .env is excluded from rsync -- env vars come from the shell environment
+    # (sourced from ~/.omnibase/.env at script top). No stale .env copy needed.
     rsync -a --delete \
         --exclude='/.env' \
         --exclude='/.env.local' \
@@ -922,42 +928,16 @@ if spec and spec.origin:
 }
 
 # =============================================================================
-# Env Setup -- ensure .env exists in deployment target
+# Env Setup (REMOVED -- F65 / OMN-6910)
 # =============================================================================
-
-setup_env() {
-    # Ensure a .env file exists in the deployment docker/ directory.
-    local repo_root="$1"
-    local deploy_target="$2"
-    local docker_dir="${deploy_target}/docker"
-
-    log_step "Environment Setup"
-
-    if [[ -f "${docker_dir}/.env" ]]; then
-        log_info ".env already exists in deployment -- preserving."
-        return 0
-    fi
-
-    # Try to copy from repo's docker/.env
-    # Use install -m 600 to atomically create the file with correct permissions,
-    # avoiding a race window where the file briefly has default (world-readable) perms.
-    if [[ -f "${repo_root}/docker/.env" ]]; then
-        log_info "Copying .env from source repo docker/.env"
-        install -m 600 "${repo_root}/docker/.env" "${docker_dir}/.env"
-        return 0
-    fi
-
-    # Fall back to .env.example
-    if [[ -f "${repo_root}/docker/.env.example" ]]; then
-        log_warn "No .env found. Copying .env.example as .env."
-        log_warn "You MUST edit ${docker_dir}/.env before running containers."
-        log_warn "At minimum, set POSTGRES_PASSWORD to a secure value."
-        install -m 600 "${repo_root}/docker/.env.example" "${docker_dir}/.env"
-        return 0
-    fi
-
-    log_warn "No .env or .env.example found. Docker compose may fail without it."
-}
+# The old setup_env() copied ~/.omnibase/.env into a stale snapshot at
+# ${deploy_target}/docker/.env. Docker compose --env-file then read from
+# that snapshot instead of the live shell environment. This caused env var
+# changes to be silently ignored until the next full redeploy.
+#
+# Fix: source ~/.omnibase/.env at script top (see line 28) and let docker
+# compose resolve ${VAR} references from the shell environment directly.
+# No --env-file, no stale copies.
 
 # =============================================================================
 # Compose Project Collision Detection
@@ -1073,16 +1053,10 @@ sanity_check() {
     log_info "Validating compose configuration from deployed directory..."
     log_cmd "docker compose -p ${compose_project} -f ${compose_file} config --quiet"
 
-    local env_file_args=()
-    if [[ -f "${deploy_target}/docker/.env" ]]; then
-        env_file_args=(--env-file "${deploy_target}/docker/.env")
-    fi
-
     local config_output
     if ! config_output="$(docker compose \
         -p "${compose_project}" \
         -f "${compose_file}" \
-        ${env_file_args[@]+"${env_file_args[@]}"} \
         config --quiet 2>&1)"; then
         log_error "Compose configuration validation failed."
         if [[ -n "${config_output}" ]]; then
@@ -1174,11 +1148,6 @@ build_images() {
     local build_date
     build_date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-    local env_file_args=()
-    if [[ -f "${deploy_target}/docker/.env" ]]; then
-        env_file_args=(--env-file "${deploy_target}/docker/.env")
-    fi
-
     # Build timeout in seconds (default: 15 minutes). Prevents the known issue
     # where `docker compose build` hangs indefinitely after images are built.
     # Override via DOCKER_BUILD_TIMEOUT_SECONDS env var. (OMN-5462)
@@ -1188,7 +1157,6 @@ build_images() {
         docker compose
         -p "${compose_project}"
         -f "${compose_file}"
-        ${env_file_args[@]+"${env_file_args[@]}"}
         --profile "${COMPOSE_PROFILE}"
         build
         --progress=plain
@@ -1226,16 +1194,10 @@ restart_services() {
 
     log_step "Restart Runtime Services"
 
-    local env_file_args=()
-    if [[ -f "${deploy_target}/docker/.env" ]]; then
-        env_file_args=(--env-file "${deploy_target}/docker/.env")
-    fi
-
     local cmd=(
         docker compose
         -p "${compose_project}"
         -f "${compose_file}"
-        ${env_file_args[@]+"${env_file_args[@]}"}
         --profile "${COMPOSE_PROFILE}"
         up -d --no-deps --force-recreate
         "${RUNTIME_SERVICES[@]}"
@@ -1336,27 +1298,16 @@ print_compose_commands() {
     local compose_project="$2"
     local git_sha="$3"
     local compose_file="${deploy_target}/docker/docker-compose.infra.yml"
-    local env_file="${deploy_target}/docker/.env"
-
-    # Only include --env-file in printed commands when the .env file exists,
-    # matching the conditional behavior used by build_images and restart_services.
-    local env_file_line=""
-    if [[ -f "${env_file}" ]]; then
-        env_file_line="    --env-file ${env_file} \\"
-    fi
 
     log_step "Compose Commands"
 
     log_info "These are the exact commands this script would run from the deployed directory."
-    if [[ -z "${env_file_line}" ]]; then
-        log_warn "No .env file found at ${env_file} -- --env-file omitted from commands."
-    fi
+    log_info "Note: env vars resolve from shell environment (sourced from ~/.omnibase/.env)."
     log_info ""
     log_info "Build:"
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
     log_info "    -f ${compose_file} \\"
-    [[ -n "${env_file_line}" ]] && log_info "${env_file_line}"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    build \\"
     log_info "    --build-arg VCS_REF=${git_sha} \\"
@@ -1368,7 +1319,6 @@ print_compose_commands() {
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
     log_info "    -f ${compose_file} \\"
-    [[ -n "${env_file_line}" ]] && log_info "${env_file_line}"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    up -d --no-deps --force-recreate \\"
     log_info "    ${RUNTIME_SERVICES[*]}"
@@ -1377,7 +1327,6 @@ print_compose_commands() {
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
     log_info "    -f ${compose_file} \\"
-    [[ -n "${env_file_line}" ]] && log_info "${env_file_line}"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    up -d"
     log_info ""
@@ -1385,7 +1334,6 @@ print_compose_commands() {
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
     log_info "    -f ${compose_file} \\"
-    [[ -n "${env_file_line}" ]] && log_info "${env_file_line}"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    down"
     log_info ""
@@ -1393,7 +1341,6 @@ print_compose_commands() {
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
     log_info "    -f ${compose_file} \\"
-    [[ -n "${env_file_line}" ]] && log_info "${env_file_line}"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    logs -f"
     log_info ""
@@ -1401,7 +1348,6 @@ print_compose_commands() {
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
     log_info "    -f ${compose_file} \\"
-    [[ -n "${env_file_line}" ]] && log_info "${env_file_line}"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    ps"
 }
@@ -1426,23 +1372,13 @@ show_summary() {
     log_info "Profile:           ${COMPOSE_PROFILE}"
     log_info "Registry:          ${REGISTRY_FILE}"
     log_info ""
-    log_info "Next steps:"
-
-    # Only include --env-file in printed commands when the .env file exists,
-    # matching the conditional behavior used by build_images, restart_services,
-    # and print_compose_commands.
-    local env_file="${deploy_target}/docker/.env"
-    local env_file_line=""
-    if [[ -f "${env_file}" ]]; then
-        env_file_line="      --env-file ${env_file} \\"
-    fi
+    log_info "Next steps (source ~/.omnibase/.env before running):"
 
     if [[ "${RESTART}" == false ]]; then
         log_info "  To start containers, run:"
         log_info "    docker compose \\"
         log_info "      -p ${compose_project} \\"
         log_info "      -f ${deploy_target}/docker/docker-compose.infra.yml \\"
-        [[ -n "${env_file_line}" ]] && log_info "${env_file_line}"
         log_info "      --profile ${COMPOSE_PROFILE} \\"
         log_info "      up -d"
     else
@@ -1450,7 +1386,6 @@ show_summary() {
         log_info "    docker compose \\"
         log_info "      -p ${compose_project} \\"
         log_info "      -f ${deploy_target}/docker/docker-compose.infra.yml \\"
-        [[ -n "${env_file_line}" ]] && log_info "${env_file_line}"
         log_info "      --profile ${COMPOSE_PROFILE} \\"
         log_info "      ps"
     fi
@@ -1560,8 +1495,8 @@ main() {
     # directory (unless registry.json already points to it).
     DEPLOY_DIR_TO_CLEANUP="${deploy_target}"
 
-    # Phase 7: Env setup
-    setup_env "${repo_root}" "${deploy_target}"
+    # Phase 7: Env setup -- REMOVED (F65 / OMN-6910)
+    # Shell environment is sourced at script top; no stale .env copy needed.
 
     # Phase 8: Sanity check
     sanity_check "${deploy_target}" "${compose_project}"
