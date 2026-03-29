@@ -120,6 +120,7 @@ class GitHubMergedPR:
     merged_at: str
     is_workflow_pr: bool  # True if it's an auto-generated workflow PR
     category: str  # 'capability', 'correctness', 'governance', 'observability', 'docs', 'churn'
+    is_exempt: bool = False  # True if dep bump or release (exempt from ticket linkage)
     additions: int = 0
     deletions: int = 0
 
@@ -232,6 +233,25 @@ WORKFLOW_PR_PATTERNS = [
 def is_workflow_pr(title: str) -> bool:
     """Check if a PR is an auto-generated workflow PR (low value for reporting)."""
     return any(pattern.lower() in title.lower() for pattern in WORKFLOW_PR_PATTERNS)
+
+
+# Exempt PR patterns — dep bumps and releases that don't need ticket linkage
+# SYNC: exempt prefixes must match the lists in:
+#   - onex_change_control/.github/workflows/pr-title-check-reusable.yml
+#   - omniclaude/src/omniclaude/nodes/node_git_effect/models/model_git_request.py
+_EXEMPT_PREFIXES = (
+    "chore(deps",  # chore(deps):, chore(deps-dev):, chore(deps)(deps):
+    "build(deps",  # build(deps):
+    "bump ",  # Bump hashicorp/aws...
+    "chore: release",  # chore: release omnibase_core v0.34.0
+    "chore(release)",  # chore(release): v0.12.0
+    "release:",  # release: omnibase_infra v0.29.0
+)
+
+
+def is_exempt_pr(title: str) -> bool:
+    """Return True if the PR title is a dep bump or release (exempt from ticket linkage)."""
+    return title.lower().startswith(_EXEMPT_PREFIXES)
 
 
 def classify_pr(title: str) -> str:
@@ -366,6 +386,7 @@ def get_github_merged_prs(repo: Path, date: dt.date) -> list[GitHubMergedPR]:
                         merged_at=display_time,
                         is_workflow_pr=is_workflow_pr(title),
                         category=classify_pr(title),
+                        is_exempt=is_exempt_pr(title),
                         additions=item.get("additions", 0),
                         deletions=item.get("deletions", 0),
                     )
@@ -380,6 +401,7 @@ def get_github_merged_prs(repo: Path, date: dt.date) -> list[GitHubMergedPR]:
                         merged_at=merged_at_str,
                         is_workflow_pr=is_workflow_pr(title),
                         category=classify_pr(title),
+                        is_exempt=is_exempt_pr(title),
                         additions=item.get("additions", 0),
                         deletions=item.get("deletions", 0),
                     )
