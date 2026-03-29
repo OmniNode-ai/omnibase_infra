@@ -10,8 +10,15 @@
 #
 # Usage:
 #   ./scripts/headless-close-out.sh [--repos REPO1,REPO2,...] [--skip-release] [--dry-run]
+#                                   [--skip-validation]
+#
+# Templates: scripts/headless-pipeline/TEMPLATES.md [OMN-6984]
+# Validation: scripts/headless-pipeline/validate-state.sh [OMN-6988]
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VALIDATE_SCRIPT="${SCRIPT_DIR}/headless-pipeline/validate-state.sh"
 
 # --- Configuration ---
 OMNI_HOME="${OMNI_HOME:-/Volumes/PRO-G40/Code/omni_home}"
@@ -20,16 +27,47 @@ TIMEOUT_SECONDS=900  # 15 minutes per task
 RUN_ID=$(date -u +"%Y-%m-%dT%H-%M-%SZ")
 STATE_DIR="/tmp/headless-state/${RUN_ID}"
 
+# --- Stage Templates [OMN-6984] ---
+# Per-stage command templates (tool allowlists, prompts, timeouts).
+# See scripts/headless-pipeline/TEMPLATES.md for full documentation.
+declare -A STAGE_TOOLS
+STAGE_TOOLS[merge-sweep]="Bash(git:*,gh:*) Read Glob Grep"
+STAGE_TOOLS[release]="Bash(git:*,gh:*,uv:*) Read Edit Write Glob Grep"
+STAGE_TOOLS[redeploy]="Bash(git:*,docker:*,uv:*) Read Edit Write Glob Grep"
+STAGE_TOOLS[ticket-close]="Bash(gh:*) Read Grep mcp__linear-server__*"
+STAGE_TOOLS[integration-sweep]="Bash(git:*,uv:*,docker:*) Read Glob Grep"
+
+declare -A STAGE_TIMEOUTS
+STAGE_TIMEOUTS[merge-sweep]=900
+STAGE_TIMEOUTS[release]=900
+STAGE_TIMEOUTS[redeploy]=1200
+STAGE_TIMEOUTS[ticket-close]=600
+STAGE_TIMEOUTS[integration-sweep]=900
+
+# get_stage_tools: Return the tool allowlist for a stage
+get_stage_tools() {
+  local stage="$1"
+  echo "${STAGE_TOOLS[$stage]:-Bash Read Glob Grep}"
+}
+
+# get_stage_timeout: Return the timeout for a stage
+get_stage_timeout() {
+  local stage="$1"
+  echo "${STAGE_TIMEOUTS[$stage]:-$TIMEOUT_SECONDS}"
+}
+
 # --- Parse arguments ---
 REPOS="${DEFAULT_REPOS}"
 SKIP_RELEASE=false
 DRY_RUN=false
+SKIP_VALIDATION=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repos) REPOS="$2"; shift 2 ;;
     --skip-release) SKIP_RELEASE=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
+    --skip-validation) SKIP_VALIDATION=true; shift ;;
     *) echo "Unknown flag: $1"; exit 1 ;;
   esac
 done
@@ -69,7 +107,7 @@ run_headless() {
 
   if [[ "$DRY_RUN" == "true" ]]; then
     echo "[DRY-RUN] Would run: claude -p for ${repo}/${stage}"
-    echo "{\"status\": \"dry-run\", \"repo\": \"${repo}\", \"stage\": \"${stage}\"}" > "$output_file"
+    echo "{\"schema_version\": \"1.0\", \"status\": \"dry-run\", \"repo\": \"${repo}\", \"stage\": \"${stage}\"}" > "$output_file"
     return 0
   fi
 
@@ -86,6 +124,13 @@ run_headless() {
       return "${exit_code}"
     }
   echo "[${repo}/${stage}] Complete"
+
+  # Validate state file schema [OMN-6988]
+  if [[ "$SKIP_VALIDATION" != "true" && -f "$VALIDATE_SCRIPT" ]]; then
+    if ! bash "$VALIDATE_SCRIPT" "$output_file" --stage "$stage" --quiet; then
+      echo "[${repo}/${stage}] WARNING: State file validation failed"
+    fi
+  fi
 }
 
 # =============================================
@@ -95,8 +140,8 @@ echo "=== Stage 1: Merge Sweep ==="
 pids=()
 for repo in "${REPO_LIST[@]}"; do
   run_headless "$repo" "merge-sweep" \
-    "Merge-sweep for ${repo}: list all open PRs in OmniNode-ai/${repo} with passing CI checks. For each green PR, merge it. Report: {\"status\": \"success|partial|failed\", \"prs_merged\": [...], \"prs_skipped\": [...], \"prs_failed\": [...]}. Working directory: ${OMNI_HOME}/${repo}" \
-    "Bash(git:*,gh:*) Read Glob Grep" &
+    "Merge-sweep for ${repo}: list all open PRs in OmniNode-ai/${repo} with passing CI checks. For each green PR, merge it using 'gh pr merge --squash --auto'. Skip PRs with: failing CI, unresolved review comments, draft status, or merge conflicts. Working directory: ${OMNI_HOME}/${repo}. Report JSON: {\"schema_version\": \"1.0\", \"stage\": \"merge-sweep\", \"repo\": \"${repo}\", \"status\": \"success|partial|failed\", \"prs_merged\": [{\"number\": N, \"title\": \"...\"}], \"prs_skipped\": [{\"number\": N, \"reason\": \"...\"}], \"prs_failed\": [{\"number\": N, \"error\": \"...\"}]}" \
+    "$(get_stage_tools merge-sweep)" &
   pids+=($!)
 done
 
@@ -118,8 +163,8 @@ if [[ "$SKIP_RELEASE" == "false" ]]; then
     merge_result="${STATE_DIR}/${repo}/merge-sweep.json"
     if [[ -f "$merge_result" ]]; then
       run_headless "$repo" "release" \
-        "Release ${repo}: check if there are unreleased commits since the last tag. If yes, bump the version, create a tag, and push. Read the merge-sweep result for context: $(cat "$merge_result" 2>/dev/null | head -c 2000). Report: {\"status\": \"success|skipped|failed\", \"version\": \"...\", \"tag\": \"...\"}. Working directory: ${OMNI_HOME}/${repo}" \
-        "Bash(git:*,gh:*,uv:*) Read Edit Write Glob Grep" &
+        "Release ${repo}: check if there are unreleased commits since the last tag. If yes, bump the version in pyproject.toml, update CHANGELOG, create a git tag, and push. Follow existing release conventions. Read merge-sweep result for context: $(cat "$merge_result" 2>/dev/null | head -c 2000). Working directory: ${OMNI_HOME}/${repo}. Report JSON: {\"schema_version\": \"1.0\", \"stage\": \"release\", \"repo\": \"${repo}\", \"status\": \"success|skipped|failed\", \"version\": \"X.Y.Z\", \"tag\": \"vX.Y.Z\", \"commits_since_last_tag\": N}" \
+        "$(get_stage_tools release)" &
       pids+=($!)
     fi
   done
@@ -158,6 +203,15 @@ echo "=== Stage 3: Summary ==="
   echo "  }"
   echo "}"
 } > "${STATE_DIR}/summary.json"
+
+# Validate all state files [OMN-6988]
+if [[ "$SKIP_VALIDATION" != "true" && -f "$VALIDATE_SCRIPT" ]]; then
+  echo ""
+  echo "=== State File Validation ==="
+  bash "$VALIDATE_SCRIPT" "${STATE_DIR}" --all || {
+    echo "WARNING: Some state files failed validation. Check individual results above."
+  }
+fi
 
 echo ""
 echo "=== Close-Out Complete ==="
