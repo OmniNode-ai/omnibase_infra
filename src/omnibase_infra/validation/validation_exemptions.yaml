@@ -2778,23 +2778,7 @@ pattern_exemptions:
   # model_id and reference_model_id are human-readable LLM model names
   # (e.g., "claude-opus-4-6", "qwen3-coder-30b-a3b"), not UUID entity references.
   # session_id and correlation_id are wire-format strings matching SPI contracts.
-  - file_pattern: 'model_llm_call_record\.py'
-    violation_pattern: "Field 'model_id' should use UUID"
-    reason: >
-      model_id is a human-readable LLM model name (e.g., "claude-opus-4-6"), not a UUID entity reference.
-
-    documentation:
-      - configs/pricing_manifest.yaml (model ID examples)
-    ticket: OMN-5547
-  - file_pattern: 'model_savings_baseline_config\.py'
-    violation_pattern: "Field 'reference_model_id' should use UUID"
-    reason: >
-      reference_model_id is a human-readable LLM model name for counterfactual pricing, not a UUID.
-
-    documentation:
-      - configs/pricing_manifest.yaml (model ID examples)
-    ticket: OMN-5547
-  - file_pattern: 'model_savings_input\.py'
+  - file_pattern: 'model_savings_estimation_input\.py'
     violation_pattern: "Field 'session_id' should use UUID"
     reason: >
       session_id is a wire-format string matching the SPI ContractSavingsEstimate contract.
@@ -2802,10 +2786,10 @@ pattern_exemptions:
     documentation:
       - omnibase_spi contracts/measurement/contract_savings_estimate.py
     ticket: OMN-5547
-  - file_pattern: 'model_savings_input\.py'
-    violation_pattern: "Field 'correlation_id' should use UUID"
+  - file_pattern: 'model_savings_estimate\.py'
+    violation_pattern: "Field 'session_id' should use UUID"
     reason: >
-      correlation_id is a wire-format string matching the SPI ContractSavingsEstimate contract.
+      session_id is a free-form session identifier, not a UUID.
 
     documentation:
       - omnibase_spi contracts/measurement/contract_savings_estimate.py
@@ -2868,6 +2852,36 @@ pattern_exemptions:
     documentation:
       - docs/plans/2026-03-27-multi-session-coordination.md (Doctrine D2)
     ticket: OMN-6864
+  # ==========================================================================
+  # Savings Estimation Compute Node Exemptions (OMN-6964)
+  # ==========================================================================
+  # session_id is a free-form string identifier (e.g., 'claude-session-abc-123'),
+  # NOT a UUID. The _id suffix triggers false positive UUID suggestions.
+  # actual_model_id is a model identifier string (e.g., 'claude-opus-4-6'), NOT a UUID.
+  - file_pattern: 'model_savings_estimate\.py'
+    violation_pattern: "Field 'session_id' should use UUID"
+    reason: >
+      session_id is a free-form session identifier (e.g., 'claude-session-abc-123'), not a UUID. The omnidash savings consumer expects a plain string session_id for grouping and display.
+
+    documentation:
+      - omnidash/migrations/0034_savings_estimates.sql (session_id TEXT NOT NULL)
+    ticket: OMN-6964
+  - file_pattern: 'model_savings_estimation_input\.py'
+    violation_pattern: "Field 'session_id' should use UUID"
+    reason: >
+      session_id is a free-form session identifier passed through to the savings estimate output. Not a UUID.
+
+    documentation:
+      - omnidash/migrations/0034_savings_estimates.sql (session_id TEXT NOT NULL)
+    ticket: OMN-6964
+  - file_pattern: 'model_savings_estimation_input\.py'
+    violation_pattern: "Field 'actual_model_id' should use UUID"
+    reason: >
+      actual_model_id is a model identifier string (e.g., 'claude-opus-4-6'), not a UUID. Identifies which LLM model was used for the session.
+
+    documentation:
+      - omnidash/migrations/0034_savings_estimates.sql (actual_model_id TEXT)
+    ticket: OMN-6964
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

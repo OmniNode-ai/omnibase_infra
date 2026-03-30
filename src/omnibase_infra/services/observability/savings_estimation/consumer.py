@@ -4,7 +4,7 @@
 
 ServiceSavingsEstimator correlates events from multiple topics by session_id
 in a bounded LRU buffer. When a session-outcome event arrives and a grace
-window elapses, it finalizes the estimate using HandlerSavingsEstimator and
+window elapses, it finalizes the estimate using HandlerSavingsEstimation and
 produces a ``savings-estimated.v1`` event.
 
 Architecture:
@@ -34,16 +34,13 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 
-from omnibase_infra.models.pricing.model_pricing_table import ModelPricingTable
-from omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_estimator import (
-    HandlerSavingsEstimator,
+from omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_estimation import (
+    HandlerSavingsEstimation,
 )
 from omnibase_infra.nodes.node_savings_estimation_compute.models import (
-    ModelInjectionSignal,
-    ModelLlmCallRecord,
-    ModelSavingsBaselineConfig,
-    ModelSavingsInput,
-    ModelValidatorCatchSignal,
+    EnumModelTier,
+    ModelEffectivenessEntry,
+    ModelSavingsEstimationInput,
 )
 from omnibase_infra.services.observability.savings_estimation.config import (
     ConfigSavingsEstimation,
@@ -53,18 +50,107 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class InjectionSignal:
+    """Raw injection signal accumulated from hook-context-injected events."""
+
+    tokens_injected: int = 0
+    patterns_count: int = 0
+
+
+@dataclass
+class LlmCallSignal:
+    """Raw LLM call signal accumulated from llm-call-completed events."""
+
+    model_id: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+
+@dataclass
 class SessionBuffer:
     """Accumulates signals for a single session."""
 
     session_id: str
     correlation_id: str = ""
-    llm_calls: list[ModelLlmCallRecord] = field(default_factory=list)
-    injection_signals: list[ModelInjectionSignal] = field(default_factory=list)
-    validator_catches: list[ModelValidatorCatchSignal] = field(default_factory=list)
+    llm_calls: list[LlmCallSignal] = field(default_factory=list)
+    injection_signals: list[InjectionSignal] = field(default_factory=list)
+    validator_catch_count: int = 0
     treatment_group: str = "treatment"
     outcome_received: bool = False
     outcome_received_at: float = 0.0
     created_at: float = field(default_factory=lambda: time.monotonic())
+
+
+def _model_tier_from_id(model_id: str) -> EnumModelTier:
+    """Classify a model_id string into a pricing tier.
+
+    Args:
+        model_id: Model identifier (e.g. 'claude-opus-4-6', 'claude-sonnet-4').
+
+    Returns:
+        The corresponding model tier. Defaults to OPUS for unknown models.
+    """
+    lower = model_id.lower()
+    if "sonnet" in lower:
+        return EnumModelTier.SONNET
+    return EnumModelTier.OPUS
+
+
+def _build_effectiveness_entries(
+    buf: SessionBuffer,
+) -> tuple[ModelEffectivenessEntry, ...]:
+    """Convert raw session signals into ModelEffectivenessEntry objects.
+
+    Each injection signal produces one entry with tokens_saved from the
+    injection and patterns_count for category classification. LLM calls
+    are aggregated to determine the dominant model tier.
+
+    Args:
+        buf: Session buffer with accumulated raw signals.
+
+    Returns:
+        Tuple of effectiveness entries for the handler.
+    """
+    # Determine dominant model tier from LLM calls
+    tier = EnumModelTier.OPUS
+    if buf.llm_calls:
+        tier = _model_tier_from_id(buf.llm_calls[0].model_id)
+
+    entries: list[ModelEffectivenessEntry] = []
+
+    for sig in buf.injection_signals:
+        if sig.tokens_injected > 0:
+            # Utilization score: heuristic based on patterns injected.
+            # More patterns = higher utilization (capped at 1.0).
+            utilization = (
+                min(sig.patterns_count / 10.0, 1.0) if sig.patterns_count > 0 else 0.5
+            )
+            entries.append(
+                ModelEffectivenessEntry(
+                    utilization_score=round(utilization, 4),
+                    patterns_count=sig.patterns_count,
+                    tokens_saved=sig.tokens_injected,
+                    model_tier=tier,
+                    is_output_tokens=False,
+                )
+            )
+
+    # If no injection signals but we have LLM calls, create a minimal entry
+    # so the session still produces an estimate (zero savings, measured).
+    if not entries and buf.llm_calls:
+        total_tokens = sum(c.prompt_tokens + c.completion_tokens for c in buf.llm_calls)
+        if total_tokens > 0:
+            entries.append(
+                ModelEffectivenessEntry(
+                    utilization_score=0.0,
+                    patterns_count=0,
+                    tokens_saved=0,
+                    model_tier=tier,
+                    is_output_tokens=False,
+                )
+            )
+
+    return tuple(entries)
 
 
 class ServiceSavingsEstimator:
@@ -77,10 +163,9 @@ class ServiceSavingsEstimator:
     def __init__(
         self,
         config: ConfigSavingsEstimation,
-        pricing_table: ModelPricingTable,
     ) -> None:
         self._config = config
-        self._handler = HandlerSavingsEstimator(pricing_table)
+        self._handler = HandlerSavingsEstimation()
         self._sessions: OrderedDict[str, SessionBuffer] = OrderedDict()
         self._finalized: OrderedDict[str, bool] = OrderedDict()
         self._max_sessions = config.max_sessions
@@ -164,7 +249,7 @@ class ServiceSavingsEstimator:
         completion_tokens = int(str(payload.get("completion_tokens", 0)))
         if model_id:
             buf.llm_calls.append(
-                ModelLlmCallRecord(
+                LlmCallSignal(
                     model_id=model_id,
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
@@ -186,7 +271,7 @@ class ServiceSavingsEstimator:
         patterns_count = int(str(payload.get("patterns_count", 0)))
         if tokens_injected > 0:
             buf.injection_signals.append(
-                ModelInjectionSignal(
+                InjectionSignal(
                     tokens_injected=tokens_injected,
                     patterns_count=patterns_count,
                 )
@@ -195,39 +280,36 @@ class ServiceSavingsEstimator:
     def _ingest_validator_catch(
         self, buf: SessionBuffer, payload: dict[str, object]
     ) -> None:
-        validator_type = str(payload.get("validator_type", ""))
-        severity = str(payload.get("severity", ""))
-        if validator_type and severity:
-            buf.validator_catches.append(
-                ModelValidatorCatchSignal(
-                    validator_type=validator_type,
-                    severity=severity,
-                )
-            )
+        buf.validator_catch_count += 1
 
     async def _finalize_session(self, buf: SessionBuffer) -> dict[str, object] | None:
-        if (
-            not buf.llm_calls
-            and not buf.injection_signals
-            and not buf.validator_catches
-        ):
+        effectiveness_entries = _build_effectiveness_entries(buf)
+        if not effectiveness_entries:
             return None
 
-        savings_input = ModelSavingsInput(
+        # Compute total tokens from LLM calls for actual_cost calculation
+        actual_total_tokens = sum(
+            c.prompt_tokens + c.completion_tokens for c in buf.llm_calls
+        )
+
+        # Determine model ID from LLM calls
+        actual_model_id = "claude-opus-4-6"
+        if buf.llm_calls:
+            actual_model_id = buf.llm_calls[0].model_id
+
+        savings_input = ModelSavingsEstimationInput(
             session_id=buf.session_id,
-            correlation_id=buf.correlation_id or buf.session_id,
-            llm_calls=buf.llm_calls,
-            treatment_group=buf.treatment_group,
-            injection_signals=buf.injection_signals,
-            validator_catches=buf.validator_catches,
-            baseline_config=ModelSavingsBaselineConfig(),
+            effectiveness_entries=effectiveness_entries,
+            actual_total_tokens=actual_total_tokens,
+            actual_model_id=actual_model_id,
         )
 
         try:
             estimate = await self._handler.handle(savings_input)
             source_event_id = f"savings-{buf.session_id}-v{self._schema_version}"
-            estimate["source_event_id"] = source_event_id
-            return estimate
+            result = estimate.model_dump(mode="json")
+            result["source_event_id"] = source_event_id
+            return result
         except Exception:
             logger.exception(
                 "Failed to finalize savings estimate for session %s",
