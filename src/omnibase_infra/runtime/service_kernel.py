@@ -661,6 +661,7 @@ async def bootstrap() -> int:
     llm_health_service: ServiceLlmEndpointHealth | None = None
     wiring_health_checker: WiringHealthChecker | None = None
     wiring_health_task: asyncio.Task[None] | None = None
+    triage_unsub: Callable[[], Awaitable[None]] | None = None
     correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
 
@@ -2219,7 +2220,7 @@ async def bootstrap() -> int:
         # 9.7. Start runtime error triage consumer (OMN-5655)
         # Subscribes to runtime-error events and routes them to the
         # HandlerRuntimeErrorTriage for first-match-wins triage processing.
-        triage_unsub: Callable[[], Awaitable[None]] | None = None
+        # (triage_unsub pre-declared before try block)
         if postgres_pool is not None and has_subscribe:
             try:
                 from omnibase_infra.nodes.node_runtime_error_triage_effect.handlers.handler_runtime_error_triage import (
