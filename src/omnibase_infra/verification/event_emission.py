@@ -43,7 +43,8 @@ def _load_publish_topic() -> str:
     if not topics:
         msg = f"No publish_topics in {_CONTRACT_PATH}"
         raise KeyError(msg)
-    return topics[0]
+    result: str = topics[0]
+    return result
 
 
 # ONEX_EXCLUDE: any_type - event payloads are heterogeneous dicts for Kafka serialization
