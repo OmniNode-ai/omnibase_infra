@@ -87,22 +87,7 @@ _APPROVED_WIRING_PREFIXES: tuple[str, ...] = ("registry_infra_",)
 # Each entry is (contract_path_relative_to_repo, handler_class_name).
 # The meta-test TestWiringExemptionsValid enforces anti-permanence:
 # exemptions for handlers that pass the wiring check will cause test failure.
-_INV4_WIRING_EXEMPTIONS: frozenset[tuple[str, str]] = frozenset(
-    {
-        # HandlerEmbeddingOllama: Ollama deprecated (OMN-5345). Module deleted.
-        # Contract still declares it. Remove when contract is cleaned up.
-        (
-            "src/omnibase_infra/nodes/node_llm_embedding_effect/contract.yaml",
-            "HandlerEmbeddingOllama",
-        ),
-        # HandlerLlmOllama: Ollama deprecated (OMN-5345). Module deleted.
-        # Contract still declares it. Remove when contract is cleaned up.
-        (
-            "src/omnibase_infra/nodes/node_llm_inference_effect/contract.yaml",
-            "HandlerLlmOllama",
-        ),
-    }
-)
+_INV4_WIRING_EXEMPTIONS: frozenset[tuple[str, str]] = frozenset()
 
 # Contract YAML root directory
 _CONTRACTS_ROOT = _SRC_ROOT / "nodes"

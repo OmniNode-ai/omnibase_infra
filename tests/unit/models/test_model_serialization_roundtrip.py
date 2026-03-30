@@ -150,6 +150,9 @@ UNCOVERED_MODELS: dict[str, str] = {
     "ModelTransitionNotificationOutboxMetrics": "Metrics model, low priority",
     "ModelTransitionNotificationPublisherMetrics": "Metrics model, low priority",
     "ModelRuntimeNodeGraphConfig": "Runtime config loaded from contracts dir with env overrides",
+    "ModelNodeConfig": "Runtime node config loaded from contract YAML with env overrides",
+    "ModelNodeEdge": "Graph edge model connecting nodes in runtime topology",
+    "ModelRuntimeNodeGraph": "Top-level graph model aggregating nodes and edges for runtime",
 }
 
 

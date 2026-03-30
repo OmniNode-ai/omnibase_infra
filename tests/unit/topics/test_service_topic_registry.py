@@ -162,7 +162,7 @@ class TestServiceTopicRegistryAllKeys:
     def test_all_keys_count(self) -> None:
         registry = ServiceTopicRegistry.from_defaults()
         keys = registry.all_keys()
-        assert len(keys) == 20  # actual count from topic_constants.py
+        assert len(keys) == 22  # actual count from topic_constants.py
 
     def test_all_keys_match_topic_keys_module(self) -> None:
         """Every key in topic_keys.__all__ must be in the registry."""

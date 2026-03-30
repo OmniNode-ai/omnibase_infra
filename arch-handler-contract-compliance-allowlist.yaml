@@ -49,6 +49,10 @@ allowlisted_handlers:
     violations:
       - missing_handler_routing
     ticket: '# migration pending'
+  - path: omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/config_loader_bifrost.py
+    violations:
+      - missing_handler_routing
+    ticket: '# config loader, not a handler'
   - path: omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/handler_bifrost_gateway.py
     violations:
       - missing_handler_routing
