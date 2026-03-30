@@ -85,6 +85,10 @@ from omnibase_infra.enums.enum_declarative_node_violation import (
 from omnibase_infra.enums.enum_dedupe_strategy import EnumDedupeStrategy
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_environment import EnumEnvironment
+from omnibase_infra.enums.enum_eval_finding_category import EnumEvalFindingCategory
+from omnibase_infra.enums.enum_eval_finding_severity import EnumEvalFindingSeverity
+from omnibase_infra.enums.enum_eval_task_status import EnumEvalTaskStatus
+from omnibase_infra.enums.enum_eval_task_type import EnumEvalTaskType
 from omnibase_infra.enums.enum_execution_shape_violation import (
     EnumExecutionShapeViolation,
 )
@@ -149,6 +153,10 @@ __all__: list[str] = [
     "EnumDedupeStrategy",
     "EnumDispatchStatus",
     "EnumEnvironment",
+    "EnumEvalFindingCategory",
+    "EnumEvalFindingSeverity",
+    "EnumEvalTaskStatus",
+    "EnumEvalTaskType",
     "EnumExecutionShapeViolation",
     "EnumHandlerErrorType",
     "EnumHandlerLoaderError",

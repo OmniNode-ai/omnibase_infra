@@ -126,7 +126,7 @@ def _add_backend_if_set(
         backend_id=backend_id,
         base_url=url,
     )
-    logger.debug("Added bifrost backend '%s' from %s=%s", backend_id, env_var, url)
+    logger.debug("Added bifrost backend '%s' from env var '%s'", backend_id, env_var)
 
 
 def _build_default_routing_rules(

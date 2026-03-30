@@ -41,7 +41,7 @@ class TestWireLlmHandlers:
 
         assert result["status"] == "success"
         assert "ServiceLlmMetricsPublisher" in result["services"]
-        assert "HandlerLlmOpenaiCompatible" in result["services"]
+        assert "HandlerLlmOpenaiCompatible (with metrics)" in result["services"]
         assert "HandlerEmbeddingOpenaiCompatible" in result["services"]
 
 

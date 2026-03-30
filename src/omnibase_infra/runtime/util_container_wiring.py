@@ -452,10 +452,11 @@ async def wire_llm_handlers(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="wire_llm_handlers",
         )
+        logger.debug("LLM handler wiring failed: %s", e, exc_info=True)
         raise ServiceRegistrationError(
-            f"Failed to wire LLM handlers: {e}",
+            "Failed to wire LLM handlers",
             context=context,
-            original_error=str(e),
+            original_error=type(e).__name__,
             error_type=type(e).__name__,
         ) from e
 
