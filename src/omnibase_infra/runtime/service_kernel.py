@@ -1280,9 +1280,6 @@ async def bootstrap() -> int:
                 from omnibase_core.models.events.model_event_envelope import (
                     ModelEventEnvelope,
                 )
-                from omnibase_infra.models.pricing.model_pricing_table import (
-                    ModelPricingTable,
-                )
                 from omnibase_infra.services.observability.savings_estimation.config import (
                     ConfigSavingsEstimation,
                 )
@@ -1295,10 +1292,8 @@ async def bootstrap() -> int:
                 )
 
                 _savings_config = ConfigSavingsEstimation()
-                _pricing_table = ModelPricingTable.from_yaml()
                 _savings_estimator = ServiceSavingsEstimator(
                     config=_savings_config,
-                    pricing_table=_pricing_table,
                 )
                 _savings_topic = ServiceTopicRegistry.from_defaults().resolve(
                     topic_keys.SAVINGS_ESTIMATED
