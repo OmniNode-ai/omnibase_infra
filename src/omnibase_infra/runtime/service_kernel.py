@@ -664,6 +664,7 @@ async def bootstrap() -> int:
     triage_unsub: Callable[[], Awaitable[None]] | None = None
     baselines_task: asyncio.Task[None] | None = None
     _baselines_pool = None  # asyncpg.Pool | None, assigned inside try block
+    savings_task: asyncio.Task[None] | None = None
     correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
 
@@ -1273,7 +1274,7 @@ async def bootstrap() -> int:
 
         # 3.9. Wire savings estimation consumer
         # Correlates session events and produces savings-estimated.v1 events.
-        savings_task: asyncio.Task[None] | None = None
+        # (savings_task pre-declared before try block)
         if use_kafka:
             try:
                 from omnibase_core.models.events.model_event_envelope import (
