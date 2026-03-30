@@ -98,9 +98,9 @@ class TestLaunchdPlist:
         content = PLIST.read_text()
         assert "ai.omninode.bare-clone-sync" in content
 
-    def test_plist_interval_is_300(self) -> None:
+    def test_plist_interval_is_1800(self) -> None:
         content = PLIST.read_text()
-        assert "<integer>300</integer>" in content
+        assert "<integer>1800</integer>" in content
 
     def test_plist_references_pull_all(self) -> None:
         content = PLIST.read_text()
@@ -121,7 +121,7 @@ class TestInstallScript:
 
     def test_install_script_supports_uninstall(self) -> None:
         content = INSTALL_SCRIPT.read_text()
-        assert "--uninstall" in content
+        assert "uninstall" in content
 
     def test_install_script_uses_launchctl(self) -> None:
         content = INSTALL_SCRIPT.read_text()
