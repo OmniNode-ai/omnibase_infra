@@ -52,6 +52,7 @@ Integration Notes:
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from omnibase_core.enums import EnumInjectionScope
@@ -385,6 +386,88 @@ async def wire_infrastructure_services(
     )
 
     return {"services": services_registered, "status": "success"}
+
+
+async def wire_llm_handlers(
+    container: ModelONEXContainer,
+    publisher: Callable[..., Awaitable[bool]] | None = None,
+) -> dict[str, list[str] | str]:
+    """Register LLM inference and embedding handlers with the container.
+
+    Wires ``RegistryInfraLlmInferenceEffect`` and
+    ``RegistryInfraLlmEmbeddingEffect`` into the container. When a
+    ``publisher`` is provided, the inference handler is wrapped with
+    ``ServiceLlmMetricsPublisher`` so that every call emits
+    ``llm-call-completed`` events.
+
+    Args:
+        container: ONEX container instance to register handlers in.
+        publisher: Optional async callable for event emission. When
+            provided, ``register_openai_compatible_with_metrics`` is
+            used; otherwise ``register_openai_compatible``.
+
+    Returns:
+        Summary dict with registered handler names and status.
+
+    Raises:
+        ServiceRegistryUnavailableError: If service_registry is unavailable.
+        ServiceRegistrationError: If handler registration fails.
+
+    Related:
+        - OMN-6785: Register LLM inference + embedding handlers in runtime bootstrap
+
+    .. versionadded:: 0.29.0
+    """
+    _validate_service_registry(container, "wire_llm_handlers")
+
+    from omnibase_infra.nodes.node_llm_embedding_effect.registry import (
+        RegistryInfraLlmEmbeddingEffect,
+    )
+    from omnibase_infra.nodes.node_llm_inference_effect.registry import (
+        RegistryInfraLlmInferenceEffect,
+    )
+
+    handlers_registered: list[str] = []
+
+    try:
+        # Register inference handler (with or without metrics)
+        if publisher is not None:
+            await (
+                RegistryInfraLlmInferenceEffect.register_openai_compatible_with_metrics(
+                    container, publisher=publisher
+                )
+            )
+            handlers_registered.append("HandlerLlmOpenaiCompatible (with metrics)")
+            handlers_registered.append("ServiceLlmMetricsPublisher")
+        else:
+            await RegistryInfraLlmInferenceEffect.register_openai_compatible(container)
+            handlers_registered.append("HandlerLlmOpenaiCompatible")
+
+        # Register embedding handler
+        await RegistryInfraLlmEmbeddingEffect.register_openai_compatible(container)
+        handlers_registered.append("HandlerEmbeddingOpenaiCompatible")
+
+    except Exception as e:
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="wire_llm_handlers",
+        )
+        raise ServiceRegistrationError(
+            f"Failed to wire LLM handlers: {e}",
+            context=context,
+            original_error=str(e),
+            error_type=type(e).__name__,
+        ) from e
+
+    logger.info(
+        "LLM handlers wired successfully",
+        extra={
+            "handler_count": len(handlers_registered),
+            "handlers": handlers_registered,
+        },
+    )
+
+    return {"services": handlers_registered, "status": "success"}
 
 
 async def get_policy_registry_from_container(

@@ -4,7 +4,7 @@
 #
 # ONEX Node Contract - LLM Embedding Effect Node
 #
-# Provides embedding generation via pluggable handlers (OpenAI-compatible, Ollama).
+# Provides embedding generation via pluggable handlers (OpenAI-compatible).
 # Ticket: OMN-2112
 #
 contract_version:
@@ -15,7 +15,7 @@ node_version: "1.0.0"
 name: "node_llm_embedding_effect"
 node_type: "EFFECT_GENERIC"
 description: >
-  Effect node for LLM embedding generation. Provides batch embedding generation via OpenAI-compatible and Ollama endpoints with retry logic, circuit breaker protection, and dimension uniformity validation.
+  Effect node for LLM embedding generation. Provides batch embedding generation via OpenAI-compatible endpoints with retry logic, circuit breaker protection, and dimension uniformity validation.
 
 # Strongly typed I/O models
 input_model:
@@ -61,33 +61,6 @@ io_operations:
       - correlation_id
       - execution_id
       - timestamp
-  - operation: "embedding.ollama"
-    description: "Generate embeddings via Ollama /api/embed endpoint"
-    input_fields:
-      - base_url
-      - model
-      - texts
-      - dimensions # optional; may be ignored by some Ollama models
-      - timeout_seconds
-      - max_retries
-      - provider_label
-      - stream
-      - metadata
-      - correlation_id
-      - execution_id
-    output_fields:
-      - status
-      - embeddings
-      - dimensions
-      - model_used
-      - provider_id
-      - usage
-      - latency_ms
-      - retry_count
-      - backend_result
-      - correlation_id
-      - execution_id
-      - timestamp
 # Handler routing
 handler_routing:
   routing_strategy: "operation_match"
@@ -96,10 +69,6 @@ handler_routing:
       handler:
         name: "HandlerEmbeddingOpenaiCompatible"
         module: "omnibase_infra.nodes.node_llm_embedding_effect.handlers.handler_embedding_openai_compatible"
-    - operation: "embedding.ollama"
-      handler:
-        name: "HandlerEmbeddingOllama"
-        module: "omnibase_infra.nodes.node_llm_embedding_effect.handlers.handler_embedding_ollama"
 # Error handling configuration
 error_handling:
   retry_policy:
@@ -147,5 +116,4 @@ metadata:
     - llm
     - embedding
     - openai-compatible
-    - ollama
     - vector
