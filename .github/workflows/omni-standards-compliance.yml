@@ -106,7 +106,7 @@ jobs:
           version: ${{ env.UV_VERSION }}
 
       - name: Install onex_change_control (pinned)
-        run: uv pip install --system "onex_change_control @ git+https://github.com/OmniNode-ai/onex_change_control.git@6f08269895488c9ce30a866e6415f1de9f6d1afc"
+        run: uv pip install --system "onex_change_control @ git+https://github.com/OmniNode-ai/onex_change_control.git@08a5194c6e587e8b2256c1f1edde236ad34cd397"
 
       - name: Run handler contract compliance check
         run: |
