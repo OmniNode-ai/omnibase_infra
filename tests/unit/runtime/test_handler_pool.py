@@ -90,6 +90,83 @@ class TestHandlerPoolInit:
         await pool.shutdown()
 
     @pytest.mark.asyncio
+    async def test_pool_passes_config_to_initialize(self) -> None:
+        """Pool should pass handler_config to instance.initialize() when provided."""
+        instances: list[MagicMock] = []
+        test_config: dict[str, object] = {
+            "dsn": "postgresql://localhost/test",
+            "timeout": 30,
+        }
+
+        def tracking_factory() -> MagicMock:
+            h = _make_mock_handler()
+            instances.append(h)
+            return h
+
+        pool = HandlerPool(
+            handler_type="db",
+            factory=tracking_factory,
+            pool_size=2,
+            handler_config=test_config,
+        )
+        await pool.initialize()
+
+        for instance in instances:
+            instance.initialize.assert_awaited_once_with(test_config)
+
+        await pool.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_pool_initialize_no_config_calls_without_args(self) -> None:
+        """Pool without handler_config should call initialize() with no args (backwards compat)."""
+        instances: list[MagicMock] = []
+
+        def tracking_factory() -> MagicMock:
+            h = _make_mock_handler()
+            instances.append(h)
+            return h
+
+        pool = HandlerPool(handler_type="mock", factory=tracking_factory, pool_size=2)
+        await pool.initialize()
+
+        for instance in instances:
+            instance.initialize.assert_awaited_once_with()
+
+        await pool.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_recycle_passes_config_to_new_instance(self) -> None:
+        """Recycled instances should receive handler_config during initialize()."""
+        call_count = 0
+        test_config: dict[str, object] = {"dsn": "postgresql://localhost/test"}
+
+        def factory() -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            h = _make_mock_handler(healthy=True)
+            return h
+
+        pool = HandlerPool(
+            handler_type="db",
+            factory=factory,
+            pool_size=1,
+            handler_config=test_config,
+        )
+        await pool.initialize()
+        assert call_count == 1
+
+        # Make instance unhealthy to trigger recycle
+        async with pool.checkout() as handler:
+            handler.health_check = AsyncMock(return_value={"healthy": False})
+
+        # Recycle happened — new instance should have received config
+        assert call_count == 2
+        # The pool's _all_instances list should have the recycled instance
+        assert pool.total_instance_count == 1
+
+        await pool.shutdown()
+
+    @pytest.mark.asyncio
     async def test_double_initialize_raises(self) -> None:
         """Calling initialize() twice should raise RuntimeError."""
         pool = HandlerPool(handler_type="mock", factory=_make_factory(), pool_size=1)

@@ -424,6 +424,21 @@ def derive_dlq_topic_for_event_type(
     return get_dlq_topic_for_original(original_topic)
 
 
+# ---------------------------------------------------------------------------
+# Session Coordination Topics (OMN-6854)
+# ---------------------------------------------------------------------------
+
+TOPIC_SESSION_COORDINATION_SIGNAL: Final[str] = (
+    "onex.evt.omniclaude.session-coordination-signal.v1"
+)
+"""Topic for session coordination signals between concurrent sessions."""
+
+TOPIC_SESSION_STATUS_CHANGED: Final[str] = (
+    "onex.evt.omniclaude.session-status-changed.v1"
+)
+"""Topic for session status change notifications."""
+
+
 __all__ = [
     "DLQ_CATEGORY_SUFFIXES",
     "DLQ_COMMAND_TOPIC_SUFFIX",

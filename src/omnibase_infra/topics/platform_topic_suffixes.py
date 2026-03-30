@@ -531,6 +531,30 @@ Consumer: MixinConsumerHealth (standalone consumers)
 """
 
 # =============================================================================
+# OMNIBASE_INFRA LLM REQUEST COMMAND TOPIC SUFFIXES (Plan D WS1)
+# =============================================================================
+
+SUFFIX_LLM_INFERENCE_REQUEST: str = "onex.cmd.omnibase-infra.llm-inference-request.v1"
+"""Topic suffix for inbound LLM inference request commands.
+
+Published by services needing LLM inference. The runtime consumes
+these and routes to the appropriate LLM handler via bifrost gateway.
+
+Producer: Any ONEX service requiring LLM inference
+Consumer: NodeLlmInferenceEffect runtime handler
+"""
+
+SUFFIX_LLM_EMBEDDING_REQUEST: str = "onex.cmd.omnibase-infra.llm-embedding-request.v1"
+"""Topic suffix for inbound LLM embedding request commands.
+
+Published by services needing embedding generation. The runtime
+consumes these and routes to the embedding handler.
+
+Producer: Any ONEX service requiring embeddings
+Consumer: NodeLlmEmbeddingEffect runtime handler
+"""
+
+# =============================================================================
 # OMNIBASE_INFRA RUNTIME ERROR TOPIC SUFFIXES (OMN-5517 / OMN-5529)
 # =============================================================================
 
@@ -578,6 +602,17 @@ Published by the runner health CLI (cli_runner_health.py) every collection
 cycle. Each event carries a ``ModelRunnerHealthSnapshot`` payload.
 
 Producer: cli_runner_health.py (cron-scheduled)
+Consumer: omnidash (future)
+"""
+
+SUFFIX_ROW_COUNT_DIAGNOSTIC: str = "onex.evt.omnibase-infra.row-count-diagnostic.v1"
+"""Topic suffix for row count probe diagnostic events (OMN-5653).
+
+Published by ServiceRowCountProbe when the probe detects empty projection
+tables. Each event carries a ``ModelRowCountProbeResult`` payload with
+per-table row counts and the list of empty tables.
+
+Producer: ServiceRowCountProbe (begin-day diagnostics / periodic probe)
 Consumer: omnidash (future)
 """
 
@@ -675,6 +710,15 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
         partitions=1,
         kafka_config={},
     ),
+    # Row count diagnostic events (1 partition — low-throughput, OMN-5653)
+    ModelTopicSpec(
+        suffix=SUFFIX_ROW_COUNT_DIAGNOSTIC,
+        partitions=1,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
     # GitHub PR merged events (1 partition — low-throughput, one event per merge, OMN-6726)
     ModelTopicSpec(
         suffix=SUFFIX_GITHUB_PR_MERGED,
@@ -701,6 +745,24 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
             "retention.ms": "604800000",
             "cleanup.policy": "delete",
         },  # 7 days
+    ),
+    # LLM inference request commands (3 partitions — Plan D WS1)
+    ModelTopicSpec(
+        suffix=SUFFIX_LLM_INFERENCE_REQUEST,
+        partitions=3,
+        kafka_config={
+            "retention.ms": "86400000",
+            "cleanup.policy": "delete",
+        },  # 1 day — commands are short-lived
+    ),
+    # LLM embedding request commands (3 partitions — Plan D WS1)
+    ModelTopicSpec(
+        suffix=SUFFIX_LLM_EMBEDDING_REQUEST,
+        partitions=3,
+        kafka_config={
+            "retention.ms": "86400000",
+            "cleanup.policy": "delete",
+        },  # 1 day — commands are short-lived
     ),
 )
 """Omnibase_infra domain topic specs for internal effect nodes.

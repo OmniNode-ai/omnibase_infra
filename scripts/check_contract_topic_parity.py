@@ -340,6 +340,8 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     # --- runner health pipeline topics (OMN-6082) ---
     "onex.evt.omnibase-infra.runner-health-snapshot.v1": "OMN-6082; Phase 1 CLI-based, contract.yaml deferred to OMN-6091 (true ONEX node conversion) | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omnibase-infra.eval-completed.v1": "OMN-6798; emitted by ServiceAutoEvalRunner; contract.yaml deferred until eval node created | owner: jonah | expiry: 2026-09-01",
+    # --- row count diagnostic probe (OMN-5653) ---
+    "onex.evt.omnibase-infra.row-count-diagnostic.v1": "OMN-5653; probe-based emission, contract.yaml deferred to ONEX node conversion | owner: jonah | expiry: 2026-09-01",
     # --- AST code extraction pipeline topics (OMN-5669) ---
     "onex.cmd.omniintelligence.code-crawl-requested.v1": "OMN-5669; contract.yaml in omniintelligence repo (cross-repo provisioning) | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omniintelligence.code-file-discovered.v1": "OMN-5669; contract.yaml in omniintelligence repo (cross-repo provisioning) | owner: jonah | expiry: 2026-09-01",

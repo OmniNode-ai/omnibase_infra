@@ -16,7 +16,6 @@ from unittest.mock import patch
 
 import pytest
 
-from omnibase_infra.models.pricing.model_pricing_table import ModelPricingTable
 from omnibase_infra.services.observability.savings_estimation.config import (
     ConfigSavingsEstimation,
 )
@@ -24,29 +23,8 @@ from omnibase_infra.services.observability.savings_estimation.consumer import (
     ServiceSavingsEstimator,
 )
 
-_PRICING_DATA = {
-    "schema_version": "1.0.0",
-    "models": {
-        "claude-opus-4-6": {
-            "input_cost_per_1k": 0.015,
-            "output_cost_per_1k": 0.075,
-            "effective_date": "2026-02-01",
-        },
-        "qwen3-coder-30b-a3b": {
-            "input_cost_per_1k": 0.0,
-            "output_cost_per_1k": 0.0,
-            "effective_date": "2026-03-19",
-        },
-    },
-}
-
 # Base monotonic time for deterministic clock control in tests.
 _T0 = 1000.0
-
-
-@pytest.fixture
-def pricing_table() -> ModelPricingTable:
-    return ModelPricingTable.from_dict(_PRICING_DATA)
 
 
 @pytest.fixture
@@ -60,10 +38,8 @@ def config() -> ConfigSavingsEstimation:
 
 
 @pytest.fixture
-def service(
-    config: ConfigSavingsEstimation, pricing_table: ModelPricingTable
-) -> ServiceSavingsEstimator:
-    return ServiceSavingsEstimator(config, pricing_table)
+def service(config: ConfigSavingsEstimation) -> ServiceSavingsEstimator:
+    return ServiceSavingsEstimator(config)
 
 
 @pytest.mark.unit
@@ -97,12 +73,11 @@ async def test_grace_window_finalization(service: ServiceSavingsEstimator) -> No
     """Session finalizes after grace window elapses post session-outcome."""
     with patch("time.monotonic", return_value=_T0):
         service.ingest_event(
-            "onex.evt.omniintelligence.llm-call-completed.v1",
+            "onex.evt.omniclaude.hook-context-injected.v1",
             {
                 "session_id": "sess-2",
-                "model_id": "qwen3-coder-30b-a3b",
-                "prompt_tokens": 1000,
-                "completion_tokens": 500,
+                "tokens_injected": 300,
+                "patterns_count": 5,
             },
         )
         service.ingest_event(
@@ -131,12 +106,11 @@ async def test_grace_window_includes_late_events(
     """Events arriving after outcome but within grace window are included."""
     with patch("time.monotonic", return_value=_T0):
         service.ingest_event(
-            "onex.evt.omniintelligence.llm-call-completed.v1",
+            "onex.evt.omniclaude.hook-context-injected.v1",
             {
                 "session_id": "sess-grace",
-                "model_id": "qwen3-coder-30b-a3b",
-                "prompt_tokens": 500,
-                "completion_tokens": 200,
+                "tokens_injected": 500,
+                "patterns_count": 3,
             },
         )
         service.ingest_event(
@@ -159,7 +133,7 @@ async def test_grace_window_includes_late_events(
     with patch("time.monotonic", return_value=_T0 + 6.0):
         results = await service.finalize_ready_sessions()
     assert len(results) == 1
-    # The session should have both the llm call and the injection signal
+    # The session should have both injection signals
     assert results[0]["session_id"] == "sess-grace"
 
 
@@ -168,12 +142,11 @@ async def test_grace_window_includes_late_events(
 async def test_session_timeout(service: ServiceSavingsEstimator) -> None:
     """Sessions without outcome finalize after timeout."""
     service.ingest_event(
-        "onex.evt.omniintelligence.llm-call-completed.v1",
+        "onex.evt.omniclaude.hook-context-injected.v1",
         {
             "session_id": "sess-3",
-            "model_id": "qwen3-coder-30b-a3b",
-            "prompt_tokens": 1000,
-            "completion_tokens": 500,
+            "tokens_injected": 200,
+            "patterns_count": 3,
         },
     )
     # Pin created_at so we can control timeout math deterministically
@@ -199,12 +172,11 @@ async def test_idempotency_finalized_sessions(
     """Finalized sessions are not re-processed on subsequent events."""
     with patch("time.monotonic", return_value=_T0):
         service.ingest_event(
-            "onex.evt.omniintelligence.llm-call-completed.v1",
+            "onex.evt.omniclaude.hook-context-injected.v1",
             {
                 "session_id": "sess-4",
-                "model_id": "qwen3-coder-30b-a3b",
-                "prompt_tokens": 1000,
-                "completion_tokens": 500,
+                "tokens_injected": 500,
+                "patterns_count": 5,
             },
         )
         service.ingest_event(
@@ -218,12 +190,11 @@ async def test_idempotency_finalized_sessions(
 
     # Ingest another event for same session -- should be ignored
     service.ingest_event(
-        "onex.evt.omniintelligence.llm-call-completed.v1",
+        "onex.evt.omniclaude.hook-context-injected.v1",
         {
             "session_id": "sess-4",
-            "model_id": "qwen3-coder-30b-a3b",
-            "prompt_tokens": 2000,
-            "completion_tokens": 1000,
+            "tokens_injected": 200,
+            "patterns_count": 2,
         },
     )
 
@@ -282,12 +253,11 @@ async def test_deterministic_source_event_id(
     """source_event_id is deterministic from session_id and schema_version."""
     with patch("time.monotonic", return_value=_T0):
         service.ingest_event(
-            "onex.evt.omniintelligence.llm-call-completed.v1",
+            "onex.evt.omniclaude.hook-context-injected.v1",
             {
                 "session_id": "sess-6",
-                "model_id": "qwen3-coder-30b-a3b",
-                "prompt_tokens": 100,
-                "completion_tokens": 50,
+                "tokens_injected": 200,
+                "patterns_count": 2,
             },
         )
         service.ingest_event(
@@ -302,7 +272,7 @@ async def test_deterministic_source_event_id(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_lru_eviction(pricing_table: ModelPricingTable) -> None:
+async def test_lru_eviction() -> None:
     """Buffer evicts oldest session when max_sessions is reached."""
     # Use model_construct to bypass validation for testing with small max_sessions
     config = ConfigSavingsEstimation.model_construct(
@@ -319,34 +289,31 @@ async def test_lru_eviction(pricing_table: ModelPricingTable) -> None:
         finalized_session_cache_size=1000,
         schema_version="1.0",
     )
-    service = ServiceSavingsEstimator(config, pricing_table)
+    service = ServiceSavingsEstimator(config)
 
     service.ingest_event(
-        "onex.evt.omniintelligence.llm-call-completed.v1",
+        "onex.evt.omniclaude.hook-context-injected.v1",
         {
             "session_id": "old",
-            "model_id": "qwen3-coder-30b-a3b",
-            "prompt_tokens": 100,
-            "completion_tokens": 50,
+            "tokens_injected": 100,
+            "patterns_count": 1,
         },
     )
     service.ingest_event(
-        "onex.evt.omniintelligence.llm-call-completed.v1",
+        "onex.evt.omniclaude.hook-context-injected.v1",
         {
             "session_id": "mid",
-            "model_id": "qwen3-coder-30b-a3b",
-            "prompt_tokens": 100,
-            "completion_tokens": 50,
+            "tokens_injected": 100,
+            "patterns_count": 1,
         },
     )
     # This should evict "old"
     service.ingest_event(
-        "onex.evt.omniintelligence.llm-call-completed.v1",
+        "onex.evt.omniclaude.hook-context-injected.v1",
         {
             "session_id": "new",
-            "model_id": "qwen3-coder-30b-a3b",
-            "prompt_tokens": 100,
-            "completion_tokens": 50,
+            "tokens_injected": 100,
+            "patterns_count": 1,
         },
     )
 
@@ -362,21 +329,19 @@ async def test_multiple_sessions_independent(
     """Multiple sessions are tracked independently."""
     with patch("time.monotonic", return_value=_T0):
         service.ingest_event(
-            "onex.evt.omniintelligence.llm-call-completed.v1",
+            "onex.evt.omniclaude.hook-context-injected.v1",
             {
                 "session_id": "sess-a",
-                "model_id": "qwen3-coder-30b-a3b",
-                "prompt_tokens": 100,
-                "completion_tokens": 50,
+                "tokens_injected": 100,
+                "patterns_count": 2,
             },
         )
         service.ingest_event(
-            "onex.evt.omniintelligence.llm-call-completed.v1",
+            "onex.evt.omniclaude.hook-context-injected.v1",
             {
                 "session_id": "sess-b",
-                "model_id": "claude-opus-4-6",
-                "prompt_tokens": 200,
-                "completion_tokens": 100,
+                "tokens_injected": 200,
+                "patterns_count": 4,
             },
         )
 
@@ -409,3 +374,32 @@ async def test_empty_session_id_ignored(service: ServiceSavingsEstimator) -> Non
         },
     )
     assert service.active_session_count == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_llm_only_session_produces_zero_savings_estimate(
+    service: ServiceSavingsEstimator,
+) -> None:
+    """Sessions with only LLM calls (no injections) produce a zero-savings estimate."""
+    with patch("time.monotonic", return_value=_T0):
+        service.ingest_event(
+            "onex.evt.omniintelligence.llm-call-completed.v1",
+            {
+                "session_id": "sess-llm-only",
+                "model_id": "claude-opus-4-6",
+                "prompt_tokens": 1000,
+                "completion_tokens": 500,
+            },
+        )
+        service.ingest_event(
+            "onex.evt.omniclaude.session-outcome.v1",
+            {"session_id": "sess-llm-only"},
+        )
+
+    with patch("time.monotonic", return_value=_T0 + 6.0):
+        results = await service.finalize_ready_sessions()
+    assert len(results) == 1
+    assert results[0]["session_id"] == "sess-llm-only"
+    assert results[0]["direct_tokens_saved"] == 0
+    assert results[0]["direct_savings_usd"] == 0.0

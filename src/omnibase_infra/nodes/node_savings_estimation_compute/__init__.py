@@ -2,30 +2,33 @@
 # SPDX-License-Identifier: MIT
 
 # Copyright (c) 2026 OmniNode Team
-"""Node Savings Estimation Compute -- tiered attribution.
+"""Node Savings Estimation Compute -- token savings calculation.
 
 This package provides the NodeSavingsEstimationCompute, a compute node
-that estimates how much token spend the ONEX platform saved in a session
-by comparing actual costs against a counterfactual reference model.
+that takes injection effectiveness data and computes token and cost
+savings using tiered model pricing.
 
 Capabilities:
-    - savings.estimate: Compute tiered token savings attribution
+    - savings.estimate: Compute savings from effectiveness data using
+      tiered model pricing (Opus/Sonnet input/output rates).
 
 Available Exports:
     - NodeSavingsEstimationCompute: The declarative compute node
-    - ModelSavingsInput: Input model for session signals
-    - HandlerSavingsEstimator: Handler for savings computation
+    - ModelSavingsEstimationInput: Input model for effectiveness data
+    - ModelSavingsEstimate: Output model for computed savings
+    - HandlerSavingsEstimation: Handler for savings computation
     - RegistryInfraSavingsEstimation: DI registry
 
 Tracking:
-    - OMN-5547: Create HandlerSavingsEstimator compute handler
+    - OMN-6964: Token savings emitter
 """
 
 from omnibase_infra.nodes.node_savings_estimation_compute.handlers import (
-    HandlerSavingsEstimator,
+    HandlerSavingsEstimation,
 )
 from omnibase_infra.nodes.node_savings_estimation_compute.models import (
-    ModelSavingsInput,
+    ModelSavingsEstimate,
+    ModelSavingsEstimationInput,
 )
 from omnibase_infra.nodes.node_savings_estimation_compute.node import (
     NodeSavingsEstimationCompute,
@@ -35,8 +38,13 @@ from omnibase_infra.nodes.node_savings_estimation_compute.registry import (
 )
 
 __all__: list[str] = [
-    "HandlerSavingsEstimator",
-    "ModelSavingsInput",
+    # Node
     "NodeSavingsEstimationCompute",
+    # Handlers
+    "HandlerSavingsEstimation",
+    # Models
+    "ModelSavingsEstimationInput",
+    "ModelSavingsEstimate",
+    # Registry
     "RegistryInfraSavingsEstimation",
 ]

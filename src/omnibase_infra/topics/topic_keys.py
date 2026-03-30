@@ -64,6 +64,12 @@ LLM_CALL_COMPLETED_INFRA: Final[str] = "LLM_CALL_COMPLETED_INFRA"
 LLM_ENDPOINT_HEALTH: Final[str] = "LLM_ENDPOINT_HEALTH"
 """LLM endpoint health probe events."""
 
+LLM_INFERENCE_REQUEST: Final[str] = "LLM_INFERENCE_REQUEST"
+"""Inbound LLM inference request commands."""
+
+LLM_EMBEDDING_REQUEST: Final[str] = "LLM_EMBEDDING_REQUEST"
+"""Inbound LLM embedding request commands."""
+
 # ==============================================================================
 # Effectiveness Topics
 # ==============================================================================
@@ -136,20 +142,34 @@ CONSUMER_RESTART_CMD: Final[str] = "CONSUMER_RESTART_CMD"
 RUNTIME_ERROR: Final[str] = "RUNTIME_ERROR"
 """Runtime error events from RuntimeLogEventBridge."""
 
+ERROR_TRIAGED: Final[str] = "ERROR_TRIAGED"
+"""Runtime error triage result events from NodeRuntimeErrorTriageEffect."""
+
+# ==============================================================================
+# Baselines Topics
+# ==============================================================================
+
+BASELINES_COMPUTED: Final[str] = "BASELINES_COMPUTED"
+"""Baselines batch computation snapshot events."""
+
 
 __all__: list[str] = [
     "AGENT_STATUS",
+    "BASELINES_COMPUTED",
     "CIRCUIT_BREAKER_STATE",
     "CONSUMER_HEALTH",
     "CONSUMER_RESTART_CMD",
     "EFFECTIVENESS_INVALIDATION",
+    "ERROR_TRIAGED",
     "HOOK_CONTEXT_INJECTED",
     "INJECTION_AGENT_MATCH",
     "INJECTION_CONTEXT_UTILIZATION",
     "INJECTION_LATENCY_BREAKDOWN",
     "LLM_CALL_COMPLETED",
     "LLM_CALL_COMPLETED_INFRA",
+    "LLM_EMBEDDING_REQUEST",
     "LLM_ENDPOINT_HEALTH",
+    "LLM_INFERENCE_REQUEST",
     "RESOLUTION_DECIDED",
     "REWARD_ASSIGNED",
     "RUNTIME_ERROR",

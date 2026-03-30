@@ -1,3 +1,27 @@
+## v0.29.0 (2026-03-28)
+
+### Added
+- feat: decision projector consumes Kafka events into Qdrant [OMN-6863] (#1040)
+- feat: add Kafka-to-Memgraph session graph projector [OMN-6859] (#1038)
+- feat: define session graph schema for Memgraph [OMN-6858] (#1036)
+- feat: create session registry projector [OMN-6854] (#1034)
+- feat: create session registry Postgres table and models [OMN-6853] (#1031)
+- feat(ci): add auto-merge-on-open workflow [OMN-6571] (#1028)
+
+### Fixed
+- fix(runtime): add omnimemory to trusted plugin namespace prefixes [OMN-6829] (#1027)
+- fix(ci): add SUFFIX_* export completeness test [OMN-6814] (#1022)
+- fix(tooling): add cache-bust headers to PyPI requests [OMN-6811] (#1021)
+- fix(infra): Phoenix healthcheck CMD format and Infisical provision bugs [OMN-6700] (#1018)
+- fix(ci): topic suffix export check + consumer-health projection [OMN-6757] (#1017)
+
+### Changed
+- refactor: consolidate runner health exports and clean up models [OMN-6049] (#1033)
+- chore(deps): bump omnibase-core to 0.34.0
+
+### Dependencies
+- omnibase-core 0.33.1 -> 0.34.0
+
 ## v0.28.0 (2026-03-27)
 
 ### Added

@@ -31,6 +31,10 @@ runtime:
     - intelligence-migration
     - intelligence-api
     - omninode-contract-resolver
+    - injection-effectiveness-consumer
+    - ci-relay
+    - linear-relay
+    - decision-store-consumer
     - autoheal
   includes:
     - core
