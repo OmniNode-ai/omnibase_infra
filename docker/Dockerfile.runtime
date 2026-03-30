@@ -355,9 +355,9 @@ EXPOSE 8085
 # Health check using the runtime's health endpoint
 # - interval: Check every 30 seconds
 # - timeout: Fail if check takes more than 10 seconds
-# - start-period: Allow 40 seconds for startup before checking
+# - start-period: Allow 120 seconds for startup (Kafka consumer init is slow)
 # - retries: Mark unhealthy after 3 consecutive failures
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD curl --fail --silent http://localhost:8085/health || exit 1
 
 # Use tini as init to properly handle signals (PID 1 problem)
