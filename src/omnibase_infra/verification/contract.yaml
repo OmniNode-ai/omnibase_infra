@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract — Verification Event Emitter
+#
+# COMPUTE_GENERIC node that emits verification results as Kafka events.
+# No subscriptions — triggered programmatically by the verification batch runner.
+name: "verification_event_emitter"
+node_type: "COMPUTE_GENERIC"
+event_bus:
+  subscribe_topics: []
+  publish_topics:
+    - "onex.evt.platform.contract-verification-result.v1"
