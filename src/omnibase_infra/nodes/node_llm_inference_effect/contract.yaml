@@ -28,7 +28,7 @@ description: >
 
 # Strongly typed I/O models
 # Note: These models live in the shared omnibase_infra.models.llm package.
-# They are shared across all LLM inference handlers (OpenAI-compatible, Ollama)
+# They are shared across all LLM inference handlers (OpenAI-compatible)
 # to ensure a single canonical request/response contract for the inference effect layer.
 # Migrated from omnibase_infra.nodes.effects.models (OMN-3989).
 input_model:
@@ -99,6 +99,27 @@ error_handling:
 io_operations:
   - operation: "inference.openai_compatible"
     description: "Execute LLM inference via OpenAI-compatible API"
+# =============================================================================
+# EVENT BUS TOPICS
+# =============================================================================
+event_bus:
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.llm-inference-request.v1"
+  publish_topics:
+    - "onex.evt.omniintelligence.llm-call-completed.v1"
+    - "onex.evt.omnibase-infra.llm-call-completed.v1"
+consumed_events:
+  - topic: "onex.cmd.omnibase-infra.llm-inference-request.v1"
+    event_type: "LlmInferenceRequestCommand"
+    message_category: "COMMAND"
+    description: "Inbound LLM inference request routed to handler via bifrost"
+published_events:
+  - topic: "onex.evt.omniintelligence.llm-call-completed.v1"
+    event_type: "LlmCallCompletedEvent"
+    description: "Per-call metrics emitted after each inference call"
+  - topic: "onex.evt.omnibase-infra.llm-call-completed.v1"
+    event_type: "LlmCallCompletedInfraEvent"
+    description: "Lightweight per-call metrics for infra-owned consumers"
 # Dependencies
 dependencies:
   - name: "protocol_llm_http_transport"

@@ -260,6 +260,30 @@ Canonical spec: `omnibase_core/docs/conventions/FILE_HEADERS.md`
 
 ---
 
+## Agent Behavioral Rules (OMN-6888)
+
+### Autonomous mode safety rails
+
+When operating autonomously in this repo:
+- Never disable pre-commit hooks, CI checks, or type checkers to make code pass.
+  Fix the code instead.
+- Never write state files to `~/.claude/` -- use `omni_home/.onex_state/`.
+- Friction logs go to `omni_home/.onex_state/friction/` for external observability.
+
+### Contract-first topic definitions
+
+Kafka topics and event schemas belong in contract YAML files, not hardcoded in
+application code. This repo is the primary home of ONEX node contracts.
+
+When adding a new Kafka topic:
+1. Declare it in the node's contract YAML under `event_bus.publish_topics` or `subscribe_topics`
+2. Add the topic to the relevant `topics.yaml` skill file if it is a skill-emitted topic
+3. Reference the contract-declared topic name in code via the contract loader
+4. Never hardcode topic strings like `"onex.evt.foo.bar.v1"` in Python modules
+5. The CI check `check-arch-invariants` enforces this -- hardcoded topic strings will fail CI
+
+---
+
 ## Architecture: Four-Node Pattern
 
 ```text

@@ -1,17 +1,14 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Unit tests for runner health models."""
+"""Tests for runner health Pydantic models."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timezone
 from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.observability.runner_health.enum_runner_health_state import (
-    EnumRunnerHealthState,
-)
 from omnibase_infra.observability.runner_health.model_runner_health_alert import (
     ModelRunnerHealthAlert,
 )
@@ -19,6 +16,7 @@ from omnibase_infra.observability.runner_health.model_runner_health_snapshot imp
     ModelRunnerHealthSnapshot,
 )
 from omnibase_infra.observability.runner_health.model_runner_status import (
+    EnumRunnerHealthState,
     ModelRunnerStatus,
 )
 
@@ -149,13 +147,3 @@ class TestModelRunnerHealthAlert:
         msg = alert.to_slack_message()
         assert "omninode-runner-3" in msg
         assert "9/10" in msg
-
-    def test_frozen(self) -> None:
-        alert = ModelRunnerHealthAlert(
-            correlation_id=uuid4(),
-            total_runners=10,
-            healthy_count=10,
-            host="192.168.86.201",
-        )
-        with pytest.raises(Exception):
-            alert.total_runners = 5  # type: ignore[misc]

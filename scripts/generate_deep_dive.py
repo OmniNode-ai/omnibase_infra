@@ -120,6 +120,7 @@ class GitHubMergedPR:
     merged_at: str
     is_workflow_pr: bool  # True if it's an auto-generated workflow PR
     category: str  # 'capability', 'correctness', 'governance', 'observability', 'docs', 'churn'
+    is_exempt: bool = False  # True if dep bump or release (exempt from ticket linkage)
     additions: int = 0
     deletions: int = 0
 
@@ -232,6 +233,25 @@ WORKFLOW_PR_PATTERNS = [
 def is_workflow_pr(title: str) -> bool:
     """Check if a PR is an auto-generated workflow PR (low value for reporting)."""
     return any(pattern.lower() in title.lower() for pattern in WORKFLOW_PR_PATTERNS)
+
+
+# Exempt PR patterns — dep bumps and releases that don't need ticket linkage
+# SYNC: exempt prefixes must match the lists in:
+#   - onex_change_control/.github/workflows/pr-title-check-reusable.yml
+#   - omniclaude/src/omniclaude/nodes/node_git_effect/models/model_git_request.py
+_EXEMPT_PREFIXES = (
+    "chore(deps",  # chore(deps):, chore(deps-dev):, chore(deps)(deps):
+    "build(deps",  # build(deps):
+    "bump ",  # Bump hashicorp/aws...
+    "chore: release",  # chore: release omnibase_core v0.34.0
+    "chore(release)",  # chore(release): v0.12.0
+    "release:",  # release: omnibase_infra v0.29.0
+)
+
+
+def is_exempt_pr(title: str) -> bool:
+    """Return True if the PR title is a dep bump or release (exempt from ticket linkage)."""
+    return title.lower().startswith(_EXEMPT_PREFIXES)
 
 
 def classify_pr(title: str) -> str:
@@ -366,6 +386,7 @@ def get_github_merged_prs(repo: Path, date: dt.date) -> list[GitHubMergedPR]:
                         merged_at=display_time,
                         is_workflow_pr=is_workflow_pr(title),
                         category=classify_pr(title),
+                        is_exempt=is_exempt_pr(title),
                         additions=item.get("additions", 0),
                         deletions=item.get("deletions", 0),
                     )
@@ -380,6 +401,7 @@ def get_github_merged_prs(repo: Path, date: dt.date) -> list[GitHubMergedPR]:
                         merged_at=merged_at_str,
                         is_workflow_pr=is_workflow_pr(title),
                         category=classify_pr(title),
+                        is_exempt=is_exempt_pr(title),
                         additions=item.get("additions", 0),
                         deletions=item.get("deletions", 0),
                     )
@@ -428,6 +450,8 @@ class DriftReport:
     penalty: int  # 0, -2, or -5
     # Informational (not scored)
     active_worktrees: int  # total dirty worktrees (parallelism, not risk)
+    unlinked_pr_count: int = 0  # PRs without OMN-XXXX and not exempt
+    total_pr_count: int = 0  # total PRs for the day
 
 
 def compute_drift(repo_days: list[RepoDay], root: Path, date: dt.date) -> DriftReport:
@@ -533,6 +557,19 @@ def compute_drift(repo_days: list[RepoDay], root: Path, date: dt.date) -> DriftR
         )
     )
 
+    # Count unlinked PRs (no OMN-XXXX and not exempt/workflow)
+    import re as _re
+
+    _ticket_re = _re.compile(r"OMN-\d+")
+    all_prs = [pr for rd in active_repo_days for pr in rd.github_merged_prs]
+    unlinked = [
+        pr
+        for pr in all_prs
+        if not pr.is_exempt
+        and not pr.is_workflow_pr
+        and not _ticket_re.search(pr.title)
+    ]
+
     return DriftReport(
         level=level,
         main_dirty=main_dirty,
@@ -541,6 +578,8 @@ def compute_drift(repo_days: list[RepoDay], root: Path, date: dt.date) -> DriftR
         risks=risks[:5],
         penalty=penalty,
         active_worktrees=active_worktrees,
+        unlinked_pr_count=len(unlinked),
+        total_pr_count=len(all_prs),
     )
 
 
@@ -1352,6 +1391,13 @@ def main() -> int:
     lines.append(
         f"| Active parallel worktrees | {drift.active_worktrees} | ✅ (normal) |"
     )
+    # Unlinked PR telemetry (OMN-6922)
+    if drift.total_pr_count > 0:
+        unlinked_pct = drift.unlinked_pr_count / drift.total_pr_count * 100
+        unlinked_status = "⚠️ HIGH" if unlinked_pct > 5 else "✅"
+        lines.append(
+            f"| Unlinked PRs (no OMN-XXXX) | {drift.unlinked_pr_count}/{drift.total_pr_count} ({unlinked_pct:.0f}%) | {unlinked_status} |"
+        )
     lines.append("")
     if drift.risks:
         lines.append("**Action items**:")

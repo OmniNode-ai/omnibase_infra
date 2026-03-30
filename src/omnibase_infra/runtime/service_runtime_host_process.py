@@ -2418,11 +2418,12 @@ class RuntimeHostProcess:
 
                 # Call initialize() if the handler has this method
                 # Handlers may require async initialization with config
+                # Declared here so the pool creation below can reference it
+                effective_config: dict[str, object] = {}
                 if hasattr(handler_instance, "initialize"):
                     # Build effective config: contract config as base, runtime overrides on top
                     # This enables contracts to provide handler-specific defaults while
                     # allowing runtime/deploy-time customization without touching contracts
-                    effective_config: dict[str, object] = {}
                     config_source = "runtime_only"
 
                     # Layer 1: Contract config as baseline (if descriptor exists with config)
@@ -2523,12 +2524,17 @@ class RuntimeHostProcess:
 
                         return factory
 
+                    # Pass the same effective_config used for the first
+                    # instance so that pooled instances also receive it
+                    # during their initialize() call (fixes handler init
+                    # missing config bug — OMN-477 oversight).
                     pool = HandlerPool(
                         handler_type=handler_type,
                         factory=_make_factory(
                             _cls, _container, _resolved, _accepts_deps
                         ),
                         pool_size=self._handler_pool_size,
+                        handler_config=effective_config if effective_config else None,
                     )
                     await pool.initialize()
                     self._handler_pools[handler_type] = pool

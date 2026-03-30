@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Runner health alert model with Slack message formatting."""
+"""Runner health alert model with Slack message formatter."""
 
 from __future__ import annotations
 
@@ -20,8 +20,8 @@ from omnibase_infra.observability.runner_health.model_runner_status import (
 class ModelRunnerHealthAlert(BaseModel):
     """Alert payload for degraded runner health.
 
-    Follows the same alert-with-formatter pattern as
-    ``ModelWiringHealthAlert.to_slack_message()``.
+    Includes a ``to_slack_message()`` method that formats runner-specific
+    degradation details for Slack Block Kit consumption.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -38,27 +38,22 @@ class ModelRunnerHealthAlert(BaseModel):
     host: str = Field(..., description="CI host address")
 
     def to_slack_message(self) -> str:
-        """Format alert as a Slack message string."""
+        """Format alert as a Slack-compatible message string."""
         lines = [
-            f":warning: *Runner Health Degraded* -- "
-            f"{self.healthy_count}/{self.total_runners} healthy on `{self.host}`",
+            f":warning: *Runner Health Degraded* — {self.healthy_count}/{self.total_runners} healthy on `{self.host}`",
             "",
         ]
-        _state_emoji = {
-            EnumRunnerHealthState.GITHUB_OFFLINE: ":red_circle:",
-            EnumRunnerHealthState.CRASH_LOOPING: ":rotating_light:",
-            EnumRunnerHealthState.DOCKER_UNHEALTHY: ":warning:",
-            EnumRunnerHealthState.STALE_REGISTRATION: ":ghost:",
-            EnumRunnerHealthState.MISSING: ":question:",
-        }
         for r in self.degraded_runners:
-            emoji = _state_emoji.get(r.state, ":x:")
-            detail = f" -- {r.error}" if r.error else ""
+            state_emoji = {
+                EnumRunnerHealthState.GITHUB_OFFLINE: ":red_circle:",
+                EnumRunnerHealthState.CRASH_LOOPING: ":rotating_light:",
+                EnumRunnerHealthState.DOCKER_UNHEALTHY: ":warning:",
+                EnumRunnerHealthState.STALE_REGISTRATION: ":ghost:",
+                EnumRunnerHealthState.MISSING: ":question:",
+            }.get(r.state, ":x:")
+            detail = f" — {r.error}" if r.error else ""
             lines.append(
-                f"{emoji} `{r.name}`: {r.state.value} "
+                f"{state_emoji} `{r.name}`: {r.state.value} "
                 f"(GitHub: {r.github_status}, Docker: {r.docker_status}){detail}"
             )
         return "\n".join(lines)
-
-
-__all__ = ["ModelRunnerHealthAlert"]

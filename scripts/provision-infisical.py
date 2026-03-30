@@ -50,6 +50,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _infisical_util import _parse_env_file
 
 
+def _is_infisical_ready(body: dict) -> bool:  # type: ignore[type-arg]
+    """Check if the Infisical /api/status response indicates readiness.
+
+    The community edition returns ``{"message": "Ok"}`` while the enterprise
+    edition returns ``{"status": "ok"}``.  Accept either format so the script
+    works across both editions.
+    """
+    if body.get("status") == "ok":
+        return True
+    msg = body.get("message", "")
+    if isinstance(msg, str) and msg.lower() == "ok":
+        return True
+    return False
+
+
 def _write_env_vars(env_path: Path, updates: dict[str, str]) -> None:
     """Write or update key=value pairs in a .env file.
 
@@ -209,31 +224,28 @@ def _configure_universal_auth(
     identity_id: str,  # type: ignore[type-arg]
 ) -> None:
     """Configure Universal Auth on an identity."""
-    # Default trusted-IP list covers loopback and the standard dev subnet.
-    # Override by setting INFISICAL_TRUSTED_IPS to a comma-separated list
-    # of CIDR blocks, e.g. "127.0.0.1/32,10.0.0.0/8".
+    # Trusted-IP restrictions are only supported on Infisical Enterprise.
+    # The community edition returns HTTP 400 when clientSecretTrustedIps is
+    # present.  Only include IP restrictions when INFISICAL_TRUSTED_IPS is
+    # explicitly set (e.g. "127.0.0.1/32,10.0.0.0/8").
     _trusted_ips_env = os.environ.get("INFISICAL_TRUSTED_IPS")
+    ua_payload: dict[str, object] = {
+        "accessTokenTTL": 86400,  # 24h
+        "accessTokenMaxTTL": 2592000,  # 30d
+        "accessTokenNumUsesLimit": 0,  # unlimited
+    }
     if _trusted_ips_env:
         _trusted_ip_list = [
             {"ipAddress": cidr.strip()}
             for cidr in _trusted_ips_env.split(",")
             if cidr.strip()
         ]
-    else:
-        _trusted_ip_list = [
-            {"ipAddress": "127.0.0.1/32"},
-            {"ipAddress": "192.168.86.0/24"},
-        ]
+        ua_payload["clientSecretTrustedIps"] = _trusted_ip_list
+        ua_payload["accessTokenTrustedIps"] = _trusted_ip_list
     resp = client.post(  # type: ignore[attr-defined]
         f"{addr}/api/v1/auth/universal-auth/identities/{identity_id}",
         headers={"Authorization": f"Bearer {token}"},
-        json={
-            "accessTokenTTL": 86400,  # 24h
-            "accessTokenMaxTTL": 2592000,  # 30d
-            "accessTokenNumUsesLimit": 0,  # unlimited
-            "clientSecretTrustedIps": _trusted_ip_list,
-            "accessTokenTrustedIps": _trusted_ip_list,
-        },
+        json=ua_payload,
     )
     if resp.status_code in (400, 409) and "already" in resp.text.lower():
         logger.info("Universal Auth already configured for identity %s", identity_id)
@@ -464,12 +476,13 @@ def main() -> int:
                 resp.raise_for_status()
                 try:
                     body = resp.json()
-                    if body.get("status") != "ok":
+                    if not _is_infisical_ready(body):
                         logger.error(
-                            "Infisical at %s returned HTTP 200 but status field is %r "
-                            "(expected 'ok'). The server may still be initialising.",
+                            "Infisical at %s returned HTTP 200 but body is %r "
+                            "(expected status=ok or message=Ok). "
+                            "The server may still be initialising.",
                             args.addr,
-                            body.get("status"),
+                            body,
                         )
                         return 1
                 except (ValueError, KeyError):

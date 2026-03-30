@@ -24,6 +24,16 @@ from omnibase_infra.runtime.service_kernel import (
 class TestValidateKafkaBrokerAllowlist:
     """Tests for validate_kafka_broker_allowlist()."""
 
+    @pytest.fixture(autouse=True)
+    def _clear_allowlist_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ensure KAFKA_BROKER_ALLOWLIST is unset for denylist-mode tests.
+
+        The host environment may have KAFKA_BROKER_ALLOWLIST=localhost: which
+        switches the validator into strict allowlist mode, causing denylist
+        tests to fail. Tests that need the allowlist explicitly patch it.
+        """
+        monkeypatch.delenv(ENV_KAFKA_BROKER_ALLOWLIST, raising=False)
+
     # ------------------------------------------------------------------
     # Rejected patterns — denylist enforcement
     # ------------------------------------------------------------------

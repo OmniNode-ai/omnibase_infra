@@ -44,6 +44,14 @@ class TestTrustedPluginNamespacePrefixes:
         """Test that omniclaude is a trusted plugin namespace (OMN-2047)."""
         assert "omniclaude." in TRUSTED_PLUGIN_NAMESPACE_PREFIXES
 
+    def test_contains_omniintelligence_namespace(self) -> None:
+        """Test that omniintelligence is a trusted plugin namespace (OMN-2192)."""
+        assert "omniintelligence." in TRUSTED_PLUGIN_NAMESPACE_PREFIXES
+
+    def test_contains_omnimemory_namespace(self) -> None:
+        """Test that omnimemory is a trusted plugin namespace (OMN-6829)."""
+        assert "omnimemory." in TRUSTED_PLUGIN_NAMESPACE_PREFIXES
+
     def test_is_tuple(self) -> None:
         """Test that the constant is a tuple (immutable), not a list."""
         assert isinstance(TRUSTED_PLUGIN_NAMESPACE_PREFIXES, tuple)
@@ -81,12 +89,15 @@ class TestPluginHandlerNamespaceRelationship:
     def test_plugin_prefixes_include_extra_namespaces(self) -> None:
         """Plugin prefixes include namespaces not in handler prefixes.
 
-        omniclaude. provides domain plugins but not handler implementations.
+        omniclaude, omniintelligence, and omnimemory provide domain plugins
+        but not handler implementations.
         """
         extra = set(TRUSTED_PLUGIN_NAMESPACE_PREFIXES) - set(
             TRUSTED_HANDLER_NAMESPACE_PREFIXES
         )
         assert "omniclaude." in extra
+        assert "omniintelligence." in extra
+        assert "omnimemory." in extra
 
 
 class TestDomainPluginEntryPointGroup:

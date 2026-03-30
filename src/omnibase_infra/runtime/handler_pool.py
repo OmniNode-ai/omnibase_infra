@@ -73,6 +73,7 @@ class HandlerPool:
         handler_type: str,
         factory: Callable[[], ProtocolContainerAware],
         pool_size: int = DEFAULT_POOL_SIZE,
+        handler_config: dict[str, object] | None = None,
     ) -> None:
         """Initialize the handler pool.
 
@@ -82,10 +83,17 @@ class HandlerPool:
                 Must return a ProtocolContainerAware-compatible handler.
             pool_size: Number of handler instances to maintain.
                 Clamped to [MIN_POOL_SIZE, MAX_POOL_SIZE].
+            handler_config: Optional configuration dict to pass to each
+                handler's ``initialize(config)`` method.  When provided,
+                ``instance.initialize(handler_config)`` is called; when
+                ``None``, ``instance.initialize()`` is called with no
+                arguments (backwards-compatible for handlers that accept
+                no config).
         """
         self.handler_type: str = handler_type
         self.pool_size: int = max(MIN_POOL_SIZE, min(pool_size, MAX_POOL_SIZE))
         self._factory: Callable[[], ProtocolContainerAware] = factory
+        self._handler_config: dict[str, object] | None = handler_config
         self._pool: asyncio.Queue[ProtocolContainerAware] = asyncio.Queue(
             maxsize=self.pool_size
         )
@@ -99,11 +107,27 @@ class HandlerPool:
         self._recycle_count: int = 0
         self._checkout_wait_total_ms: float = 0.0
 
+    async def _initialize_instance(self, instance: ProtocolContainerAware) -> None:
+        """Call ``initialize()`` on a handler instance, passing config if available.
+
+        When ``_handler_config`` is set, calls ``instance.initialize(config)``;
+        otherwise calls ``instance.initialize()`` with no arguments for
+        backwards compatibility with handlers that accept no config.
+        """
+        if not (hasattr(instance, "initialize") and callable(instance.initialize)):
+            return
+        if self._handler_config is not None:
+            await instance.initialize(self._handler_config)  # type: ignore[call-arg]
+        else:
+            await instance.initialize()  # type: ignore[call-arg]
+
     async def initialize(self) -> None:
         """Create and initialize all handler instances in the pool.
 
         Each instance is created via the factory, then ``initialize()``
-        is called on it (if the method exists).
+        is called on it (if the method exists).  When ``handler_config``
+        was provided at construction time, it is passed to each instance's
+        ``initialize(config)`` call.
 
         Raises:
             RuntimeError: If pool is already initialized.
@@ -117,14 +141,13 @@ class HandlerPool:
             extra={
                 "handler_type": self.handler_type,
                 "pool_size": self.pool_size,
+                "has_handler_config": self._handler_config is not None,
             },
         )
 
         for i in range(self.pool_size):
             instance = self._factory()
-            # Call initialize() if handler supports it
-            if hasattr(instance, "initialize") and callable(instance.initialize):
-                await instance.initialize()  # type: ignore[call-arg]
+            await self._initialize_instance(instance)
             self._all_instances.append(instance)
             self._pool.put_nowait(instance)
             logger.debug(
@@ -316,10 +339,7 @@ class HandlerPool:
         # Create and initialize replacement
         try:
             new_instance = self._factory()
-            if hasattr(new_instance, "initialize") and callable(
-                new_instance.initialize
-            ):
-                await new_instance.initialize()  # type: ignore[call-arg]
+            await self._initialize_instance(new_instance)
             self._all_instances.append(new_instance)
             self._pool.put_nowait(new_instance)
         except Exception:

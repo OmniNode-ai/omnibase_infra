@@ -183,6 +183,29 @@ def test_pin_re_matches_intelligence() -> None:
 
 
 @pytest.mark.unit
+def test_fetch_sends_cache_bust_headers() -> None:
+    """fetch_latest_version must send Cache-Control and Pragma headers (OMN-6811)."""
+    import urllib.request
+
+    captured_request: list[urllib.request.Request] = []
+    original_urlopen = urllib.request.urlopen
+
+    def mock_urlopen(req: urllib.request.Request, **kwargs: object) -> object:  # type: ignore[override]
+        captured_request.append(req)
+        raise urllib.error.URLError("test — not a real request")
+
+    with patch.object(urllib.request, "urlopen", side_effect=mock_urlopen):
+        with pytest.raises(RuntimeError):
+            fetch_latest_version("omninode-claude")
+
+    assert len(captured_request) == 1
+    req = captured_request[0]
+    assert isinstance(req, urllib.request.Request)
+    assert "no-cache" in req.get_header("Cache-control")
+    assert req.get_header("Pragma") == "no-cache"
+
+
+@pytest.mark.unit
 def test_rewrite_updates_all_three_plugins() -> None:
     """rewrite_content updates claude, intelligence, and memory pins."""
     content = (

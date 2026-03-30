@@ -1207,6 +1207,8 @@ __all__: list[str] = [
     "get_policy_registry_from_container",
     "get_projection_reader_from_container",
     "wire_infrastructure_services",
+    # LLM handlers (Plan D WS1)
+    "wire_llm_handlers",
     # Registration handlers (OMN-888)
     "wire_registration_handlers",
     # Registration dispatchers (OMN-892)

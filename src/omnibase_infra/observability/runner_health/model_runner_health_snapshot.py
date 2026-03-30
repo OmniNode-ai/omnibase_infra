@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Runner health snapshot model -- frozen point-in-time view of all runners."""
+"""Runner health snapshot model — a point-in-time view of all runners."""
 
 from __future__ import annotations
 
@@ -15,12 +15,12 @@ from omnibase_infra.observability.runner_health.model_runner_status import (
 
 
 class ModelRunnerHealthSnapshot(BaseModel):
-    """Frozen point-in-time health snapshot of all self-hosted runners.
+    """Point-in-time health snapshot for all monitored runners.
 
-    ``expected_runners`` (configured) and ``observed_runners`` (discovered)
-    are modeled separately to prevent semantic overloading.  Source failure
-    tracking (``github_source_ok``, ``docker_source_ok``, ``source_errors``)
-    ensures partial-source degradation is surfaced explicitly.
+    Separates ``expected_runners`` (configured count) from
+    ``observed_runners`` (actually discovered) to prevent semantic
+    overloading.  Tracks per-source failure via ``github_source_ok``,
+    ``docker_source_ok``, and ``source_errors``.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -51,6 +51,3 @@ class ModelRunnerHealthSnapshot(BaseModel):
     host_disk_percent: float = Field(
         default=0.0, description="Host disk usage percentage"
     )
-
-
-__all__ = ["ModelRunnerHealthSnapshot"]

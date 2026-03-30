@@ -1,0 +1,46 @@
+name: linear-relay
+description: Linear webhook relay — publishes feature dashboard events to Kafka
+image: runtime:latest
+layer: runtime
+container_name: omninode-linear-relay
+required_env:
+  - LINEAR_WEBHOOK_SECRET
+hardcoded_env:
+  KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+  LINEAR_RELAY_HOST: 0.0.0.0
+  LINEAR_RELAY_PORT: '8090'
+operational_defaults:
+  ONEX_LOG_LEVEL: INFO
+  ONEX_ENVIRONMENT: local
+ports:
+  external: 8090
+  internal: 8090
+healthcheck:
+  test: curl -sf http://localhost:8090/health
+  interval_s: 30
+  timeout_s: 10
+  retries: 3
+  start_period_s: 20
+depends_on:
+  - service: redpanda
+    condition: service_healthy
+restart: unless-stopped
+resources:
+  cpus: '0.25'
+  memory: 128M
+  cpus_reservation: '0.1'
+  memory_reservation: 64M
+stop_grace_period: 30s
+command:
+  - uvicorn
+  - omniclaude.services.linear_relay.app:create_app
+  - --factory
+  - --host
+  - 0.0.0.0
+  - --port
+  - '8090'
+labels:
+  com.omninode.service: linear-relay
+  com.omninode.layer: runtime
+  com.omninode.version: ${RUNTIME_VERSION:-0.1.0}
+  autoheal: 'true'
