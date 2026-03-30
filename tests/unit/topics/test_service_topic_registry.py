@@ -112,6 +112,20 @@ class TestServiceTopicRegistryResolve:
             == "onex.evt.omnibase-infra.runtime-error.v1"
         )
 
+    def test_resolve_error_triaged(self) -> None:
+        registry = ServiceTopicRegistry.from_defaults()
+        assert (
+            registry.resolve(topic_keys.ERROR_TRIAGED)
+            == "onex.evt.omnibase-infra.error-triaged.v1"
+        )
+
+    def test_resolve_baselines_computed(self) -> None:
+        registry = ServiceTopicRegistry.from_defaults()
+        assert (
+            registry.resolve(topic_keys.BASELINES_COMPUTED)
+            == "onex.evt.omnibase-infra.baselines-computed.v1"
+        )
+
     def test_resolve_unknown_key_raises(self) -> None:
         registry = ServiceTopicRegistry.from_defaults()
         with pytest.raises(KeyError, match="NONEXISTENT"):
@@ -162,7 +176,7 @@ class TestServiceTopicRegistryAllKeys:
     def test_all_keys_count(self) -> None:
         registry = ServiceTopicRegistry.from_defaults()
         keys = registry.all_keys()
-        assert len(keys) == 22  # actual count from topic_constants.py
+        assert len(keys) == 24  # actual count from topic_constants.py
 
     def test_all_keys_match_topic_keys_module(self) -> None:
         """Every key in topic_keys.__all__ must be in the registry."""
