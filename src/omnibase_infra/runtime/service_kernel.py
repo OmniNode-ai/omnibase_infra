@@ -662,6 +662,8 @@ async def bootstrap() -> int:
     wiring_health_checker: WiringHealthChecker | None = None
     wiring_health_task: asyncio.Task[None] | None = None
     triage_unsub: Callable[[], Awaitable[None]] | None = None
+    baselines_task: asyncio.Task[None] | None = None
+    _baselines_pool = None  # asyncpg.Pool | None, assigned inside try block
     correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
 
@@ -1161,8 +1163,7 @@ async def bootstrap() -> int:
         # Runs the 3-phase baselines computation at a configurable interval
         # and emits baselines-computed.v1 snapshot events for omnidash.
         # Creates its own asyncpg pool for isolation from plugin pools.
-        baselines_task: asyncio.Task[None] | None = None
-        _baselines_pool = None  # asyncpg.Pool, assigned inside try block
+        # (baselines_task and _baselines_pool pre-declared before try block)
         if use_kafka:
             try:
                 import asyncpg as _asyncpg
