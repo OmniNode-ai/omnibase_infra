@@ -41,17 +41,29 @@ def _make_db_query_fn(
     """
     if projection_rows is None:
         projection_rows = [
-            {"node_name": "some_node", "current_state": "active"},
+            {"entity_id": "some_id", "current_state": "active", "node_type": "effect"},
         ]
 
+    schema_columns: list[dict[str, Any]] = [
+        {"column_name": "entity_id"},
+        {"column_name": "domain"},
+        {"column_name": "current_state"},
+        {"column_name": "node_type"},
+        {"column_name": "node_version"},
+        {"column_name": "capabilities"},
+    ]
+
     def db_query_fn(sql: str) -> list[dict[str, Any]]:
-        if "WHERE node_name = 'node_registration_orchestrator'" in sql:
+        if "information_schema" in sql:
+            return schema_columns
+        if "WHERE node_type = 'orchestrator'" in sql:
             if orchestrator_state is None:
                 return []
             return [
                 {
-                    "node_name": "node_registration_orchestrator",
+                    "entity_id": "abc-123",
                     "current_state": orchestrator_state,
+                    "node_type": "orchestrator",
                 }
             ]
         # Full projection query

@@ -141,9 +141,12 @@ def _run_registration_probe(
             )
         ]
 
-    # Contract names are internal identifiers from YAML files (not user input).
-    _base = "SELECT node_name, current_state FROM registration_projections WHERE node_name = "
-    sql = _base + "'" + parsed.name + "'"
+    # Query by node_type (not node_name which does not exist in the schema).
+    sql = (
+        "SELECT entity_id, current_state, node_type "
+        "FROM registration_projections "
+        "WHERE node_type = 'orchestrator' LIMIT 1"
+    )
     try:
         rows = config.db_query_fn(sql)
     # ONEX_EXCLUDE: blind_except - boundary probe must not crash on infra errors
@@ -229,7 +232,7 @@ def _run_projection_probe(
         ]
 
     sql = (
-        "SELECT node_name, current_state FROM registration_projections "
+        "SELECT entity_id, current_state, node_type FROM registration_projections "
         "WHERE current_state IS NOT NULL"
     )
     try:

@@ -54,14 +54,52 @@ def _check_registration(
 ) -> ModelContractCheckResult:
     """Check 1: Verify orchestrator node exists in registration_projections.
 
+    Uses node_type='orchestrator' (not nonexistent node_name column).
+    Validates schema via information_schema before querying data.
+
     Args:
         contract_name: Name of the contract being verified.
         db_query_fn: Callable that accepts a SQL string and returns list[dict].
     """
     try:
+        schema_rows = db_query_fn(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' "
+            "AND table_name = 'registration_projections' "
+            "ORDER BY ordinal_position"
+        )
+    # ONEX_EXCLUDE: blind_except - boundary probe must not crash on infra errors
+    except Exception as exc:  # noqa: BLE001
+        return ModelContractCheckResult(
+            check_type=EnumContractCheckType.REGISTRATION,
+            severity=EnumCheckSeverity.REQUIRED,
+            verdict=EnumValidationVerdict.FAIL,
+            evidence=f"Schema introspection failed: {exc}",
+            contract_name=contract_name,
+            message="Registration check failed: could not introspect schema.",
+        )
+
+    actual_columns = {row.get("column_name", "") for row in schema_rows}
+    required_columns = {"entity_id", "current_state", "node_type"}
+    missing = required_columns - actual_columns
+    if missing:
+        return ModelContractCheckResult(
+            check_type=EnumContractCheckType.REGISTRATION,
+            severity=EnumCheckSeverity.REQUIRED,
+            verdict=EnumValidationVerdict.QUARANTINE,
+            evidence=(
+                f"Schema mismatch: columns {sorted(missing)} not found in "
+                f"registration_projections. Actual columns: {sorted(actual_columns)}"
+            ),
+            contract_name=contract_name,
+            message="Registration check quarantined: column assumptions invalid.",
+        )
+
+    try:
         rows = db_query_fn(
-            "SELECT node_name, current_state FROM registration_projections "
-            "WHERE node_name = 'node_registration_orchestrator' LIMIT 1"
+            "SELECT entity_id, current_state, node_type "
+            "FROM registration_projections "
+            "WHERE node_type = 'orchestrator' LIMIT 1"
         )
     # ONEX_EXCLUDE: blind_except - boundary probe must not crash on infra errors
     except Exception as exc:  # noqa: BLE001
@@ -98,7 +136,10 @@ def _check_registration(
         check_type=EnumContractCheckType.REGISTRATION,
         severity=EnumCheckSeverity.REQUIRED,
         verdict=EnumValidationVerdict.FAIL,
-        evidence="No row found for node_registration_orchestrator in registration_projections.",
+        evidence=(
+            "No orchestrator row found in registration_projections "
+            "(node_type='orchestrator')."
+        ),
         contract_name=contract_name,
         message="Registration check failed: orchestrator not registered.",
     )
@@ -239,13 +280,51 @@ def _check_projection_state_via_db(
 ) -> ModelContractCheckResult:
     """Check 4: Query registration_projections for any ACTIVE node.
 
+    Validates schema assumptions via information_schema before querying data.
+    Introspection failure = QUARANTINE (consistent with _check_registration).
+
     Args:
         contract_name: Name of the contract.
         db_query_fn: Callable that accepts SQL and returns list[dict].
     """
     try:
+        schema_rows = db_query_fn(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' "
+            "AND table_name = 'registration_projections' "
+            "ORDER BY ordinal_position"
+        )
+    # ONEX_EXCLUDE: blind_except - boundary probe must not crash on infra errors
+    except Exception as exc:  # noqa: BLE001
+        return ModelContractCheckResult(
+            check_type=EnumContractCheckType.PROJECTION_STATE,
+            severity=EnumCheckSeverity.REQUIRED,
+            verdict=EnumValidationVerdict.QUARANTINE,
+            evidence=f"Schema introspection failed: {exc}",
+            contract_name=contract_name,
+            message="Projection state check quarantined: could not introspect schema.",
+        )
+
+    if schema_rows:
+        actual_columns = {row.get("column_name", "") for row in schema_rows}
+        required = {"current_state"}
+        missing = required - actual_columns
+        if missing:
+            return ModelContractCheckResult(
+                check_type=EnumContractCheckType.PROJECTION_STATE,
+                severity=EnumCheckSeverity.REQUIRED,
+                verdict=EnumValidationVerdict.QUARANTINE,
+                evidence=(
+                    f"Schema mismatch: columns {sorted(missing)} not found. "
+                    f"Actual: {sorted(actual_columns)}"
+                ),
+                contract_name=contract_name,
+                message="Projection state check quarantined: schema assumptions invalid.",
+            )
+
+    try:
         rows = db_query_fn(
-            "SELECT node_name, current_state FROM registration_projections"
+            "SELECT entity_id, current_state, node_type FROM registration_projections"
         )
     # ONEX_EXCLUDE: blind_except - boundary probe must not crash on infra errors
     except Exception as exc:  # noqa: BLE001

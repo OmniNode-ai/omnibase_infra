@@ -155,7 +155,7 @@ def _run_projection_probe(
         ]
 
     rows = config.db_query_fn(
-        "SELECT node_name, current_state FROM registration_projections"
+        "SELECT entity_id, current_state, node_type FROM registration_projections"
     )
     return [check_projection_state(parsed.name, rows)]
 
