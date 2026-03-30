@@ -1,0 +1,98 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# OMN-7005: Integration test requirement check
+#
+# Detects if a PR adds new feature code and warns (not blocks) if no
+# integration test was added or modified. Promotes to hard gate after
+# 14 days (tracked via PROMOTION_DATE).
+#
+# Exemptions: docs-only, config-only, and pure refactor PRs.
+
+name: Integration Test Check
+
+on:
+  pull_request:
+    branches: [main]
+
+# Promotion date: 14 days after first deployment. Update this date
+# when the check is first deployed to track the promotion timeline.
+# After this date, the check becomes a hard gate (exit 1 on missing tests).
+env:
+  PROMOTION_DATE: "2026-04-13"
+
+jobs:
+  check-integration-tests:
+    name: Integration Test Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check for integration tests in PR
+        run: |
+          set -euo pipefail
+
+          # Get changed files in this PR
+          CHANGED_FILES=$(git diff --name-only origin/main...HEAD)
+
+          # Check if this is an exempt PR type
+          DOCS_ONLY=true
+          CONFIG_ONLY=true
+          HAS_FEATURE_CODE=false
+          HAS_INTEGRATION_TEST=false
+
+          for file in $CHANGED_FILES; do
+            # Check for feature code (Python source files)
+            if [[ "$file" == src/*.py ]]; then
+              DOCS_ONLY=false
+              CONFIG_ONLY=false
+              HAS_FEATURE_CODE=true
+            fi
+
+            # Check for integration tests
+            if [[ "$file" == tests/integration/*.py ]] || [[ "$file" == tests/e2e/*.py ]]; then
+              HAS_INTEGRATION_TEST=true
+            fi
+
+            # Check for non-doc, non-config files
+            case "$file" in
+              *.md|*.rst|docs/*|CHANGELOG*) ;;  # docs
+              .github/*|pyproject.toml|Makefile|*.cfg|*.ini|*.yaml|*.yml) ;;  # config
+              *) DOCS_ONLY=false; CONFIG_ONLY=false ;;
+            esac
+          done
+
+          # Exempt PR types
+          if [ "$DOCS_ONLY" = true ]; then
+            echo "Docs-only PR — integration test not required"
+            exit 0
+          fi
+
+          if [ "$CONFIG_ONLY" = true ]; then
+            echo "Config-only PR — integration test not required"
+            exit 0
+          fi
+
+          if [ "$HAS_FEATURE_CODE" = false ]; then
+            echo "No feature code changed — integration test not required"
+            exit 0
+          fi
+
+          # Feature code present — check for integration test
+          if [ "$HAS_INTEGRATION_TEST" = true ]; then
+            echo "Integration test found — requirement satisfied"
+            exit 0
+          fi
+
+          # No integration test found — check promotion status
+          TODAY=$(date +%Y-%m-%d)
+          if [[ "$TODAY" > "$PROMOTION_DATE" ]] || [[ "$TODAY" == "$PROMOTION_DATE" ]]; then
+            echo "::error::Feature PR without integration test. After $PROMOTION_DATE this is a hard gate. Add a test in tests/integration/ or tests/e2e/."
+            exit 1
+          else
+            echo "::warning::Feature PR without integration test. This will become a hard gate after $PROMOTION_DATE. Consider adding a test in tests/integration/ or tests/e2e/."
+            exit 0
+          fi
