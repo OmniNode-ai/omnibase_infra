@@ -1803,6 +1803,13 @@ async def _main() -> None:
         loop.add_signal_handler(sig, _on_signal)
 
     async def _run_once() -> None:
+        from omnibase_infra.services.observability.agent_actions.config_ttl_cleanup import (
+            ConfigTTLCleanup,
+        )
+        from omnibase_infra.services.observability.agent_actions.service_ttl_cleanup import (
+            ServiceTTLCleanup,
+        )
+
         config = ConfigAgentActionsConsumer()
         logger.info(
             "Starting agent actions consumer",
@@ -1816,10 +1823,44 @@ async def _main() -> None:
         )
         consumer = AgentActionsConsumer(config)
         active_consumer[0] = consumer
+        ttl_task: asyncio.Task[None] | None = None
         try:
             await consumer.start()
+
+            # Wire TTL cleanup to run alongside the consumer (OMN-7012).
+            # ServiceTTLCleanup was implemented in OMN-1759 but never wired
+            # to any runtime entrypoint. The consumer's pool is reused.
+            if consumer._pool is not None:
+                ttl_config = ConfigTTLCleanup(
+                    postgres_dsn=config.postgres_dsn,
+                )
+                ttl_service = ServiceTTLCleanup(
+                    pool=consumer._pool,
+                    config=ttl_config,
+                )
+                ttl_task = asyncio.create_task(
+                    ttl_service.run(),
+                    name="ttl-cleanup",
+                )
+                logger.info(
+                    "TTL cleanup service started alongside consumer",
+                    extra={
+                        "retention_days": ttl_config.retention_days,
+                        "interval_seconds": ttl_config.interval_seconds,
+                        "batch_size": ttl_config.batch_size,
+                    },
+                )
+
             await consumer.run()
         finally:
+            # Stop TTL cleanup gracefully before tearing down the consumer
+            if ttl_task is not None:
+                ttl_service.stop()
+                try:
+                    await asyncio.wait_for(ttl_task, timeout=5.0)
+                except TimeoutError:
+                    logger.warning("TTL cleanup task did not stop within 5s")
+                    ttl_task.cancel()
             active_consumer[0] = None
             try:
                 await asyncio.wait_for(consumer.stop(), timeout=10.0)
