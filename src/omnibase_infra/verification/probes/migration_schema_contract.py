@@ -24,6 +24,37 @@ import re
 from pathlib import Path
 
 
+def _split_top_level_commas(text: str) -> list[str]:
+    """Split text on commas that are not inside parentheses or quotes."""
+    segments: list[str] = []
+    depth = 0
+    in_quote = False
+    current: list[str] = []
+    for ch in text:
+        if ch == "'" and not in_quote:
+            in_quote = True
+            current.append(ch)
+        elif ch == "'" and in_quote:
+            in_quote = False
+            current.append(ch)
+        elif in_quote:
+            current.append(ch)
+        elif ch == "(":
+            depth += 1
+            current.append(ch)
+        elif ch == ")":
+            depth -= 1
+            current.append(ch)
+        elif ch == "," and depth == 0:
+            segments.append("".join(current))
+            current = []
+        else:
+            current.append(ch)
+    if current:
+        segments.append("".join(current))
+    return segments
+
+
 def extract_columns_from_migration(ddl: str) -> set[str]:
     """Extract column names from CREATE TABLE and ALTER TABLE DDL.
 
@@ -57,12 +88,18 @@ def extract_columns_from_migration(ddl: str) -> set[str]:
                 depth -= 1
             pos += 1
         body = ddl[start : pos - 1]
-        for line in body.split(","):
-            line = line.strip()
-            if not line:
+        # Split on top-level commas only (respecting nested parens)
+        segments = _split_top_level_commas(body)
+        for segment in segments:
+            segment = segment.strip()
+            if not segment:
+                continue
+            # Strip SQL comments
+            segment = re.sub(r"--[^\n]*", "", segment).strip()
+            if not segment:
                 continue
             # Skip constraints (PRIMARY KEY, UNIQUE, CONSTRAINT, CHECK)
-            first_word = line.split()[0].upper() if line.split() else ""
+            first_word = segment.split()[0].upper() if segment.split() else ""
             if first_word in (
                 "PRIMARY",
                 "UNIQUE",
@@ -72,7 +109,7 @@ def extract_columns_from_migration(ddl: str) -> set[str]:
             ):
                 continue
             # First token is column name
-            col_name = line.split()[0].strip('"')
+            col_name = segment.split()[0].strip('"')
             if col_name and not col_name.startswith("--"):
                 columns.add(col_name)
 
