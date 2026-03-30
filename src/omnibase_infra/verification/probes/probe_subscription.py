@@ -14,7 +14,10 @@ from __future__ import annotations
 import logging
 import subprocess
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from omnibase_infra.models import ModelNodeIdentity
 
 from omnibase_infra.enums.enum_check_severity import EnumCheckSeverity
 from omnibase_infra.enums.enum_contract_check_type import EnumContractCheckType
@@ -79,15 +82,22 @@ def _rpk_fallback(group_id: str) -> set[str]:
     return topics
 
 
-def _derive_consumer_group_id(contract_name: str) -> str:
+def _derive_consumer_group_id(
+    contract_name: str,
+    *,
+    identity: ModelNodeIdentity | None = None,
+) -> str:
     """Derive the consumer group ID from a contract name.
 
-    Uses compute_consumer_group_id with a ModelNodeIdentity constructed from
-    the contract name. Falls back to a convention-based derivation if the
-    identity model cannot be constructed.
+    Uses compute_consumer_group_id with a ModelNodeIdentity. When identity is
+    provided, uses it directly. Otherwise attempts rpk discovery; if rpk is
+    unavailable, falls back to unknown markers (fabricated identity = always
+    QUARANTINE-grade).
 
     Args:
         contract_name: Contract name (e.g., "node_registration_orchestrator").
+        identity: Optional ModelNodeIdentity. If None, attempts rpk discovery
+            then falls back to unknown markers.
 
     Returns:
         The canonical consumer group ID.
@@ -96,13 +106,67 @@ def _derive_consumer_group_id(contract_name: str) -> str:
     from omnibase_infra.models import ModelNodeIdentity
     from omnibase_infra.utils.util_consumer_group import compute_consumer_group_id
 
-    identity = ModelNodeIdentity(
-        env="dev",
-        service="omnibase_infra",
+    if identity is not None:
+        return compute_consumer_group_id(identity, EnumConsumerGroupPurpose.CONSUME)
+
+    # Attempt rpk discovery for runtime identity
+    discovered_identity = _discover_identity_via_rpk(contract_name)
+    if discovered_identity is not None:
+        return compute_consumer_group_id(
+            discovered_identity, EnumConsumerGroupPurpose.CONSUME
+        )
+
+    # Fallback: fabricated identity with unknown markers
+    fallback_identity = ModelNodeIdentity(
+        env="unknown",
+        service="unknown",
         node_name=contract_name,
-        version="v1",
+        version="v0",
     )
-    return compute_consumer_group_id(identity, EnumConsumerGroupPurpose.CONSUME)
+    return compute_consumer_group_id(
+        fallback_identity, EnumConsumerGroupPurpose.CONSUME
+    )
+
+
+def _discover_identity_via_rpk(contract_name: str) -> ModelNodeIdentity | None:
+    """Attempt to discover node identity via rpk group list.
+
+    Returns:
+        A ModelNodeIdentity if discovery succeeds, None otherwise.
+    """
+    try:
+        result = subprocess.run(
+            ["rpk", "group", "list", "--format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+
+        import json
+
+        groups = json.loads(result.stdout)
+        # Look for a consumer group matching the contract name
+        for group in groups if isinstance(groups, list) else []:
+            group_name = group.get("name", "") if isinstance(group, dict) else ""
+            if contract_name in group_name:
+                # Parse identity from group name segments
+                parts = group_name.split(".")
+                if len(parts) >= 5:
+                    from omnibase_infra.models import ModelNodeIdentity
+
+                    return ModelNodeIdentity(
+                        env=parts[0],
+                        service=parts[1],
+                        node_name=parts[2],
+                        version=parts[4],
+                    )
+    # ONEX_EXCLUDE: blind_except - rpk discovery is best-effort; any failure returns None
+    except Exception:  # noqa: BLE001
+        pass
+    return None
 
 
 def check_subscriptions(
