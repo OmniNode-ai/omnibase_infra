@@ -65,6 +65,7 @@ from omnibase_infra.enums.enum_adjudicator_state import EnumAdjudicatorState
 from omnibase_infra.enums.enum_any_type_violation import EnumAnyTypeViolation
 from omnibase_infra.enums.enum_auth_decision import EnumAuthDecision
 from omnibase_infra.enums.enum_auth_source import EnumAuthSource
+from omnibase_infra.enums.enum_auto_eval_task_type import EnumAutoEvalTaskType
 from omnibase_infra.enums.enum_backend_type import EnumBackendType
 from omnibase_infra.enums.enum_capture_outcome import EnumCaptureOutcome
 from omnibase_infra.enums.enum_capture_state import EnumCaptureState
@@ -136,6 +137,7 @@ __all__: list[str] = [
     "EnumAdjudicatorState",
     "EnumAnyTypeViolation",
     "EnumAuthDecision",
+    "EnumAutoEvalTaskType",
     "EnumAuthSource",
     "EnumBackendType",
     "EnumCostTier",

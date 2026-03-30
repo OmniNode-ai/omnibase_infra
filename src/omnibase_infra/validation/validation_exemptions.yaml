@@ -2585,6 +2585,27 @@ pattern_exemptions:
       - CLAUDE.md (Pydantic Model Standards)
     ticket: OMN-2239
   # ==========================================================================
+  # Auto-Eval Model Exemptions (OMN-6795) - model_id is an LLM model name
+  # ==========================================================================
+  # model_id is an LLM model name (e.g., "qwen3-coder-30b", "deepseek-r1-32b"),
+  # not a UUID entity reference. Follows same pattern as model_cost_estimate.
+  - file_pattern: 'model_auto_eval_task\.py'
+    violation_pattern: "Field 'model_id' should use UUID"
+    reason: >
+      model_id is a human-readable LLM model name (e.g., 'qwen3-coder-30b'), not a UUID. The _id suffix triggers a false positive UUID suggestion. Follows same pattern as ModelCostEstimate.
+
+    documentation:
+      - CLAUDE.md (Pydantic Model Standards)
+    ticket: OMN-6795
+  - file_pattern: 'model_auto_eval_result\.py'
+    violation_pattern: "Field 'model_id' should use UUID"
+    reason: >
+      model_id is a human-readable LLM model name (e.g., 'qwen3-coder-30b'), not a UUID. Result carries model_id from the originating task. Follows same pattern as ModelCostEstimate.
+
+    documentation:
+      - CLAUDE.md (Pydantic Model Standards)
+    ticket: OMN-6795
+  # ==========================================================================
   # Gmail Message ID Exemptions (OMN-2729)
   # ==========================================================================
   # Gmail message IDs and thread IDs are opaque string identifiers assigned

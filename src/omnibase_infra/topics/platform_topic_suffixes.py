@@ -457,6 +457,17 @@ Producer: omnibase_infra baselines compute node (TODO(OMN-4296): implement)
 Consumer: omnidash /baselines dashboard
 """
 
+SUFFIX_EVAL_COMPLETED: str = "onex.evt.omnibase-infra.eval-completed.v1"
+"""Topic suffix for autonomous LLM evaluation completed events (OMN-6798).
+
+Published by ServiceAutoEvalRunner after each eval task completes.
+Each event carries a ModelAutoEvalResult payload with scores, latency,
+token usage, and cost.
+
+Producer: ServiceAutoEvalRunner (OMN-6796)
+Consumer: omnidash /eval-results dashboard (future)
+"""
+
 SUFFIX_WIRING_HEALTH_SNAPSHOT: str = "onex.evt.omnibase-infra.wiring-health-snapshot.v1"
 """Topic suffix for wiring health snapshot events.
 
@@ -721,6 +732,15 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(
         suffix=SUFFIX_GITHUB_POST_MERGE_RESULT,
         partitions=1,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
+    # Eval completed events (3 partitions — low-throughput, per-eval-task, OMN-6798)
+    ModelTopicSpec(
+        suffix=SUFFIX_EVAL_COMPLETED,
+        partitions=3,
         kafka_config={
             "retention.ms": "604800000",
             "cleanup.policy": "delete",
