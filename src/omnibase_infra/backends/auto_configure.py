@@ -30,17 +30,15 @@ logger = logging.getLogger(__name__)
 def _import_event_bus_inmemory() -> type:
     """Import EventBusInmemory from core (preferred) or infra (fallback)."""
     try:
-        from omnibase_core.event_bus.event_bus_inmemory import (  # type: ignore[import-not-found]
+        from omnibase_core.event_bus.event_bus_inmemory import (  # type: ignore[import-not-found,no-any-return,unused-ignore]
             EventBusInmemory as _Cls,
         )
-
-        return _Cls  # type: ignore[no-any-return]
     except ImportError:
         from omnibase_infra.event_bus.event_bus_inmemory import (
             EventBusInmemory as _Cls,
         )
 
-        return _Cls
+    return _Cls  # type: ignore[no-any-return]
 
 
 # Probe functions keyed by entry point name
