@@ -584,8 +584,8 @@ async def bootstrap() -> int:
         8. Start HTTP health server for Docker/Kubernetes health probes
         9. Start runtime (Kafka consumer joins — may take 10+ min)
         10. Run runtime until shutdown signal received
-        10. Perform graceful shutdown with configurable timeout
-        11. Clean up resources in finally block to prevent resource leaks
+        11. Perform graceful shutdown with configurable timeout
+        12. Clean up resources in finally block to prevent resource leaks
 
     Error Handling:
         - Configuration errors: Logged with full context and correlation_id
