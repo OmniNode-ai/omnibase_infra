@@ -66,11 +66,11 @@ async def start_llm_inference_consumer(
     from omnibase_infra.adapters.llm.adapter_llm_provider_openai import (
         TransportHolderLlmHttp,
     )
-    from omnibase_infra.models.llm.model_llm_inference_request import (
-        ModelLlmInferenceRequest,
-    )
     from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
         HandlerLlmOpenaiCompatible,
+    )
+    from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request import (
+        ModelLlmInferenceRequest,
     )
 
     # Create transport holder (provides _execute_llm_http_call) and handler
