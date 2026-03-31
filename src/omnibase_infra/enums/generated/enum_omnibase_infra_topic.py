@@ -24,6 +24,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_BASELINES_COMPUTED_V1 = "onex.evt.omnibase-infra.baselines-computed.v1"  # onex.evt.omnibase-infra.baselines-computed.v1
     EVT_CONSUMER_HEALTH_V1 = "onex.evt.omnibase-infra.consumer-health.v1"  # onex.evt.omnibase-infra.consumer-health.v1
     EVT_DB_ERROR_V1 = "onex.evt.omnibase-infra.db-error.v1"  # onex.evt.omnibase-infra.db-error.v1
+    EVT_EVAL_COMPLETED_V1 = "onex.evt.omnibase-infra.eval-completed.v1"  # onex.evt.omnibase-infra.eval-completed.v1
     EVT_GMAIL_INTENT_RECEIVED_V1 = "onex.evt.omnibase-infra.gmail-intent-received.v1"  # onex.evt.omnibase-infra.gmail-intent-received.v1
     EVT_LLM_CALL_COMPLETED_V1 = "onex.evt.omnibase-infra.llm-call-completed.v1"  # onex.evt.omnibase-infra.llm-call-completed.v1
     EVT_ROW_COUNT_DIAGNOSTIC_V1 = "onex.evt.omnibase-infra.row-count-diagnostic.v1"  # onex.evt.omnibase-infra.row-count-diagnostic.v1
