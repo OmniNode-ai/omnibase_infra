@@ -1,3 +1,27 @@
+## v0.31.0 (2026-03-31)
+
+### Added
+- feat: runtime contract compliance verification [OMN-7040] (#1064)
+- feat: add TOPIC_EVAL_COMPLETED constant [OMN-6798] (#1080)
+- feat: node-based LLM delegation — Kafka consumer, GLM, Gemini/Codex CLI [OMN-7103] (#1083)
+- feat: infra unification — backend probes, registry auto-config, inmemory migration [OMN-7075/7076/7077] (#1071)
+
+### Fixed
+- fix: add node_name field to infra ModelNodeIntrospectionEvent [OMN-7088] (#1084)
+- fix: add metadata.description to all node contract YAMLs [OMN-7089] (#1081)
+- fix(topics): register 4 missing topics in provisioner [OMN-7114] (#1082)
+
+### Changed
+- refactor(event_bus): re-export EventBusInmemory from core [OMN-7062] (#1067)
+
+### Dependencies
+- chore(deps): bump actions/checkout from 4 to 6 (#1075)
+- chore(deps): bump actions/upload-artifact from 4 to 7 (#1077)
+- chore(deps): update opentelemetry-instrumentation-asyncpg requirement (#1072)
+- chore(deps): update opentelemetry-instrumentation-redis requirement (#1073)
+- chore(deps): update fastapi requirement (#1074)
+- chore(deps-dev): update pytest-split requirement (#1078)
+
 ## v0.30.1 (2026-03-31)
 
 ### Fixed
