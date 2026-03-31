@@ -199,7 +199,7 @@ class PluginLlm:
                 start_llm_inference_consumer(
                     event_bus=event_bus,
                     endpoints=self._endpoints,
-                    correlation_id=config.correlation_id,
+                    correlation_id=str(config.correlation_id),
                 ),
                 name="llm-inference-consumer",
             )

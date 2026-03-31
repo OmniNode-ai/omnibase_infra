@@ -194,7 +194,7 @@ async def start_llm_inference_consumer(
                 await event_bus.publish(
                     _PUBLISH_TOPIC_INTELLIGENCE,
                     key=msg_correlation_id,
-                    value=response_payload,
+                    value=json.dumps(response_payload).encode(),
                 )
 
             logger.info(
