@@ -36,7 +36,15 @@ from __future__ import annotations
 from omnibase_infra.event_bus.enum_topic_validation_status import (
     EnumTopicValidationStatus,
 )
-from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+
+# OMN-7077: EventBusInmemory is migrating to omnibase_core.
+# Try core first; fall back to infra until core Part 1 merges.
+try:
+    from omnibase_core.event_bus.event_bus_inmemory import EventBusInmemory
+except ImportError:
+    from omnibase_infra.event_bus.event_bus_inmemory import (
+        EventBusInmemory,  # type: ignore[assignment]
+    )
 from omnibase_infra.event_bus.model_topic_validation_result import (
     ModelTopicValidationResult,
 )

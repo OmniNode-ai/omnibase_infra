@@ -26,6 +26,19 @@ from omnibase_infra.backends.model_probe_result import ModelProbeResult
 
 logger = logging.getLogger(__name__)
 
+
+def _import_event_bus_inmemory() -> type:
+    """Import EventBusInmemory from core (preferred) or infra (fallback)."""
+    try:
+        from omnibase_core.event_bus.event_bus_inmemory import EventBusInmemory
+
+        return EventBusInmemory
+    except ImportError:
+        from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+
+        return EventBusInmemory
+
+
 # Probe functions keyed by entry point name
 _PROBE_REGISTRY: dict[str, object] = {
     "event_bus_kafka": probe_kafka,
@@ -86,9 +99,8 @@ def select_event_bus(
     bus_type_override = os.getenv("ONEX_EVENT_BUS_TYPE", "").lower()
     if bus_type_override == "inmemory":
         logger.info("Using EventBusInmemory (ONEX_EVENT_BUS_TYPE override)")
-        from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-
-        return EventBusInmemory(
+        _InmemoryBus = _import_event_bus_inmemory()
+        return _InmemoryBus(
             environment=environment,
             group=consumer_group,
         )
@@ -135,9 +147,8 @@ def select_event_bus(
         "Kafka probe: %s — falling back to EventBusInmemory",
         kafka_result.reason,
     )
-    from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-
-    return EventBusInmemory(
+    _InmemoryBus = _import_event_bus_inmemory()
+    return _InmemoryBus(
         environment=environment,
         group=consumer_group,
     )

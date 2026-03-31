@@ -300,6 +300,14 @@ repos:
         pass_filenames: false
         types: [python]
         stages: [pre-commit]
+      # OMN-7077: Prevent new direct imports of EventBusInmemory from infra path
+      - id: no-infra-inmemory-import
+        name: Block infra-path EventBusInmemory imports (OMN-7077)
+        entry: bash scripts/validation/check_no_infra_inmemory_import.sh
+        language: system
+        pass_filenames: false
+        types: [python]
+        stages: [pre-commit]
       # OMN-3530: Ensure writer_postgres.py / handler_*_postgres.py changes include a migration
       - id: onex-check-migration-required
         name: Writer-Migration Coupling Check

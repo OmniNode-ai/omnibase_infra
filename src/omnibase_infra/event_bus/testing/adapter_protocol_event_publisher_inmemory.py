@@ -61,7 +61,10 @@ from omnibase_infra.event_bus.testing.model_publisher_metrics import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+    # OMN-7077: EventBusInmemory migrating to omnibase_core
+    from omnibase_infra.event_bus.event_bus_inmemory import (
+        EventBusInmemory,
+    )
     from omnibase_infra.types.typed_dict import TypedDictEnvelopeBuildParams
     from omnibase_spi.protocols.types.protocol_core_types import ContextValue
 

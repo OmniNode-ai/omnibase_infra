@@ -63,7 +63,7 @@ class ServiceResolutionEventPublisher:
         _topic: Target topic for resolution events.
 
     Example:
-        >>> from omnibase_infra.event_bus import EventBusInmemory
+        >>> from omnibase_infra.event_bus import EventBusInmemory  # OMN-7077: migrating to core
         >>> from omnibase_infra.services.resolution import (
         ...     ServiceResolutionEventPublisher,
         ...     ModelResolutionEventLocal,
