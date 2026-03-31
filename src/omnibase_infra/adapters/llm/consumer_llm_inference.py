@@ -158,6 +158,7 @@ async def start_llm_inference_consumer(
             request = ModelLlmInferenceRequest(
                 base_url=base_url.rstrip("/"),
                 model=model_name or "auto",
+                operation_type="chat_completion",
                 messages=messages,
                 max_tokens=payload.get("max_tokens", 2048),
                 temperature=payload.get("temperature", 0.3),
