@@ -12,10 +12,11 @@ from unittest.mock import patch
 
 import pytest
 
-from omnibase_infra.backends.auto_configure import select_event_bus
+from omnibase_infra.backends.auto_configure import (
+    select_event_bus,
+)
 from omnibase_infra.backends.enum_probe_state import EnumProbeState
 from omnibase_infra.backends.model_probe_result import ModelProbeResult
-from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 
 pytestmark = pytest.mark.unit
 
@@ -30,16 +31,20 @@ class TestKernelRegistryResolution:
             reason="TCP connect to localhost:59999 failed",
             backend_label="event_bus_kafka",
         )
-        with patch(
-            "omnibase_infra.backends.auto_configure.probe_kafka",
-            return_value=kafka_probe_result,
+        with (
+            patch(
+                "omnibase_infra.backends.auto_configure.probe_kafka",
+                return_value=kafka_probe_result,
+            ),
+            patch.dict("os.environ", {}, clear=False) as env,
         ):
+            env.pop("ONEX_EVENT_BUS_TYPE", None)
             bus = select_event_bus(
                 kafka_bootstrap_servers=None,
                 environment="test",
                 consumer_group="test-group",
             )
-            assert isinstance(bus, EventBusInmemory)
+            assert type(bus).__name__ == "EventBusInmemory"
 
     def test_registry_resolves_kafka_when_healthy(self) -> None:
         """When Kafka is healthy, kernel selects EventBusKafka."""
@@ -48,18 +53,20 @@ class TestKernelRegistryResolution:
             reason="Kafka healthy with 5 topics, brokers match config",
             backend_label="event_bus_kafka",
         )
-        with patch(
-            "omnibase_infra.backends.auto_configure.probe_kafka",
-            return_value=kafka_probe_result,
+        with (
+            patch(
+                "omnibase_infra.backends.auto_configure.probe_kafka",
+                return_value=kafka_probe_result,
+            ),
+            patch.dict("os.environ", {}, clear=False) as env,
         ):
-            from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
-
+            env.pop("ONEX_EVENT_BUS_TYPE", None)
             bus = select_event_bus(
                 kafka_bootstrap_servers="localhost:9092",
                 environment="test",
                 consumer_group="test-group",
             )
-            assert isinstance(bus, EventBusKafka)
+            assert type(bus).__name__ == "EventBusKafka"
 
     def test_env_override_forces_inmemory(self) -> None:
         """ONEX_EVENT_BUS_TYPE=inmemory forces in-memory regardless of probe."""
@@ -69,7 +76,7 @@ class TestKernelRegistryResolution:
                 environment="test",
                 consumer_group="test-group",
             )
-            assert isinstance(bus, EventBusInmemory)
+            assert type(bus).__name__ == "EventBusInmemory"
 
     def test_reachable_with_explicit_servers_uses_kafka(self) -> None:
         """When Kafka is REACHABLE and bootstrap_servers set, still try Kafka."""
@@ -78,15 +85,17 @@ class TestKernelRegistryResolution:
             reason="TCP reachable but topic list failed",
             backend_label="event_bus_kafka",
         )
-        with patch(
-            "omnibase_infra.backends.auto_configure.probe_kafka",
-            return_value=kafka_probe_result,
+        with (
+            patch(
+                "omnibase_infra.backends.auto_configure.probe_kafka",
+                return_value=kafka_probe_result,
+            ),
+            patch.dict("os.environ", {}, clear=False) as env,
         ):
-            from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
-
+            env.pop("ONEX_EVENT_BUS_TYPE", None)
             bus = select_event_bus(
                 kafka_bootstrap_servers="localhost:9092",
                 environment="test",
                 consumer_group="test-group",
             )
-            assert isinstance(bus, EventBusKafka)
+            assert type(bus).__name__ == "EventBusKafka"
