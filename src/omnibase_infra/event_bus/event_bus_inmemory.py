@@ -850,7 +850,7 @@ class EventBusInmemory:
 # omnibase_core has not yet published the event_bus module (e.g., CI pinned
 # to omnibase-core<0.37).
 try:
-    from omnibase_core.event_bus.event_bus_inmemory import (  # type: ignore[no-redef]
+    from omnibase_core.event_bus.event_bus_inmemory import (  # type: ignore[no-redef,assignment]
         EventBusInmemory,
     )
 except ImportError:
