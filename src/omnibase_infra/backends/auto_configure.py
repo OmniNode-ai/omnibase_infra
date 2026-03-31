@@ -38,7 +38,7 @@ def _import_event_bus_inmemory() -> type:
             EventBusInmemory as _Cls,
         )
 
-    return _Cls  # type: ignore[no-any-return]
+    return _Cls
 
 
 # Probe functions keyed by entry point name
