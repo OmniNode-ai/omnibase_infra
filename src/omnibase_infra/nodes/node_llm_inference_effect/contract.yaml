@@ -53,12 +53,24 @@ feature_flags:
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
-    # OpenAI-Compatible Inference Handler
+    # OpenAI-Compatible Inference Handler (vLLM, OpenAI, GLM/Z.AI)
     - operation: "inference.openai_compatible"
       handler:
         name: "HandlerLlmOpenaiCompatible"
         module: "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible"
-      description: "Execute LLM inference via OpenAI-compatible API (vLLM, OpenAI, etc.)"
+      description: "Execute LLM inference via OpenAI-compatible API (vLLM, OpenAI, GLM/Z.AI, etc.)"
+    # Gemini CLI Subprocess Handler
+    - operation: "inference.gemini_cli"
+      handler:
+        name: "HandlerLlmCliSubprocess"
+        module: "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess"
+      description: "Execute LLM inference via Gemini CLI subprocess (gemini -p)"
+    # Codex CLI Subprocess Handler
+    - operation: "inference.codex_cli"
+      handler:
+        name: "HandlerLlmCliSubprocess"
+        module: "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess"
+      description: "Execute LLM inference via Codex CLI subprocess (codex exec)"
   execution_mode: "single"
   max_timeout_seconds: 600
 # =============================================================================

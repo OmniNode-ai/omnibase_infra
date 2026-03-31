@@ -182,6 +182,18 @@ class ModelLlmInferenceRequest(BaseModel):
         description="Maximum retry attempts on transient failures.",
     )
 
+    # -- Auth --
+
+    api_key: str | None = Field(
+        default=None,
+        description="API key for authenticated endpoints (GLM, cloud APIs). "
+        "When set, handler injects Authorization: Bearer header.",
+    )
+    extra_headers: dict[str, str] = Field(
+        default_factory=dict,
+        description="Additional HTTP headers to include in the request.",
+    )
+
     # -- Tracing --
 
     correlation_id: UUID = Field(

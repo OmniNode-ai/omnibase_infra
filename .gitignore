@@ -292,3 +292,4 @@ docs/recovery/
 # Generated compose (catalog CLI output)
 docker/docker-compose.generated.yml
 .onex/
+.fastembed_cache/

@@ -458,6 +458,15 @@ class HandlerLlmOpenaiCompatible:
             raise ValueError(msg)
 
         base = request.base_url.rstrip("/")
+        # If base_url already includes a version path (e.g., /v4 for Z.AI GLM),
+        # append only the operation suffix without the /v1 prefix.
+        # Standard vLLM/OpenAI endpoints use base_url without version.
+        import re
+
+        if re.search(r"/v\d+$", base):
+            # base_url ends with /vN — strip /v1 from the operation path
+            path_no_version = re.sub(r"^/v\d+", "", path)
+            return f"{base}{path_no_version}"
         return f"{base}{path}"
 
     # ── Payload building ─────────────────────────────────────────────────
