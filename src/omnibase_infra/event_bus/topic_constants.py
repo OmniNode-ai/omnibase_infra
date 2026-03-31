@@ -462,7 +462,6 @@ __all__ = [
     "DLQ_INTENT_TOPIC_SUFFIX",
     "DLQ_TOPIC_PATTERN",
     "DLQ_TOPIC_VERSION",
-    "TOPIC_EVAL_COMPLETED",
     "_DLQ_PREFIX",
     "build_dlq_topic",
     "derive_dlq_topic_for_event_type",
