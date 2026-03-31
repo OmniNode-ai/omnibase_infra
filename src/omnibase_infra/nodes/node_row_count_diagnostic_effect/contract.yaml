@@ -46,6 +46,7 @@ published_events:
     message_category: "EVENT"
     description: "Periodic database row count diagnostic snapshot"
 metadata:
+  description: "Publishes periodic PostgreSQL table row count snapshots to the event bus for capacity monitoring"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-31"
