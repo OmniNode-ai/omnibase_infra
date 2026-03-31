@@ -1,0 +1,133 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeDelegationOrchestrator
+#
+# Coordinates the full delegation workflow: receive request -> invoke
+# routing reducer -> invoke LLM inference effect -> invoke quality
+# gate -> emit completion or failure.
+#
+# FSM States: RECEIVED -> ROUTED -> INFERENCE_COMPLETED -> GATE_EVALUATED -> COMPLETED | FAILED
+#
+# Related Tickets:
+#   - OMN-7040: Node-based delegation pipeline
+name: "node_delegation_orchestrator"
+contract_name: "node_delegation_orchestrator"
+node_name: "node_delegation_orchestrator"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_type: "ORCHESTRATOR_GENERIC"
+description: >
+  Orchestrator node that coordinates the full delegation workflow through a correlation_id-keyed FSM: receive delegation request, invoke routing reducer, invoke LLM inference effect, invoke quality gate reducer, then emit delegation-completed or delegation-failed. Replay-safe with explicit terminal states (COMPLETED, FAILED).
+
+input_model:
+  name: "ModelDelegationRequest"
+  module: "omnibase_infra.nodes.node_delegation_orchestrator.models"
+  description: "Delegation command with prompt, task_type, and context."
+output_model:
+  name: "ModelDelegationResult"
+  module: "omnibase_infra.nodes.node_delegation_orchestrator.models"
+  description: "Delegation outcome with content, quality assessment, and metrics."
+event_bus:
+  subscribe_topics:
+    - topic: "onex.cmd.omnibase-infra.delegation-request.v1"
+      description: "Incoming delegation requests from /delegate skill"
+      payload_model: "ModelDelegationRequest"
+    - topic: "onex.evt.omnibase-infra.routing-decision.v1"
+      description: "Routing decisions from the delegation routing reducer"
+      payload_model: "ModelRoutingDecision"
+    - topic: "onex.evt.omnibase-infra.quality-gate-result.v1"
+      description: "Quality gate results from the delegation quality gate reducer"
+      payload_model: "ModelQualityGateResult"
+  publish_topics:
+    - topic: "onex.evt.omnibase-infra.delegation-completed.v1"
+      description: "Successful delegation completion with full result"
+      payload_model: "ModelDelegationResult"
+    - topic: "onex.evt.omnibase-infra.delegation-failed.v1"
+      description: "Failed delegation with reason and fallback recommendation"
+      payload_model: "ModelDelegationResult"
+fsm:
+  states:
+    - RECEIVED
+    - ROUTED
+    - INFERENCE_COMPLETED
+    - GATE_EVALUATED
+    - COMPLETED
+    - FAILED
+  initial_state: RECEIVED
+  terminal_states:
+    - COMPLETED
+    - FAILED
+  transitions:
+    - from: RECEIVED
+      to: ROUTED
+      trigger: "routing-decision received"
+    - from: ROUTED
+      to: INFERENCE_COMPLETED
+      trigger: "inference response received"
+    - from: INFERENCE_COMPLETED
+      to: GATE_EVALUATED
+      trigger: "quality gate result received"
+    - from: GATE_EVALUATED
+      to: COMPLETED
+      trigger: "quality gate passed"
+    - from: GATE_EVALUATED
+      to: FAILED
+      trigger: "quality gate failed"
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    - operation: "delegation.orchestrate"
+      handler_class: "HandlerDelegationWorkflow"
+      handler_module: "omnibase_infra.nodes.node_delegation_orchestrator.handlers.handler_delegation_workflow"
+      description: "Coordinate delegation through routing, inference, and quality gate"
+      input_model:
+        name: "ModelDelegationRequest"
+        module: "omnibase_infra.nodes.node_delegation_orchestrator.models"
+        description: "Delegation request to orchestrate."
+error_handling:
+  retry_policy:
+    max_retries: 1
+    initial_delay_ms: 1000
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "InferenceTimeoutError"
+  error_types:
+    - name: "OrchestrationError"
+      description: "Unexpected error during delegation orchestration"
+      recoverable: false
+    - name: "InferenceTimeoutError"
+      description: "LLM inference did not respond within timeout"
+      recoverable: true
+    - name: "InvalidStateTransitionError"
+      description: "Attempted invalid FSM state transition"
+      recoverable: false
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  checks:
+    - name: "orchestrator_handler_loaded"
+      type: "handler"
+      critical: true
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-03-30"
+  tags:
+    - orchestrator
+    - delegation
+    - fsm
+    - workflow
+    - llm
+  related_tickets:
+    - "OMN-7040"
