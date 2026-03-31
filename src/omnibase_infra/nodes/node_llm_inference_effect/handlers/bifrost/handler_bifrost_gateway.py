@@ -116,6 +116,24 @@ logger = logging.getLogger(__name__)
 _HMAC_HEADER_NAME = "X-ONEX-Signature"
 
 
+def _safe_invoke_callback(
+    callback: Callable[[ModelBifrostResponse], None] | None,
+    response: ModelBifrostResponse,
+    correlation_id: UUID,
+) -> None:
+    """Invoke a routing decision callback if provided, swallowing errors."""
+    if callback is None:
+        return
+    try:
+        callback(response)
+    except Exception:  # noqa: BLE001 — callback must never crash the gateway
+        logger.warning(
+            "Bifrost: on_routing_decision callback failed. corr=%s",
+            correlation_id,
+            exc_info=True,
+        )
+
+
 class ProtocolShadowPolicy(Protocol):
     """Protocol for learned routing policies used in shadow mode.
 
@@ -240,6 +258,7 @@ class HandlerBifrostGateway:  # ONEX_EXCLUDE: method_count - gateway is a single
         shadow_config: ModelBifrostShadowConfig | None = None,
         shadow_policy: ProtocolShadowPolicy | None = None,
         shadow_decision_callback: ShadowDecisionCallback | None = None,
+        on_routing_decision: Callable[[ModelBifrostResponse], None] | None = None,
     ) -> None:
         """Initialize the bifrost gateway with config and inference handler.
 
@@ -255,9 +274,14 @@ class HandlerBifrostGateway:  # ONEX_EXCLUDE: method_count - gateway is a single
             shadow_decision_callback: Async callback invoked with each
                 shadow decision log entry. Typically publishes to Kafka.
                 Required when shadow_config.enabled is True.
+            on_routing_decision: Optional synchronous callback invoked
+                with the ``ModelBifrostResponse`` after every routing
+                decision. Injected by the delegation orchestrator to
+                emit routing decision events. None means no-op.
         """
         self._config = config
         self._inference_handler = inference_handler
+        self._on_routing_decision = on_routing_decision
         # Per-backend circuit breaker state — lazily created on first access.
         self._circuit_states: dict[str, CircuitBreakerState] = defaultdict(
             CircuitBreakerState
@@ -391,7 +415,7 @@ class HandlerBifrostGateway:  # ONEX_EXCLUDE: method_count - gateway is a single
                 retry_count,
                 correlation_id,
             )
-            return ModelBifrostResponse(
+            response = ModelBifrostResponse(
                 backend_selected="",  # empty — no backend served on total failure
                 matched_rule_id=matched_rule_id,
                 latency_ms=latency_ms,
@@ -405,6 +429,8 @@ class HandlerBifrostGateway:  # ONEX_EXCLUDE: method_count - gateway is a single
                     f"operation_type={request.operation_type.value}"
                 ),
             )
+            _safe_invoke_callback(self._on_routing_decision, response, correlation_id)
+            return response
 
         logger.info(
             "Bifrost: request served. tenant=%s operation=%s backend=%s rule=%s "
@@ -418,7 +444,7 @@ class HandlerBifrostGateway:  # ONEX_EXCLUDE: method_count - gateway is a single
             correlation_id,
         )
 
-        return ModelBifrostResponse(
+        response = ModelBifrostResponse(
             backend_selected=backend_selected,
             matched_rule_id=matched_rule_id,
             latency_ms=latency_ms,
@@ -428,6 +454,8 @@ class HandlerBifrostGateway:  # ONEX_EXCLUDE: method_count - gateway is a single
             inference_response=result,
             success=True,
         )
+        _safe_invoke_callback(self._on_routing_decision, response, correlation_id)
+        return response
 
     # ── Shadow mode ──────────────────────────────────────────────────────
 

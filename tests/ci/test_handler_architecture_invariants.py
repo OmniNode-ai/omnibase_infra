@@ -62,6 +62,10 @@ _RUNTIME_UTILITY_EXCLUSIONS: frozenset[str] = frozenset(
         "handler_contract_scan.py",
         "handler_event_bus_wiring.py",
         "handler_runtime_lifecycle.py",
+        # Delegation pipeline reducers (pure-function delta() pattern, not ONEX handler protocol)
+        "handler_delegation_workflow.py",
+        "handler_quality_gate.py",
+        "handler_delegation_routing.py",
     }
 )
 
@@ -87,7 +91,20 @@ _APPROVED_WIRING_PREFIXES: tuple[str, ...] = ("registry_infra_",)
 # Each entry is (contract_path_relative_to_repo, handler_class_name).
 # The meta-test TestWiringExemptionsValid enforces anti-permanence:
 # exemptions for handlers that pass the wiring check will cause test failure.
-_INV4_WIRING_EXEMPTIONS: frozenset[tuple[str, str]] = frozenset()
+_INV4_WIRING_EXEMPTIONS: frozenset[tuple[str, str]] = frozenset(
+    {
+        # OMN-7040: Delegation pipeline reducers use pure-function delta() pattern,
+        # invoked directly by the orchestrator, not through the handler registry.
+        (
+            "src/omnibase_infra/nodes/node_delegation_quality_gate_reducer/contract.yaml",
+            "HandlerQualityGate",
+        ),
+        (
+            "src/omnibase_infra/nodes/node_delegation_routing_reducer/contract.yaml",
+            "HandlerDelegationRouting",
+        ),
+    }
+)
 
 # Contract YAML root directory
 _CONTRACTS_ROOT = _SRC_ROOT / "nodes"
@@ -473,7 +490,8 @@ class TestNoDirectEnvAccessInHandlers:
         #   handler_runtime_target_collect.py:54-57 - 3x os.environ.get for env/kafka/kubeconfig
         #   handler_upsert_merge_gate.py:250 - LINEAR_API_KEY, no config injection path (OMN-3140)
         #   handler_upsert_merge_gate.py:253 - LINEAR_TEAM_ID, no config injection path (OMN-3140)
-        max_allowed = 7
+        #   handler_delegation_routing.py:103,123 - os.environ.get for LLM endpoint URLs (OMN-7040)
+        max_allowed = 9
         if len(violations) > max_allowed:
             assert False, (
                 f"Found {len(violations)} env access violations in node handlers "

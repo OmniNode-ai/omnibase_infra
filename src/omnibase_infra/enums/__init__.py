@@ -22,6 +22,7 @@ Exports:
     EnumConfirmationEventType: Registration confirmation event types
     EnumConsumerGroupPurpose: Consumer group purpose (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL)
     EnumContextSectionCategory: Semantic categories for static context sections (CONFIG, RULES, TOPOLOGY, etc.)
+    EnumContractCheckType: Runtime contract check types (REGISTRATION, SUBSCRIPTION, PUBLICATION, etc.)
     EnumContractType: Contract types for ONEX nodes (effect, compute, reducer, orchestrator)
     EnumCostTier: Cost tier for LLM backend routing (LOW, MID, HIGH)
     EnumDispatchStatus: Dispatch operation status enumeration
@@ -78,6 +79,7 @@ from omnibase_infra.enums.enum_consumer_group_purpose import EnumConsumerGroupPu
 from omnibase_infra.enums.enum_context_section_category import (
     EnumContextSectionCategory,
 )
+from omnibase_infra.enums.enum_contract_check_type import EnumContractCheckType
 from omnibase_infra.enums.enum_contract_type import EnumContractType
 from omnibase_infra.enums.enum_cost_tier import EnumCostTier
 from omnibase_infra.enums.enum_declarative_node_violation import (
@@ -150,6 +152,7 @@ __all__: list[str] = [
     "EnumConfirmationEventType",
     "EnumConsumerGroupPurpose",
     "EnumContextSectionCategory",
+    "EnumContractCheckType",
     "EnumContractType",
     "EnumDeclarativeNodeViolation",
     "EnumDedupeStrategy",

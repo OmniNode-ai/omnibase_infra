@@ -2903,6 +2903,28 @@ pattern_exemptions:
     documentation:
       - omnidash/migrations/0034_savings_estimates.sql (actual_model_id TEXT)
     ticket: OMN-6964
+  # ==========================================================================
+  # Contract Verification Models (OMN-7042)
+  # ==========================================================================
+  # contract_name is a canonical identifier string (e.g., "node_registration_orchestrator")
+  # matching the directory name under nodes/. It is the contract's own name, not a foreign
+  # key reference to another entity.
+  - file_pattern: 'model_contract_check_result\.py'
+    violation_pattern: "Field 'contract_name' might reference an entity"
+    reason: >
+      contract_name is a canonical identifier string matching the contract directory name (e.g., "node_registration_orchestrator"). It identifies the contract being verified, not a foreign key reference to another entity. The contract YAML files are the source of truth, not a database table.
+
+    documentation:
+      - docs/plans/2026-03-30-runtime-contract-compliance-verification.md
+    ticket: OMN-7042
+  - file_pattern: 'model_contract_verification_report\.py'
+    violation_pattern: "Field 'contract_name' might reference an entity"
+    reason: >
+      contract_name is a canonical identifier string matching the contract directory name (e.g., "node_registration_orchestrator"). It identifies the contract being verified, not a foreign key reference to another entity. The contract YAML files are the source of truth, not a database table.
+
+    documentation:
+      - docs/plans/2026-03-30-runtime-contract-compliance-verification.md
+    ticket: OMN-7042
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

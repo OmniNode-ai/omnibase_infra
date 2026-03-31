@@ -454,7 +454,38 @@ Ticket: OMN-6798
 """
 
 
+# ---------------------------------------------------------------------------
+# Delegation Pipeline Topics (OMN-7040)
+# ---------------------------------------------------------------------------
+
+TOPIC_DELEGATION_REQUEST: Final[str] = "onex.cmd.omnibase-infra.delegation-request.v1"
+"""Command topic for delegation requests from /delegate skill."""
+
+TOPIC_DELEGATION_ROUTING_DECISION: Final[str] = (
+    "onex.evt.omnibase-infra.routing-decision.v1"
+)
+"""Event topic for routing decisions from the delegation routing reducer."""
+
+TOPIC_DELEGATION_COMPLETED: Final[str] = (
+    "onex.evt.omnibase-infra.delegation-completed.v1"
+)
+"""Event topic for successful delegation completions."""
+
+TOPIC_DELEGATION_FAILED: Final[str] = "onex.evt.omnibase-infra.delegation-failed.v1"
+"""Event topic for failed delegation attempts."""
+
+TOPIC_DELEGATION_QUALITY_GATE_RESULT: Final[str] = (
+    "onex.evt.omnibase-infra.quality-gate-result.v1"
+)
+"""Event topic for quality gate evaluation results."""
+
+
 __all__ = [
+    "TOPIC_DELEGATION_COMPLETED",
+    "TOPIC_DELEGATION_FAILED",
+    "TOPIC_DELEGATION_QUALITY_GATE_RESULT",
+    "TOPIC_DELEGATION_REQUEST",
+    "TOPIC_DELEGATION_ROUTING_DECISION",
     "TOPIC_EVAL_COMPLETED",
     "DLQ_CATEGORY_SUFFIXES",
     "DLQ_COMMAND_TOPIC_SUFFIX",
