@@ -127,6 +127,7 @@ health_check:
 # Metadata
 # ---------------------------------------------------------------------------
 metadata:
+  description: "Transitional HTTP bridge that exposes the contract.resolve compute node (NodeContractResolveCompute) as a synchronous FastAPI service. Allows the dashboard (Node.js/Express) to resolve overlaid contracts via POST /api/nodes/contract.resolve without a Kafka round-trip. Emits onex.contract.resolve.completed to Kafka fire-and-forget for observability. Identical contract, events, and registry entry to the production node — only the execution path (HTTP vs. Kafka) changes in the transition."
   author: "OmniNode Team"
   license: "MIT"
   ticket: "OMN-2756"

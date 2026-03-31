@@ -46,6 +46,7 @@ consumed_events:
     message_category: "EVENT"
     description: "Context audit events that failed normal processing"
 metadata:
+  description: "Routes failed context audit events to the dead letter queue for manual review and reprocessing"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-31"

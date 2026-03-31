@@ -258,6 +258,7 @@ health_check:
       timeout_ms: 5000
 # Metadata
 metadata:
+  description: "Two-stage effect node for decision store persistence. Stage 1 normalises and upserts the decision record into decision_store, committing independently of Stage 2. Stage 2 runs structural conflict detection against ACTIVE decisions in the same scope_domain + scope_layer, writing pairs >= 0.3 confidence to decision_conflicts and enforcing the ACTIVE invariant for pairs >= 0.9. Stage 2 failure never rolls back Stage 1. Supports two intent types: write_decision (two-stage) and write_conflict (idempotent pair insert)."
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-25"

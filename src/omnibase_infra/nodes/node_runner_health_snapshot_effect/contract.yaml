@@ -48,6 +48,7 @@ published_events:
     message_category: "EVENT"
     description: "Periodic health snapshot from GitHub Actions runners"
 metadata:
+  description: "Captures point-in-time health metrics from GitHub Actions runners and publishes snapshots for trend analysis"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-31"

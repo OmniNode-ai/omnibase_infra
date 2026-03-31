@@ -77,6 +77,7 @@ health_check:
       type: "handler"
       critical: true
 metadata:
+  description: "Estimates token cost savings from injection effectiveness data using tiered model pricing, computing per-session and aggregate ROI metrics"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-29"

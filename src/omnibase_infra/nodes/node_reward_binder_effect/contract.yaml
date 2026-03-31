@@ -44,6 +44,7 @@ capabilities:
   - "reward.emit.reward_assigned"
   - "reward.emit.policy_state_updated"
 metadata:
+  description: "Emits structured reward events to Kafka after ScoringReducer produces an EvaluationResult, publishing RunEvaluated, RewardAssigned, and PolicyStateUpdated events"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-24"

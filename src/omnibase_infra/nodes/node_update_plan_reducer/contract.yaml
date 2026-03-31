@@ -205,6 +205,7 @@ health_check:
   interval_seconds: 30
 # Metadata
 metadata:
+  description: "Pure reducer for artifact update plan lifecycle management. Tracks the FSM idle -> created -> comment_posted -> yaml_emitted -> closed (or waived) for each impact analysis event. Emits intents for PR comment posting and YAML plan emission. Translates ModelImpactAnalysisResult into ModelUpdatePlan with deterministic task_type assignment."
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-08"

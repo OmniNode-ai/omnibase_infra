@@ -592,6 +592,7 @@ health_check:
       timeout_ms: 5000
 # Metadata
 metadata:
+  description: "Persists node registration records to PostgreSQL with retry and circuit breaker protection (Consul service discovery decommissioned per OMN-4857)"
   author: "OmniNode Team"
   license: "MIT"
   created: "2025-01-01"

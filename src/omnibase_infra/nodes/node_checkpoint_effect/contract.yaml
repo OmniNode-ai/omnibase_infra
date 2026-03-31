@@ -52,3 +52,5 @@ capabilities:
   - "checkpoint.write"
   - "checkpoint.read"
   - "checkpoint.list"
+metadata:
+  description: "Owns all filesystem I/O for pipeline checkpoint persistence, supporting write, read, and list operations on checkpoint YAML files stored under ~/.claude/checkpoints/"
