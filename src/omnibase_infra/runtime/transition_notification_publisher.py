@@ -748,13 +748,8 @@ def _verify_protocol_compliance() -> None:  # pragma: no cover
     """
     from typing import cast
 
-    # OMN-7077: EventBusInmemory migrating to omnibase_core
-    try:
-        from omnibase_core.event_bus.event_bus_inmemory import EventBusInmemory
-    except ImportError:
-        from omnibase_infra.event_bus.event_bus_inmemory import (
-            EventBusInmemory,  # type: ignore[assignment]
-        )
+    # OMN-7077: EventBusInmemory is migrating to omnibase_core.
+    from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 
     # Create instance to verify protocol compliance
     bus = cast("ProtocolEventBusLike", EventBusInmemory())

@@ -191,7 +191,7 @@ def probe_postgres(
     """
     backend_name = "state_postgres"
 
-    effective_host = host or os.getenv("PGHOST", "localhost")
+    effective_host: str = host or os.getenv("PGHOST", "localhost") or "localhost"
     effective_port = port or int(os.getenv("PGPORT", "5436"))
     effective_user = user or os.getenv("PGUSER", "postgres")
     effective_password = password or os.getenv("POSTGRES_PASSWORD", "")
