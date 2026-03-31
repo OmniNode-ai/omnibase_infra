@@ -78,6 +78,7 @@ health_check:
       type: "handler"
       critical: true
 metadata:
+  description: "Deterministic routing reducer that maps delegation requests to LLM endpoints based on task type and prompt length."
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-30"

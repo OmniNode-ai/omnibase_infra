@@ -67,6 +67,7 @@ health_check:
       type: "handler"
       critical: true
 metadata:
+  description: "Deterministic quality gate that evaluates LLM output using heuristic checks for length, refusal detection, and task-type markers."
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-30"
