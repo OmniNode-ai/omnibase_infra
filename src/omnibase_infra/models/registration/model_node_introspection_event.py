@@ -92,6 +92,11 @@ class ModelNodeIntrospectionEvent(BaseModel):
 
     # Core identity (required, strongly typed)
     node_id: UUID = Field(..., description="Unique node identifier")
+    node_name: str | None = Field(
+        default=None,
+        description="Human-readable node name from contract metadata or snake_case class name. "
+        "None only as degraded fallback — UUID fallback in e2e is a regression.",
+    )
     node_type: EnumNodeKind = Field(..., description="ONEX node type")
     node_version: ModelSemVer = Field(
         default_factory=lambda: ModelSemVer(major=1, minor=0, patch=0),
