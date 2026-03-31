@@ -185,7 +185,7 @@ async def test_callback_receives_correct_routing_metadata() -> None:
     )
     request = _make_request()
 
-    response = await gateway.handle(request)
+    await gateway.handle(request)
 
     invoked_response = callback.call_args[0][0]
     assert invoked_response.latency_ms >= 0.0

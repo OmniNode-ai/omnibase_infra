@@ -29,7 +29,7 @@ def test_projection_state_validates_schema_before_querying() -> None:
             ]
         return [{"entity_id": "abc", "current_state": "active"}]
 
-    result = _check_projection_state_via_db("test_contract", db_query_fn)
+    _check_projection_state_via_db("test_contract", db_query_fn)
     # After fix: first call should be schema introspection
     assert any("information_schema" in sql for sql in call_log), (
         "Probe must introspect schema before querying data"

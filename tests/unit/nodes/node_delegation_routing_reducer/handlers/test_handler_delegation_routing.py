@@ -140,7 +140,7 @@ class TestUnknownTaskType:
     """Verify error on invalid task type."""
 
     def test_unknown_task_type_raises(self) -> None:
-        req = _request(task_type="test")
+        _request(task_type="test")
         # We can't construct with invalid literal, so test the function directly
         # by monkeypatching. Instead, test with a valid request object and
         # verify the happy path works for all valid types.
