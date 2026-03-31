@@ -91,7 +91,7 @@ dependencies = [
     "opentelemetry-instrumentation-asyncpg>=0.48b0,<0.49", # AsyncPG tracing
     "opentelemetry-instrumentation-aiohttp-client>=0.48b0,<0.49", # AIOHTTP tracing
     "opentelemetry-instrumentation-kafka-python>=0.48b0,<0.62", # Kafka tracing
-    "opentelemetry-instrumentation-redis>=0.48b0,<0.49", # Redis tracing
+    "opentelemetry-instrumentation-redis>=0.48b0,<0.62", # Redis tracing
     # MCP (Model Context Protocol) integration
     "mcp>=1.25.0,<2.0.0", # Anthropic MCP SDK for streamable HTTP transport
     # Additional infrastructure dependencies
