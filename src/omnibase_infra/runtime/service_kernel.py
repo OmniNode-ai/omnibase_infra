@@ -581,10 +581,11 @@ async def bootstrap() -> int:
         5. Resolve RegistryProtocolBinding from container (async)
         6. Instantiate RuntimeHostProcess with validated configuration and pre-resolved registry
         7. Setup graceful shutdown signal handlers (SIGINT, SIGTERM)
-        8. Start runtime and HTTP health server for Docker/Kubernetes health probes
-        9. Run runtime until shutdown signal received
-        10. Perform graceful shutdown with configurable timeout
-        11. Clean up resources in finally block to prevent resource leaks
+        8. Start HTTP health server for Docker/Kubernetes health probes
+        9. Start runtime (Kafka consumer joins — may take 10+ min)
+        10. Run runtime until shutdown signal received
+        11. Perform graceful shutdown with configurable timeout
+        12. Clean up resources in finally block to prevent resource leaks
 
     Error Handling:
         - Configuration errors: Logged with full context and correlation_id
@@ -2200,7 +2201,53 @@ async def bootstrap() -> int:
 
             signal.signal(signal.SIGINT, windows_handler)
 
-        # 8. Start runtime and health server
+        # 8. Start HTTP health server for Docker/K8s probes
+        # Started BEFORE runtime.start() so Docker health checks pass during
+        # the slow Kafka consumer-join phase (runtime.start() can take 10+ min).
+        # The health server has no dependency on the runtime being started.
+        # Port can be configured via ONEX_HTTP_PORT environment variable
+        http_port_str = os.getenv("ONEX_HTTP_PORT", str(DEFAULT_HTTP_PORT))
+        try:
+            http_port = int(http_port_str)
+            if not MIN_PORT <= http_port <= MAX_PORT:
+                logger.warning(
+                    "ONEX_HTTP_PORT %d outside valid range %d-%d, using default %d (correlation_id=%s)",
+                    http_port,
+                    MIN_PORT,
+                    MAX_PORT,
+                    DEFAULT_HTTP_PORT,
+                    correlation_id,
+                )
+                http_port = DEFAULT_HTTP_PORT
+        except ValueError:
+            logger.warning(
+                "Invalid ONEX_HTTP_PORT value '%s', using default %d (correlation_id=%s)",
+                http_port_str,
+                DEFAULT_HTTP_PORT,
+                correlation_id,
+            )
+            http_port = DEFAULT_HTTP_PORT
+
+        health_server = ServiceHealth(
+            container=container,
+            runtime=runtime,
+            port=http_port,
+            version=KERNEL_VERSION,
+        )
+        health_start_time = time.time()
+        await health_server.start()
+        health_start_duration = time.time() - health_start_time
+        logger.debug(
+            "Health server started in %.3fs (correlation_id=%s)",
+            health_start_duration,
+            correlation_id,
+            extra={
+                "duration_seconds": health_start_duration,
+                "port": http_port,
+            },
+        )
+
+        # 9. Start runtime
         runtime_start_time = time.time()
         logger.info(
             "Starting ONEX runtime... (correlation_id=%s)",
@@ -2289,49 +2336,6 @@ async def bootstrap() -> int:
                 )
                 wiring_health_checker = None
                 wiring_health_task = None
-
-        # 9. Start HTTP health server for Docker/K8s probes
-        # Port can be configured via ONEX_HTTP_PORT environment variable
-        http_port_str = os.getenv("ONEX_HTTP_PORT", str(DEFAULT_HTTP_PORT))
-        try:
-            http_port = int(http_port_str)
-            if not MIN_PORT <= http_port <= MAX_PORT:
-                logger.warning(
-                    "ONEX_HTTP_PORT %d outside valid range %d-%d, using default %d (correlation_id=%s)",
-                    http_port,
-                    MIN_PORT,
-                    MAX_PORT,
-                    DEFAULT_HTTP_PORT,
-                    correlation_id,
-                )
-                http_port = DEFAULT_HTTP_PORT
-        except ValueError:
-            logger.warning(
-                "Invalid ONEX_HTTP_PORT value '%s', using default %d (correlation_id=%s)",
-                http_port_str,
-                DEFAULT_HTTP_PORT,
-                correlation_id,
-            )
-            http_port = DEFAULT_HTTP_PORT
-
-        health_server = ServiceHealth(
-            container=container,
-            runtime=runtime,
-            port=http_port,
-            version=KERNEL_VERSION,
-        )
-        health_start_time = time.time()
-        await health_server.start()
-        health_start_duration = time.time() - health_start_time
-        logger.debug(
-            "Health server started in %.3fs (correlation_id=%s)",
-            health_start_duration,
-            correlation_id,
-            extra={
-                "duration_seconds": health_start_duration,
-                "port": http_port,
-            },
-        )
 
         # 9.5. Introspection event consumer is now started by domain plugins
         # during plugin activation (step 4.5). The PluginRegistration.start_consumers()
