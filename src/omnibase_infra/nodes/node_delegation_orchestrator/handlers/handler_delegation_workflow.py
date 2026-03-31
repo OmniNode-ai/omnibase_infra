@@ -25,6 +25,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID
 
+from omnibase_infra.event_bus.topic_constants import (
+    TOPIC_DELEGATION_COMPLETED,
+    TOPIC_DELEGATION_FAILED,
+)
 from omnibase_infra.nodes.node_delegation_orchestrator.enums import (
     EnumDelegationState,
 )
@@ -305,7 +309,7 @@ class HandlerDelegationWorkflow:
             self._transition(workflow, EnumDelegationState.COMPLETED)
             events.append(
                 ModelDelegationEvent(
-                    topic="onex.evt.omnibase-infra.delegation-completed.v1",
+                    topic=TOPIC_DELEGATION_COMPLETED,
                     payload=delegation_result,
                 )
             )
@@ -325,7 +329,7 @@ class HandlerDelegationWorkflow:
             self._transition(workflow, EnumDelegationState.FAILED)
             events.append(
                 ModelDelegationEvent(
-                    topic="onex.evt.omnibase-infra.delegation-failed.v1",
+                    topic=TOPIC_DELEGATION_FAILED,
                     payload=delegation_result,
                 )
             )

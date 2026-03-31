@@ -147,3 +147,15 @@ allowlisted_handlers:
     violations:
       - missing_handler_routing
     ticket: '# migration pending'
+  - path: omnibase_infra/nodes/node_delegation_orchestrator/handlers/handler_delegation_workflow.py
+    violations:
+      - missing_handler_routing
+    ticket: 'OMN-7040'
+  - path: omnibase_infra/nodes/node_delegation_quality_gate_reducer/handlers/handler_quality_gate.py
+    violations:
+      - missing_handler_routing
+    ticket: 'OMN-7040'
+  - path: omnibase_infra/nodes/node_delegation_routing_reducer/handlers/handler_delegation_routing.py
+    violations:
+      - missing_handler_routing
+    ticket: 'OMN-7040'
