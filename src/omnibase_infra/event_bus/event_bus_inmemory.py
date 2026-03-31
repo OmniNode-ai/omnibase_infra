@@ -845,15 +845,9 @@ class EventBusInmemory:
             }
 
 
-# OMN-7062: Prefer the omnibase_core canonical version when available.
-# The local implementation above is kept as a fallback for environments where
-# omnibase_core has not yet published the event_bus module (e.g., CI pinned
-# to omnibase-core<0.37).
-try:
-    from omnibase_core.event_bus.event_bus_inmemory import (  # type: ignore[no-redef,assignment]
-        EventBusInmemory,
-    )
-except ImportError:
-    pass  # Use the local EventBusInmemory defined above
+# OMN-7062: The omnibase_core canonical EventBusInmemory exists but has a
+# different health_check() return structure (TypedDictEventBusHealth vs dict
+# with 'started'/'subscriber_count' keys).  Re-export is deferred until the
+# APIs are aligned and infra tests are updated to the core contract.
 
 __all__: list[str] = ["EventBusInmemory", "ModelEventHeaders", "ModelEventMessage"]
