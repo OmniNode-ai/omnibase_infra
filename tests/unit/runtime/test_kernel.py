@@ -503,23 +503,23 @@ class TestBootstrap:
 
     @pytest.fixture
     def mock_event_bus(self) -> Generator[MagicMock, None, None]:
-        """Create a mock EventBusInmemory.
+        """Create a mock event bus via select_event_bus.
 
-        Ensures async methods (start, subscribe, close) are AsyncMocks
-        to avoid 'object MagicMock can't be used in await expression' errors.
+        Since OMN-7076 moved bus creation into auto_configure.select_event_bus(),
+        we patch that function to return a mock in-memory bus instance.
         """
+        mock_instance = MagicMock()
+        # Event bus async methods must be AsyncMocks
+        mock_instance.start = AsyncMock()
+        mock_instance.close = AsyncMock()
+        # subscribe returns an async unsubscribe callback
+        mock_unsubscribe = AsyncMock()
+        mock_instance.subscribe = AsyncMock(return_value=mock_unsubscribe)
         with patch(
-            "omnibase_infra.runtime.service_kernel.EventBusInmemory"
-        ) as mock_cls:
-            mock_instance = MagicMock()
-            # Event bus async methods must be AsyncMocks
-            mock_instance.start = AsyncMock()
-            mock_instance.close = AsyncMock()
-            # subscribe returns an async unsubscribe callback
-            mock_unsubscribe = AsyncMock()
-            mock_instance.subscribe = AsyncMock(return_value=mock_unsubscribe)
-            mock_cls.return_value = mock_instance
-            yield mock_cls
+            "omnibase_infra.backends.auto_configure.select_event_bus",
+            return_value=mock_instance,
+        ) as mock_select:
+            yield mock_select
 
     @pytest.fixture
     def mock_health_server(self) -> Generator[MagicMock, None, None]:
@@ -643,6 +643,7 @@ class TestBootstrap:
         mock_config.input_topic = "test-input"
         mock_config.output_topic = "test-output"
         mock_config.group_id = "test-group"
+        mock_config.contract_version = "v1"
         mock_config.event_bus = MagicMock()
         mock_config.event_bus.type = "kafka"  # Use kafka (inmemory is forbidden)
         mock_config.event_bus.environment = "test-env"
@@ -660,7 +661,7 @@ class TestBootstrap:
 
             await bootstrap()
 
-        # Verify event bus was created with environment
+        # Verify select_event_bus was called with correct environment
         mock_event_bus.assert_called_once()
         call_kwargs = mock_event_bus.call_args[1]
         assert call_kwargs["environment"] == "test-env"
@@ -672,7 +673,7 @@ class TestBootstrap:
         mock_health_server: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Test that bootstrap creates EventBusKafka when KAFKA_BOOTSTRAP_SERVERS is set."""
+        """Test that bootstrap calls select_event_bus with kafka params when configured."""
         monkeypatch.setenv("KAFKA_ENVIRONMENT", "dev")
         monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
         # Allow kafka: prefix in broker allowlist for this test
@@ -682,33 +683,29 @@ class TestBootstrap:
         # Clear any CI override that forces inmemory event bus
         monkeypatch.delenv("ONEX_EVENT_BUS_TYPE", raising=False)
 
+        mock_bus_instance = MagicMock()
+        mock_bus_instance.start = AsyncMock()
+        mock_bus_instance.close = AsyncMock()
+        mock_bus_instance.subscribe = AsyncMock(return_value=AsyncMock())
+
         with (
             patch(
-                "omnibase_infra.runtime.service_kernel.EventBusKafka"
-            ) as mock_kafka_bus,
-            patch(
-                "omnibase_infra.runtime.service_kernel.EventBusInmemory"
-            ) as mock_inmemory_bus,
+                "omnibase_infra.backends.auto_configure.select_event_bus",
+                return_value=mock_bus_instance,
+            ) as mock_select,
             patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event,
         ):
-            mock_kafka_instance = MagicMock()
-            mock_kafka_bus.return_value = mock_kafka_instance
-
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
             mock_event.return_value = event_instance
 
             await bootstrap()
 
-        # Verify EventBusKafka was created, not EventBusInmemory
-        mock_kafka_bus.assert_called_once()
-        mock_inmemory_bus.assert_not_called()
-
-        # Verify config was passed with correct parameters
-        call_kwargs = mock_kafka_bus.call_args[1]
-        config = call_kwargs["config"]
-        assert config.bootstrap_servers == "kafka:9092"
-        assert config.environment == "dev"
+        # Verify select_event_bus was called with kafka bootstrap servers
+        mock_select.assert_called_once()
+        call_kwargs = mock_select.call_args[1]
+        assert call_kwargs["kafka_bootstrap_servers"] == "kafka:9092"
+        assert call_kwargs["environment"] == "dev"
 
     async def test_bootstrap_fails_when_kafka_configured_without_bootstrap_servers(
         self,
@@ -1342,23 +1339,23 @@ class TestHttpPortValidation:
 
     @pytest.fixture
     def mock_event_bus(self) -> Generator[MagicMock, None, None]:
-        """Create a mock EventBusInmemory.
+        """Create a mock event bus via select_event_bus.
 
-        Ensures async methods (start, subscribe, close) are AsyncMocks
-        to avoid 'object MagicMock can't be used in await expression' errors.
+        Since OMN-7076 moved bus creation into auto_configure.select_event_bus(),
+        we patch that function to return a mock in-memory bus instance.
         """
+        mock_instance = MagicMock()
+        # Event bus async methods must be AsyncMocks
+        mock_instance.start = AsyncMock()
+        mock_instance.close = AsyncMock()
+        # subscribe returns an async unsubscribe callback
+        mock_unsubscribe = AsyncMock()
+        mock_instance.subscribe = AsyncMock(return_value=mock_unsubscribe)
         with patch(
-            "omnibase_infra.runtime.service_kernel.EventBusInmemory"
-        ) as mock_cls:
-            mock_instance = MagicMock()
-            # Event bus async methods must be AsyncMocks
-            mock_instance.start = AsyncMock()
-            mock_instance.close = AsyncMock()
-            # subscribe returns an async unsubscribe callback
-            mock_unsubscribe = AsyncMock()
-            mock_instance.subscribe = AsyncMock(return_value=mock_unsubscribe)
-            mock_cls.return_value = mock_instance
-            yield mock_cls
+            "omnibase_infra.backends.auto_configure.select_event_bus",
+            return_value=mock_instance,
+        ) as mock_select:
+            yield mock_select
 
     @pytest.fixture
     def mock_health_server(self) -> Generator[MagicMock, None, None]:
