@@ -148,7 +148,7 @@ health_check:
   interval_seconds: 30
 # Metadata
 metadata:
-  description: "Orchestrator for the artifact reconciliation pipeline. Consumes artifact update plans from the REDUCER node, posts PR comments via HandlerPlanToPRComment (for PR-triggered plans only), and emits YAML plan events via HandlerPlanToYaml. Drives the post_pr_comment -> emit_yaml_plan workflow."
+  description: "Coordinates artifact reconciliation by consuming update plans, posting PR comments for PR-triggered plans, and emitting YAML plan events through a sequential post_pr_comment -> emit_yaml_plan workflow."
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-08"
