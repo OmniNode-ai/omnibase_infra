@@ -22,10 +22,14 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from uuid import UUID
 
 from omnibase_infra.nodes.node_delegation_orchestrator.enums import (
     EnumDelegationState,
+)
+from omnibase_infra.nodes.node_delegation_orchestrator.models.model_baseline_intent import (
+    ModelBaselineIntent,
 )
 from omnibase_infra.nodes.node_delegation_orchestrator.models.model_delegation_event import (
     ModelDelegationEvent,
@@ -48,6 +52,9 @@ from omnibase_infra.nodes.node_delegation_orchestrator.models.model_quality_gate
 from omnibase_infra.nodes.node_delegation_orchestrator.models.model_routing_intent import (
     ModelRoutingIntent,
 )
+from omnibase_infra.nodes.node_delegation_orchestrator.models.model_task_delegated_event import (
+    ModelTaskDelegatedEvent,
+)
 from omnibase_infra.nodes.node_delegation_quality_gate_reducer.models.model_quality_gate_input import (
     ModelQualityGateInput,
 )
@@ -57,6 +64,20 @@ from omnibase_infra.nodes.node_delegation_quality_gate_reducer.models.model_qual
 from omnibase_infra.nodes.node_delegation_routing_reducer.models.model_routing_decision import (
     ModelRoutingDecision,
 )
+
+GateResultEvent = ModelDelegationEvent | ModelTaskDelegatedEvent | ModelBaselineIntent
+
+# Temperature by task type (Task 10, OMN-7040)
+_TASK_TEMPERATURE: dict[str, float] = {
+    "test": 0.3,
+    "document": 0.5,
+    "research": 0.7,
+}
+
+# Approximate Claude pricing for savings estimation (Task 11, OMN-7040)
+# Claude Sonnet 3.5: ~$3/M input, ~$15/M output tokens
+_CLAUDE_INPUT_PRICE_PER_TOKEN: float = 3.0 / 1_000_000
+_CLAUDE_OUTPUT_PRICE_PER_TOKEN: float = 15.0 / 1_000_000
 
 # Valid state transitions: from_state -> set of valid to_states
 _VALID_TRANSITIONS: dict[EnumDelegationState, frozenset[EnumDelegationState]] = {
@@ -164,6 +185,7 @@ class HandlerDelegationWorkflow:
         workflow.routing_decision = decision
 
         assert workflow.request is not None
+        temperature = _TASK_TEMPERATURE.get(workflow.request.task_type, 0.3)
         return [
             ModelInferenceIntent(
                 base_url=decision.endpoint_url,
@@ -171,6 +193,7 @@ class HandlerDelegationWorkflow:
                 system_prompt=decision.system_prompt,
                 prompt=workflow.request.prompt,
                 max_tokens=workflow.request.max_tokens,
+                temperature=temperature,
                 correlation_id=cid,
             )
         ]
@@ -211,12 +234,14 @@ class HandlerDelegationWorkflow:
     def handle_gate_result(
         self,
         result: ModelQualityGateResult,
-    ) -> list[ModelDelegationEvent]:
+    ) -> list[GateResultEvent]:
         """Handle quality gate result.
 
         Transitions INFERENCE_COMPLETED -> GATE_EVALUATED, then evaluates
-        pass/fail to transition to COMPLETED or FAILED. Returns the
-        delegation result event to emit.
+        pass/fail to transition to COMPLETED or FAILED. Returns:
+        1. The delegation result event (completed or failed)
+        2. A backward-compatible task-delegated.v1 event for omnidash (Task 12)
+        3. A baseline comparison intent for savings computation (Task 11, pass only)
         """
         cid = result.correlation_id
         workflow = self._workflows.get(cid)
@@ -254,22 +279,61 @@ class HandlerDelegationWorkflow:
             else "",
         )
 
+        # Estimate Claude cost for savings comparison (Task 11)
+        estimated_claude_cost = (
+            workflow.inference_prompt_tokens * _CLAUDE_INPUT_PRICE_PER_TOKEN
+            + workflow.inference_completion_tokens * _CLAUDE_OUTPUT_PRICE_PER_TOKEN
+        )
+
+        # Backward-compatible task-delegated.v1 event for omnidash (Task 12)
+        compat_event = ModelTaskDelegatedEvent(
+            timestamp=datetime.now(UTC).isoformat(),
+            correlation_id=cid,
+            session_id=None,
+            task_type=workflow.request.task_type,
+            delegated_to=workflow.inference_model_used,
+            quality_gate_passed=result.passed,
+            quality_gates_failed=list(result.failure_reasons),
+            cost_usd=0.0,
+            cost_savings_usd=round(estimated_claude_cost, 6),
+            delegation_latency_ms=elapsed_ms,
+        )
+
+        events: list[GateResultEvent] = []
+
         if result.passed:
             self._transition(workflow, EnumDelegationState.COMPLETED)
-            return [
+            events.append(
                 ModelDelegationEvent(
                     topic="onex.evt.omnibase-infra.delegation-completed.v1",
                     payload=delegation_result,
                 )
-            ]
+            )
+            # Baseline comparison for savings pipeline (Task 11)
+            events.append(
+                ModelBaselineIntent(
+                    correlation_id=cid,
+                    task_type=workflow.request.task_type,
+                    baseline_cost_usd=estimated_claude_cost,
+                    candidate_cost_usd=0.0,
+                    prompt_tokens=workflow.inference_prompt_tokens,
+                    completion_tokens=workflow.inference_completion_tokens,
+                    total_tokens=workflow.inference_total_tokens,
+                )
+            )
         else:
             self._transition(workflow, EnumDelegationState.FAILED)
-            return [
+            events.append(
                 ModelDelegationEvent(
                     topic="onex.evt.omnibase-infra.delegation-failed.v1",
                     payload=delegation_result,
                 )
-            ]
+            )
+
+        # Always emit backward-compatible event for omnidash (Task 12)
+        events.append(compat_event)
+
+        return events
 
 
 class InvalidStateTransitionError(Exception):

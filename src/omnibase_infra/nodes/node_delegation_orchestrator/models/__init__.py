@@ -4,6 +4,9 @@
 # Copyright (c) 2026 OmniNode Team
 """Models for the delegation orchestrator node."""
 
+from omnibase_infra.nodes.node_delegation_orchestrator.models.model_baseline_intent import (
+    ModelBaselineIntent,
+)
 from omnibase_infra.nodes.node_delegation_orchestrator.models.model_delegation_event import (
     ModelDelegationEvent,
 )
@@ -25,8 +28,12 @@ from omnibase_infra.nodes.node_delegation_orchestrator.models.model_quality_gate
 from omnibase_infra.nodes.node_delegation_orchestrator.models.model_routing_intent import (
     ModelRoutingIntent,
 )
+from omnibase_infra.nodes.node_delegation_orchestrator.models.model_task_delegated_event import (
+    ModelTaskDelegatedEvent,
+)
 
 __all__: list[str] = [
+    "ModelBaselineIntent",
     "ModelDelegationRequest",
     "ModelDelegationResult",
     "ModelInferenceResponseData",
@@ -34,4 +41,5 @@ __all__: list[str] = [
     "ModelInferenceIntent",
     "ModelQualityGateIntent",
     "ModelRoutingIntent",
+    "ModelTaskDelegatedEvent",
 ]

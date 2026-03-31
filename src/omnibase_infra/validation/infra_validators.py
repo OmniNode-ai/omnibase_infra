@@ -476,6 +476,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 131 (2026-03-01): OMN-3202 graph handler signature fix
 #                     HandlerGraph.initialize(): dict[str, object] | str
 # - 132 (2026-03-22): HealthCheck.test: str | list[str] for distroless CMD support
+# - 133 (2026-03-30): GateResultEvent type alias in delegation orchestrator (OMN-7040)
 INFRA_MAX_UNIONS = 133
 
 # Maximum allowed architecture violations in infrastructure code.

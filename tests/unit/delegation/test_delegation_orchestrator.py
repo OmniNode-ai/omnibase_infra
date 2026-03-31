@@ -178,10 +178,11 @@ class TestHappyPath:
         assert intents[0].intent == "quality_gate"
         assert handler.workflows[cid].state == EnumDelegationState.INFERENCE_COMPLETED
 
-        # Step 4: Handle gate result (pass) -> emits delegation-completed
+        # Step 4: Handle gate result (pass) -> emits completed + baseline + compat
         gate = _make_gate_result(cid, passed=True, quality_score=0.9)
         intents = handler.handle_gate_result(gate)
-        assert len(intents) == 1
+        # 3 events: delegation-completed, baseline intent, backward-compat task-delegated
+        assert len(intents) == 3
         assert isinstance(intents[0], ModelDelegationEvent)
         assert intents[0].topic == "onex.evt.omnibase-infra.delegation-completed.v1"
         assert handler.workflows[cid].state == EnumDelegationState.COMPLETED
@@ -197,6 +198,26 @@ class TestHappyPath:
         assert result.prompt_tokens == 100
         assert result.completion_tokens == 50
         assert result.total_tokens == 150
+
+        # Baseline intent for savings computation (Task 11)
+        from omnibase_infra.nodes.node_delegation_orchestrator.models.model_baseline_intent import (
+            ModelBaselineIntent,
+        )
+
+        assert isinstance(intents[1], ModelBaselineIntent)
+        assert intents[1].correlation_id == cid
+        assert intents[1].task_type == "test"
+        assert intents[1].baseline_cost_usd > 0
+        assert intents[1].candidate_cost_usd == 0.0
+
+        # Backward-compatible task-delegated.v1 event (Task 12)
+        from omnibase_infra.nodes.node_delegation_orchestrator.models.model_task_delegated_event import (
+            ModelTaskDelegatedEvent,
+        )
+
+        assert isinstance(intents[2], ModelTaskDelegatedEvent)
+        assert intents[2].correlation_id == cid
+        assert intents[2].quality_gate_passed is True
 
     def test_completed_result_has_positive_latency(self) -> None:
         handler = HandlerDelegationWorkflow()
@@ -244,7 +265,8 @@ class TestGateFailure:
         )
         intents = handler.handle_gate_result(gate)
 
-        assert len(intents) == 1
+        # 2 events: delegation-failed + backward-compat task-delegated (no baseline on failure)
+        assert len(intents) == 2
         assert isinstance(intents[0], ModelDelegationEvent)
         assert intents[0].topic == "onex.evt.omnibase-infra.delegation-failed.v1"
         assert handler.workflows[cid].state == EnumDelegationState.FAILED
@@ -253,6 +275,14 @@ class TestGateFailure:
         assert result.quality_passed is False
         assert result.fallback_to_claude is True
         assert "REFUSAL" in result.failure_reason
+
+        # Backward-compat event still emitted on failure
+        from omnibase_infra.nodes.node_delegation_orchestrator.models.model_task_delegated_event import (
+            ModelTaskDelegatedEvent,
+        )
+
+        assert isinstance(intents[1], ModelTaskDelegatedEvent)
+        assert intents[1].quality_gate_passed is False
 
     def test_gate_fail_without_fallback(self) -> None:
         handler = HandlerDelegationWorkflow()
