@@ -30,6 +30,11 @@ from datetime import UTC
 from enum import Enum
 from typing import TYPE_CHECKING
 
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+)
+
 if TYPE_CHECKING:
     from omnibase_infra.models.llm.model_llm_inference_request import (
         ModelLlmInferenceRequest,
@@ -83,6 +88,16 @@ class HandlerLlmCliSubprocess:
     def cli_name(self) -> str:
         """Return the CLI binary name."""
         return self._cli
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role classification."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def execute_cli_inference(
         self,
@@ -153,16 +168,12 @@ class HandlerLlmCliSubprocess:
             from datetime import datetime
             from uuid import uuid4
 
-            from omnibase_infra.models.llm.model_llm_inference_response import (
+            from omnibase_infra.enums import (
                 EnumLlmFinishReason,
-            )
-            from omnibase_infra.models.llm.model_llm_usage import ModelLlmUsage
-            from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
-                ModelBackendResult,
-            )
-            from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request import (
                 EnumLlmOperationType,
             )
+            from omnibase_infra.models.llm.model_llm_usage import ModelLlmUsage
+            from omnibase_infra.models.model_backend_result import ModelBackendResult
 
             # Rough token estimate: ~1.3 tokens per word
             prompt_tokens = int(len(prompt.split()) * 1.3)
