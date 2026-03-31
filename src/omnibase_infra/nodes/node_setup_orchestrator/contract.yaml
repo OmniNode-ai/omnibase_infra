@@ -47,3 +47,5 @@ capabilities:
   - "setup.provision"
   - "setup.infisical"
   - "setup.validate"
+metadata:
+  description: "Coordinates the full platform setup workflow: cloud gate check, preflight validation, local Docker Compose provisioning, Infisical bootstrap, and post-provision health validation"

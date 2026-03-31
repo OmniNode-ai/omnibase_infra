@@ -182,6 +182,7 @@ health_check:
       env_var: "GMAIL_REFRESH_TOKEN"
       description: "Verify GMAIL_REFRESH_TOKEN is set"
 metadata:
+  description: "Permanently deletes archived Gmail messages older than retention_days from configured archive labels on runtime tick, emitting summary events per label"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-25"

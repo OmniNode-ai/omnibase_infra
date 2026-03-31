@@ -136,6 +136,7 @@ feature_flags:
     description: "Gate for automated restart commands"
 # Metadata
 metadata:
+  description: "Triages consumer health events with graduated response: first occurrence triggers Slack WARNING, second triggers Slack RED alert and Linear ticket creation"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-19"

@@ -234,6 +234,7 @@ definitions:
       - success
 # Metadata
 metadata:
+  description: "Registers, deregisters, and discovers services with pluggable backend support (Consul, Kubernetes, Etcd) using capability-oriented naming"
   author: "OmniNode Team"
   license: "MIT"
   created: "2025-01-06"

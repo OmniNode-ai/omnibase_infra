@@ -183,6 +183,7 @@ health_check:
       description: "Verify LINEAR_TEAM_ID is set"
 # Metadata
 metadata:
+  description: "Creates Linear tickets for PostgreSQL errors with deduplication via a db_error_tickets table, preventing duplicate tickets for recurring database issues"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-02"

@@ -93,6 +93,7 @@ health_check:
       critical: true
 # Metadata
 metadata:
+  description: "Provides cursor-paginated decision store queries with filtering by domain, layer, decision_type, tags, epic_id, status, and scope_services (ANY/ALL/EXACT modes)"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-25"

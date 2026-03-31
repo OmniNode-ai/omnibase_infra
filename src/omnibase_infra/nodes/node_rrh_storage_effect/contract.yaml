@@ -39,6 +39,7 @@ capabilities:
     description: "Persist RRH validation results as artifacts with symlinks"
     version: "1.0.0"
 metadata:
+  description: "Persists Release Readiness Handshake validation results as timestamped JSON artifacts and maintains convenience symlinks for lookup by ticket and repository"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-11"

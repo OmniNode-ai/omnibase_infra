@@ -115,6 +115,7 @@ dependencies:
     required: false
 # Metadata
 metadata:
+  description: "Triages runtime error events using first-match-wins rules covering aiokafka, asyncpg, and aiohttp patterns with graduated Slack alerting and Linear ticket creation"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-19"

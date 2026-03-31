@@ -29,3 +29,5 @@ handler_routing:
         module: "omnibase_infra.nodes.node_checkpoint_validate_compute.handlers.handler_checkpoint_validate"
 capabilities:
   - "checkpoint.validate"
+metadata:
+  description: "Performs pure structural validation on checkpoint data, verifying field completeness, type correctness, and invariant compliance without side effects"

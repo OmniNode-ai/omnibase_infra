@@ -159,6 +159,7 @@ health_check:
       critical: true
 # Metadata
 metadata:
+  description: "Manages session state filesystem I/O including reads/writes to ~/.claude/state/ session.json and run files using atomic write-tmp-fsync-rename for crash safety"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-10"

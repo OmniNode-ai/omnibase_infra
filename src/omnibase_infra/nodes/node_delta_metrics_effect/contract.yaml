@@ -179,6 +179,7 @@ health_check:
       timeout_ms: 5000
 # Metadata
 metadata:
+  description: "Rolls up per-model performance metrics from bundle completion signals, upserting aggregated counters into delta_metrics_by_model with ON CONFLICT DO UPDATE"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-07"

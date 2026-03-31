@@ -152,6 +152,7 @@ health_check:
   interval_seconds: 30
 # Metadata
 metadata:
+  description: "Pure reducer for validation verdict production. Aggregates check results from the validation executor, applies scoring policy (required/recommended/informational severity), and produces a PASS/FAIL/QUARANTINE verdict. Supports the collecting -> adjudicating -> verdict_emitted FSM lifecycle with reset capability."
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-11"

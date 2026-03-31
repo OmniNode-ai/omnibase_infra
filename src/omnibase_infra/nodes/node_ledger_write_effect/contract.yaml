@@ -203,6 +203,7 @@ health_check:
       critical: true
 # Metadata
 metadata:
+  description: "Capability-oriented effect node for event ledger write operations. Handles appending events to the PostgreSQL audit ledger with idempotent write support via unique constraint on (topic, partition, kafka_offset). Supports querying events by correlation ID, event type, topic, or time range."
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-01-29"

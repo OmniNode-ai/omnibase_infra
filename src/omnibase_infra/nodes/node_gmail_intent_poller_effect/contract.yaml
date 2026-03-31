@@ -213,6 +213,7 @@ health_check:
       env_var: "GMAIL_REFRESH_TOKEN"
       description: "Verify GMAIL_REFRESH_TOKEN is set"
 metadata:
+  description: "Drains configured Gmail source labels on demand, applying idempotency markers, extracting URLs, and emitting gmail-intent-received events to the platform bus"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-24"

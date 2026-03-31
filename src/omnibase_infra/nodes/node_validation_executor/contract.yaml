@@ -96,6 +96,7 @@ health_check:
       critical: true
 # Metadata
 metadata:
+  description: "Runs validation checks against a candidate from a ModelValidationPlan, executing typecheck, lint, unit tests, integration tests, risk assessment, and cost measurement"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-11"

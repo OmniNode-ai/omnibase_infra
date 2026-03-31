@@ -102,6 +102,7 @@ dependencies:
     optional: false
 # Metadata
 metadata:
+  description: "Subscribes to 7 platform event topics for event ledger persistence, projecting events from the platform bus into the audit ledger for traceability and debugging"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-01-29"

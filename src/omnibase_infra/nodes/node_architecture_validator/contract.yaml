@@ -241,6 +241,7 @@ definitions:
       - description
 # Metadata
 metadata:
+  description: "Validates ONEX architecture patterns by analyzing Python source files for compliance with node taxonomy, handler routing, and contract conventions"
   author: "OmniNode Team"
   license: "MIT"
   created: "2025-01-07"

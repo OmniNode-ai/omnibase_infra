@@ -30,3 +30,5 @@ handler_routing:
       handler:
         name: "HandlerBaselinesBatchCompute"
         module: "omnibase_infra.nodes.node_baselines_batch_compute.handlers.handler_baselines_batch_compute"
+metadata:
+  description: "Derives treatment/control comparison batches for A/B evaluation through 3-phase computation: session selection, metric aggregation, and statistical summary"

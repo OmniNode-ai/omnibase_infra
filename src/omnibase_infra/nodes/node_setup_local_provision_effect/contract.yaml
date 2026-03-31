@@ -52,3 +52,5 @@ capabilities:
   - "local_provision.start"
   - "local_provision.stop"
   - "local_provision.status"
+metadata:
+  description: "Provisions, tears down, and checks status of local Docker Compose services defined in a ModelDeploymentTopology with async port health polling"

@@ -187,6 +187,7 @@ health_check:
   interval_seconds: 30
 # Metadata
 metadata:
+  description: "Orchestrator for the validation pipeline. Consumes pattern candidates, builds validation plans with the MVP check catalog, coordinates executor and adjudicator nodes, and publishes validation results. Drives the build_plan -> execute_checks -> adjudicate -> update_lifecycle workflow."
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-11"

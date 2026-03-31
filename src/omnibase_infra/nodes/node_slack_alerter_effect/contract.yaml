@@ -303,6 +303,7 @@ health_check:
       description: "Verify SLACK_BOT_TOKEN is configured"
 # Metadata
 metadata:
+  description: "Sends infrastructure alerts to Slack channels via Web API with Block Kit formatting, threading support, retry with exponential backoff, and rate limiting"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-04"

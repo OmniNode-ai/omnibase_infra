@@ -150,6 +150,7 @@ capabilities:
   - name: "kafka_event_production"
     description: "Publish ModelUpdateTrigger to onex.evt.artifact.change-detected.v1"
 metadata:
+  description: "Detects artifact-relevant code changes from GitHub PR webhooks, watchdog filesystem events, and manual CLI reconcile commands, emitting ModelUpdateTrigger events"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-08"

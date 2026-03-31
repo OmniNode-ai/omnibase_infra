@@ -43,6 +43,7 @@ operation_bindings:
         expression: "${payload}"
         required: true
 metadata:
+  description: "Ledger projection handler that transforms ModelEventMessage to ModelIntent with ModelPayloadLedgerAppend for audit ledger persistence"
   handler_id: "ledger-projection-handler"
   handler_type: "compute_handler"
   handler_category: "compute"

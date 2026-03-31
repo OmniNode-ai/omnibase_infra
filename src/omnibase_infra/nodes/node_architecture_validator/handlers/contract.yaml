@@ -116,6 +116,7 @@ tags:
   - onex-compliance
 # Metadata
 metadata:
+  description: "Handler for architecture validation operations. Validates ONEX nodes and handlers against configurable architecture rules. Supports pluggable rules via the ProtocolArchitectureRule protocol. Returns structured validation results with violations grouped by rule and severity."
   author: "OmniNode Team"
   license: "MIT"
   created: "2025-01-30"

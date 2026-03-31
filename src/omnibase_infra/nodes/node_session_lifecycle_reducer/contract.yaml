@@ -167,6 +167,7 @@ health_check:
   interval_seconds: 30
 # Metadata
 metadata:
+  description: "Pure reducer for session lifecycle management. Tracks the FSM idle -> run_created -> run_active -> run_ended for each pipeline run. Emits intents for session index and run context writes. Supports concurrent pipeline isolation via per-run FSM instances."
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-10"

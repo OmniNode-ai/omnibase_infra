@@ -90,6 +90,7 @@ dependencies:
     optional: false
 # Metadata
 metadata:
+  description: "Subscribes to 3 cross-repo validation event topics for validation ledger persistence, projecting validation events for deterministic replay"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-06"
