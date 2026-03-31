@@ -42,8 +42,8 @@ from omnibase_infra.event_bus.enum_topic_validation_status import (
 try:
     from omnibase_core.event_bus.event_bus_inmemory import EventBusInmemory
 except ImportError:
-    from omnibase_infra.event_bus.event_bus_inmemory import (
-        EventBusInmemory,  # type: ignore[assignment]
+    from omnibase_infra.event_bus.event_bus_inmemory import (  # type: ignore[assignment]
+        EventBusInmemory,
     )
 from omnibase_infra.event_bus.model_topic_validation_result import (
     ModelTopicValidationResult,
