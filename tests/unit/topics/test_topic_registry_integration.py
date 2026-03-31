@@ -76,12 +76,13 @@ class TestTopicRegistryIntegration:
             f"Remaining WIRING_HEALTH imports in src/:\n{result.stdout}"
         )
 
-    def test_topic_constants_only_has_dlq(self) -> None:
-        """topic_constants.py __all__ contains only DLQ items and functions."""
+    def test_topic_constants_only_has_dlq_and_topic_constants(self) -> None:
+        """topic_constants.py __all__ contains only DLQ items, TOPIC_ constants, and functions."""
         from omnibase_infra.event_bus.topic_constants import __all__ as tc_all
 
         for name in tc_all:
             is_dlq = name.startswith(("DLQ_", "_DLQ_"))
+            is_topic = name.startswith("TOPIC_")
             is_func = name in {
                 "build_dlq_topic",
                 "parse_dlq_topic",
@@ -89,7 +90,9 @@ class TestTopicRegistryIntegration:
                 "get_dlq_topic_for_original",
                 "derive_dlq_topic_for_event_type",
             }
-            assert is_dlq or is_func, f"Non-DLQ item in topic_constants.__all__: {name}"
+            assert is_dlq or is_topic or is_func, (
+                f"Unexpected item in topic_constants.__all__: {name}"
+            )
 
     def test_registry_key_count_matches_topic_keys(self) -> None:
         """Registry has exactly as many entries as topic_keys.__all__."""
