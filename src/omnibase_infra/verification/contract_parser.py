@@ -170,10 +170,16 @@ def parse_contract_for_verification(
     name = data.get("name", contract_path.parent.name)
     node_type = data.get("node_type", "UNKNOWN")
 
-    # Event bus topics
+    # Event bus topics — entries may be plain strings or dicts with a "topic" key
     event_bus = data.get("event_bus", {}) or {}
-    subscribe_topics = tuple(event_bus.get("subscribe_topics", []) or [])
-    publish_topics = tuple(event_bus.get("publish_topics", []) or [])
+    subscribe_topics = tuple(
+        entry["topic"] if isinstance(entry, dict) else entry
+        for entry in (event_bus.get("subscribe_topics", []) or [])
+    )
+    publish_topics = tuple(
+        entry["topic"] if isinstance(entry, dict) else entry
+        for entry in (event_bus.get("publish_topics", []) or [])
+    )
 
     # Handler names and FSM states
     handler_names = _extract_handler_names(data)
