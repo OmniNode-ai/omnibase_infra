@@ -438,8 +438,24 @@ TOPIC_SESSION_STATUS_CHANGED: Final[str] = (
 )
 """Topic for session status change notifications."""
 
+# ---------------------------------------------------------------------------
+# Eval Pipeline Topics (OMN-6798)
+# ---------------------------------------------------------------------------
+
+TOPIC_EVAL_COMPLETED: Final[str] = "onex.evt.omnibase-infra.eval-completed.v1"
+"""Evaluation pipeline completed event.
+
+Published by ServiceAutoEvalRunner after each eval task completes.
+Carries eval_id, model_id, pass/fail counts, and overall verdict.
+
+Producer: ServiceAutoEvalRunner (OMN-6796)
+Consumer: omnidash eval dashboard, observability
+Ticket: OMN-6798
+"""
+
 
 __all__ = [
+    "TOPIC_EVAL_COMPLETED",
     "DLQ_CATEGORY_SUFFIXES",
     "DLQ_COMMAND_TOPIC_SUFFIX",
     "DLQ_DOMAIN",
