@@ -192,7 +192,14 @@ def probe_postgres(
     backend_name = "state_postgres"
 
     effective_host: str = host or os.getenv("PGHOST", "localhost") or "localhost"
-    effective_port = port or int(os.getenv("PGPORT", "5436"))
+    try:
+        effective_port = port or int(os.getenv("PGPORT", "5436"))
+    except ValueError:
+        return ModelProbeResult(
+            state=EnumProbeState.DISCOVERED,
+            reason=f"Invalid PGPORT value: {os.getenv('PGPORT', '')}",
+            backend_label=backend_name,
+        )
     effective_user = user or os.getenv("PGUSER", "postgres")
     effective_password = password or os.getenv("POSTGRES_PASSWORD", "")
     effective_dbname = dbname or os.getenv("PGDATABASE", "omnibase_infra")

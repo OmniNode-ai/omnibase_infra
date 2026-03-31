@@ -107,8 +107,13 @@ def select_event_bus(
             group=consumer_group,
         )
 
+    # Resolve bootstrap servers (match probe_kafka fallback logic)
+    resolved_bootstrap = kafka_bootstrap_servers or os.getenv(
+        "KAFKA_BOOTSTRAP_SERVERS", ""
+    )
+
     # Probe Kafka backend
-    kafka_result = probe_kafka(bootstrap_servers=kafka_bootstrap_servers)
+    kafka_result = probe_kafka(bootstrap_servers=resolved_bootstrap or None)
 
     if kafka_result.state in (
         EnumProbeState.HEALTHY,
@@ -122,13 +127,13 @@ def select_event_bus(
         from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
         kafka_config = ModelKafkaEventBusConfig(
-            bootstrap_servers=kafka_bootstrap_servers or "",
+            bootstrap_servers=resolved_bootstrap,
             environment=environment,
             circuit_breaker_threshold=circuit_breaker_threshold,
         )
         return EventBusKafka(config=kafka_config)
 
-    if kafka_result.state == EnumProbeState.REACHABLE and kafka_bootstrap_servers:
+    if kafka_result.state == EnumProbeState.REACHABLE and resolved_bootstrap:
         # Reachable but not healthy — still try Kafka if explicitly configured
         logger.warning(
             "Kafka probe: %s — attempting EventBusKafka despite probe result",
@@ -138,7 +143,7 @@ def select_event_bus(
         from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
         kafka_config = ModelKafkaEventBusConfig(
-            bootstrap_servers=kafka_bootstrap_servers,
+            bootstrap_servers=resolved_bootstrap,
             environment=environment,
             circuit_breaker_threshold=circuit_breaker_threshold,
         )
