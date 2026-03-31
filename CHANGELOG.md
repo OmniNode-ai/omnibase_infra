@@ -1,3 +1,18 @@
+## v0.30.1 (2026-03-31)
+
+### Fixed
+- fix: increase runtime healthcheck start_period to 120s [F-CO-009] (#1068)
+- fix: start health server before runtime.start() [OMN-7081] (#1069)
+
+### Changed
+- chore(deps): bump omnibase_core to 0.36.0
+- ci: add onex compliance check to CI [OMN-7079] (#1070)
+
+## v0.30.0 (2026-03-30)
+
+### Changed
+- chore(deps): bump omnibase_core to 0.35.0 (#1066)
+
 ## v0.29.0 (2026-03-28)
 
 ### Added
