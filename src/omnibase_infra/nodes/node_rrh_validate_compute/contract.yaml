@@ -59,6 +59,7 @@ capabilities:
     description: "Validate environment data against RRH rules and profiles"
     version: "1.0.0"
 metadata:
+  description: "Pure COMPUTE node for Release Readiness Handshake validation. Evaluates 13 rules (RRH-1001 through RRH-1701) against collected environment data using profile-driven severity and contract tightening. No I/O — deterministic input-to-output transformation."
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-11"

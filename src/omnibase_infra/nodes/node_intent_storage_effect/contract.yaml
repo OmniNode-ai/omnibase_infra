@@ -193,6 +193,7 @@ health_check:
       critical: true
 # Metadata
 metadata:
+  description: "Capability-oriented effect node for intent storage operations. Handles storing classified intents in Memgraph graph database and querying intents by session or distribution statistics."
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-01-26"

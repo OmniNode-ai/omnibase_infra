@@ -1,0 +1,58 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeRowCountDiagnosticEffect
+#
+# Publishes database row count diagnostic events to the event bus.
+# Probe-based emitter — full ONEX node conversion deferred.
+#
+# Related Tickets:
+#   - OMN-5653: Row count diagnostic probe
+#   - OMN-7114: Register missing topics in provisioner
+name: "node_row_count_diagnostic_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  Effect node for database row count diagnostic emission. Publishes periodic row count snapshots from projection tables via the event bus. Currently implemented as a probe-based emitter; full ONEX node conversion is deferred.
+
+input_model:
+  name: "ModelRowCountDiagnosticInput"
+  module: "omnibase_infra.nodes.node_row_count_diagnostic_effect"
+  description: "Input for row count diagnostic emission (stub)."
+output_model:
+  name: "ModelRowCountDiagnosticOutput"
+  module: "omnibase_infra.nodes.node_row_count_diagnostic_effect"
+  description: "Output for row count diagnostic emission (stub)."
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics: []
+  publish_topics:
+    - "onex.evt.omnibase-infra.row-count-diagnostic.v1"
+published_events:
+  - topic: "onex.evt.omnibase-infra.row-count-diagnostic.v1"
+    event_type: "RowCountDiagnosticEvent"
+    message_category: "EVENT"
+    description: "Periodic database row count diagnostic snapshot"
+metadata:
+  description: "Publishes periodic PostgreSQL table row count snapshots to the event bus for capacity monitoring"
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-03-31"
+  tags:
+    - effect
+    - health
+    - diagnostic
+    - database
+    - row-count

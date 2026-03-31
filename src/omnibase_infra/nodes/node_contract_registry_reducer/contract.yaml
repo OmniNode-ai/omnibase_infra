@@ -243,6 +243,7 @@ health_check:
 # Metadata
 # ========
 metadata:
+  description: "Consumes contract registration events from Kafka and materializes them to PostgreSQL for discovery and observability, tracking registrations and topic declarations"
   author: "OmniNode Team"
   created: "2026-01-29"
   updated: "2026-01-29"

@@ -1566,6 +1566,7 @@ class MixinNodeIntrospection:
         # Build event kwargs; resolved_feature_flags is optional (OMN-5577)
         event_kwargs: dict[str, object] = {
             "node_id": node_id_uuid,
+            "node_name": self._introspection_node_name,
             "node_type": node_type,
             "node_version": node_version,
             "declared_capabilities": self._introspection_declared_capabilities,

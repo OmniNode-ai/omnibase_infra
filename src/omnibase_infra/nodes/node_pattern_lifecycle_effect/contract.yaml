@@ -101,6 +101,7 @@ health_check:
       critical: true
 # Metadata
 metadata:
+  description: "Applies validation verdicts (PASS, FAIL, QUARANTINE) to pattern lifecycle state and computes tier transitions based on promotion rules"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-11"

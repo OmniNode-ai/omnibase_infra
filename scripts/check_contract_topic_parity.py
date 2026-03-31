@@ -264,7 +264,7 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omniclaude.audit-dispatch-validated.v1": "context audit topic [OMN-5240]; produced by omniclaude, needs contract.yaml | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.audit-return-bounded.v1": "context audit topic [OMN-5240]; produced by omniclaude, needs contract.yaml | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.audit-scope-violation.v1": "context audit topic [OMN-5240]; produced by omniclaude, needs contract.yaml | owner: jonah | expiry: 2026-06-01",
-    "onex.evt.omniclaude.context-audit-dlq.v1": "context audit DLQ topic [OMN-5240]; needs contract.yaml | owner: jonah | expiry: 2026-06-01",
+    # OMN-7114: contract.yaml added in node_context_audit_dlq_effect
     "onex.evt.omniclaude.fix-transition.v1": "lifecycle transition topic added in OMN-4572; needs contract.yaml | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.skill-completed.v1": "global skill lifecycle topic [OMN-2934]; needs contract.yaml | owner: jonah | expiry: 2026-06-01",
     "onex.evt.omniclaude.skill-started.v1": "global skill lifecycle topic [OMN-2934]; needs contract.yaml | owner: jonah | expiry: 2026-06-01",
@@ -338,10 +338,10 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     # --- DLQ aggregation topic (OMN-6136) ---
     "onex.evt.platform.dlq-message.v1": "OMN-6136; cross-published by MixinKafkaDlq for omnidash /dlq dashboard | owner: jonah | expiry: 2026-06-01",
     # --- runner health pipeline topics (OMN-6082) ---
-    "onex.evt.omnibase-infra.runner-health-snapshot.v1": "OMN-6082; Phase 1 CLI-based, contract.yaml deferred to OMN-6091 (true ONEX node conversion) | owner: jonah | expiry: 2026-09-01",
+    # OMN-7114: contract.yaml added in node_runner_health_snapshot_effect
     "onex.evt.omnibase-infra.eval-completed.v1": "OMN-6798; emitted by ServiceAutoEvalRunner; contract.yaml deferred until eval node created | owner: jonah | expiry: 2026-09-01",
     # --- row count diagnostic probe (OMN-5653) ---
-    "onex.evt.omnibase-infra.row-count-diagnostic.v1": "OMN-5653; probe-based emission, contract.yaml deferred to ONEX node conversion | owner: jonah | expiry: 2026-09-01",
+    # OMN-7114: contract.yaml added in node_row_count_diagnostic_effect
     # --- AST code extraction pipeline topics (OMN-5669) ---
     "onex.cmd.omniintelligence.code-crawl-requested.v1": "OMN-5669; contract.yaml in omniintelligence repo (cross-repo provisioning) | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omniintelligence.code-file-discovered.v1": "OMN-5669; contract.yaml in omniintelligence repo (cross-repo provisioning) | owner: jonah | expiry: 2026-09-01",

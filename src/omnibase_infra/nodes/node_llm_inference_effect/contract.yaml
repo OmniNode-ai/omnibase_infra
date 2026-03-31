@@ -151,6 +151,7 @@ capabilities:
     description: "Per-backend circuit breaker for provider fault isolation"
 # Metadata
 metadata:
+  description: "LLM inference effect node for provider-agnostic inference operations. Delegates to provider-specific handlers (OpenAI-compatible, GLM, Gemini) via declarative operation routing. Supports chat completions and text completions with tool calling, generation parameters, and structured response parsing."
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-13"

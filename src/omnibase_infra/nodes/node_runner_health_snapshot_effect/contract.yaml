@@ -1,0 +1,59 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeRunnerHealthSnapshotEffect
+#
+# Publishes periodic runner health snapshots to the event bus.
+# CLI-based emitter (collector_runner_health.py) — full ONEX node
+# conversion deferred to OMN-6091.
+#
+# Related Tickets:
+#   - OMN-6082: Runner health snapshot CLI emitter
+#   - OMN-6091: Full ONEX node conversion (deferred)
+#   - OMN-7114: Register missing topics in provisioner
+name: "node_runner_health_snapshot_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  Effect node for runner health snapshot emission. Publishes periodic health snapshots from GitHub Actions runners via the event bus. Currently implemented as a CLI-based emitter; full ONEX node conversion is tracked by OMN-6091.
+
+input_model:
+  name: "ModelRunnerHealthSnapshotInput"
+  module: "omnibase_infra.nodes.node_runner_health_snapshot_effect"
+  description: "Input for runner health snapshot emission (stub)."
+output_model:
+  name: "ModelRunnerHealthSnapshotOutput"
+  module: "omnibase_infra.nodes.node_runner_health_snapshot_effect"
+  description: "Output for runner health snapshot emission (stub)."
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics: []
+  publish_topics:
+    - "onex.evt.omnibase-infra.runner-health-snapshot.v1"
+published_events:
+  - topic: "onex.evt.omnibase-infra.runner-health-snapshot.v1"
+    event_type: "RunnerHealthSnapshotEvent"
+    message_category: "EVENT"
+    description: "Periodic health snapshot from GitHub Actions runners"
+metadata:
+  description: "Captures point-in-time health metrics from GitHub Actions runners and publishes snapshots for trend analysis"
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-03-31"
+  tags:
+    - effect
+    - health
+    - runner
+    - snapshot

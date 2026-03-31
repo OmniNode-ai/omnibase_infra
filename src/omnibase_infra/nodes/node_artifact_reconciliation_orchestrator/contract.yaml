@@ -148,6 +148,7 @@ health_check:
   interval_seconds: 30
 # Metadata
 metadata:
+  description: "Coordinates artifact reconciliation by consuming update plans, posting PR comments for PR-triggered plans, and emitting YAML plan events through a sequential post_pr_comment -> emit_yaml_plan workflow."
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-08"

@@ -116,6 +116,7 @@ health_check:
   interval_seconds: 30
 # Metadata
 metadata:
+  description: "Generates batch LLM embeddings via OpenAI-compatible endpoints with retry logic, circuit breaker protection, and dimension uniformity validation"
   author: "OmniNode Team"
   license: "MIT"
   created: "2025-01-15"

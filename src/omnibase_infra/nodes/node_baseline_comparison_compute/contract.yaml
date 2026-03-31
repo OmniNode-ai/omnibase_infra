@@ -80,6 +80,7 @@ health_check:
       critical: true
 # Metadata
 metadata:
+  description: "Compares paired A/B baseline and candidate run results, computing cost deltas (token, time, retry savings), outcome deltas (quality), and overall ROI metrics"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-14"

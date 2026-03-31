@@ -35,3 +35,5 @@ handler_routing:
 capabilities:
   - "setup.infisical.provision"
   - "setup.infisical.seed"
+metadata:
+  description: "Bootstraps the Infisical secret store by running provision-infisical.py (identity setup) and seed-infisical.py (secret population) in sequence"

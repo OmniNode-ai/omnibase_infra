@@ -53,6 +53,7 @@ capabilities:
     description: "Collect environment data for RRH validation"
     version: "1.0.0"
 metadata:
+  description: "Collects environment data for Release Readiness Handshake validation across three dimensions: repository git state, deployment runtime targets, and build metadata"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-11"

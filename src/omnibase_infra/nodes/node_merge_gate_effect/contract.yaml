@@ -213,6 +213,7 @@ health_check:
       timeout_ms: 5000
 # Metadata
 metadata:
+  description: "Upserts merge gate decisions into PostgreSQL from merge-gate-decision.v1 events using ON CONFLICT (pr_ref, head_sha) DO UPDATE for idempotent processing"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-07"

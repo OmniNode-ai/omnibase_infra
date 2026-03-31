@@ -143,6 +143,8 @@ import yaml
 
 from omnibase_core.types import JsonType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+
+# OMN-7077: EventBusInmemory is migrating to omnibase_core.
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.runtime.handler_registry import (
     EVENT_BUS_INMEMORY,

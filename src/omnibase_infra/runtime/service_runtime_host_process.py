@@ -71,6 +71,8 @@ from omnibase_infra.errors import (
     RuntimeHostError,
     UnknownHandlerTypeError,
 )
+
+# OMN-7077: EventBusInmemory is migrating to omnibase_core.
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.gateway import (

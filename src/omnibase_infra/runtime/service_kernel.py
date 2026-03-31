@@ -84,6 +84,10 @@ from omnibase_infra.errors import (
     SchemaFingerprintMissingError,
     ServiceResolutionError,
 )
+
+# OMN-7077: EventBusInmemory is migrating to omnibase_core.
+# Import from infra for type safety until core Part 1 merges; runtime bus
+# selection in select_event_bus() handles the core→infra fallback.
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
@@ -863,20 +867,24 @@ async def bootstrap() -> int:
         event_bus: EventBusInmemory | EventBusKafka
         event_bus_type: str
 
-        if use_kafka:
-            # Use EventBusKafka for production/integration testing
-            # NOTE: bootstrap_servers is guaranteed non-empty at this point due to validation
-            # above, but mypy cannot narrow the Optional[str] type through control flow.
-            kafka_config = ModelKafkaEventBusConfig(
-                bootstrap_servers=kafka_bootstrap_servers,  # type: ignore[arg-type]  # NOTE: control flow narrowing limitation
-                environment=environment,
-                circuit_breaker_threshold=config.event_bus.circuit_breaker_threshold,
-            )
-            event_bus = EventBusKafka(config=kafka_config)
-            event_bus_type = "kafka"
+        # OMN-7076: Use registry auto-configuration for bus selection.
+        # select_event_bus() probes onex.backends entry points and selects
+        # the best available backend, replacing the previous inline if/else.
+        from omnibase_infra.backends.auto_configure import select_event_bus
 
-            # Start EventBusKafka to connect to Kafka/Redpanda and enable consumers
-            # Without this, the event bus cannot publish or consume messages
+        event_bus = cast(  # type: ignore[redundant-cast]
+            "EventBusInmemory | EventBusKafka",
+            select_event_bus(
+                kafka_bootstrap_servers=kafka_bootstrap_servers if use_kafka else None,
+                environment=environment,
+                consumer_group=config.consumer_group,
+                circuit_breaker_threshold=config.event_bus.circuit_breaker_threshold,
+            ),
+        )
+        event_bus_type = "kafka" if isinstance(event_bus, EventBusKafka) else "inmemory"
+
+        # Start the bus and wire post-creation infrastructure
+        if isinstance(event_bus, EventBusKafka):
             try:
                 await event_bus.start()
                 logger.debug(
@@ -940,13 +948,6 @@ async def bootstrap() -> int:
                     correlation_id,
                     exc_info=True,
                 )
-        else:
-            # Use EventBusInmemory for local development/testing
-            event_bus = EventBusInmemory(
-                environment=environment,
-                group=config.consumer_group,
-            )
-            event_bus_type = "inmemory"
 
         event_bus_duration = time.time() - event_bus_start_time
         logger.debug(

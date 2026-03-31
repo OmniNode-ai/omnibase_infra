@@ -218,6 +218,7 @@ health_check:
       critical: true
 # Metadata
 metadata:
+  description: "Capability-oriented effect node for registration storage operations. Handles store, query, update, and delete operations for node registrations with pluggable backend handlers (e.g., PostgreSQL)."
   author: "OmniNode Team"
   license: "MIT"
   created: "2025-01-06"

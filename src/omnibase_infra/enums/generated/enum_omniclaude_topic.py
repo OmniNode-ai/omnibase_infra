@@ -18,5 +18,6 @@ class EnumOmniclaudeTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
+    EVT_CONTEXT_AUDIT_DLQ_V1 = "onex.evt.omniclaude.context-audit-dlq.v1"  # onex.evt.omniclaude.context-audit-dlq.v1
     EVT_SESSION_COORDINATION_SIGNAL_V1 = "onex.evt.omniclaude.session-coordination-signal.v1"  # onex.evt.omniclaude.session-coordination-signal.v1
     EVT_SESSION_STATUS_CHANGED_V1 = "onex.evt.omniclaude.session-status-changed.v1"  # onex.evt.omniclaude.session-status-changed.v1

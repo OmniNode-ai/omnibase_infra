@@ -476,6 +476,7 @@ health_check:
       timeout_ms: 5000
 # Metadata
 metadata:
+  description: "Persists contract registry data to PostgreSQL, routing intents from ContractRegistryReducer for contract and topic upsert, update, deactivation, and cleanup"
   author: "OmniNode Team"
   license: "MIT"
   created: "2025-02-02"

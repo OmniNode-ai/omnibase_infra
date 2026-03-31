@@ -218,6 +218,7 @@ health_check:
       timeout_ms: 5000
 # Metadata
 metadata:
+  description: "Tracks delta bundle lifecycle via merge-gate-decision events (idempotent INSERT) and pr-outcome events (UPDATE with outcome, merged_at, bundle_completed_at)"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-07"

@@ -60,6 +60,7 @@ capabilities:
     version: "0.1.0"
 # Metadata
 metadata:
+  description: "Pure COMPUTE node for work authorization decisions. Evaluates a 10-step cascade: whitelisted paths, emergency overrides, run_id validation, authorization scope checks (tools, paths, repos), and expiry. Returns allow/deny/soft_deny with reason codes. No I/O, no side effects."
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-10"

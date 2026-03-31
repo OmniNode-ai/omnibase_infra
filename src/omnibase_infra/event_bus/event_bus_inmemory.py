@@ -845,4 +845,9 @@ class EventBusInmemory:
             }
 
 
+# OMN-7062: The omnibase_core canonical EventBusInmemory exists but has a
+# different health_check() return structure (TypedDictEventBusHealth vs dict
+# with 'started'/'subscriber_count' keys).  Re-export is deferred until the
+# APIs are aligned and infra tests are updated to the core contract.
+
 __all__: list[str] = ["EventBusInmemory", "ModelEventHeaders", "ModelEventMessage"]
