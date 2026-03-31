@@ -438,6 +438,21 @@ TOPIC_SESSION_STATUS_CHANGED: Final[str] = (
 )
 """Topic for session status change notifications."""
 
+# ---------------------------------------------------------------------------
+# Eval Pipeline Topics (OMN-6798)
+# ---------------------------------------------------------------------------
+
+TOPIC_EVAL_COMPLETED: Final[str] = "onex.evt.omniintelligence.eval-completed.v1"
+"""Evaluation pipeline completed event.
+
+Emitted by omniintelligence after an autonomous evaluation run completes.
+Carries eval_id, model_id, pass/fail counts, and overall verdict.
+
+Producer: omniintelligence eval pipeline
+Consumer: omnidash eval dashboard, observability
+Ticket: OMN-6798
+"""
+
 
 __all__ = [
     "DLQ_CATEGORY_SUFFIXES",
@@ -447,6 +462,7 @@ __all__ = [
     "DLQ_INTENT_TOPIC_SUFFIX",
     "DLQ_TOPIC_PATTERN",
     "DLQ_TOPIC_VERSION",
+    "TOPIC_EVAL_COMPLETED",
     "_DLQ_PREFIX",
     "build_dlq_topic",
     "derive_dlq_topic_for_event_type",

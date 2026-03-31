@@ -18,4 +18,5 @@ class EnumOmniintelligenceTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
+    EVT_EVAL_COMPLETED_V1 = "onex.evt.omniintelligence.eval-completed.v1"  # onex.evt.omniintelligence.eval-completed.v1
     EVT_LLM_CALL_COMPLETED_V1 = "onex.evt.omniintelligence.llm-call-completed.v1"  # onex.evt.omniintelligence.llm-call-completed.v1
