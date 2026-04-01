@@ -478,7 +478,8 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 132 (2026-03-22): HealthCheck.test: str | list[str] for distroless CMD support
 # - 133 (2026-03-30): GateResultEvent type alias in delegation orchestrator (OMN-7040)
 # - 134 (2026-03-30): Additional delegation pipeline model unions (OMN-7040)
-INFRA_MAX_UNIONS = 134
+# - 138 (2026-04-01): Eval framework models (OMN-7095: metric_collector, eval_runner, regression_check, baseline_passthrough)
+INFRA_MAX_UNIONS = 138
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
