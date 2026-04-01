@@ -356,6 +356,10 @@ class TestConsumerLifecycle:
                 "_start_health_server",
                 new_callable=AsyncMock,
             ),
+            patch(
+                "omnibase_infra.services.observability.llm_cost_aggregation.consumer.ConsumerHealthEmitter.is_enabled",
+                return_value=False,
+            ),
         ):
             async with ServiceLlmCostAggregator(config) as svc:
                 assert svc._running is True
@@ -386,6 +390,10 @@ class TestConsumerLifecycle:
                 "_start_health_server",
                 new_callable=AsyncMock,
             ) as mock_health,
+            patch(
+                "omnibase_infra.services.observability.llm_cost_aggregation.consumer.ConsumerHealthEmitter.is_enabled",
+                return_value=False,
+            ),
         ):
             service = ServiceLlmCostAggregator(config)
             await service.start()
