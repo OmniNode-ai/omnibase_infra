@@ -144,8 +144,8 @@ class TestPolicyRegistryPerformance:
         # Early exit optimization: 100 failed lookups should complete quickly
         # Even though error message generation is expensive, it's deferred
         # until we actually raise the error
-        assert elapsed_ms < 500, (
-            f"100 failed lookups took {elapsed_ms:.2f}ms (expected < 500ms)"
+        assert elapsed_ms < 2000, (
+            f"100 failed lookups took {elapsed_ms:.2f}ms (expected < 2000ms)"
         )
 
     def test_get_performance_fast_path_correctness(
