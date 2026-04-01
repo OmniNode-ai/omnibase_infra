@@ -8,8 +8,8 @@ Related Tickets:
 
 from __future__ import annotations
 
-from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic import AliasChoices, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from omnibase_infra.services.waitlist_signup_notifier.topics import (
     TOPIC_WAITLIST_SIGNUP,
@@ -20,9 +20,21 @@ class ConfigWaitlistSignupNotifier(BaseSettings):
     """Configuration sourced from environment variables.
 
     Prefix: WAITLIST_NOTIFIER_
+
+    The ``slack_bot_token`` and ``slack_channel_id`` fields accept both
+    prefixed (``WAITLIST_NOTIFIER_SLACK_BOT_TOKEN``) and unprefixed
+    (``SLACK_BOT_TOKEN``) env var names via ``AliasChoices``, matching the
+    pattern in ``session/config_store.py``.
     """
 
-    model_config = {"env_prefix": "WAITLIST_NOTIFIER_"}
+    model_config = SettingsConfigDict(
+        env_prefix="WAITLIST_NOTIFIER_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+        populate_by_name=True,
+    )
 
     kafka_bootstrap_servers: str = Field(
         default="localhost:19092",
@@ -46,9 +58,17 @@ class ConfigWaitlistSignupNotifier(BaseSettings):
     )
     slack_bot_token: str = Field(
         default="",
-        description="Slack Bot Token (falls back to SLACK_BOT_TOKEN env var)",
+        description="Slack Bot Token (accepts WAITLIST_NOTIFIER_SLACK_BOT_TOKEN or SLACK_BOT_TOKEN)",
+        validation_alias=AliasChoices(
+            "WAITLIST_NOTIFIER_SLACK_BOT_TOKEN",
+            "SLACK_BOT_TOKEN",
+        ),
     )
     slack_channel_id: str = Field(
         default="",
-        description="Slack channel ID (falls back to SLACK_CHANNEL_ID env var)",
+        description="Slack channel ID (accepts WAITLIST_NOTIFIER_SLACK_CHANNEL_ID or SLACK_CHANNEL_ID)",
+        validation_alias=AliasChoices(
+            "WAITLIST_NOTIFIER_SLACK_CHANNEL_ID",
+            "SLACK_CHANNEL_ID",
+        ),
     )

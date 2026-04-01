@@ -4,8 +4,8 @@ image: runtime:latest
 layer: runtime
 container_name: omninode-waitlist-signup-notifier
 required_env:
-  - SLACK_BOT_TOKEN
-  - SLACK_CHANNEL_ID
+  - WAITLIST_NOTIFIER_SLACK_BOT_TOKEN
+  - WAITLIST_NOTIFIER_SLACK_CHANNEL_ID
 hardcoded_env:
   WAITLIST_NOTIFIER_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   WAITLIST_NOTIFIER_HEALTH_CHECK_PORT: '8095'

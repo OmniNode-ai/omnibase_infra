@@ -21,6 +21,7 @@ Related Tickets:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import signal
@@ -52,6 +53,7 @@ class WaitlistSignupNotifier:
         self._running = False
         self._healthy = False
         self._last_message_at: float | None = None
+        self._health_runner: web.AppRunner | None = None
 
         self._slack_handler = HandlerSlackWebhook(
             bot_token=config.slack_bot_token or None,
@@ -77,9 +79,12 @@ class WaitlistSignupNotifier:
         )
 
     async def stop(self) -> None:
-        """Stop the consumer gracefully."""
+        """Stop the consumer and health server gracefully."""
         self._running = False
         self._healthy = False
+        if self._health_runner:
+            await self._health_runner.cleanup()
+            self._health_runner = None
         if self._consumer:
             await self._consumer.stop()
             self._consumer = None
@@ -168,6 +173,7 @@ class WaitlistSignupNotifier:
         app = web.Application()
         app.router.add_get("/health", self._health_handler)
         runner = web.AppRunner(app)
+        self._health_runner = runner
         await runner.setup()
         site = web.TCPSite(
             runner,
@@ -209,14 +215,11 @@ async def _main() -> None:
     consume_task = asyncio.create_task(notifier.run())
     await stop_event.wait()
 
-    notifier._running = False
-    consume_task.cancel()
-    try:
-        await consume_task
-    except asyncio.CancelledError:
-        pass
-
+    # stop() sets _running=False which causes run() to exit naturally
     await notifier.stop()
+    consume_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await consume_task
 
 
 if __name__ == "__main__":
