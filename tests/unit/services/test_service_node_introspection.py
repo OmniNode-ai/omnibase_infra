@@ -127,6 +127,63 @@ class TestServiceNodeIntrospectionContractDir:
         assert service._introspection_contract is not None
         assert getattr(service._introspection_contract, "name", None) == "test_node"
 
+    def test_node_name_from_contract(self, tmp_path: Path) -> None:
+        """OMN-6405: node_name is populated from contract name, not caller arg."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(yaml.dump(MINIMAL_CONTRACT_YAML))
+
+        service = ServiceNodeIntrospection.from_contract_dir(
+            contracts_dir=tmp_path,
+            event_bus=None,
+            node_name="runtime_config",  # caller passes generic config name
+            node_id=TEST_NODE_ID,
+        )
+        # Should use contract name, not the caller-provided "runtime_config"
+        assert service._introspection_node_name == "test_node"
+
+    @pytest.mark.asyncio
+    async def test_introspection_event_node_name_from_contract(
+        self, tmp_path: Path
+    ) -> None:
+        """OMN-6405: introspection event carries contract node_name, not None."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(yaml.dump(MINIMAL_CONTRACT_YAML))
+
+        service = ServiceNodeIntrospection.from_contract_dir(
+            contracts_dir=tmp_path,
+            event_bus=None,
+            node_name="runtime_config",
+            node_id=TEST_NODE_ID,
+        )
+        event = await service.get_introspection_data()
+        assert event.node_name is not None
+        assert event.node_name == "test_node"
+
+    def test_node_name_from_raw_yaml_fallback(self, tmp_path: Path) -> None:
+        """OMN-6405: node_name extracted from raw YAML when Pydantic parsing fails."""
+        # Write a contract with extra fields that cause ModelContractBase to reject it
+        raw_yaml = {
+            "name": "my_custom_node",
+            "contract_version": {"major": 1, "minor": 0, "patch": 0},
+            "node_type": "EFFECT_GENERIC",
+            "description": "Test effect node",
+            "input_model": "omnibase_core.models.events.ModelEventEnvelope",
+            "output_model": "omnibase_core.models.events.ModelEventEnvelope",
+            "performance": {"single_operation_max_ms": 5000},
+            "unknown_field_that_breaks_pydantic": True,
+        }
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(yaml.dump(raw_yaml))
+
+        service = ServiceNodeIntrospection.from_contract_dir(
+            contracts_dir=tmp_path,
+            event_bus=None,
+            node_name="runtime_config",
+            node_id=TEST_NODE_ID,
+        )
+        # Contract parsing fails, but raw YAML fallback should extract the name
+        assert service._introspection_node_name == "my_custom_node"
+
     def test_graceful_fallback_no_contract(self, tmp_path: Path) -> None:
         """Falls back gracefully when no contract.yaml exists."""
         service = ServiceNodeIntrospection.from_contract_dir(
@@ -137,6 +194,8 @@ class TestServiceNodeIntrospectionContractDir:
         )
         assert service is not None
         assert service._introspection_contract is None
+        # Without contract, caller-provided node_name is used
+        assert service._introspection_node_name == "test-service"
 
 
 @pytest.mark.unit

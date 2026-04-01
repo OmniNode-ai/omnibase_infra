@@ -217,12 +217,19 @@ class ServiceNodeIntrospection(MixinNodeIntrospection):
         contract, event_bus_sub = _try_load_contract(contracts_dir)
 
         # Extract metadata from contract Pydantic model if available
+        # OMN-6405: Also extract name from contract so introspection events
+        # carry the contract-defined node name instead of the runtime config
+        # name (e.g., "node_registration_orchestrator" not "runtime_config").
         description = None
+        effective_node_name = node_name
         version = "1.0.0"
         node_type = EnumNodeKind.ORCHESTRATOR
 
         if contract is not None:
             description = getattr(contract, "description", None)
+            contract_name = getattr(contract, "name", None)
+            if isinstance(contract_name, str) and contract_name:
+                effective_node_name = contract_name
             contract_version = getattr(contract, "contract_version", None)
             if contract_version is not None:
                 version = (
@@ -244,6 +251,9 @@ class ServiceNodeIntrospection(MixinNodeIntrospection):
                     pass  # Keep it
                 else:
                     description = None
+                raw_name = raw_yaml.get("name")
+                if isinstance(raw_name, str) and raw_name:
+                    effective_node_name = raw_name
                 raw_nt = raw_yaml.get("node_type")
                 if raw_nt is not None:
                     node_type = _map_node_type(raw_nt)
@@ -253,7 +263,7 @@ class ServiceNodeIntrospection(MixinNodeIntrospection):
 
         return cls.from_kernel_config(
             event_bus=event_bus,
-            node_name=node_name,
+            node_name=effective_node_name,
             node_id=node_id,
             node_type=node_type,
             version=version,
