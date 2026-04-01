@@ -280,7 +280,9 @@ _MCP_HANDLER_DEFINITION: BootstrapEffectDefinition = {
 
 def _is_mcp_enabled() -> bool:
     """Check if MCP handler is opted in via MCP_SERVER_ENABLED env var."""
-    return os.environ.get("MCP_SERVER_ENABLED", "").lower() == "true"
+    return os.environ.get(  # ONEX_EXCLUDE: env
+        "MCP_SERVER_ENABLED", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _get_active_bootstrap_definitions() -> list[BootstrapEffectDefinition]:
@@ -289,6 +291,7 @@ def _get_active_bootstrap_definitions() -> list[BootstrapEffectDefinition]:
     if _is_mcp_enabled():
         definitions.append(_MCP_HANDLER_DEFINITION)
     return definitions
+
 
 # Version for all bootstrap handlers (hardcoded handlers use stable version)
 _BOOTSTRAP_HANDLER_VERSION = ModelSemVer(major=1, minor=0, patch=0)

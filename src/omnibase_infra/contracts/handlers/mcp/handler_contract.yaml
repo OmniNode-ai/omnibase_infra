@@ -59,6 +59,12 @@ handler_routing:
         - "mcp.list_tools"
         - "mcp.call_tool"
         - "mcp.describe"
+feature_flags:
+  - name: mcp_server
+    description: "Master gate for MCP handler registration — when false, MCP handler is not bootstrapped"
+    default_value: false
+    env_var: MCP_SERVER_ENABLED
+    category: infrastructure
 supports_lifecycle: true
 supports_health_check: true
 supports_provisioning: false
