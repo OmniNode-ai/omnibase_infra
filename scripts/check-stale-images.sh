@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-COMPOSE_FILE="${1:-docker/docker-compose.infra.yml}"
+COMPOSE_FILE="${1:-docker/docker-compose.generated.yml}"
 PROFILE="${2:-runtime}"
 INFRA_DIR="${OMNIBASE_INFRA_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 
