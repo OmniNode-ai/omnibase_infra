@@ -120,7 +120,7 @@ def _check_success_criteria(
             if result.returncode == 0:
                 passed += 1
         except subprocess.TimeoutExpired:
-            pass
+            pass  # Criterion timed out — counted as not passed
     return passed == len(criteria), passed, len(criteria)
 
 
