@@ -1,0 +1,43 @@
+name: waitlist-signup-notifier
+description: Posts Slack notifications for new omniweb waitlist signups
+image: runtime:latest
+layer: runtime
+container_name: omninode-waitlist-signup-notifier
+required_env:
+  - SLACK_BOT_TOKEN
+  - SLACK_CHANNEL_ID
+hardcoded_env:
+  WAITLIST_NOTIFIER_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+  WAITLIST_NOTIFIER_HEALTH_CHECK_PORT: '8095'
+  WAITLIST_NOTIFIER_HEALTH_CHECK_HOST: 0.0.0.0
+operational_defaults:
+  ONEX_LOG_LEVEL: INFO
+  ONEX_ENVIRONMENT: local
+ports:
+  external: 8095
+  internal: 8095
+healthcheck:
+  test: curl -sf http://localhost:8095/health
+  interval_s: 30
+  timeout_s: 10
+  retries: 3
+  start_period_s: 40
+depends_on:
+  - service: redpanda
+    condition: service_healthy
+restart: unless-stopped
+resources:
+  cpus: '0.25'
+  memory: 128M
+  cpus_reservation: '0.1'
+  memory_reservation: 64M
+stop_grace_period: 30s
+command:
+  - python
+  - -m
+  - omnibase_infra.services.waitlist_signup_notifier.consumer
+labels:
+  com.omninode.service: waitlist-signup-notifier
+  com.omninode.layer: runtime
+  com.omninode.version: ${RUNTIME_VERSION:-0.1.0}
+  autoheal: 'true'
