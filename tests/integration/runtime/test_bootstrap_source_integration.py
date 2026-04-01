@@ -66,26 +66,25 @@ class TestHandlerBootstrapSourceDiscovery:
     """
 
     @pytest.mark.asyncio
-    async def test_discover_handlers_returns_five_descriptors(self) -> None:
-        """HandlerBootstrapSource.discover_handlers() returns 3 handler descriptors.
+    async def test_discover_handlers_returns_two_descriptors_by_default(self) -> None:
+        """HandlerBootstrapSource.discover_handlers() returns 2 handler descriptors by default.
 
         Verifies:
         1. discover_handlers() returns ModelContractDiscoveryResult
-        2. Result contains exactly 3 descriptors (db, http, mcp)
+        2. Result contains exactly 2 descriptors (db, http) — MCP requires opt-in (OMN-7225)
         3. No validation errors (hardcoded handlers are pre-validated)
         """
         source = HandlerBootstrapSource()
         result = await source.discover_handlers()
 
-        assert len(result.descriptors) == 3
+        assert len(result.descriptors) == 2
         assert len(result.validation_errors) == 0
 
     @pytest.mark.asyncio
     async def test_discover_handlers_includes_core_handlers(self) -> None:
-        """HandlerBootstrapSource includes db, http, mcp handlers.
+        """HandlerBootstrapSource includes db and http handlers by default.
 
-        Verifies that all three core infrastructure handlers are present
-        in the discovery result.
+        MCP is excluded unless MCP_SERVER_ENABLED=true (OMN-7225).
         """
         source = HandlerBootstrapSource()
         result = await source.discover_handlers()
@@ -94,7 +93,6 @@ class TestHandlerBootstrapSourceDiscovery:
         expected_ids = {
             "proto.db",
             "proto.http",
-            "proto.mcp",
         }
 
         assert handler_ids == expected_ids

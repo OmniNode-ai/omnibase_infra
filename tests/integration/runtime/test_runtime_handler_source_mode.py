@@ -685,15 +685,14 @@ class TestHybridModeBootstrapOverride:
 
         result = await resolver.resolve_handlers()
 
-        # All bootstrap handlers should be included
+        # All default bootstrap handlers should be included (MCP requires opt-in, OMN-7225)
         handler_ids = {d.handler_id for d in result.descriptors}
         expected_bootstrap_ids = {
             "proto.db",
             "proto.http",
-            "proto.mcp",
         }
         assert expected_bootstrap_ids.issubset(handler_ids), (
-            "All bootstrap handlers should be included when contract source is empty"
+            "All default bootstrap handlers should be included when contract source is empty"
         )
 
     @pytest.mark.asyncio
@@ -1345,8 +1344,8 @@ class TestHandlerSourceResolverIntegration:
 
         result = await resolver.resolve_handlers()
 
-        # Should have 3 bootstrap handlers (db, http, mcp — consul removed from bootstrap)
-        assert len(result.descriptors) == 3
+        # Should have 2 default bootstrap handlers (MCP requires opt-in, OMN-7225)
+        assert len(result.descriptors) == 2
         assert len(result.validation_errors) == 0
 
         # Verify handler IDs
@@ -1354,7 +1353,6 @@ class TestHandlerSourceResolverIntegration:
         expected_ids = {
             "proto.db",
             "proto.http",
-            "proto.mcp",
         }
         assert handler_ids == expected_ids
 
