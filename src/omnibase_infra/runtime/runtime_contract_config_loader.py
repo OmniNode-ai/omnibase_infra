@@ -112,15 +112,22 @@ class RuntimeContractConfigLoader:
     def validate_path(self, path: Path) -> None:
         """Validate that a path is not in the deny list.
 
+        Resolves the real path first to handle macOS symlinks (e.g.,
+        ``/var`` → ``/private/var``). Deny patterns are matched as path
+        prefixes against the resolved path, ensuring that
+        ``/private/var/folders/...`` (macOS temp dirs) is not falsely
+        denied by the ``/var`` pattern.
+
         Args:
             path: Path to validate.
 
         Raises:
             ProtocolConfigurationError: If the path matches a deny pattern.
         """
-        path_str = str(path)
+        resolved = path.resolve()
+        path_str = str(resolved)
         for deny in self._scan_deny_paths:
-            if path_str.startswith(deny) or deny in path_str:
+            if path_str.startswith(deny + "/") or path_str == deny:
                 context = ModelInfraErrorContext.with_correlation(
                     operation="validate_scan_path",
                     target_name=path_str,
@@ -266,11 +273,11 @@ class RuntimeContractConfigLoader:
             # Filter out excluded patterns and denied paths
             filtered: list[Path] = []
             for p in found:
-                # Check deny paths
-                path_str = str(p)
+                # Check deny paths (resolve symlinks for macOS /var → /private/var)
+                resolved_str = str(p.resolve())
                 denied = False
                 for deny in self._scan_deny_paths:
-                    if deny in path_str:
+                    if resolved_str.startswith(deny + "/") or resolved_str == deny:
                         logger.debug("Denied path skipped: %s (pattern: %s)", p, deny)
                         denied = True
                         break
