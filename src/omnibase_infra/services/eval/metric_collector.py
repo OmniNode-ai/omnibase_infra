@@ -80,11 +80,13 @@ class MetricCollector:
         return self._window_end is None
 
     def record_event(self, event: MetricEvent) -> bool:
-        """Record a metric event if it matches the correlation ID and window.
+        """Record a metric event if it matches the correlation ID, topic, and window.
 
         Returns True if the event was accepted, False if filtered out.
         """
         if event.correlation_id != self._correlation_id:
+            return False
+        if self._topics and event.topic not in self._topics:
             return False
         if event.timestamp < self._window_start:
             return False

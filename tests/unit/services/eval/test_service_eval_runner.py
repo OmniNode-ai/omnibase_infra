@@ -139,7 +139,7 @@ class TestServiceEvalRunner:
 
         assert run.success is False
         assert run.error_message is not None
-        assert "Setup command failed" in run.error_message
+        assert "Setup failed" in run.error_message
 
     def test_run_suite(self, sample_suite: ModelEvalSuite, workspace: Path) -> None:
         runner = ServiceEvalRunner(workspace_root=str(workspace))
@@ -164,3 +164,26 @@ class TestServiceEvalRunner:
         assert len(off_runs) == 1
         assert on_runs[0].mode == EnumEvalMode.ONEX_ON
         assert off_runs[0].mode == EnumEvalMode.ONEX_OFF
+
+    def test_repo_path_traversal_blocked(self, workspace: Path) -> None:
+        runner = ServiceEvalRunner(workspace_root=str(workspace))
+        with pytest.raises(ValueError, match="escapes workspace root"):
+            runner._repo_path("../../etc")
+
+    def test_env_flags_restored_after_run(
+        self, sample_task: ModelEvalTask, workspace: Path
+    ) -> None:
+        """run_task restores env flags to their previous values."""
+        # Set all flags to a known sentinel before running
+        flag_names = list(_capture_env_snapshot().keys())
+        for flag in flag_names:
+            os.environ[flag] = "original"
+        runner = ServiceEvalRunner(workspace_root=str(workspace))
+        with patch(
+            "omnibase_infra.services.eval.service_eval_runner._get_git_sha",
+            return_value="abc123",
+        ):
+            runner.run_task(sample_task, EnumEvalMode.ONEX_ON)
+        # After run_task returns, flags should be restored
+        for flag in flag_names:
+            assert os.environ.get(flag) == "original"

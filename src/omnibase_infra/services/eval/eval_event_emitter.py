@@ -4,7 +4,7 @@
 """Eval-completed event emitter.
 
 Emits an eval-completed event to Kafka after a full A/B eval run.
-Topic: onex.evt.onex-change-control.eval-completed.v1
+Topic: onex.evt.omnibase-infra.eval-completed.v1
 
 Related:
     - OMN-6779: Emit eval-completed event to Kafka

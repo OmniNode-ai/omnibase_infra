@@ -135,8 +135,16 @@ class ServiceEvalRunner:
         self._workspace_root = workspace_root
 
     def _repo_path(self, repo: str) -> str:
-        """Resolve absolute path for a repo name."""
-        return str(Path(self._workspace_root) / repo)
+        """Resolve absolute path for a repo name.
+
+        Raises:
+            ValueError: If repo contains path traversal segments.
+        """
+        resolved = Path(self._workspace_root).resolve() / repo
+        resolved = resolved.resolve()
+        if not str(resolved).startswith(str(Path(self._workspace_root).resolve())):
+            raise ValueError(f"repo path escapes workspace root: {repo!r}")
+        return str(resolved)
 
     def run_task(
         self,
@@ -152,65 +160,76 @@ class ServiceEvalRunner:
         repo_path = self._repo_path(task.repo)
         git_sha = _get_git_sha(repo_path)
 
-        # Toggle feature flags
-        _set_mode_flags(mode)
-        env_snapshot = _capture_env_snapshot()
+        # Save previous env flags so we can restore after the run
+        saved_env = _capture_env_snapshot()
 
-        started_at = datetime.now(UTC)
-        start_mono = time.monotonic()
+        try:
+            # Toggle feature flags
+            _set_mode_flags(mode)
+            env_snapshot = _capture_env_snapshot()
 
-        # Run setup commands
-        setup_error = _run_setup_commands(task.setup_commands, repo_path)
-        if setup_error is not None:
+            started_at = datetime.now(UTC)
+            start_mono = time.monotonic()
+
+            # Run setup commands
+            setup_error = _run_setup_commands(task.setup_commands, repo_path)
+            if setup_error is not None:
+                return ModelEvalRun(
+                    run_id=run_id,
+                    task_id=task.task_id,
+                    mode=mode,
+                    started_at=started_at,
+                    completed_at=datetime.now(UTC),
+                    success=False,
+                    error_message="Setup failed (details redacted for safety)",
+                    git_sha=git_sha,
+                    env_snapshot=env_snapshot,
+                )
+
+            # Check success criteria
+            all_passed, passed_count, total_count = _check_success_criteria(
+                task.success_criteria,
+                repo_path,
+                task.max_duration_seconds,
+            )
+
+            elapsed_ms = (time.monotonic() - start_mono) * 1000.0
+            completed_at = datetime.now(UTC)
+
+            metrics: list[ModelEvalMetric] = [
+                ModelEvalMetric(
+                    metric_type=EnumEvalMetricType.LATENCY_MS,
+                    value=elapsed_ms,
+                    unit="ms",
+                ),
+            ]
+            if total_count > 0:
+                metrics.append(
+                    ModelEvalMetric(
+                        metric_type=EnumEvalMetricType.SUCCESS_RATE,
+                        value=passed_count / total_count,
+                        unit="ratio",
+                    )
+                )
+
             return ModelEvalRun(
                 run_id=run_id,
                 task_id=task.task_id,
                 mode=mode,
                 started_at=started_at,
-                completed_at=datetime.now(UTC),
-                success=False,
-                error_message=setup_error,
+                completed_at=completed_at,
+                success=all_passed,
+                metrics=metrics,
                 git_sha=git_sha,
                 env_snapshot=env_snapshot,
             )
-
-        # Check success criteria
-        all_passed, passed_count, total_count = _check_success_criteria(
-            task.success_criteria,
-            repo_path,
-            task.max_duration_seconds,
-        )
-
-        elapsed_ms = (time.monotonic() - start_mono) * 1000.0
-        completed_at = datetime.now(UTC)
-
-        metrics: list[ModelEvalMetric] = [
-            ModelEvalMetric(
-                metric_type=EnumEvalMetricType.LATENCY_MS,
-                value=elapsed_ms,
-                unit="ms",
-            ),
-        ]
-        if total_count > 0:
-            metrics.append(
-                ModelEvalMetric(
-                    metric_type=EnumEvalMetricType.SUCCESS_RATE,
-                    value=passed_count / total_count,
-                    unit="ratio",
-                )
-            )
-
-        return ModelEvalRun(
-            run_id=run_id,
-            task_id=task.task_id,
-            mode=mode,
-            started_at=started_at,
-            completed_at=completed_at,
-            success=all_passed,
-            metrics=metrics,
-            git_sha=git_sha,
-            env_snapshot=env_snapshot,
-        )
+        finally:
+            # Restore previous env flags to avoid contaminating the process
+            for key, value in saved_env.items():
+                if value:
+                    os.environ[key] = value
+                else:
+                    os.environ.pop(key, None)
 
     def run_suite(
         self,

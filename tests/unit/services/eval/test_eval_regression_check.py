@@ -79,3 +79,13 @@ class TestCheckEvalRegression:
         report = _make_report(total=10, worse=1)
         result = check_eval_regression(report, threshold=0.30)
         assert "OK" in result.summary
+
+    def test_threshold_above_one_raises(self) -> None:
+        report = _make_report()
+        with pytest.raises(ValueError, match="threshold must be in"):
+            check_eval_regression(report, threshold=1.5)
+
+    def test_negative_threshold_raises(self) -> None:
+        report = _make_report()
+        with pytest.raises(ValueError, match="threshold must be in"):
+            check_eval_regression(report, threshold=-0.1)

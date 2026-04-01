@@ -81,3 +81,30 @@ class TestMetricCollector:
         assert collector.is_collecting is True
         collector.stop_collecting()
         assert collector.is_collecting is False
+
+    def test_reject_event_from_wrong_topic(self) -> None:
+        """Events from topics not in the allow-list are rejected."""
+        collector = MetricCollector(
+            correlation_id="test-run-123",
+            window_start=datetime(2026, 1, 1, tzinfo=UTC),
+            topics=["onex.evt.allowed.v1"],
+        )
+        event = _make_event()  # topic is "onex.evt.test.v1"
+        assert collector.record_event(event) is False
+        assert collector.event_count == 0
+
+    def test_accept_event_from_allowed_topic(self) -> None:
+        """Events from topics in the allow-list are accepted."""
+        collector = MetricCollector(
+            correlation_id="test-run-123",
+            window_start=datetime(2026, 1, 1, tzinfo=UTC),
+            topics=["onex.evt.test.v1"],
+        )
+        event = _make_event()
+        assert collector.record_event(event) is True
+        assert collector.event_count == 1
+
+    def test_empty_topics_accepts_all(self, collector: MetricCollector) -> None:
+        """When topics list is empty, all topics are accepted."""
+        event = _make_event()
+        assert collector.record_event(event) is True

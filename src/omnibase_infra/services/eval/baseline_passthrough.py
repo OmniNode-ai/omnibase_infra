@@ -26,10 +26,12 @@ treatment events.
 
 ## Verification
 
-The `verify_baseline_passthrough` function checks that:
-1. Kafka is reachable
-2. Events can be produced and consumed with flags OFF
-3. Events carry the correct mode tag
+The `verify_baseline_passthrough` function inspects the current process
+configuration and reports:
+1. Whether all ONEX feature flags are OFF
+2. Which flags are currently enabled (if any)
+3. Whether KAFKA_BOOTSTRAP_SERVERS is configured (env var presence, not a
+   connectivity test)
 
 Related:
     - OMN-6774: Build baseline mode ONEX_OFF event passthrough

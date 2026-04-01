@@ -74,10 +74,17 @@ def check_eval_regression(
     Args:
         report: The eval report to check.
         threshold: Fraction of tasks that must be worse to flag regression.
+            Must be in [0.0, 1.0].
 
     Returns:
         EvalRegressionResult with the check outcome.
+
+    Raises:
+        ValueError: If threshold is outside [0.0, 1.0].
     """
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError(f"threshold must be in [0.0, 1.0], got {threshold}")
+
     total = report.summary.total_tasks
     if total == 0:
         logger.warning(
