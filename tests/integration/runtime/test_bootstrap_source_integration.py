@@ -40,7 +40,6 @@ from omnibase_infra.runtime.handler_bootstrap_source import (
 from omnibase_infra.runtime.handler_registry import (
     HANDLER_TYPE_DATABASE,
     HANDLER_TYPE_HTTP,
-    HANDLER_TYPE_MCP,
     RegistryProtocolBinding,
     get_handler_registry,
 )
@@ -153,7 +152,7 @@ class TestBootstrapSourceRuntimeIntegration:
 
         Verifies:
         1. RuntimeHostProcess.start() registers bootstrap handlers
-        2. All 3 core handlers (db, http, mcp) are in registry
+        2. Core handlers (db, http) are in registry — MCP requires opt-in (OMN-7225)
         """
         event_bus = EventBusInmemory()
         process = RuntimeHostProcess(
@@ -170,10 +169,10 @@ class TestBootstrapSourceRuntimeIntegration:
             await process.start()
 
             # Verify bootstrap handlers are in the singleton registry
+            # MCP requires MCP_SERVER_ENABLED=true (OMN-7225), so only db+http are guaranteed
             registry = get_handler_registry()
             assert registry.is_registered(HANDLER_TYPE_DATABASE)
             assert registry.is_registered(HANDLER_TYPE_HTTP)
-            assert registry.is_registered(HANDLER_TYPE_MCP)
 
         finally:
             await process.stop()
@@ -218,11 +217,10 @@ class TestBootstrapSourceRuntimeIntegration:
                 await process.start()
 
                 # Bootstrap handlers should be registered first
-                # (db, http, mcp in some order)
+                # (db, http — MCP requires MCP_SERVER_ENABLED opt-in, OMN-7225)
                 bootstrap_handlers = {
                     HANDLER_TYPE_DATABASE,
                     HANDLER_TYPE_HTTP,
-                    HANDLER_TYPE_MCP,
                 }
 
                 # Check that bootstrap handlers were registered

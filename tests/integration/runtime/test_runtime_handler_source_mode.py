@@ -49,7 +49,6 @@ from omnibase_infra.runtime.handler_bootstrap_source import (
 from omnibase_infra.runtime.handler_registry import (
     HANDLER_TYPE_DATABASE,
     HANDLER_TYPE_HTTP,
-    HANDLER_TYPE_MCP,
     RegistryProtocolBinding,
     get_handler_registry,
 )
@@ -206,11 +205,10 @@ class TestBootstrapModeLoadsOnlyBootstrapHandlers:
             await process.start()
 
             # Verify bootstrap handlers are in the singleton registry
+            # MCP requires MCP_SERVER_ENABLED=true (OMN-7225), only db+http guaranteed
             registry = get_handler_registry()
             assert registry.is_registered(HANDLER_TYPE_DATABASE)
-            assert registry.is_registered(HANDLER_TYPE_DATABASE)
             assert registry.is_registered(HANDLER_TYPE_HTTP)
-            assert registry.is_registered(HANDLER_TYPE_MCP)
 
         finally:
             await process.stop()
@@ -265,11 +263,10 @@ class TestBootstrapModeLoadsOnlyBootstrapHandlers:
                 assert len(mode_logs) >= 1, "Should log bootstrap mode"
 
                 # Verify bootstrap handlers are registered (confirming BOOTSTRAP mode worked)
+                # MCP requires MCP_SERVER_ENABLED=true (OMN-7225), only db+http guaranteed
                 registry = get_handler_registry()
                 assert registry.is_registered(HANDLER_TYPE_DATABASE)
-                assert registry.is_registered(HANDLER_TYPE_DATABASE)
                 assert registry.is_registered(HANDLER_TYPE_HTTP)
-                assert registry.is_registered(HANDLER_TYPE_MCP)
 
             finally:
                 await process.stop()
@@ -439,11 +436,10 @@ class TestHybridModeContractFirstBootstrapFallback:
                 assert len(log_records) >= 1, "Should log handler source mode"
 
                 # In HYBRID mode, bootstrap handlers should be available as fallback
+                # MCP requires MCP_SERVER_ENABLED=true (OMN-7225), only db+http guaranteed
                 registry = get_handler_registry()
-                # Bootstrap handlers should be registered (as fallback)
                 assert registry.is_registered(HANDLER_TYPE_DATABASE)
-                assert registry.is_registered(HANDLER_TYPE_DATABASE)
-                assert registry.is_registered(HANDLER_TYPE_MCP)
+                assert registry.is_registered(HANDLER_TYPE_HTTP)
 
             finally:
                 await process.stop()
@@ -488,12 +484,11 @@ class TestHybridModeContractFirstBootstrapFallback:
         try:
             await process.start()
 
-            # All bootstrap handlers should be registered as fallback
+            # All default bootstrap handlers should be registered as fallback
+            # MCP requires MCP_SERVER_ENABLED=true (OMN-7225), only db+http guaranteed
             registry = get_handler_registry()
             assert registry.is_registered(HANDLER_TYPE_DATABASE)
-            assert registry.is_registered(HANDLER_TYPE_DATABASE)
             assert registry.is_registered(HANDLER_TYPE_HTTP)
-            assert registry.is_registered(HANDLER_TYPE_MCP)
 
         finally:
             await process.stop()
@@ -1052,11 +1047,12 @@ class TestHandlerResolutionLogging:
                     "Expected log message with descriptor_count field"
                 )
 
-                # Verify count is reasonable (bootstrap has 3 handlers: db, http, mcp)
+                # Verify count is reasonable (bootstrap has 2 handlers by default: db, http)
+                # MCP requires MCP_SERVER_ENABLED=true (OMN-7225)
                 for record in descriptor_count_logs:
                     count = record.__dict__.get("descriptor_count", 0)
-                    assert count >= 3, (
-                        f"Expected at least 3 bootstrap handlers, got {count}"
+                    assert count >= 2, (
+                        f"Expected at least 2 bootstrap handlers, got {count}"
                     )
 
             finally:
