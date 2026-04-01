@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# GitHub Webhook Bridge Integration Contract [OMN-6723]
+#
+# Declares the GITHUB_WEBHOOK_SECRET env dependency so seed-infisical.py
+# discovers it and creates the Infisical key. The actual webhook endpoint
+# lives in omnidash (server/lib/github-webhook-signature.ts).
+name: "github_webhook_bridge"
+description: >
+  GitHub webhook integration bridge. Receives webhook events from GitHub, verifies HMAC-SHA256 signatures, and publishes normalized ONEX events to Kafka. The webhook secret is shared between GitHub org settings and the omnidash deployment.
+
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+dependencies:
+  - name: "GITHUB_WEBHOOK_SECRET"
+    type: "environment"
+    description: "HMAC-SHA256 shared secret for GitHub webhook signature verification"
+    required: true
+event_bus:
+  publish_topics:
+    - topic: "onex.evt.github.pr-merged.v1"
+      direction: "publish"
+      description: "Emitted when a GitHub PR is merged"
+    - topic: "onex.evt.github.push-to-main.v1"
+      direction: "publish"
+      description: "Emitted when code is pushed to the default branch"
+    - topic: "onex.evt.github.check-suite-completed.v1"
+      direction: "publish"
+      description: "Emitted when a GitHub check suite completes"

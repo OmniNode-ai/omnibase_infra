@@ -2039,10 +2039,11 @@ wheels = [
 
 [[package]]
 name = "onex-change-control"
-version = "0.1.0"
-source = { git = "https://github.com/OmniNode-ai/onex_change_control.git?branch=main#41054810a25db826a4c649f491a2d980bffb0c17" }
+version = "0.4.1"
+source = { git = "https://github.com/OmniNode-ai/onex_change_control.git?branch=main#89bd70253447e8a13d7549dae300f8add2eb50bd" }
 dependencies = [
     { name = "colorama" },
+    { name = "omnibase-core" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "tomli-w" },
