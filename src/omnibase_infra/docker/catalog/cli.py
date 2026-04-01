@@ -8,6 +8,7 @@ Usage:
     python -m omnibase_infra.docker.catalog.cli validate core
     python -m omnibase_infra.docker.catalog.cli up runtime
     python -m omnibase_infra.docker.catalog.cli up runtime --seed
+    python -m omnibase_infra.docker.catalog.cli up runtime --build
     python -m omnibase_infra.docker.catalog.cli down
     python -m omnibase_infra.docker.catalog.cli status
     python -m omnibase_infra.docker.catalog.cli seed
@@ -175,12 +176,14 @@ def cmd_seed(_args: list[str]) -> int:
 def cmd_up(args: list[str]) -> int:
     """Validate, generate, and start compose stack."""
     _load_omnibase_env()
-    # Parse --seed flag
+    # Parse flags
     run_seed = "--seed" in args
-    bundles = [a for a in args if a != "--seed"] if args else _load_stack()
+    force_build = "--build" in args
+    flag_args = {"--seed", "--build"}
+    bundles = [a for a in args if a not in flag_args] if args else _load_stack()
 
-    # Save stack selection
-    if args:
+    # Save stack selection (exclude flags from saved bundles)
+    if bundles:
         _save_stack(bundles)
 
     # Validate
@@ -214,6 +217,18 @@ def cmd_up(args: list[str]) -> int:
         check=False,
         capture_output=True,
     )
+
+    # Build if requested (OMN-7214)
+    if force_build:
+        print("Rebuilding images (--build)...")
+        build_proc = subprocess.run(
+            ["docker", "compose", "-f", _DEFAULT_OUTPUT, "build"],
+            cwd=str(_REPO_ROOT),
+            check=False,
+        )
+        if build_proc.returncode != 0:
+            print("Image build failed", file=sys.stderr)
+            return build_proc.returncode
 
     # Start
     proc = subprocess.run(

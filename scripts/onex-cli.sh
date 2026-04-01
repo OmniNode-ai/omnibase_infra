@@ -11,12 +11,38 @@ set -euo pipefail
 INFRA_DIR="${OMNIBASE_INFRA_DIR:-$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")}"
 
 onex_up() {
-    local bundles="$*"
+    local force_build=0
+    local bundles=""
+    for arg in "$@"; do
+        if [[ "$arg" == "--build" ]]; then
+            force_build=1
+        else
+            bundles="${bundles:+$bundles }$arg"
+        fi
+    done
     if [ -z "$bundles" ]; then
         bundles=$(cd "$INFRA_DIR" && uv run python -m omnibase_infra.docker.catalog.cli read-stack)
     fi
-    # shellcheck disable=SC2086
-    (cd "$INFRA_DIR" && uv run python -m omnibase_infra.docker.catalog.cli up $bundles)
+
+    # Auto-detect stale images when not explicitly requesting --build
+    if [[ "$force_build" -eq 0 ]]; then
+        local stale
+        stale=$("${INFRA_DIR}/scripts/check-stale-images.sh" 2>/dev/null || true)
+        if [[ -n "$stale" ]]; then
+            echo "[onex] Stale images detected (code is newer than image):" >&2
+            echo "$stale" | sed 's/^/  /' >&2
+            echo "[onex] Auto-rebuilding..." >&2
+            force_build=1
+        fi
+    fi
+
+    if [[ "$force_build" -eq 1 ]]; then
+        # shellcheck disable=SC2086
+        (cd "$INFRA_DIR" && uv run python -m omnibase_infra.docker.catalog.cli up --build $bundles)
+    else
+        # shellcheck disable=SC2086
+        (cd "$INFRA_DIR" && uv run python -m omnibase_infra.docker.catalog.cli up $bundles)
+    fi
 }
 
 onex_down() {
