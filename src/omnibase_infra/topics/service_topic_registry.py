@@ -130,6 +130,8 @@ class ServiceTopicRegistry:
             topic_keys.BASELINES_COMPUTED: (
                 "onex.evt.omnibase-infra.baselines-computed.v1"
             ),
+            # Waitlist
+            topic_keys.WAITLIST_SIGNUP: ("onex.evt.omniweb.waitlist-signup.v1"),
         }
 
         # Wiring health monitored topics (matches WIRING_HEALTH_MONITORED_TOPICS)

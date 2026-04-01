@@ -155,6 +155,13 @@ ERROR_TRIAGED: Final[str] = "ERROR_TRIAGED"
 BASELINES_COMPUTED: Final[str] = "BASELINES_COMPUTED"
 """Baselines batch computation snapshot events."""
 
+# ==============================================================================
+# Waitlist Topics
+# ==============================================================================
+
+WAITLIST_SIGNUP: Final[str] = "WAITLIST_SIGNUP"
+"""Waitlist signup events from omniweb Server Action (email_domain only, no PII)."""
+
 
 __all__: list[str] = [
     "AGENT_STATUS",
@@ -181,5 +188,6 @@ __all__: list[str] = [
     "SESSION_OUTCOME_CANONICAL",
     "SESSION_OUTCOME_CURRENT",
     "VALIDATOR_CATCH",
+    "WAITLIST_SIGNUP",
     "WIRING_HEALTH_SNAPSHOT",
 ]

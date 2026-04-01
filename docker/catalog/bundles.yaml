@@ -35,6 +35,7 @@ runtime:
     - ci-relay
     - linear-relay
     - decision-store-consumer
+    - waitlist-signup-notifier
     - autoheal
   includes:
     - core
