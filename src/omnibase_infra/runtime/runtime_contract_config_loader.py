@@ -124,16 +124,24 @@ class RuntimeContractConfigLoader:
         Raises:
             ProtocolConfigurationError: If the path matches a deny pattern.
         """
+        original_str = str(path)
         resolved = path.resolve()
-        path_str = str(resolved)
+        resolved_str = str(resolved)
         for deny in self._scan_deny_paths:
-            if path_str.startswith(deny + "/") or path_str == deny:
+            # Resolve the deny pattern too so macOS symlinks
+            # (e.g. /etc → /private/etc) are handled consistently.
+            resolved_deny = str(Path(deny).resolve()) if deny.startswith("/") else deny
+            if (
+                resolved_str.startswith(resolved_deny + "/")
+                or resolved_str == resolved_deny
+                or deny in original_str.split("/")
+            ):
                 context = ModelInfraErrorContext.with_correlation(
                     operation="validate_scan_path",
-                    target_name=path_str,
+                    target_name=resolved_str,
                 )
                 raise ProtocolConfigurationError(
-                    f"Path denied by contract security policy: {path_str} "
+                    f"Path denied by contract security policy: {resolved_str} "
                     f"(matched deny pattern: {deny})",
                     context=context,
                 )
@@ -277,7 +285,14 @@ class RuntimeContractConfigLoader:
                 resolved_str = str(p.resolve())
                 denied = False
                 for deny in self._scan_deny_paths:
-                    if resolved_str.startswith(deny + "/") or resolved_str == deny:
+                    resolved_deny = (
+                        str(Path(deny).resolve()) if deny.startswith("/") else deny
+                    )
+                    if (
+                        resolved_deny in str(p).split("/")
+                        or resolved_str.startswith(resolved_deny + "/")
+                        or resolved_str == resolved_deny
+                    ):
                         logger.debug("Denied path skipped: %s (pattern: %s)", p, deny)
                         denied = True
                         break
