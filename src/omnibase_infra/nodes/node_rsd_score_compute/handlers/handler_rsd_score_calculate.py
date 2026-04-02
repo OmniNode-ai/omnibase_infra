@@ -373,7 +373,11 @@ def _calculate_user_weighting(
     if not with_ts:
         return base_score
 
-    latest = max(with_ts, key=lambda o: o.timestamp)  # type: ignore[arg-type]
+    def _ts(o: ModelPlanOverrideData) -> datetime:
+        assert o.timestamp is not None  # guaranteed by with_ts filter
+        return o.timestamp
+
+    latest = max(with_ts, key=_ts)
 
     # Check expiry
     if latest.expires_at is not None:
