@@ -12,7 +12,7 @@ from .model_chain_entry import ModelChainEntry
 class ModelChainMatch(BaseModel):
     """Single match from Qdrant similarity search."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     chain_entry: ModelChainEntry = Field(..., description="Matched chain trajectory")
     similarity_score: float = Field(

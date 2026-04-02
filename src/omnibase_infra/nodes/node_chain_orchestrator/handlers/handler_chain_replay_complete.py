@@ -51,7 +51,7 @@ class HandlerChainReplayComplete:
                 correlation_id,
             )
             return {
-                "action": "store",
+                "action": "verify",
                 "confidence": str(replay_result.confidence),
                 "summary": replay_result.adaptation_summary,
             }

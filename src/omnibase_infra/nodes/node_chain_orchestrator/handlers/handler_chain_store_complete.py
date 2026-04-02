@@ -49,7 +49,7 @@ class HandlerChainStoreComplete:
             return {
                 "status": "complete",
                 "chain_id": str(store_result.chain_id),
-                "success": "true",
+                "success": True,
             }
 
         logger.warning(
@@ -60,5 +60,5 @@ class HandlerChainStoreComplete:
         return {
             "status": "complete_without_store",
             "error": store_result.error_message,
-            "success": "false",
+            "success": False,
         }

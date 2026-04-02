@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelChainLearnResult(BaseModel):
     """Final output of the chain learning workflow."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID")
     path_taken: Literal["hit_replay", "miss_explore", "fallback_explore"] = Field(

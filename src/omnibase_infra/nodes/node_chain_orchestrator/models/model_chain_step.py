@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelChainStep(BaseModel):
     """Single step within a chain trajectory."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     step_index: int = Field(..., ge=0, description="Ordered position in the chain")
     node_ref: str = Field(

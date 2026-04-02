@@ -14,7 +14,7 @@ from .model_chain_match import ModelChainMatch
 class ModelChainRetrievalResult(BaseModel):
     """Output of the chain retrieval effect."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID")
     matches: tuple[ModelChainMatch, ...] = Field(

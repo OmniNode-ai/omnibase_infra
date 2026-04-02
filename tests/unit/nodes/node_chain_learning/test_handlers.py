@@ -4,8 +4,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -98,7 +97,7 @@ class TestHandlerChainRetrievalComplete:
         )
         result = await handler.handle(retrieval, uuid4())
         assert result["path"] == "replay"
-        assert result["is_hit"] == "true"
+        assert result["is_hit"] is True
 
     @pytest.mark.asyncio
     async def test_miss_path(self) -> None:
@@ -109,7 +108,7 @@ class TestHandlerChainRetrievalComplete:
         )
         result = await handler.handle(retrieval, uuid4())
         assert result["path"] == "explore"
-        assert result["is_hit"] == "false"
+        assert result["is_hit"] is False
 
 
 @pytest.mark.unit
@@ -124,7 +123,7 @@ class TestHandlerChainReplayComplete:
             confidence=0.95,
         )
         result = await handler.handle(replay, uuid4())
-        assert result["action"] == "store"
+        assert result["action"] == "verify"
 
     @pytest.mark.asyncio
     async def test_low_confidence_fallback(self) -> None:
@@ -151,7 +150,7 @@ class TestHandlerChainStoreComplete:
         )
         result = await handler.handle(store_result, uuid4())
         assert result["status"] == "complete"
-        assert result["success"] == "true"
+        assert result["success"] is True
 
     @pytest.mark.asyncio
     async def test_failure(self) -> None:
@@ -163,7 +162,7 @@ class TestHandlerChainStoreComplete:
             error_message="connection refused",
         )
         result = await handler.handle(store_result, uuid4())
-        assert result["success"] == "false"
+        assert result["success"] is False
 
 
 # ---- Compute handler ----

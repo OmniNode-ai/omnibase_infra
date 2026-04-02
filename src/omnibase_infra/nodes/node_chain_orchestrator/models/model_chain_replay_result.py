@@ -14,7 +14,7 @@ from .model_chain_step import ModelChainStep
 class ModelChainReplayResult(BaseModel):
     """Output of the chain replay compute node."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID")
     adapted_steps: tuple[ModelChainStep, ...] = Field(

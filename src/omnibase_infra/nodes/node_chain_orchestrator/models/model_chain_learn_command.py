@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelChainLearnCommand(BaseModel):
     """Command to trigger the chain learning workflow."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID")
     prompt_text: str = Field(..., min_length=1, description="Prompt text to learn from")

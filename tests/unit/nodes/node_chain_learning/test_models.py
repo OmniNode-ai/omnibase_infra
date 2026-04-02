@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -59,7 +59,7 @@ class TestModelChainStep:
         with pytest.raises(Exception):
             ModelChainStep(
                 step_index=0,
-                node_name="n",
+                node_ref="n",
                 operation="op",
                 input_hash="a",
                 output_hash="b",
@@ -72,7 +72,7 @@ class TestModelChainStep:
         with pytest.raises(Exception):
             ModelChainStep(
                 step_index=-1,
-                node_name="n",
+                node_ref="n",
                 operation="op",
                 input_hash="a",
                 output_hash="b",

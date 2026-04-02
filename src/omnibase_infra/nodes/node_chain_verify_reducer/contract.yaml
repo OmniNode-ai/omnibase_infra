@@ -118,6 +118,18 @@ state_machine:
     - "complete"
     - "failed"
   persistence_enabled: false
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "chain.verify"
+      handler:
+        name: "HandlerChainVerify"
+        module: "omnibase_infra.nodes.node_chain_verify_reducer.handlers.handler_chain_verify"
+      description: "Pure FSM state transition handler for chain verification"
+      input_model:
+        name: "ModelReducerInput"
+        module: "omnibase_core.models.reducer.model_reducer_input"
+        description: "Reducer input containing workflow event."
 metadata:
   description: "FSM reducer for chain learning verification state tracking"
   author: "OmniNode Team"

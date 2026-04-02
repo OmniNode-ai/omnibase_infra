@@ -14,7 +14,7 @@ from .model_chain_entry import ModelChainEntry
 class ModelChainReplayInput(BaseModel):
     """Input to the chain replay compute node."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID")
     cached_chain: ModelChainEntry = Field(..., description="Cached chain to replay")

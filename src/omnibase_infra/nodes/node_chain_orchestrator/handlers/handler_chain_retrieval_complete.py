@@ -51,7 +51,7 @@ class HandlerChainRetrievalComplete:
             return {
                 "path": "replay",
                 "chain_id": str(best_match.chain_entry.chain_id),
-                "is_hit": "true",
+                "is_hit": True,
             }
 
         logger.info(
@@ -61,5 +61,5 @@ class HandlerChainRetrievalComplete:
         )
         return {
             "path": "explore",
-            "is_hit": "false",
+            "is_hit": False,
         }

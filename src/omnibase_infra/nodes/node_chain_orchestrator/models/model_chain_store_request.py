@@ -14,7 +14,7 @@ from .model_chain_entry import ModelChainEntry
 class ModelChainStoreRequest(BaseModel):
     """Request to store a verified chain in Qdrant."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID")
     chain_entry: ModelChainEntry = Field(..., description="Verified chain to store")

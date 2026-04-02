@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelChainStoreResult(BaseModel):
     """Result of storing a chain in Qdrant."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID")
     chain_id: UUID = Field(..., description="ID of the stored chain")

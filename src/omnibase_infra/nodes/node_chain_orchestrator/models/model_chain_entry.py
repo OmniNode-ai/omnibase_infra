@@ -15,7 +15,7 @@ from .model_chain_step import ModelChainStep
 class ModelChainEntry(BaseModel):
     """A verified trajectory stored in Qdrant."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     chain_id: UUID = Field(..., description="Unique chain identifier")
     prompt_text: str = Field(
