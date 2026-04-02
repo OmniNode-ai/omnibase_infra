@@ -62,7 +62,10 @@ def project_tool_executed(
             summary,
         )
         if file_match:
-            files = list(updated.get("files_touched") or [])
+            existing_files = updated.get("files_touched")
+            files: list[str] = (
+                list(existing_files) if isinstance(existing_files, list) else []
+            )
             path = file_match.group(1).rstrip(":")
             if path not in files:
                 files.append(path)
@@ -70,7 +73,10 @@ def project_tool_executed(
 
     # Track errors from failed tools
     if not success and summary:
-        errors = list(updated.get("errors_hit") or [])
+        existing_errors = updated.get("errors_hit")
+        errors: list[str] = (
+            list(existing_errors) if isinstance(existing_errors, list) else []
+        )
         errors.append(summary[:500])
         updated["errors_hit"] = errors[-20:]  # Keep last 20
 
