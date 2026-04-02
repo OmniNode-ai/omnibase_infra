@@ -265,6 +265,10 @@ services:
       # Admin API defaults to 0.0.0.0:9644 in dev-container mode; port mapping
       # in ports: section is sufficient for external access.
       - --default-log-level=warn
+      # OMN-7302: raise partition cap from default 1000 to 7000 to prevent
+      # "Not enough resources" failures when topic count × partitions exceeds
+      # the per-shard limit.
+      - --set topic_partitions_per_shard=7000
     ports:
       - "${REDPANDA_EXTERNAL_PORT:-19092}:19092"
       # Pandaproxy (REST API for Kafka)
