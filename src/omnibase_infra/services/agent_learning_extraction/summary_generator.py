@@ -12,7 +12,7 @@ _MAX_ERROR_CHARS = 500
 _MAX_SUMMARY_CHARS = 2000
 _FALLBACK_SUMMARY = "Session completed successfully (no summary generated)."
 
-_SYSTEM_PROMPT = (
+SYSTEM_PROMPT = (
     "You are a technical documentation assistant. Given a summary of an agent's "
     "session (repo, files touched, errors encountered, tools used), write a 2-3 "
     "sentence resolution summary explaining what the agent did and why it worked. "
