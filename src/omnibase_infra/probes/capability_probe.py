@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import socket
 import urllib.error
 import urllib.request
@@ -119,7 +120,7 @@ def http_health_check(url: str, timeout: float = 1.0) -> bool:
 
 def probe_platform_tier(
     kafka_servers: str = "",
-    intelligence_url: str = "http://localhost:8053",
+    intelligence_url: str = os.environ.get("INTELLIGENCE_URL", ""),
     kafka_timeout: float = 1.0,
     intel_timeout: float = 1.0,
 ) -> TierName:

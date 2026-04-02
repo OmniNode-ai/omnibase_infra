@@ -44,10 +44,10 @@ class ConfigLlmCostAggregation(BaseSettings):
 
     # Kafka connection
     kafka_bootstrap_servers: str = Field(
-        default="localhost:19092",
+        ...,
         description=(
             "Kafka bootstrap servers. Set via "
-            "OMNIBASE_INFRA_LLM_COST_KAFKA_BOOTSTRAP_SERVERS env var for production."
+            "OMNIBASE_INFRA_LLM_COST_KAFKA_BOOTSTRAP_SERVERS env var."
         ),
     )
     kafka_group_id: str = Field(

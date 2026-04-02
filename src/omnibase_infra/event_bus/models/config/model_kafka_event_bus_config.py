@@ -214,7 +214,7 @@ class ModelKafkaEventBusConfig(BaseModel):
 
     # Connection settings
     bootstrap_servers: str = Field(
-        default="localhost:19092",
+        default_factory=lambda: os.environ["KAFKA_BOOTSTRAP_SERVERS"],
         description="Kafka bootstrap servers (host:port format, comma-separated for multiple)",
         min_length=1,
     )

@@ -82,7 +82,7 @@ class HandlerRegistryApiGetHealth:
 
             from aiokafka.admin import AIOKafkaAdminClient
 
-            _kafka = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")  # ONEX_EXCLUDE  # fmt: skip
+            _kafka = os.environ["KAFKA_BOOTSTRAP_SERVERS"]  # ONEX_EXCLUDE  # fmt: skip
             admin = AIOKafkaAdminClient(
                 bootstrap_servers=_kafka, request_timeout_ms=2000
             )
@@ -99,7 +99,7 @@ class HandlerRegistryApiGetHealth:
 
             import httpx
 
-            qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")  # ONEX_EXCLUDE  # fmt: skip
+            qdrant_url = os.environ["QDRANT_URL"]  # ONEX_EXCLUDE  # fmt: skip
             async with httpx.AsyncClient(timeout=2) as client:
                 resp = await client.get(f"{qdrant_url}/healthz")
                 components["qdrant"] = (

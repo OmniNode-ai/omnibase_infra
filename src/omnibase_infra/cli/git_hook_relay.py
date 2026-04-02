@@ -108,7 +108,7 @@ class ModelGitHookEmitParams(BaseModel):
     outcome: str = Field(..., description="Hook outcome.")
     gates: list[str] = Field(default_factory=list, description="Gate names evaluated.")
     bootstrap_servers: str = Field(
-        default="localhost:19092",
+        default_factory=lambda: os.environ["KAFKA_BOOTSTRAP_SERVERS"],
         description="Kafka bootstrap servers.",
     )
 
@@ -257,7 +257,7 @@ def _resolve_gates(gates_json: str | None, gates_file: Path | None) -> list[str]
 @click.group()
 @click.option(
     "--bootstrap-servers",
-    default=lambda: os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092"),
+    default=lambda: os.environ["KAFKA_BOOTSTRAP_SERVERS"],
     show_default=True,
     help="Kafka bootstrap servers (overrides KAFKA_BOOTSTRAP_SERVERS env var).",
 )

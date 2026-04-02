@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import os
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -20,7 +22,7 @@ class ModelQdrantHandlerConfig(BaseModel):
     model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
 
     url: str = Field(
-        default="http://localhost:6333",
+        default_factory=lambda: os.environ["QDRANT_URL"],
         description="Qdrant server URL",
     )
     api_key: str | None = Field(

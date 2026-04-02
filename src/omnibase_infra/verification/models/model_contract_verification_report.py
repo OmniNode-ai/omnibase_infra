@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import UTC, datetime, timezone
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -69,7 +70,7 @@ class ModelContractVerificationReport(BaseModel):
         description="Which probes had to use fallback mechanisms.",
     )
     runtime_target: str = Field(
-        default="localhost:8085",
+        default_factory=lambda: os.environ["ONEX_RUNTIME_TARGET"],
         description="The runtime endpoint targeted.",
     )
     duration_ms: int = Field(

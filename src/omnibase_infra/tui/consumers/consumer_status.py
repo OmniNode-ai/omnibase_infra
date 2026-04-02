@@ -106,7 +106,7 @@ async def consume_all(app: object) -> None:
     Args:
         app: The textual App instance to receive messages.
     """
-    bootstrap_servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
+    bootstrap_servers = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
     consumer: AIOKafkaConsumer | None = None
     try:
         consumer = AIOKafkaConsumer(
