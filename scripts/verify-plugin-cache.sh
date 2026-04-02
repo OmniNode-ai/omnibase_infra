@@ -131,14 +131,18 @@ CACHE_HASH=$(compute_content_hash "$CACHE_DIR")
 
 # ── Diff computation ──────────────────────────────────────────────────────────
 
-# Build a fast file manifest: relative_path \t size \t mtime
-# Uses stat for speed instead of per-file shasum.
+# Build a fast file manifest: relative_path \t size_bytes
+# Uses wc -c for portability (works on both macOS and Linux).
 build_file_manifest() {
   local dir="$1"
   (
     cd "$dir"
-    find . -type f "${_FIND_EXCLUDES[@]}" \
-      -exec stat -f '%N\t%z' {} \; 2>/dev/null \
+    find . -type f "${_FIND_EXCLUDES[@]}" -print0 2>/dev/null \
+    | while IFS= read -r -d '' f; do
+        local sz
+        sz=$(wc -c < "$f")
+        printf '%s\t%s\n' "$f" "$sz"
+      done \
     | LC_ALL=C sort
   )
 }
@@ -169,8 +173,8 @@ if [[ "$REPO_HASH" != "$CACHE_HASH" ]]; then
 
   # Files in both but with different sizes (modified)
   while IFS= read -r f; do
-    repo_size=$(grep -F "$f" "$_tmp_repo" | cut -f2)
-    cache_size=$(grep -F "$f" "$_tmp_cache" | cut -f2)
+    repo_size=$(grep -F "${f}	" "$_tmp_repo" | head -1 | cut -f2)
+    cache_size=$(grep -F "${f}	" "$_tmp_cache" | head -1 | cut -f2)
     if [[ "$repo_size" != "$cache_size" ]]; then
       CHANGED_FILES+=("~ $f")
     fi
@@ -231,8 +235,10 @@ if [[ "$FIX" -eq 1 && "$STATUS" == "STALE" ]]; then
   echo ""
   echo "Refreshing cache from repo..."
   rsync -a --delete \
-    --exclude='__pycache__' --exclude='*.pyc' \
-    --exclude='.deployed-commit' --exclude='.content-hash' \
+    --exclude='.venv' --exclude='node_modules' \
+    --exclude='logs' --exclude='tmp' \
+    --exclude='__pycache__' --exclude='*.pyc' --exclude='*.log' \
+    --exclude='.deployed-commit' --exclude='.content-hash' --exclude='.DS_Store' \
     "${REPO_PLUGIN_DIR}/" "${CACHE_DIR}/" 2>/dev/null
 
   # Update metadata
