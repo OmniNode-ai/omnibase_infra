@@ -122,19 +122,31 @@ class HandlerChainRetrieval:
             )
 
         # Step 4: Build matches
+        # Qdrant ScoredPoint objects have .payload, .score, .id attributes
         matches: list[ModelChainMatch] = []
         for hit in hits:
             try:
-                chain_entry = ModelChainEntry.model_validate(hit.payload)
+                payload = getattr(hit, "payload", None)
+                score: float = getattr(hit, "score", 0.0)
+                point_id = getattr(hit, "id", "unknown")
+                if payload is None:
+                    logger.warning(
+                        "Skipping hit without payload (point_id=%s)", point_id
+                    )
+                    continue
+                chain_entry = ModelChainEntry.model_validate(payload)
                 matches.append(
                     ModelChainMatch(
                         chain_entry=chain_entry,
-                        similarity_score=hit.score,
-                        distance=1.0 - hit.score,
+                        similarity_score=score,
+                        distance=1.0 - score,
                     )
                 )
             except (KeyError, ValueError, TypeError):
-                logger.warning("Skipping invalid chain payload (point_id=%s)", hit.id)
+                logger.warning(
+                    "Skipping invalid chain payload (point_id=%s)",
+                    getattr(hit, "id", "unknown"),
+                )
                 continue
 
         best_similarity = max(m.similarity_score for m in matches) if matches else 0.0
