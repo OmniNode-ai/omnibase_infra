@@ -91,7 +91,10 @@ class HandlerBuildDispatch:
         total_failed = 0
 
         dispatch_path = _dispatch_dir()
-        if dispatch_path is not None and not dry_run:
+        if targets and not dry_run:
+            if dispatch_path is None:
+                msg = "ONEX_STATE_DIR not set — cannot write dispatch manifest"
+                raise RuntimeError(msg)
             dispatch_path.mkdir(parents=True, exist_ok=True)
 
         for target in targets:
@@ -179,16 +182,23 @@ class HandlerBuildDispatch:
             msg = "ONEX_STATE_DIR not set — cannot write dispatch manifest"
             raise RuntimeError(msg)
 
+        ticket_id = target.ticket_id
+        if not (ticket_id.isascii() and ticket_id.replace("-", "").isalnum()):
+            msg = f"Unsafe ticket_id for dispatch manifest: {ticket_id!r}"
+            raise ValueError(msg)
+
         manifest = {
-            "ticket_id": target.ticket_id,
+            "ticket_id": ticket_id,
             "title": target.title,
             "buildability": target.buildability.value,
             "correlation_id": str(correlation_id),
             "dispatched_at": datetime.now(tz=UTC).isoformat(),
             "status": "pending",
-            "command": f'claude -p "Run ticket-pipeline for {target.ticket_id}"',
+            "command": f'claude -p "Run ticket-pipeline for {ticket_id}"',
         }
 
-        manifest_path = dispatch_path / f"{target.ticket_id}.json"
-        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+        manifest_path = dispatch_path / f"{ticket_id}.json"
+        temp_path = manifest_path.with_suffix(".json.tmp")
+        temp_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        temp_path.replace(manifest_path)
         logger.debug("Wrote dispatch manifest: %s", manifest_path)

@@ -17,11 +17,26 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
+
+_REDACT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"password\s*[=:]\s*\S+", re.IGNORECASE), "password=[REDACTED]"),
+    (re.compile(r"://[^:@/\s]+:[^@\s]+@"), "://[REDACTED]@"),
+    (re.compile(r"api[_-]?key\s*[=:]\s*\S+", re.IGNORECASE), "api_key=[REDACTED]"),
+    (re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"), "[EMAIL_REDACTED]"),
+]
+
+
+def _sanitize_error_message(msg: str) -> str:
+    """Redact credentials and PII from error messages before writing to disk."""
+    for pattern, replacement in _REDACT_PATTERNS:
+        msg = pattern.sub(replacement, msg)
+    return msg
 
 
 def emit_build_loop_friction(
@@ -62,7 +77,7 @@ def emit_build_loop_friction(
             "surface": f"build_loop/{phase}",
             "severity": severity,
             "description": description,
-            "error_message": error_message or "",
+            "error_message": _sanitize_error_message(error_message) if error_message else "",
             "correlation_id": str(correlation_id),
             "phase": phase,
             "timestamp": ts.isoformat(),
