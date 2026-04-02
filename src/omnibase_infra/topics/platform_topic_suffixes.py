@@ -940,6 +940,18 @@ SUFFIX_OMNICLAUDE_SKILL_COMPLETED: str = "onex.evt.omniclaude.skill-completed.v1
 Consumed by omnibase_infra ServiceSkillLifecycleConsumer.
 """
 
+SUFFIX_OMNICLAUDE_SESSION_ENDED: str = "onex.evt.omniclaude.session-ended.v1"
+"""Session lifecycle end topic. Emitted by omniclaude session hooks.
+
+Consumed by omnibase_infra agent learning extraction consumer (OMN-7242).
+"""
+
+SUFFIX_OMNICLAUDE_TOOL_EXECUTED: str = "onex.evt.omniclaude.tool-executed.v1"
+"""Tool execution event topic. Emitted by omniclaude tool hooks.
+
+Consumed by omnibase_infra agent learning extraction consumer (OMN-7242).
+"""
+
 # =============================================================================
 # OMNICLAUDE OBSERVABILITY DLQ TOPIC SUFFIXES
 # =============================================================================

@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Result of querying the agent learning store."""
+
+"""Query result model for agent learning retrieval."""
 
 from __future__ import annotations
 

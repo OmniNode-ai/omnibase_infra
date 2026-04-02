@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 """Pydantic model for agent learning records.
 
 A learning record captures what an agent discovered during a successful session:

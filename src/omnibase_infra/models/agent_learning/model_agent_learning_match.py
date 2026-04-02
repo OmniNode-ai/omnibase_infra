@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""A single learning match result with relevance scoring."""
+
+"""Match result model for agent learning retrieval."""
 
 from __future__ import annotations
 

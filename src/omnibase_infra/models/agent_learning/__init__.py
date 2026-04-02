@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 """Agent learning record models for Cross-Agent Memory Fabric."""
 
 from omnibase_infra.models.agent_learning.enum_learning_match_type import (
