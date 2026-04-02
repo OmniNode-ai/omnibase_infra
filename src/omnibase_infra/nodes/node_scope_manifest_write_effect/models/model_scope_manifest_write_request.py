@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelScopeManifestWriteRequest(BaseModel):
     """Request to write a scope manifest JSON file."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID.")
     output_path: str = Field(..., description="Path to write the manifest.")

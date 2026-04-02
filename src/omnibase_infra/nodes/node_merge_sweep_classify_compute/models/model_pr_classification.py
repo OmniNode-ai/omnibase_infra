@@ -16,7 +16,7 @@ from omnibase_infra.nodes.node_merge_sweep_pr_list_effect.models.model_pr_info i
 class ModelPRClassification(BaseModel):
     """Classification of a single PR into Track A or Track B."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     pr: ModelPRInfo = Field(..., description="The PR being classified.")
     track: Literal["A", "B", "SKIP"] = Field(

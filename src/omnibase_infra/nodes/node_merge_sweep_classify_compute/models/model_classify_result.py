@@ -16,7 +16,7 @@ from omnibase_infra.nodes.node_merge_sweep_classify_compute.models.model_pr_clas
 class ModelClassifyResult(BaseModel):
     """Result of classifying PRs into Track A / Track B / SKIP."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID.")
     track_a: tuple[ModelPRClassification, ...] = Field(

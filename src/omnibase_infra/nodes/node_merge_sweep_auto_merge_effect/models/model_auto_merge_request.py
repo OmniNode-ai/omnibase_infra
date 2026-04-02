@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelAutoMergeRequest(BaseModel):
     """Request to enable auto-merge on a set of PRs."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID.")
     prs: tuple[tuple[str, int], ...] = Field(

@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelMergeSweepResult(BaseModel):
     """Final result of the merge-sweep workflow."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID.")
     status: Literal["queued", "nothing_to_merge", "partial", "complete", "error"] = (

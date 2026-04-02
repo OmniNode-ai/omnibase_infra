@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelScopeFileReadRequest(BaseModel):
     """Request to read a plan file from the filesystem."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID.")
     file_path: str = Field(..., description="Absolute path to the plan file.")

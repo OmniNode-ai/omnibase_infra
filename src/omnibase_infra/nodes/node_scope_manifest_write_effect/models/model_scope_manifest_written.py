@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelScopeManifestWritten(BaseModel):
     """Confirmation that the scope manifest was written to disk."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID.")
     manifest_path: str = Field(

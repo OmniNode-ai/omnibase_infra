@@ -103,6 +103,24 @@ _INV4_WIRING_EXEMPTIONS: frozenset[tuple[str, str]] = frozenset(
             "src/omnibase_infra/nodes/node_delegation_routing_reducer/contract.yaml",
             "HandlerDelegationRouting",
         ),
+        # OMN-5406: Scope-check canary orchestrator handlers use payload_type_match
+        # routing and are dispatched via Kafka events, not through the handler registry.
+        (
+            "src/omnibase_infra/nodes/node_scope_workflow_orchestrator/contract.yaml",
+            "HandlerScopeCheckInitiate",
+        ),
+        (
+            "src/omnibase_infra/nodes/node_scope_workflow_orchestrator/contract.yaml",
+            "HandlerScopeFileReadComplete",
+        ),
+        (
+            "src/omnibase_infra/nodes/node_scope_workflow_orchestrator/contract.yaml",
+            "HandlerScopeExtractComplete",
+        ),
+        (
+            "src/omnibase_infra/nodes/node_scope_workflow_orchestrator/contract.yaml",
+            "HandlerScopeManifestWriteComplete",
+        ),
     }
 )
 

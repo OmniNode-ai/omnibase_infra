@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelScopeExtractInput(BaseModel):
     """Input containing plan file content for scope extraction."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID.")
     plan_file_path: str = Field(..., description="Original path of the plan file.")

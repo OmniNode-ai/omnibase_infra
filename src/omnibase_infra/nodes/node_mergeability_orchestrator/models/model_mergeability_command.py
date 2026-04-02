@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelMergeabilityCommand(BaseModel):
     """Command payload emitted by bin-shell to trigger mergeability-gate workflow."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(
         ..., description="Unique correlation ID for this workflow run."

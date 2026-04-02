@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelMergeSweepCommand(BaseModel):
     """Command payload to trigger merge-sweep workflow."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(
         ..., description="Unique correlation ID for this workflow run."

@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelAutoMergeOutcome(BaseModel):
     """Outcome of enabling auto-merge on a single PR."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     repo: str = Field(..., description="Full repo name.")
     pr_number: int = Field(..., description="PR number.")

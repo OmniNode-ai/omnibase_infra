@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelPRListRequest(BaseModel):
     """Request to list open PRs across GitHub repositories."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID.")
     repos: tuple[str, ...] = Field(

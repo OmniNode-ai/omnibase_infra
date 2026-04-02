@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.nodes.node_mergeability_evaluate_compute.models.model_mergeability_evaluation import (
+from omnibase_infra.nodes.node_mergeability_evaluate_compute.models.enum_mergeability_status import (
     EnumMergeabilityStatus,
 )
 

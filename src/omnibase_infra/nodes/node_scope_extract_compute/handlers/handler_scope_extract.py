@@ -94,9 +94,9 @@ class HandlerScopeExtract:
                 # Path-like but no extension - treat as directory
                 directories.append(path)
 
-        # Extract repos from known names
+        # Extract repos from known names (word-boundary aware to avoid substring matches)
         for repo in KNOWN_REPOS:
-            if repo in content:
+            if re.search(rf"\b{re.escape(repo)}\b", content):
                 repos.append(repo)
 
         # Extract "Files affected" or "Files Affected" sections

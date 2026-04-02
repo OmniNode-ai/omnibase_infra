@@ -16,7 +16,7 @@ from omnibase_infra.nodes.node_merge_sweep_pr_list_effect.models.model_pr_info i
 class ModelPRListResult(BaseModel):
     """Result of listing open PRs across repositories."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID.")
     prs: tuple[ModelPRInfo, ...] = Field(

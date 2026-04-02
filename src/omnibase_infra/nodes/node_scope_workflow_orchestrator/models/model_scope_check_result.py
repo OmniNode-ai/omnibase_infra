@@ -16,7 +16,7 @@ from omnibase_infra.nodes.node_scope_workflow_orchestrator.models.enum_scope_che
 class ModelScopeCheckResult(BaseModel):
     """Final result emitted when scope-check workflow completes."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(
         ..., description="Correlation ID from the originating command."

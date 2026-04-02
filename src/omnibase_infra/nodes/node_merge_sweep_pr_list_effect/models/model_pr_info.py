@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelPRInfo(BaseModel):
     """Metadata for a single GitHub pull request."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     number: int = Field(..., description="PR number.")
     repo: str = Field(..., description="Full repo name (org/repo).")

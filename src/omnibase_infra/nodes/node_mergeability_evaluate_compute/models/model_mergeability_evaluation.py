@@ -16,7 +16,7 @@ from omnibase_infra.nodes.node_mergeability_evaluate_compute.models.enum_mergeab
 class ModelMergeabilityEvaluation(BaseModel):
     """Result of evaluating a PR's mergeability."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID.")
     pr_number: int = Field(..., description="GitHub PR number.")

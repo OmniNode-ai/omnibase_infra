@@ -16,7 +16,7 @@ from omnibase_infra.nodes.node_merge_sweep_auto_merge_effect.models.model_auto_m
 class ModelAutoMergeResult(BaseModel):
     """Result of enabling auto-merge across multiple PRs."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID.")
     outcomes: tuple[ModelAutoMergeOutcome, ...] = Field(
