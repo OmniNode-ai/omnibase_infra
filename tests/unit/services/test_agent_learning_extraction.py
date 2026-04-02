@@ -3,7 +3,7 @@
 
 """Tests for agent learning extraction consumer."""
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
