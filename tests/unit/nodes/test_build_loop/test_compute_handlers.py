@@ -17,13 +17,13 @@ from omnibase_infra.enums.enum_buildability import EnumBuildability
 from omnibase_infra.nodes.node_rsd_fill_compute.handlers.handler_rsd_fill import (
     HandlerRsdFill,
 )
-from omnibase_infra.nodes.node_rsd_fill_compute.models.model_rsd_fill import (
+from omnibase_infra.nodes.node_rsd_fill_compute.models.model_scored_ticket import (
     ModelScoredTicket,
 )
 from omnibase_infra.nodes.node_ticket_classify_compute.handlers.handler_ticket_classify import (
     HandlerTicketClassify,
 )
-from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_classification import (
+from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_for_classification import (
     ModelTicketForClassification,
 )
 
@@ -132,7 +132,10 @@ class TestHandlerTicketClassify:
             ),
         )
         result = await handler.handle(correlation_id=uuid4(), tickets=tickets)
-        assert result.classifications[0].buildability == EnumBuildability.NEEDS_ARCH_DECISION
+        assert (
+            result.classifications[0].buildability
+            == EnumBuildability.NEEDS_ARCH_DECISION
+        )
 
     @pytest.mark.asyncio
     async def test_skip_terminal_state(self):
@@ -153,13 +156,19 @@ class TestHandlerTicketClassify:
         handler = HandlerTicketClassify()
         tickets = (
             ModelTicketForClassification(
-                ticket_id="OMN-10", title="Add new handler", description="implement node"
+                ticket_id="OMN-10",
+                title="Add new handler",
+                description="implement node",
             ),
             ModelTicketForClassification(
-                ticket_id="OMN-11", title="Blocked by vendor", description="external dependency"
+                ticket_id="OMN-11",
+                title="Blocked by vendor",
+                description="external dependency",
             ),
             ModelTicketForClassification(
-                ticket_id="OMN-12", title="Investigate spike on auth", description="research tradeoff"
+                ticket_id="OMN-12",
+                title="Investigate spike on auth",
+                description="research tradeoff",
             ),
         )
         result = await handler.handle(correlation_id=uuid4(), tickets=tickets)

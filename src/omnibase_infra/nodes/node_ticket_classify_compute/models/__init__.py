@@ -4,8 +4,14 @@
 
 from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_classification import (
     ModelTicketClassification,
+)
+from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_classify_input import (
     ModelTicketClassifyInput,
+)
+from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_classify_output import (
     ModelTicketClassifyOutput,
+)
+from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_for_classification import (
     ModelTicketForClassification,
 )
 

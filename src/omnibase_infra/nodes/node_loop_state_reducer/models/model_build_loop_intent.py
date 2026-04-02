@@ -29,16 +29,12 @@ class ModelBuildLoopIntent(BaseModel):
     intent_type: EnumBuildLoopIntentType = Field(
         ..., description="The intent type determining which node to invoke."
     )
-    correlation_id: UUID = Field(
-        ..., description="Cycle correlation ID for tracing."
-    )
-    cycle_number: int = Field(
-        ..., ge=0, description="Current cycle number."
-    )
+    correlation_id: UUID = Field(..., description="Cycle correlation ID for tracing.")
+    cycle_number: int = Field(..., ge=0, description="Current cycle number.")
     from_phase: EnumBuildLoopPhase = Field(
         ..., description="Phase that produced this intent."
     )
-    payload: dict[str, str | int | float | bool | None] = Field(
+    payload: dict[str, object] = Field(
         default_factory=dict,
         description="Optional key-value payload for the target node.",
     )

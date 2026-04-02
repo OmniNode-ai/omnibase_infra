@@ -25,12 +25,19 @@ from uuid import UUID
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.enums.enum_build_loop_intent_type import EnumBuildLoopIntentType
 from omnibase_infra.enums.enum_build_loop_phase import EnumBuildLoopPhase
-from omnibase_infra.nodes.node_autonomous_loop_orchestrator.models.model_loop_orchestrator import (
+from omnibase_infra.nodes.node_autonomous_loop_orchestrator.models.model_loop_cycle_summary import (
     ModelLoopCycleSummary,
+)
+from omnibase_infra.nodes.node_autonomous_loop_orchestrator.models.model_loop_orchestrator_result import (
     ModelLoopOrchestratorResult,
+)
+from omnibase_infra.nodes.node_autonomous_loop_orchestrator.models.model_loop_start_command import (
     ModelLoopStartCommand,
 )
-from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_dispatch import (
+from omnibase_infra.nodes.node_build_dispatch_effect.handlers.handler_build_dispatch import (
+    HandlerBuildDispatch,
+)
+from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_target import (
     ModelBuildTarget,
 )
 from omnibase_infra.nodes.node_closeout_effect.handlers.handler_closeout import (
@@ -42,26 +49,26 @@ from omnibase_infra.nodes.node_loop_state_reducer.handlers.handler_loop_state im
 from omnibase_infra.nodes.node_loop_state_reducer.models.model_build_loop_event import (
     ModelBuildLoopEvent,
 )
+from omnibase_infra.nodes.node_loop_state_reducer.models.model_build_loop_intent import (
+    ModelBuildLoopIntent,
+)
 from omnibase_infra.nodes.node_loop_state_reducer.models.model_build_loop_state import (
     ModelBuildLoopState,
 )
 from omnibase_infra.nodes.node_rsd_fill_compute.handlers.handler_rsd_fill import (
     HandlerRsdFill,
 )
-from omnibase_infra.nodes.node_rsd_fill_compute.models.model_rsd_fill import (
+from omnibase_infra.nodes.node_rsd_fill_compute.models.model_scored_ticket import (
     ModelScoredTicket,
 )
 from omnibase_infra.nodes.node_ticket_classify_compute.handlers.handler_ticket_classify import (
     HandlerTicketClassify,
 )
-from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_classification import (
+from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_for_classification import (
     ModelTicketForClassification,
 )
 from omnibase_infra.nodes.node_verify_effect.handlers.handler_verify import (
     HandlerVerify,
-)
-from omnibase_infra.nodes.node_build_dispatch_effect.handlers.handler_build_dispatch import (
-    HandlerBuildDispatch,
 )
 
 logger = logging.getLogger(__name__)
@@ -175,9 +182,15 @@ class HandlerLoopOrchestrator:
         state, intents = self._reducer.delta(state, start_event)
 
         # Process intents until terminal state
-        while state.phase not in (EnumBuildLoopPhase.COMPLETE, EnumBuildLoopPhase.FAILED):
+        while state.phase not in (
+            EnumBuildLoopPhase.COMPLETE,
+            EnumBuildLoopPhase.FAILED,
+        ):
             if not intents:
-                logger.error("No intents emitted but not in terminal state: %s", state.phase.value)
+                logger.error(
+                    "No intents emitted but not in terminal state: %s",
+                    state.phase.value,
+                )
                 break
 
             for intent in intents:
@@ -198,23 +211,19 @@ class HandlerLoopOrchestrator:
 
     async def _execute_intent(
         self,
-        intent: "ModelBuildLoopIntent",
+        intent: ModelBuildLoopIntent,
         state: ModelBuildLoopState,
     ) -> ModelBuildLoopEvent:
         """Execute a single intent by invoking the corresponding node handler.
 
         Returns a ModelBuildLoopEvent with the result.
         """
-        from omnibase_infra.nodes.node_loop_state_reducer.models.model_build_loop_intent import (
-            ModelBuildLoopIntent,
-        )
-
         now = datetime.now(tz=UTC)
         correlation_id = state.correlation_id
 
         try:
             if intent.intent_type == EnumBuildLoopIntentType.START_CLOSEOUT:
-                result = await self._closeout.handle(
+                await self._closeout.handle(
                     correlation_id=correlation_id,
                     dry_run=state.dry_run,
                 )
@@ -235,7 +244,9 @@ class HandlerLoopOrchestrator:
                     source_phase=EnumBuildLoopPhase.VERIFYING,
                     success=result.all_critical_passed,
                     timestamp=now,
-                    error_message=None if result.all_critical_passed else "Critical verification checks failed",
+                    error_message=None
+                    if result.all_critical_passed
+                    else "Critical verification checks failed",
                 )
 
             elif intent.intent_type == EnumBuildLoopIntentType.START_FILL:
@@ -320,7 +331,9 @@ def _placeholder_scored_tickets() -> tuple[ModelScoredTicket, ...]:
     return ()
 
 
-def _placeholder_tickets_for_classification() -> tuple[ModelTicketForClassification, ...]:
+def _placeholder_tickets_for_classification() -> tuple[
+    ModelTicketForClassification, ...
+]:
     """Placeholder: returns empty ticket list until real backlog integration."""
     return ()
 

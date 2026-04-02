@@ -142,9 +142,7 @@ class ServiceTopicRegistry:
             topic_keys.BUILD_LOOP_VERIFY: (
                 "onex.cmd.omnibase-infra.build-loop-verify.v1"
             ),
-            topic_keys.BUILD_LOOP_FILL: (
-                "onex.cmd.omnibase-infra.build-loop-fill.v1"
-            ),
+            topic_keys.BUILD_LOOP_FILL: ("onex.cmd.omnibase-infra.build-loop-fill.v1"),
             topic_keys.BUILD_LOOP_CLASSIFY: (
                 "onex.cmd.omnibase-infra.build-loop-classify.v1"
             ),

@@ -34,12 +34,30 @@ _TRANSITIONS: dict[
     EnumBuildLoopPhase,
     tuple[EnumBuildLoopPhase, EnumBuildLoopPhase],
 ] = {
-    EnumBuildLoopPhase.IDLE: (EnumBuildLoopPhase.CLOSING_OUT, EnumBuildLoopPhase.FAILED),
-    EnumBuildLoopPhase.CLOSING_OUT: (EnumBuildLoopPhase.VERIFYING, EnumBuildLoopPhase.FAILED),
-    EnumBuildLoopPhase.VERIFYING: (EnumBuildLoopPhase.FILLING, EnumBuildLoopPhase.FAILED),
-    EnumBuildLoopPhase.FILLING: (EnumBuildLoopPhase.CLASSIFYING, EnumBuildLoopPhase.FAILED),
-    EnumBuildLoopPhase.CLASSIFYING: (EnumBuildLoopPhase.BUILDING, EnumBuildLoopPhase.FAILED),
-    EnumBuildLoopPhase.BUILDING: (EnumBuildLoopPhase.COMPLETE, EnumBuildLoopPhase.FAILED),
+    EnumBuildLoopPhase.IDLE: (
+        EnumBuildLoopPhase.CLOSING_OUT,
+        EnumBuildLoopPhase.FAILED,
+    ),
+    EnumBuildLoopPhase.CLOSING_OUT: (
+        EnumBuildLoopPhase.VERIFYING,
+        EnumBuildLoopPhase.FAILED,
+    ),
+    EnumBuildLoopPhase.VERIFYING: (
+        EnumBuildLoopPhase.FILLING,
+        EnumBuildLoopPhase.FAILED,
+    ),
+    EnumBuildLoopPhase.FILLING: (
+        EnumBuildLoopPhase.CLASSIFYING,
+        EnumBuildLoopPhase.FAILED,
+    ),
+    EnumBuildLoopPhase.CLASSIFYING: (
+        EnumBuildLoopPhase.BUILDING,
+        EnumBuildLoopPhase.FAILED,
+    ),
+    EnumBuildLoopPhase.BUILDING: (
+        EnumBuildLoopPhase.COMPLETE,
+        EnumBuildLoopPhase.FAILED,
+    ),
 }
 
 # Map phase -> intent type to emit on successful transition
@@ -101,7 +119,9 @@ class HandlerLoopState:
 
         # Terminal states reject all events
         if state.phase in (EnumBuildLoopPhase.COMPLETE, EnumBuildLoopPhase.FAILED):
-            logger.warning("Rejecting event: already in terminal phase %s", state.phase.value)
+            logger.warning(
+                "Rejecting event: already in terminal phase %s", state.phase.value
+            )
             return state, []
 
         transition = _TRANSITIONS.get(state.phase)

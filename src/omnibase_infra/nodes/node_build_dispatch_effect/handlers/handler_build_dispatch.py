@@ -15,9 +15,13 @@ import logging
 from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_dispatch import (
+from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_dispatch_outcome import (
     ModelBuildDispatchOutcome,
+)
+from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_dispatch_result import (
     ModelBuildDispatchResult,
+)
+from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_target import (
     ModelBuildTarget,
 )
 
@@ -93,7 +97,7 @@ class HandlerBuildDispatch:
                     )
                 )
                 total_dispatched += 1
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — boundary: catch-all converts dispatch failure to outcome record
                 logger.warning(
                     "Failed to dispatch %s: %s",
                     target.ticket_id,

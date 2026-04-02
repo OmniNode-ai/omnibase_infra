@@ -18,6 +18,12 @@ class EnumOmnibaseInfraTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
+    CMD_BUILD_LOOP_BUILD_V1 = "onex.cmd.omnibase-infra.build-loop-build.v1"  # onex.cmd.omnibase-infra.build-loop-build.v1
+    CMD_BUILD_LOOP_CLASSIFY_V1 = "onex.cmd.omnibase-infra.build-loop-classify.v1"  # onex.cmd.omnibase-infra.build-loop-classify.v1
+    CMD_BUILD_LOOP_CLOSEOUT_V1 = "onex.cmd.omnibase-infra.build-loop-closeout.v1"  # onex.cmd.omnibase-infra.build-loop-closeout.v1
+    CMD_BUILD_LOOP_FILL_V1 = "onex.cmd.omnibase-infra.build-loop-fill.v1"  # onex.cmd.omnibase-infra.build-loop-fill.v1
+    CMD_BUILD_LOOP_START_V1 = "onex.cmd.omnibase-infra.build-loop-start.v1"  # onex.cmd.omnibase-infra.build-loop-start.v1
+    CMD_BUILD_LOOP_VERIFY_V1 = "onex.cmd.omnibase-infra.build-loop-verify.v1"  # onex.cmd.omnibase-infra.build-loop-verify.v1
     CMD_CHAIN_LEARN_V1 = "onex.cmd.omnibase-infra.chain-learn.v1"  # onex.cmd.omnibase-infra.chain-learn.v1
     CMD_CONSUMER_RESTART_V1 = "onex.cmd.omnibase-infra.consumer-restart.v1"  # onex.cmd.omnibase-infra.consumer-restart.v1
     CMD_DELEGATION_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-request.v1"  # onex.cmd.omnibase-infra.delegation-request.v1
@@ -26,6 +32,14 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_LLM_INFERENCE_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-inference-request.v1"  # onex.cmd.omnibase-infra.llm-inference-request.v1
     CMD_VECTOR_STORE_REQUEST_V1 = "onex.cmd.omnibase-infra.vector-store-request.v1"  # onex.cmd.omnibase-infra.vector-store-request.v1
     EVT_BASELINES_COMPUTED_V1 = "onex.evt.omnibase-infra.baselines-computed.v1"  # onex.evt.omnibase-infra.baselines-computed.v1
+    EVT_BUILD_LOOP_BUILD_COMPLETED_V1 = "onex.evt.omnibase-infra.build-loop-build-completed.v1"  # onex.evt.omnibase-infra.build-loop-build-completed.v1
+    EVT_BUILD_LOOP_CLASSIFY_COMPLETED_V1 = "onex.evt.omnibase-infra.build-loop-classify-completed.v1"  # onex.evt.omnibase-infra.build-loop-classify-completed.v1
+    EVT_BUILD_LOOP_CLOSEOUT_COMPLETED_V1 = "onex.evt.omnibase-infra.build-loop-closeout-completed.v1"  # onex.evt.omnibase-infra.build-loop-closeout-completed.v1
+    EVT_BUILD_LOOP_CYCLE_COMPLETED_V1 = "onex.evt.omnibase-infra.build-loop-cycle-completed.v1"  # onex.evt.omnibase-infra.build-loop-cycle-completed.v1
+    EVT_BUILD_LOOP_FAILED_V1 = "onex.evt.omnibase-infra.build-loop-failed.v1"  # onex.evt.omnibase-infra.build-loop-failed.v1
+    EVT_BUILD_LOOP_FILL_COMPLETED_V1 = "onex.evt.omnibase-infra.build-loop-fill-completed.v1"  # onex.evt.omnibase-infra.build-loop-fill-completed.v1
+    EVT_BUILD_LOOP_STARTED_V1 = "onex.evt.omnibase-infra.build-loop-started.v1"  # onex.evt.omnibase-infra.build-loop-started.v1
+    EVT_BUILD_LOOP_VERIFY_COMPLETED_V1 = "onex.evt.omnibase-infra.build-loop-verify-completed.v1"  # onex.evt.omnibase-infra.build-loop-verify-completed.v1
     EVT_CHAIN_LEARN_COMPLETE_V1 = "onex.evt.omnibase-infra.chain-learn-complete.v1"  # onex.evt.omnibase-infra.chain-learn-complete.v1
     EVT_CHAIN_LEARN_FAILED_V1 = "onex.evt.omnibase-infra.chain-learn-failed.v1"  # onex.evt.omnibase-infra.chain-learn-failed.v1
     EVT_CHAIN_REPLAY_RESULT_V1 = "onex.evt.omnibase-infra.chain-replay-result.v1"  # onex.evt.omnibase-infra.chain-replay-result.v1

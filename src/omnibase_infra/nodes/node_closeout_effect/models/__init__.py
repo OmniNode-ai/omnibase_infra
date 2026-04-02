@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: MIT
 """Models for the closeout effect node."""
 
-from omnibase_infra.nodes.node_closeout_effect.models.model_closeout import (
+from omnibase_infra.nodes.node_closeout_effect.models.model_closeout_input import (
     ModelCloseoutInput,
+)
+from omnibase_infra.nodes.node_closeout_effect.models.model_closeout_result import (
     ModelCloseoutResult,
 )
 

@@ -3032,6 +3032,41 @@ pattern_exemptions:
       session_id is an opaque Claude Code CLI session identifier string. It comes from hook events where session IDs are not necessarily UUIDs.
 
     ticket: OMN-7292
+  # ==========================================================================
+  # Autonomous Build Loop ticket_id Exemptions (OMN-5113)
+  # ==========================================================================
+  # ticket_id fields in build loop nodes use Linear ticket identifiers (e.g. "OMN-1234"),
+  # which are human-readable string identifiers, not UUIDs.
+  - file_pattern: 'model_ticket_classification\.py'
+    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    reason: >
+      ticket_id is a human-readable Linear identifier (e.g. "OMN-1234"), not a UUID.
+    ticket: OMN-5113
+
+  - file_pattern: 'model_ticket_for_classification\.py'
+    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    reason: >
+      ticket_id is a human-readable Linear identifier (e.g. "OMN-1234"), not a UUID.
+    ticket: OMN-5113
+
+  - file_pattern: 'model_build_target\.py'
+    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    reason: >
+      ticket_id is a human-readable Linear identifier (e.g. "OMN-1234"), not a UUID.
+    ticket: OMN-5113
+
+  - file_pattern: 'model_build_dispatch_outcome\.py'
+    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    reason: >
+      ticket_id is a human-readable Linear identifier (e.g. "OMN-1234"), not a UUID.
+    ticket: OMN-5113
+
+  - file_pattern: 'model_scored_ticket\.py'
+    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    reason: >
+      ticket_id is a human-readable Linear identifier (e.g. "OMN-1234"), not a UUID.
+    ticket: OMN-5113
+
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

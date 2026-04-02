@@ -81,7 +81,7 @@ class HandlerCloseout:
             # TODO: Wire to actual merge-sweep node invocation via orchestrator
             logger.info("Merge sweep: delegating to merge-sweep workflow")
             merge_sweep_ok = True
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: catch-all for merge-sweep resilience
             warnings.append(f"Merge sweep warning: {exc}")
             merge_sweep_ok = False
 
@@ -90,7 +90,7 @@ class HandlerCloseout:
         try:
             logger.info("Quality gates: checking CI status across repos")
             quality_gates_ok = True
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: catch-all for quality gate resilience
             warnings.append(f"Quality gates warning: {exc}")
             quality_gates_ok = False
 

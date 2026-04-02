@@ -68,9 +68,21 @@ class HandlerVerify:
                 correlation_id=correlation_id,
                 all_critical_passed=True,
                 checks=(
-                    ModelVerifyCheck(name="dashboard_health", passed=True, critical=False, message="dry_run"),
-                    ModelVerifyCheck(name="runtime_health", passed=True, critical=True, message="dry_run"),
-                    ModelVerifyCheck(name="data_flow", passed=True, critical=False, message="dry_run"),
+                    ModelVerifyCheck(
+                        name="dashboard_health",
+                        passed=True,
+                        critical=False,
+                        message="dry_run",
+                    ),
+                    ModelVerifyCheck(
+                        name="runtime_health",
+                        passed=True,
+                        critical=True,
+                        message="dry_run",
+                    ),
+                    ModelVerifyCheck(
+                        name="data_flow", passed=True, critical=False, message="dry_run"
+                    ),
                 ),
                 warnings=("dry_run: no actual checks executed",),
             )
@@ -82,25 +94,34 @@ class HandlerVerify:
         try:
             logger.info("Checking dashboard health")
             checks.append(
-                ModelVerifyCheck(name="dashboard_health", passed=True, critical=False, message="OK")
+                ModelVerifyCheck(
+                    name="dashboard_health", passed=True, critical=False, message="OK"
+                )
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: catch-all for dashboard health resilience
             msg = f"Dashboard health check failed: {exc}"
             warnings.append(msg)
             checks.append(
-                ModelVerifyCheck(name="dashboard_health", passed=False, critical=False, message=msg)
+                ModelVerifyCheck(
+                    name="dashboard_health", passed=False, critical=False, message=msg
+                )
             )
 
         # Check 2: Runtime health (critical)
         try:
             logger.info("Checking runtime health")
             checks.append(
-                ModelVerifyCheck(name="runtime_health", passed=True, critical=True, message="OK")
+                ModelVerifyCheck(
+                    name="runtime_health", passed=True, critical=True, message="OK"
+                )
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: catch-all for runtime health resilience
             checks.append(
                 ModelVerifyCheck(
-                    name="runtime_health", passed=False, critical=True, message=f"Runtime health failed: {exc}"
+                    name="runtime_health",
+                    passed=False,
+                    critical=True,
+                    message=f"Runtime health failed: {exc}",
                 )
             )
 
@@ -108,13 +129,17 @@ class HandlerVerify:
         try:
             logger.info("Verifying data flow")
             checks.append(
-                ModelVerifyCheck(name="data_flow", passed=True, critical=False, message="OK")
+                ModelVerifyCheck(
+                    name="data_flow", passed=True, critical=False, message="OK"
+                )
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — boundary: catch-all for data flow resilience
             msg = f"Data flow verification failed: {exc}"
             warnings.append(msg)
             checks.append(
-                ModelVerifyCheck(name="data_flow", passed=False, critical=False, message=msg)
+                ModelVerifyCheck(
+                    name="data_flow", passed=False, critical=False, message=msg
+                )
             )
 
         all_critical_passed = all(c.passed for c in checks if c.critical)

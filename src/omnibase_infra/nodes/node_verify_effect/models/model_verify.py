@@ -1,56 +1,21 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Verify effect models.
+"""Re-export shim for backwards compatibility.
 
-Related:
-    - OMN-7317: node_verify_effect
-    - OMN-5113: Autonomous Build Loop epic
+Models have been split into individual files per ONEX architecture rules.
+Import directly from the individual model files instead.
 """
 
 from __future__ import annotations
 
-from uuid import UUID
-
-from pydantic import BaseModel, ConfigDict, Field
-
-
-class ModelVerifyCheck(BaseModel):
-    """Result of a single verification check."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    name: str = Field(..., description="Check name.")
-    passed: bool = Field(..., description="Whether the check passed.")
-    critical: bool = Field(
-        default=True, description="Whether failure is critical (blocks loop) or just a warning."
-    )
-    message: str = Field(default="", description="Details about the check result.")
-
-
-class ModelVerifyInput(BaseModel):
-    """Input to the verify effect node."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    correlation_id: UUID = Field(..., description="Build loop cycle correlation ID.")
-    dry_run: bool = Field(default=False, description="Skip actual checks.")
-
-
-class ModelVerifyResult(BaseModel):
-    """Result from the verify effect node."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    correlation_id: UUID = Field(..., description="Build loop cycle correlation ID.")
-    all_critical_passed: bool = Field(
-        ..., description="Whether all critical checks passed."
-    )
-    checks: tuple[ModelVerifyCheck, ...] = Field(
-        ..., description="Individual check results."
-    )
-    warnings: tuple[str, ...] = Field(
-        default_factory=tuple, description="Non-critical warnings."
-    )
-
+from omnibase_infra.nodes.node_verify_effect.models.model_verify_check import (
+    ModelVerifyCheck,
+)
+from omnibase_infra.nodes.node_verify_effect.models.model_verify_input import (
+    ModelVerifyInput,
+)
+from omnibase_infra.nodes.node_verify_effect.models.model_verify_result import (
+    ModelVerifyResult,
+)
 
 __all__: list[str] = ["ModelVerifyCheck", "ModelVerifyInput", "ModelVerifyResult"]

@@ -63,7 +63,9 @@ def _event(
 class TestReducerHappyPath:
     """Test the full happy path through all phases."""
 
-    def test_idle_to_closing_out(self, reducer: HandlerLoopState, idle_state: ModelBuildLoopState):
+    def test_idle_to_closing_out(
+        self, reducer: HandlerLoopState, idle_state: ModelBuildLoopState
+    ):
         new_state, intents = reducer.delta(idle_state, _event(idle_state))
         assert new_state.phase == EnumBuildLoopPhase.CLOSING_OUT
         assert new_state.cycle_number == 1
@@ -81,7 +83,9 @@ class TestReducerHappyPath:
         assert len(intents) == 1
         assert intents[0].intent_type == EnumBuildLoopIntentType.START_VERIFY
 
-    def test_full_cycle(self, reducer: HandlerLoopState, idle_state: ModelBuildLoopState):
+    def test_full_cycle(
+        self, reducer: HandlerLoopState, idle_state: ModelBuildLoopState
+    ):
         """Walk through IDLE -> CLOSING_OUT -> VERIFYING -> FILLING -> CLASSIFYING -> BUILDING -> COMPLETE."""
         state = idle_state
 
@@ -155,7 +159,9 @@ class TestReducerFailure:
 class TestReducerDeduplication:
     """Test duplicate/out-of-order event rejection."""
 
-    def test_wrong_correlation_id(self, reducer: HandlerLoopState, idle_state: ModelBuildLoopState):
+    def test_wrong_correlation_id(
+        self, reducer: HandlerLoopState, idle_state: ModelBuildLoopState
+    ):
         wrong_event = ModelBuildLoopEvent(
             correlation_id=uuid4(),  # different from state
             source_phase=EnumBuildLoopPhase.IDLE,

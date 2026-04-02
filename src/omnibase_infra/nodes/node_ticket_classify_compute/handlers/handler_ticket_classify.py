@@ -19,7 +19,11 @@ from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.enums.enum_buildability import EnumBuildability
 from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_classification import (
     ModelTicketClassification,
+)
+from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_classify_output import (
     ModelTicketClassifyOutput,
+)
+from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_for_classification import (
     ModelTicketForClassification,
 )
 
@@ -91,12 +95,12 @@ _SKIP_KEYWORDS: frozenset[str] = frozenset(
 )
 
 
-def _match_keywords(
-    text: str, keywords: frozenset[str]
-) -> tuple[str, ...]:
+def _match_keywords(text: str, keywords: frozenset[str]) -> tuple[str, ...]:
     """Return matching keywords found in text (case-insensitive)."""
     text_lower = text.lower()
-    return tuple(kw for kw in keywords if re.search(rf"\b{re.escape(kw)}\b", text_lower))
+    return tuple(
+        kw for kw in keywords if re.search(rf"\b{re.escape(kw)}\b", text_lower)
+    )
 
 
 class HandlerTicketClassify:
@@ -141,7 +145,9 @@ class HandlerTicketClassify:
         total_skipped = 0
 
         for ticket in tickets:
-            combined_text = f"{ticket.title} {ticket.description} {' '.join(ticket.labels)}"
+            combined_text = (
+                f"{ticket.title} {ticket.description} {' '.join(ticket.labels)}"
+            )
 
             # Priority order: SKIP > BLOCKED > NEEDS_ARCH > AUTO_BUILDABLE
             skip_matches = _match_keywords(combined_text, _SKIP_KEYWORDS)
@@ -153,7 +159,9 @@ class HandlerTicketClassify:
                         buildability=EnumBuildability.SKIP,
                         confidence=0.9 if skip_matches else 0.8,
                         matched_keywords=skip_matches,
-                        reason=f"Skip: matched {skip_matches}" if skip_matches else f"Skip: terminal state '{ticket.state}'",
+                        reason=f"Skip: matched {skip_matches}"
+                        if skip_matches
+                        else f"Skip: terminal state '{ticket.state}'",
                     )
                 )
                 total_skipped += 1
@@ -198,7 +206,9 @@ class HandlerTicketClassify:
                     buildability=EnumBuildability.AUTO_BUILDABLE,
                     confidence=confidence,
                     matched_keywords=auto_matches,
-                    reason=f"Auto-buildable: matched {auto_matches}" if auto_matches else "Auto-buildable: default classification",
+                    reason=f"Auto-buildable: matched {auto_matches}"
+                    if auto_matches
+                    else "Auto-buildable: default classification",
                 )
             )
             total_auto += 1

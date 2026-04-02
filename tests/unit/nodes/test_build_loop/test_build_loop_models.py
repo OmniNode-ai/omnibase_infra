@@ -27,12 +27,11 @@ from omnibase_infra.nodes.node_loop_state_reducer.models.model_build_loop_intent
 from omnibase_infra.nodes.node_loop_state_reducer.models.model_build_loop_state import (
     ModelBuildLoopState,
 )
+from omnibase_infra.nodes.node_rsd_fill_compute.models.model_scored_ticket import (
+    ModelScoredTicket,
+)
 from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_classification import (
     ModelTicketClassification,
-    ModelTicketForClassification,
-)
-from omnibase_infra.nodes.node_rsd_fill_compute.models.model_rsd_fill import (
-    ModelScoredTicket,
 )
 
 

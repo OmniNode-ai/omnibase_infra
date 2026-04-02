@@ -32,12 +32,8 @@ class ModelBuildLoopEvent(BaseModel):
     source_phase: EnumBuildLoopPhase = Field(
         ..., description="Phase that produced this event."
     )
-    success: bool = Field(
-        ..., description="Whether the phase completed successfully."
-    )
-    timestamp: datetime = Field(
-        ..., description="When the event was produced."
-    )
+    success: bool = Field(..., description="Whether the phase completed successfully.")
+    timestamp: datetime = Field(..., description="When the event was produced.")
     error_message: str | None = Field(
         default=None, description="Error details if success=False."
     )
