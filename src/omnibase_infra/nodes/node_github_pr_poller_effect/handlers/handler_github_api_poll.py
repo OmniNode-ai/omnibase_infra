@@ -207,13 +207,19 @@ class HandlerGitHubApiPoll:
         """Return the behavioral classification: EFFECT (GitHub REST API I/O)."""
         return EnumHandlerTypeCategory.EFFECT
 
+    # Topic declared in contract.yaml event_bus.publish_topics
+    _DEFAULT_PUBLISH_TOPIC = "onex.evt.github.pr-status.v1"
+
     def __init__(
         self,
         api_base: str = GITHUB_API_BASE,
         http_timeout: float = 15.0,
+        publish_topic: str | None = None,
     ) -> None:
         self._api_base = api_base
         self._http_timeout = http_timeout
+        # Topic from contract.yaml; falls back to class default
+        self._publish_topic = publish_topic or self._DEFAULT_PUBLISH_TOPIC
         # Per-repo throttle tracker — maps repo identifier to last poll time
         self._last_polled: dict[str, datetime] = {}
 
@@ -338,8 +344,9 @@ class HandlerGitHubApiPoll:
                 pr["review_states"] = list(review_states_raw)
 
                 triage = compute_triage_state(pr, stale_hours)
+                # Topic declared in contract.yaml event_bus.publish_topics
                 event_payload: JsonType = {
-                    "event_type": "onex.evt.github.pr-status.v1",
+                    "event_type": self._publish_topic,
                     "repo": repo,
                     "pr_number": pr_number,
                     "triage_state": triage,

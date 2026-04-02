@@ -194,6 +194,7 @@ health_check:
       description: "Verify GITHUB_TOKEN is set"
 metadata:
   description: "Polls GitHub REST API for open pull-request triage state across configured repositories on runtime tick events, respecting configurable poll intervals"
+  transport_type: "HTTP"
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-23"

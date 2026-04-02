@@ -61,6 +61,7 @@ error_handling:
     reset_timeout_ms: 30000
 metadata:
   description: "Platform event forwarding to HTTP backends"
+  transport_type: "HTTP"
   author: "OmniNode Team"
   created: "2026-04-01"
   tags:
