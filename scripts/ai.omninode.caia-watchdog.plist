@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  CAIA Watchdog — macOS LaunchAgent
+
+  Monitors for session checkpoint files and relaunches claude -p when
+  limits reset. Uses WatchPaths for efficient detection (triggers on
+  checkpoint creation) plus a KeepAlive fallback for the long-running loop.
+
+  Install:
+    bash scripts/install-watchdog.sh
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/ai.omninode.caia-watchdog.plist
+    rm ~/Library/LaunchAgents/ai.omninode.caia-watchdog.plist
+
+  Logs:
+    ~/.onex_state/orchestrator/watchdog.log
+    /tmp/caia-watchdog-stderr.log  (launchd-level errors only)
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.omninode.caia-watchdog</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Volumes/PRO-G40/Code/omni_home/omnibase_infra/scripts/caia-watchdog.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+        <key>HOME</key>
+        <string>/Users/jonah</string>
+    </dict>
+
+    <!-- Start immediately on load -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart automatically if the process exits -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Wait 60s before restarting after exit (avoids tight loops) -->
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <!-- Also trigger when checkpoint file is created/modified -->
+    <key>WatchPaths</key>
+    <array>
+        <string>/Users/jonah/.onex_state/orchestrator</string>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/caia-watchdog-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/caia-watchdog-stderr.log</string>
+</dict>
+</plist>
