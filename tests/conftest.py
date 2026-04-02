@@ -85,11 +85,12 @@ if _env_file.exists():
     logging.getLogger(__name__).debug(f"Loaded environment from {_env_file}")
 
 # OMN-7227: Provide test defaults for required env vars (no more localhost fallbacks in src/).
-# NOTE: Kafka-related env vars are intentionally excluded — Kafka integration tests use
-# @requires_kafka markers that skip when KAFKA_BOOTSTRAP_SERVERS is unset. Setting defaults
-# here would defeat those skip conditions and cause connection failures in CI.
+# KAFKA_BOOTSTRAP_SERVERS is included here as a CI test default so unit tests that instantiate
+# Kafka config models (e.g. ConfigSessionConsumer) can validate structure without a live broker.
+# @requires_kafka markers independently gate tests that need actual Kafka connectivity.
 _TEST_ENV_DEFAULTS: dict[str, str] = {
     "POSTGRES_HOST": "localhost",
+    "KAFKA_BOOTSTRAP_SERVERS": "localhost:19092",
     "ONEX_RUNTIME_TARGET": "localhost:8085",
     "QDRANT_URL": "http://localhost:6333",
     "GRAPH_BOLT_URI": "bolt://localhost:7687",
