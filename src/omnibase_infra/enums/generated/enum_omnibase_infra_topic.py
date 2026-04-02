@@ -21,8 +21,10 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_CHAIN_LEARN_V1 = "onex.cmd.omnibase-infra.chain-learn.v1"  # onex.cmd.omnibase-infra.chain-learn.v1
     CMD_CONSUMER_RESTART_V1 = "onex.cmd.omnibase-infra.consumer-restart.v1"  # onex.cmd.omnibase-infra.consumer-restart.v1
     CMD_DELEGATION_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-request.v1"  # onex.cmd.omnibase-infra.delegation-request.v1
+    CMD_LLM_COMPLETION_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-completion-request.v1"  # onex.cmd.omnibase-infra.llm-completion-request.v1
     CMD_LLM_EMBEDDING_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-embedding-request.v1"  # onex.cmd.omnibase-infra.llm-embedding-request.v1
     CMD_LLM_INFERENCE_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-inference-request.v1"  # onex.cmd.omnibase-infra.llm-inference-request.v1
+    CMD_VECTOR_STORE_REQUEST_V1 = "onex.cmd.omnibase-infra.vector-store-request.v1"  # onex.cmd.omnibase-infra.vector-store-request.v1
     EVT_BASELINES_COMPUTED_V1 = "onex.evt.omnibase-infra.baselines-computed.v1"  # onex.evt.omnibase-infra.baselines-computed.v1
     EVT_CHAIN_LEARN_COMPLETE_V1 = "onex.evt.omnibase-infra.chain-learn-complete.v1"  # onex.evt.omnibase-infra.chain-learn-complete.v1
     EVT_CHAIN_LEARN_FAILED_V1 = "onex.evt.omnibase-infra.chain-learn-failed.v1"  # onex.evt.omnibase-infra.chain-learn-failed.v1
@@ -35,10 +37,16 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_DELEGATION_COMPLETED_V1 = "onex.evt.omnibase-infra.delegation-completed.v1"  # onex.evt.omnibase-infra.delegation-completed.v1
     EVT_DELEGATION_FAILED_V1 = "onex.evt.omnibase-infra.delegation-failed.v1"  # onex.evt.omnibase-infra.delegation-failed.v1
     EVT_EVAL_COMPLETED_V1 = "onex.evt.omnibase-infra.eval-completed.v1"  # onex.evt.omnibase-infra.eval-completed.v1
+    EVT_EVENT_FORWARDED_V1 = "onex.evt.omnibase-infra.event-forwarded.v1"  # onex.evt.omnibase-infra.event-forwarded.v1
     EVT_GMAIL_INTENT_RECEIVED_V1 = "onex.evt.omnibase-infra.gmail-intent-received.v1"  # onex.evt.omnibase-infra.gmail-intent-received.v1
     EVT_LLM_CALL_COMPLETED_V1 = "onex.evt.omnibase-infra.llm-call-completed.v1"  # onex.evt.omnibase-infra.llm-call-completed.v1
+    EVT_LLM_COMPLETION_COMPLETED_V1 = "onex.evt.omnibase-infra.llm-completion-completed.v1"  # onex.evt.omnibase-infra.llm-completion-completed.v1
     EVT_QUALITY_GATE_RESULT_V1 = "onex.evt.omnibase-infra.quality-gate-result.v1"  # onex.evt.omnibase-infra.quality-gate-result.v1
     EVT_ROUTING_DECISION_V1 = "onex.evt.omnibase-infra.routing-decision.v1"  # onex.evt.omnibase-infra.routing-decision.v1
     EVT_ROW_COUNT_DIAGNOSTIC_V1 = "onex.evt.omnibase-infra.row-count-diagnostic.v1"  # onex.evt.omnibase-infra.row-count-diagnostic.v1
     EVT_RUNNER_HEALTH_SNAPSHOT_V1 = "onex.evt.omnibase-infra.runner-health-snapshot.v1"  # onex.evt.omnibase-infra.runner-health-snapshot.v1
     EVT_RUNTIME_ERROR_V1 = "onex.evt.omnibase-infra.runtime-error.v1"  # onex.evt.omnibase-infra.runtime-error.v1
+    EVT_SERVICE_LIFECYCLE_V1 = "onex.evt.omnibase-infra.service-lifecycle.v1"  # onex.evt.omnibase-infra.service-lifecycle.v1
+    EVT_SYSTEM_ALERT_V1 = "onex.evt.omnibase-infra.system-alert.v1"  # onex.evt.omnibase-infra.system-alert.v1
+    EVT_TOOL_UPDATE_V1 = "onex.evt.omnibase-infra.tool-update.v1"  # onex.evt.omnibase-infra.tool-update.v1
+    EVT_VECTOR_STORE_COMPLETED_V1 = "onex.evt.omnibase-infra.vector-store-completed.v1"  # onex.evt.omnibase-infra.vector-store-completed.v1

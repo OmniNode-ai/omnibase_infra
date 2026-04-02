@@ -1,0 +1,71 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Event Forward Effect
+#
+# Receives platform events (lifecycle, system, tool updates) from the event bus
+# and forwards them to an HTTP backend.
+# Ported from archive: omniarchon/python/src/server/nodes/handlers.
+#
+name: "node_event_forward_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Effect node that receives typed platform events (service lifecycle, system alerts, tool updates) and forwards them to a configurable HTTP backend endpoint.  Consolidates three archive handlers into one contract-driven node.
+
+input_model:
+  name: "ModelEventForwardRequest"
+  module: "omnibase_infra.nodes.node_event_forward_effect.models.model_event_forward_request"
+  description: "Typed platform event to forward."
+output_model:
+  name: "ModelEventForwardResult"
+  module: "omnibase_infra.nodes.node_event_forward_effect.models.model_event_forward_result"
+  description: "Forward confirmation with HTTP status."
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.evt.omnibase-infra.service-lifecycle.v1"
+    - "onex.evt.omnibase-infra.system-alert.v1"
+    - "onex.evt.omnibase-infra.tool-update.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.event-forwarded.v1"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "event.forward"
+      handler:
+        name: "HandlerEventForward"
+        module: "omnibase_infra.nodes.node_event_forward_effect.handlers.handler_event_forward"
+dependencies:
+  - type: "environment"
+    name: "EVENT_FORWARD_BACKEND_URL"
+    description: "Base URL of the HTTP backend to forward events to"
+error_handling:
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 200
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 10
+    reset_timeout_ms: 30000
+metadata:
+  description: "Platform event forwarding to HTTP backends"
+  author: "OmniNode Team"
+  created: "2026-04-01"
+  tags:
+    - "effect"
+    - "event-forwarding"
+    - "lifecycle"
+    - "system-events"
+    - "webhook"

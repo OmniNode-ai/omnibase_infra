@@ -2986,6 +2986,23 @@ pattern_exemptions:
     reason: >
       ticket_id is a human-readable Linear identifier (e.g. "OMN-2136"), not a UUID.
 
+  # Archive Feature Port Exemptions
+  # ==========================================================================
+  - file_pattern: 'model_vector_search_hit\.py'
+    violation_pattern: "Field 'doc_id' should use UUID type instead of str"
+    reason: >
+      doc_id is a vector store document identifier string, not necessarily a UUID. Vector stores use opaque string IDs.
+
+  - file_pattern: 'model_vector_document\.py'
+    violation_pattern: "Field 'doc_id' should use UUID type instead of str"
+    reason: >
+      doc_id is a vector store document identifier string, not necessarily a UUID. Vector stores use opaque string IDs.
+
+  - file_pattern: 'model_vector_store_request\.py'
+    violation_pattern: "might reference an entity"
+    reason: >
+      collection_name is a vector store collection label string, not an entity reference.
+
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
