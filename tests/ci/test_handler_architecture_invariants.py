@@ -93,16 +93,6 @@ _APPROVED_WIRING_PREFIXES: tuple[str, ...] = ("registry_infra_",)
 # exemptions for handlers that pass the wiring check will cause test failure.
 _INV4_WIRING_EXEMPTIONS: frozenset[tuple[str, str]] = frozenset(
     {
-        # OMN-7040: Delegation pipeline reducers use pure-function delta() pattern,
-        # invoked directly by the orchestrator, not through the handler registry.
-        (
-            "src/omnibase_infra/nodes/node_delegation_quality_gate_reducer/contract.yaml",
-            "HandlerQualityGate",
-        ),
-        (
-            "src/omnibase_infra/nodes/node_delegation_routing_reducer/contract.yaml",
-            "HandlerDelegationRouting",
-        ),
         # OMN-5406: Scope-check canary orchestrator handlers use payload_type_match
         # routing and are dispatched via Kafka events, not through the handler registry.
         (
@@ -398,8 +388,18 @@ class TestHandlerTypeInvariant:
 class TestWiringLocationInvariant:
     """INV-2: wiring.py is the only handler registration location."""
 
-    def test_only_one_wiring_file(self) -> None:
-        """Only one wiring.py should exist in the nodes directory."""
+    # Approved node directories that may contain wiring.py.
+    # Each domain orchestrator that registers handlers via the DI container
+    # gets its own wiring.py for domain isolation.
+    _APPROVED_WIRING_NODES: frozenset[str] = frozenset(
+        {
+            "node_registration_orchestrator",
+            "node_delegation_orchestrator",  # OMN-7040: delegation pipeline
+        }
+    )
+
+    def test_only_approved_wiring_files(self) -> None:
+        """wiring.py files should only exist in approved node directories."""
         wiring_files: list[Path] = []
         nodes_dir = _SRC_ROOT / "nodes"
         for root_str, _dirs, files in os.walk(nodes_dir):
@@ -408,10 +408,13 @@ class TestWiringLocationInvariant:
                 if f == "wiring.py":
                     wiring_files.append(root / f)
 
-        assert len(wiring_files) <= 1, (
-            f"Found {len(wiring_files)} wiring.py files. "
-            "Handler registration should only exist in one wiring.py:\n"
-            + "\n".join(f"  - {f}" for f in sorted(wiring_files))
+        unapproved = [
+            f for f in wiring_files if f.parent.name not in self._APPROVED_WIRING_NODES
+        ]
+        assert not unapproved, (
+            "Found wiring.py in unapproved location(s). "
+            "Add to _APPROVED_WIRING_NODES if intentional:\n"
+            + "\n".join(f"  - {f}" for f in sorted(unapproved))
         )
 
     def test_wiring_exists_in_registration_orchestrator(self) -> None:
