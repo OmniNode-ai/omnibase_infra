@@ -33,6 +33,7 @@ from omnibase_infra.nodes.node_delegation_orchestrator.models.model_delegation_r
 from omnibase_infra.nodes.node_registration_orchestrator.dispatchers._util_envelope_extract import (
     extract_envelope_fields,
 )
+from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
@@ -88,10 +89,10 @@ class DispatcherDelegationRequest(MixinAsyncCircuitBreaker):
         started_at = datetime.now(UTC)
         correlation_id, raw_payload = extract_envelope_fields(envelope)
 
-        async with self._circuit_breaker_lock:
-            await self._check_circuit_breaker("handle", correlation_id)
-
         try:
+            async with self._circuit_breaker_lock:
+                await self._check_circuit_breaker("handle", correlation_id)
+
             payload = raw_payload
             if not isinstance(payload, ModelDelegationRequest):
                 if isinstance(payload, dict):
@@ -141,6 +142,27 @@ class DispatcherDelegationRequest(MixinAsyncCircuitBreaker):
                 duration_ms=duration_ms,
                 correlation_id=correlation_id,
                 output_events=list(intents),
+            )
+
+        except InfraUnavailableError as e:
+            completed_at = datetime.now(UTC)
+            duration_ms = (completed_at - started_at).total_seconds() * 1000
+            logger.error(  # noqa: TRY400
+                "DispatcherDelegationRequest circuit open: %s",
+                sanitize_error_message(e),
+                extra={"correlation_id": str(correlation_id)},
+            )
+            return ModelDispatchResult(
+                dispatch_id=uuid4(),
+                status=EnumDispatchStatus.HANDLER_ERROR,
+                topic=TOPIC_ID_DELEGATION_REQUEST,
+                dispatcher_id=self.dispatcher_id,
+                started_at=started_at,
+                completed_at=completed_at,
+                duration_ms=duration_ms,
+                error_message=sanitize_error_message(e),
+                correlation_id=correlation_id,
+                output_events=[],
             )
 
         except (ValidationError, ValueError, KeyError) as e:

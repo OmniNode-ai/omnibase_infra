@@ -148,9 +148,10 @@ class PluginDelegation:
 
         except Exception as e:
             duration = time.time() - start_time
-            logger.exception(
-                "Failed to wire delegation handlers (correlation_id=%s)",
-                config.correlation_id,
+            logger.error(  # noqa: TRY400
+                "Failed to wire delegation handlers: %s",
+                sanitize_error_message(e),
+                extra={"correlation_id": str(config.correlation_id)},
             )
             return ModelDomainPluginResult.failed(
                 plugin_id=self.plugin_id,
@@ -220,9 +221,10 @@ class PluginDelegation:
 
         except Exception as e:
             duration = time.time() - start_time
-            logger.exception(
-                "Failed to wire delegation dispatchers (correlation_id=%s)",
-                config.correlation_id,
+            logger.error(  # noqa: TRY400
+                "Failed to wire delegation dispatchers: %s",
+                sanitize_error_message(e),
+                extra={"correlation_id": str(config.correlation_id)},
             )
             return ModelDomainPluginResult.failed(
                 plugin_id=self.plugin_id,
@@ -272,6 +274,7 @@ class PluginDelegation:
                 reason="node_identity not set (required for consumer subscription)",
             )
 
+        wiring = None
         try:
             from omnibase_core.enums import EnumInjectionScope
             from omnibase_infra.runtime.event_bus_subcontract_wiring import (
@@ -320,7 +323,7 @@ class PluginDelegation:
                     },
                 )
 
-            self._wiring = EventBusSubcontractWiring(
+            wiring = EventBusSubcontractWiring(
                 event_bus=config.event_bus,
                 dispatch_engine=config.dispatch_engine,
                 environment=config.node_identity.env,
@@ -330,10 +333,12 @@ class PluginDelegation:
                 result_applier=result_applier,
             )
 
-            await self._wiring.wire_subscriptions(
+            await wiring.wire_subscriptions(
                 subcontract=subcontract,
                 node_name="delegation-orchestrator",
             )
+
+            self._wiring = wiring
 
             logger.info(
                 "Delegation consumers started via EventBusSubcontractWiring "
@@ -364,9 +369,13 @@ class PluginDelegation:
 
         except Exception as e:
             duration = time.time() - start_time
-            logger.exception(
-                "Failed to start delegation consumers (correlation_id=%s)",
-                correlation_id,
+            if wiring is not None:
+                await wiring.cleanup()
+            self._wiring = None
+            logger.error(  # noqa: TRY400
+                "Failed to start delegation consumers: %s",
+                sanitize_error_message(e),
+                extra={"correlation_id": str(correlation_id)},
             )
             return ModelDomainPluginResult.failed(
                 plugin_id=self.plugin_id,
