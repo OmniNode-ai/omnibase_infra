@@ -18,7 +18,7 @@
 --   - CREATE INDEX IF NOT EXISTS is safe to re-run.
 --
 -- ROLLBACK:
---   docker/migrations/rollback/rollback_058_create_routing_outcomes.sql
+--   docker/migrations/rollback/rollback_060_create_routing_outcomes.sql
 -- =============================================================================
 
 -- ============================================================
@@ -121,6 +121,6 @@ COMMENT ON COLUMN capability_scores.graduated IS
 -- Update migration sentinel
 UPDATE public.db_metadata
 SET migrations_complete = TRUE,
-    schema_version = '058',
+    schema_version = '060',
     updated_at = NOW()
 WHERE id = TRUE AND owner_service = 'omnibase_infra';

@@ -8,6 +8,6 @@ DROP TABLE IF EXISTS public.routing_outcomes;
 
 -- Revert migration sentinel
 UPDATE public.db_metadata
-SET schema_version = '057',
+SET schema_version = '059',
     updated_at = NOW()
 WHERE id = TRUE AND owner_service = 'omnibase_infra';
