@@ -181,3 +181,7 @@ allowlisted_handlers:
     violations:
       - undeclared_transport
     ticket: 'OMN-7264'
+  - path: omnibase_infra/nodes/node_autonomous_loop_orchestrator/handlers/handler_loop_orchestrator.py
+    violations:
+      - missing_handler_routing
+    ticket: 'OMN-5113'
