@@ -78,6 +78,7 @@ class PluginDelegation:
     def __init__(self) -> None:
         self._wiring: EventBusSubcontractWiring | None = None
         self._handler_wiring_succeeded: bool = False
+        self._dispatcher_wiring_succeeded: bool = False
 
     @property
     def plugin_id(self) -> str:
@@ -208,6 +209,7 @@ class PluginDelegation:
                 },
             )
 
+            self._dispatcher_wiring_succeeded = True
             return ModelDomainPluginResult(
                 plugin_id=self.plugin_id,
                 success=True,
@@ -236,16 +238,16 @@ class PluginDelegation:
         start_time = time.time()
         correlation_id = config.correlation_id
 
-        if not self._handler_wiring_succeeded:
+        if not (self._handler_wiring_succeeded and self._dispatcher_wiring_succeeded):
             logger.warning(
-                "Skipping consumer startup: handler wiring did not succeed "
+                "Skipping consumer startup: handler/dispatcher wiring did not succeed "
                 "for plugin '%s' (correlation_id=%s)",
                 self.plugin_id,
                 correlation_id,
             )
             return ModelDomainPluginResult.skipped(
                 plugin_id=self.plugin_id,
-                reason="Handler wiring did not succeed — consumers not started",
+                reason="Handler/dispatcher wiring did not succeed — consumers not started",
             )
 
         if config.dispatch_engine is None:
@@ -350,6 +352,7 @@ class PluginDelegation:
             async def _cleanup_wiring() -> None:
                 if self._wiring is not None:
                     await self._wiring.cleanup()
+                    self._wiring = None
 
             return ModelDomainPluginResult(
                 plugin_id=self.plugin_id,

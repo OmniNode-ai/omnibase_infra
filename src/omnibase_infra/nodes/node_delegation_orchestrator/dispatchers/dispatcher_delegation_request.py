@@ -169,7 +169,7 @@ class DispatcherDelegationRequest(MixinAsyncCircuitBreaker):
             duration_ms = (completed_at - started_at).total_seconds() * 1000
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("handle")
-            logger.exception(
+            logger.error(
                 "DispatcherDelegationRequest failed: %s",
                 sanitize_error_message(e),
                 extra={"correlation_id": str(correlation_id)},

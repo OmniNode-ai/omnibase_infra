@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, TypedDict
 from uuid import UUID
 
 from omnibase_core.enums import EnumInjectionScope
-from omnibase_infra.enums import EnumMessageCategory
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
