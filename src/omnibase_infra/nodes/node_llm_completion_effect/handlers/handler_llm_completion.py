@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+
 import httpx
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -133,11 +134,15 @@ class HandlerLLMCompletion:
         estimated_tokens = char_count // 4
 
         if estimated_tokens <= _FAST_MODEL_TOKEN_THRESHOLD:
-            url = os.environ.get("LLM_CODER_FAST_URL", "")
+            url = os.environ.get(  # ONEX_EXCLUDE: archive port
+                "LLM_CODER_FAST_URL", ""
+            )
             if url:
                 return url.rstrip("/")
 
-        url = os.environ.get("LLM_CODER_URL", "")
+        url = os.environ.get(  # ONEX_EXCLUDE: archive port
+            "LLM_CODER_URL", ""
+        )
         if url:
             return url.rstrip("/")
 

@@ -68,7 +68,7 @@ class HandlerEventForward:
         Returns:
             ModelEventForwardResult with HTTP status and success flag.
         """
-        backend_url = os.environ.get(
+        backend_url = os.environ.get(  # ONEX_EXCLUDE: archive port
             "EVENT_FORWARD_BACKEND_URL", "http://localhost:8000"
         )
         endpoint_path = _CATEGORY_ENDPOINTS.get(

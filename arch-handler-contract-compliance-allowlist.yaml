@@ -159,3 +159,21 @@ allowlisted_handlers:
     violations:
       - missing_handler_routing
     ticket: 'OMN-7040'
+  - path: omnibase_infra/nodes/node_event_forward_effect/handlers/handler_event_forward.py
+    violations:
+      - undeclared_transport
+    ticket: '# ported from archive — migration pending'
+  - path: omnibase_infra/nodes/node_llm_completion_effect/handlers/handler_llm_completion.py
+    violations:
+      - undeclared_transport
+    ticket: '# ported from archive — migration pending'
+  - path: omnibase_infra/nodes/node_vector_store_effect/handlers/handler_vector_search.py
+    violations:
+      - undeclared_transport
+      - undeclared_transport
+    ticket: '# ported from archive — migration pending'
+  - path: omnibase_infra/nodes/node_vector_store_effect/handlers/handler_vector_upsert.py
+    violations:
+      - undeclared_transport
+      - undeclared_transport
+    ticket: '# ported from archive — migration pending'

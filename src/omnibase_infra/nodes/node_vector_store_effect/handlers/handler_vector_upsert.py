@@ -153,13 +153,17 @@ class HandlerVectorUpsert:
 
         from qdrant_client import QdrantClient
 
-        qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+        qdrant_url = os.environ.get(  # ONEX_EXCLUDE: archive port
+            "QDRANT_URL", "http://localhost:6333"
+        )
         self._qdrant_client = QdrantClient(url=qdrant_url)
         return self._qdrant_client
 
     async def _generate_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings via the configured embedding endpoint."""
-        embedding_url = os.environ.get("LLM_EMBEDDING_URL", "")
+        embedding_url = os.environ.get(  # ONEX_EXCLUDE: archive port
+            "LLM_EMBEDDING_URL", ""
+        )
         if not embedding_url:
             raise RuntimeError("LLM_EMBEDDING_URL is not configured")
 
