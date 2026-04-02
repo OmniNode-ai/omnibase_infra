@@ -601,7 +601,7 @@ services:
   # intelligence DB ownership, schema fingerprint, message type registration)
   # must complete before /health returns 200.
   # Unhealthy detection latency = start_period + (interval * retries) = 600s + 150s = 750s.
-  # AUTOHEAL_START_PERIOD (720s) must exceed start_period to avoid premature restarts.
+  # AUTOHEAL_START_PERIOD (840s) must exceed start_period + retry window to avoid premature restarts.
   runtime-effects:
     !!merge <<: *runtime-base
     container_name: omninode-runtime-effects
@@ -645,7 +645,7 @@ services:
   # because plugin initialization (intelligence DB ownership, schema fingerprint,
   # message type registration) must complete before /health returns 200.
   # Unhealthy detection latency = start_period + (interval * retries) = 600s + 150s = 750s.
-  # AUTOHEAL_START_PERIOD (720s) must exceed start_period to avoid premature restarts.
+  # AUTOHEAL_START_PERIOD (840s) must exceed start_period + retry window to avoid premature restarts.
   runtime-worker:
     !!merge <<: *runtime-base
     profiles: ["runtime", "full"]
@@ -1062,11 +1062,10 @@ services:
     environment:
       AUTOHEAL_CONTAINER_LABEL: autoheal
       AUTOHEAL_INTERVAL: 60
-      # OMN-5095: Increased from 60s to 720s so autoheal ignores containers
-      # still in their Docker health check start_period. Workers need up to
-      # 600s for plugin initialization (intelligence DB ownership validation,
-      # schema fingerprint, message type registration) before /health passes.
-      AUTOHEAL_START_PERIOD: 720
+      # OMN-5095: Set to 840s (720s worker unhealthy window + 120s buffer) to avoid
+      # race condition where autoheal could trigger during a worker's initial health
+      # assessment. Workers need up to 600s start_period + 5×30s retries = 750s max.
+      AUTOHEAL_START_PERIOD: 840
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     logging: *logging-defaults
