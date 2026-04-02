@@ -180,12 +180,12 @@ class DispatcherRoutingDecision(MixinAsyncCircuitBreaker):
                 output_events=[],
             )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             completed_at = datetime.now(UTC)
             duration_ms = (completed_at - started_at).total_seconds() * 1000
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("handle")
-            logger.error(
+            logger.error(  # noqa: TRY400
                 "DispatcherRoutingDecision failed: %s",
                 sanitize_error_message(e),
                 extra={"correlation_id": str(correlation_id)},
