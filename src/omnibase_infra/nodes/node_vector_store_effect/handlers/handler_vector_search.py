@@ -109,7 +109,7 @@ class HandlerVectorSearch:
                 ]
                 query_filter = Filter(must=conditions)
             except ImportError:
-                pass
+                pass  # qdrant_client filter types are optional; search proceeds without metadata filter
 
         # Search Qdrant
         try:
