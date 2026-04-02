@@ -7,16 +7,13 @@ with correct repo extraction, ticket parsing, and task classification.
 Full write -> store -> retrieve cycle requires Postgres + Qdrant (deferred to runtime tests).
 """
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
 
 from omnibase_infra.models.agent_learning.enum_learning_task_type import (
     EnumLearningTaskType,
-)
-from omnibase_infra.models.agent_learning.model_agent_learning import (
-    ModelAgentLearning,
 )
 from omnibase_infra.services.agent_learning_extraction.consumer import (
     build_learning_record,
