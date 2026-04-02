@@ -22,8 +22,7 @@ integrations:
     type: webhook
     description: "Receives GitHub webhook events (PR merged, push, check suite) and publishes ONEX events"
     contract: "contracts/integrations/github_webhook/contract.yaml"
-    nodes:
-      - node_github_pr_poller_effect
+    nodes: []
     health_check:
       type: github_api
       endpoint: "https://api.github.com/orgs/OmniNode-ai"
@@ -66,6 +65,7 @@ integrations:
     env_vars:
       - GMAIL_CLIENT_ID
       - GMAIL_CLIENT_SECRET
+      - GMAIL_REFRESH_TOKEN
   - id: slack_alerter
     name: "Slack Alerter"
     type: outbound
