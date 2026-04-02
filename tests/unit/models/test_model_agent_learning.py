@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for agent learning record models."""
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
