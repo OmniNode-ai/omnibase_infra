@@ -4,14 +4,24 @@
 
 This is an EFFECT handler - performs external I/O (delegation dispatch).
 
+Dispatch mechanism: writes per-ticket JSON manifest files to
+``$ONEX_STATE_DIR/autopilot/dispatch/`` for consumption by
+``cron-buildloop.sh`` or any downstream runner that spawns
+``claude -p`` per ticket.
+
 Related:
     - OMN-7318: node_build_dispatch_effect
+    - OMN-7381: Wire handler_build_dispatch to delegation orchestrator
     - OMN-5113: Autonomous Build Loop epic
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -24,15 +34,25 @@ from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_dispatch
 from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_target import (
     ModelBuildTarget,
 )
+from omnibase_infra.utils.util_friction_emitter import emit_build_loop_friction
 
 logger = logging.getLogger(__name__)
+
+
+def _dispatch_dir() -> Path | None:
+    """Resolve the dispatch manifest directory from ONEX_STATE_DIR."""
+    state_dir = os.environ.get("ONEX_STATE_DIR", "")
+    if not state_dir:
+        return None
+    return Path(state_dir) / "autopilot" / "dispatch"
 
 
 class HandlerBuildDispatch:
     """Dispatches ticket-pipeline builds for AUTO_BUILDABLE tickets via delegation.
 
-    Each ticket is dispatched as an independent delegation request.
-    Failures on individual tickets do not block other dispatches.
+    Each ticket is dispatched as an independent delegation request by writing
+    a JSON manifest to the dispatch directory. Failures on individual tickets
+    do not block other dispatches.
     """
 
     @property
@@ -70,6 +90,10 @@ class HandlerBuildDispatch:
         total_dispatched = 0
         total_failed = 0
 
+        dispatch_path = _dispatch_dir()
+        if dispatch_path is not None and not dry_run:
+            dispatch_path.mkdir(parents=True, exist_ok=True)
+
         for target in targets:
             if dry_run:
                 outcomes.append(
@@ -83,9 +107,13 @@ class HandlerBuildDispatch:
                 continue
 
             try:
-                # TODO: Wire to actual delegation orchestrator invocation
+                self._write_dispatch_manifest(
+                    dispatch_path=dispatch_path,
+                    target=target,
+                    correlation_id=correlation_id,
+                )
                 logger.info(
-                    "Dispatching ticket-pipeline for %s: %s",
+                    "Dispatched ticket-pipeline for %s: %s",
                     target.ticket_id,
                     target.title,
                 )
@@ -102,6 +130,13 @@ class HandlerBuildDispatch:
                     "Failed to dispatch %s: %s",
                     target.ticket_id,
                     exc,
+                )
+                emit_build_loop_friction(
+                    phase="BUILDING",
+                    correlation_id=correlation_id,
+                    severity="high",
+                    description=f"Failed to dispatch ticket-pipeline for {target.ticket_id}",
+                    error_message=str(exc),
                 )
                 outcomes.append(
                     ModelBuildDispatchOutcome(
@@ -124,3 +159,36 @@ class HandlerBuildDispatch:
             total_dispatched=total_dispatched,
             total_failed=total_failed,
         )
+
+    def _write_dispatch_manifest(
+        self,
+        *,
+        dispatch_path: Path | None,
+        target: ModelBuildTarget,
+        correlation_id: UUID,
+    ) -> None:
+        """Write a dispatch manifest JSON for a single ticket.
+
+        The manifest contains everything a downstream runner needs to spawn
+        ``claude -p "Run ticket-pipeline for {ticket_id}"``.
+
+        Raises:
+            RuntimeError: If ONEX_STATE_DIR is not set.
+        """
+        if dispatch_path is None:
+            msg = "ONEX_STATE_DIR not set — cannot write dispatch manifest"
+            raise RuntimeError(msg)
+
+        manifest = {
+            "ticket_id": target.ticket_id,
+            "title": target.title,
+            "buildability": target.buildability.value,
+            "correlation_id": str(correlation_id),
+            "dispatched_at": datetime.now(tz=UTC).isoformat(),
+            "status": "pending",
+            "command": f'claude -p "Run ticket-pipeline for {target.ticket_id}"',
+        }
+
+        manifest_path = dispatch_path / f"{target.ticket_id}.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+        logger.debug("Wrote dispatch manifest: %s", manifest_path)
