@@ -15,7 +15,7 @@ import logging
 from typing import TYPE_CHECKING, TypedDict
 from uuid import UUID
 
-from omnibase_core.enums import EnumInjectionScope
+from omnibase_core.enums import EnumInjectionScope, EnumMessageCategory
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
@@ -132,6 +132,16 @@ async def wire_delegation_dispatchers(
     )
     dispatchers_registered.append(dispatcher_request.dispatcher_id)
 
+    route_delegation_request = ModelDispatchRoute(
+        route_id=ROUTE_ID_DELEGATION_REQUEST,
+        topic_pattern="*.cmd.*.delegation-request.*",
+        message_category=EnumMessageCategory.COMMAND,
+        dispatcher_id=dispatcher_request.dispatcher_id,
+        message_type="omnibase-infra.delegation-request",
+    )
+    engine.register_route(route_delegation_request)
+    routes_registered.append(route_delegation_request.route_id)
+
     # 2. DispatcherRoutingDecision — handles routing decisions from reducer
     dispatcher_routing = DispatcherRoutingDecision(handler, event_bus=event_bus)
     engine.register_dispatcher(
@@ -142,6 +152,16 @@ async def wire_delegation_dispatchers(
     )
     dispatchers_registered.append(dispatcher_routing.dispatcher_id)
 
+    route_routing_decision = ModelDispatchRoute(
+        route_id=ROUTE_ID_ROUTING_DECISION,
+        topic_pattern="*.evt.*.routing-decision.*",
+        message_category=EnumMessageCategory.EVENT,
+        dispatcher_id=dispatcher_routing.dispatcher_id,
+        message_type="omnibase-infra.routing-decision",
+    )
+    engine.register_route(route_routing_decision)
+    routes_registered.append(route_routing_decision.route_id)
+
     # 3. DispatcherQualityGateResult — handles quality gate results
     dispatcher_gate = DispatcherQualityGateResult(handler, event_bus=event_bus)
     engine.register_dispatcher(
@@ -151,6 +171,16 @@ async def wire_delegation_dispatchers(
         message_types=dispatcher_gate.message_types,
     )
     dispatchers_registered.append(dispatcher_gate.dispatcher_id)
+
+    route_quality_gate = ModelDispatchRoute(
+        route_id=ROUTE_ID_QUALITY_GATE_RESULT,
+        topic_pattern="*.evt.*.quality-gate-result.*",
+        message_category=EnumMessageCategory.EVENT,
+        dispatcher_id=dispatcher_gate.dispatcher_id,
+        message_type="omnibase-infra.quality-gate-result",
+    )
+    engine.register_route(route_quality_gate)
+    routes_registered.append(route_quality_gate.route_id)
 
     logger.info(
         "Delegation dispatchers wired: %s (correlation_id=%s)",
