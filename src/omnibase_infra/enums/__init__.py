@@ -63,6 +63,9 @@ Exports:
 
 from omnibase_core.enums import EnumTopicType
 from omnibase_infra.enums.enum_adjudicator_state import EnumAdjudicatorState
+from omnibase_infra.enums.enum_build_loop_intent_type import EnumBuildLoopIntentType
+from omnibase_infra.enums.enum_build_loop_phase import EnumBuildLoopPhase
+from omnibase_infra.enums.enum_buildability import EnumBuildability
 from omnibase_infra.enums.enum_any_type_violation import EnumAnyTypeViolation
 from omnibase_infra.enums.enum_auth_decision import EnumAuthDecision
 from omnibase_infra.enums.enum_auth_source import EnumAuthSource
@@ -141,6 +144,9 @@ __all__: list[str] = [
     "EnumAuthDecision",
     "EnumAutoEvalTaskType",
     "EnumAuthSource",
+    "EnumBuildLoopIntentType",
+    "EnumBuildLoopPhase",
+    "EnumBuildability",
     "EnumBackendType",
     "EnumCostTier",
     "EnumCaptureOutcome",

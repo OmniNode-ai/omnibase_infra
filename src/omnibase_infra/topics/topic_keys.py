@@ -162,10 +162,72 @@ BASELINES_COMPUTED: Final[str] = "BASELINES_COMPUTED"
 WAITLIST_SIGNUP: Final[str] = "WAITLIST_SIGNUP"
 """Waitlist signup events from omniweb Server Action (email_domain only, no PII)."""
 
+# ==============================================================================
+# Build Loop Topics (OMN-5113)
+# ==============================================================================
+
+# Commands (6)
+BUILD_LOOP_START: Final[str] = "BUILD_LOOP_START"
+"""Command to start the autonomous build loop."""
+
+BUILD_LOOP_CLOSEOUT: Final[str] = "BUILD_LOOP_CLOSEOUT"
+"""Command to initiate close-out phase."""
+
+BUILD_LOOP_VERIFY: Final[str] = "BUILD_LOOP_VERIFY"
+"""Command to initiate verification phase."""
+
+BUILD_LOOP_FILL: Final[str] = "BUILD_LOOP_FILL"
+"""Command to initiate sprint fill phase."""
+
+BUILD_LOOP_CLASSIFY: Final[str] = "BUILD_LOOP_CLASSIFY"
+"""Command to initiate ticket classification phase."""
+
+BUILD_LOOP_BUILD: Final[str] = "BUILD_LOOP_BUILD"
+"""Command to initiate build dispatch phase."""
+
+# Events (8)
+BUILD_LOOP_STARTED: Final[str] = "BUILD_LOOP_STARTED"
+"""Event: build loop cycle started."""
+
+BUILD_LOOP_CLOSEOUT_COMPLETED: Final[str] = "BUILD_LOOP_CLOSEOUT_COMPLETED"
+"""Event: close-out phase completed."""
+
+BUILD_LOOP_VERIFY_COMPLETED: Final[str] = "BUILD_LOOP_VERIFY_COMPLETED"
+"""Event: verification phase completed."""
+
+BUILD_LOOP_FILL_COMPLETED: Final[str] = "BUILD_LOOP_FILL_COMPLETED"
+"""Event: sprint fill phase completed."""
+
+BUILD_LOOP_CLASSIFY_COMPLETED: Final[str] = "BUILD_LOOP_CLASSIFY_COMPLETED"
+"""Event: ticket classification phase completed."""
+
+BUILD_LOOP_BUILD_COMPLETED: Final[str] = "BUILD_LOOP_BUILD_COMPLETED"
+"""Event: build dispatch phase completed."""
+
+BUILD_LOOP_CYCLE_COMPLETED: Final[str] = "BUILD_LOOP_CYCLE_COMPLETED"
+"""Event: full build loop cycle completed."""
+
+BUILD_LOOP_FAILED: Final[str] = "BUILD_LOOP_FAILED"
+"""Event: build loop cycle failed (circuit breaker or unrecoverable error)."""
+
 
 __all__: list[str] = [
     "AGENT_STATUS",
     "BASELINES_COMPUTED",
+    "BUILD_LOOP_BUILD",
+    "BUILD_LOOP_BUILD_COMPLETED",
+    "BUILD_LOOP_CLASSIFY",
+    "BUILD_LOOP_CLASSIFY_COMPLETED",
+    "BUILD_LOOP_CLOSEOUT",
+    "BUILD_LOOP_CLOSEOUT_COMPLETED",
+    "BUILD_LOOP_CYCLE_COMPLETED",
+    "BUILD_LOOP_FAILED",
+    "BUILD_LOOP_FILL",
+    "BUILD_LOOP_FILL_COMPLETED",
+    "BUILD_LOOP_START",
+    "BUILD_LOOP_STARTED",
+    "BUILD_LOOP_VERIFY",
+    "BUILD_LOOP_VERIFY_COMPLETED",
     "CIRCUIT_BREAKER_STATE",
     "CONSUMER_HEALTH",
     "CONSUMER_RESTART_CMD",

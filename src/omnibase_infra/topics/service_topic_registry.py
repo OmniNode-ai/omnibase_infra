@@ -132,6 +132,50 @@ class ServiceTopicRegistry:
             ),
             # Waitlist
             topic_keys.WAITLIST_SIGNUP: ("onex.evt.omniweb.waitlist-signup.v1"),
+            # Build Loop commands (OMN-5113)
+            topic_keys.BUILD_LOOP_START: (
+                "onex.cmd.omnibase-infra.build-loop-start.v1"
+            ),
+            topic_keys.BUILD_LOOP_CLOSEOUT: (
+                "onex.cmd.omnibase-infra.build-loop-closeout.v1"
+            ),
+            topic_keys.BUILD_LOOP_VERIFY: (
+                "onex.cmd.omnibase-infra.build-loop-verify.v1"
+            ),
+            topic_keys.BUILD_LOOP_FILL: (
+                "onex.cmd.omnibase-infra.build-loop-fill.v1"
+            ),
+            topic_keys.BUILD_LOOP_CLASSIFY: (
+                "onex.cmd.omnibase-infra.build-loop-classify.v1"
+            ),
+            topic_keys.BUILD_LOOP_BUILD: (
+                "onex.cmd.omnibase-infra.build-loop-build.v1"
+            ),
+            # Build Loop events (OMN-5113)
+            topic_keys.BUILD_LOOP_STARTED: (
+                "onex.evt.omnibase-infra.build-loop-started.v1"
+            ),
+            topic_keys.BUILD_LOOP_CLOSEOUT_COMPLETED: (
+                "onex.evt.omnibase-infra.build-loop-closeout-completed.v1"
+            ),
+            topic_keys.BUILD_LOOP_VERIFY_COMPLETED: (
+                "onex.evt.omnibase-infra.build-loop-verify-completed.v1"
+            ),
+            topic_keys.BUILD_LOOP_FILL_COMPLETED: (
+                "onex.evt.omnibase-infra.build-loop-fill-completed.v1"
+            ),
+            topic_keys.BUILD_LOOP_CLASSIFY_COMPLETED: (
+                "onex.evt.omnibase-infra.build-loop-classify-completed.v1"
+            ),
+            topic_keys.BUILD_LOOP_BUILD_COMPLETED: (
+                "onex.evt.omnibase-infra.build-loop-build-completed.v1"
+            ),
+            topic_keys.BUILD_LOOP_CYCLE_COMPLETED: (
+                "onex.evt.omnibase-infra.build-loop-cycle-completed.v1"
+            ),
+            topic_keys.BUILD_LOOP_FAILED: (
+                "onex.evt.omnibase-infra.build-loop-failed.v1"
+            ),
         }
 
         # Wiring health monitored topics (matches WIRING_HEALTH_MONITORED_TOPICS)
