@@ -108,7 +108,7 @@ class HandlerVectorUpsert:
             )
 
         doc_ids: list[str] = []
-        points: list[object] = []
+        points: list[PointStruct] = []
         for doc, embedding in zip(request.documents, embeddings, strict=True):
             doc_id = doc.doc_id or str(uuid_mod.uuid4())
             doc_ids.append(doc_id)

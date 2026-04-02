@@ -114,13 +114,14 @@ class HandlerVectorSearch:
         # Search Qdrant
         try:
             client = self._get_qdrant_client()
-            results = await asyncio.to_thread(
-                client.search,
+            response = await asyncio.to_thread(
+                client.query_points,
                 collection_name=request.collection_name,
-                query_vector=query_vector,
+                query=query_vector,
                 limit=request.limit,
                 query_filter=query_filter,
             )
+            results = response.points
         except Exception as exc:
             logger.exception(
                 "Qdrant search failed | correlation_id=%s", request.correlation_id
