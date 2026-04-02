@@ -15,9 +15,6 @@ from omnibase_infra.nodes.node_model_health_effect.models.model_endpoint_health 
 from omnibase_infra.nodes.node_model_health_effect.models.model_health_probe_target import (
     ModelHealthProbeTarget,
 )
-from omnibase_infra.nodes.node_model_health_effect.models.model_health_request import (
-    ModelHealthRequest,
-)
 from omnibase_infra.nodes.node_model_health_effect.models.model_health_snapshot import (
     ModelHealthSnapshot,
 )

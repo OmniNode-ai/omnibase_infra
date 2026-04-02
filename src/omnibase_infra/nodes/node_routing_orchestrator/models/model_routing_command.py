@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.nodes.node_model_router_compute.models.enum_task_type import (
     EnumTaskType,
@@ -29,9 +29,15 @@ class ModelRoutingCommand(BaseModel):
         description="Hard constraints for model selection.",
     )
     context_length_estimate: int = Field(
-        default=4096, description="Estimated context length in tokens."
+        default=4096, ge=1, description="Estimated context length in tokens."
     )
     chain_hit: bool = Field(default=False, description="Chain retrieval hit.")
     chain_hit_model_key: str | None = Field(
         default=None, description="Model from matched chain."
     )
+
+    @model_validator(mode="after")
+    def chain_hit_requires_model_key(self) -> "ModelRoutingCommand":
+        if self.chain_hit and not self.chain_hit_model_key:
+            raise ValueError("chain_hit_model_key is required when chain_hit is True")
+        return self

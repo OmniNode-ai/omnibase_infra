@@ -23,5 +23,5 @@ class ModelHealthRequest(BaseModel):
         ..., description="Model endpoints to probe."
     )
     timeout_ms: int = Field(
-        default=5000, description="Per-endpoint probe timeout in ms."
+        default=5000, ge=1, description="Per-endpoint probe timeout in ms."
     )

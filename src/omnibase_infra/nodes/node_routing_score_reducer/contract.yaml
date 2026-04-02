@@ -68,6 +68,13 @@ state_machine:
       description: "Outcome received while models are graduated"
   terminal_states: []
   persistence_enabled: true
+event_bus:
+  subscribe:
+    - topic: "routing.outcomes"
+      description: "Routing outcome events fed back after task completion."
+  publish:
+    - topic: "routing.scores.updated"
+      description: "Emitted when capability scores are updated for a model/task-type pair."
 metadata:
   description: "Capability score reducer for intelligent model router"
   author: "OmniNode Team"

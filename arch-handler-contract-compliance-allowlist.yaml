@@ -177,3 +177,7 @@ allowlisted_handlers:
       - undeclared_transport
       - undeclared_transport
     ticket: '# ported from archive — migration pending'
+  - path: omnibase_infra/nodes/node_model_health_effect/handlers/handler_probe_health.py
+    violations:
+      - undeclared_transport
+    ticket: 'OMN-7264'

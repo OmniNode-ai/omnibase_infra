@@ -9,7 +9,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.nodes.node_model_router_compute.models.model_routing_request import (
+from omnibase_infra.nodes.node_model_router_compute.models.enum_task_type import (
     EnumTaskType,
 )
 

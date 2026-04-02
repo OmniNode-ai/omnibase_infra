@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -14,4 +16,4 @@ class ModelHealthProbeTarget(BaseModel):
 
     model_key: str = Field(..., description="Model identifier from registry.")
     base_url: str = Field(..., description="Resolved base URL for health check.")
-    transport: str = Field(default="http", description="Transport type: http or sdk.")
+    transport: Literal["http", "sdk"] = Field(default="http", description="Transport type: http or sdk.")

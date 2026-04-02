@@ -8,8 +8,6 @@ Endpoint Summary:
     POST /routing/route              - Request a routing decision
     GET  /routing/health             - Service health check
     GET  /routing/models             - List registered models
-    GET  /routing/scores             - Current capability scores
-    GET  /routing/outcomes           - Recent routing outcomes
 
 Related Tickets:
     - OMN-7278: Routing API endpoint
@@ -90,7 +88,7 @@ def _load_registry() -> tuple[ModelRegistryEntry, ...]:
     for m in data.get("models", []):
         entries.append(
             ModelRegistryEntry(
-                model_key=m["id"],
+                model_key=m["model_key"],
                 provider=m.get("provider", "local"),
                 transport=m.get("transport", "http"),
                 base_url_env=m.get("base_url_env", ""),
