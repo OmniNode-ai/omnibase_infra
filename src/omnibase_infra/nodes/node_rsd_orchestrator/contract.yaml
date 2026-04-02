@@ -1,0 +1,102 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - RSD Orchestrator
+#
+# Coordinates the fetch -> score -> store cycle for RSD priority scoring.
+#
+name: "node_rsd_orchestrator"
+node_type: "ORCHESTRATOR_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Orchestrates the RSD priority scoring workflow: receive command, dispatch data fetch, dispatch score computation, dispatch state storage, emit completion event.
+
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.cmd.rsd.score.v1"
+    - "onex.evt.rsd.data-fetched.v1"
+    - "onex.evt.rsd.scores-calculated.v1"
+    - "onex.evt.rsd.scores-stored.v1"
+  publish_topics:
+    - "onex.evt.rsd.score-complete.v1"
+    - "onex.evt.rsd.score-failed.v1"
+input_model:
+  name: "ModelRsdCommand"
+  module: "omnibase_infra.nodes.node_rsd_orchestrator.models.model_rsd_command"
+  description: "Command to initiate RSD priority scoring cycle."
+output_model:
+  name: "ModelRsdResult"
+  module: "omnibase_infra.nodes.node_rsd_orchestrator.models.model_rsd_result"
+  description: "Final scoring result with ranked tickets and rank changes."
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    - event_model:
+        name: "ModelRsdCommand"
+        module: "omnibase_infra.nodes.node_rsd_orchestrator.models.model_rsd_command"
+      handler:
+        name: "HandlerRsdInitiate"
+        module: "omnibase_infra.nodes.node_rsd_orchestrator.handlers.handler_rsd_initiate"
+      output_events:
+        - "ModelRsdDataFetchRequest"
+    - event_model:
+        name: "ModelRsdDataFetchResult"
+        module: "omnibase_infra.nodes.node_rsd_data_fetch_effect.models.model_rsd_data_fetch_result"
+      handler:
+        name: "HandlerRsdDataFetchComplete"
+        module: "omnibase_infra.nodes.node_rsd_orchestrator.handlers.handler_rsd_data_fetch_complete"
+      output_events:
+        - "ModelRsdScoreInput"
+    - event_model:
+        name: "ModelRsdScoreResult"
+        module: "omnibase_infra.nodes.node_rsd_score_compute.models.model_rsd_score_result"
+      handler:
+        name: "HandlerRsdScoreComplete"
+        module: "omnibase_infra.nodes.node_rsd_orchestrator.handlers.handler_rsd_score_complete"
+      output_events:
+        - "ModelRsdResult"
+workflow_coordination:
+  workflow_definition:
+    workflow_metadata:
+      workflow_name: "rsd_scoring_workflow"
+      workflow_version:
+        major: 1
+        minor: 0
+        patch: 0
+      description: "RSD 5-factor priority scoring workflow"
+    execution_graph:
+      nodes:
+        - node_id: "fetch_data"
+          node_type: EFFECT_GENERIC
+          description: "Fetch ticket data, dependencies, agent requests, plan overrides"
+        - node_id: "compute_scores"
+          node_type: COMPUTE_GENERIC
+          description: "Calculate RSD 5-factor priority scores"
+          depends_on: ["fetch_data"]
+        - node_id: "store_state"
+          node_type: REDUCER_GENERIC
+          description: "Store scores and compute rank changes"
+          depends_on: ["compute_scores"]
+    coordination_rules:
+      execution_mode: sequential
+      parallel_execution_allowed: false
+      max_parallel_branches: 1
+      failure_recovery_strategy: fail_fast
+      max_retries: 0
+      timeout_ms: 30000
+metadata:
+  description: "RSD priority scoring workflow orchestrator"
+  author: "OmniNode Team"
+  created: "2026-04-01"
+  tags:
+    - "orchestrator"
+    - "rsd"
+    - "priority-engine"
+    - "scoring"

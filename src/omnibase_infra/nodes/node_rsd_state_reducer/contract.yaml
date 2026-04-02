@@ -1,0 +1,92 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - RSD State Reducer
+#
+name: "node_rsd_state_reducer"
+node_type: "REDUCER_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: "FSM-based state tracking for the RSD priority scoring workflow."
+input_model:
+  name: "ModelReducerInput"
+  module: "omnibase_core.models.reducer.model_reducer_input"
+  description: "Reducer input containing workflow event."
+output_model:
+  name: "ModelReducerOutput"
+  module: "omnibase_core.models.reducer.model_reducer_output"
+  description: "Reducer output with new state."
+state_machine:
+  state_machine_name: "rsd_scoring_fsm"
+  initial_state: "pending"
+  states:
+    - state_name: "pending"
+      description: "Waiting for RSD scoring command"
+      required_data: []
+    - state_name: "fetching_data"
+      description: "Data fetch dispatched to effect node"
+      required_data:
+        - "correlation_id"
+        - "ticket_ids"
+    - state_name: "scoring"
+      description: "Priority score computation in progress"
+      required_data:
+        - "correlation_id"
+    - state_name: "storing"
+      description: "Storing scores and computing rank changes"
+      required_data:
+        - "correlation_id"
+    - state_name: "complete"
+      description: "Scoring cycle completed successfully"
+      is_terminal: true
+      required_data:
+        - "ranked_ticket_ids"
+    - state_name: "failed"
+      description: "Scoring cycle failed"
+      is_terminal: true
+      required_data:
+        - "error_message"
+  transitions:
+    - from_state: "pending"
+      to_state: "fetching_data"
+      trigger: "cmd_received"
+      description: "RSD scoring command received, dispatch data fetch"
+    - from_state: "fetching_data"
+      to_state: "scoring"
+      trigger: "data_fetched"
+      description: "Data fetch succeeded, dispatch score computation"
+    - from_state: "scoring"
+      to_state: "storing"
+      trigger: "scores_calculated"
+      description: "Scores calculated, store results and compute rank changes"
+    - from_state: "storing"
+      to_state: "complete"
+      trigger: "scores_stored"
+      description: "Scores stored, workflow complete"
+    - from_state: "fetching_data"
+      to_state: "failed"
+      trigger: "error"
+      description: "Data fetch failed"
+    - from_state: "scoring"
+      to_state: "failed"
+      trigger: "error"
+      description: "Score computation failed"
+    - from_state: "storing"
+      to_state: "failed"
+      trigger: "error"
+      description: "Score storage failed"
+  terminal_states:
+    - "complete"
+    - "failed"
+  persistence_enabled: false
+metadata:
+  description: "FSM reducer for RSD priority scoring workflow state tracking"
+  author: "OmniNode Team"
+  created: "2026-04-01"
+  tags:
+    - "reducer"
+    - "fsm"
+    - "rsd"
+    - "priority-engine"

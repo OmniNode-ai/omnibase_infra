@@ -16,6 +16,7 @@ from .enum_omniclaude_topic import EnumOmniclaudeTopic
 from .enum_omniintelligence_topic import EnumOmniintelligenceTopic
 from .enum_omnimemory_topic import EnumOmnimemoryTopic
 from .enum_platform_topic import EnumPlatformTopic
+from .enum_rsd_topic import EnumRsdTopic
 from .enum_runtime_topic import EnumRuntimeTopic
 from .enum_skill_topic import EnumSkillTopic
 from .enum_validation_topic import EnumValidationTopic

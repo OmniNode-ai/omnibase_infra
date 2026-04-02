@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - RSD Data Fetch Effect
+#
+name: "node_rsd_data_fetch_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: "Fetches ticket data, dependency graphs, agent requests, and plan overrides from Linear API or DB for RSD scoring."
+input_model:
+  name: "ModelRsdDataFetchRequest"
+  module: "omnibase_infra.nodes.node_rsd_data_fetch_effect.models.model_rsd_data_fetch_request"
+  description: "Request specifying which ticket data to fetch."
+output_model:
+  name: "ModelRsdDataFetchResult"
+  module: "omnibase_infra.nodes.node_rsd_data_fetch_effect.models.model_rsd_data_fetch_result"
+  description: "Fetched ticket data, dependency edges, agent requests, and plan overrides."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "fetch_rsd_data"
+      handler:
+        name: "HandlerRsdDataFetch"
+        module: "omnibase_infra.nodes.node_rsd_data_fetch_effect.handlers.handler_rsd_data_fetch"
+metadata:
+  description: "Data fetch effect for RSD priority scoring workflow"
+  author: "OmniNode Team"
+  created: "2026-04-01"
+  tags:
+    - "effect"
+    - "rsd"
+    - "priority-engine"
+    - "data-fetch"
