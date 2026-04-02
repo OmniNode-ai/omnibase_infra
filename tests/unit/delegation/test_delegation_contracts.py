@@ -106,9 +106,9 @@ class TestRoutingReducerContract:
     def test_llm_coder_fast_url_is_optional(self) -> None:
         data = self._load()
         deps = {d["key"]: d for d in data["config_dependencies"]}
-        assert (
-            "LLM_CODER_FAST_URL" in deps
-        ), "LLM_CODER_FAST_URL missing from config_dependencies"
+        assert "LLM_CODER_FAST_URL" in deps, (
+            "LLM_CODER_FAST_URL missing from config_dependencies"
+        )
         assert deps["LLM_CODER_FAST_URL"]["required"] is False
 
 
