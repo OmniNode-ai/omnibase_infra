@@ -74,14 +74,12 @@ class TestOrchestratorContract:
 
     def test_subscribes_to_delegation_request(self) -> None:
         data = self._load()
-        raw = data["event_bus"]["subscribe_topics"]
-        topics = [t if isinstance(t, str) else t["topic"] for t in raw]
+        topics = data["event_bus"]["subscribe_topics"]
         assert "onex.cmd.omnibase-infra.delegation-request.v1" in topics
 
     def test_publishes_completed_and_failed(self) -> None:
         data = self._load()
-        raw = data["event_bus"]["publish_topics"]
-        topics = [t if isinstance(t, str) else t["topic"] for t in raw]
+        topics = data["event_bus"]["publish_topics"]
         assert "onex.evt.omnibase-infra.delegation-completed.v1" in topics
         assert "onex.evt.omnibase-infra.delegation-failed.v1" in topics
 
@@ -108,9 +106,9 @@ class TestRoutingReducerContract:
     def test_llm_coder_fast_url_is_optional(self) -> None:
         data = self._load()
         deps = {d["key"]: d for d in data["config_dependencies"]}
-        assert "LLM_CODER_FAST_URL" in deps, (
-            "LLM_CODER_FAST_URL missing from config_dependencies"
-        )
+        assert (
+            "LLM_CODER_FAST_URL" in deps
+        ), "LLM_CODER_FAST_URL missing from config_dependencies"
         assert deps["LLM_CODER_FAST_URL"]["required"] is False
 
 
