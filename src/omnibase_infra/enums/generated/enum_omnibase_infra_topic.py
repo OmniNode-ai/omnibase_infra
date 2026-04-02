@@ -18,11 +18,18 @@ class EnumOmnibaseInfraTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
+    CMD_CHAIN_LEARN_V1 = "onex.cmd.omnibase-infra.chain-learn.v1"  # onex.cmd.omnibase-infra.chain-learn.v1
     CMD_CONSUMER_RESTART_V1 = "onex.cmd.omnibase-infra.consumer-restart.v1"  # onex.cmd.omnibase-infra.consumer-restart.v1
     CMD_DELEGATION_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-request.v1"  # onex.cmd.omnibase-infra.delegation-request.v1
     CMD_LLM_EMBEDDING_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-embedding-request.v1"  # onex.cmd.omnibase-infra.llm-embedding-request.v1
     CMD_LLM_INFERENCE_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-inference-request.v1"  # onex.cmd.omnibase-infra.llm-inference-request.v1
     EVT_BASELINES_COMPUTED_V1 = "onex.evt.omnibase-infra.baselines-computed.v1"  # onex.evt.omnibase-infra.baselines-computed.v1
+    EVT_CHAIN_LEARN_COMPLETE_V1 = "onex.evt.omnibase-infra.chain-learn-complete.v1"  # onex.evt.omnibase-infra.chain-learn-complete.v1
+    EVT_CHAIN_LEARN_FAILED_V1 = "onex.evt.omnibase-infra.chain-learn-failed.v1"  # onex.evt.omnibase-infra.chain-learn-failed.v1
+    EVT_CHAIN_REPLAY_RESULT_V1 = "onex.evt.omnibase-infra.chain-replay-result.v1"  # onex.evt.omnibase-infra.chain-replay-result.v1
+    EVT_CHAIN_RETRIEVAL_RESULT_V1 = "onex.evt.omnibase-infra.chain-retrieval-result.v1"  # onex.evt.omnibase-infra.chain-retrieval-result.v1
+    EVT_CHAIN_STORED_V1 = "onex.evt.omnibase-infra.chain-stored.v1"  # onex.evt.omnibase-infra.chain-stored.v1
+    EVT_CHAIN_VERIFIED_V1 = "onex.evt.omnibase-infra.chain-verified.v1"  # onex.evt.omnibase-infra.chain-verified.v1
     EVT_CONSUMER_HEALTH_V1 = "onex.evt.omnibase-infra.consumer-health.v1"  # onex.evt.omnibase-infra.consumer-health.v1
     EVT_DB_ERROR_V1 = "onex.evt.omnibase-infra.db-error.v1"  # onex.evt.omnibase-infra.db-error.v1
     EVT_DELEGATION_COMPLETED_V1 = "onex.evt.omnibase-infra.delegation-completed.v1"  # onex.evt.omnibase-infra.delegation-completed.v1

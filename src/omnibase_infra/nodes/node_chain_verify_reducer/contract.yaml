@@ -1,0 +1,128 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Chain Verify Reducer
+#
+# FSM-based state tracking for the chain learning workflow.
+#
+name: "node_chain_verify_reducer"
+node_type: "REDUCER_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  FSM-based state tracking for the chain learning workflow. Tracks the verification lifecycle: pending, retrieving, replaying/exploring, verifying, complete/fallback/failed.
+
+input_model:
+  name: "ModelReducerInput"
+  module: "omnibase_core.models.reducer.model_reducer_input"
+  description: "Reducer input containing workflow event."
+output_model:
+  name: "ModelReducerOutput"
+  module: "omnibase_core.models.reducer.model_reducer_output"
+  description: "Reducer output with new state."
+state_machine:
+  state_machine_name: "chain_verify_fsm"
+  initial_state: "pending"
+  states:
+    - state_name: "pending"
+      description: "Waiting for chain learn command"
+      required_data: []
+    - state_name: "retrieving"
+      description: "Embedding prompt and searching Qdrant"
+      required_data:
+        - "correlation_id"
+        - "prompt_text"
+    - state_name: "replaying"
+      description: "Replaying cached chain with new context (HIT path)"
+      required_data:
+        - "correlation_id"
+        - "chain_id"
+    - state_name: "exploring"
+      description: "Full exploration path (MISS or fallback)"
+      required_data:
+        - "correlation_id"
+    - state_name: "verifying"
+      description: "Verifying chain against contract"
+      required_data:
+        - "correlation_id"
+    - state_name: "complete"
+      description: "Workflow completed successfully"
+      is_terminal: true
+      required_data:
+        - "chain_id"
+    - state_name: "fallback"
+      description: "Replay failed, falling back to full explore"
+      required_data:
+        - "correlation_id"
+    - state_name: "failed"
+      description: "Workflow failed"
+      is_terminal: true
+      required_data:
+        - "error_message"
+  transitions:
+    - from_state: "pending"
+      to_state: "retrieving"
+      trigger: "cmd_received"
+      description: "Chain learn command received, dispatch retrieval"
+    - from_state: "retrieving"
+      to_state: "replaying"
+      trigger: "retrieval_hit"
+      description: "Similar chain found, attempt replay"
+    - from_state: "retrieving"
+      to_state: "exploring"
+      trigger: "retrieval_miss"
+      description: "No similar chain found, full exploration"
+    - from_state: "replaying"
+      to_state: "verifying"
+      trigger: "replay_complete"
+      description: "Chain replay done, verify result"
+    - from_state: "exploring"
+      to_state: "verifying"
+      trigger: "explore_complete"
+      description: "Exploration done, verify result"
+    - from_state: "verifying"
+      to_state: "complete"
+      trigger: "verify_success"
+      description: "Verification passed, store chain"
+    - from_state: "verifying"
+      to_state: "fallback"
+      trigger: "verify_failed"
+      description: "Replay verification failed, try full explore"
+    - from_state: "fallback"
+      to_state: "exploring"
+      trigger: "fallback_to_explore"
+      description: "Falling back to full exploration"
+    - from_state: "retrieving"
+      to_state: "failed"
+      trigger: "error"
+      description: "Retrieval failed"
+    - from_state: "replaying"
+      to_state: "failed"
+      trigger: "error"
+      description: "Replay failed"
+    - from_state: "exploring"
+      to_state: "failed"
+      trigger: "error"
+      description: "Exploration failed"
+    - from_state: "verifying"
+      to_state: "failed"
+      trigger: "error"
+      description: "Verification failed"
+    - from_state: "fallback"
+      to_state: "failed"
+      trigger: "error"
+      description: "Fallback failed"
+  terminal_states:
+    - "complete"
+    - "failed"
+  persistence_enabled: false
+metadata:
+  description: "FSM reducer for chain learning verification state tracking"
+  author: "OmniNode Team"
+  created: "2026-04-02"
+  tags:
+    - "reducer"
+    - "fsm"
+    - "chain-learning"

@@ -1,0 +1,62 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Chain Retrieval Effect
+#
+# Embeds incoming prompt and queries Qdrant for similar verified chains.
+#
+name: "node_chain_retrieval_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Effect node that embeds an incoming prompt via the LLM embedding endpoint and queries the Qdrant onex_chain_trajectories collection for similar verified chains by cosine similarity.
+
+input_model:
+  name: "ModelChainLearnCommand"
+  module: "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_learn_command"
+  description: "Chain learn command containing prompt text."
+output_model:
+  name: "ModelChainRetrievalResult"
+  module: "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_retrieval_result"
+  description: "Retrieval result with matched chains and hit/miss flag."
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.chain-learn.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.chain-retrieval-result.v1"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "chain.retrieve"
+      handler:
+        name: "HandlerChainRetrieval"
+        module: "omnibase_infra.nodes.node_chain_retrieval_effect.handlers.handler_chain_retrieval"
+error_handling:
+  retry_policy:
+    max_retries: 2
+    initial_delay_ms: 200
+    max_delay_ms: 2000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+metadata:
+  description: "Prompt embedding and Qdrant similarity search for chain learning"
+  author: "OmniNode Team"
+  created: "2026-04-02"
+  tags:
+    - "effect"
+    - "chain-learning"
+    - "qdrant"
+    - "embedding"
