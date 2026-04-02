@@ -18,8 +18,12 @@ class ModelLiveMetrics(BaseModel):
 
     model_key: str = Field(..., description="Model identifier.")
     task_type: EnumTaskType = Field(..., description="Task type these metrics are for.")
-    success_rate: float = Field(default=0.0, ge=0.0, le=1.0, description="Rolling success rate 0-1.")
-    sample_count: int = Field(default=0, ge=0, description="Number of verified outcomes.")
+    success_rate: float = Field(
+        default=0.0, ge=0.0, le=1.0, description="Rolling success rate 0-1."
+    )
+    sample_count: int = Field(
+        default=0, ge=0, description="Number of verified outcomes."
+    )
     avg_latency_ms: int = Field(
         default=0, ge=0, description="Average observed latency in ms."
     )
