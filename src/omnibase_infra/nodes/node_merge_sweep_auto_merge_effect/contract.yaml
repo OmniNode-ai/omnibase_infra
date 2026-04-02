@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Merge Sweep Auto-Merge Effect
+#
+# Canary: skill-to-node migration — merge-sweep.
+# Enables GitHub auto-merge on Track A PRs via gh CLI.
+#
+name: "node_merge_sweep_auto_merge_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: "Enables GitHub auto-merge on merge-ready PRs."
+input_model:
+  name: "ModelAutoMergeRequest"
+  module: "omnibase_infra.nodes.node_merge_sweep_auto_merge_effect.models.model_auto_merge_request"
+  description: "Request with PR list and merge method."
+output_model:
+  name: "ModelAutoMergeResult"
+  module: "omnibase_infra.nodes.node_merge_sweep_auto_merge_effect.models.model_auto_merge_result"
+  description: "Result with per-PR outcomes."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "enable_auto_merge"
+      handler:
+        name: "HandlerAutoMerge"
+        module: "omnibase_infra.nodes.node_merge_sweep_auto_merge_effect.handlers.handler_auto_merge"
+metadata:
+  description: "GitHub auto-merge effect for merge-sweep workflow"
+  author: "OmniNode Team"
+  created: "2026-04-01"
+  tags:
+    - "effect"
+    - "github"
+    - "auto-merge"
+    - "merge-sweep"
+    - "canary"
+    - "skill-migration"

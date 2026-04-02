@@ -1,0 +1,111 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Merge Sweep Workflow Orchestrator
+#
+# Canary: skill-to-node migration — merge-sweep.
+# Coordinates: scan repos -> classify PRs -> enable auto-merge.
+#
+name: "node_merge_sweep_workflow_orchestrator"
+node_type: "ORCHESTRATOR_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Orchestrates the merge-sweep workflow: receive command, dispatch PR scan, dispatch classification, dispatch auto-merge, emit completion event.
+
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.cmd.skill.merge-sweep.v1"
+    - "onex.evt.skill.merge-sweep-pr-list.v1"
+    - "onex.evt.skill.merge-sweep-classified.v1"
+    - "onex.evt.skill.merge-sweep-auto-merged.v1"
+  publish_topics:
+    - "onex.evt.skill.merge-sweep-complete.v1"
+    - "onex.evt.skill.merge-sweep-failed.v1"
+input_model:
+  name: "ModelMergeSweepCommand"
+  module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.models.model_merge_sweep_command"
+  description: "Command to initiate merge-sweep workflow."
+output_model:
+  name: "ModelMergeSweepResult"
+  module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.models.model_merge_sweep_result"
+  description: "Final merge-sweep result with summary statistics."
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    - event_model:
+        name: "ModelMergeSweepCommand"
+        module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.models.model_merge_sweep_command"
+      handler:
+        name: "HandlerMergeSweepInitiate"
+        module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.handlers.handler_merge_sweep_initiate"
+      output_events:
+        - "ModelPRListRequest"
+    - event_model:
+        name: "ModelPRListResult"
+        module: "omnibase_infra.nodes.node_merge_sweep_pr_list_effect.models.model_pr_list_result"
+      handler:
+        name: "HandlerPRListComplete"
+        module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.handlers.handler_pr_list_complete"
+      output_events:
+        - "ModelClassifyInput"
+    - event_model:
+        name: "ModelClassifyResult"
+        module: "omnibase_infra.nodes.node_merge_sweep_classify_compute.models.model_classify_result"
+      handler:
+        name: "HandlerClassifyComplete"
+        module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.handlers.handler_classify_complete"
+      output_events:
+        - "ModelAutoMergeRequest"
+    - event_model:
+        name: "ModelAutoMergeResult"
+        module: "omnibase_infra.nodes.node_merge_sweep_auto_merge_effect.models.model_auto_merge_result"
+      handler:
+        name: "HandlerAutoMergeComplete"
+        module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.handlers.handler_auto_merge_complete"
+      output_events:
+        - "ModelMergeSweepResult"
+workflow_coordination:
+  workflow_definition:
+    workflow_metadata:
+      workflow_name: "merge_sweep_workflow"
+      workflow_version:
+        major: 1
+        minor: 0
+        patch: 0
+      description: "Org-wide PR sweep: scan, classify, auto-merge"
+    execution_graph:
+      nodes:
+        - node_id: "scan_prs"
+          node_type: EFFECT_GENERIC
+          description: "Scan GitHub repos for open PRs"
+        - node_id: "classify_prs"
+          node_type: COMPUTE_GENERIC
+          description: "Classify PRs into Track A (merge-ready) and Track B (needs polish)"
+          depends_on: ["scan_prs"]
+        - node_id: "enable_auto_merge"
+          node_type: EFFECT_GENERIC
+          description: "Enable auto-merge on Track A PRs"
+          depends_on: ["classify_prs"]
+    coordination_rules:
+      execution_mode: sequential
+      parallel_execution_allowed: false
+      max_parallel_branches: 1
+      failure_recovery_strategy: fail_fast
+      max_retries: 0
+      timeout_ms: 120000
+metadata:
+  description: "Merge-sweep workflow orchestrator (skill-to-node canary)"
+  author: "OmniNode Team"
+  created: "2026-04-01"
+  tags:
+    - "orchestrator"
+    - "merge-sweep"
+    - "canary"
+    - "skill-migration"

@@ -18,7 +18,13 @@ class EnumSkillTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
+    CMD_MERGE_SWEEP_V1 = "onex.cmd.skill.merge-sweep.v1"  # onex.cmd.skill.merge-sweep.v1
     CMD_SCOPE_CHECK_V1 = "onex.cmd.skill.scope-check.v1"  # onex.cmd.skill.scope-check.v1
+    EVT_MERGE_SWEEP_AUTO_MERGED_V1 = "onex.evt.skill.merge-sweep-auto-merged.v1"  # onex.evt.skill.merge-sweep-auto-merged.v1
+    EVT_MERGE_SWEEP_CLASSIFIED_V1 = "onex.evt.skill.merge-sweep-classified.v1"  # onex.evt.skill.merge-sweep-classified.v1
+    EVT_MERGE_SWEEP_COMPLETE_V1 = "onex.evt.skill.merge-sweep-complete.v1"  # onex.evt.skill.merge-sweep-complete.v1
+    EVT_MERGE_SWEEP_FAILED_V1 = "onex.evt.skill.merge-sweep-failed.v1"  # onex.evt.skill.merge-sweep-failed.v1
+    EVT_MERGE_SWEEP_PR_LIST_V1 = "onex.evt.skill.merge-sweep-pr-list.v1"  # onex.evt.skill.merge-sweep-pr-list.v1
     EVT_SCOPE_CHECK_COMPLETE_V1 = "onex.evt.skill.scope-check-complete.v1"  # onex.evt.skill.scope-check-complete.v1
     EVT_SCOPE_CHECK_FAILED_V1 = "onex.evt.skill.scope-check-failed.v1"  # onex.evt.skill.scope-check-failed.v1
     EVT_SCOPE_EXTRACTED_V1 = "onex.evt.skill.scope-extracted.v1"  # onex.evt.skill.scope-extracted.v1

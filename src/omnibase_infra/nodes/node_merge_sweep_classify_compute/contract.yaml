@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Merge Sweep Classify Compute
+#
+# Canary: skill-to-node migration — merge-sweep.
+# Classifies PRs into Track A (merge-ready) vs Track B (needs polish).
+#
+name: "node_merge_sweep_classify_compute"
+node_type: "COMPUTE_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: "Classifies PRs into Track A (auto-merge ready) and Track B (needs polish)."
+input_model:
+  name: "ModelClassifyInput"
+  module: "omnibase_infra.nodes.node_merge_sweep_classify_compute.models.model_classify_input"
+  description: "PRs to classify with configuration options."
+output_model:
+  name: "ModelClassifyResult"
+  module: "omnibase_infra.nodes.node_merge_sweep_classify_compute.models.model_classify_result"
+  description: "Classification result with Track A, B, and SKIP buckets."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "classify_prs"
+      handler:
+        name: "HandlerClassifyPRs"
+        module: "omnibase_infra.nodes.node_merge_sweep_classify_compute.handlers.handler_classify_prs"
+metadata:
+  description: "PR classification compute for merge-sweep workflow"
+  author: "OmniNode Team"
+  created: "2026-04-01"
+  tags:
+    - "compute"
+    - "classification"
+    - "merge-sweep"
+    - "canary"
+    - "skill-migration"
