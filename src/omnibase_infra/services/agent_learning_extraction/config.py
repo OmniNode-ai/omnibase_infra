@@ -31,7 +31,7 @@ class ModelAgentLearningExtractionConfig(BaseModel):
         description="Kafka consumer group ID",
     )
     llm_summary_url: str = Field(
-        default="http://192.168.86.201:8001/v1/chat/completions",
+        default="http://localhost:8001/v1/chat/completions",
         description="Qwen3-14B endpoint for generating resolution summaries",
     )
     llm_summary_timeout_seconds: float = Field(
