@@ -168,7 +168,7 @@ class DispatcherDelegationRequest(MixinAsyncCircuitBreaker):
             completed_at = datetime.now(UTC)
             duration_ms = (completed_at - started_at).total_seconds() * 1000
             async with self._circuit_breaker_lock:
-                await self._record_circuit_breaker_failure()
+                await self._record_circuit_failure("handle")
             logger.exception(
                 "DispatcherDelegationRequest failed: %s",
                 sanitize_error_message(e),
@@ -176,7 +176,7 @@ class DispatcherDelegationRequest(MixinAsyncCircuitBreaker):
             )
             return ModelDispatchResult(
                 dispatch_id=uuid4(),
-                status=EnumDispatchStatus.ERROR,
+                status=EnumDispatchStatus.HANDLER_ERROR,
                 topic=TOPIC_ID_DELEGATION_REQUEST,
                 dispatcher_id=self.dispatcher_id,
                 started_at=started_at,
