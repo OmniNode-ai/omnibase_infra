@@ -252,7 +252,7 @@ class HandlerLoopOrchestrator:
             elif intent.intent_type == EnumBuildLoopIntentType.START_FILL:
                 # TODO: Fetch real scored tickets from Linear/backlog
                 scored = _placeholder_scored_tickets()
-                result = await self._rsd_fill.handle(
+                fill_result = await self._rsd_fill.handle(
                     correlation_id=correlation_id,
                     scored_tickets=scored,
                     max_tickets=5,
@@ -262,13 +262,13 @@ class HandlerLoopOrchestrator:
                     source_phase=EnumBuildLoopPhase.FILLING,
                     success=True,
                     timestamp=now,
-                    tickets_filled=result.total_selected,
+                    tickets_filled=fill_result.total_selected,
                 )
 
             elif intent.intent_type == EnumBuildLoopIntentType.START_CLASSIFY:
                 # Convert filled tickets for classification
                 tickets_for_classify = _placeholder_tickets_for_classification()
-                result = await self._classify.handle(
+                classify_result = await self._classify.handle(
                     correlation_id=correlation_id,
                     tickets=tickets_for_classify,
                 )
@@ -277,13 +277,13 @@ class HandlerLoopOrchestrator:
                     source_phase=EnumBuildLoopPhase.CLASSIFYING,
                     success=True,
                     timestamp=now,
-                    tickets_classified=len(result.classifications),
+                    tickets_classified=len(classify_result.classifications),
                 )
 
             elif intent.intent_type == EnumBuildLoopIntentType.START_BUILD:
                 # TODO: Use actual classified tickets
                 targets = _placeholder_build_targets()
-                result = await self._dispatch.handle(
+                dispatch_result = await self._dispatch.handle(
                     correlation_id=correlation_id,
                     targets=targets,
                     dry_run=state.dry_run,
@@ -293,7 +293,7 @@ class HandlerLoopOrchestrator:
                     source_phase=EnumBuildLoopPhase.BUILDING,
                     success=True,
                     timestamp=now,
-                    tickets_dispatched=result.total_dispatched,
+                    tickets_dispatched=dispatch_result.total_dispatched,
                 )
 
             elif intent.intent_type == EnumBuildLoopIntentType.CYCLE_COMPLETE:
