@@ -41,9 +41,8 @@ if TYPE_CHECKING:
 # =============================================================================
 
 # Check if Kafka is available based on environment variable.
-# KAFKA_BOOTSTRAP_SERVERS is set to a localhost default by tests/conftest.py (OMN-7227),
-# so we require an explicit KAFKA_INTEGRATION_TESTS=1 opt-in to avoid false positives
-# in CI environments where Kafka is not actually running.
+# Requires KAFKA_BOOTSTRAP_SERVERS to be set AND KAFKA_INTEGRATION_TESTS=1 opt-in
+# to avoid false positives in CI environments where Kafka is not actually running.
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
 KAFKA_AVAILABLE = (
     KAFKA_BOOTSTRAP_SERVERS is not None and os.getenv("KAFKA_INTEGRATION_TESTS") == "1"
