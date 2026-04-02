@@ -146,7 +146,7 @@ class PluginDelegation:
                 duration_seconds=duration,
             )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             duration = time.time() - start_time
             logger.error(  # noqa: TRY400
                 "Failed to wire delegation handlers: %s",
@@ -219,7 +219,7 @@ class PluginDelegation:
                 duration_seconds=duration,
             )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             duration = time.time() - start_time
             logger.error(  # noqa: TRY400
                 "Failed to wire delegation dispatchers: %s",
@@ -367,7 +367,7 @@ class PluginDelegation:
                 unsubscribe_callbacks=[_cleanup_wiring],
             )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             duration = time.time() - start_time
             if wiring is not None:
                 await wiring.cleanup()

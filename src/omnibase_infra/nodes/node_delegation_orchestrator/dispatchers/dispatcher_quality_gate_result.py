@@ -25,6 +25,7 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
     EnumMessageCategory,
 )
+from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.nodes.node_delegation_quality_gate_reducer.models.model_quality_gate_result import (
@@ -33,7 +34,6 @@ from omnibase_infra.nodes.node_delegation_quality_gate_reducer.models.model_qual
 from omnibase_infra.nodes.node_registration_orchestrator.dispatchers._util_envelope_extract import (
     extract_envelope_fields,
 )
-from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
