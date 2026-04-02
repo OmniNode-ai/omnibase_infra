@@ -1030,8 +1030,11 @@ _OMNICLAUDE_AGENT_OBSERVABILITY_TOPIC_SUFFIXES: tuple[str, ...] = (
     SUFFIX_OMNICLAUDE_DETECTION_FAILURE,
     SUFFIX_OMNICLAUDE_AGENT_EXECUTION_LOGS,
     SUFFIX_OMNICLAUDE_AGENT_STATUS,
+    SUFFIX_OMNICLAUDE_SESSION_ENDED,
+    SUFFIX_OMNICLAUDE_TOOL_EXECUTED,
 )
-"""Agent observability topic suffixes consumed by ServiceAgentActionsConsumer."""
+"""Agent observability topic suffixes consumed by ServiceAgentActionsConsumer and
+agent learning extraction consumer (OMN-7242)."""
 
 # =============================================================================
 # OMNICLAUDE CONTEXT AUDIT TOPIC SUFFIXES (OMN-5240)
