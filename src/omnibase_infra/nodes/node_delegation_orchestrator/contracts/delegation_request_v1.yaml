@@ -4,6 +4,12 @@
 #
 # Wire schema contract for delegation request command
 # Prior incident: silent data drops when field names mismatched between producer/consumer
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "SCHEMA"
+
 topic: "onex.cmd.omnibase-infra.delegation-request.v1"
 schema_version: "1.0.0"
 ticket: "OMN-7360"
