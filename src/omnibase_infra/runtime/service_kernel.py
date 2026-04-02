@@ -102,6 +102,9 @@ from omnibase_infra.nodes.node_contract_registry_reducer.contract_registration_e
 from omnibase_infra.nodes.node_contract_registry_reducer.reducer import (
     ContractRegistryReducer,
 )
+from omnibase_infra.nodes.node_delegation_orchestrator.plugin import (
+    PluginDelegation,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
     PluginRegistration,
 )
@@ -1550,6 +1553,21 @@ async def bootstrap() -> int:
         except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "PluginDlq failed to initialize, continuing without it "
+                "(correlation_id=%s)",
+                correlation_id,
+                exc_info=True,
+            )
+
+        # Try to register PluginDelegation (OMN-7040: delegation pipeline).
+        try:
+            plugin_registry.register(PluginDelegation())
+            logger.info(
+                "PluginDelegation registered (correlation_id=%s)",
+                correlation_id,
+            )
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+            logger.warning(
+                "PluginDelegation failed to initialize, continuing without it "
                 "(correlation_id=%s)",
                 correlation_id,
                 exc_info=True,
