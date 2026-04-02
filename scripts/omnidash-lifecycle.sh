@@ -40,14 +40,7 @@ _resolve_omnidash_dir() {
     fi
   fi
 
-  # Hardcoded fallback
-  local fallback="/Volumes/PRO-G40/Code/omni_home/omnidash"
-  if [[ -f "${fallback}/package.json" ]]; then
-    echo "${fallback}"
-    return 0
-  fi
-
-  echo "[omnidash] ERROR: Cannot find omnidash directory. Set OMNIDASH_DIR." >&2
+  echo "[omnidash] ERROR: Cannot find omnidash directory. Set OMNIDASH_DIR or OMNIBASE_INFRA_DIR." >&2
   return 1
 }
 

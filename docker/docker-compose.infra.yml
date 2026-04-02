@@ -163,7 +163,8 @@ x-runtime-env: &runtime-env
   # nodes at the site-packages path below.
   OMNICLAUDE_CONTRACTS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/nodes
   # OMN-4622: Skills root for topic provisioning (flat-list topics.yaml manifests)
-  OMNICLAUDE_SKILLS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/plugins/onex/skills
+  # Overrideable for remote deployments where skills are mounted from host (e.g. OMNICLAUDE_SKILLS_ROOT=/app/skills)
+  OMNICLAUDE_SKILLS_ROOT: ${OMNICLAUDE_SKILLS_ROOT:-/app/.venv/lib/python3.12/site-packages/omniclaude/plugins/onex/skills}
   # --- Infisical config store ---
   INFISICAL_ADDR: ${INFISICAL_ADDR:-}
   INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID:-}
@@ -575,6 +576,7 @@ services:
       - runtime_logs:/app/logs
       - runtime_data:/app/data
       - ../contracts:/app/contracts:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
@@ -619,6 +621,7 @@ services:
       - effects_logs:/app/logs
       - effects_data:/app/data
       - ../contracts:/app/contracts:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
@@ -658,6 +661,7 @@ services:
     volumes:
       - worker_logs:/app/logs
       - ../contracts:/app/contracts:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
@@ -973,6 +977,7 @@ services:
     volumes:
       - contract_resolver_logs:/app/logs
       - ../contracts:/app/contracts:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8091/health"]
       interval: 30s
