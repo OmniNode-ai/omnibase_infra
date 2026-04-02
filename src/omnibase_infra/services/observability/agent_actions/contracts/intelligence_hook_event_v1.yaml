@@ -1,0 +1,66 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Ticket: OMN-7360
+#
+# Wire schema contract for intelligence hook event (full prompt path)
+topic: "onex.cmd.omniintelligence.claude-hook-event.v1"
+schema_version: "1.0.0"
+ticket: "OMN-7360"
+description: >
+  Full Claude Code hook event sent to the intelligence pipeline for analysis.
+  Contains the complete prompt content (access-restricted topic). This is the
+  privacy-sensitive counterpart to the preview-safe evt topics.
+
+producer:
+  repo: "omniclaude"
+  file: "src/omniclaude/hooks/handler_event_emitter.py"
+  function: "emit_intelligence_event"
+
+consumer:
+  repo: "omniintelligence"
+  file: "src/omniintelligence/consumers/hook_event_consumer.py"
+  model: "ModelClaudeHookEvent"
+
+required_fields:
+  - name: "session_id"
+    type: "string"
+    description: "Session identifier string."
+  - name: "correlation_id"
+    type: "uuid"
+    description: "Correlation ID for distributed tracing."
+  - name: "emitted_at"
+    type: "datetime"
+    description: "Timestamp when the event was emitted (UTC)."
+  - name: "event_type"
+    type: "string"
+    description: "Hook event type (session_started, prompt_submitted, tool_executed, session_ended)."
+
+optional_fields:
+  - name: "task_id"
+    type: "string"
+    nullable: true
+    description: "Stable task identifier for cross-session correlation."
+  - name: "prompt"
+    type: "string"
+    nullable: true
+    description: "Full prompt content (privacy-sensitive, access-restricted)."
+  - name: "prompt_length"
+    type: "integer"
+    nullable: true
+    description: "Total character count of the prompt."
+  - name: "tool_name"
+    type: "string"
+    nullable: true
+    description: "Tool name for tool_executed events."
+  - name: "tool_input"
+    type: "object"
+    nullable: true
+    description: "Tool input for tool_executed events."
+  - name: "working_directory"
+    type: "string"
+    nullable: true
+    description: "Working directory of the session."
+  - name: "metadata"
+    type: "object"
+    nullable: true
+    description: "Additional event-specific metadata."
