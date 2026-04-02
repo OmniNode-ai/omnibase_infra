@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for learning store adapter."""
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
