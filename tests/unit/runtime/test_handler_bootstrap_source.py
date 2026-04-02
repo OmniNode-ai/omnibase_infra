@@ -5,26 +5,31 @@ Unit tests for HandlerBootstrapSource hardcoded handler registration.
 
 Tests the HandlerBootstrapSource functionality including:
 - Protocol compliance with ProtocolContractSource
-- Bootstrap handler discovery (db, http, mcp)
+- Bootstrap handler discovery (db, http; mcp only when opted in)
 - ModelHandlerDescriptor validation for all bootstrap handlers
+- MCP handler opt-in gating via MCP_SERVER_ENABLED env var (OMN-7225)
 - Graceful mode behavior (API consistency)
 - Idempotency of discover_handlers() calls
 
 Related:
     - OMN-1087: HandlerBootstrapSource for hardcoded handler registration
+    - OMN-7225: MCP handler opt-in (default OFF)
     - src/omnibase_infra/runtime/handler_bootstrap_source.py
     - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
 
 Expected Behavior:
     HandlerBootstrapSource implements ProtocolContractSource from omnibase_infra.
     It provides hardcoded handler descriptors for core infrastructure handlers
-    (Database, HTTP, MCP) without requiring contract.yaml files.
+    (Database, HTTP). The MCP handler is only registered when MCP_SERVER_ENABLED=true.
 
     The source_type property returns "BOOTSTRAP" as per the implementation.
     All handlers have handler_kind="effect" since they perform external I/O.
 """
 
 from __future__ import annotations
+
+import os
+from unittest import mock
 
 import pytest
 from pydantic import ValidationError
@@ -43,8 +48,16 @@ from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSour
 # Constants for Test Validation
 # =============================================================================
 
-# Expected bootstrap handler IDs (using "proto." prefix for protocol identity namespace)
-EXPECTED_HANDLER_IDS = frozenset(
+# Expected bootstrap handler IDs when MCP is OFF (default)
+EXPECTED_HANDLER_IDS_DEFAULT = frozenset(
+    {
+        "proto.db",
+        "proto.http",
+    }
+)
+
+# Expected bootstrap handler IDs when MCP is ON (MCP_SERVER_ENABLED=true)
+EXPECTED_HANDLER_IDS_WITH_MCP = frozenset(
     {
         "proto.db",
         "proto.http",
@@ -58,8 +71,11 @@ EXPECTED_HANDLER_KIND = "effect"
 # Expected version for all bootstrap handlers
 EXPECTED_VERSION = "1.0.0"
 
-# Expected count of bootstrap handlers
-EXPECTED_HANDLER_COUNT = 3
+# Expected count of bootstrap handlers (default, without MCP)
+EXPECTED_HANDLER_COUNT = 2
+
+# Expected count when MCP is enabled
+EXPECTED_HANDLER_COUNT_WITH_MCP = 3
 
 # Performance threshold: 25ms allows for contract YAML file I/O during handler
 # discovery. Pre-OMN-1282 threshold was 10ms when no contract files were loaded.
@@ -180,13 +196,14 @@ class TestHandlerBootstrapSourceDiscovery:
         assert hasattr(result, "validation_errors")
 
     @pytest.mark.asyncio
-    async def test_discovers_exactly_three_handlers(self) -> None:
-        """discover_handlers() should return exactly 3 bootstrap handlers.
+    async def test_discovers_two_handlers_by_default(self) -> None:
+        """discover_handlers() should return exactly 2 bootstrap handlers by default.
 
-        The bootstrap handlers are:
-        - bootstrap.db: PostgreSQL database operations
-        - bootstrap.http: HTTP REST protocol
-        - bootstrap.mcp: Model Context Protocol for AI agent integration
+        The default bootstrap handlers are:
+        - proto.db: PostgreSQL database operations
+        - proto.http: HTTP REST protocol
+
+        MCP is excluded unless MCP_SERVER_ENABLED=true (OMN-7225).
         """
         source = HandlerBootstrapSource()
 
@@ -201,8 +218,8 @@ class TestHandlerBootstrapSourceDiscovery:
     async def test_discovered_handler_ids_match_expected(self) -> None:
         """All discovered handlers should have expected handler_id values.
 
-        Handler IDs must follow the pattern "bootstrap.<service_name>" where
-        service_name is one of: db, http, mcp.
+        Handler IDs must follow the pattern "proto.<service_name>" where
+        service_name is one of: db, http (mcp only when opted in).
         """
         source = HandlerBootstrapSource()
 
@@ -210,8 +227,8 @@ class TestHandlerBootstrapSourceDiscovery:
 
         discovered_ids = {d.handler_id for d in result.descriptors}
 
-        assert discovered_ids == EXPECTED_HANDLER_IDS, (
-            f"Handler ID mismatch. Expected: {EXPECTED_HANDLER_IDS}, "
+        assert discovered_ids == EXPECTED_HANDLER_IDS_DEFAULT, (
+            f"Handler ID mismatch. Expected: {EXPECTED_HANDLER_IDS_DEFAULT}, "
             f"Got: {discovered_ids}"
         )
 
@@ -283,7 +300,6 @@ class TestHandlerBootstrapSourceDiscovery:
         expected_paths = {
             "proto.db": "src/omnibase_infra/contracts/handlers/db/handler_contract.yaml",
             "proto.http": "src/omnibase_infra/contracts/handlers/http/handler_contract.yaml",
-            "proto.mcp": "src/omnibase_infra/contracts/handlers/mcp/handler_contract.yaml",
         }
 
         for descriptor in result.descriptors:
@@ -499,11 +515,24 @@ class TestHandlerBootstrapSourceDescriptors:
         assert descriptor.handler_kind == "effect"
 
     @pytest.mark.asyncio
-    async def test_mcp_handler_descriptor_content(self) -> None:
-        """Verify the MCP handler descriptor has expected content."""
+    async def test_mcp_handler_excluded_by_default(self) -> None:
+        """MCP handler should NOT be registered by default (OMN-7225)."""
         source = HandlerBootstrapSource()
 
         result = await source.discover_handlers()
+
+        mcp_descriptors = [d for d in result.descriptors if d.handler_id == "proto.mcp"]
+        assert len(mcp_descriptors) == 0, (
+            "MCP handler should not be registered without MCP_SERVER_ENABLED=true"
+        )
+
+    @pytest.mark.asyncio
+    async def test_mcp_handler_descriptor_content_when_enabled(self) -> None:
+        """Verify the MCP handler descriptor has expected content when opted in."""
+        with mock.patch.dict(os.environ, {"MCP_SERVER_ENABLED": "true"}):
+            source = HandlerBootstrapSource()
+
+            result = await source.discover_handlers()
 
         mcp_descriptors = [d for d in result.descriptors if d.handler_id == "proto.mcp"]
 
@@ -1087,11 +1116,96 @@ class TestHandlerBootstrapSourcePerformance:
         )
 
 
+# =============================================================================
+# MCP Opt-In Tests (OMN-7225)
+# =============================================================================
+
+
+class TestHandlerBootstrapSourceMCPOptIn:
+    """Tests for MCP handler opt-in gating via MCP_SERVER_ENABLED env var.
+
+    OMN-7225: HandlerMCP spawns uvicorn on port 8090 per node instance.
+    When the handler pool creates one per node, only the first binds; the
+    rest crash with EADDRINUSE and take down the runtime. The fix gates
+    MCP handler registration on MCP_SERVER_ENABLED=true.
+    """
+
+    @pytest.mark.asyncio
+    async def test_mcp_excluded_when_env_unset(self) -> None:
+        """MCP handler should be absent when MCP_SERVER_ENABLED is not set."""
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("MCP_SERVER_ENABLED", None)
+            source = HandlerBootstrapSource()
+            result = await source.discover_handlers()
+
+        ids = {d.handler_id for d in result.descriptors}
+        assert "proto.mcp" not in ids
+
+    @pytest.mark.asyncio
+    async def test_mcp_excluded_when_env_false(self) -> None:
+        """MCP handler should be absent when MCP_SERVER_ENABLED=false."""
+        with mock.patch.dict(os.environ, {"MCP_SERVER_ENABLED": "false"}):
+            source = HandlerBootstrapSource()
+            result = await source.discover_handlers()
+
+        ids = {d.handler_id for d in result.descriptors}
+        assert "proto.mcp" not in ids
+
+    @pytest.mark.asyncio
+    async def test_mcp_excluded_when_env_empty(self) -> None:
+        """MCP handler should be absent when MCP_SERVER_ENABLED is empty string."""
+        with mock.patch.dict(os.environ, {"MCP_SERVER_ENABLED": ""}):
+            source = HandlerBootstrapSource()
+            result = await source.discover_handlers()
+
+        ids = {d.handler_id for d in result.descriptors}
+        assert "proto.mcp" not in ids
+
+    @pytest.mark.asyncio
+    async def test_mcp_included_when_enabled_true(self) -> None:
+        """MCP handler should be registered when MCP_SERVER_ENABLED=true."""
+        with mock.patch.dict(os.environ, {"MCP_SERVER_ENABLED": "true"}):
+            source = HandlerBootstrapSource()
+            result = await source.discover_handlers()
+
+        ids = {d.handler_id for d in result.descriptors}
+        assert "proto.mcp" in ids
+        assert len(result.descriptors) == EXPECTED_HANDLER_COUNT_WITH_MCP
+
+    @pytest.mark.asyncio
+    async def test_mcp_included_when_enabled_true_case_insensitive(self) -> None:
+        """MCP_SERVER_ENABLED should be case-insensitive."""
+        with mock.patch.dict(os.environ, {"MCP_SERVER_ENABLED": "True"}):
+            source = HandlerBootstrapSource()
+            result = await source.discover_handlers()
+
+        ids = {d.handler_id for d in result.descriptors}
+        assert "proto.mcp" in ids
+
+    @pytest.mark.asyncio
+    async def test_mcp_enabled_handler_ids_match_expected(self) -> None:
+        """When MCP is enabled, all three handler IDs should be present."""
+        with mock.patch.dict(os.environ, {"MCP_SERVER_ENABLED": "true"}):
+            source = HandlerBootstrapSource()
+            result = await source.discover_handlers()
+
+        ids = {d.handler_id for d in result.descriptors}
+        assert ids == EXPECTED_HANDLER_IDS_WITH_MCP
+
+    @pytest.mark.asyncio
+    async def test_default_handler_count_is_two(self) -> None:
+        """Default bootstrap should register exactly 2 handlers (db, http)."""
+        source = HandlerBootstrapSource()
+        result = await source.discover_handlers()
+        assert len(result.descriptors) == EXPECTED_HANDLER_COUNT
+
+
 __all__ = [
     "TestHandlerBootstrapSourceDescriptors",
     "TestHandlerBootstrapSourceDiscovery",
     "TestHandlerBootstrapSourceEdgeCases",
     "TestHandlerBootstrapSourceIdempotency",
+    "TestHandlerBootstrapSourceMCPOptIn",
     "TestHandlerBootstrapSourceModelImportability",
     "TestHandlerBootstrapSourcePerformance",
     "TestHandlerBootstrapSourceProtocolCompliance",

@@ -20,4 +20,3 @@ class EnumOmnimemoryTopic(str, Enum):
     """
     EVT_POLICY_STATE_UPDATED_V1 = "onex.evt.omnimemory.policy-state-updated.v1"  # onex.evt.omnimemory.policy-state-updated.v1
     EVT_REWARD_ASSIGNED_V1 = "onex.evt.omnimemory.reward-assigned.v1"  # onex.evt.omnimemory.reward-assigned.v1
-    EVT_RUN_EVALUATED_V1 = "onex.evt.omnimemory.run-evaluated.v1"  # onex.evt.omnimemory.run-evaluated.v1

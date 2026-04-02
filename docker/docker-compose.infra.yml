@@ -163,7 +163,8 @@ x-runtime-env: &runtime-env
   # nodes at the site-packages path below.
   OMNICLAUDE_CONTRACTS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/nodes
   # OMN-4622: Skills root for topic provisioning (flat-list topics.yaml manifests)
-  OMNICLAUDE_SKILLS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/plugins/onex/skills
+  # Overrideable for remote deployments where skills are mounted from host (e.g. OMNICLAUDE_SKILLS_ROOT=/app/skills)
+  OMNICLAUDE_SKILLS_ROOT: ${OMNICLAUDE_SKILLS_ROOT:-/app/.venv/lib/python3.12/site-packages/omniclaude/plugins/onex/skills}
   # --- Infisical config store ---
   INFISICAL_ADDR: ${INFISICAL_ADDR:-}
   INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID:-}
@@ -241,6 +242,10 @@ services:
   # Memory: REDPANDA_MEMORY defaults to 8G. Override via env for constrained hosts.
   redpanda:
     image: redpandadata/redpanda:v24.2.7
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     container_name: omnibase-infra-redpanda
     command:
       - redpanda
@@ -260,6 +265,10 @@ services:
       # Admin API defaults to 0.0.0.0:9644 in dev-container mode; port mapping
       # in ports: section is sufficient for external access.
       - --default-log-level=warn
+      # OMN-7302: raise partition cap from default 1000 to 7000 to prevent
+      # "Not enough resources" failures when topic count × partitions exceeds
+      # the per-shard limit.
+      - --set topic_partitions_per_shard=7000
     ports:
       - "${REDPANDA_EXTERNAL_PORT:-19092}:19092"
       # Pandaproxy (REST API for Kafka)
@@ -575,12 +584,13 @@ services:
       - runtime_logs:/app/logs
       - runtime_data:/app/data
       - ../contracts:/app/contracts:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 120s
+      retries: 5
+      start_period: 600s
     labels:
       - "com.omninode.service=runtime-main"
       - "com.omninode.layer=runtime"
@@ -590,12 +600,12 @@ services:
   # ONEX Runtime - Effects Handler (Runtime Profile)
   # ==========================================================================
   # Handles effect nodes for external service interactions.
-  # OMN-5637: Effects has an extended start_period (120s) and retries (5)
+  # OMN-5637: Effects has an extended start_period (600s) and retries (5)
   # because plugin initialization (1950+ Kafka consumer subscriptions,
   # intelligence DB ownership, schema fingerprint, message type registration)
   # must complete before /health returns 200.
-  # Unhealthy detection latency = start_period + (interval * retries) = 120s + 150s = 270s.
-  # AUTOHEAL_START_PERIOD (180s) must exceed start_period to avoid premature restarts.
+  # Unhealthy detection latency = start_period + (interval * retries) = 600s + 150s = 750s.
+  # AUTOHEAL_START_PERIOD (840s) must exceed start_period + retry window to avoid premature restarts.
   runtime-effects:
     !!merge <<: *runtime-base
     container_name: omninode-runtime-effects
@@ -619,12 +629,13 @@ services:
       - effects_logs:/app/logs
       - effects_data:/app/data
       - ../contracts:/app/contracts:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 120s
+      start_period: 600s
     labels:
       - "com.omninode.service=runtime-effects"
       - "com.omninode.layer=runtime"
@@ -634,11 +645,11 @@ services:
   # ONEX Runtime - Workers (Runtime Profile)
   # ==========================================================================
   # Scalable worker containers for parallel compute operations.
-  # OMN-5095: Workers have an extended start_period (120s) and retries (5)
+  # OMN-5095: Workers have an extended start_period (600s) and retries (5)
   # because plugin initialization (intelligence DB ownership, schema fingerprint,
   # message type registration) must complete before /health returns 200.
-  # Unhealthy detection latency = start_period + (interval * retries) = 120s + 150s = 270s.
-  # AUTOHEAL_START_PERIOD (180s) must exceed start_period to avoid premature restarts.
+  # Unhealthy detection latency = start_period + (interval * retries) = 600s + 150s = 750s.
+  # AUTOHEAL_START_PERIOD (840s) must exceed start_period + retry window to avoid premature restarts.
   runtime-worker:
     !!merge <<: *runtime-base
     profiles: ["runtime", "full"]
@@ -658,12 +669,13 @@ services:
     volumes:
       - worker_logs:/app/logs
       - ../contracts:/app/contracts:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 120s
+      start_period: 600s
     deploy:
       mode: replicated
       replicas: ${WORKER_REPLICAS:-2}
@@ -973,6 +985,7 @@ services:
     volumes:
       - contract_resolver_logs:/app/logs
       - ../contracts:/app/contracts:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8091/health"]
       interval: 30s
@@ -1053,11 +1066,10 @@ services:
     environment:
       AUTOHEAL_CONTAINER_LABEL: autoheal
       AUTOHEAL_INTERVAL: 60
-      # OMN-5095: Increased from 60s to 180s so autoheal ignores containers
-      # still in their Docker health check start_period. Workers need up to
-      # 120s for plugin initialization (intelligence DB ownership validation,
-      # schema fingerprint, message type registration) before /health passes.
-      AUTOHEAL_START_PERIOD: 180
+      # OMN-5095: Set to 840s (720s worker unhealthy window + 120s buffer) to avoid
+      # race condition where autoheal could trigger during a worker's initial health
+      # assessment. Workers need up to 600s start_period + 5×30s retries = 750s max.
+      AUTOHEAL_START_PERIOD: 840
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     logging: *logging-defaults

@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - RSD Score Compute
+#
+name: "node_rsd_score_compute"
+node_type: "COMPUTE_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Pure computation: calculates RSD 5-factor priority scores. Factors: dependency distance (40%), failure surface (25%), time decay (15%), agent utility (10%), user weighting (10%). No I/O - all data provided as input.
+
+input_model:
+  name: "ModelRsdScoreInput"
+  module: "omnibase_infra.nodes.node_rsd_score_compute.models.model_rsd_score_input"
+  description: "Ticket data, dependency graph, agent requests, plan overrides, and weights."
+output_model:
+  name: "ModelRsdScoreResult"
+  module: "omnibase_infra.nodes.node_rsd_score_compute.models.model_rsd_score_result"
+  description: "Priority scores for each ticket with factor breakdown and ranked order."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "calculate_rsd_scores"
+      handler:
+        name: "HandlerRsdScoreCalculate"
+        module: "omnibase_infra.nodes.node_rsd_score_compute.handlers.handler_rsd_score_calculate"
+metadata:
+  description: "Pure RSD 5-factor priority scoring compute node"
+  author: "OmniNode Team"
+  created: "2026-04-01"
+  tags:
+    - "compute"
+    - "rsd"
+    - "priority-engine"
+    - "scoring"

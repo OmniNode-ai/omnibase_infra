@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""Request model for scope manifest write effect."""
+
+from __future__ import annotations
+
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ModelScopeManifestWriteRequest(BaseModel):
+    """Request to write a scope manifest JSON file."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
+
+    correlation_id: UUID = Field(..., description="Workflow correlation ID.")
+    output_path: str = Field(..., description="Path to write the manifest.")
+    plan_file_path: str = Field(..., description="Source plan file path.")
+    files: tuple[str, ...] = Field(default_factory=tuple, description="Files in scope.")
+    directories: tuple[str, ...] = Field(
+        default_factory=tuple, description="Directories in scope."
+    )
+    repos: tuple[str, ...] = Field(default_factory=tuple, description="Repos in scope.")
+    systems: tuple[str, ...] = Field(
+        default_factory=tuple, description="Systems in scope."
+    )
+    adjacent_files: tuple[str, ...] = Field(
+        default_factory=tuple, description="Adjacent files."
+    )

@@ -60,6 +60,7 @@ See Also:
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from typing import TypedDict, final
@@ -258,17 +259,39 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[BootstrapEffectDefinition] = [
         "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
         "contract_path": "src/omnibase_infra/contracts/handlers/http/handler_contract.yaml",
     },
-    {
-        "handler_id": handler_identity(_HANDLER_TYPE_MCP),
-        "name": "MCP Handler",
-        "description": "Model Context Protocol handler for AI agent integration",
-        "handler_kind": "effect",
-        "handler_class": "omnibase_infra.handlers.handler_mcp.HandlerMCP",
-        "input_model": "omnibase_infra.models.types.JsonDict",
-        "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
-        "contract_path": "src/omnibase_infra/contracts/handlers/mcp/handler_contract.yaml",
-    },
 ]
+
+# MCP handler definition — only registered when MCP_SERVER_ENABLED=true.
+# Each HandlerMCP instance spawns a uvicorn server on port 8090; when the handler
+# pool creates one per node, the first binds successfully but all subsequent
+# instances crash with EADDRINUSE, taking down the entire runtime.
+# Gating on an explicit env var keeps the default safe (OMN-7225).
+_MCP_HANDLER_DEFINITION: BootstrapEffectDefinition = {
+    "handler_id": handler_identity(_HANDLER_TYPE_MCP),
+    "name": "MCP Handler",
+    "description": "Model Context Protocol handler for AI agent integration",
+    "handler_kind": "effect",
+    "handler_class": "omnibase_infra.handlers.handler_mcp.HandlerMCP",
+    "input_model": "omnibase_infra.models.types.JsonDict",
+    "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
+    "contract_path": "src/omnibase_infra/contracts/handlers/mcp/handler_contract.yaml",
+}
+
+
+def _is_mcp_enabled() -> bool:
+    """Check if MCP handler is opted in via MCP_SERVER_ENABLED env var."""
+    return os.environ.get(  # ONEX_EXCLUDE: env
+        "MCP_SERVER_ENABLED", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _get_active_bootstrap_definitions() -> list[BootstrapEffectDefinition]:
+    """Return the bootstrap handler definitions including MCP only when opted in."""
+    definitions = list(_BOOTSTRAP_HANDLER_DEFINITIONS)
+    if _is_mcp_enabled():
+        definitions.append(_MCP_HANDLER_DEFINITION)
+    return definitions
+
 
 # Version for all bootstrap handlers (hardcoded handlers use stable version)
 _BOOTSTRAP_HANDLER_VERSION = ModelSemVer(major=1, minor=0, patch=0)
@@ -355,18 +378,20 @@ class HandlerBootstrapSource(
 
         start_time = time.perf_counter()
         descriptors: list[ModelHandlerDescriptor] = []
+        active_definitions = _get_active_bootstrap_definitions()
 
         logger.debug(
             "Starting bootstrap handler discovery",
             extra={
                 "source_type": SOURCE_TYPE_BOOTSTRAP,
-                "expected_handler_count": len(_BOOTSTRAP_HANDLER_DEFINITIONS),
+                "expected_handler_count": len(active_definitions),
+                "mcp_enabled": _is_mcp_enabled(),
             },
         )
 
         # Create descriptors from hardcoded definitions
         # Uses ModelBootstrapHandlerDescriptor to enforce handler_class requirement
-        for handler_def in _BOOTSTRAP_HANDLER_DEFINITIONS:
+        for handler_def in active_definitions:
             contract_path = handler_def["contract_path"]
             contract_config = None
 
@@ -478,4 +503,5 @@ class HandlerBootstrapSource(
 __all__ = [
     "HandlerBootstrapSource",
     "SOURCE_TYPE_BOOTSTRAP",
+    "_is_mcp_enabled",
 ]

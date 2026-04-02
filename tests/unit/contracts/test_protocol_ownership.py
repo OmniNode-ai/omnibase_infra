@@ -127,6 +127,11 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # === [NODE] Bifrost shadow policy protocol ===
     # [NODE] DI boundary for shadow comparison policy — pluggable shadow policy interface (OMN-5570)
     "ProtocolShadowPolicy": "nodes/node_llm_inference_effect/handlers/bifrost/handler_bifrost_gateway.py",
+    # === [NODE] Chain learning DI boundaries ===
+    # [NODE] DI boundary for chain retrieval effect — embedding client interface (chain-learning)
+    "ProtocolChainEmbeddingClient": "nodes/node_chain_orchestrator/models/protocol_chain_embedding_client.py",
+    # [NODE] DI boundary for chain retrieval/store effects — vector store client interface (chain-learning)
+    "ProtocolChainVectorClient": "nodes/node_chain_orchestrator/models/protocol_chain_vector_client.py",
 }
 
 # Duplicate protocol names that appear in multiple files (node-internal

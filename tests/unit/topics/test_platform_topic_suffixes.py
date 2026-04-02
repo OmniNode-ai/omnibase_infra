@@ -527,7 +527,9 @@ class TestOmniClaudeTopicSuffixes:
             SUFFIX_OMNICLAUDE_DETECTION_FAILURE,
             SUFFIX_OMNICLAUDE_PERFORMANCE_METRICS,
             SUFFIX_OMNICLAUDE_ROUTING_DECISION,
+            SUFFIX_OMNICLAUDE_SESSION_ENDED,
             SUFFIX_OMNICLAUDE_SKILL_LIFECYCLE_DLQ,
+            SUFFIX_OMNICLAUDE_TOOL_EXECUTED,
         )
 
         three_partition_suffixes = {
@@ -550,6 +552,9 @@ class TestOmniClaudeTopicSuffixes:
             SUFFIX_OMNICLAUDE_DETECTION_FAILURE,
             SUFFIX_OMNICLAUDE_AGENT_EXECUTION_LOGS,
             SUFFIX_OMNICLAUDE_AGENT_STATUS,
+            # Agent learning extraction topics (OMN-7242) — observability consumer throughput
+            SUFFIX_OMNICLAUDE_SESSION_ENDED,
+            SUFFIX_OMNICLAUDE_TOOL_EXECUTED,
         }
         for spec in ALL_OMNICLAUDE_TOPIC_SPECS:
             if spec.suffix in three_partition_suffixes:

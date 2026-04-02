@@ -1,0 +1,72 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Vector Store Effect
+#
+# General-purpose vector storage and retrieval via Qdrant.
+# Ported from archive: ai-dev/containers/vector_store.
+#
+name: "node_vector_store_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Effect node for vector database operations: store documents with embeddings, search by similarity, and manage collections.  Backed by Qdrant.
+
+input_model:
+  name: "ModelVectorStoreRequest"
+  module: "omnibase_infra.nodes.node_vector_store_effect.models.model_vector_store_request"
+  description: "Vector store operation: upsert, search, or collection management."
+output_model:
+  name: "ModelVectorStoreResult"
+  module: "omnibase_infra.nodes.node_vector_store_effect.models.model_vector_store_result"
+  description: "Operation result with search hits or confirmation."
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.vector-store-request.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.vector-store-completed.v1"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "vector.upsert"
+      handler:
+        name: "HandlerVectorUpsert"
+        module: "omnibase_infra.nodes.node_vector_store_effect.handlers.handler_vector_upsert"
+    - operation: "vector.search"
+      handler:
+        name: "HandlerVectorSearch"
+        module: "omnibase_infra.nodes.node_vector_store_effect.handlers.handler_vector_search"
+dependencies:
+  - type: "environment"
+    name: "QDRANT_URL"
+    description: "Qdrant HTTP endpoint URL"
+error_handling:
+  retry_policy:
+    max_retries: 2
+    initial_delay_ms: 200
+    max_delay_ms: 2000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+metadata:
+  description: "General-purpose Qdrant vector storage and retrieval"
+  author: "OmniNode Team"
+  created: "2026-04-01"
+  tags:
+    - "effect"
+    - "vector"
+    - "qdrant"
+    - "embeddings"
+    - "search"

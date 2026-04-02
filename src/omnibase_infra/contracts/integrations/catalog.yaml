@@ -1,0 +1,139 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Integration Catalog — Declarative registry of all active platform integrations
+#
+# This catalog is the single source of truth for which external systems the
+# ONEX platform integrates with. It is consumed by the omnidash
+# /api/integrations route to render the Integration Catalog dashboard.
+#
+# Each entry declares: integration name, type, health check endpoint (if any),
+# the ONEX node(s) that implement it, and relevant contract references.
+name: integration_catalog
+description: >
+  Declarative registry of all active external integrations in the ONEX platform. Used by omnidash IntegrationCatalogDashboard for status and health rendering.
+
+catalog_version:
+  major: 1
+  minor: 0
+  patch: 0
+integrations:
+  - id: github_webhook
+    name: "GitHub Webhook Bridge"
+    type: webhook
+    description: "Receives GitHub webhook events (PR merged, push, check suite) and publishes ONEX events"
+    contract: "contracts/integrations/github_webhook/contract.yaml"
+    nodes: []
+    health_check:
+      type: github_api
+      endpoint: "https://api.github.com/orgs/OmniNode-ai"
+    env_vars:
+      - GITHUB_WEBHOOK_SECRET
+      - GITHUB_TOKEN
+      # Topics declared in contracts/integrations/github_webhook/contract.yaml
+  - id: github_pr_poller
+    name: "GitHub PR Poller"
+    type: poller
+    description: "Polls GitHub API for open PR status, checks, and review state"
+    nodes:
+      - node_github_pr_poller_effect
+    health_check:
+      type: github_api
+      endpoint: "https://api.github.com/orgs/OmniNode-ai"
+    env_vars:
+      - GITHUB_TOKEN
+  - id: linear_relay
+    name: "Linear Relay"
+    type: webhook
+    description: "Receives Linear webhook events and publishes normalized ONEX events for ticket state changes"
+    nodes: []
+    health_check:
+      type: http
+      endpoint: "https://api.linear.app/graphql"
+    env_vars:
+      - LINEAR_API_KEY
+      - LINEAR_WEBHOOK_SECRET
+  - id: gmail_intent_poller
+    name: "Gmail Intent Poller"
+    type: poller
+    description: "Polls Gmail for new messages, classifies intent, and routes to appropriate handlers"
+    nodes:
+      - node_gmail_intent_poller_effect
+      - node_gmail_archive_cleanup_effect
+    health_check:
+      type: http
+      endpoint: "https://gmail.googleapis.com/$discovery/rest?version=v1"
+    env_vars:
+      - GMAIL_CLIENT_ID
+      - GMAIL_CLIENT_SECRET
+      - GMAIL_REFRESH_TOKEN
+  - id: slack_alerter
+    name: "Slack Alerter"
+    type: outbound
+    description: "Sends structured alerts to Slack channels based on runtime triage events"
+    nodes:
+      - node_slack_alerter_effect
+    health_check:
+      type: http
+      endpoint: "https://slack.com/api/api.test"
+    env_vars:
+      - SLACK_BOT_TOKEN
+      - SLACK_CHANNEL_ID
+  - id: kafka_event_bus
+    name: "Kafka Event Bus (Redpanda)"
+    type: infrastructure
+    description: "Core event bus for all ONEX events — local Redpanda instance"
+    nodes: []
+    health_check:
+      type: tcp
+      host: "localhost"
+      port: 19092
+    env_vars:
+      - KAFKA_BOOTSTRAP_SERVERS
+  - id: qdrant_vector_store
+    name: "Qdrant Vector Store"
+    type: infrastructure
+    description: "Vector similarity search for RAG, memory retrieval, and semantic matching"
+    nodes: []
+    health_check:
+      type: http
+      endpoint: "http://localhost:6333/healthz"
+    env_vars:
+      - QDRANT_HOST
+      - QDRANT_PORT
+      - QDRANT_URL
+  - id: infisical_secrets
+    name: "Infisical Secrets Manager"
+    type: infrastructure
+    description: "Centralized secrets management — runtime config prefetch and secret rotation"
+    nodes: []
+    health_check:
+      type: http
+      endpoint: "http://localhost:8880/api/status"
+    env_vars:
+      - INFISICAL_ADDR
+      - INFISICAL_CLIENT_ID
+      - INFISICAL_CLIENT_SECRET
+  - id: postgresql
+    name: "PostgreSQL"
+    type: infrastructure
+    description: "Primary relational database for projections, ledger, and state"
+    nodes: []
+    health_check:
+      type: tcp
+      host: "localhost"
+      port: 5436
+    env_vars:
+      - POSTGRES_PASSWORD
+      - OMNIBASE_INFRA_DB_URL
+  - id: valkey_cache
+    name: "Valkey (Redis-compatible)"
+    type: infrastructure
+    description: "In-memory cache for session state, feature flags, and rate limiting"
+    nodes: []
+    health_check:
+      type: tcp
+      host: "localhost"
+      port: 16379
+    env_vars:
+      - VALKEY_HOST
+      - VALKEY_PORT

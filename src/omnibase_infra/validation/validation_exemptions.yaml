@@ -2925,6 +2925,113 @@ pattern_exemptions:
     documentation:
       - docs/plans/2026-03-30-runtime-contract-compliance-verification.md
     ticket: OMN-7042
+  # ==========================================================================
+  # RSD Priority Engine Exemptions
+  # ==========================================================================
+  # RSD nodes use string-typed IDs because they represent external identifiers
+  # from Linear (ticket IDs like "OMN-2136") and opaque agent session IDs,
+  # not internal UUID-based entities.
+  - file_pattern: 'node_rsd_.*\.py'
+    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    reason: >
+      ticket_id is a human-readable Linear identifier (e.g. "OMN-2136"), not a UUID.
+
+  - file_pattern: 'model_dependency_edge\.py'
+    violation_pattern: "Field 'source_id' should use UUID type instead of str"
+    reason: >
+      source_id references a Linear ticket identifier string, not a UUID.
+
+  - file_pattern: 'model_dependency_edge\.py'
+    violation_pattern: "Field 'target_id' should use UUID type instead of str"
+    reason: >
+      target_id references a Linear ticket identifier string, not a UUID.
+
+  - file_pattern: 'model_agent_request_data\.py'
+    violation_pattern: "Field 'agent_id' should use UUID type instead of str"
+    reason: >
+      agent_id is an opaque agent session identifier string, not a UUID.
+
+  - file_pattern: 'model_agent_request_data\.py'
+    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    reason: >
+      ticket_id is a human-readable Linear identifier (e.g. "OMN-2136"), not a UUID.
+
+  - file_pattern: 'model_rsd_factor_score\.py'
+    violation_pattern: "might reference an entity"
+    reason: >
+      factor_name is a scoring factor label (e.g. "time_decay", "dependency_distance"), not an entity reference.
+
+  - file_pattern: 'model_ticket_data\.py'
+    violation_pattern: "Field 'status' should use Enum instead of str"
+    reason: >
+      status is a free-text field from the Linear API whose values may change without code updates. Using str avoids coupling to a specific enum.
+
+  - file_pattern: 'model_ticket_data\.py'
+    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    reason: >
+      ticket_id is a human-readable Linear identifier (e.g. "OMN-2136"), not a UUID.
+
+  - file_pattern: 'model_plan_override_data\.py'
+    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    reason: >
+      ticket_id is a human-readable Linear identifier (e.g. "OMN-2136"), not a UUID.
+
+  - file_pattern: 'model_rsd_rank_change\.py'
+    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    reason: >
+      ticket_id is a human-readable Linear identifier (e.g. "OMN-2136"), not a UUID.
+
+  - file_pattern: 'model_rsd_ticket_score\.py'
+    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    reason: >
+      ticket_id is a human-readable Linear identifier (e.g. "OMN-2136"), not a UUID.
+
+  # Archive Feature Port Exemptions
+  # ==========================================================================
+  - file_pattern: 'model_vector_search_hit\.py'
+    violation_pattern: "Field 'doc_id' should use UUID type instead of str"
+    reason: >
+      doc_id is a vector store document identifier string, not necessarily a UUID. Vector stores use opaque string IDs.
+
+  - file_pattern: 'model_vector_document\.py'
+    violation_pattern: "Field 'doc_id' should use UUID type instead of str"
+    reason: >
+      doc_id is a vector store document identifier string, not necessarily a UUID. Vector stores use opaque string IDs.
+
+  - file_pattern: 'model_vector_store_request\.py'
+    violation_pattern: "might reference an entity"
+    reason: >
+      collection_name is a vector store collection label string, not an entity reference.
+
+  # ==========================================================================
+  # Agent Identity Model Exemptions (OMN-7292)
+  # ==========================================================================
+  # agent_id is a human-readable persistent agent name (e.g., "CAIA",
+  # "SENTINEL"), not a UUID. It is the primary key for the agent registry.
+  - file_pattern: 'model_agent_entity\.py'
+    violation_pattern: "Field 'agent_id' should use UUID type instead of str"
+    reason: >
+      agent_id is a human-readable persistent agent name (e.g., "CAIA", "SENTINEL") used as the primary key for the YAML and Postgres agent registries. It is intentionally a short string identifier, not a UUID.
+
+    ticket: OMN-7292
+  - file_pattern: 'model_agent_entity\.py'
+    violation_pattern: "might reference an entity"
+    reason: >
+      display_name is a human-readable label for the agent, not an entity reference. The agent_id field is the actual identifier.
+
+    ticket: OMN-7292
+  - file_pattern: 'model_agent_binding\.py'
+    violation_pattern: "Field 'terminal_id' should use UUID type instead of str"
+    reason: >
+      terminal_id is a PPID-based heuristic identifier for terminal tabs (e.g., "terminal-hostname-hash"). It is generated by terminal_identity.py, not a UUID.
+
+    ticket: OMN-7292
+  - file_pattern: 'model_agent_binding\.py'
+    violation_pattern: "Field 'session_id' should use UUID type instead of str"
+    reason: >
+      session_id is an opaque Claude Code CLI session identifier string. It comes from hook events where session IDs are not necessarily UUIDs.
+
+    ticket: OMN-7292
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

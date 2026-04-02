@@ -74,12 +74,12 @@ class TestOrchestratorContract:
 
     def test_subscribes_to_delegation_request(self) -> None:
         data = self._load()
-        topics = [t["topic"] for t in data["event_bus"]["subscribe_topics"]]
+        topics = data["event_bus"]["subscribe_topics"]
         assert "onex.cmd.omnibase-infra.delegation-request.v1" in topics
 
     def test_publishes_completed_and_failed(self) -> None:
         data = self._load()
-        topics = [t["topic"] for t in data["event_bus"]["publish_topics"]]
+        topics = data["event_bus"]["publish_topics"]
         assert "onex.evt.omnibase-infra.delegation-completed.v1" in topics
         assert "onex.evt.omnibase-infra.delegation-failed.v1" in topics
 

@@ -1,0 +1,115 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Chain Learning Orchestrator
+#
+# Top-level coordinator for the prompt-chain learning workflow.
+# Manages: retrieval -> decide shortcut/explore -> execute -> verify -> store.
+#
+name: "node_chain_orchestrator"
+node_type: "ORCHESTRATOR_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Orchestrates the prompt-chain learning workflow: receive command, dispatch chain retrieval, evaluate hit/miss, dispatch replay or explore, verify contract, store verified chain.
+
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.chain-learn.v1"
+    - "onex.evt.omnibase-infra.chain-retrieval-result.v1"
+    - "onex.evt.omnibase-infra.chain-replay-result.v1"
+    - "onex.evt.omnibase-infra.chain-verified.v1"
+    - "onex.evt.omnibase-infra.chain-stored.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.chain-learn-complete.v1"
+    - "onex.evt.omnibase-infra.chain-learn-failed.v1"
+input_model:
+  name: "ModelChainLearnCommand"
+  module: "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_learn_command"
+  description: "Command to initiate chain learning workflow."
+output_model:
+  name: "ModelChainLearnResult"
+  module: "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_learn_result"
+  description: "Final chain learning result with path taken and timing."
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    - event_model:
+        name: "ModelChainLearnCommand"
+        module: "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_learn_command"
+      handler:
+        name: "HandlerChainLearnInitiate"
+        module: "omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_learn_initiate"
+      output_events:
+        - "ModelChainLearnCommand"
+    - event_model:
+        name: "ModelChainRetrievalResult"
+        module: "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_retrieval_result"
+      handler:
+        name: "HandlerChainRetrievalComplete"
+        module: "omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_retrieval_complete"
+      output_events:
+        - "ModelChainReplayInput"
+    - event_model:
+        name: "ModelChainReplayResult"
+        module: "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_replay_result"
+      handler:
+        name: "HandlerChainReplayComplete"
+        module: "omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_replay_complete"
+      output_events:
+        - "ModelChainStoreRequest"
+    - event_model:
+        name: "ModelChainStoreResult"
+        module: "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_store_result"
+      handler:
+        name: "HandlerChainStoreComplete"
+        module: "omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_store_complete"
+      output_events:
+        - "ModelChainLearnResult"
+workflow_coordination:
+  workflow_definition:
+    workflow_metadata:
+      workflow_name: "chain_learning_workflow"
+      workflow_version:
+        major: 1
+        minor: 0
+        patch: 0
+      description: "Prompt-chain learning: cache verified trajectories for fast replay"
+    execution_graph:
+      nodes:
+        - node_id: "retrieve"
+          node_type: EFFECT_GENERIC
+          description: "Embed prompt and search Qdrant for similar chains"
+        - node_id: "replay"
+          node_type: COMPUTE_GENERIC
+          description: "Adapt cached chain to new context (HIT path only)"
+          depends_on: ["retrieve"]
+        - node_id: "verify"
+          node_type: REDUCER_GENERIC
+          description: "FSM tracking verification state"
+        - node_id: "store"
+          node_type: EFFECT_GENERIC
+          description: "Store verified chain to Qdrant"
+          depends_on: ["verify"]
+    coordination_rules:
+      execution_mode: sequential
+      parallel_execution_allowed: false
+      max_parallel_branches: 1
+      failure_recovery_strategy: fail_fast
+      max_retries: 0
+      timeout_ms: 30000
+metadata:
+  description: "Chain learning orchestrator -- cache and replay verified workflows"
+  author: "OmniNode Team"
+  created: "2026-04-02"
+  tags:
+    - "orchestrator"
+    - "chain-learning"
+    - "cache"
+    - "trajectory"

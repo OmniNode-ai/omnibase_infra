@@ -479,7 +479,10 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 133 (2026-03-30): GateResultEvent type alias in delegation orchestrator (OMN-7040)
 # - 134 (2026-03-30): Additional delegation pipeline model unions (OMN-7040)
 # - 138 (2026-04-01): Eval framework models (OMN-7095: metric_collector, eval_runner, regression_check, baseline_passthrough)
-INFRA_MAX_UNIONS = 138
+# - 142 (2026-04-02): Chain learning system models (protocol_chain_clients, model_chain_learn_result)
+# - 146 (2026-04-01): Delegation pipeline dispatchers (OMN-7040: 3 dispatchers + wiring, each with
+#                     ModelEventEnvelope[object] | dict[str, object] handle() signature)
+INFRA_MAX_UNIONS = 146
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

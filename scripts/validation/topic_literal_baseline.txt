@@ -2,7 +2,7 @@
 # Pre-existing violations grandfathered in on 2026-03-02 (updated 2026-03-10 for SPDX line shifts).
 # Format: <repo-relative-path>:<lineno>
 # DO NOT add new entries here — fix violations instead.
-# Total entries: 122
+# Total entries: 121
 src/omnibase_infra/cli/git_hook_relay.py:72
 src/omnibase_infra/cli/git_hook_relay.py:74
 src/omnibase_infra/cli/infra_test/introspect.py:25
@@ -33,16 +33,15 @@ src/omnibase_infra/cli/service_demo_reset.py:89
 src/omnibase_infra/cli/service_demo_reset.py:90
 src/omnibase_infra/nodes/node_baselines_batch_compute/handlers/handler_baselines_batch_compute.py:61
 src/omnibase_infra/nodes/node_baselines_batch_compute/handlers/handler_baselines_batch_compute.py:63
-src/omnibase_infra/nodes/node_github_pr_poller_effect/handlers/handler_github_api_poll.py:342
-src/omnibase_infra/nodes/node_github_pr_poller_effect/handlers/handler_github_api_poll.py:344
+src/omnibase_infra/nodes/node_github_pr_poller_effect/handlers/handler_github_api_poll.py:211
 src/omnibase_infra/nodes/node_gmail_archive_cleanup_effect/handlers/handler_gmail_archive_cleanup.py:68
 src/omnibase_infra/nodes/node_gmail_archive_cleanup_effect/handlers/handler_gmail_archive_cleanup.py:70
 src/omnibase_infra/nodes/node_gmail_intent_poller_effect/handlers/handler_gmail_intent_poll.py:61
 src/omnibase_infra/nodes/node_gmail_intent_poller_effect/handlers/handler_gmail_intent_poll.py:63
-src/omnibase_infra/nodes/node_reward_binder_effect/handlers/handler_reward_binder.py:77
-src/omnibase_infra/nodes/node_reward_binder_effect/handlers/handler_reward_binder.py:78
 src/omnibase_infra/nodes/node_reward_binder_effect/handlers/handler_reward_binder.py:79
 src/omnibase_infra/nodes/node_reward_binder_effect/handlers/handler_reward_binder.py:80
+src/omnibase_infra/nodes/node_reward_binder_effect/handlers/handler_reward_binder.py:81
+src/omnibase_infra/nodes/node_reward_binder_effect/handlers/handler_reward_binder.py:82
 src/omnibase_infra/runtime/contract_registration_event_router.py:73
 src/omnibase_infra/runtime/contract_registration_event_router.py:74
 src/omnibase_infra/runtime/contract_registration_event_router.py:75

@@ -1,0 +1,105 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Merge Sweep Workflow Reducer
+#
+# Canary: skill-to-node migration — merge-sweep.
+# FSM-based state tracking for the merge-sweep workflow.
+#
+name: "node_merge_sweep_workflow_reducer"
+node_type: "REDUCER_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: "FSM-based state tracking for the merge-sweep workflow."
+input_model:
+  name: "ModelReducerInput"
+  module: "omnibase_core.models.reducer.model_reducer_input"
+  description: "Reducer input containing workflow event."
+output_model:
+  name: "ModelReducerOutput"
+  module: "omnibase_core.models.reducer.model_reducer_output"
+  description: "Reducer output with new state."
+state_machine:
+  state_machine_name: "merge_sweep_fsm"
+  initial_state: "pending"
+  states:
+    - state_name: "pending"
+      description: "Waiting for merge-sweep command"
+      required_data: []
+    - state_name: "scanning"
+      description: "Scanning repos for open PRs"
+      required_data:
+        - "correlation_id"
+        - "repos"
+    - state_name: "classifying"
+      description: "Classifying PRs into Track A/B"
+      required_data:
+        - "correlation_id"
+    - state_name: "merging"
+      description: "Enabling auto-merge on Track A PRs"
+      required_data:
+        - "correlation_id"
+    - state_name: "complete"
+      description: "Workflow completed successfully"
+      is_terminal: true
+      required_data:
+        - "total_enabled"
+        - "total_track_b"
+    - state_name: "failed"
+      description: "Workflow failed"
+      is_terminal: true
+      required_data:
+        - "error_message"
+  transitions:
+    - from_state: "pending"
+      to_state: "scanning"
+      trigger: "cmd_received"
+      description: "Merge-sweep command received, start scanning repos"
+    - from_state: "scanning"
+      to_state: "classifying"
+      trigger: "scan_complete"
+      description: "PR scan complete, classify into tracks"
+    - from_state: "scanning"
+      to_state: "complete"
+      trigger: "no_prs_found"
+      description: "No open PRs found, nothing to do"
+    - from_state: "classifying"
+      to_state: "merging"
+      trigger: "classification_complete"
+      description: "Classification done, enable auto-merge on Track A"
+    - from_state: "classifying"
+      to_state: "complete"
+      trigger: "no_track_a"
+      description: "No Track A PRs, skip merging phase"
+    - from_state: "merging"
+      to_state: "complete"
+      trigger: "merge_complete"
+      description: "Auto-merge enabled on all Track A PRs"
+    - from_state: "scanning"
+      to_state: "failed"
+      trigger: "error"
+      description: "Scan failed"
+    - from_state: "classifying"
+      to_state: "failed"
+      trigger: "error"
+      description: "Classification failed"
+    - from_state: "merging"
+      to_state: "failed"
+      trigger: "error"
+      description: "Auto-merge failed"
+  terminal_states:
+    - "complete"
+    - "failed"
+  persistence_enabled: false
+metadata:
+  description: "FSM reducer for merge-sweep workflow state tracking"
+  author: "OmniNode Team"
+  created: "2026-04-01"
+  tags:
+    - "reducer"
+    - "fsm"
+    - "merge-sweep"
+    - "canary"
+    - "skill-migration"

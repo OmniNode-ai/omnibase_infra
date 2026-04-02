@@ -74,7 +74,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ==============================================================================
-# Topic name constants
+# Topics — declared in contract.yaml event_bus.publish_topics.
+# These constants mirror the contract for use in handler code.
+# Source of truth: contract.yaml
 # ==============================================================================
 _TOPIC_REWARD_ASSIGNED = "onex.evt.omnimemory.reward-assigned.v1"
 _TOPIC_POLICY_STATE_UPDATED = "onex.evt.omnimemory.policy-state-updated.v1"

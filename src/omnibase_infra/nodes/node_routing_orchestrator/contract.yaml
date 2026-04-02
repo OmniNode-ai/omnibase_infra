@@ -1,0 +1,104 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Routing Orchestrator
+#
+# Intelligent Model Router — coordinates probe -> score -> route -> dispatch.
+#
+# Ticket: OMN-7269
+#
+name: "node_routing_orchestrator"
+node_type: "ORCHESTRATOR_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Orchestrates the model routing workflow: receive command, dispatch health probe, dispatch scoring, emit routing decision.
+
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.cmd.router.route-request.v1"
+    - "onex.evt.router.health-snapshot.v1"
+    - "onex.evt.router.scoring-decision.v1"
+    - "onex.evt.router.routing-outcome.v1"
+  publish_topics:
+    - "onex.evt.router.routing-complete.v1"
+    - "onex.evt.router.routing-failed.v1"
+input_model:
+  name: "ModelRoutingCommand"
+  module: "omnibase_infra.nodes.node_routing_orchestrator.models.model_routing_command"
+  description: "Command to initiate routing workflow."
+output_model:
+  name: "ModelRoutingResult"
+  module: "omnibase_infra.nodes.node_routing_orchestrator.models.model_routing_result"
+  description: "Final routing result with selected model."
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    - event_model:
+        name: "ModelRoutingCommand"
+        module: "omnibase_infra.nodes.node_routing_orchestrator.models.model_routing_command"
+      handler:
+        name: "HandlerRoutingInitiate"
+        module: "omnibase_infra.nodes.node_routing_orchestrator.handlers.handler_routing_initiate"
+      output_events:
+        - "ModelHealthRequest"
+    - event_model:
+        name: "ModelHealthSnapshot"
+        module: "omnibase_infra.nodes.node_model_health_effect.models.model_health_snapshot"
+      handler:
+        name: "HandlerHealthComplete"
+        module: "omnibase_infra.nodes.node_routing_orchestrator.handlers.handler_health_complete"
+      output_events:
+        - "ModelScoringInput"
+    - event_model:
+        name: "ModelRoutingDecision"
+        module: "omnibase_infra.nodes.node_model_router_compute.models.model_routing_decision"
+      handler:
+        name: "HandlerScoringComplete"
+        module: "omnibase_infra.nodes.node_routing_orchestrator.handlers.handler_scoring_complete"
+      output_events:
+        - "ModelRoutingResult"
+workflow_coordination:
+  workflow_definition:
+    workflow_metadata:
+      workflow_name: "model_routing_workflow"
+      workflow_version:
+        major: 1
+        minor: 0
+        patch: 0
+      description: "Intelligent model routing: probe -> score -> route"
+    execution_graph:
+      nodes:
+        - node_id: "probe_health"
+          node_type: EFFECT_GENERIC
+          description: "Probe model endpoints for health/latency"
+        - node_id: "score_models"
+          node_type: COMPUTE_GENERIC
+          description: "Score candidate models by quality, cost, speed"
+          depends_on: ["probe_health"]
+        - node_id: "emit_decision"
+          node_type: ORCHESTRATOR_GENERIC
+          description: "Emit final routing decision"
+          depends_on: ["score_models"]
+    coordination_rules:
+      execution_mode: sequential
+      parallel_execution_allowed: false
+      max_parallel_branches: 1
+      failure_recovery_strategy: fail_fast
+      max_retries: 0
+      timeout_ms: 30000
+metadata:
+  description: "Routing orchestrator for intelligent model router"
+  author: "OmniNode Team"
+  created: "2026-04-02"
+  tags:
+    - "orchestrator"
+    - "model-router"
+    - "llm"
+    - "routing"
