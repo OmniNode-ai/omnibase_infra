@@ -1,0 +1,87 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Routing Score Reducer
+#
+# Intelligent Model Router — tracks capability scores, graduation state, cost.
+# Pure reducer: delta(state, event) -> new_state. No I/O.
+#
+# Ticket: OMN-7268
+#
+name: "node_routing_score_reducer"
+node_type: "REDUCER_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: "Tracks model capability scores, graduation state, and cost per model over time."
+input_model:
+  name: "ModelRoutingOutcome"
+  module: "omnibase_infra.nodes.node_routing_score_reducer.models.model_routing_outcome"
+  description: "Routing outcome event with success/failure and metrics."
+output_model:
+  name: "ModelReducerState"
+  module: "omnibase_infra.nodes.node_routing_score_reducer.models.model_reducer_state"
+  description: "Updated reducer state with capability scores."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "update_scores"
+      handler:
+        name: "HandlerUpdateScores"
+        module: "omnibase_infra.nodes.node_routing_score_reducer.handlers.handler_update_scores"
+state_machine:
+  state_machine_name: "routing_score_fsm"
+  initial_state: "idle"
+  states:
+    - state_name: "idle"
+      description: "Waiting for routing outcomes"
+      required_data: []
+    - state_name: "tracking"
+      description: "Actively tracking routing outcomes"
+      required_data:
+        - "correlation_id"
+    - state_name: "graduated"
+      description: "At least one model has graduated for a task type"
+      required_data:
+        - "correlation_id"
+  transitions:
+    - from_state: "idle"
+      to_state: "tracking"
+      trigger: "outcome_received"
+      description: "First routing outcome received"
+    - from_state: "tracking"
+      to_state: "tracking"
+      trigger: "outcome_received"
+      description: "Additional outcome received"
+    - from_state: "tracking"
+      to_state: "graduated"
+      trigger: "model_graduated"
+      description: "A model crossed graduation threshold"
+    - from_state: "graduated"
+      to_state: "tracking"
+      trigger: "model_degraduated"
+      description: "A graduated model regressed below threshold"
+    - from_state: "graduated"
+      to_state: "graduated"
+      trigger: "outcome_received"
+      description: "Outcome received while models are graduated"
+  terminal_states: []
+  persistence_enabled: true
+event_bus:
+  subscribe:
+    - topic: "routing.outcomes"
+      description: "Routing outcome events fed back after task completion."
+  publish:
+    - topic: "routing.scores.updated"
+      description: "Emitted when capability scores are updated for a model/task-type pair."
+metadata:
+  description: "Capability score reducer for intelligent model router"
+  author: "OmniNode Team"
+  created: "2026-04-02"
+  tags:
+    - "reducer"
+    - "fsm"
+    - "model-router"
+    - "capability-tracking"
+    - "graduation"

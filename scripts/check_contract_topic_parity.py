@@ -279,6 +279,9 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omniclaude.detection-failure.v1": "observability topic produced by omniclaude [OMN-6066]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omniclaude.agent-execution-logs.v1": "observability topic produced by omniclaude [OMN-6066]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omniclaude.agent-status.v1": "observability topic produced by omniclaude [OMN-6066]; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
+    # --- omniclaude session/tool lifecycle topics (needs contract.yaml in omniclaude) ---
+    "onex.evt.omniclaude.session-ended.v1": "session lifecycle topic produced by omniclaude; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.tool-executed.v1": "tool execution topic produced by omniclaude; needs contract.yaml in omniclaude | owner: jonah | expiry: 2026-09-01",
     # --- omniintelligence topics (need contract.yaml in omniintelligence) ---
     "onex.cmd.omniintelligence.claude-hook-event.v1": "pre-migration; needs contract.yaml in omniintelligence repo | owner: jonah | expiry: 2026-06-01",
     "onex.cmd.omniintelligence.decision-recorded.v1": "pre-migration; needs contract.yaml in omniintelligence repo | owner: jonah | expiry: 2026-06-01",
