@@ -35,6 +35,8 @@ command:
   - --memory ${REDPANDA_MEMORY:-8G}
   - --default-log-level=warn
   - --set redpanda.kafka_batch_max_bytes=4194304
+  # OMN-7302: raise partition cap to prevent "Not enough resources" errors
+  - --set topic_partitions_per_shard=7000
 labels:
   com.omninode.service: redpanda
   com.omninode.layer: infrastructure
