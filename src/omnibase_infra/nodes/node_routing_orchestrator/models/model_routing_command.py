@@ -37,7 +37,7 @@ class ModelRoutingCommand(BaseModel):
     )
 
     @model_validator(mode="after")
-    def chain_hit_requires_model_key(self) -> "ModelRoutingCommand":
+    def chain_hit_requires_model_key(self) -> ModelRoutingCommand:
         if self.chain_hit and not self.chain_hit_model_key:
             raise ValueError("chain_hit_model_key is required when chain_hit is True")
         return self
