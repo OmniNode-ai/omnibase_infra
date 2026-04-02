@@ -58,7 +58,9 @@ class VerificationConfig:
     db_query_fn: DbQueryFn | None = None
     kafka_admin_fn: KafkaAdminFn | None = None
     watermark_fn: WatermarkFn | None = None
-    runtime_target: str = field(default_factory=lambda: os.environ["ONEX_RUNTIME_TARGET"])
+    runtime_target: str = field(
+        default_factory=lambda: os.environ["ONEX_RUNTIME_TARGET"]
+    )
     probe_timeout: float = 5.0
 
 

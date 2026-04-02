@@ -58,7 +58,11 @@ class BatchVerificationConfig:
         self.db_query_fn = db_query_fn
         self.kafka_admin_fn = kafka_admin_fn
         self.watermark_fn = watermark_fn
-        self.runtime_target = runtime_target if runtime_target is not None else os.environ["ONEX_RUNTIME_TARGET"]
+        self.runtime_target = (
+            runtime_target
+            if runtime_target is not None
+            else os.environ["ONEX_RUNTIME_TARGET"]
+        )
 
 
 # -- Node-type to probe requirement matrix --
