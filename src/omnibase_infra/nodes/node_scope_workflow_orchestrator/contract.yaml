@@ -1,0 +1,111 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Scope Workflow Orchestrator
+#
+# Canary: skill-to-node migration proof of concept.
+# Converts the scope-check Claude Code skill to an event-driven ONEX workflow.
+#
+name: "node_scope_workflow_orchestrator"
+node_type: "ORCHESTRATOR_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Orchestrates the scope-check workflow: receive command, dispatch file read, dispatch scope extraction, dispatch manifest write, emit completion event.
+
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.cmd.skill.scope-check.v1"
+    - "onex.evt.skill.scope-file-read.v1"
+    - "onex.evt.skill.scope-extracted.v1"
+    - "onex.evt.skill.scope-manifest-written.v1"
+  publish_topics:
+    - "onex.evt.skill.scope-check-complete.v1"
+    - "onex.evt.skill.scope-check-failed.v1"
+input_model:
+  name: "ModelScopeCheckCommand"
+  module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.models.model_scope_check_command"
+  description: "Command to initiate scope-check workflow."
+output_model:
+  name: "ModelScopeCheckResult"
+  module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.models.model_scope_check_result"
+  description: "Final scope-check result with manifest path and summary."
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    - event_model:
+        name: "ModelScopeCheckCommand"
+        module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.models.model_scope_check_command"
+      handler:
+        name: "HandlerScopeCheckInitiate"
+        module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.handlers.handler_scope_check_initiate"
+      output_events:
+        - "ModelScopeFileReadRequest"
+    - event_model:
+        name: "ModelScopeFileReadResult"
+        module: "omnibase_infra.nodes.node_scope_file_read_effect.models.model_scope_file_read_result"
+      handler:
+        name: "HandlerScopeFileReadComplete"
+        module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.handlers.handler_scope_file_read_complete"
+      output_events:
+        - "ModelScopeExtractInput"
+    - event_model:
+        name: "ModelScopeExtracted"
+        module: "omnibase_infra.nodes.node_scope_extract_compute.models.model_scope_extracted"
+      handler:
+        name: "HandlerScopeExtractComplete"
+        module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.handlers.handler_scope_extract_complete"
+      output_events:
+        - "ModelScopeManifestWriteRequest"
+    - event_model:
+        name: "ModelScopeManifestWritten"
+        module: "omnibase_infra.nodes.node_scope_manifest_write_effect.models.model_scope_manifest_written"
+      handler:
+        name: "HandlerScopeManifestWriteComplete"
+        module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.handlers.handler_scope_manifest_write_complete"
+      output_events:
+        - "ModelScopeCheckResult"
+workflow_coordination:
+  workflow_definition:
+    workflow_metadata:
+      workflow_name: "scope_check_workflow"
+      workflow_version:
+        major: 1
+        minor: 0
+        patch: 0
+      description: "Scope extraction and manifest generation workflow"
+    execution_graph:
+      nodes:
+        - node_id: "read_file"
+          node_type: EFFECT_GENERIC
+          description: "Read plan file from filesystem"
+        - node_id: "extract_scope"
+          node_type: COMPUTE_GENERIC
+          description: "Parse plan content and extract scope items"
+          depends_on: ["read_file"]
+        - node_id: "write_manifest"
+          node_type: EFFECT_GENERIC
+          description: "Write scope manifest JSON to disk"
+          depends_on: ["extract_scope"]
+    coordination_rules:
+      execution_mode: sequential
+      parallel_execution_allowed: false
+      max_parallel_branches: 1
+      failure_recovery_strategy: fail_fast
+      max_retries: 0
+      timeout_ms: 15000
+metadata:
+  description: "Scope-check workflow orchestrator (skill-to-node canary)"
+  author: "OmniNode Team"
+  created: "2026-04-01"
+  tags:
+    - "orchestrator"
+    - "scope-check"
+    - "canary"
+    - "skill-migration"

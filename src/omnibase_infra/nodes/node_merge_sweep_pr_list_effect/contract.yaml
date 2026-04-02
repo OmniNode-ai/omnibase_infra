@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Merge Sweep PR List Effect
+#
+# Canary: skill-to-node migration — merge-sweep.
+# Lists open PRs across GitHub repositories via gh CLI.
+#
+name: "node_merge_sweep_pr_list_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: "Lists open PRs across GitHub repositories and emits PR metadata."
+input_model:
+  name: "ModelPRListRequest"
+  module: "omnibase_infra.nodes.node_merge_sweep_pr_list_effect.models.model_pr_list_request"
+  description: "Request containing repos to scan and optional filters."
+output_model:
+  name: "ModelPRListResult"
+  module: "omnibase_infra.nodes.node_merge_sweep_pr_list_effect.models.model_pr_list_result"
+  description: "Result containing discovered PRs or error."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "list_open_prs"
+      handler:
+        name: "HandlerPRList"
+        module: "omnibase_infra.nodes.node_merge_sweep_pr_list_effect.handlers.handler_pr_list"
+metadata:
+  description: "GitHub PR list effect for merge-sweep workflow"
+  author: "OmniNode Team"
+  created: "2026-04-01"
+  tags:
+    - "effect"
+    - "github"
+    - "merge-sweep"
+    - "canary"
+    - "skill-migration"

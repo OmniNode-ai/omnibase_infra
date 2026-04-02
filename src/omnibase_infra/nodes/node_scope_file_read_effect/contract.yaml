@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Scope File Read Effect
+#
+name: "node_scope_file_read_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: "Reads a plan file from the filesystem and emits its content."
+input_model:
+  name: "ModelScopeFileReadRequest"
+  module: "omnibase_infra.nodes.node_scope_file_read_effect.models.model_scope_file_read_request"
+  description: "Request containing the file path to read."
+output_model:
+  name: "ModelScopeFileReadResult"
+  module: "omnibase_infra.nodes.node_scope_file_read_effect.models.model_scope_file_read_result"
+  description: "Result containing the file content or error."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "read_plan_file"
+      handler:
+        name: "HandlerScopeFileRead"
+        module: "omnibase_infra.nodes.node_scope_file_read_effect.handlers.handler_scope_file_read"
+metadata:
+  description: "Filesystem read effect for scope-check workflow"
+  author: "OmniNode Team"
+  created: "2026-04-01"
+  tags:
+    - "effect"
+    - "filesystem"
+    - "scope-check"
+    - "canary"

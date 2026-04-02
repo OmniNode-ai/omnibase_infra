@@ -1,0 +1,92 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Scope Workflow Reducer
+#
+name: "node_scope_workflow_reducer"
+node_type: "REDUCER_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: "FSM-based state tracking for the scope-check workflow."
+input_model:
+  name: "ModelReducerInput"
+  module: "omnibase_core.models.reducer.model_reducer_input"
+  description: "Reducer input containing workflow event."
+output_model:
+  name: "ModelReducerOutput"
+  module: "omnibase_core.models.reducer.model_reducer_output"
+  description: "Reducer output with new state."
+state_machine:
+  state_machine_name: "scope_check_fsm"
+  initial_state: "pending"
+  states:
+    - state_name: "pending"
+      description: "Waiting for scope-check command"
+      required_data: []
+    - state_name: "reading_file"
+      description: "File read dispatched"
+      required_data:
+        - "correlation_id"
+        - "file_path"
+    - state_name: "extracting"
+      description: "Scope extraction in progress"
+      required_data:
+        - "correlation_id"
+    - state_name: "writing"
+      description: "Manifest write in progress"
+      required_data:
+        - "correlation_id"
+    - state_name: "complete"
+      description: "Workflow completed successfully"
+      is_terminal: true
+      required_data:
+        - "manifest_path"
+    - state_name: "failed"
+      description: "Workflow failed"
+      is_terminal: true
+      required_data:
+        - "error_message"
+  transitions:
+    - from_state: "pending"
+      to_state: "reading_file"
+      trigger: "cmd_received"
+      description: "Scope-check command received, dispatch file read"
+    - from_state: "reading_file"
+      to_state: "extracting"
+      trigger: "file_read_complete"
+      description: "File read succeeded, dispatch scope extraction"
+    - from_state: "extracting"
+      to_state: "writing"
+      trigger: "scope_extracted"
+      description: "Scope extracted, dispatch manifest write"
+    - from_state: "writing"
+      to_state: "complete"
+      trigger: "manifest_written"
+      description: "Manifest written, workflow complete"
+    - from_state: "reading_file"
+      to_state: "failed"
+      trigger: "error"
+      description: "File read failed"
+    - from_state: "extracting"
+      to_state: "failed"
+      trigger: "error"
+      description: "Scope extraction failed"
+    - from_state: "writing"
+      to_state: "failed"
+      trigger: "error"
+      description: "Manifest write failed"
+  terminal_states:
+    - "complete"
+    - "failed"
+  persistence_enabled: false
+metadata:
+  description: "FSM reducer for scope-check workflow state tracking"
+  author: "OmniNode Team"
+  created: "2026-04-01"
+  tags:
+    - "reducer"
+    - "fsm"
+    - "scope-check"
+    - "canary"
