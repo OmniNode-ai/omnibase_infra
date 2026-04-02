@@ -243,7 +243,7 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
 
         # Store configuration — host is required via env var if not provided
         self._dsn = dsn
-        self._host = host if host is not None else os.environ["POSTGRES_HOST"]  # ONEX_EXCLUDE: constructor injection fallback
+        self._host = host if host is not None else os.environ["POSTGRES_HOST"]  # ONEX_EXCLUDE: env  # fmt: skip
         self._port = port
         self._database = database
         self._user = user
