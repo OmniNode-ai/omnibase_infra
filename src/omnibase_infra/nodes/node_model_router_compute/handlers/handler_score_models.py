@@ -20,6 +20,9 @@ from omnibase_infra.nodes.node_model_router_compute.models.model_live_metrics im
 from omnibase_infra.nodes.node_model_router_compute.models.model_registry_entry import (
     ModelRegistryEntry,
 )
+from omnibase_infra.nodes.node_model_router_compute.models.model_routing_constraints import (
+    ModelRoutingConstraints,
+)
 from omnibase_infra.nodes.node_model_router_compute.models.model_routing_decision import (
     ModelRoutingDecision,
 )
@@ -52,7 +55,7 @@ def _capability_match(model: ModelRegistryEntry, task_type: str) -> bool:
 
 def _passes_hard_constraints(
     model: ModelRegistryEntry,
-    constraints: ModelScoringInput.constraints.__class__,
+    constraints: ModelRoutingConstraints,
     health_map: dict[str, ModelEndpointHealth],
 ) -> bool:
     """Check hard constraints — returns False if model is filtered out."""
