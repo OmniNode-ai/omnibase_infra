@@ -16,12 +16,15 @@ Architecture:
 
 Related Tickets:
     - OMN-2319: Implement SPI LLM protocol adapters (Gap 2)
+    - OMN-7443: Add routing decision event emission
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from omnibase_infra.adapters.llm.model_llm_adapter_request import (
@@ -42,6 +45,10 @@ if TYPE_CHECKING:
     from omnibase_spi.protocols.llm.protocol_llm_provider import ProtocolLLMProvider
 
 logger = logging.getLogger(__name__)
+
+# Callback type for routing decision event emission.
+# Receives a dict with routing decision fields. Must be non-blocking.
+RoutingEventCallback = Callable[[dict[str, object]], Awaitable[None]]
 
 
 class AdapterModelRouter:
@@ -69,18 +76,24 @@ class AdapterModelRouter:
     def __init__(
         self,
         default_provider: str | None = None,
+        on_routing_decided: RoutingEventCallback | None = None,
     ) -> None:
         """Initialize the model router.
 
         Args:
             default_provider: Name of the default provider. If None, the
                 first registered provider is used as default.
+            on_routing_decided: Optional async callback invoked after each
+                routing decision with a dict of decision fields. Used for
+                emitting routing-decided events to Kafka. Non-blocking:
+                failures are logged and dropped.
         """
         self._providers: dict[str, ProtocolLLMProvider] = {}
         self._provider_order: list[str] = []
         self._current_index: int = 0
         self._default_provider = default_provider
         self._lock = asyncio.Lock()
+        self._on_routing_decided = on_routing_decided
 
     # ── Provider management ────────────────────────────────────────────
 
@@ -175,6 +188,7 @@ class AdapterModelRouter:
         # Try providers in round-robin order, starting from current index
         errors: list[tuple[str, str]] = []
         attempted = 0
+        t0 = time.monotonic()
 
         for i in range(len(provider_order)):
             idx = (current_index + i) % len(provider_order)
@@ -193,6 +207,17 @@ class AdapterModelRouter:
                 # the lock during network I/O.
                 async with self._lock:
                     self._current_index = (idx + 1) % len(provider_order)
+
+                # Emit routing decision event (non-blocking, best-effort)
+                await self._emit_routing_decided(
+                    request=request,
+                    selected_provider=provider_name,
+                    selection_mode="round_robin",
+                    is_fallback=attempted > 0,
+                    candidates_evaluated=attempted + 1,
+                    candidate_providers=provider_order,
+                    latency_ms=round((time.monotonic() - t0) * 1000, 2),
+                )
                 return response
             except Exception as exc:  # noqa: BLE001 — boundary: logs warning and degrades
                 sanitized = sanitize_error_string(str(exc))
@@ -296,6 +321,48 @@ class AdapterModelRouter:
                     f"Available: {list(self._providers.keys())}"
                 )
         return await provider.generate_async(request)
+
+    async def _emit_routing_decided(
+        self,
+        *,
+        request: ModelLlmAdapterRequest,
+        selected_provider: str,
+        selection_mode: str,
+        is_fallback: bool,
+        candidates_evaluated: int,
+        candidate_providers: list[str],
+        latency_ms: float,
+    ) -> None:
+        """Emit a routing decision event via the registered callback.
+
+        Non-blocking: failures are logged at warning level and dropped.
+        Events are best-effort observability, not transactional guarantees.
+        """
+        if self._on_routing_decided is None:
+            return
+        try:
+            from datetime import datetime, timezone
+
+            event = {
+                "correlation_id": getattr(request, "correlation_id", None) or "",
+                "session_id": getattr(request, "session_id", None),
+                "selected_provider": selected_provider,
+                "selected_model": getattr(request, "model", None) or "",
+                "reason": "fallback" if is_fallback else "round_robin",
+                "selection_mode": selection_mode,
+                "is_fallback": is_fallback,
+                "candidates_evaluated": candidates_evaluated,
+                "candidate_providers": candidate_providers,
+                "task_type": getattr(request, "task_type", None),
+                "latency_ms": latency_ms,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            await self._on_routing_decided(event)
+        except Exception:  # noqa: BLE001 — boundary: best-effort event emission
+            logger.warning(
+                "Failed to emit routing-decided event",
+                exc_info=True,
+            )
 
     async def health_check_all(
         self,
