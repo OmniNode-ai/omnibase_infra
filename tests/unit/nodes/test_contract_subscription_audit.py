@@ -12,7 +12,6 @@ from pathlib import Path
 
 import yaml
 
-
 NODES_DIR = Path("src/omnibase_infra/nodes")
 
 

@@ -18,7 +18,7 @@ import pytest
 import yaml
 
 
-@pytest.fixture()
+@pytest.fixture
 def tmp_nodes_dir(tmp_path: Path) -> Path:
     """Create temporary node contract directory structure."""
     # Node A: has subscribe_topics (should be wired)
@@ -88,7 +88,7 @@ def tmp_nodes_dir(tmp_path: Path) -> Path:
     return tmp_path
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_event_bus_wiring() -> MagicMock:
     """Mock EventBusSubcontractWiring with tracking."""
     wiring = MagicMock()
@@ -134,8 +134,8 @@ class TestPackageNodeSubscriptionWiring:
 
         (
             wired,
-            skipped_existing,
-            skipped_no_topics,
+            _skipped_existing,
+            _skipped_no_topics,
         ) = await _wire_package_node_subscriptions(
             contracts=contracts,
             event_bus_wiring=mock_event_bus_wiring,
@@ -164,7 +164,7 @@ class TestPackageNodeSubscriptionWiring:
         (
             wired,
             skipped_existing,
-            skipped_no_topics,
+            _skipped_no_topics,
         ) = await _wire_package_node_subscriptions(
             contracts=contracts,
             event_bus_wiring=mock_event_bus_wiring,
@@ -190,8 +190,8 @@ class TestPackageNodeSubscriptionWiring:
         contracts = _discover_package_node_contracts(tmp_nodes_dir)
 
         (
-            wired,
-            skipped_existing,
+            _wired,
+            _skipped_existing,
             skipped_no_topics,
         ) = await _wire_package_node_subscriptions(
             contracts=contracts,
@@ -216,7 +216,7 @@ class TestPackageNodeSubscriptionWiring:
 
         contracts = _discover_package_node_contracts(tmp_nodes_dir)
 
-        wired1, _, _ = await _wire_package_node_subscriptions(
+        _wired1, _, _ = await _wire_package_node_subscriptions(
             contracts=contracts,
             event_bus_wiring=mock_event_bus_wiring,
             already_wired_names=set(),
