@@ -31,8 +31,11 @@ class ModelDelegationPayload(BaseModel):
 
     event_type: str = Field(..., description="Logical event type for routing.")
     topic: str = Field(..., description="Kafka topic to publish to.")
+    # NOTE: Any is required because delegation payloads carry arbitrary
+    # JSON-serialisable data from various upstream sources (e.g., prompt
+    # parameters, task metadata) whose schema is not known at compile time.
     payload: dict[str, Any] = Field(..., description="JSON-serialisable event payload.")
-    correlation_id: str = Field(..., description="Tracing correlation ID.")
+    correlation_id: UUID = Field(..., description="Tracing correlation ID.")
 
 
 class ModelBuildDispatchResult(BaseModel):

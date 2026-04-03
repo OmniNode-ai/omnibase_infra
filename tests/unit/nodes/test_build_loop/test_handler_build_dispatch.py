@@ -87,7 +87,7 @@ class TestDelegationPayloads:
         assert dp.payload["correlation_id"] == str(cid)
         assert dp.payload["max_tokens"] == 4096
         assert "emitted_at" in dp.payload
-        assert dp.correlation_id == str(cid)
+        assert dp.correlation_id == cid
 
 
 # ------------------------------------------------------------------

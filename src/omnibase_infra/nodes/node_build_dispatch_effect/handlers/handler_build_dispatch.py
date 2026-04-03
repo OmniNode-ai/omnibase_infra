@@ -260,7 +260,7 @@ class HandlerBuildDispatch:
             event_type=_DELEGATION_EVENT_TYPE,
             topic=TOPIC_DELEGATION_REQUEST,
             payload=payload,
-            correlation_id=str(correlation_id),
+            correlation_id=correlation_id,
         )
 
     # ------------------------------------------------------------------
