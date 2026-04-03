@@ -525,7 +525,9 @@ async def _wire_package_node_subscriptions(
         node_name = str(contract["name"])
         event_bus_section = contract.get("event_bus")
 
-        if not isinstance(event_bus_section, dict) or not event_bus_section.get("subscribe_topics"):
+        if not isinstance(event_bus_section, dict) or not event_bus_section.get(
+            "subscribe_topics"
+        ):
             skipped_no_topics += 1
             continue
 
