@@ -40,6 +40,7 @@ def _make_config(**overrides: object) -> ConfigLlmCostAggregation:
     Bypasses .env file loading via ``_env_file=None`` to isolate tests.
     """
     defaults: dict[str, object] = {
+        "kafka_bootstrap_servers": "localhost:19092",
         "postgres_dsn": _REQUIRED_DSN,
         "_env_file": None,
     }

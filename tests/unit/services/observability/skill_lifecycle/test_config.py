@@ -28,6 +28,7 @@ _ENV_PREFIX = "OMNIBASE_INFRA_SKILL_LIFECYCLE_"
 def _make_config(**overrides: object) -> ConfigSkillLifecycleConsumer:
     """Create a config with required fields filled in."""
     defaults: dict[str, object] = {
+        "kafka_bootstrap_servers": "localhost:19092",
         "postgres_dsn": _REQUIRED_DSN,
         "_env_file": None,
     }
