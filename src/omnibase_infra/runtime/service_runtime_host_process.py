@@ -522,10 +522,10 @@ async def _wire_package_node_subscriptions(
     skipped_no_topics = 0
 
     for contract in contracts:
-        node_name = contract["name"]
+        node_name = str(contract["name"])
         event_bus_section = contract.get("event_bus")
 
-        if not event_bus_section or not event_bus_section.get("subscribe_topics"):
+        if not isinstance(event_bus_section, dict) or not event_bus_section.get("subscribe_topics"):
             skipped_no_topics += 1
             continue
 
@@ -533,7 +533,7 @@ async def _wire_package_node_subscriptions(
             skipped_existing += 1
             continue
 
-        contract_path = Path(contract["_contract_path"])
+        contract_path = Path(str(contract["_contract_path"]))
         subcontract = load_event_bus_subcontract(contract_path, logger)
         if subcontract and subcontract.subscribe_topics:
             await event_bus_wiring.wire_subscriptions(
