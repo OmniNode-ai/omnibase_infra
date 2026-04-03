@@ -26,6 +26,9 @@ env:
   # into Docker containers and for injection_effectiveness conftest.  Production
   # code uses OMNIBASE_INFRA_DB_URL instead (see docs/patterns/db_url_contract.md).
   POSTGRES_DATABASE: "omnibase_infra"
+  # LLM endpoint CIDR allowlist — required by MixinLlmHttpTransport.
+  # CI uses a dummy value since no LLM calls are made during tests.
+  LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
 
 jobs:
   # =============================================================================
