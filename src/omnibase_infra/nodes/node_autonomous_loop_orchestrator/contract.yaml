@@ -23,10 +23,7 @@ node_version:
   patch: 0
 node_type: "ORCHESTRATOR_GENERIC"
 description: >
-  Orchestrator that coordinates the 6-phase autonomous build loop cycle.
-  Reacts to reducer-approved state transitions and bridges COMPUTE/EFFECT
-  node outputs to events for the reducer. Never independently decides
-  phase transitions.
+  Orchestrator that coordinates the 6-phase autonomous build loop cycle. Reacts to reducer-approved state transitions and bridges COMPUTE/EFFECT node outputs to events for the reducer. Never independently decides phase transitions.
 
 input_model:
   name: "ModelLoopStartCommand"

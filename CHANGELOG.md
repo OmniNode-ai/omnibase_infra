@@ -1,3 +1,11 @@
+## v0.34.0 (2026-04-03)
+
+### Features
+- feat(routing): emit routing-decided events from model router [OMN-7443] (#1141)
+
+### Bug Fixes
+- fix: add consumers for context-enrichment and injection-recorded events [OMN-6158] (#1140)
+
 ## v0.32.0 (2026-04-03)
 
 ### Features
