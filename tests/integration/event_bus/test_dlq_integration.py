@@ -51,7 +51,7 @@ from omnibase_infra.event_bus.models import ModelEventMessage
 # =============================================================================
 
 # Check if Kafka is available AND integration tests are explicitly opted in.
-# KAFKA_BOOTSTRAP_SERVERS is set globally in conftest for model instantiation, so we
+# KAFKA_BOOTSTRAP_SERVERS may be set in a developer's local environment, so we
 # require KAFKA_INTEGRATION_TESTS=1 to prevent false connects in CI without a live broker.
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
 KAFKA_AVAILABLE = (
