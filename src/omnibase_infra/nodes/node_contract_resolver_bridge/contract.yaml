@@ -92,12 +92,13 @@ produced_events:
     model:
       name: "ModelContractResolveCompletedEvent"
       module: "omnibase_core.models.events.contract_resolve.model_contract_resolve_completed_event"
-consumed_events:
-  - name: "onex.contract.resolve.requested"
-    description: "Lifecycle event emitted by NodeContractResolveCompute before processing."
-    model:
-      name: "ModelContractResolveRequestedEvent"
-      module: "omnibase_core.models.events.contract_resolve.model_contract_resolve_requested_event"
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.evt.platform.contract-resolve-requested.v1"
 # ---------------------------------------------------------------------------
 # Capabilities
 # ---------------------------------------------------------------------------

@@ -37,25 +37,21 @@ description: |
   The reducer emits intents for PostgreSQL writes via the Effect layer,
   following the pure reducer pattern where state changes and side effects
   are separated.
-# Event Consumption Configuration
+# Event Bus Configuration (OMN-7410: migrated from consumed_events)
 # ================================
 # Topics are realm-agnostic: onex.{category}.{domain}.{event-name}.v{version}
 # Categories: evt (external events), int (internal events), cmd (commands)
 # Note: Environment/realm is enforced via envelope identity, not topic naming.
-consumed_events:
-  - topic: "onex.evt.platform.contract-registered.v1"
-    event_type: "ModelContractRegisteredEvent"
-    description: "Contract registration from nodes on startup"
-  - topic: "onex.evt.platform.contract-deregistered.v1"
-    event_type: "ModelContractDeregisteredEvent"
-    description: "Explicit contract deregistration on graceful shutdown"
-  - topic: "onex.evt.platform.node-heartbeat.v1"
-    event_type: "ModelNodeHeartbeatEvent"
-    description: "Heartbeat for liveness tracking and last_seen_at updates"
-  - topic: "onex.int.platform.runtime-tick.v1"
-    event_type: "ModelRuntimeTick"
-    internal: true
-    description: "Periodic tick for staleness computation - marks contracts as stale/inactive"
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.evt.platform.contract-registered.v1"
+    - "onex.evt.platform.contract-deregistered.v1"
+    - "onex.evt.platform.node-heartbeat.v1"
+    - "onex.int.platform.runtime-tick.v1"
 # Input/Output Model Configuration
 # =================================
 input_model:
