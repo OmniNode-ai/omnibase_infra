@@ -24,7 +24,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
+from omnibase_infra.models.errors import ModelInfraErrorContext
 from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_dispatch_outcome import (
     ModelBuildDispatchOutcome,
 )
@@ -97,6 +102,13 @@ class HandlerBuildDispatch:
                 raise RuntimeError(msg)
             dispatch_path.mkdir(parents=True, exist_ok=True)
 
+        seen_ticket_ids: set[str] = set()
+        for target in targets:
+            if target.ticket_id in seen_ticket_ids:
+                msg = f"Duplicate ticket_id in dispatch batch: {target.ticket_id!r}"
+                raise ValueError(msg)
+            seen_ticket_ids.add(target.ticket_id)
+
         for target in targets:
             if dry_run:
                 outcomes.append(
@@ -129,18 +141,31 @@ class HandlerBuildDispatch:
                 )
                 total_dispatched += 1
             except Exception as exc:  # noqa: BLE001 — boundary: catch-all converts dispatch failure to outcome record
+                error_ctx = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.FILESYSTEM,
+                    operation="dispatch_manifest_write",
+                    target_name=target.ticket_id,
+                    correlation_id=correlation_id,
+                    original_error_type=type(exc).__name__,
+                )
                 logger.warning(
-                    "Failed to dispatch %s: %s",
+                    "Failed to dispatch %s: %s (correlation_id=%s)",
                     target.ticket_id,
                     exc,
+                    error_ctx.correlation_id,
                 )
-                emit_build_loop_friction(
+                emitted = emit_build_loop_friction(
                     phase="BUILDING",
                     correlation_id=correlation_id,
                     severity="high",
                     description=f"Failed to dispatch ticket-pipeline for {target.ticket_id}",
                     error_message=str(exc),
                 )
+                if not emitted:
+                    logger.warning(
+                        "emit_build_loop_friction returned False for %s — telemetry may be lost",
+                        target.ticket_id,
+                    )
                 outcomes.append(
                     ModelBuildDispatchOutcome(
                         ticket_id=target.ticket_id,
