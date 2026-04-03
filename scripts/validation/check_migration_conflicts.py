@@ -121,20 +121,13 @@ def main() -> int:
                 match = PREFIX_PATTERN.match(sql_file.name)
                 if match:
                     prefix = match.group(1)
-                    prefix_map.setdefault(prefix, []).append(
-                        (repo_name, sql_file)
-                    )
+                    prefix_map.setdefault(prefix, []).append((repo_name, sql_file))
 
                 # Check table names
                 for table_name in extract_tables_from_sql(sql_file):
-                    table_map.setdefault(table_name, []).append(
-                        (repo_name, sql_file)
-                    )
+                    table_map.setdefault(table_name, []).append((repo_name, sql_file))
 
-    print(
-        f"Found {total_files} migration files across "
-        f"{len(migration_dirs)} repos.\n"
-    )
+    print(f"Found {total_files} migration files across {len(migration_dirs)} repos.\n")
 
     conflicts = 0
 

@@ -22,8 +22,12 @@ import sys
 from pathlib import Path
 
 VIOLATIONS_PATTERNS = [
-    re.compile(r'os\.environ\.get\([^)]*,\s*"(localhost|http://localhost|bolt://localhost|redis://localhost|postgresql://localhost)'),
-    re.compile(r'default="(localhost|http://localhost|bolt://localhost|redis://localhost|postgresql://localhost)'),
+    re.compile(
+        r'os\.environ\.get\([^)]*,\s*"(localhost|http://localhost|bolt://localhost|redis://localhost|postgresql://localhost)'
+    ),
+    re.compile(
+        r'default="(localhost|http://localhost|bolt://localhost|redis://localhost|postgresql://localhost)'
+    ),
 ]
 
 SKIP_DIRS = {"tests", "__tests__", "test", "__pycache__"}

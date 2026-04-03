@@ -206,12 +206,16 @@ def check_wiring_health(
     for topic, subscribers in sorted(all_subscribe.items()):
         if topic in _EXTERNAL_PUBLISHER_ALLOWLIST:
             if verbose:
-                print(f"  ALLOWLISTED (external): {topic} (subscribed by {', '.join(subscribers)})")
+                print(
+                    f"  ALLOWLISTED (external): {topic} (subscribed by {', '.join(subscribers)})"
+                )
             continue
 
         if topic in _BASELINE_DEAD_LETTER_ALLOWLIST:
             if verbose:
-                print(f"  ALLOWLISTED (baseline): {topic} (subscribed by {', '.join(subscribers)})")
+                print(
+                    f"  ALLOWLISTED (baseline): {topic} (subscribed by {', '.join(subscribers)})"
+                )
             continue
 
         if topic not in all_publish:
@@ -257,7 +261,8 @@ def main() -> int:
         help="Additional contract directories (e.g., cross-repo nodes)",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Print detailed wiring status",
     )
@@ -272,15 +277,15 @@ def main() -> int:
             print(f"  - {w}")
 
     if errors:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"WIRING HEALTH: FAIL ({len(errors)} dead-letter subscriptions)")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         for e in errors:
             print(f"  - {e}")
-        print(f"\nEach dead-letter topic means a contract declares a subscription")
-        print(f"but no contract in the system publishes to that topic.")
-        print(f"Fix: add the topic to a publisher's publish_topics, or add to allowlist")
-        print(f"if the publisher is external (webhook, CLI, cross-repo).")
+        print("\nEach dead-letter topic means a contract declares a subscription")
+        print("but no contract in the system publishes to that topic.")
+        print("Fix: add the topic to a publisher's publish_topics, or add to allowlist")
+        print("if the publisher is external (webhook, CLI, cross-repo).")
         return 1
 
     print("WIRING HEALTH: PASS (no dead-letter subscriptions found)")

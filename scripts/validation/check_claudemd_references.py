@@ -54,7 +54,9 @@ SKIP_PATTERNS = [
     re.compile(r"<[^>]+>"),  # Angle bracket placeholders
     re.compile(r"XXXX|xxxx"),  # Template placeholders
     re.compile(r"^\d+\.\d+\.\d+"),  # Version numbers
-    re.compile(r"^[a-z_]+\.[a-z_]+\.[a-z_]+"),  # Python imports (3+ segments, all lowercase)
+    re.compile(
+        r"^[a-z_]+\.[a-z_]+\.[a-z_]+"
+    ),  # Python imports (3+ segments, all lowercase)
     re.compile(r"^pip install"),  # pip commands
     re.compile(r"^uv "),  # uv commands
     re.compile(r"^npm "),  # npm commands

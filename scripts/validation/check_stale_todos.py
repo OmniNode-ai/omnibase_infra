@@ -149,15 +149,13 @@ def main() -> int:
                 print(f"    {rel}:{line_no}: {line_text[:120]}")
             if len(locations) > 3:
                 print(f"    ... and {len(locations) - 3} more")
-        print(
-            "\nRun with --check-linear to check ticket status against Linear API."
-        )
+        print("\nRun with --check-linear to check ticket status against Linear API.")
         return 0
 
     # Check Linear for ticket status
     try:
-        import os
         import json
+        import os
         import urllib.request
     except ImportError:
         print("ERROR: urllib required for Linear API check", file=sys.stderr)
@@ -203,15 +201,14 @@ def main() -> int:
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read())
-                nodes = (
-                    data.get("data", {})
-                    .get("issueSearch", {})
-                    .get("nodes", [])
-                )
+                nodes = data.get("data", {}).get("issueSearch", {}).get("nodes", [])
                 for node in nodes:
                     state_type = node.get("state", {}).get("type", "").lower()
                     state_name = node.get("state", {}).get("name", "")
-                    if state_type in done_statuses or state_name.lower() in done_statuses:
+                    if (
+                        state_type in done_statuses
+                        or state_name.lower() in done_statuses
+                    ):
                         stale_tickets.append(ticket_id)
                         print(
                             f"  STALE: {ticket_id} — status: {state_name} "
@@ -224,9 +221,7 @@ def main() -> int:
             print(f"  WARN: Could not check {ticket_id}: {e}", file=sys.stderr)
 
     if stale_tickets:
-        print(
-            f"\n{len(stale_tickets)} stale TODO(s) referencing completed tickets."
-        )
+        print(f"\n{len(stale_tickets)} stale TODO(s) referencing completed tickets.")
         return 1
 
     print("\nNo stale TODOs found — all referenced tickets are still open.")

@@ -30,12 +30,7 @@ from scripts.check_subscribe_wiring_health import (
 
 pytestmark = pytest.mark.unit
 
-NODES_DIR = (
-    Path(__file__).resolve().parents[3]
-    / "src"
-    / "omnibase_infra"
-    / "nodes"
-)
+NODES_DIR = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra" / "nodes"
 
 
 class TestInfrastructureTopicFilter:
@@ -79,23 +74,26 @@ class TestWiringHealthWithSyntheticContracts:
     def test_no_violations_when_wired(self, tmp_path: Path) -> None:
         """Subscribe topics with matching publishers should pass."""
         self._write_contract(
-            tmp_path, "producer",
+            tmp_path,
+            "producer",
             publish=["onex.evt.test.event.v1"],
         )
         self._write_contract(
-            tmp_path, "consumer",
+            tmp_path,
+            "consumer",
             subscribe=["onex.evt.test.event.v1"],
         )
-        errors, warnings = check_wiring_health([tmp_path])
+        errors, _warnings = check_wiring_health([tmp_path])
         assert errors == []
 
     def test_detects_dead_letter_subscription(self, tmp_path: Path) -> None:
         """Subscribe topic with no publisher should be flagged."""
         self._write_contract(
-            tmp_path, "consumer",
+            tmp_path,
+            "consumer",
             subscribe=["onex.evt.test.orphan.v1"],
         )
-        errors, warnings = check_wiring_health([tmp_path])
+        errors, _warnings = check_wiring_health([tmp_path])
         assert len(errors) == 1
         assert "DEAD_LETTER" in errors[0]
         assert "onex.evt.test.orphan.v1" in errors[0]
@@ -103,7 +101,8 @@ class TestWiringHealthWithSyntheticContracts:
     def test_detects_orphan_publisher(self, tmp_path: Path) -> None:
         """Publish topic with no subscriber should produce a warning."""
         self._write_contract(
-            tmp_path, "producer",
+            tmp_path,
+            "producer",
             publish=["onex.evt.test.lonely.v1"],
         )
         errors, warnings = check_wiring_health([tmp_path])
@@ -114,7 +113,8 @@ class TestWiringHealthWithSyntheticContracts:
     def test_self_loop_is_valid(self, tmp_path: Path) -> None:
         """A node that publishes and subscribes to the same topic is valid."""
         self._write_contract(
-            tmp_path, "loopback",
+            tmp_path,
+            "loopback",
             subscribe=["onex.evt.test.self.v1"],
             publish=["onex.evt.test.self.v1"],
         )
@@ -124,9 +124,7 @@ class TestWiringHealthWithSyntheticContracts:
 
     def test_skips_missing_directory(self, tmp_path: Path) -> None:
         """Non-existent directories should be skipped gracefully."""
-        errors, warnings = check_wiring_health(
-            [tmp_path / "nonexistent"]
-        )
+        errors, _warnings = check_wiring_health([tmp_path / "nonexistent"])
         assert errors == []
 
     def test_multiple_directories(self, tmp_path: Path) -> None:
@@ -134,14 +132,16 @@ class TestWiringHealthWithSyntheticContracts:
         dir_a = tmp_path / "repo_a"
         dir_b = tmp_path / "repo_b"
         self._write_contract(
-            dir_a, "producer",
+            dir_a,
+            "producer",
             publish=["onex.evt.cross.event.v1"],
         )
         self._write_contract(
-            dir_b, "consumer",
+            dir_b,
+            "consumer",
             subscribe=["onex.evt.cross.event.v1"],
         )
-        errors, warnings = check_wiring_health([dir_a, dir_b])
+        errors, _warnings = check_wiring_health([dir_a, dir_b])
         assert errors == []
 
 
@@ -176,8 +176,8 @@ class TestCurrentContractWiring:
         if not NODES_DIR.exists():
             pytest.skip("Nodes directory not found")
 
-        errors, warnings = check_wiring_health([NODES_DIR])
+        errors, _warnings = check_wiring_health([NODES_DIR])
         assert errors == [], (
-            f"Dead-letter subscriptions found (not in baseline allowlist):\n"
+            "Dead-letter subscriptions found (not in baseline allowlist):\n"
             + "\n".join(f"  - {e}" for e in errors)
         )
