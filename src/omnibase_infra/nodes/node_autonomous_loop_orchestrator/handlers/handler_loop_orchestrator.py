@@ -70,6 +70,7 @@ from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_for_c
 from omnibase_infra.nodes.node_verify_effect.handlers.handler_verify import (
     HandlerVerify,
 )
+from omnibase_infra.utils.util_friction_emitter import emit_build_loop_friction
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +136,13 @@ class HandlerLoopOrchestrator:
                 total_dispatched += summary.tickets_dispatched
             else:
                 cycles_failed += 1
-                # Stop cycling on failure
+                emit_build_loop_friction(
+                    phase=summary.final_phase.value,
+                    correlation_id=command.correlation_id,
+                    severity="critical",
+                    description=f"Build loop cycle {cycle_idx + 1} failed in phase {summary.final_phase.value}",
+                    error_message=summary.error_message,
+                )
                 break
 
         logger.info(
@@ -239,6 +246,14 @@ class HandlerLoopOrchestrator:
                     correlation_id=correlation_id,
                     dry_run=state.dry_run,
                 )
+                if not result.all_critical_passed:
+                    emit_build_loop_friction(
+                        phase="VERIFYING",
+                        correlation_id=correlation_id,
+                        severity="high",
+                        description="Critical verification checks failed",
+                        timestamp=now,
+                    )
                 return ModelBuildLoopEvent(
                     correlation_id=correlation_id,
                     source_phase=EnumBuildLoopPhase.VERIFYING,
@@ -307,6 +322,13 @@ class HandlerLoopOrchestrator:
 
             else:
                 logger.error("Unknown intent type: %s", intent.intent_type)
+                emit_build_loop_friction(
+                    phase=state.phase.value,
+                    correlation_id=correlation_id,
+                    severity="high",
+                    description=f"Unknown intent type: {intent.intent_type}",
+                    timestamp=now,
+                )
                 return ModelBuildLoopEvent(
                     correlation_id=correlation_id,
                     source_phase=state.phase,
@@ -317,6 +339,14 @@ class HandlerLoopOrchestrator:
 
         except Exception as exc:
             logger.exception("Intent execution failed: %s", intent.intent_type)
+            emit_build_loop_friction(
+                phase=state.phase.value,
+                correlation_id=correlation_id,
+                severity="critical",
+                description=f"Intent execution failed: {intent.intent_type}",
+                error_message=str(exc),
+                timestamp=now,
+            )
             return ModelBuildLoopEvent(
                 correlation_id=correlation_id,
                 source_phase=state.phase,
