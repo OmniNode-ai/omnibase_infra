@@ -12,10 +12,9 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-import yaml
 
 
 @pytest.fixture
@@ -94,8 +93,6 @@ def mock_event_bus_wiring() -> MagicMock:
     wiring = MagicMock()
     wiring.wire_subscriptions = AsyncMock()
     wiring._wire_calls: list[dict[str, Any]] = []
-
-    original_wire = wiring.wire_subscriptions
 
     async def tracking_wire(subcontract: Any, node_name: str) -> None:
         wiring._wire_calls.append(
