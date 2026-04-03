@@ -52,11 +52,10 @@ import random
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
-
-import yaml
+from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
+import yaml
 from pydantic import BaseModel, ValidationError
 
 from omnibase_infra.enums import (
@@ -463,7 +462,7 @@ class PluginLoaderContractSource(ProtocolContractSource):
 # =========================================================================
 
 
-def _discover_package_node_contracts(package_root: Path) -> list[dict[str, Any]]:
+def _discover_package_node_contracts(package_root: Path) -> list[dict[str, object]]:
     """Discover node contracts from the installed package tree.
 
     Scans ``{package_root}/nodes/*/contract.yaml`` and returns parsed
@@ -480,7 +479,7 @@ def _discover_package_node_contracts(package_root: Path) -> list[dict[str, Any]]
     if not nodes_dir.is_dir():
         return []
 
-    contracts: list[dict[str, Any]] = []
+    contracts: list[dict[str, object]] = []
     for contract_path in sorted(nodes_dir.glob("*/contract.yaml")):
         try:
             raw = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
@@ -498,8 +497,8 @@ def _discover_package_node_contracts(package_root: Path) -> list[dict[str, Any]]
 
 
 async def _wire_package_node_subscriptions(
-    contracts: list[dict[str, Any]],
-    event_bus_wiring: "EventBusSubcontractWiring",
+    contracts: list[dict[str, object]],
+    event_bus_wiring: EventBusSubcontractWiring,
     already_wired_names: set[str],
 ) -> tuple[int, int, int]:
     """Wire Kafka subscriptions for package-discovered node contracts.
@@ -5004,7 +5003,10 @@ class RuntimeHostProcess:
 
         .. versionadded:: OMN-7410
         """
-        if os.environ.get("ONEX_DISABLE_PACKAGE_NODE_SUBSCRIPTIONS", "").lower() == "true":
+        if (
+            os.environ.get("ONEX_DISABLE_PACKAGE_NODE_SUBSCRIPTIONS", "").lower()
+            == "true"
+        ):
             logger.info("Package-node subscription wiring disabled by env flag")
             return
 
@@ -5050,12 +5052,14 @@ class RuntimeHostProcess:
                 topic_deny_patterns=topic_deny_patterns,
             )
 
-        wired, skipped_existing, skipped_no_topics = (
-            await _wire_package_node_subscriptions(
-                contracts=contracts,
-                event_bus_wiring=self._event_bus_wiring,
-                already_wired_names=already_wired,
-            )
+        (
+            wired,
+            skipped_existing,
+            skipped_no_topics,
+        ) = await _wire_package_node_subscriptions(
+            contracts=contracts,
+            event_bus_wiring=self._event_bus_wiring,
+            already_wired_names=already_wired,
         )
 
         logger.info(

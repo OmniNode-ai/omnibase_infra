@@ -132,12 +132,14 @@ class TestPackageNodeSubscriptionWiring:
             _wire_package_node_subscriptions,
         )
 
-        wired, skipped_existing, skipped_no_topics = (
-            await _wire_package_node_subscriptions(
-                contracts=contracts,
-                event_bus_wiring=mock_event_bus_wiring,
-                already_wired_names=set(),
-            )
+        (
+            wired,
+            skipped_existing,
+            skipped_no_topics,
+        ) = await _wire_package_node_subscriptions(
+            contracts=contracts,
+            event_bus_wiring=mock_event_bus_wiring,
+            already_wired_names=set(),
         )
 
         assert wired == len(eligible)
@@ -159,12 +161,14 @@ class TestPackageNodeSubscriptionWiring:
 
         contracts = _discover_package_node_contracts(tmp_nodes_dir)
 
-        wired, skipped_existing, skipped_no_topics = (
-            await _wire_package_node_subscriptions(
-                contracts=contracts,
-                event_bus_wiring=mock_event_bus_wiring,
-                already_wired_names={"node_alpha"},
-            )
+        (
+            wired,
+            skipped_existing,
+            skipped_no_topics,
+        ) = await _wire_package_node_subscriptions(
+            contracts=contracts,
+            event_bus_wiring=mock_event_bus_wiring,
+            already_wired_names={"node_alpha"},
         )
 
         assert wired == 1  # only node_beta
@@ -185,12 +189,14 @@ class TestPackageNodeSubscriptionWiring:
 
         contracts = _discover_package_node_contracts(tmp_nodes_dir)
 
-        wired, skipped_existing, skipped_no_topics = (
-            await _wire_package_node_subscriptions(
-                contracts=contracts,
-                event_bus_wiring=mock_event_bus_wiring,
-                already_wired_names=set(),
-            )
+        (
+            wired,
+            skipped_existing,
+            skipped_no_topics,
+        ) = await _wire_package_node_subscriptions(
+            contracts=contracts,
+            event_bus_wiring=mock_event_bus_wiring,
+            already_wired_names=set(),
         )
 
         wired_names = {c["node_name"] for c in mock_event_bus_wiring._wire_calls}

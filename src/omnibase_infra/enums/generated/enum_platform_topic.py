@@ -27,6 +27,7 @@ class EnumPlatformTopic(str, Enum):
     CMD_TOPIC_CATALOG_QUERY_V1 = "onex.cmd.platform.topic-catalog-query.v1"  # onex.cmd.platform.topic-catalog-query.v1
     EVT_CONTRACT_DEREGISTERED_V1 = "onex.evt.platform.contract-deregistered.v1"  # onex.evt.platform.contract-deregistered.v1
     EVT_CONTRACT_REGISTERED_V1 = "onex.evt.platform.contract-registered.v1"  # onex.evt.platform.contract-registered.v1
+    EVT_CONTRACT_RESOLVE_REQUESTED_V1 = "onex.evt.platform.contract-resolve-requested.v1"  # onex.evt.platform.contract-resolve-requested.v1
     EVT_FSM_STATE_TRANSITIONS_V1 = "onex.evt.platform.fsm-state-transitions.v1"  # onex.evt.platform.fsm-state-transitions.v1
     EVT_INTENT_CLASSIFIED_V1 = "onex.evt.platform.intent-classified.v1"  # onex.evt.platform.intent-classified.v1
     EVT_INTENT_DISTRIBUTION_RESULT_V1 = "onex.evt.platform.intent-distribution-result.v1"  # onex.evt.platform.intent-distribution-result.v1

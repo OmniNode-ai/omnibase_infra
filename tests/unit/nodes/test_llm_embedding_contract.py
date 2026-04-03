@@ -17,4 +17,6 @@ def test_embedding_contract_uses_standard_subscribe_field() -> None:
     contract = yaml.safe_load(contract_path.read_text())
     subscribe_topics = contract.get("event_bus", {}).get("subscribe_topics", [])
     assert len(subscribe_topics) > 0, "Must use event_bus.subscribe_topics"
-    assert "consumed_events" not in contract, "Legacy consumed_events field must be removed"
+    assert "consumed_events" not in contract, (
+        "Legacy consumed_events field must be removed"
+    )
