@@ -24,11 +24,11 @@ node_version:
   patch: 0
 node_type: "EFFECT_GENERIC"
 description: >
-  Effect node that permanently deletes archived Gmail messages older than retention_days from each configured archive label. Triggered by onex.int.platform.runtime-tick.v1. Emits a single summary event to onex.evt.omnibase-infra.gmail-archive-purged.v1 per run when any messages were deleted or errors occurred.
+  Effect node that permanently deletes archived Gmail messages older than retention_days from each configured archive label. Triggered by onex.intent.platform.runtime-tick.v1. Emits a single summary event to onex.evt.omnibase-infra.gmail-archive-purged.v1 per run when any messages were deleted or errors occurred.
 
 # Input subscriptions: scheduling trigger
 input_subscriptions:
-  - topic: "onex.int.platform.runtime-tick.v1"
+  - topic: "onex.intent.platform.runtime-tick.v1"
     operation: "gmail.purge_archive"
 input_model:
   name: "ModelGmailCleanupConfig"

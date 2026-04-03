@@ -98,7 +98,7 @@ event_bus:
     minor: 0
     patch: 0
   subscribe_topics:
-    - "onex.evt.platform.contract-resolve-requested.v1"
+    - "onex.cmd.platform.contract-resolve-requested.v1"
 # ---------------------------------------------------------------------------
 # Capabilities
 # ---------------------------------------------------------------------------

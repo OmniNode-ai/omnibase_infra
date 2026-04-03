@@ -51,7 +51,7 @@ event_bus:
     - "onex.evt.platform.contract-registered.v1"
     - "onex.evt.platform.contract-deregistered.v1"
     - "onex.evt.platform.node-heartbeat.v1"
-    - "onex.int.platform.runtime-tick.v1"
+    - "onex.intent.platform.runtime-tick.v1"
 # Input/Output Model Configuration
 # =================================
 input_model:
