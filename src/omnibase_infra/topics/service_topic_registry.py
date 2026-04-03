@@ -127,9 +127,7 @@ class ServiceTopicRegistry:
             topic_keys.RUNTIME_ERROR: ("onex.evt.omnibase-infra.runtime-error.v1"),
             topic_keys.ERROR_TRIAGED: ("onex.evt.omnibase-infra.error-triaged.v1"),
             # Routing
-            topic_keys.ROUTING_DECIDED: (
-                "onex.evt.omnibase-infra.routing-decided.v1"
-            ),
+            topic_keys.ROUTING_DECIDED: ("onex.evt.omnibase-infra.routing-decided.v1"),
             # Baselines
             topic_keys.BASELINES_COMPUTED: (
                 "onex.evt.omnibase-infra.baselines-computed.v1"
