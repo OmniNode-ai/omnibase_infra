@@ -1508,7 +1508,7 @@ class TestCidrAllowlistValidation:
 
         with patch.object(
             MixinLlmHttpTransport,
-            "LOCAL_LLM_CIDRS",
+            "_LOCAL_LLM_CIDRS",
             (IPv4Network("10.0.0.0/8"),),
         ):
             # 10.0.0.1 is within 10.0.0.0/8 -- should pass
@@ -1522,7 +1522,7 @@ class TestCidrAllowlistValidation:
 
         with patch.object(
             MixinLlmHttpTransport,
-            "LOCAL_LLM_CIDRS",
+            "_LOCAL_LLM_CIDRS",
             (IPv4Network("10.0.0.0/8"), IPv4Network("172.16.0.0/12")),
         ):
             # 10.0.0.1 is within 10.0.0.0/8
@@ -1540,7 +1540,7 @@ class TestCidrAllowlistValidation:
 
         with patch.object(
             MixinLlmHttpTransport,
-            "LOCAL_LLM_CIDRS",
+            "_LOCAL_LLM_CIDRS",
             (),
         ):
             with pytest.raises(

@@ -98,6 +98,7 @@ from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 logger = logging.getLogger(__name__)
 
+
 def _parse_cidr_allowlist() -> tuple[IPv4Network, ...]:
     """Parse CIDR allowlist from the ``LLM_ENDPOINT_CIDR_ALLOWLIST`` env var.
 
@@ -181,11 +182,11 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
     #:
     #: .. important:: Configuration reload asymmetry
     #:
-    #:    This value is **parsed once at module import time** by
-    #:    ``_parse_cidr_allowlist()`` and stored as an immutable class variable.
+    #:    This value is **parsed lazily on first access** by
+    #:    ``_get_cidr_allowlist()`` and cached as a class variable.
     #:    Changes to the ``LLM_ENDPOINT_CIDR_ALLOWLIST`` environment variable
-    #:    after the module has been imported have **no effect** until the
-    #:    process is restarted.
+    #:    after the first access have **no effect** until
+    #:    ``_reload_cidr_allowlist()`` is called or the process is restarted.
     #:
     #:    This differs intentionally from ``LOCAL_LLM_SHARED_SECRET``, which
     #:    is read from ``os.environ`` on **every call** to
@@ -200,8 +201,15 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
     #:    is a routine security operation that should complete without service
     #:    interruption; requiring a restart for secret rotation would create
     #:    unnecessary downtime and discourage frequent rotation.
-    # Parsed at import time; use _reload_cidr_allowlist() to refresh after env changes.
-    LOCAL_LLM_CIDRS: ClassVar[tuple[IPv4Network, ...]] = _parse_cidr_allowlist()
+    # Parsed lazily on first access; use _reload_cidr_allowlist() to refresh after env changes.
+    _LOCAL_LLM_CIDRS: ClassVar[tuple[IPv4Network, ...] | None] = None
+
+    @classmethod
+    def _get_cidr_allowlist(cls) -> tuple[IPv4Network, ...]:
+        """Return the parsed CIDR allowlist, parsing on first access."""
+        if cls._LOCAL_LLM_CIDRS is None:
+            cls._LOCAL_LLM_CIDRS = _parse_cidr_allowlist()
+        return cls._LOCAL_LLM_CIDRS
 
     @classmethod
     def _reload_cidr_allowlist(cls) -> None:
@@ -217,7 +225,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
             MixinLlmHttpTransport._reload_cidr_allowlist()
             # LOCAL_LLM_CIDRS now contains IPv4Network('10.0.0.0/8')
         """
-        cls.LOCAL_LLM_CIDRS = _parse_cidr_allowlist()
+        cls._LOCAL_LLM_CIDRS = _parse_cidr_allowlist()
 
     #: Environment variable name for the HMAC shared secret.
     LOCAL_LLM_SECRET_ENV: ClassVar[str] = "LOCAL_LLM_SHARED_SECRET"
@@ -480,9 +488,9 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                 context=ctx,
             )
 
-        if not any(resolved_ip in cidr for cidr in self.LOCAL_LLM_CIDRS):
+        if not any(resolved_ip in cidr for cidr in self._get_cidr_allowlist()):
             ctx = self._build_error_context(f"allowlist_check:{url}", correlation_id)
-            allowlist_str = ", ".join(str(c) for c in self.LOCAL_LLM_CIDRS)
+            allowlist_str = ", ".join(str(c) for c in self._get_cidr_allowlist())
             raise InfraAuthenticationError(
                 f"Endpoint IP {resolved_ip} is outside the local LLM allowlist "
                 f"({allowlist_str})",
@@ -493,7 +501,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
             "Endpoint passed CIDR allowlist check",
             extra={
                 "resolved_ip": str(resolved_ip),
-                "allowlist": ", ".join(str(c) for c in self.LOCAL_LLM_CIDRS),
+                "allowlist": ", ".join(str(c) for c in self._get_cidr_allowlist()),
                 "hostname": hostname,
                 "correlation_id": str(correlation_id),
                 "target": self._llm_target_name,
