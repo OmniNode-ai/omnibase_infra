@@ -32,6 +32,7 @@ event_bus:
     - "onex.cmd.omnibase-infra.build-loop-build.v1"
   publish_topics:
     - "onex.evt.omnibase-infra.build-loop-build-completed.v1"
+    - "onex.cmd.omnibase-infra.delegation-request.v1"
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
