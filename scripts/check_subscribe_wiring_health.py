@@ -86,10 +86,13 @@ _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
     "onex.cmd.omnibase-infra.delegation-request.v1": "Delegation request from omniclaude hooks | owner: jonah | expiry: 2026-09-01",
     # LLM infrastructure — requests come from orchestrators via intents, not Kafka publish
     "onex.cmd.omnibase-infra.llm-completion-request.v1": "LLM request via intent routing, not direct publish | owner: jonah | expiry: 2026-09-01",
+    "onex.cmd.omnibase-infra.llm-embedding-request.v1": "LLM embedding request via intent routing | owner: jonah | expiry: 2026-09-01",
     "onex.cmd.omnibase-infra.llm-inference-request.v1": "LLM request via intent routing | owner: jonah | expiry: 2026-09-01",
     "onex.cmd.omnibase-infra.vector-store-request.v1": "Vector store request via intent routing | owner: jonah | expiry: 2026-09-01",
     # Artifact reconciliation — triggered externally
     "onex.cmd.artifact.reconcile.v1": "Triggered by CI/webhook, not Kafka publisher | owner: jonah | expiry: 2026-09-01",
+    # Contract resolution — triggered by runtime, not Kafka publisher
+    "onex.cmd.platform.contract-resolve-requested.v1": "Contract resolution triggered by runtime | owner: jonah | expiry: 2026-09-01",
     # Intent storage queries — internal runtime queries, not event-sourced
     "onex.cmd.platform.intent-query-distribution.v1": "Internal runtime query pattern | owner: jonah | expiry: 2026-09-01",
     "onex.cmd.platform.intent-query-session.v1": "Internal runtime query pattern | owner: jonah | expiry: 2026-09-01",
@@ -120,6 +123,9 @@ _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
     "onex.evt.omnibase-infra.tool-update.v1": "Published by tool updater | owner: jonah | expiry: 2026-09-01",
     # Context audit DLQ — published by omniclaude hooks
     "onex.evt.omniclaude.context-audit-dlq.v1": "Published by omniclaude context audit | owner: jonah | expiry: 2026-09-01",
+    # Contract lifecycle — published by contract management runtime, not contract-declared
+    "onex.evt.platform.contract-deregistered.v1": "Published by contract management runtime | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.platform.contract-registered.v1": "Published by contract management runtime | owner: jonah | expiry: 2026-09-01",
     # Intent classification — published by omniintelligence, not in this scan
     "onex.evt.platform.intent-classified.v1": "Published by omniintelligence, cross-repo | owner: jonah | expiry: 2026-09-01",
     # Merge gate — decision published by CI integration, not contract
