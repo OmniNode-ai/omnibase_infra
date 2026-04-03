@@ -85,12 +85,13 @@ if _env_file.exists():
     logging.getLogger(__name__).debug(f"Loaded environment from {_env_file}")
 
 # OMN-7227: Provide test defaults for required env vars (no more localhost fallbacks in src/).
-# NOTE: KAFKA_BOOTSTRAP_SERVERS is intentionally excluded — integration tests use module-level
-# `KAFKA_AVAILABLE = os.getenv("KAFKA_BOOTSTRAP_SERVERS") is not None` to decide whether to skip.
-# Setting it here at conftest import time would cause all Kafka integration tests to run even
-# without a live broker, causing CI failures. Unit tests that need it use monkeypatch.setenv.
+# KAFKA_BOOTSTRAP_SERVERS is included so Pydantic BaseSettings models (e.g. ConfigSavingsEstimation,
+# ConfigSessionConsumer) can instantiate for structural validation without a live broker.
+# Integration tests that need actual Kafka connectivity must ALSO check KAFKA_INTEGRATION_TESTS=1
+# (see test_dlq_integration.py, test_kafka_event_bus_integration.py) to avoid false connects.
 _TEST_ENV_DEFAULTS: dict[str, str] = {
     "POSTGRES_HOST": "localhost",
+    "KAFKA_BOOTSTRAP_SERVERS": "localhost:19092",
     "ONEX_RUNTIME_TARGET": "localhost:8085",
     "QDRANT_URL": "http://localhost:6333",
     "GRAPH_BOLT_URI": "bolt://localhost:7687",

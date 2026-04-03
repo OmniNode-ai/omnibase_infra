@@ -50,14 +50,18 @@ from omnibase_infra.event_bus.models import ModelEventMessage
 # Test Configuration and Skip Conditions
 # =============================================================================
 
-# Check if Kafka is available based on environment variable
+# Check if Kafka is available AND integration tests are explicitly opted in.
+# KAFKA_BOOTSTRAP_SERVERS is set globally in conftest for model instantiation, so we
+# require KAFKA_INTEGRATION_TESTS=1 to prevent false connects in CI without a live broker.
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
-KAFKA_AVAILABLE = KAFKA_BOOTSTRAP_SERVERS is not None
+KAFKA_AVAILABLE = (
+    KAFKA_BOOTSTRAP_SERVERS is not None and os.getenv("KAFKA_INTEGRATION_TESTS") == "1"
+)
 
 # Skip marker for tests that require Kafka
 requires_kafka = pytest.mark.skipif(
     not KAFKA_AVAILABLE,
-    reason="Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)",
+    reason="Kafka not available (set KAFKA_BOOTSTRAP_SERVERS and KAFKA_INTEGRATION_TESTS=1)",
 )
 
 # Test configuration constants
