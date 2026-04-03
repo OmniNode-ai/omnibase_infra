@@ -43,9 +43,9 @@ class ModelInjectionRecordedEvent(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="ignore", from_attributes=True)
 
-    session_id: str = Field(..., description="Session identifier")
-    correlation_id: str = Field(
-        default_factory=lambda: str(uuid4()),
+    session_id: UUID = Field(..., description="Session identifier")
+    correlation_id: UUID = Field(
+        default_factory=uuid4,
         description="Correlation ID for tracing",
     )
     emitted_at: str = Field(

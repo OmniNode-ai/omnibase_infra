@@ -2532,6 +2532,15 @@ pattern_exemptions:
     documentation:
       - ProtocolLLMRequest (omnibase_spi.protocols.types.protocol_llm_types)
     ticket: OMN-2319
+  - file_pattern: 'model_context_enrichment\.py'
+    violation_pattern: "Field 'model_name' might reference an entity"
+    reason: >
+      model_name is a free-text LLM identifier string (e.g. "gpt-4o"), not an entity reference.
+      Matches the producer schema in omniclaude enrichment_observability_emitter.py.
+
+    documentation:
+      - enrichment_observability_emitter.py (omniclaude)
+    ticket: OMN-6158
   - file_pattern: 'model_llm_health_response\.py'
     violation_pattern: "Field 'provider_name' might reference an entity"
     reason: >

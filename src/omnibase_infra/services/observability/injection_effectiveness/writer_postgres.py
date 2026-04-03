@@ -50,17 +50,17 @@ from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.services.observability.injection_effectiveness.models.model_agent_match import (
     ModelAgentMatchEvent,
 )
-from omnibase_infra.services.observability.injection_effectiveness.models.model_context_utilization import (
-    ModelContextUtilizationEvent,
-)
-from omnibase_infra.services.observability.injection_effectiveness.models.model_latency_breakdown import (
-    ModelLatencyBreakdownEvent,
-)
 from omnibase_infra.services.observability.injection_effectiveness.models.model_context_enrichment import (
     ModelContextEnrichmentEvent,
 )
+from omnibase_infra.services.observability.injection_effectiveness.models.model_context_utilization import (
+    ModelContextUtilizationEvent,
+)
 from omnibase_infra.services.observability.injection_effectiveness.models.model_injection_recorded import (
     ModelInjectionRecordedEvent,
+)
+from omnibase_infra.services.observability.injection_effectiveness.models.model_latency_breakdown import (
+    ModelLatencyBreakdownEvent,
 )
 from omnibase_infra.services.observability.injection_effectiveness.models.model_manifest_injection_lifecycle import (
     ModelManifestInjectionLifecycleEvent,
