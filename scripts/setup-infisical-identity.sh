@@ -37,7 +37,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 IDENTITY_FILE="${PROJECT_ROOT}/.infisical-identity"
 
 # Defaults
-INFISICAL_ADDR="${INFISICAL_ADDR:-http://localhost:8880}"
+INFISICAL_ADDR="${INFISICAL_ADDR:?INFISICAL_ADDR required}"
 IDENTITY_TYPE="runtime"  # runtime (read-only) or admin (read-write)
 
 # Colors

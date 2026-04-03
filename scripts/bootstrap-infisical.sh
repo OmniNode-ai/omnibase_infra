@@ -350,12 +350,12 @@ if [[ "${SKIP_IDENTITY}" != "true" ]]; then
         log_info "Running automated provisioning (idempotent)..."
         if [[ "${DRY_RUN}" == "true" ]]; then
             run_cmd uv run python "${PROVISION_SCRIPT}" \
-                --addr "${INFISICAL_ADDR:-http://localhost:8880}" \
+                --addr "${INFISICAL_ADDR:?INFISICAL_ADDR required}" \
                 --env-file "${OMNIBASE_ENV}" \
                 --dry-run
         else
             run_cmd uv run python "${PROVISION_SCRIPT}" \
-                --addr "${INFISICAL_ADDR:-http://localhost:8880}" \
+                --addr "${INFISICAL_ADDR:?INFISICAL_ADDR required}" \
                 --env-file "${OMNIBASE_ENV}"
             # Re-source ~/.omnibase/.env so the newly-written INFISICAL_* credentials
             # are visible to subsequent steps (seed, runtime service startup).

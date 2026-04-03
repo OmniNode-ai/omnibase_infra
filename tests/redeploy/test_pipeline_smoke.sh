@@ -121,7 +121,7 @@ check_output "Issue3: ENABLE_ENV_SYNC_PROBE missing (exit 1)" "PREFLIGHT FAILED"
 check_output "Issue4: bus tunnel check skippable (no PREFLIGHT FAILED)" "PREFLIGHT OK: ENABLE_ENV_SYNC_PROBE" \
   bash -c "
     OMNI_HOME='/tmp' \
-    KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:19092}" \
+    KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-${TEST_KAFKA_HOST:-localhost}:19092}" \
     POSTGRES_PASSWORD='test' \
     ENABLE_ENV_SYNC_PROBE='true' \
       bash '${REPO_ROOT}/scripts/preflight-check.sh' --skip-tunnel-check 2>&1

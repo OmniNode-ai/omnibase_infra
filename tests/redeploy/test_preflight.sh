@@ -27,7 +27,7 @@ echo "PASS: preflight correctly reports missing vars"
 # Note: exit 2 is advisory (non-blocking VirtioFS warning) — treated as pass for this test.
 # pipefail would cause a pipe with exit 2 on the left side to fail, so we capture separately.
 pass_output=$(OMNI_HOME="/tmp" \
-KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:19092}" \
+KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-${TEST_KAFKA_HOST:-localhost}:19092}" \
 POSTGRES_PASSWORD="test" \
 ENABLE_ENV_SYNC_PROBE="true" \
   bash scripts/preflight-check.sh --skip-tunnel-check 2>&1) || pass_exit=$?

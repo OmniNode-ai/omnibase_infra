@@ -64,7 +64,7 @@ readonly RUNTIME_SERVICES=(
 readonly MIN_COMPOSE_VERSION="2.20"
 
 # Health check parameters
-readonly HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-http://localhost:8085/health}"
+readonly HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-http://${INFRA_HOST:?INFRA_HOST required}:8085/health}"
 readonly HEALTH_CHECK_RETRIES=15
 readonly HEALTH_CHECK_INTERVAL=4
 
