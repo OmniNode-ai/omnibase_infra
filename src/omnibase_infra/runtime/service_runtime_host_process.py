@@ -52,7 +52,9 @@ import random
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
+
+import yaml
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ValidationError
@@ -454,6 +456,95 @@ class PluginLoaderContractSource(ProtocolContractSource):
             descriptors=descriptors,
             validation_errors=validation_errors,
         )
+
+
+# =========================================================================
+# Package-Node Subscription Wiring (OMN-7410)
+# =========================================================================
+
+
+def _discover_package_node_contracts(package_root: Path) -> list[dict[str, Any]]:
+    """Discover node contracts from the installed package tree.
+
+    Scans ``{package_root}/nodes/*/contract.yaml`` and returns parsed
+    contract dicts. Contracts that fail to parse are logged and skipped.
+
+    Args:
+        package_root: Root directory of the installed package (e.g.,
+            the parent of ``omnibase_infra/__init__.py``).
+
+    Returns:
+        List of parsed contract dicts with at least a ``name`` key.
+    """
+    nodes_dir = package_root / "nodes"
+    if not nodes_dir.is_dir():
+        return []
+
+    contracts: list[dict[str, Any]] = []
+    for contract_path in sorted(nodes_dir.glob("*/contract.yaml")):
+        try:
+            raw = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict) or "name" not in raw:
+                continue
+            raw["_contract_path"] = str(contract_path)
+            contracts.append(raw)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to parse node contract: %s",
+                contract_path,
+                exc_info=True,
+            )
+    return contracts
+
+
+async def _wire_package_node_subscriptions(
+    contracts: list[dict[str, Any]],
+    event_bus_wiring: "EventBusSubcontractWiring",
+    already_wired_names: set[str],
+) -> tuple[int, int, int]:
+    """Wire Kafka subscriptions for package-discovered node contracts.
+
+    For each contract with ``event_bus.subscribe_topics``, creates Kafka
+    subscriptions via ``EventBusSubcontractWiring.wire_subscriptions()``
+    unless the node is already wired (dedup).
+
+    Args:
+        contracts: List of parsed contract dicts from
+            :func:`_discover_package_node_contracts`.
+        event_bus_wiring: Wiring instance to create subscriptions.
+        already_wired_names: Set of node names that are already wired
+            (e.g. by domain plugins or a previous call).
+
+    Returns:
+        Tuple of ``(wired_count, skipped_existing, skipped_no_topics)``.
+    """
+    wired = 0
+    skipped_existing = 0
+    skipped_no_topics = 0
+
+    for contract in contracts:
+        node_name = contract["name"]
+        event_bus_section = contract.get("event_bus")
+
+        if not event_bus_section or not event_bus_section.get("subscribe_topics"):
+            skipped_no_topics += 1
+            continue
+
+        if node_name in already_wired_names:
+            skipped_existing += 1
+            continue
+
+        contract_path = Path(contract["_contract_path"])
+        subcontract = load_event_bus_subcontract(contract_path, logger)
+        if subcontract and subcontract.subscribe_topics:
+            await event_bus_wiring.wire_subscriptions(
+                subcontract=subcontract,
+                node_name=node_name,
+            )
+            wired += 1
+            already_wired_names.add(node_name)
+
+    return wired, skipped_existing, skipped_no_topics
 
 
 class RuntimeHostProcess:
@@ -1633,6 +1724,11 @@ class RuntimeHostProcess:
         # This bridges contract-declared topics to Kafka subscriptions.
         # Requires dispatch_engine to be available for message routing.
         await self._wire_event_bus_subscriptions()
+
+        # Step 4.25: Wire subscriptions for package-discovered nodes (OMN-7410)
+        # Scans all node contracts in the installed package tree and wires
+        # Kafka subscriptions for nodes not already covered by Step 4.2.
+        await self._wire_package_node_subscriptions()
 
         # Step 4.3: Wire baseline subscriptions for contract discovery (OMN-1654)
         # When KAFKA_EVENTS mode is active, subscribe to platform-reserved
@@ -4895,6 +4991,80 @@ class RuntimeHostProcess:
                 "No handlers with event_bus subscriptions found",
                 extra={"handler_count": len(self._handler_descriptors)},
             )
+
+    async def _wire_package_node_subscriptions(self) -> None:
+        """Wire Kafka subscriptions for package-discovered node contracts.
+
+        Scans the installed ``omnibase_infra`` package tree for node contracts
+        and wires subscriptions for any node that declares
+        ``event_bus.subscribe_topics`` but was NOT already wired by
+        :meth:`_wire_event_bus_subscriptions` (domain-plugin path).
+
+        Controlled by ``ONEX_DISABLE_PACKAGE_NODE_SUBSCRIPTIONS`` env var.
+
+        .. versionadded:: OMN-7410
+        """
+        if os.environ.get("ONEX_DISABLE_PACKAGE_NODE_SUBSCRIPTIONS", "").lower() == "true":
+            logger.info("Package-node subscription wiring disabled by env flag")
+            return
+
+        if not self._event_bus or not self._dispatch_engine:
+            logger.debug(
+                "Event bus or dispatch engine not available, "
+                "skipping package-node subscription wiring"
+            )
+            return
+
+        # Discover package root
+        import omnibase_infra as _pkg
+
+        package_root = Path(_pkg.__file__).parent
+
+        # Build set of already-wired node names (from handler descriptor path)
+        already_wired: set[str] = set()
+        for _ht, descriptor in self._handler_descriptors.items():
+            if descriptor.name:
+                already_wired.add(descriptor.name)
+
+        contracts = _discover_package_node_contracts(package_root)
+
+        if not contracts:
+            logger.debug("No package node contracts found")
+            return
+
+        # Reuse existing wiring instance if available, otherwise create one
+        if not self._event_bus_wiring:
+            environment = self._get_environment_from_config()
+            topic_deny_patterns: tuple[str, ...] = ()
+            if self._runtime_node_graph_config is not None:
+                topic_deny_patterns = (
+                    self._runtime_node_graph_config.topic_deny_patterns
+                )
+            self._event_bus_wiring = EventBusSubcontractWiring(
+                event_bus=cast("ProtocolEventBusSubscriber", self._event_bus),
+                dispatch_engine=self._dispatch_engine,
+                environment=environment,
+                node_name="runtime-host",
+                service=self._node_identity.service,
+                version=self._node_identity.version,
+                topic_deny_patterns=topic_deny_patterns,
+            )
+
+        wired, skipped_existing, skipped_no_topics = (
+            await _wire_package_node_subscriptions(
+                contracts=contracts,
+                event_bus_wiring=self._event_bus_wiring,
+                already_wired_names=already_wired,
+            )
+        )
+
+        logger.info(
+            "Package-node subscriptions: wired %d, skipped %d (already wired), "
+            "skipped %d (no topics)",
+            wired,
+            skipped_existing,
+            skipped_no_topics,
+        )
 
     async def _wire_baseline_subscriptions(self) -> None:
         """Wire platform-baseline topic subscriptions for contract discovery.
