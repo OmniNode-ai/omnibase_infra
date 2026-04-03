@@ -165,7 +165,7 @@ def mask_dsn_password(dsn: str) -> str:
 # =============================================================================
 
 # Resolve topic strings from the canonical registry (no raw literals)
-_topic_registry = ServiceTopicRegistry.default()
+_topic_registry = ServiceTopicRegistry.from_defaults()
 _T_CONTEXT_UTIL = _topic_registry.resolve(topic_keys.INJECTION_CONTEXT_UTILIZATION)
 _T_AGENT_MATCH = _topic_registry.resolve(topic_keys.INJECTION_AGENT_MATCH)
 _T_LATENCY = _topic_registry.resolve(topic_keys.INJECTION_LATENCY_BREAKDOWN)

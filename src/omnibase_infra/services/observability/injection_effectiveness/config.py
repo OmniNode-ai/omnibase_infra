@@ -63,6 +63,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
+
+# Resolve OMN-6158 topics via canonical registry (no raw literals — OMN-3343)
+_registry = ServiceTopicRegistry.from_defaults()
+_T_CONTEXT_ENRICHMENT: str = _registry.resolve(topic_keys.INJECTION_CONTEXT_ENRICHMENT)
+_T_INJECTION_RECORDED: str = _registry.resolve(topic_keys.INJECTION_RECORDED)
 
 logger = logging.getLogger(__name__)
 
@@ -111,8 +118,8 @@ class ConfigInjectionEffectivenessConsumer(BaseSettings):
             "onex.evt.omniclaude.manifest-injected.v1",
             "onex.evt.omniclaude.manifest-injection-failed.v1",
             # Context enrichment + injection recorded topics (OMN-6158)
-            "onex.evt.omniclaude.context-enrichment.v1",
-            "onex.evt.omniclaude.injection-recorded.v1",
+            _T_CONTEXT_ENRICHMENT,
+            _T_INJECTION_RECORDED,
         ],
         description="Kafka topics to consume for injection effectiveness",
     )

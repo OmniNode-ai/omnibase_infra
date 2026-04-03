@@ -85,9 +85,7 @@ class ServiceTopicRegistry:
             topic_keys.MANIFEST_INJECTION_STARTED: (
                 "onex.evt.omniclaude.manifest-injection-started.v1"
             ),
-            topic_keys.MANIFEST_INJECTED: (
-                "onex.evt.omniclaude.manifest-injected.v1"
-            ),
+            topic_keys.MANIFEST_INJECTED: ("onex.evt.omniclaude.manifest-injected.v1"),
             topic_keys.MANIFEST_INJECTION_FAILED: (
                 "onex.evt.omniclaude.manifest-injection-failed.v1"
             ),
