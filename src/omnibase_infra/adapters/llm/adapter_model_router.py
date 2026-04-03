@@ -341,7 +341,7 @@ class AdapterModelRouter:
         if self._on_routing_decided is None:
             return
         try:
-            from datetime import datetime, timezone
+            from datetime import UTC, datetime
 
             event = {
                 "correlation_id": getattr(request, "correlation_id", None) or "",
@@ -355,7 +355,7 @@ class AdapterModelRouter:
                 "candidate_providers": candidate_providers,
                 "task_type": getattr(request, "task_type", None),
                 "latency_ms": latency_ms,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
             await self._on_routing_decided(event)
         except Exception:  # noqa: BLE001 — boundary: best-effort event emission
