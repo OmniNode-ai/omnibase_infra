@@ -99,7 +99,8 @@ class ConfigInjectionEffectivenessConsumer(BaseSettings):
     )
 
     # Topics to subscribe (3 injection effectiveness topics from OMN-1889 +
-    # 3 manifest injection lifecycle topics from OMN-2942 for OMN-1888 audit trail)
+    # 3 manifest injection lifecycle topics from OMN-2942 for OMN-1888 audit trail +
+    # 2 pipeline gap topics from OMN-6158)
     topics: list[str] = Field(
         default_factory=lambda: [
             "onex.evt.omniclaude.context-utilization.v1",
@@ -109,6 +110,9 @@ class ConfigInjectionEffectivenessConsumer(BaseSettings):
             "onex.evt.omniclaude.manifest-injection-started.v1",
             "onex.evt.omniclaude.manifest-injected.v1",
             "onex.evt.omniclaude.manifest-injection-failed.v1",
+            # Context enrichment + injection recorded topics (OMN-6158)
+            "onex.evt.omniclaude.context-enrichment.v1",
+            "onex.evt.omniclaude.injection-recorded.v1",
         ],
         description="Kafka topics to consume for injection effectiveness",
     )

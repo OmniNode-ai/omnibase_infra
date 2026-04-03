@@ -22,11 +22,14 @@ Topics consumed:
     - onex.evt.omniclaude.context-utilization.v1
     - onex.evt.omniclaude.agent-match.v1
     - onex.evt.omniclaude.latency-breakdown.v1
+    - onex.evt.omniclaude.context-enrichment.v1 (OMN-6158)
+    - onex.evt.omniclaude.injection-recorded.v1 (OMN-6158)
 
 Related Tickets:
     - OMN-1890: Injection effectiveness observability consumer (current)
     - OMN-1889: Emit injection metrics from omniclaude hooks (producer)
     - OMN-1743: Agent actions consumer (reference pattern)
+    - OMN-6158: Add consumers for context-enrichment and injection-recorded events
 
 Example:
     >>> from omnibase_infra.services.observability.injection_effectiveness import (
@@ -76,7 +79,9 @@ from omnibase_infra.services.observability.injection_effectiveness.config import
 )
 from omnibase_infra.services.observability.injection_effectiveness.models import (
     ModelAgentMatchEvent,
+    ModelContextEnrichmentEvent,
     ModelContextUtilizationEvent,
+    ModelInjectionRecordedEvent,
     ModelLatencyBreakdownEvent,
     ModelManifestInjectionLifecycleEvent,
 )
@@ -166,6 +171,10 @@ TOPIC_TO_MODEL: dict[str, type[BaseModel]] = {
     "onex.evt.omniclaude.manifest-injection-started.v1": ModelManifestInjectionLifecycleEvent,
     "onex.evt.omniclaude.manifest-injected.v1": ModelManifestInjectionLifecycleEvent,
     "onex.evt.omniclaude.manifest-injection-failed.v1": ModelManifestInjectionLifecycleEvent,
+    # Context enrichment topic (OMN-2274 / OMN-6158)
+    "onex.evt.omniclaude.context-enrichment.v1": ModelContextEnrichmentEvent,
+    # Injection recorded topic (OMN-1673 / OMN-6158)
+    "onex.evt.omniclaude.injection-recorded.v1": ModelInjectionRecordedEvent,
 }
 
 # Map topics to writer method names
@@ -177,6 +186,10 @@ TOPIC_TO_WRITER_METHOD: dict[str, str] = {
     "onex.evt.omniclaude.manifest-injection-started.v1": "write_manifest_injection_lifecycle",
     "onex.evt.omniclaude.manifest-injected.v1": "write_manifest_injection_lifecycle",
     "onex.evt.omniclaude.manifest-injection-failed.v1": "write_manifest_injection_lifecycle",
+    # Context enrichment topic (OMN-2274 / OMN-6158)
+    "onex.evt.omniclaude.context-enrichment.v1": "write_context_enrichment",
+    # Injection recorded topic (OMN-1673 / OMN-6158)
+    "onex.evt.omniclaude.injection-recorded.v1": "write_injection_recorded",
 }
 
 

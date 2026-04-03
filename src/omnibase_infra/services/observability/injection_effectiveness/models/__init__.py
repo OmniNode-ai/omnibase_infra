@@ -11,6 +11,8 @@ Event Types:
     - ModelAgentMatchEvent: Agent routing accuracy metrics
     - ModelLatencyBreakdownEvent: Per-prompt latency breakdowns
     - ModelManifestInjectionLifecycleEvent: Manifest injection lifecycle audit trail (OMN-2942)
+    - ModelContextEnrichmentEvent: Context enrichment per-channel metrics (OMN-6158)
+    - ModelInjectionRecordedEvent: Injection tracking events (OMN-6158)
 
 Query Models (OMN-2078):
     - ModelInjectionEffectivenessRow: Single row from injection_effectiveness table
@@ -23,11 +25,17 @@ Query Models (OMN-2078):
 from omnibase_infra.services.observability.injection_effectiveness.models.model_agent_match import (
     ModelAgentMatchEvent,
 )
+from omnibase_infra.services.observability.injection_effectiveness.models.model_context_enrichment import (
+    ModelContextEnrichmentEvent,
+)
 from omnibase_infra.services.observability.injection_effectiveness.models.model_batch_compute_result import (
     ModelBatchComputeResult,
 )
 from omnibase_infra.services.observability.injection_effectiveness.models.model_context_utilization import (
     ModelContextUtilizationEvent,
+)
+from omnibase_infra.services.observability.injection_effectiveness.models.model_injection_recorded import (
+    ModelInjectionRecordedEvent,
 )
 from omnibase_infra.services.observability.injection_effectiveness.models.model_injection_effectiveness_query import (
     ModelInjectionEffectivenessQuery,
@@ -60,11 +68,13 @@ from omnibase_infra.services.observability.injection_effectiveness.models.model_
 __all__ = [
     "ModelAgentMatchEvent",
     "ModelBatchComputeResult",
+    "ModelContextEnrichmentEvent",
     "ModelContextUtilizationEvent",
     "ModelEffectivenessInvalidationEvent",
     "ModelInjectionEffectivenessQuery",
     "ModelInjectionEffectivenessQueryResult",
     "ModelInjectionEffectivenessRow",
+    "ModelInjectionRecordedEvent",
     "ModelLatencyBreakdownEvent",
     "ModelLatencyBreakdownRow",
     "ModelManifestInjectionLifecycleEvent",

@@ -253,12 +253,12 @@ class TestConfigManifestTopics:
             assert topic in config.topics, f"Missing topic: {topic}"
 
     def test_total_topic_count(self) -> None:
-        """Default config has 6 topics (3 existing + 3 manifest lifecycle)."""
+        """Default config has 8 topics (3 existing + 3 manifest lifecycle + 2 OMN-6158)."""
         config = ConfigInjectionEffectivenessConsumer(
             kafka_bootstrap_servers="localhost:19092",
             postgres_dsn="postgresql://postgres:secret@localhost:5432/omnibase_infra",
         )
-        assert len(config.topics) == 6
+        assert len(config.topics) == 8
 
 
 # ---------------------------------------------------------------------------
