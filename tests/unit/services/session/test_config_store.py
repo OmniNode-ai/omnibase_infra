@@ -24,7 +24,6 @@ class TestConfigSessionStorageAliasChoices:
     ) -> None:
         """POSTGRES_POOL_MIN_SIZE (canonical shared key) resolves to pool_min_size."""
         for key in (
-            "POSTGRES_HOST",
             "POSTGRES_PORT",
             "POSTGRES_USER",
             "POSTGRES_DATABASE",
@@ -33,6 +32,7 @@ class TestConfigSessionStorageAliasChoices:
             "QUERY_TIMEOUT_SECONDS",
         ):
             monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("POSTGRES_HOST", "localhost")
         monkeypatch.setenv("POSTGRES_POOL_MIN_SIZE", "3")
         monkeypatch.setenv("POSTGRES_POOL_MAX_SIZE", "20")
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")
@@ -46,7 +46,6 @@ class TestConfigSessionStorageAliasChoices:
     ) -> None:
         """POSTGRES_POOL_MAX_SIZE (canonical shared key) resolves to pool_max_size."""
         for key in (
-            "POSTGRES_HOST",
             "POSTGRES_PORT",
             "POSTGRES_USER",
             "POSTGRES_DATABASE",
@@ -55,6 +54,7 @@ class TestConfigSessionStorageAliasChoices:
             "QUERY_TIMEOUT_SECONDS",
         ):
             monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("POSTGRES_HOST", "localhost")
         monkeypatch.setenv("POSTGRES_POOL_MIN_SIZE", "3")
         monkeypatch.setenv("POSTGRES_POOL_MAX_SIZE", "8")
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")
@@ -68,7 +68,6 @@ class TestConfigSessionStorageAliasChoices:
     ) -> None:
         """Both POSTGRES_POOL_MIN_SIZE and POSTGRES_POOL_MAX_SIZE resolve correctly."""
         for key in (
-            "POSTGRES_HOST",
             "POSTGRES_PORT",
             "POSTGRES_USER",
             "POSTGRES_DATABASE",
@@ -77,6 +76,7 @@ class TestConfigSessionStorageAliasChoices:
             "QUERY_TIMEOUT_SECONDS",
         ):
             monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("POSTGRES_HOST", "localhost")
         monkeypatch.setenv("POSTGRES_POOL_MIN_SIZE", "3")
         monkeypatch.setenv("POSTGRES_POOL_MAX_SIZE", "8")
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")
@@ -99,10 +99,10 @@ class TestConfigSessionStorageAliasChoices:
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")
         # Clear ambient connection vars so CI environments don't silently pollute the
         # constructed config and cause misleading failures if the test is extended.
-        monkeypatch.delenv("POSTGRES_HOST", raising=False)
         monkeypatch.delenv("POSTGRES_PORT", raising=False)
         monkeypatch.delenv("POSTGRES_USER", raising=False)
         monkeypatch.delenv("POSTGRES_DATABASE", raising=False)
+        monkeypatch.setenv("POSTGRES_HOST", "localhost")
 
         config = ConfigSessionStorage()
 
@@ -125,7 +125,6 @@ class TestConfigSessionStorageAliasChoices:
         # do not silently influence AliasChoices resolution and make the assertion
         # pass for the wrong reason (e.g. ambient POSTGRES_POOL_MIN_SIZE=5).
         for key in (
-            "POSTGRES_HOST",
             "POSTGRES_PORT",
             "POSTGRES_USER",
             "POSTGRES_DATABASE",
@@ -134,6 +133,7 @@ class TestConfigSessionStorageAliasChoices:
         ):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.delenv("QUERY_TIMEOUT_SECONDS", raising=False)
+        monkeypatch.setenv("POSTGRES_HOST", "localhost")
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")  # required field
         config = ConfigSessionStorage(
             pool_min_size=5,
@@ -179,7 +179,6 @@ class TestConfigSessionStorageAliasChoices:
     ) -> None:
         """Verify that pool_min_size > pool_max_size raises ValidationError."""
         for key in (
-            "POSTGRES_HOST",
             "POSTGRES_PORT",
             "POSTGRES_USER",
             "POSTGRES_DATABASE",
@@ -189,6 +188,7 @@ class TestConfigSessionStorageAliasChoices:
         ):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
+        monkeypatch.setenv("POSTGRES_HOST", "localhost")
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")
         with pytest.raises(ValidationError):
             ConfigSessionStorage(pool_min_size=10, pool_max_size=5)
@@ -198,7 +198,6 @@ class TestConfigSessionStorageAliasChoices:
     ) -> None:
         """Verify QUERY_TIMEOUT_SECONDS env var resolves to query_timeout_seconds."""
         for key in (
-            "POSTGRES_HOST",
             "POSTGRES_PORT",
             "POSTGRES_USER",
             "POSTGRES_DATABASE",
@@ -208,6 +207,7 @@ class TestConfigSessionStorageAliasChoices:
         ):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
+        monkeypatch.setenv("POSTGRES_HOST", "localhost")
         monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")
         monkeypatch.setenv("QUERY_TIMEOUT_SECONDS", "60")
         config = ConfigSessionStorage()

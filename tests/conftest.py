@@ -84,6 +84,24 @@ if _env_file.exists():
     load_dotenv(_env_file)
     logging.getLogger(__name__).debug(f"Loaded environment from {_env_file}")
 
+# OMN-7227: Provide test defaults for required env vars (no more localhost fallbacks in src/).
+# KAFKA_BOOTSTRAP_SERVERS is set so tests can use it for Kafka config construction and CLI tests
+# that explicitly access os.environ['KAFKA_BOOTSTRAP_SERVERS']. The E2E conftest (registration/e2e)
+# additionally requires KAFKA_INTEGRATION_TESTS=1 before running real-broker tests, so setting
+# this value here does not cause E2E tests to run in CI without a live broker.
+_TEST_ENV_DEFAULTS: dict[str, str] = {
+    "POSTGRES_HOST": "localhost",
+    "KAFKA_BOOTSTRAP_SERVERS": "localhost:19092",
+    "ONEX_RUNTIME_TARGET": "localhost:8085",
+    "QDRANT_URL": "http://localhost:6333",
+    "GRAPH_BOLT_URI": "bolt://localhost:7687",
+    "VALKEY_HOST": "localhost",
+    "INTELLIGENCE_URL": "http://localhost:8053",
+}
+for _key, _val in _TEST_ENV_DEFAULTS.items():
+    if _key not in os.environ:
+        os.environ[_key] = _val
+
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.utils import sanitize_error_message
 

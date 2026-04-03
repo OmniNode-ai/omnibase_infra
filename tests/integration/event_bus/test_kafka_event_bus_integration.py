@@ -40,9 +40,13 @@ if TYPE_CHECKING:
 # Test Configuration and Skip Conditions
 # =============================================================================
 
-# Check if Kafka is available based on environment variable
+# Check if Kafka is available based on environment variable.
+# Requires KAFKA_BOOTSTRAP_SERVERS to be set AND KAFKA_INTEGRATION_TESTS=1 opt-in
+# to avoid false positives in CI environments where Kafka is not actually running.
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
-KAFKA_AVAILABLE = KAFKA_BOOTSTRAP_SERVERS is not None
+KAFKA_AVAILABLE = (
+    KAFKA_BOOTSTRAP_SERVERS is not None and os.getenv("KAFKA_INTEGRATION_TESTS") == "1"
+)
 
 # Module-level markers - skip all tests if Kafka is not available
 pytestmark = [

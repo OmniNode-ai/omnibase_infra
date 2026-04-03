@@ -152,7 +152,7 @@ def _build_event(
 @click.group()
 @click.option(
     "--bootstrap-servers",
-    default=lambda: os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092"),
+    default=lambda: os.environ["KAFKA_BOOTSTRAP_SERVERS"],
     show_default=True,
     help="Kafka bootstrap servers (overrides KAFKA_BOOTSTRAP_SERVERS env var).",
 )

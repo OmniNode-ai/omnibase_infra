@@ -201,9 +201,13 @@ from tests.helpers.util_postgres import PostgresConfig
 _postgres_config = PostgresConfig.from_env()
 POSTGRES_AVAILABLE = _postgres_config.is_configured
 
-# Kafka availability
+# Kafka availability — requires both KAFKA_BOOTSTRAP_SERVERS AND KAFKA_INTEGRATION_TESTS=1.
+# KAFKA_BOOTSTRAP_SERVERS is set globally in conftest for model instantiation, so we gate
+# real-broker E2E tests on KAFKA_INTEGRATION_TESTS=1 to prevent false connects in CI.
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
-KAFKA_AVAILABLE = bool(KAFKA_BOOTSTRAP_SERVERS)
+KAFKA_AVAILABLE = (
+    bool(KAFKA_BOOTSTRAP_SERVERS) and os.getenv("KAFKA_INTEGRATION_TESTS") == "1"
+)
 
 SERVICE_REGISTRY_AVAILABLE = check_service_registry_available()
 
@@ -225,7 +229,7 @@ pytestmark = [
         not ALL_INFRA_AVAILABLE,
         reason=(
             "Full infrastructure required for E2E tests. "
-            f"Kafka: {'available' if KAFKA_AVAILABLE else 'MISSING (set KAFKA_BOOTSTRAP_SERVERS)'}. "
+            f"Kafka: {'available' if KAFKA_AVAILABLE else 'MISSING (set KAFKA_BOOTSTRAP_SERVERS and KAFKA_INTEGRATION_TESTS=1)'}. "
             f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST and POSTGRES_PASSWORD)'}. "
             f"ServiceRegistry: {'available' if SERVICE_REGISTRY_AVAILABLE else 'MISSING (omnibase_core circular import issue)'}."
         ),

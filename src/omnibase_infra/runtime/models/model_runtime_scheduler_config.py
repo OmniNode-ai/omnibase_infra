@@ -222,7 +222,7 @@ class ModelRuntimeSchedulerConfig(BaseModel):
 
     # Valkey (Redis-compatible) configuration for sequence number persistence
     valkey_host: str = Field(
-        default="localhost",
+        default_factory=lambda: os.environ["VALKEY_HOST"],
         description="Valkey host for sequence number persistence",
         min_length=1,
         max_length=255,

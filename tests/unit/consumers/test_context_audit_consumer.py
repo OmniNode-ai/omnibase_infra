@@ -115,7 +115,8 @@ class TestConfigContextAuditConsumer:
     def test_default_topics(self) -> None:
         """Default topic list contains all 5 audit topics."""
         config = ConfigContextAuditConsumer(
-            postgres_dsn="postgresql://test:test@localhost:5432/test"
+            kafka_bootstrap_servers="localhost:19092",
+            postgres_dsn="postgresql://test:test@localhost:5432/test",
         )
         assert "onex.evt.omniclaude.audit-dispatch-validated.v1" in config.topics
         assert "onex.evt.omniclaude.audit-scope-violation.v1" in config.topics
@@ -127,14 +128,16 @@ class TestConfigContextAuditConsumer:
     def test_default_health_check_port(self) -> None:
         """Default health check port is 8093."""
         config = ConfigContextAuditConsumer(
-            postgres_dsn="postgresql://test:test@localhost:5432/test"
+            kafka_bootstrap_servers="localhost:19092",
+            postgres_dsn="postgresql://test:test@localhost:5432/test",
         )
         assert config.health_check_port == 8093
 
     def test_default_group_id(self) -> None:
         """Default consumer group ID is context-audit-postgres."""
         config = ConfigContextAuditConsumer(
-            postgres_dsn="postgresql://test:test@localhost:5432/test"
+            kafka_bootstrap_servers="localhost:19092",
+            postgres_dsn="postgresql://test:test@localhost:5432/test",
         )
         assert config.kafka_group_id == "context-audit-postgres"
 
@@ -144,6 +147,7 @@ class TestConfigContextAuditConsumer:
 
         with pytest.raises(ProtocolConfigurationError, match="No topics configured"):
             ConfigContextAuditConsumer(
+                kafka_bootstrap_servers="localhost:19092",
                 postgres_dsn="postgresql://test:test@localhost:5432/test",
                 topics=[],
             )
@@ -151,6 +155,7 @@ class TestConfigContextAuditConsumer:
     def test_custom_topics(self) -> None:
         """Custom topics list is accepted."""
         config = ConfigContextAuditConsumer(
+            kafka_bootstrap_servers="localhost:19092",
             postgres_dsn="postgresql://test:test@localhost:5432/test",
             topics=["onex.evt.omniclaude.audit-dispatch-validated.v1"],
         )

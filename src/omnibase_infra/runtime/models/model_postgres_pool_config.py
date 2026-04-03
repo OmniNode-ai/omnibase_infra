@@ -26,7 +26,10 @@ class ModelPostgresPoolConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    host: str = Field(default="localhost", description="PostgreSQL host")
+    host: str = Field(
+        default_factory=lambda: os.environ["POSTGRES_HOST"],
+        description="PostgreSQL host",
+    )
     port: int = Field(default=5432, ge=1, le=65535, description="PostgreSQL port")
     user: str = Field(default="postgres", description="PostgreSQL user")
     password: str = Field(

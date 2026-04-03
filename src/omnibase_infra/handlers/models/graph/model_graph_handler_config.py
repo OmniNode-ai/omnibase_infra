@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Configuration model for HandlerGraph."""
 
+import os
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -22,7 +24,7 @@ class ModelGraphHandlerConfig(BaseModel):
     model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
 
     uri: str = Field(
-        default="bolt://localhost:7687",
+        default_factory=lambda: os.environ["GRAPH_BOLT_URI"],
         description="Bolt URI for graph database",
     )
     username: str = Field(

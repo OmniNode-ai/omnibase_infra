@@ -19,7 +19,7 @@ class TestConfigPostMergeConsumer:
     """Tests for ConfigPostMergeConsumer defaults and validation."""
 
     def test_defaults(self) -> None:
-        config = ConfigPostMergeConsumer()
+        config = ConfigPostMergeConsumer(kafka_bootstrap_servers="localhost:19092")
         assert config.kafka_bootstrap_servers == "localhost:19092"
         assert config.kafka_group_id == "post-merge-consumer"
         assert config.input_topic == SUFFIX_GITHUB_PR_MERGED
@@ -47,5 +47,5 @@ class TestConfigPostMergeConsumer:
         assert config.kafka_bootstrap_servers == "localhost:19092"
 
     def test_auto_ticket_min_severity_default(self) -> None:
-        config = ConfigPostMergeConsumer()
+        config = ConfigPostMergeConsumer(kafka_bootstrap_servers="localhost:19092")
         assert config.auto_ticket_min_severity == "medium"

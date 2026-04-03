@@ -96,7 +96,7 @@ class ConfigSessionStorage(BaseSettings):
     # config/shared_key_registry.yaml) first, then falls back to the bare
     # field names so that direct construction (e.g. in tests) still works.
     postgres_host: str = Field(
-        default="localhost",
+        ...,
         description="PostgreSQL host",
     )
     postgres_port: int = Field(

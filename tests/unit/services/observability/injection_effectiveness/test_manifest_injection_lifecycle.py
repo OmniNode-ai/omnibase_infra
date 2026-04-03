@@ -246,6 +246,7 @@ class TestConfigManifestTopics:
     def test_default_topics_include_manifest_injection(self) -> None:
         """All 3 manifest injection lifecycle topics are in default topic list."""
         config = ConfigInjectionEffectivenessConsumer(
+            kafka_bootstrap_servers="localhost:19092",
             postgres_dsn="postgresql://postgres:secret@localhost:5432/omnibase_infra",
         )
         for topic in _MANIFEST_TOPICS:
@@ -254,6 +255,7 @@ class TestConfigManifestTopics:
     def test_total_topic_count(self) -> None:
         """Default config has 6 topics (3 existing + 3 manifest lifecycle)."""
         config = ConfigInjectionEffectivenessConsumer(
+            kafka_bootstrap_servers="localhost:19092",
             postgres_dsn="postgresql://postgres:secret@localhost:5432/omnibase_infra",
         )
         assert len(config.topics) == 6

@@ -151,9 +151,9 @@ class TestConfig:
     """Test configuration defaults and overrides."""
 
     def test_default_topic(self) -> None:
-        config = ConfigWaitlistSignupNotifier()
+        config = ConfigWaitlistSignupNotifier(kafka_bootstrap_servers="localhost:19092")
         assert config.kafka_topic == "onex.evt.omniweb.waitlist-signup.v1"
 
     def test_default_group_id(self) -> None:
-        config = ConfigWaitlistSignupNotifier()
+        config = ConfigWaitlistSignupNotifier(kafka_bootstrap_servers="localhost:19092")
         assert config.kafka_group_id == "waitlist-signup-slack-notifier"

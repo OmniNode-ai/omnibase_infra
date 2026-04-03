@@ -23,7 +23,7 @@ class ModelKafkaProducerConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     bootstrap_servers: str = Field(
-        default="localhost:19092",
+        default_factory=lambda: os.environ["KAFKA_BOOTSTRAP_SERVERS"],
         description="Kafka bootstrap servers",
     )
     timeout_seconds: float = Field(

@@ -692,7 +692,10 @@ class TestConfigSessionStorage:
         # Access Field defaults directly to test hardcoded defaults,
         # bypassing pydantic-settings environment variable loading
         fields = ConfigSessionStorage.model_fields
-        assert fields["postgres_host"].default == "localhost"
+        # postgres_host is now required (no default) after OMN-7227 removed localhost fallback
+        import pydantic
+
+        assert fields["postgres_host"].default is pydantic.fields.PydanticUndefined
         assert fields["postgres_port"].default == 5436
         assert fields["postgres_database"].default == "omnibase_infra"
         assert fields["postgres_user"].default == "postgres"

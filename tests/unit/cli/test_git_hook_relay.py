@@ -66,6 +66,7 @@ class TestBuildEvent:
             author="jsmith",
             outcome="pass",
             gates=["lint", "tests"],
+            bootstrap_servers="localhost:19092",
         )
         event = _build_event(params)
         assert event["event_type"] == "onex.evt.git.hook.v1"
@@ -87,6 +88,7 @@ class TestBuildEvent:
             author="jdoe",
             outcome="pass",
             gates=[],
+            bootstrap_servers="localhost:19092",
         )
         event = _build_event(params)
         assert event["gates"] == []

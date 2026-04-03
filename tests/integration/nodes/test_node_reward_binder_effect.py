@@ -49,8 +49,13 @@ from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_binder_o
 # Skip conditions
 # ==============================================================================
 
+# KAFKA_BOOTSTRAP_SERVERS is set to a localhost default by tests/conftest.py (OMN-7227),
+# so we require an explicit KAFKA_INTEGRATION_TESTS=1 opt-in to avoid false positives
+# in CI environments where Kafka is not actually running.
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
-KAFKA_AVAILABLE = KAFKA_BOOTSTRAP_SERVERS is not None
+KAFKA_AVAILABLE = (
+    KAFKA_BOOTSTRAP_SERVERS is not None and os.getenv("KAFKA_INTEGRATION_TESTS") == "1"
+)
 
 pytestmark = [
     pytest.mark.integration,
@@ -121,6 +126,7 @@ class TestRewardBinderKafkaIntegration:
         Uses EventBusKafka to publish and verifies output model is correct.
         """
         from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+        from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
         from omnibase_infra.runtime.publisher_topic_scoped import PublisherTopicScoped
 
         bootstrap = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
@@ -129,10 +135,11 @@ class TestRewardBinderKafkaIntegration:
         spec = _make_objective_spec()
         corr_id = uuid4()
 
-        bus = EventBusKafka(
+        config = ModelKafkaEventBusConfig(
             bootstrap_servers=bootstrap,
             environment="dev",
         )
+        bus = EventBusKafka(config=config)
         await bus.start()
 
         try:

@@ -542,7 +542,8 @@ class TestNoDirectEnvAccessInHandlers:
                     rel = filepath.relative_to(_SRC_ROOT.parent.parent)
                     violations.append(f"{rel}:{line_no}: {line_content}")
 
-        # Known violations: handler_gmail_api (3) + handler_slack_webhook (3)
+        # Known violations: handler_gmail_api (3) + handler_slack_webhook (2) + handler_graph (1)
+        # handler_registration_storage_postgres is excluded via ONEX_EXCLUDE marker.
         # These use os.getenv as fallback when constructor args are None.
         max_allowed = 6
         if len(violations) > max_allowed:

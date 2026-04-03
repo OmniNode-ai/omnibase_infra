@@ -36,8 +36,8 @@ class ConfigSessionConsumer(BaseSettings):
 
     # Kafka connection
     bootstrap_servers: str = Field(
-        default="localhost:19092",
-        description="Kafka bootstrap servers. Set via OMNIBASE_INFRA_SESSION_CONSUMER_BOOTSTRAP_SERVERS env var for production.",
+        ...,
+        description="Kafka bootstrap servers. Set via OMNIBASE_INFRA_SESSION_CONSUMER_BOOTSTRAP_SERVERS env var.",
     )
     group_id: str = Field(
         default="omnibase-infra-session-consumer",

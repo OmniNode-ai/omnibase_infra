@@ -20,14 +20,14 @@ _DEFAULT_TOPIC_PATTERN = r"onex\.evt\.omniclaude\..*"
 class ModelConfigGraphProjector(BaseModel):
     """Configuration for the session graph projector.
 
-    Connection defaults are sourced from OMNIMEMORY_MEMGRAPH_HOST/PORT
-    environment variables, falling back to localhost:7687.
+    Connection values are sourced from OMNIMEMORY_MEMGRAPH_HOST/PORT
+    environment variables (required, no fallback).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     bootstrap_servers: str = Field(
-        default="localhost:19092",
+        default_factory=lambda: os.environ["KAFKA_BOOTSTRAP_SERVERS"],
         description="Kafka bootstrap servers.",
     )
     consumer_group: str = Field(
@@ -39,11 +39,11 @@ class ModelConfigGraphProjector(BaseModel):
         description="Regex pattern for Kafka topic subscription.",
     )
     memgraph_host: str = Field(
-        default_factory=lambda: os.environ.get("OMNIMEMORY_MEMGRAPH_HOST", "localhost"),
+        default_factory=lambda: os.environ["OMNIMEMORY_MEMGRAPH_HOST"],
         description="Memgraph host.",
     )
     memgraph_port: int = Field(
-        default_factory=lambda: int(os.environ.get("OMNIMEMORY_MEMGRAPH_PORT", "7687")),
+        default_factory=lambda: int(os.environ["OMNIMEMORY_MEMGRAPH_PORT"]),
         description="Memgraph bolt port.",
     )
 

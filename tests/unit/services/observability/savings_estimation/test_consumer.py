@@ -30,6 +30,7 @@ _T0 = 1000.0
 @pytest.fixture
 def config() -> ConfigSavingsEstimation:
     return ConfigSavingsEstimation(
+        kafka_bootstrap_servers="localhost:19092",
         grace_window_seconds=5.0,
         session_timeout_seconds=60.0,
         max_sessions=100,

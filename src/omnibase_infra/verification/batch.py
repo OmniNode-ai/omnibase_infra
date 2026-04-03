@@ -12,6 +12,7 @@ are aggregated into per-contract reports with an overall summary.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -52,12 +53,16 @@ class BatchVerificationConfig:
         db_query_fn: DbQueryFn | None = None,
         kafka_admin_fn: KafkaAdminFn | None = None,
         watermark_fn: WatermarkFn | None = None,
-        runtime_target: str = "localhost:8085",
+        runtime_target: str | None = None,
     ) -> None:
         self.db_query_fn = db_query_fn
         self.kafka_admin_fn = kafka_admin_fn
         self.watermark_fn = watermark_fn
-        self.runtime_target = runtime_target
+        self.runtime_target = (
+            runtime_target
+            if runtime_target is not None
+            else os.environ["ONEX_RUNTIME_TARGET"]
+        )
 
 
 # -- Node-type to probe requirement matrix --

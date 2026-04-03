@@ -143,11 +143,14 @@ class TestConsumerInitialization:
         environment-specific domain topics.
         """
         with pytest.raises(ProtocolConfigurationError, match="No topics configured"):
-            ConfigSessionConsumer()
+            ConfigSessionConsumer(bootstrap_servers="localhost:19092")
 
     def test_consumer_uses_explicit_config(self, aggregator: MockAggregator) -> None:
         """Consumer should work with explicitly configured topics."""
-        config = ConfigSessionConsumer(topics=["test.session.events.v1"])
+        config = ConfigSessionConsumer(
+            bootstrap_servers="localhost:19092",
+            topics=["test.session.events.v1"],
+        )
         consumer = SessionEventConsumer(config=config, aggregator=aggregator)
 
         assert consumer._config.group_id == "omnibase-infra-session-consumer"

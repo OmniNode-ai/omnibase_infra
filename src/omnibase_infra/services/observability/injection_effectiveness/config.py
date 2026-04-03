@@ -87,7 +87,7 @@ class ConfigInjectionEffectivenessConsumer(BaseSettings):
 
     # Kafka connection
     kafka_bootstrap_servers: str = Field(
-        default="localhost:19092",
+        ...,
         description=(
             "Kafka bootstrap servers. Set via "
             "OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_KAFKA_BOOTSTRAP_SERVERS env var."

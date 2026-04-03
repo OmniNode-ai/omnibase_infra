@@ -41,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -176,7 +177,7 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
         container: ModelONEXContainer,
         postgres_adapter: ProtocolPostgresAdapter | None = None,
         dsn: str | None = None,
-        host: str = "localhost",
+        host: str | None = None,
         port: int = 5432,
         database: str = "omnibase_infra",
         user: str = "postgres",
@@ -240,9 +241,9 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
             transport_type=cb_config.transport_type,
         )
 
-        # Store configuration
+        # Store configuration — host is required via env var if not provided
         self._dsn = dsn
-        self._host = host
+        self._host = host if host is not None else os.environ["POSTGRES_HOST"]  # ONEX_EXCLUDE: env  # fmt: skip
         self._port = port
         self._database = database
         self._user = user

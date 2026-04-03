@@ -36,7 +36,7 @@ class ConfigPostMergeConsumer(BaseSettings):
 
     # Kafka connection
     kafka_bootstrap_servers: str = Field(
-        default="localhost:19092",
+        ...,
         description="Kafka bootstrap servers",
     )
     kafka_group_id: str = Field(

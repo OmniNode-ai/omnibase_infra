@@ -582,8 +582,12 @@ async def vault_handler(
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 
-# Check if Qdrant is available based on URL being set
-QDRANT_AVAILABLE = QDRANT_URL is not None
+# Check if Qdrant is available — requires QDRANT_URL AND QDRANT_INTEGRATION_TESTS=1.
+# QDRANT_URL is set globally in conftest for model instantiation, so we gate real-server
+# integration tests on QDRANT_INTEGRATION_TESTS=1 to prevent false connects in CI.
+QDRANT_AVAILABLE = (
+    QDRANT_URL is not None and os.getenv("QDRANT_INTEGRATION_TESTS") == "1"
+)
 
 
 # =============================================================================

@@ -35,6 +35,7 @@ _REQUIRED_DSN = "postgresql://postgres:secret@localhost:5432/testdb"
 
 def _make_config(**overrides: object) -> ConfigSkillLifecycleConsumer:
     defaults: dict[str, object] = {
+        "kafka_bootstrap_servers": "localhost:19092",
         "postgres_dsn": _REQUIRED_DSN,
         "_env_file": None,
     }
