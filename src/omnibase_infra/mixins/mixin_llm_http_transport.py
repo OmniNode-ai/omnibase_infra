@@ -98,28 +98,25 @@ from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_CIDR = "192.168.86.0/24"
-
-
 def _parse_cidr_allowlist() -> tuple[IPv4Network, ...]:
     """Parse CIDR allowlist from the ``LLM_ENDPOINT_CIDR_ALLOWLIST`` env var.
 
-    When the env var is not set, logs a WARNING and falls back to the
-    default ``192.168.86.0/24``.  Parses each comma-separated value as
-    an ``IPv4Network``. Malformed entries are logged at WARNING level and
-    skipped. If **all** entries are malformed (or the env var is empty
-    after parsing), falls back to the default and logs a warning.
+    The env var is **required**. If not set, raises ``RuntimeError``.
+    Parses each comma-separated value as an ``IPv4Network``. Malformed
+    entries are logged at WARNING level and skipped. If **all** entries
+    are malformed or empty, raises ``RuntimeError``.
 
     Returns:
         Tuple of parsed ``IPv4Network`` objects, never empty.
     """
     raw = os.environ.get("LLM_ENDPOINT_CIDR_ALLOWLIST")
     if raw is None:
-        logger.warning(
-            "LLM_ENDPOINT_CIDR_ALLOWLIST not set — using default %s",
-            _DEFAULT_CIDR,
+        msg = (
+            "LLM_ENDPOINT_CIDR_ALLOWLIST is required but not set. "
+            "Add it to ~/.omnibase/.env "
+            "(e.g. LLM_ENDPOINT_CIDR_ALLOWLIST=192.168.86.0/24)"
         )
-        raw = _DEFAULT_CIDR
+        raise RuntimeError(msg)
     parsed: list[IPv4Network] = []
     for entry in raw.split(","):
         cidr = entry.strip()
@@ -133,12 +130,11 @@ def _parse_cidr_allowlist() -> tuple[IPv4Network, ...]:
                 cidr,
             )
     if not parsed:
-        logger.warning(
+        msg = (
             "All entries in LLM_ENDPOINT_CIDR_ALLOWLIST were malformed or "
-            "empty; falling back to default %s",
-            _DEFAULT_CIDR,
+            "empty. Set a valid CIDR in ~/.omnibase/.env"
         )
-        parsed.append(IPv4Network(_DEFAULT_CIDR))
+        raise RuntimeError(msg)
     return tuple(parsed)
 
 
