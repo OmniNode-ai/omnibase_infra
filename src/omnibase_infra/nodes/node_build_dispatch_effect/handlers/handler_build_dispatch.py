@@ -41,6 +41,8 @@ from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_dispatch
 )
 from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_dispatch_result import (
     ModelBuildDispatchResult,
+)
+from omnibase_infra.nodes.node_build_dispatch_effect.models.model_delegation_payload import (
     ModelDelegationPayload,
 )
 from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_target import (

@@ -14,10 +14,14 @@ from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_dispatch
 from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_target import (
     ModelBuildTarget,
 )
+from omnibase_infra.nodes.node_build_dispatch_effect.models.model_delegation_payload import (
+    ModelDelegationPayload,
+)
 
 __all__ = [
     "ModelBuildDispatchInput",
     "ModelBuildDispatchOutcome",
     "ModelBuildDispatchResult",
     "ModelBuildTarget",
+    "ModelDelegationPayload",
 ]
