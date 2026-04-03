@@ -31,9 +31,9 @@ class ModelDelegationPayload(BaseModel):
 
     event_type: str = Field(..., description="Logical event type for routing.")
     topic: str = Field(..., description="Kafka topic to publish to.")
-    # NOTE: Any is required because delegation payloads carry arbitrary
-    # JSON-serialisable data from various upstream sources (e.g., prompt
-    # parameters, task metadata) whose schema is not known at compile time.
+    # ONEX_EXCLUDE: any_type - delegation payloads carry arbitrary JSON data from
+    # various upstream sources (prompt params, task metadata) whose schema is unknown
+    # at compile time; a strict union type would mirror the full upstream message spec.
     payload: dict[str, Any] = Field(..., description="JSON-serialisable event payload.")
     correlation_id: UUID = Field(..., description="Tracing correlation ID.")
 
