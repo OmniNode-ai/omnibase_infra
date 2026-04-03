@@ -28,12 +28,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
+import yaml
+
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
     EnumInfraTransportType,
 )
-from omnibase_infra.event_bus.topic_constants import TOPIC_DELEGATION_REQUEST
 from omnibase_infra.models.errors import ModelInfraErrorContext
 from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_dispatch_outcome import (
     ModelBuildDispatchOutcome,
@@ -48,6 +49,43 @@ from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_target i
 from omnibase_infra.utils.util_friction_emitter import emit_build_loop_friction
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Resolve delegation topic from contract.yaml (single source of truth)
+# ---------------------------------------------------------------------------
+_CONTRACT_PATH = Path(__file__).resolve().parent.parent / "contract.yaml"
+_DELEGATION_TOPIC_SUFFIX = "delegation-request"
+
+
+def _load_delegation_topic() -> str:
+    """Load the delegation-request publish topic from contract.yaml.
+
+    Raises:
+        RuntimeError: If contract.yaml is missing or does not declare a
+            publish topic containing 'delegation-request'.
+    """
+    if not _CONTRACT_PATH.exists():
+        msg = f"contract.yaml not found at {_CONTRACT_PATH}"
+        raise RuntimeError(msg)
+
+    with open(_CONTRACT_PATH) as fh:
+        data = yaml.safe_load(fh) or {}
+
+    event_bus = data.get("event_bus", {}) or {}
+    publish_topics: list[str] = event_bus.get("publish_topics", []) or []
+
+    for topic in publish_topics:
+        if _DELEGATION_TOPIC_SUFFIX in topic:
+            return topic
+
+    msg = (
+        f"contract.yaml at {_CONTRACT_PATH} does not declare a "
+        f"publish topic containing {_DELEGATION_TOPIC_SUFFIX!r}"
+    )
+    raise RuntimeError(msg)
+
+
+_TOPIC_DELEGATION_REQUEST: str = _load_delegation_topic()
 
 # Event type used by the delegation dispatcher for message routing.
 # Must match DispatcherDelegationRequest.message_types.
@@ -258,7 +296,7 @@ class HandlerBuildDispatch:
 
         return ModelDelegationPayload(
             event_type=_DELEGATION_EVENT_TYPE,
-            topic=TOPIC_DELEGATION_REQUEST,
+            topic=_TOPIC_DELEGATION_REQUEST,
             payload=payload,
             correlation_id=correlation_id,
         )
