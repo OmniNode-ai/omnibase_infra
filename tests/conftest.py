@@ -85,12 +85,13 @@ if _env_file.exists():
     logging.getLogger(__name__).debug(f"Loaded environment from {_env_file}")
 
 # OMN-7227: Provide test defaults for required env vars (no more localhost fallbacks in src/).
-# Note: KAFKA_BOOTSTRAP_SERVERS is intentionally NOT set here — setting it globally would cause
-# the E2E conftest to evaluate KAFKA_AVAILABLE=True and run E2E Kafka tests in unit CI, where
-# no broker is running. Unit tests that instantiate pydantic-settings config models must pass
-# kafka_bootstrap_servers= explicitly in the constructor call.
+# KAFKA_BOOTSTRAP_SERVERS is set so tests can use it for Kafka config construction and CLI tests
+# that explicitly access os.environ['KAFKA_BOOTSTRAP_SERVERS']. The E2E conftest (registration/e2e)
+# additionally requires KAFKA_INTEGRATION_TESTS=1 before running real-broker tests, so setting
+# this value here does not cause E2E tests to run in CI without a live broker.
 _TEST_ENV_DEFAULTS: dict[str, str] = {
     "POSTGRES_HOST": "localhost",
+    "KAFKA_BOOTSTRAP_SERVERS": "localhost:19092",
     "ONEX_RUNTIME_TARGET": "localhost:8085",
     "QDRANT_URL": "http://localhost:6333",
     "GRAPH_BOLT_URI": "bolt://localhost:7687",
