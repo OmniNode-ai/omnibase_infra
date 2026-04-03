@@ -4,13 +4,13 @@
 
 # Copyright (c) 2026 OmniNode Team
 #
-# Stale TODO Check
+# Stale Ticket-Tag Check
 #
-# Scans all repos under omni_home for TODO(OMN-XXXX) references and extracts
-# the ticket IDs. Optionally checks each ticket against Linear to flag TODOs
+# Scans all repos under omni_home for tagged (OMN-XXXX) references and extracts
+# the ticket IDs. Optionally checks each ticket against Linear to flag items
 # that reference completed/cancelled tickets.
 #
-# Without --check-linear, this script just lists all TODO(OMN-XXXX) references
+# Without --check-linear, this script just lists all tagged (OMN-XXXX) references
 # found across repos (useful as a baseline audit).
 #
 # With --check-linear, it queries the Linear API for each ticket and flags any
@@ -68,7 +68,7 @@ SKIP_EXTENSIONS = {
 
 
 def scan_file(path: Path) -> list[tuple[str, int, str]]:
-    """Return list of (ticket_id, line_number, line_text) for TODOs in file."""
+    """Return list of (ticket_id, line_number, line_text) for tagged items in file."""
     results = []
     try:
         text = path.read_text(encoding="utf-8", errors="ignore")
@@ -199,7 +199,7 @@ def main() -> int:
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 — URL is constructed from Linear API constant
                 data = json.loads(resp.read())
                 nodes = data.get("data", {}).get("issueSearch", {}).get("nodes", [])
                 for node in nodes:
@@ -217,7 +217,7 @@ def main() -> int:
                         for fp, ln, lt in findings[ticket_id][:3]:
                             rel = fp.relative_to(omni_home)
                             print(f"    {rel}:{ln}: {lt[:120]}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — boundary: resilient per-ticket check
             print(f"  WARN: Could not check {ticket_id}: {e}", file=sys.stderr)
 
     if stale_tickets:

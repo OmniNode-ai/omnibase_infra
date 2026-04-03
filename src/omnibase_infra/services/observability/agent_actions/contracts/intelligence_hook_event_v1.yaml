@@ -7,20 +7,16 @@ topic: "onex.cmd.omniintelligence.claude-hook-event.v1"
 schema_version: "1.0.0"
 ticket: "OMN-7360"
 description: >
-  Full Claude Code hook event sent to the intelligence pipeline for analysis.
-  Contains the complete prompt content (access-restricted topic). This is the
-  privacy-sensitive counterpart to the preview-safe evt topics.
+  Full Claude Code hook event sent to the intelligence pipeline for analysis. Contains the complete prompt content (access-restricted topic). This is the privacy-sensitive counterpart to the preview-safe evt topics.
 
 producer:
   repo: "omniclaude"
   file: "src/omniclaude/hooks/handler_event_emitter.py"
   function: "emit_intelligence_event"
-
 consumer:
   repo: "omniintelligence"
   file: "src/omniintelligence/consumers/hook_event_consumer.py"
   model: "ModelClaudeHookEvent"
-
 required_fields:
   - name: "session_id"
     type: "string"
@@ -34,7 +30,6 @@ required_fields:
   - name: "event_type"
     type: "string"
     description: "Hook event type (session_started, prompt_submitted, tool_executed, session_ended)."
-
 optional_fields:
   - name: "task_id"
     type: "string"

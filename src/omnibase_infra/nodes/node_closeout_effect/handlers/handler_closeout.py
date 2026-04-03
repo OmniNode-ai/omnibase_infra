@@ -78,7 +78,7 @@ class HandlerCloseout:
         merge_sweep_ok = True
         prs_merged = 0
         try:
-            # TODO: Wire to actual merge-sweep node invocation via orchestrator
+            # TODO(OMN-7408): Wire to actual merge-sweep node invocation via orchestrator
             logger.info("Merge sweep: delegating to merge-sweep workflow")
             merge_sweep_ok = True
         except Exception as exc:  # noqa: BLE001 — boundary: catch-all for merge-sweep resilience

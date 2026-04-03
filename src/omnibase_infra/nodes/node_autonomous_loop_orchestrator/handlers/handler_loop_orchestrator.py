@@ -270,7 +270,7 @@ class HandlerLoopOrchestrator:
                 )
 
             elif intent.intent_type == EnumBuildLoopIntentType.START_FILL:
-                # TODO: Fetch real scored tickets from Linear/backlog
+                # TODO(OMN-7324): Fetch real scored tickets from Linear/backlog
                 scored = _placeholder_scored_tickets()
                 fill_result = await self._rsd_fill.handle(
                     correlation_id=correlation_id,
@@ -301,7 +301,7 @@ class HandlerLoopOrchestrator:
                 )
 
             elif intent.intent_type == EnumBuildLoopIntentType.START_BUILD:
-                # TODO: Use actual classified tickets
+                # TODO(OMN-7325): Use actual classified tickets
                 targets = _placeholder_build_targets()
                 dispatch_result = await self._dispatch.handle(
                     correlation_id=correlation_id,

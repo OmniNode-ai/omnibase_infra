@@ -136,7 +136,7 @@ def main() -> int:
     print("=== Cross-Repo Prefix Conflicts ===")
     prefix_conflicts = 0
     for prefix, entries in sorted(prefix_map.items()):
-        repos = set(repo for repo, _ in entries)
+        repos = {repo for repo, _ in entries}
         if len(repos) > 1:
             prefix_conflicts += 1
             print(f"  Prefix {prefix} used in {len(repos)} repos:")
@@ -153,7 +153,7 @@ def main() -> int:
     print("=== Cross-Repo Table Name Conflicts ===")
     table_conflicts = 0
     for table_name, entries in sorted(table_map.items()):
-        repos = set(repo for repo, _ in entries)
+        repos = {repo for repo, _ in entries}
         if len(repos) > 1:
             table_conflicts += 1
             print(f"  Table '{table_name}' created in {len(repos)} repos:")
