@@ -377,6 +377,7 @@ class TestConfigEnvironment:
     @pytest.mark.unit
     def test_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Environment variables override default values."""
+        monkeypatch.setenv(f"{_ENV_PREFIX}KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
         monkeypatch.setenv(f"{_ENV_PREFIX}POSTGRES_DSN", _REQUIRED_DSN)
         monkeypatch.setenv(f"{_ENV_PREFIX}BATCH_SIZE", "42")
         monkeypatch.setenv(f"{_ENV_PREFIX}HEALTH_CHECK_PORT", "9999")
@@ -394,6 +395,7 @@ class TestConfigEnvironment:
         # pydantic-settings with case_sensitive=False matches env vars
         # regardless of case. The env var name itself is always uppercase
         # on most OSes, but the field name mapping is case-insensitive.
+        monkeypatch.setenv(f"{_ENV_PREFIX}KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
         monkeypatch.setenv(f"{_ENV_PREFIX}POSTGRES_DSN", _REQUIRED_DSN)
         monkeypatch.setenv(f"{_ENV_PREFIX}KAFKA_GROUP_ID", "custom-group")
 
@@ -404,6 +406,7 @@ class TestConfigEnvironment:
     @pytest.mark.unit
     def test_env_topics_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Topics can be overridden via environment variable (JSON list)."""
+        monkeypatch.setenv(f"{_ENV_PREFIX}KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
         monkeypatch.setenv(f"{_ENV_PREFIX}POSTGRES_DSN", _REQUIRED_DSN)
         monkeypatch.setenv(
             f"{_ENV_PREFIX}TOPICS",

@@ -209,6 +209,7 @@ class TestConfigEnvironment:
     @pytest.mark.unit
     def test_env_batch_size_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """batch_size can be overridden via environment variable."""
+        monkeypatch.setenv(f"{_ENV_PREFIX}KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
         monkeypatch.setenv(f"{_ENV_PREFIX}POSTGRES_DSN", _REQUIRED_DSN)
         monkeypatch.setenv(f"{_ENV_PREFIX}BATCH_SIZE", "42")
 
@@ -219,6 +220,7 @@ class TestConfigEnvironment:
     @pytest.mark.unit
     def test_env_health_port_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """health_check_port can be overridden via environment variable."""
+        monkeypatch.setenv(f"{_ENV_PREFIX}KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
         monkeypatch.setenv(f"{_ENV_PREFIX}POSTGRES_DSN", _REQUIRED_DSN)
         monkeypatch.setenv(f"{_ENV_PREFIX}HEALTH_CHECK_PORT", "9999")
 
