@@ -47,6 +47,7 @@ CORRELATION_ID = "corr-001"
 def _build_config(grace_window: float = 0.0) -> ConfigSavingsEstimation:
     """Build a test config with zero grace window for immediate finalization."""
     return ConfigSavingsEstimation(
+        kafka_bootstrap_servers="localhost:19092",
         grace_window_seconds=max(grace_window, 1.0),
         session_timeout_seconds=3600.0,
         max_sessions=100,
