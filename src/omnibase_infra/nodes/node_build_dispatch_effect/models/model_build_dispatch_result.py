@@ -9,6 +9,7 @@ Related:
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -16,6 +17,22 @@ from pydantic import BaseModel, ConfigDict, Field
 from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_dispatch_outcome import (
     ModelBuildDispatchOutcome,
 )
+
+
+class ModelDelegationPayload(BaseModel):
+    """A delegation request payload to be published by the orchestrator.
+
+    Effect handlers must not publish events directly — they return payloads
+    for the orchestrator to publish (architectural rule: only orchestrators
+    may access the event bus).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: str = Field(..., description="Logical event type for routing.")
+    topic: str = Field(..., description="Kafka topic to publish to.")
+    payload: dict[str, Any] = Field(..., description="JSON-serialisable event payload.")
+    correlation_id: str = Field(..., description="Tracing correlation ID.")
 
 
 class ModelBuildDispatchResult(BaseModel):
@@ -31,6 +48,10 @@ class ModelBuildDispatchResult(BaseModel):
         default=0, ge=0, description="Successfully dispatched count."
     )
     total_failed: int = Field(default=0, ge=0, description="Failed dispatch count.")
+    delegation_payloads: tuple[ModelDelegationPayload, ...] = Field(
+        default=(),
+        description="Delegation request payloads for the orchestrator to publish.",
+    )
 
 
-__all__: list[str] = ["ModelBuildDispatchResult"]
+__all__: list[str] = ["ModelBuildDispatchResult", "ModelDelegationPayload"]

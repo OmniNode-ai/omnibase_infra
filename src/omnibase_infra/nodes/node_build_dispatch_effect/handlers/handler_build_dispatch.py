@@ -4,13 +4,12 @@
 
 This is an EFFECT handler - performs external I/O (delegation dispatch).
 
-Dispatch mechanism (primary): publishes a ``ModelDelegationRequest`` per ticket
-to the ``onex.cmd.omnibase-infra.delegation-request.v1`` Kafka topic.  The
-runtime's ``MessageDispatchEngine`` routes each message to the delegation
-orchestrator FSM which handles LLM inference routing.
+Architectural rule: effect handlers must NOT have direct event bus access.
+Instead, this handler builds delegation request payloads and returns them
+in the result.  The orchestrator is responsible for publishing them to Kafka.
 
-Fallback mechanism: when no ``publisher`` callable is injected (e.g. in tests
-or when Kafka is unavailable), writes per-ticket JSON manifest files to
+Fallback mechanism: when the orchestrator does not have a publisher (e.g. in
+tests or when Kafka is unavailable), writes per-ticket JSON manifest files to
 ``$ONEX_STATE_DIR/autopilot/dispatch/`` for consumption by
 ``cron-buildloop.sh``.
 
@@ -25,10 +24,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 from omnibase_infra.enums import (
@@ -43,14 +40,12 @@ from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_dispatch
 )
 from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_dispatch_result import (
     ModelBuildDispatchResult,
+    ModelDelegationPayload,
 )
 from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_target import (
     ModelBuildTarget,
 )
 from omnibase_infra.utils.util_friction_emitter import emit_build_loop_friction
-
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
 
 logger = logging.getLogger(__name__)
 
@@ -70,37 +65,15 @@ def _dispatch_dir() -> Path | None:
 class HandlerBuildDispatch:
     """Dispatches ticket-pipeline builds for AUTO_BUILDABLE tickets via delegation.
 
-    Primary path: publishes ``ModelDelegationRequest`` envelopes to Kafka for
-    each ticket.  The delegation orchestrator FSM routes each request to a
-    local LLM (DeepSeek-R1, Qwen3-Coder) or frontier Claude depending on
-    task type and model availability.
+    Primary path: builds ``ModelDelegationPayload`` objects for each ticket
+    and returns them in the result.  The orchestrator publishes these to
+    Kafka (architectural rule: only orchestrators may access the event bus).
 
-    Fallback path: when no publisher is injected, writes per-ticket JSON
-    manifests to the dispatch directory for ``cron-buildloop.sh``.
+    Fallback path: when ``use_filesystem_fallback=True``, writes per-ticket
+    JSON manifests to the dispatch directory for ``cron-buildloop.sh``.
 
     Failures on individual tickets do not block other dispatches.
     """
-
-    def __init__(
-        self,
-        publisher: Callable[..., Awaitable[bool]] | None = None,
-    ) -> None:
-        """Initialise with an optional event publisher.
-
-        Args:
-            publisher: An async callable with the signature::
-
-                    async def publish(
-                        event_type: str,
-                        payload: JsonType,
-                        correlation_id: str | None = None,
-                        topic: str | None = None,
-                    ) -> bool: ...
-
-                Typically ``AdapterProtocolEventPublisherKafka.publish``.
-                When ``None``, falls back to filesystem manifest writes.
-        """
-        self._publisher = publisher
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -115,6 +88,7 @@ class HandlerBuildDispatch:
         correlation_id: UUID,
         targets: tuple[ModelBuildTarget, ...],
         dry_run: bool = False,
+        use_filesystem_fallback: bool = False,
     ) -> ModelBuildDispatchResult:
         """Dispatch builds for each target ticket.
 
@@ -122,25 +96,30 @@ class HandlerBuildDispatch:
             correlation_id: Cycle correlation ID.
             targets: Tickets to dispatch.
             dry_run: Skip actual dispatch.
+            use_filesystem_fallback: Write filesystem manifests instead of
+                building delegation payloads (used when no Kafka publisher
+                is available).
 
         Returns:
-            ModelBuildDispatchResult with per-ticket outcomes.
+            ModelBuildDispatchResult with per-ticket outcomes and delegation
+            payloads for the orchestrator to publish.
         """
         logger.info(
-            "Build dispatch: %d targets (correlation_id=%s, dry_run=%s, kafka=%s)",
+            "Build dispatch: %d targets (correlation_id=%s, dry_run=%s, fallback=%s)",
             len(targets),
             correlation_id,
             dry_run,
-            self._publisher is not None,
+            use_filesystem_fallback,
         )
 
         outcomes: list[ModelBuildDispatchOutcome] = []
+        delegation_payloads: list[ModelDelegationPayload] = []
         total_dispatched = 0
         total_failed = 0
 
-        # Filesystem fallback: only needed when no publisher is injected
+        # Filesystem fallback: only needed when explicitly requested
         dispatch_path: Path | None = None
-        if self._publisher is None and targets and not dry_run:
+        if use_filesystem_fallback and targets and not dry_run:
             dispatch_path = _dispatch_dir()
             if dispatch_path is None:
                 msg = "ONEX_STATE_DIR not set — cannot write dispatch manifest"
@@ -167,17 +146,18 @@ class HandlerBuildDispatch:
                 continue
 
             try:
-                if self._publisher is not None:
-                    await self._publish_delegation_request(
-                        target=target,
-                        correlation_id=correlation_id,
-                    )
-                else:
+                if use_filesystem_fallback:
                     self._write_dispatch_manifest(
                         dispatch_path=dispatch_path,
                         target=target,
                         correlation_id=correlation_id,
                     )
+                else:
+                    payload = self._build_delegation_payload(
+                        target=target,
+                        correlation_id=correlation_id,
+                    )
+                    delegation_payloads.append(payload)
                 logger.info(
                     "Dispatched ticket-pipeline for %s: %s",
                     target.ticket_id,
@@ -193,14 +173,14 @@ class HandlerBuildDispatch:
                 total_dispatched += 1
             except Exception as exc:  # noqa: BLE001 — boundary: catch-all converts dispatch failure to outcome record
                 transport = (
-                    EnumInfraTransportType.KAFKA
-                    if self._publisher is not None
-                    else EnumInfraTransportType.FILESYSTEM
+                    EnumInfraTransportType.FILESYSTEM
+                    if use_filesystem_fallback
+                    else EnumInfraTransportType.KAFKA
                 )
                 operation = (
-                    "delegation_request_publish"
-                    if self._publisher is not None
-                    else "dispatch_manifest_write"
+                    "dispatch_manifest_write"
+                    if use_filesystem_fallback
+                    else "delegation_payload_build"
                 )
                 error_ctx = ModelInfraErrorContext.with_correlation(
                     transport_type=transport,
@@ -247,30 +227,26 @@ class HandlerBuildDispatch:
             outcomes=tuple(outcomes),
             total_dispatched=total_dispatched,
             total_failed=total_failed,
+            delegation_payloads=tuple(delegation_payloads),
         )
 
     # ------------------------------------------------------------------
-    # Primary dispatch: Kafka delegation request
+    # Primary dispatch: build delegation payload (orchestrator publishes)
     # ------------------------------------------------------------------
 
-    async def _publish_delegation_request(
+    def _build_delegation_payload(
         self,
         *,
         target: ModelBuildTarget,
         correlation_id: UUID,
-    ) -> None:
-        """Publish a delegation request for a single ticket to Kafka.
+    ) -> ModelDelegationPayload:
+        """Build a delegation request payload for a single ticket.
 
-        Builds a ``ModelDelegationRequest``-shaped payload and publishes it
-        to the delegation-request topic with the correct ``event_type`` so
-        that ``DispatcherDelegationRequest`` routes it to the delegation
-        orchestrator FSM.
-
-        Raises:
-            RuntimeError: If the publisher returns ``False`` (publish failed).
+        Returns a ``ModelDelegationPayload`` that the orchestrator will
+        publish to the delegation-request Kafka topic.
         """
         now = datetime.now(tz=UTC)
-        payload: JsonType = {
+        payload: dict[str, object] = {
             "prompt": f"Run ticket-pipeline for {target.ticket_id}",
             "task_type": "research",
             "source_session_id": None,
@@ -280,19 +256,12 @@ class HandlerBuildDispatch:
             "emitted_at": now.isoformat(),
         }
 
-        assert self._publisher is not None  # guarded by caller
-        success = await self._publisher(
+        return ModelDelegationPayload(
             event_type=_DELEGATION_EVENT_TYPE,
+            topic=TOPIC_DELEGATION_REQUEST,
             payload=payload,
             correlation_id=str(correlation_id),
-            topic=TOPIC_DELEGATION_REQUEST,
         )
-        if not success:
-            msg = (
-                f"Publisher returned False for {target.ticket_id} — "
-                "delegation request was not delivered"
-            )
-            raise RuntimeError(msg)
 
     # ------------------------------------------------------------------
     # Fallback dispatch: filesystem manifest

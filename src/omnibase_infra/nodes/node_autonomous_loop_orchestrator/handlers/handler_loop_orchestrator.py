@@ -100,7 +100,8 @@ class HandlerLoopOrchestrator:
         self._verify = HandlerVerify()
         self._rsd_fill = HandlerRsdFill()
         self._classify = HandlerTicketClassify()
-        self._dispatch = HandlerBuildDispatch(publisher=publisher)
+        self._dispatch = HandlerBuildDispatch()
+        self._publisher = publisher
 
     async def handle(
         self,
@@ -306,7 +307,27 @@ class HandlerLoopOrchestrator:
                     correlation_id=correlation_id,
                     targets=targets,
                     dry_run=state.dry_run,
+                    use_filesystem_fallback=self._publisher is None,
                 )
+
+                # Orchestrator publishes delegation payloads (handlers
+                # must not have direct event bus access).
+                for dp in dispatch_result.delegation_payloads:
+                    if self._publisher is not None:
+                        success = await self._publisher(
+                            event_type=dp.event_type,
+                            payload=dp.payload,
+                            correlation_id=dp.correlation_id,
+                            topic=dp.topic,
+                        )
+                        if not success:
+                            logger.warning(
+                                "Publisher returned False for delegation payload "
+                                "(correlation_id=%s, topic=%s)",
+                                dp.correlation_id,
+                                dp.topic,
+                            )
+
                 return ModelBuildLoopEvent(
                     correlation_id=correlation_id,
                     source_phase=EnumBuildLoopPhase.BUILDING,

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Unit tests for HandlerBuildDispatch — Kafka delegation and filesystem fallback.
+"""Unit tests for HandlerBuildDispatch — delegation payloads and filesystem fallback.
 
 Related:
     - OMN-7381: Wire handler_build_dispatch to delegation orchestrator
@@ -9,7 +9,6 @@ Related:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -34,18 +33,17 @@ def _target(ticket_id: str = "OMN-1234", title: str = "Fix widget") -> ModelBuil
 
 
 # ------------------------------------------------------------------
-# Kafka publisher path
+# Delegation payload path (primary — orchestrator publishes)
 # ------------------------------------------------------------------
 
 
 @pytest.mark.unit
-class TestKafkaDispatch:
-    """Tests for the primary Kafka delegation path."""
+class TestDelegationPayloads:
+    """Tests for the primary delegation payload path."""
 
     @pytest.mark.asyncio
-    async def test_publishes_delegation_request(self) -> None:
-        publisher = AsyncMock(return_value=True)
-        handler = HandlerBuildDispatch(publisher=publisher)
+    async def test_builds_delegation_payload(self) -> None:
+        handler = HandlerBuildDispatch()
 
         result = await handler.handle(
             correlation_id=uuid4(),
@@ -54,17 +52,16 @@ class TestKafkaDispatch:
 
         assert result.total_dispatched == 1
         assert result.total_failed == 0
-        publisher.assert_called_once()
+        assert len(result.delegation_payloads) == 1
 
-        call_kwargs = publisher.call_args.kwargs
-        assert call_kwargs["event_type"] == _DELEGATION_EVENT_TYPE
-        assert call_kwargs["topic"] == TOPIC_DELEGATION_REQUEST
-        assert "OMN-1234" in call_kwargs["payload"]["prompt"]
+        dp = result.delegation_payloads[0]
+        assert dp.event_type == _DELEGATION_EVENT_TYPE
+        assert dp.topic == TOPIC_DELEGATION_REQUEST
+        assert "OMN-1234" in dp.payload["prompt"]
 
     @pytest.mark.asyncio
-    async def test_publishes_multiple_targets(self) -> None:
-        publisher = AsyncMock(return_value=True)
-        handler = HandlerBuildDispatch(publisher=publisher)
+    async def test_builds_multiple_payloads(self) -> None:
+        handler = HandlerBuildDispatch()
 
         targets = (
             _target("OMN-1001", "First"),
@@ -75,74 +72,22 @@ class TestKafkaDispatch:
 
         assert result.total_dispatched == 3
         assert result.total_failed == 0
-        assert publisher.call_count == 3
-
-    @pytest.mark.asyncio
-    async def test_publish_failure_records_error(self) -> None:
-        publisher = AsyncMock(return_value=False)
-        handler = HandlerBuildDispatch(publisher=publisher)
-
-        result = await handler.handle(
-            correlation_id=uuid4(),
-            targets=(_target(),),
-        )
-
-        assert result.total_dispatched == 0
-        assert result.total_failed == 1
-        assert result.outcomes[0].dispatched is False
-        assert "not delivered" in (result.outcomes[0].error or "")
-
-    @pytest.mark.asyncio
-    async def test_publish_exception_records_error(self) -> None:
-        publisher = AsyncMock(side_effect=RuntimeError("Kafka down"))
-        handler = HandlerBuildDispatch(publisher=publisher)
-
-        result = await handler.handle(
-            correlation_id=uuid4(),
-            targets=(_target(),),
-        )
-
-        assert result.total_dispatched == 0
-        assert result.total_failed == 1
-        assert "Kafka down" in (result.outcomes[0].error or "")
-
-    @pytest.mark.asyncio
-    async def test_partial_failure_continues(self) -> None:
-        """One publish failure should not block subsequent tickets."""
-        call_count = 0
-
-        async def flaky_publisher(**kwargs: object) -> bool:
-            nonlocal call_count
-            call_count += 1
-            if call_count == 2:
-                raise RuntimeError("transient")
-            return True
-
-        handler = HandlerBuildDispatch(publisher=flaky_publisher)
-        targets = (
-            _target("OMN-1001", "A"),
-            _target("OMN-1002", "B"),
-            _target("OMN-1003", "C"),
-        )
-        result = await handler.handle(correlation_id=uuid4(), targets=targets)
-
-        assert result.total_dispatched == 2
-        assert result.total_failed == 1
+        assert len(result.delegation_payloads) == 3
 
     @pytest.mark.asyncio
     async def test_payload_shape(self) -> None:
-        """Ensure the published payload matches ModelDelegationRequest fields."""
-        publisher = AsyncMock(return_value=True)
-        handler = HandlerBuildDispatch(publisher=publisher)
+        """Ensure the delegation payload matches ModelDelegationRequest fields."""
+        handler = HandlerBuildDispatch()
         cid = uuid4()
 
-        await handler.handle(correlation_id=cid, targets=(_target(),))
+        result = await handler.handle(correlation_id=cid, targets=(_target(),))
 
-        payload = publisher.call_args.kwargs["payload"]
-        assert payload["task_type"] == "research"
-        assert payload["correlation_id"] == str(cid)
-        assert payload["max_tokens"] == 4096
-        assert "emitted_at" in payload
+        dp = result.delegation_payloads[0]
+        assert dp.payload["task_type"] == "research"
+        assert dp.payload["correlation_id"] == str(cid)
+        assert dp.payload["max_tokens"] == 4096
+        assert "emitted_at" in dp.payload
+        assert dp.correlation_id == str(cid)
 
 
 # ------------------------------------------------------------------
@@ -153,21 +98,7 @@ class TestKafkaDispatch:
 @pytest.mark.unit
 class TestDryRun:
     @pytest.mark.asyncio
-    async def test_dry_run_skips_publish(self) -> None:
-        publisher = AsyncMock(return_value=True)
-        handler = HandlerBuildDispatch(publisher=publisher)
-
-        result = await handler.handle(
-            correlation_id=uuid4(),
-            targets=(_target(),),
-            dry_run=True,
-        )
-
-        assert result.total_dispatched == 1
-        publisher.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_dry_run_no_publisher(self) -> None:
+    async def test_dry_run_skips_payload_build(self) -> None:
         handler = HandlerBuildDispatch()
 
         result = await handler.handle(
@@ -177,6 +108,21 @@ class TestDryRun:
         )
 
         assert result.total_dispatched == 1
+        assert len(result.delegation_payloads) == 0
+
+    @pytest.mark.asyncio
+    async def test_dry_run_with_fallback(self) -> None:
+        handler = HandlerBuildDispatch()
+
+        result = await handler.handle(
+            correlation_id=uuid4(),
+            targets=(_target(),),
+            dry_run=True,
+            use_filesystem_fallback=True,
+        )
+
+        assert result.total_dispatched == 1
+        assert len(result.delegation_payloads) == 0
 
 
 # ------------------------------------------------------------------
@@ -187,7 +133,7 @@ class TestDryRun:
 @pytest.mark.unit
 class TestFilesystemFallback:
     @pytest.mark.asyncio
-    async def test_writes_manifest_when_no_publisher(
+    async def test_writes_manifest_when_fallback(
         self, tmp_path: object, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import pathlib
@@ -195,13 +141,15 @@ class TestFilesystemFallback:
         state_dir = pathlib.Path(str(tmp_path))
         monkeypatch.setenv("ONEX_STATE_DIR", str(state_dir))
 
-        handler = HandlerBuildDispatch()  # no publisher
+        handler = HandlerBuildDispatch()
         result = await handler.handle(
             correlation_id=uuid4(),
             targets=(_target(),),
+            use_filesystem_fallback=True,
         )
 
         assert result.total_dispatched == 1
+        assert len(result.delegation_payloads) == 0
         manifest = state_dir / "autopilot" / "dispatch" / "OMN-1234.json"
         assert manifest.exists()
 
@@ -210,12 +158,13 @@ class TestFilesystemFallback:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("ONEX_STATE_DIR", raising=False)
-        handler = HandlerBuildDispatch()  # no publisher
+        handler = HandlerBuildDispatch()
 
         with pytest.raises(RuntimeError, match="ONEX_STATE_DIR"):
             await handler.handle(
                 correlation_id=uuid4(),
                 targets=(_target(),),
+                use_filesystem_fallback=True,
             )
 
 
@@ -228,7 +177,7 @@ class TestFilesystemFallback:
 class TestValidation:
     @pytest.mark.asyncio
     async def test_duplicate_ticket_ids_rejected(self) -> None:
-        handler = HandlerBuildDispatch(publisher=AsyncMock(return_value=True))
+        handler = HandlerBuildDispatch()
 
         with pytest.raises(ValueError, match="Duplicate"):
             await handler.handle(
