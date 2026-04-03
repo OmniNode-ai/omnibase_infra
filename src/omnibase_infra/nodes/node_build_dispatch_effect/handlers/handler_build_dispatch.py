@@ -41,7 +41,9 @@ logger = logging.getLogger(__name__)
 
 def _dispatch_dir() -> Path | None:
     """Resolve the dispatch manifest directory from ONEX_STATE_DIR."""
-    state_dir = os.environ.get("ONEX_STATE_DIR", "")
+    state_dir = os.environ.get(
+        "ONEX_STATE_DIR", ""
+    )  # ONEX_EXCLUDE: state-dir is runtime config, not business logic
     if not state_dir:
         return None
     return Path(state_dir) / "autopilot" / "dispatch"
