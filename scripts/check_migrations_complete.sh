@@ -20,7 +20,7 @@
 set -e
 
 PGUSER="${POSTGRES_USER:-postgres}"
-PGHOST="${POSTGRES_HOST:-localhost}"
+PGHOST="${POSTGRES_HOST:?POSTGRES_HOST required}"
 PGPORT="${POSTGRES_PORT:-5432}"
 PGDB="${POSTGRES_DB:-omnibase_infra}"
 

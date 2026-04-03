@@ -9,25 +9,20 @@ contract_version:
   minor: 0
   patch: 0
 node_type: "SCHEMA"
-
 topic: "onex.cmd.omnibase-infra.delegation-request.v1"
 schema_version: "1.0.0"
 ticket: "OMN-7360"
 description: >
-  Delegation request command emitted by omniclaude to delegate tasks (test, document,
-  research) to a local LLM via the ONEX runtime event bus. Prior incident: silent drops
-  caused by field name mismatches between producer and consumer.
+  Delegation request command emitted by omniclaude to delegate tasks (test, document, research) to a local LLM via the ONEX runtime event bus. Prior incident: silent drops caused by field name mismatches between producer and consumer.
 
 producer:
   repo: "omniclaude"
   file: "plugins/onex/hooks/lib/delegation_wrapper.py"
   function: "emit_delegation_request"
-
 consumer:
   repo: "omnibase_infra"
   file: "src/omnibase_infra/nodes/node_delegation_orchestrator/dispatchers/dispatcher_delegation_request.py"
   model: "ModelDelegationRequest"
-
 required_fields:
   - name: "prompt"
     type: "string"
@@ -43,7 +38,6 @@ required_fields:
   - name: "emitted_at"
     type: "datetime"
     description: "Timestamp when the request was created."
-
 optional_fields:
   - name: "source_session_id"
     type: "string"

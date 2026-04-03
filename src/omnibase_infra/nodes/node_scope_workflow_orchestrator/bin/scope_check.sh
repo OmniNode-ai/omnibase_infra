@@ -36,7 +36,7 @@ PAYLOAD=$(cat <<EOF
 EOF
 )
 
-echo "${PAYLOAD}" | kcat -P -b "${KAFKA_BOOTSTRAP_SERVERS:-localhost:19092}" -t "${TOPIC}"
+echo "${PAYLOAD}" | kcat -P -b "${KAFKA_BOOTSTRAP_SERVERS:-${TEST_KAFKA_HOST:-localhost}:19092}" -t "${TOPIC}"
 
 echo "scope-check command emitted"
 echo "  correlation_id: ${CORRELATION_ID}"

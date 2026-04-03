@@ -2535,8 +2535,7 @@ pattern_exemptions:
   - file_pattern: 'model_context_enrichment\.py'
     violation_pattern: "Field 'model_name' might reference an entity"
     reason: >
-      model_name is a free-text LLM identifier string (e.g. "gpt-4o"), not an entity reference.
-      Matches the producer schema in omniclaude enrichment_observability_emitter.py.
+      model_name is a free-text LLM identifier string (e.g. "gpt-4o"), not an entity reference. Matches the producer schema in omniclaude enrichment_observability_emitter.py.
 
     documentation:
       - enrichment_observability_emitter.py (omniclaude)
@@ -3050,32 +3049,32 @@ pattern_exemptions:
     violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
     reason: >
       ticket_id is a human-readable Linear identifier (e.g. "OMN-1234"), not a UUID.
-    ticket: OMN-5113
 
+    ticket: OMN-5113
   - file_pattern: 'model_ticket_for_classification\.py'
     violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
     reason: >
       ticket_id is a human-readable Linear identifier (e.g. "OMN-1234"), not a UUID.
-    ticket: OMN-5113
 
+    ticket: OMN-5113
   - file_pattern: 'model_build_target\.py'
     violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
     reason: >
       ticket_id is a human-readable Linear identifier (e.g. "OMN-1234"), not a UUID.
-    ticket: OMN-5113
 
+    ticket: OMN-5113
   - file_pattern: 'model_build_dispatch_outcome\.py'
     violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
     reason: >
       ticket_id is a human-readable Linear identifier (e.g. "OMN-1234"), not a UUID.
-    ticket: OMN-5113
 
+    ticket: OMN-5113
   - file_pattern: 'model_scored_ticket\.py'
     violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
     reason: >
       ticket_id is a human-readable Linear identifier (e.g. "OMN-1234"), not a UUID.
-    ticket: OMN-5113
 
+    ticket: OMN-5113
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

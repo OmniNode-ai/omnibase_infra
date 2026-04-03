@@ -123,7 +123,7 @@ check_postgres() {
         return
     fi
 
-    local pg_host="${POSTGRES_HOST:-localhost}"
+    local pg_host="${POSTGRES_HOST:?POSTGRES_HOST required}"
     local pg_port="${POSTGRES_PORT:-5436}"
     local pg_user="${POSTGRES_USER:-postgres}"
     local pg_db="${POSTGRES_DB:-omnibase_infra}"
@@ -163,7 +163,7 @@ check_redpanda() {
 
 check_valkey() {
     local name="valkey"
-    local vk_host="${VALKEY_HOST:-localhost}"
+    local vk_host="${VALKEY_HOST:?VALKEY_HOST required}"
     local vk_port="${VALKEY_PORT:-16379}"
     local vk_pass="${VALKEY_PASSWORD:-${REDIS_PASSWORD:-}}"
 
