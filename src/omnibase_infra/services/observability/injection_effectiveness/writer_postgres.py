@@ -50,8 +50,14 @@ from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.services.observability.injection_effectiveness.models.model_agent_match import (
     ModelAgentMatchEvent,
 )
+from omnibase_infra.services.observability.injection_effectiveness.models.model_context_enrichment import (
+    ModelContextEnrichmentEvent,
+)
 from omnibase_infra.services.observability.injection_effectiveness.models.model_context_utilization import (
     ModelContextUtilizationEvent,
+)
+from omnibase_infra.services.observability.injection_effectiveness.models.model_injection_recorded import (
+    ModelInjectionRecordedEvent,
 )
 from omnibase_infra.services.observability.injection_effectiveness.models.model_latency_breakdown import (
     ModelLatencyBreakdownEvent,
@@ -671,6 +677,178 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
 
         logger.debug(
             "Wrote manifest injection lifecycle batch",
+            extra={
+                "count": len(events),
+                "correlation_id": str(correlation_id),
+            },
+        )
+        return len(events)
+
+    async def write_context_enrichment(
+        self,
+        events: list[ModelContextEnrichmentEvent],
+        correlation_id: UUID,
+    ) -> int:
+        """Write batch of context enrichment events to PostgreSQL.
+
+        Inserts records into ``context_enrichment_events`` with
+        ``ON CONFLICT DO NOTHING`` idempotency (one row per session_id + channel).
+
+        This closes the OMN-6158 consumer gap: context-enrichment.v1 events
+        are now stored for enrichment effectiveness analysis.
+
+        Args:
+            events: List of context enrichment events to write.
+            correlation_id: Correlation ID for tracing.
+
+        Returns:
+            Count of events in the batch (idempotent -- skips duplicates).
+
+        Raises:
+            InfraConnectionError: If database connection fails.
+            InfraTimeoutError: If operation times out.
+            InfraUnavailableError: If circuit breaker is open.
+        """
+        if not events:
+            return 0
+
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker(
+                operation="write_context_enrichment",
+                correlation_id=correlation_id,
+            )
+
+        sql = """
+            INSERT INTO context_enrichment_events (
+                session_id, correlation_id, emitted_at,
+                channel, model_name, cache_hit, outcome,
+                latency_ms, tokens_before, tokens_after, net_tokens_saved,
+                similarity_score, quality_score,
+                repo, agent_name,
+                created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
+            ON CONFLICT (session_id, channel) DO NOTHING
+        """
+
+        async with db_operation_error_context(
+            operation="write_context_enrichment",
+            target_name="context_enrichment_events",
+            correlation_id=correlation_id,
+        ):
+            async with self._pool.acquire() as conn:
+                await set_statement_timeout(conn, self._query_timeout)
+                await conn.executemany(
+                    sql,
+                    [
+                        (
+                            e.session_id,
+                            e.correlation_id,
+                            e.timestamp,
+                            e.channel,
+                            e.model_name,
+                            e.cache_hit,
+                            e.outcome,
+                            e.latency_ms,
+                            e.tokens_before,
+                            e.tokens_after,
+                            e.net_tokens_saved,
+                            e.similarity_score,
+                            e.quality_score,
+                            e.repo,
+                            e.agent_name,
+                        )
+                        for e in events
+                    ],
+                )
+
+        async with self._circuit_breaker_lock:
+            await self._reset_circuit_breaker()
+
+        logger.debug(
+            "Wrote context enrichment batch",
+            extra={
+                "count": len(events),
+                "correlation_id": str(correlation_id),
+            },
+        )
+        return len(events)
+
+    async def write_injection_recorded(
+        self,
+        events: list[ModelInjectionRecordedEvent],
+        correlation_id: UUID,
+    ) -> int:
+        """Write batch of injection recorded events to PostgreSQL.
+
+        Inserts records into ``injection_recorded_events`` with
+        ``ON CONFLICT DO NOTHING`` idempotency (one row per session_id + emitted_at).
+
+        This closes the OMN-6158 consumer gap: injection-recorded.v1 events
+        are now stored for injection tracking analysis.
+
+        Args:
+            events: List of injection recorded events to write.
+            correlation_id: Correlation ID for tracing.
+
+        Returns:
+            Count of events in the batch (idempotent -- skips duplicates).
+
+        Raises:
+            InfraConnectionError: If database connection fails.
+            InfraTimeoutError: If operation times out.
+            InfraUnavailableError: If circuit breaker is open.
+        """
+        if not events:
+            return 0
+
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker(
+                operation="write_injection_recorded",
+                correlation_id=correlation_id,
+            )
+
+        sql = """
+            INSERT INTO injection_recorded_events (
+                session_id, correlation_id, emitted_at,
+                patterns_injected, total_injected_tokens, injection_latency_ms,
+                agent_name, repo, cache_hit,
+                created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            ON CONFLICT (session_id, emitted_at) DO NOTHING
+        """
+
+        async with db_operation_error_context(
+            operation="write_injection_recorded",
+            target_name="injection_recorded_events",
+            correlation_id=correlation_id,
+        ):
+            async with self._pool.acquire() as conn:
+                await set_statement_timeout(conn, self._query_timeout)
+                await conn.executemany(
+                    sql,
+                    [
+                        (
+                            e.session_id,
+                            e.correlation_id,
+                            e.emitted_at,
+                            e.patterns_injected,
+                            e.total_injected_tokens,
+                            e.injection_latency_ms,
+                            e.agent_name,
+                            e.repo,
+                            e.cache_hit,
+                        )
+                        for e in events
+                    ],
+                )
+
+        async with self._circuit_breaker_lock:
+            await self._reset_circuit_breaker()
+
+        logger.debug(
+            "Wrote injection recorded batch",
             extra={
                 "count": len(events),
                 "correlation_id": str(correlation_id),

@@ -22,11 +22,14 @@ Topics consumed:
     - onex.evt.omniclaude.context-utilization.v1
     - onex.evt.omniclaude.agent-match.v1
     - onex.evt.omniclaude.latency-breakdown.v1
+    - onex.evt.omniclaude.context-enrichment.v1 (OMN-6158)
+    - onex.evt.omniclaude.injection-recorded.v1 (OMN-6158)
 
 Related Tickets:
     - OMN-1890: Injection effectiveness observability consumer (current)
     - OMN-1889: Emit injection metrics from omniclaude hooks (producer)
     - OMN-1743: Agent actions consumer (reference pattern)
+    - OMN-6158: Add consumers for context-enrichment and injection-recorded events
 
 Example:
     >>> from omnibase_infra.services.observability.injection_effectiveness import (
@@ -76,13 +79,17 @@ from omnibase_infra.services.observability.injection_effectiveness.config import
 )
 from omnibase_infra.services.observability.injection_effectiveness.models import (
     ModelAgentMatchEvent,
+    ModelContextEnrichmentEvent,
     ModelContextUtilizationEvent,
+    ModelInjectionRecordedEvent,
     ModelLatencyBreakdownEvent,
     ModelManifestInjectionLifecycleEvent,
 )
 from omnibase_infra.services.observability.injection_effectiveness.writer_postgres import (
     WriterInjectionEffectivenessPostgres,
 )
+from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 
 if TYPE_CHECKING:
     from aiokafka.structs import ConsumerRecord
@@ -157,26 +164,45 @@ def mask_dsn_password(dsn: str) -> str:
 # Type Aliases and Constants
 # =============================================================================
 
+# Resolve topic strings from the canonical registry (no raw literals)
+_topic_registry = ServiceTopicRegistry.from_defaults()
+_T_CONTEXT_UTIL = _topic_registry.resolve(topic_keys.INJECTION_CONTEXT_UTILIZATION)
+_T_AGENT_MATCH = _topic_registry.resolve(topic_keys.INJECTION_AGENT_MATCH)
+_T_LATENCY = _topic_registry.resolve(topic_keys.INJECTION_LATENCY_BREAKDOWN)
+_T_MANIFEST_STARTED = _topic_registry.resolve(topic_keys.MANIFEST_INJECTION_STARTED)
+_T_MANIFEST_INJECTED = _topic_registry.resolve(topic_keys.MANIFEST_INJECTED)
+_T_MANIFEST_FAILED = _topic_registry.resolve(topic_keys.MANIFEST_INJECTION_FAILED)
+_T_CONTEXT_ENRICHMENT = _topic_registry.resolve(topic_keys.INJECTION_CONTEXT_ENRICHMENT)
+_T_INJECTION_RECORDED = _topic_registry.resolve(topic_keys.INJECTION_RECORDED)
+
 # Map topics to their Pydantic model class
 TOPIC_TO_MODEL: dict[str, type[BaseModel]] = {
-    "onex.evt.omniclaude.context-utilization.v1": ModelContextUtilizationEvent,
-    "onex.evt.omniclaude.agent-match.v1": ModelAgentMatchEvent,
-    "onex.evt.omniclaude.latency-breakdown.v1": ModelLatencyBreakdownEvent,
+    _T_CONTEXT_UTIL: ModelContextUtilizationEvent,
+    _T_AGENT_MATCH: ModelAgentMatchEvent,
+    _T_LATENCY: ModelLatencyBreakdownEvent,
     # Manifest injection lifecycle topics (OMN-1888 / OMN-2942)
-    "onex.evt.omniclaude.manifest-injection-started.v1": ModelManifestInjectionLifecycleEvent,
-    "onex.evt.omniclaude.manifest-injected.v1": ModelManifestInjectionLifecycleEvent,
-    "onex.evt.omniclaude.manifest-injection-failed.v1": ModelManifestInjectionLifecycleEvent,
+    _T_MANIFEST_STARTED: ModelManifestInjectionLifecycleEvent,
+    _T_MANIFEST_INJECTED: ModelManifestInjectionLifecycleEvent,
+    _T_MANIFEST_FAILED: ModelManifestInjectionLifecycleEvent,
+    # Context enrichment topic (OMN-2274 / OMN-6158)
+    _T_CONTEXT_ENRICHMENT: ModelContextEnrichmentEvent,
+    # Injection recorded topic (OMN-1673 / OMN-6158)
+    _T_INJECTION_RECORDED: ModelInjectionRecordedEvent,
 }
 
 # Map topics to writer method names
 TOPIC_TO_WRITER_METHOD: dict[str, str] = {
-    "onex.evt.omniclaude.context-utilization.v1": "write_context_utilization",
-    "onex.evt.omniclaude.agent-match.v1": "write_agent_match",
-    "onex.evt.omniclaude.latency-breakdown.v1": "write_latency_breakdowns",
+    _T_CONTEXT_UTIL: "write_context_utilization",
+    _T_AGENT_MATCH: "write_agent_match",
+    _T_LATENCY: "write_latency_breakdowns",
     # Manifest injection lifecycle topics (OMN-1888 / OMN-2942)
-    "onex.evt.omniclaude.manifest-injection-started.v1": "write_manifest_injection_lifecycle",
-    "onex.evt.omniclaude.manifest-injected.v1": "write_manifest_injection_lifecycle",
-    "onex.evt.omniclaude.manifest-injection-failed.v1": "write_manifest_injection_lifecycle",
+    _T_MANIFEST_STARTED: "write_manifest_injection_lifecycle",
+    _T_MANIFEST_INJECTED: "write_manifest_injection_lifecycle",
+    _T_MANIFEST_FAILED: "write_manifest_injection_lifecycle",
+    # Context enrichment topic (OMN-2274 / OMN-6158)
+    _T_CONTEXT_ENRICHMENT: "write_context_enrichment",
+    # Injection recorded topic (OMN-1673 / OMN-6158)
+    _T_INJECTION_RECORDED: "write_injection_recorded",
 }
 
 

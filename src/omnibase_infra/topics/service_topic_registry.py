@@ -75,6 +75,20 @@ class ServiceTopicRegistry:
             topic_keys.INJECTION_LATENCY_BREAKDOWN: (
                 "onex.evt.omniclaude.latency-breakdown.v1"
             ),
+            topic_keys.INJECTION_CONTEXT_ENRICHMENT: (
+                "onex.evt.omniclaude.context-enrichment.v1"
+            ),
+            topic_keys.INJECTION_RECORDED: (
+                "onex.evt.omniclaude.injection-recorded.v1"
+            ),
+            # Manifest injection lifecycle (OMN-1888)
+            topic_keys.MANIFEST_INJECTION_STARTED: (
+                "onex.evt.omniclaude.manifest-injection-started.v1"
+            ),
+            topic_keys.MANIFEST_INJECTED: ("onex.evt.omniclaude.manifest-injected.v1"),
+            topic_keys.MANIFEST_INJECTION_FAILED: (
+                "onex.evt.omniclaude.manifest-injection-failed.v1"
+            ),
             # LLM
             topic_keys.LLM_CALL_COMPLETED: (
                 "onex.evt.omniintelligence.llm-call-completed.v1"

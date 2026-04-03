@@ -51,6 +51,21 @@ INJECTION_AGENT_MATCH: Final[str] = "INJECTION_AGENT_MATCH"
 INJECTION_LATENCY_BREAKDOWN: Final[str] = "INJECTION_LATENCY_BREAKDOWN"
 """Latency breakdown metrics from omniclaude injection hooks."""
 
+INJECTION_CONTEXT_ENRICHMENT: Final[str] = "INJECTION_CONTEXT_ENRICHMENT"
+"""Context enrichment metrics from omniclaude injection hooks (OMN-6158)."""
+
+INJECTION_RECORDED: Final[str] = "INJECTION_RECORDED"
+"""Injection recorded events from omniclaude injection hooks (OMN-6158)."""
+
+MANIFEST_INJECTION_STARTED: Final[str] = "MANIFEST_INJECTION_STARTED"
+"""Manifest injection started lifecycle event (OMN-1888)."""
+
+MANIFEST_INJECTED: Final[str] = "MANIFEST_INJECTED"
+"""Manifest injected lifecycle event (OMN-1888)."""
+
+MANIFEST_INJECTION_FAILED: Final[str] = "MANIFEST_INJECTION_FAILED"
+"""Manifest injection failed lifecycle event (OMN-1888)."""
+
 # ==============================================================================
 # LLM Topics
 # ==============================================================================
@@ -243,8 +258,13 @@ __all__: list[str] = [
     "EVAL_COMPLETED",
     "HOOK_CONTEXT_INJECTED",
     "INJECTION_AGENT_MATCH",
+    "INJECTION_CONTEXT_ENRICHMENT",
     "INJECTION_CONTEXT_UTILIZATION",
     "INJECTION_LATENCY_BREAKDOWN",
+    "INJECTION_RECORDED",
+    "MANIFEST_INJECTED",
+    "MANIFEST_INJECTION_FAILED",
+    "MANIFEST_INJECTION_STARTED",
     "LLM_CALL_COMPLETED",
     "LLM_CALL_COMPLETED_INFRA",
     "LLM_EMBEDDING_REQUEST",
