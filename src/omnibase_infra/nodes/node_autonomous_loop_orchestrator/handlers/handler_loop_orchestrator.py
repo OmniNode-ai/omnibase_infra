@@ -19,6 +19,7 @@ Related:
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -90,13 +91,16 @@ class HandlerLoopOrchestrator:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.EFFECT
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        publisher: Callable[..., Awaitable[bool]] | None = None,
+    ) -> None:
         self._reducer = HandlerLoopState()
         self._closeout = HandlerCloseout()
         self._verify = HandlerVerify()
         self._rsd_fill = HandlerRsdFill()
         self._classify = HandlerTicketClassify()
-        self._dispatch = HandlerBuildDispatch()
+        self._dispatch = HandlerBuildDispatch(publisher=publisher)
 
     async def handle(
         self,

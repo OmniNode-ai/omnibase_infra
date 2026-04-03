@@ -38,6 +38,7 @@ def _target(ticket_id: str = "OMN-1234", title: str = "Fix widget") -> ModelBuil
 # ------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestKafkaDispatch:
     """Tests for the primary Kafka delegation path."""
 
@@ -149,6 +150,7 @@ class TestKafkaDispatch:
 # ------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestDryRun:
     @pytest.mark.asyncio
     async def test_dry_run_skips_publish(self) -> None:
@@ -182,6 +184,7 @@ class TestDryRun:
 # ------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestFilesystemFallback:
     @pytest.mark.asyncio
     async def test_writes_manifest_when_no_publisher(
@@ -221,6 +224,7 @@ class TestFilesystemFallback:
 # ------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestValidation:
     @pytest.mark.asyncio
     async def test_duplicate_ticket_ids_rejected(self) -> None:
