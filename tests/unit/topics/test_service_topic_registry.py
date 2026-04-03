@@ -177,8 +177,8 @@ class TestServiceTopicRegistryAllKeys:
         registry = ServiceTopicRegistry.from_defaults()
         keys = registry.all_keys()
         assert (
-            len(keys) == 45
-        )  # updated: +5 keys from OMN-6158 (context-enrichment, injection-recorded) and prior additions
+            len(keys) == 46
+        )  # updated: +1 key from OMN-7443 (routing-decided)
 
     def test_all_keys_match_topic_keys_module(self) -> None:
         """Every key in topic_keys.__all__ must be in the registry."""
