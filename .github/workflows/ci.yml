@@ -35,7 +35,7 @@ jobs:
   # Phase 1 - Quick Validation (parallel, ~2-3 min)
   # =============================================================================
   # Phase 2 - Parallel Test Suite (after Phase 1 completes)
-  #   10 splits of ~927 tests each (~3 min per split)
+  #   15 splits of ~618 tests each (~2-3 min per split)
   # Phase 3 - Aggregation
   # =============================================================================
 
@@ -611,10 +611,11 @@ jobs:
           done
           echo "Contract path pre-flight: ${CHECKED} local modules checked, ${WARNINGS} warnings, ${SKIPPED} cross-repo references skipped"
 
-  # Parallel test execution - 10 splits for ~927 tests each
-  # Split strategy: 9265 tests / 10 = ~927 tests per split (~3-4 min each)
+  # Parallel test execution - 15 splits for ~618 tests each
+  # Split strategy: 9265 tests / 15 = ~618 tests per split (~2-3 min each)
+  # Reduced from 10 splits + -n auto after repeated xdist OOM crashes on shard 3
   test-parallel:
-    name: Tests (Split ${{ matrix.split }}/10)
+    name: Tests (Split ${{ matrix.split }}/15)
     needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight]
     # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
     runs-on: >-
@@ -630,7 +631,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        split: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        split: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 
     steps:
       - name: Checkout code
@@ -645,14 +646,14 @@ jobs:
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
 
-      - name: Run test split ${{ matrix.split }}/10
+      - name: Run test split ${{ matrix.split }}/15
         run: |
           uv run pytest tests/ \
             --ignore=tests/integration/docker \
             -m "not slow and not chaos and not kafka" \
-            --splits 10 \
+            --splits 15 \
             --group ${{ matrix.split }} \
-            -n auto --dist loadgroup \
+            -n 2 --dist loadgroup \
             --timeout=60 \
             --timeout-method=thread \
             --tb=short \
@@ -830,7 +831,7 @@ jobs:
             echo "::error::Test matrix failed (result: $TESTS_RESULT)"
             exit 1
           fi
-          echo "All 10 test splits passed"
+          echo "All 15 test splits passed"
 
   # ============================================================================
   # CROSS-REPO MIGRATION CONFLICT CHECK (OMN-5772)
@@ -896,7 +897,7 @@ jobs:
              [[ "$migrationrequiredcheck" == "success" ]] && \
              [[ "$compliance" == "success" || "$compliance" == "skipped" ]]; then
             echo "All checks passed successfully"
-            echo "CI Tests Gate (10 splits): Passed"
+            echo "CI Tests Gate (15 splits): Passed"
             echo "Code Quality: Passed"
             echo "ONEX Validators: Passed"
             echo "Migration Freeze: Passed"
