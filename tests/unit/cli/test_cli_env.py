@@ -11,8 +11,16 @@ from unittest.mock import patch
 import pytest
 
 from omnibase_infra.cli.cli_env import (
+    BootstrapStepResult,
+    BootstrapStepStatus,
     CheckResult,
     CheckStatus,
+    _step_omni_home_exists,
+    _step_render_sync_settings,
+    _step_run_env_check,
+    _step_ssh_connectivity,
+    _step_symlink_plugin,
+    _step_write_env,
     check_config_no_hooks_block,
     check_config_settings_exists,
     check_config_settings_paths,
@@ -20,7 +28,9 @@ from omnibase_infra.cli.cli_env import (
     check_topology_plugin_symlink,
     fix_env_no_duplicates,
     fix_no_hooks_block,
+    format_bootstrap_summary,
     render_settings_json,
+    run_bootstrap,
     run_checks_for_machine,
     write_settings_local,
     write_settings_remote,
@@ -209,9 +219,7 @@ def test_dry_run_shows_diff_without_writing(tmp_path: Path) -> None:
     settings_file.write_text(json.dumps(old_content))
 
     machine = _make_machine()
-    diff = write_settings_local(
-        machine, target_path=str(settings_file), dry_run=True
-    )
+    diff = write_settings_local(machine, target_path=str(settings_file), dry_run=True)
 
     # File should be unchanged
     assert json.loads(settings_file.read_text()) == old_content
@@ -230,9 +238,7 @@ def test_dry_run_new_file(tmp_path: Path) -> None:
     settings_file = tmp_path / "settings.json"
     machine = _make_machine()
 
-    diff = write_settings_local(
-        machine, target_path=str(settings_file), dry_run=True
-    )
+    diff = write_settings_local(machine, target_path=str(settings_file), dry_run=True)
 
     # File should NOT exist
     assert not settings_file.exists()
@@ -240,7 +246,9 @@ def test_dry_run_new_file(tmp_path: Path) -> None:
     assert "OMNI_HOME" in diff
 
 
-def test_sync_failure_cleans_up_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sync_failure_cleans_up_tmp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """On failure after .tmp write, .tmp is removed and .bak stays."""
     settings_dir = tmp_path / ".claude"
     settings_dir.mkdir()
@@ -413,9 +421,7 @@ class TestCheckConfigSettingsPaths:
         settings = render_settings_json(machine)
         settings_file = tmp_path / "settings.json"
         settings_file.write_text(json.dumps(settings))
-        result = check_config_settings_paths(
-            machine, settings_path=str(settings_file)
-        )
+        result = check_config_settings_paths(machine, settings_path=str(settings_file))
         assert result.status == CheckStatus.PASS
 
     def test_fail_when_omni_home_wrong(self, tmp_path: Path) -> None:
@@ -424,9 +430,7 @@ class TestCheckConfigSettingsPaths:
         settings["env"]["OMNI_HOME"] = "/wrong/path"
         settings_file = tmp_path / "settings.json"
         settings_file.write_text(json.dumps(settings))
-        result = check_config_settings_paths(
-            machine, settings_path=str(settings_file)
-        )
+        result = check_config_settings_paths(machine, settings_path=str(settings_file))
         assert result.status == CheckStatus.FAIL
         assert result.fixable is True
         assert "OMNI_HOME" in result.detail
@@ -437,9 +441,7 @@ class TestCheckConfigSettingsPaths:
         settings["statusLine"]["command"] = "/wrong/statusline.sh"
         settings_file = tmp_path / "settings.json"
         settings_file.write_text(json.dumps(settings))
-        result = check_config_settings_paths(
-            machine, settings_path=str(settings_file)
-        )
+        result = check_config_settings_paths(machine, settings_path=str(settings_file))
         assert result.status == CheckStatus.FAIL
         assert "statusLine" in result.detail
 
@@ -510,9 +512,7 @@ class TestCheckEnvNoDuplicates:
 
     def test_pass_when_file_missing(self, tmp_path: Path) -> None:
         machine = _make_check_machine()
-        result = check_env_no_duplicates(
-            machine, env_path=str(tmp_path / "nope.env")
-        )
+        result = check_env_no_duplicates(machine, env_path=str(tmp_path / "nope.env"))
         assert result.status == CheckStatus.PASS
         assert "not found" in result.detail.lower()
 
@@ -553,9 +553,7 @@ class TestCheckTopologyPluginSymlink:
         cache_parent.mkdir()
         link = cache_parent / "onex"
         link.symlink_to(canonical)
-        result = check_topology_plugin_symlink(
-            machine, plugin_cache_path=str(link)
-        )
+        result = check_topology_plugin_symlink(machine, plugin_cache_path=str(link))
         assert result.status == CheckStatus.PASS
 
     def test_fail_when_regular_dir(self, tmp_path: Path) -> None:
@@ -622,6 +620,457 @@ class TestRunChecksForMachine:
             skip_secrets=True,
         )
         for check_id, result in results.items():
-            assert result["status"] in ("PASS", "SKIP"), (
-                f"{check_id}: {result}"
+            assert result["status"] in ("PASS", "SKIP"), f"{check_id}: {result}"
+
+
+# ---------------------------------------------------------------------------
+# env bootstrap tests
+# ---------------------------------------------------------------------------
+
+
+def _make_bootstrap_machine(
+    omni_home: str = "/Users/test/Code/omni_home",
+    infisical_participant: bool = True,
+) -> ModelMachineEntry:
+    return ModelMachineEntry(
+        machine_id="test-dev",
+        hostname="test.local",
+        ip="1.1.1.1",
+        role=EnumMachineRole.DEV,
+        omni_home=omni_home,
+        ssh_user="test",
+        infisical_participant=infisical_participant,
+    )
+
+
+def _ok_ssh_runner(
+    machine: ModelMachineEntry,
+    cmd: str,
+) -> tuple[int, str, str]:
+    """Mock SSH runner that always succeeds."""
+    if "echo ok" in cmd:
+        return 0, "ok\n", ""
+    if "test -d" in cmd:
+        return 0, "exists\n", ""
+    if "test -f" in cmd:
+        return 0, "exists\n", ""
+    if "readlink" in cmd:
+        return 0, machine.plugin_path + "\n", ""
+    return 0, "", ""
+
+
+def _fail_ssh_runner(
+    machine: ModelMachineEntry,
+    cmd: str,
+) -> tuple[int, str, str]:
+    """Mock SSH runner that always fails."""
+    return 255, "", "Connection refused"
+
+
+class TestBootstrapStepResult:
+    """BootstrapStepResult model basics."""
+
+    def test_step_result_to_dict(self) -> None:
+        r = BootstrapStepResult(
+            "ssh_connectivity", BootstrapStepStatus.VERIFIED, "SSH ok"
+        )
+        d = r.to_dict()
+        assert d["step"] == "ssh_connectivity"
+        assert d["status"] == "verified"
+        assert d["detail"] == "SSH ok"
+
+    def test_all_statuses(self) -> None:
+        for status in BootstrapStepStatus:
+            r = BootstrapStepResult("test", status, "detail")
+            assert r.status == status
+
+
+class TestStepSshConnectivity:
+    """Step 1: SSH connectivity."""
+
+    def test_verified_on_success(self) -> None:
+        machine = _make_bootstrap_machine()
+        result = _step_ssh_connectivity(machine, ssh_runner=_ok_ssh_runner)
+        assert result.status == BootstrapStepStatus.VERIFIED
+
+    def test_failed_on_connection_error(self) -> None:
+        machine = _make_bootstrap_machine()
+        result = _step_ssh_connectivity(machine, ssh_runner=_fail_ssh_runner)
+        assert result.status == BootstrapStepStatus.FAILED
+
+    def test_failed_on_exception(self) -> None:
+        def exploding_runner(m: ModelMachineEntry, cmd: str) -> tuple[int, str, str]:
+            raise OSError("Network unreachable")
+
+        machine = _make_bootstrap_machine()
+        result = _step_ssh_connectivity(machine, ssh_runner=exploding_runner)
+        assert result.status == BootstrapStepStatus.FAILED
+        assert "Network unreachable" in result.detail
+
+
+class TestStepOmniHomeExists:
+    """Step 2: omni_home exists."""
+
+    def test_verified_local(self, tmp_path: Path) -> None:
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        machine = _make_bootstrap_machine(omni_home=str(omni_home))
+        result = _step_omni_home_exists(machine, is_local=True)
+        assert result.status == BootstrapStepStatus.VERIFIED
+
+    def test_failed_local_missing(self, tmp_path: Path) -> None:
+        machine = _make_bootstrap_machine(omni_home=str(tmp_path / "nonexistent"))
+        result = _step_omni_home_exists(machine, is_local=True)
+        assert result.status == BootstrapStepStatus.FAILED
+
+    def test_verified_remote(self) -> None:
+        machine = _make_bootstrap_machine()
+        result = _step_omni_home_exists(
+            machine, is_local=False, ssh_runner=_ok_ssh_runner
+        )
+        assert result.status == BootstrapStepStatus.VERIFIED
+
+    def test_failed_remote(self) -> None:
+        machine = _make_bootstrap_machine()
+        result = _step_omni_home_exists(
+            machine, is_local=False, ssh_runner=_fail_ssh_runner
+        )
+        assert result.status == BootstrapStepStatus.FAILED
+
+
+class TestStepWriteEnv:
+    """Step 3: Write .env from template."""
+
+    def test_verified_when_exists(self, tmp_path: Path) -> None:
+        env_file = tmp_path / ".env"
+        env_file.write_text("KEY=val\n")
+        machine = _make_bootstrap_machine()
+        result = _step_write_env(machine, is_local=True, env_target_path=str(env_file))
+        assert result.status == BootstrapStepStatus.VERIFIED
+
+    def test_created_from_template(self, tmp_path: Path) -> None:
+        template = tmp_path / "template.env"
+        template.write_text("POSTGRES_PASSWORD=__REPLACE__\n")
+        env_target = tmp_path / "target" / ".env"
+        machine = _make_bootstrap_machine()
+        result = _step_write_env(
+            machine,
+            is_local=True,
+            env_template_path=str(template),
+            env_target_path=str(env_target),
+        )
+        assert result.status == BootstrapStepStatus.CREATED
+        assert env_target.exists()
+        assert "POSTGRES_PASSWORD" in env_target.read_text()
+
+    def test_warned_when_no_template(self, tmp_path: Path) -> None:
+        env_target = tmp_path / "target" / ".env"
+        machine = _make_bootstrap_machine(omni_home=str(tmp_path / "nonexistent"))
+        result = _step_write_env(
+            machine,
+            is_local=True,
+            env_template_path=str(tmp_path / "no_such_template"),
+            env_target_path=str(env_target),
+        )
+        assert result.status == BootstrapStepStatus.WARNED
+
+    def test_remote_verified_when_exists(self) -> None:
+        machine = _make_bootstrap_machine()
+        result = _step_write_env(machine, is_local=False, ssh_runner=_ok_ssh_runner)
+        assert result.status == BootstrapStepStatus.VERIFIED
+
+
+class TestStepRenderSyncSettings:
+    """Step 4: Render + sync settings."""
+
+    def test_verified_when_matches(self, tmp_path: Path) -> None:
+        machine = _make_bootstrap_machine()
+        settings = render_settings_json(machine)
+        target = tmp_path / "settings.json"
+        target.write_text(json.dumps(settings, indent=2) + "\n")
+        result = _step_render_sync_settings(
+            machine, is_local=True, target_path=str(target)
+        )
+        assert result.status == BootstrapStepStatus.VERIFIED
+
+    def test_created_when_missing(self, tmp_path: Path) -> None:
+        machine = _make_bootstrap_machine()
+        target = tmp_path / "settings.json"
+        result = _step_render_sync_settings(
+            machine, is_local=True, target_path=str(target)
+        )
+        assert result.status == BootstrapStepStatus.CREATED
+        assert target.exists()
+        parsed = json.loads(target.read_text())
+        assert parsed["env"]["OMNI_HOME"] == "/Users/test/Code/omni_home"
+
+    def test_created_when_content_differs(self, tmp_path: Path) -> None:
+        machine = _make_bootstrap_machine()
+        target = tmp_path / "settings.json"
+        target.write_text(json.dumps({"old": "data"}, indent=2) + "\n")
+        result = _step_render_sync_settings(
+            machine, is_local=True, target_path=str(target)
+        )
+        assert result.status == BootstrapStepStatus.CREATED
+
+
+class TestStepSymlinkPlugin:
+    """Step 5: Symlink plugin cache."""
+
+    def test_created_when_no_cache(self, tmp_path: Path) -> None:
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        machine = _make_bootstrap_machine(omni_home=str(omni_home))
+        cache = tmp_path / "plugin_cache"
+        result = _step_symlink_plugin(
+            machine, is_local=True, plugin_cache_path=str(cache)
+        )
+        assert result.status == BootstrapStepStatus.CREATED
+        assert cache.is_symlink()
+        assert (
+            str(cache.resolve()).endswith("omniclaude/plugins/onex")
+            or str(cache.readlink()) == machine.plugin_path
+        )
+
+    def test_verified_when_correct_symlink(self, tmp_path: Path) -> None:
+        omni_home = tmp_path / "omni_home"
+        canonical = omni_home / "omniclaude" / "plugins" / "onex"
+        canonical.mkdir(parents=True)
+        machine = _make_bootstrap_machine(omni_home=str(omni_home))
+        cache = tmp_path / "plugin_cache"
+        cache.symlink_to(machine.plugin_path)
+        result = _step_symlink_plugin(
+            machine, is_local=True, plugin_cache_path=str(cache)
+        )
+        assert result.status == BootstrapStepStatus.VERIFIED
+
+    def test_created_replaces_regular_dir(self, tmp_path: Path) -> None:
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        machine = _make_bootstrap_machine(omni_home=str(omni_home))
+        cache = tmp_path / "plugin_cache"
+        cache.mkdir()
+        (cache / "somefile").write_text("old")
+        result = _step_symlink_plugin(
+            machine, is_local=True, plugin_cache_path=str(cache)
+        )
+        assert result.status == BootstrapStepStatus.CREATED
+        assert cache.is_symlink()
+        # Backup should exist
+        assert Path(str(cache) + ".bak").exists()
+
+
+class TestStepRunEnvCheck:
+    """Step 8: Run env check."""
+
+    def test_verified_on_all_pass(self, tmp_path: Path) -> None:
+        machine = _make_bootstrap_machine()
+        settings = render_settings_json(machine)
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps(settings))
+        env_file = tmp_path / ".env"
+        env_file.write_text("FOO=1\n")
+        result = _step_run_env_check(
+            machine,
+            settings_path=str(settings_file),
+            env_path=str(env_file),
+            plugin_cache_path=str(tmp_path / "nonexistent"),
+        )
+        assert result.status == BootstrapStepStatus.VERIFIED
+
+    def test_failed_on_check_failures(self, tmp_path: Path) -> None:
+        machine = _make_bootstrap_machine()
+        # Write wrong settings to trigger path check failure
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps({"env": {"OMNI_HOME": "/wrong"}}))
+        result = _step_run_env_check(
+            machine,
+            settings_path=str(settings_file),
+            env_path=str(tmp_path / "nope"),
+            plugin_cache_path=str(tmp_path / "nonexistent"),
+        )
+        assert result.status == BootstrapStepStatus.FAILED
+
+
+class TestRunBootstrap:
+    """Integration: run_bootstrap orchestrator."""
+
+    def test_full_local_bootstrap(self, tmp_path: Path) -> None:
+        """Full local bootstrap creates settings and env, reports results."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        machine = _make_bootstrap_machine(
+            omni_home=str(omni_home),
+            infisical_participant=False,
+        )
+
+        # Create template
+        template = tmp_path / "template.env"
+        template.write_text("KEY=val\n")
+        env_target = tmp_path / ".env"
+        settings_target = tmp_path / "settings.json"
+
+        results = run_bootstrap(
+            machine,
+            is_local=True,
+            env_template_path=str(template),
+            env_target_path=str(env_target),
+            settings_target_path=str(settings_target),
+            plugin_cache_path=str(tmp_path / "plugin_cache"),
+            infra_root=str(tmp_path),  # no scripts here
+        )
+
+        # Should have all 8 steps
+        assert len(results) == 8
+        step_names = [r.step for r in results]
+        assert "ssh_connectivity" in step_names
+        assert "omni_home_exists" in step_names
+        assert "write_env" in step_names
+        assert "render_sync_settings" in step_names
+        assert "symlink_plugin" in step_names
+        assert "provision_infisical" in step_names
+        assert "seed_infisical" in step_names
+        assert "env_check" in step_names
+
+        # SSH should be skipped (local)
+        ssh_result = next(r for r in results if r.step == "ssh_connectivity")
+        assert ssh_result.status == BootstrapStepStatus.SKIPPED
+
+        # Infisical should be skipped (infisical_participant=False)
+        prov_result = next(r for r in results if r.step == "provision_infisical")
+        assert prov_result.status == BootstrapStepStatus.SKIPPED
+        seed_result = next(r for r in results if r.step == "seed_infisical")
+        assert seed_result.status == BootstrapStepStatus.SKIPPED
+
+        # No FAILED status
+        for r in results:
+            assert r.status != BootstrapStepStatus.FAILED, (
+                f"Step {r.step} failed: {r.detail}"
             )
+
+    def test_idempotent_rerun(self, tmp_path: Path) -> None:
+        """Re-running bootstrap reports verified for already-correct steps."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        machine = _make_bootstrap_machine(
+            omni_home=str(omni_home),
+            infisical_participant=False,
+        )
+
+        template = tmp_path / "template.env"
+        template.write_text("KEY=val\n")
+        env_target = tmp_path / ".env"
+        settings_target = tmp_path / "settings.json"
+        plugin_cache = tmp_path / "plugin_cache"
+
+        # First run
+        run_bootstrap(
+            machine,
+            is_local=True,
+            env_template_path=str(template),
+            env_target_path=str(env_target),
+            settings_target_path=str(settings_target),
+            plugin_cache_path=str(plugin_cache),
+            infra_root=str(tmp_path),
+        )
+
+        # Second run -- should be all verified/skipped
+        results = run_bootstrap(
+            machine,
+            is_local=True,
+            env_template_path=str(template),
+            env_target_path=str(env_target),
+            settings_target_path=str(settings_target),
+            plugin_cache_path=str(plugin_cache),
+            infra_root=str(tmp_path),
+        )
+
+        for r in results:
+            assert r.status in (
+                BootstrapStepStatus.VERIFIED,
+                BootstrapStepStatus.SKIPPED,
+                BootstrapStepStatus.WARNED,
+            ), f"Step {r.step} not idempotent: {r.status} - {r.detail}"
+
+    def test_ssh_failure_blocks_remote_steps(self) -> None:
+        """SSH failure on step 1 stops the pipeline."""
+        machine = _make_bootstrap_machine()
+        results = run_bootstrap(
+            machine,
+            is_local=False,
+            ssh_runner=_fail_ssh_runner,
+        )
+        assert len(results) == 1
+        assert results[0].step == "ssh_connectivity"
+        assert results[0].status == BootstrapStepStatus.FAILED
+
+    def test_continue_on_error(self, tmp_path: Path) -> None:
+        """--continue-on-error continues past failures."""
+        machine = _make_bootstrap_machine(
+            omni_home=str(tmp_path / "nonexistent"),
+            infisical_participant=False,
+        )
+        results = run_bootstrap(
+            machine,
+            is_local=True,
+            continue_on_error=True,
+            settings_target_path=str(tmp_path / "settings.json"),
+            env_target_path=str(tmp_path / ".env"),
+            env_template_path=str(tmp_path / "no_template"),
+            plugin_cache_path=str(tmp_path / "plugin_cache"),
+            infra_root=str(tmp_path),
+        )
+        # Should have all 8 steps even though omni_home doesn't exist
+        assert len(results) == 8
+        # omni_home step should be FAILED
+        omni_result = next(r for r in results if r.step == "omni_home_exists")
+        assert omni_result.status == BootstrapStepStatus.FAILED
+
+    def test_infisical_skipped_for_non_participant(self, tmp_path: Path) -> None:
+        """Infisical steps skipped when infisical_participant=False."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        machine = _make_bootstrap_machine(
+            omni_home=str(omni_home),
+            infisical_participant=False,
+        )
+        results = run_bootstrap(
+            machine,
+            is_local=True,
+            env_target_path=str(tmp_path / ".env"),
+            env_template_path=str(tmp_path / "no_template"),
+            settings_target_path=str(tmp_path / "settings.json"),
+            plugin_cache_path=str(tmp_path / "plugin_cache"),
+            infra_root=str(tmp_path),
+        )
+        prov = next(r for r in results if r.step == "provision_infisical")
+        seed = next(r for r in results if r.step == "seed_infisical")
+        assert prov.status == BootstrapStepStatus.SKIPPED
+        assert seed.status == BootstrapStepStatus.SKIPPED
+
+
+class TestFormatBootstrapSummary:
+    """format_bootstrap_summary output."""
+
+    def test_summary_includes_all_steps(self) -> None:
+        results = [
+            BootstrapStepResult("step1", BootstrapStepStatus.VERIFIED, "ok"),
+            BootstrapStepResult("step2", BootstrapStepStatus.CREATED, "done"),
+            BootstrapStepResult("step3", BootstrapStepStatus.SKIPPED, "n/a"),
+        ]
+        summary = format_bootstrap_summary(results)
+        assert "[ok] step1" in summary
+        assert "[++] step2" in summary
+        assert "[--] step3" in summary
+        assert "Summary:" in summary
+        assert "1 verified" in summary
+        assert "1 created" in summary
+        assert "1 skipped" in summary
+
+    def test_summary_with_failure(self) -> None:
+        results = [
+            BootstrapStepResult("step1", BootstrapStepStatus.FAILED, "boom"),
+        ]
+        summary = format_bootstrap_summary(results)
+        assert "[FAIL] step1" in summary
+        assert "1 failed" in summary

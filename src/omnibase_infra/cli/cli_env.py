@@ -115,7 +115,9 @@ def _diff_settings(old_content: str | None, new_content: str) -> str:
     new_lines = new_content.splitlines(keepends=True)
     import difflib
 
-    diff = difflib.unified_diff(old_lines, new_lines, fromfile="current", tofile="rendered")
+    diff = difflib.unified_diff(
+        old_lines, new_lines, fromfile="current", tofile="rendered"
+    )
     return "".join(diff)
 
 
@@ -243,9 +245,7 @@ def write_settings_remote(
             raise RuntimeError(f"Failed to write .tmp on remote: {result.stderr}")
 
         # Step 4: Validate JSON on remote
-        result = _ssh(
-            f"python3 -c \"import json; json.load(open('{tmp_target}'))\""
-        )
+        result = _ssh(f"python3 -c \"import json; json.load(open('{tmp_target}'))\"")
         if result.returncode != 0:
             raise RuntimeError(f"JSON validation failed on remote: {result.stderr}")
 
@@ -650,7 +650,9 @@ def fix_env_no_duplicates(env_path: str) -> None:
     path.write_text("\n".join(output_lines) + "\n")
 
 
-def fix_topology_plugin_symlink(machine: ModelMachineEntry, plugin_cache_path: str) -> None:
+def fix_topology_plugin_symlink(
+    machine: ModelMachineEntry, plugin_cache_path: str
+) -> None:
     """Replace regular directory with symlink to canonical plugin path. Creates .bak."""
     cache = Path(plugin_cache_path)
     bak = Path(plugin_cache_path + ".bak")
@@ -703,7 +705,10 @@ def _apply_fixes_for_machine(
     fixed: list[str] = []
     sp = settings_path or machine.claude_settings_path
     ep = env_path or f"{machine.resolved_home_dir}/.omnibase/.env"
-    pp = plugin_cache_path or f"{machine.resolved_home_dir}/.claude/plugins/onex@omninode-tools"
+    pp = (
+        plugin_cache_path
+        or f"{machine.resolved_home_dir}/.claude/plugins/onex@omninode-tools"
+    )
 
     for check_id, result in check_results.items():
         if result["status"] != "FAIL" or not result["fixable"]:
@@ -738,7 +743,11 @@ def _apply_fixes_for_machine(
     default="config/machines.yaml",
     help="Path to machines.yaml registry file",
 )
-@click.option("--fix", is_flag=True, help="Auto-fix fixable issues (local only unless --fix-remote)")
+@click.option(
+    "--fix",
+    is_flag=True,
+    help="Auto-fix fixable issues (local only unless --fix-remote)",
+)
 @click.option("--fix-remote", is_flag=True, help="Allow auto-fix on remote machines")
 @click.option("--machine-id", default=None, help="Check specific machine only")
 @click.option("--skip-secrets", is_flag=True, help="Skip Infisical identity check")
@@ -779,3 +788,562 @@ def check_env(
                     result["detail"] += " [use --fix-remote to auto-fix]"
 
     click.echo(json.dumps(all_results, indent=2))
+
+
+# ---------------------------------------------------------------------------
+# env bootstrap: one-command machine setup
+# ---------------------------------------------------------------------------
+
+
+class BootstrapStepStatus(StrEnum):
+    VERIFIED = "verified"
+    CREATED = "created"
+    SKIPPED = "skipped"
+    WARNED = "warned"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class BootstrapStepResult:
+    step: str
+    status: BootstrapStepStatus
+    detail: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"step": self.step, "status": str(self.status), "detail": self.detail}
+
+
+def _step_ssh_connectivity(
+    machine: ModelMachineEntry,
+    *,
+    ssh_runner: Any | None = None,
+) -> BootstrapStepResult:
+    """Step 1: Verify SSH connectivity to machine."""
+    step = "ssh_connectivity"
+    runner = ssh_runner or _default_ssh_runner
+    try:
+        rc, stdout, stderr = runner(machine, "echo ok")
+        if rc == 0 and "ok" in stdout:
+            return BootstrapStepResult(
+                step, BootstrapStepStatus.VERIFIED, "SSH connection ok"
+            )
+        return BootstrapStepResult(
+            step, BootstrapStepStatus.FAILED, f"SSH returned rc={rc}: {stderr}"
+        )
+    except Exception as exc:
+        return BootstrapStepResult(
+            step, BootstrapStepStatus.FAILED, f"SSH failed: {exc}"
+        )
+
+
+def _default_ssh_runner(
+    machine: ModelMachineEntry,
+    cmd: str,
+) -> tuple[int, str, str]:
+    """Run a command on a remote machine via SSH. Returns (rc, stdout, stderr)."""
+    ssh_base = [
+        "ssh",
+        "-o",
+        "ConnectTimeout=10",
+        "-o",
+        "BatchMode=yes",
+        "-p",
+        str(machine.ssh_port),
+        f"{machine.ssh_user}@{machine.ip}",
+    ]
+    result = subprocess.run(
+        [*ssh_base, cmd],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    return result.returncode, result.stdout, result.stderr
+
+
+def _step_omni_home_exists(
+    machine: ModelMachineEntry,
+    *,
+    is_local: bool = False,
+    ssh_runner: Any | None = None,
+) -> BootstrapStepResult:
+    """Step 2: Verify omni_home directory exists on the machine."""
+    step = "omni_home_exists"
+    if is_local:
+        if Path(machine.omni_home).is_dir():
+            return BootstrapStepResult(
+                step, BootstrapStepStatus.VERIFIED, f"{machine.omni_home} exists"
+            )
+        return BootstrapStepResult(
+            step, BootstrapStepStatus.FAILED, f"{machine.omni_home} not found"
+        )
+
+    runner = ssh_runner or _default_ssh_runner
+    try:
+        rc, stdout, _stderr = runner(
+            machine, f"test -d {machine.omni_home} && echo exists"
+        )
+        if rc == 0 and "exists" in stdout:
+            return BootstrapStepResult(
+                step, BootstrapStepStatus.VERIFIED, f"{machine.omni_home} exists"
+            )
+        return BootstrapStepResult(
+            step, BootstrapStepStatus.FAILED, f"{machine.omni_home} not found on remote"
+        )
+    except Exception as exc:
+        return BootstrapStepResult(
+            step, BootstrapStepStatus.FAILED, f"Check failed: {exc}"
+        )
+
+
+def _step_write_env(
+    machine: ModelMachineEntry,
+    *,
+    is_local: bool = False,
+    env_template_path: str | None = None,
+    env_target_path: str | None = None,
+    ssh_runner: Any | None = None,
+) -> BootstrapStepResult:
+    """Step 3: Write .env from template if missing."""
+    step = "write_env"
+    target = env_target_path or f"{machine.resolved_home_dir}/.omnibase/.env"
+
+    if is_local:
+        target_p = Path(target)
+        if target_p.exists():
+            return BootstrapStepResult(
+                step, BootstrapStepStatus.VERIFIED, f".env already exists at {target}"
+            )
+
+        # Find template
+        template = Path(env_template_path) if env_template_path else None
+        if template is None:
+            # Try relative to this package
+            candidates = [
+                Path(__file__).resolve().parents[3]
+                / ".env.example",  # src/../../../.env.example
+                Path(machine.omni_home) / "omnibase_infra" / ".env.example",
+            ]
+            for c in candidates:
+                if c.exists():
+                    template = c
+                    break
+
+        if template is None or not template.exists():
+            return BootstrapStepResult(
+                step, BootstrapStepStatus.WARNED, "No .env.example template found"
+            )
+
+        target_p.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(template), str(target_p))
+        return BootstrapStepResult(
+            step, BootstrapStepStatus.CREATED, f".env written from {template}"
+        )
+    else:
+        runner = ssh_runner or _default_ssh_runner
+        try:
+            rc, stdout, _ = runner(machine, f"test -f {target} && echo exists")
+            if rc == 0 and "exists" in stdout:
+                return BootstrapStepResult(
+                    step,
+                    BootstrapStepStatus.VERIFIED,
+                    f".env already exists at {target}",
+                )
+            return BootstrapStepResult(
+                step,
+                BootstrapStepStatus.WARNED,
+                "Remote .env missing; copy template manually",
+            )
+        except Exception as exc:
+            return BootstrapStepResult(
+                step, BootstrapStepStatus.WARNED, f"Could not check remote .env: {exc}"
+            )
+
+
+def _step_render_sync_settings(
+    machine: ModelMachineEntry,
+    *,
+    is_local: bool = False,
+    target_path: str | None = None,
+    ssh_runner: Any | None = None,
+) -> BootstrapStepResult:
+    """Step 4: Render + sync settings.json."""
+    step = "render_sync_settings"
+    settings = render_settings_json(machine)
+    new_content = json.dumps(settings, indent=2) + "\n"
+
+    if is_local:
+        target = Path(target_path or machine.claude_settings_path)
+        if target.exists():
+            existing = target.read_text()
+            if existing == new_content:
+                return BootstrapStepResult(
+                    step, BootstrapStepStatus.VERIFIED, "settings.json already matches"
+                )
+
+        try:
+            write_settings_local(machine, target_path=target_path, dry_run=False)
+            return BootstrapStepResult(
+                step, BootstrapStepStatus.CREATED, "settings.json written"
+            )
+        except Exception as exc:
+            return BootstrapStepResult(
+                step, BootstrapStepStatus.FAILED, f"Failed to write settings: {exc}"
+            )
+    else:
+        try:
+            write_settings_remote(machine, dry_run=False)
+            return BootstrapStepResult(
+                step, BootstrapStepStatus.CREATED, "settings.json written to remote"
+            )
+        except Exception as exc:
+            return BootstrapStepResult(
+                step,
+                BootstrapStepStatus.FAILED,
+                f"Failed to write remote settings: {exc}",
+            )
+
+
+def _step_symlink_plugin(
+    machine: ModelMachineEntry,
+    *,
+    is_local: bool = False,
+    plugin_cache_path: str | None = None,
+    ssh_runner: Any | None = None,
+) -> BootstrapStepResult:
+    """Step 5: Symlink plugin cache to canonical clone."""
+    step = "symlink_plugin"
+    cache_path = (
+        plugin_cache_path
+        or f"{machine.resolved_home_dir}/.claude/plugins/onex@omninode-tools"
+    )
+    canonical = machine.plugin_path
+
+    if is_local:
+        cache = Path(cache_path)
+        if cache.is_symlink():
+            link_target = str(cache.readlink())
+            if link_target == canonical:
+                return BootstrapStepResult(
+                    step,
+                    BootstrapStepStatus.VERIFIED,
+                    f"Symlink correct -> {canonical}",
+                )
+            # Wrong target, re-link
+            cache.unlink()
+            cache.symlink_to(canonical)
+            return BootstrapStepResult(
+                step, BootstrapStepStatus.CREATED, f"Symlink re-pointed to {canonical}"
+            )
+        if cache.exists():
+            bak = Path(cache_path + ".bak")
+            shutil.move(str(cache), str(bak))
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.symlink_to(canonical)
+        return BootstrapStepResult(
+            step, BootstrapStepStatus.CREATED, f"Symlink created -> {canonical}"
+        )
+    else:
+        runner = ssh_runner or _default_ssh_runner
+        try:
+            rc, stdout, _ = runner(machine, f"readlink {cache_path} 2>/dev/null")
+            if rc == 0 and stdout.strip() == canonical:
+                return BootstrapStepResult(
+                    step,
+                    BootstrapStepStatus.VERIFIED,
+                    f"Symlink correct -> {canonical}",
+                )
+            # Create symlink remotely
+            runner(
+                machine,
+                f"mkdir -p $(dirname {cache_path}) && ln -sfn {canonical} {cache_path}",
+            )
+            return BootstrapStepResult(
+                step,
+                BootstrapStepStatus.CREATED,
+                f"Remote symlink created -> {canonical}",
+            )
+        except Exception as exc:
+            return BootstrapStepResult(
+                step, BootstrapStepStatus.FAILED, f"Symlink failed: {exc}"
+            )
+
+
+def _step_provision_infisical(
+    machine: ModelMachineEntry,
+    *,
+    infra_root: str | None = None,
+) -> BootstrapStepResult:
+    """Step 6: Provision Infisical identity (delegate to provision-infisical.py)."""
+    step = "provision_infisical"
+    if not machine.infisical_participant:
+        return BootstrapStepResult(
+            step, BootstrapStepStatus.SKIPPED, "Machine is not an Infisical participant"
+        )
+
+    script = Path(infra_root or ".") / "scripts" / "provision-infisical.py"
+    if not script.exists():
+        return BootstrapStepResult(
+            step, BootstrapStepStatus.WARNED, f"Script not found: {script}"
+        )
+
+    try:
+        result = subprocess.run(
+            ["uv", "run", "python", str(script)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        if result.returncode == 0:
+            return BootstrapStepResult(
+                step, BootstrapStepStatus.CREATED, "Infisical identity provisioned"
+            )
+        return BootstrapStepResult(
+            step,
+            BootstrapStepStatus.WARNED,
+            f"Provision returned rc={result.returncode}: {result.stderr[:200]}",
+        )
+    except Exception as exc:
+        return BootstrapStepResult(
+            step, BootstrapStepStatus.WARNED, f"Provision failed: {exc}"
+        )
+
+
+def _step_seed_infisical(
+    machine: ModelMachineEntry,
+    *,
+    infra_root: str | None = None,
+) -> BootstrapStepResult:
+    """Step 7: Seed Infisical secrets (delegate to seed-infisical.py --execute)."""
+    step = "seed_infisical"
+    if not machine.infisical_participant:
+        return BootstrapStepResult(
+            step, BootstrapStepStatus.SKIPPED, "Machine is not an Infisical participant"
+        )
+
+    script = Path(infra_root or ".") / "scripts" / "seed-infisical.py"
+    if not script.exists():
+        return BootstrapStepResult(
+            step, BootstrapStepStatus.WARNED, f"Script not found: {script}"
+        )
+
+    try:
+        result = subprocess.run(
+            ["uv", "run", "python", str(script), "--execute"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        if result.returncode == 0:
+            return BootstrapStepResult(
+                step, BootstrapStepStatus.CREATED, "Infisical secrets seeded"
+            )
+        return BootstrapStepResult(
+            step,
+            BootstrapStepStatus.WARNED,
+            f"Seed returned rc={result.returncode}: {result.stderr[:200]}",
+        )
+    except Exception as exc:
+        return BootstrapStepResult(
+            step, BootstrapStepStatus.WARNED, f"Seed failed: {exc}"
+        )
+
+
+def _step_run_env_check(
+    machine: ModelMachineEntry,
+    *,
+    settings_path: str | None = None,
+    env_path: str | None = None,
+    plugin_cache_path: str | None = None,
+) -> BootstrapStepResult:
+    """Step 8: Run env check to verify."""
+    step = "env_check"
+    results = run_checks_for_machine(
+        machine,
+        settings_path=settings_path,
+        env_path=env_path,
+        plugin_cache_path=plugin_cache_path,
+        skip_secrets=True,
+    )
+
+    failures = [cid for cid, r in results.items() if r["status"] == "FAIL"]
+    warns = [cid for cid, r in results.items() if r["status"] == "WARN"]
+
+    if failures:
+        return BootstrapStepResult(
+            step, BootstrapStepStatus.FAILED, f"Checks failed: {', '.join(failures)}"
+        )
+    if warns:
+        return BootstrapStepResult(
+            step, BootstrapStepStatus.WARNED, f"Checks warned: {', '.join(warns)}"
+        )
+    return BootstrapStepResult(step, BootstrapStepStatus.VERIFIED, "All checks passed")
+
+
+def run_bootstrap(
+    machine: ModelMachineEntry,
+    *,
+    is_local: bool = False,
+    continue_on_error: bool = False,
+    ssh_runner: Any | None = None,
+    env_template_path: str | None = None,
+    env_target_path: str | None = None,
+    settings_target_path: str | None = None,
+    plugin_cache_path: str | None = None,
+    infra_root: str | None = None,
+) -> list[BootstrapStepResult]:
+    """Run all 8 bootstrap steps for a machine.
+
+    Returns list of step results. Stops on FAILED unless continue_on_error.
+    """
+    results: list[BootstrapStepResult] = []
+
+    def _run(result: BootstrapStepResult) -> bool:
+        """Append result, return True if pipeline should continue."""
+        results.append(result)
+        if result.status == BootstrapStepStatus.FAILED and not continue_on_error:
+            return False
+        return True
+
+    # Step 1: SSH connectivity (skip for local)
+    if is_local:
+        results.append(
+            BootstrapStepResult(
+                "ssh_connectivity", BootstrapStepStatus.SKIPPED, "Local machine"
+            )
+        )
+    else:
+        r = _step_ssh_connectivity(machine, ssh_runner=ssh_runner)
+        if not _run(r):
+            return results
+
+    # Step 2: omni_home exists
+    r = _step_omni_home_exists(machine, is_local=is_local, ssh_runner=ssh_runner)
+    if not _run(r):
+        return results
+
+    # Step 3: Write .env
+    r = _step_write_env(
+        machine,
+        is_local=is_local,
+        env_template_path=env_template_path,
+        env_target_path=env_target_path,
+        ssh_runner=ssh_runner,
+    )
+    if not _run(r):
+        return results
+
+    # Step 4: Render + sync settings
+    r = _step_render_sync_settings(
+        machine,
+        is_local=is_local,
+        target_path=settings_target_path,
+        ssh_runner=ssh_runner,
+    )
+    if not _run(r):
+        return results
+
+    # Step 5: Symlink plugin cache
+    r = _step_symlink_plugin(
+        machine,
+        is_local=is_local,
+        plugin_cache_path=plugin_cache_path,
+        ssh_runner=ssh_runner,
+    )
+    if not _run(r):
+        return results
+
+    # Step 6: Provision Infisical
+    r = _step_provision_infisical(machine, infra_root=infra_root)
+    if not _run(r):
+        return results
+
+    # Step 7: Seed Infisical
+    r = _step_seed_infisical(machine, infra_root=infra_root)
+    if not _run(r):
+        return results
+
+    # Step 8: Run env check
+    r = _step_run_env_check(
+        machine,
+        settings_path=settings_target_path,
+        env_path=env_target_path,
+        plugin_cache_path=plugin_cache_path,
+    )
+    _run(r)
+
+    return results
+
+
+def format_bootstrap_summary(results: list[BootstrapStepResult]) -> str:
+    """Format a human-readable summary of bootstrap results."""
+    lines = []
+    for r in results:
+        icon = {
+            BootstrapStepStatus.VERIFIED: "[ok]",
+            BootstrapStepStatus.CREATED: "[++]",
+            BootstrapStepStatus.SKIPPED: "[--]",
+            BootstrapStepStatus.WARNED: "[!!]",
+            BootstrapStepStatus.FAILED: "[FAIL]",
+        }.get(r.status, "[??]")
+        lines.append(f"  {icon} {r.step}: {r.detail}")
+
+    # Summary counts
+    counts = {}
+    for r in results:
+        counts[r.status] = counts.get(r.status, 0) + 1
+    summary_parts = [f"{count} {status}" for status, count in sorted(counts.items())]
+    lines.append(f"\nSummary: {', '.join(summary_parts)}")
+    return "\n".join(lines)
+
+
+@env_group.command("bootstrap")
+@click.option("--machine-id", required=True, help="Machine ID from the registry")
+@click.option(
+    "--registry",
+    default="config/machines.yaml",
+    help="Path to machines.yaml registry file",
+)
+@click.option(
+    "--continue-on-error",
+    is_flag=True,
+    help="Continue after non-SSH failures",
+)
+def bootstrap(machine_id: str, registry: str, continue_on_error: bool) -> None:
+    """One-command machine bootstrap.
+
+    Runs 8 steps: SSH, omni_home, .env, settings, plugin symlink,
+    Infisical provision, Infisical seed, env check.
+
+    Each step reports verified/created/skipped/warned/failed.
+    Re-running reports verified for already-correct steps (idempotent).
+    """
+    reg = ModelMachineRegistry.from_yaml(Path(registry))
+    machine = reg.get_machine(machine_id)
+    local = reg.resolve_local_machine()
+    is_local = local is not None and machine.machine_id == local.machine_id
+
+    click.echo(f"Bootstrapping {machine_id} ({'local' if is_local else 'remote'})...")
+
+    # Resolve infra_root from registry file location
+    registry_path = Path(registry).resolve()
+    infra_root = (
+        str(registry_path.parent.parent)
+        if registry_path.parent.name == "config"
+        else "."
+    )
+
+    results = run_bootstrap(
+        machine,
+        is_local=is_local,
+        continue_on_error=continue_on_error,
+        infra_root=infra_root,
+    )
+
+    click.echo(format_bootstrap_summary(results))
+
+    # Exit with error if any step failed
+    if any(r.status == BootstrapStepStatus.FAILED for r in results):
+        raise SystemExit(1)
