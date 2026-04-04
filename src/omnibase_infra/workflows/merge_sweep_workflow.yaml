@@ -1,0 +1,61 @@
+# Workflow contract wrapping the merge sweep node orchestrator.
+# Enables `onex run` to execute the event-driven merge sweep pipeline.
+workflow_id: merge_sweep
+contract_version: {major: 1, minor: 0, patch: 0}
+node_type: workflow
+description: >
+  Merge sweep workflow: scan repos for open PRs, classify into tracks,
+  enable auto-merge on Track A PRs.
+
+initial_command: onex.cmd.skill.merge-sweep.v1
+terminal_event: onex.evt.skill.merge-sweep-complete.v1
+
+event_bus:
+  subscribe_topics:
+    - "onex.cmd.skill.merge-sweep.v1"
+    - "onex.evt.skill.merge-sweep-pr-list.v1"
+    - "onex.evt.skill.merge-sweep-classified.v1"
+    - "onex.evt.skill.merge-sweep-auto-merged.v1"
+  publish_topics:
+    - "onex.evt.skill.merge-sweep-complete.v1"
+    - "onex.evt.skill.merge-sweep-failed.v1"
+
+input_model:
+  class: ModelMergeSweepCommand
+  module: omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.models.model_merge_sweep_command
+
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    - event_model:
+        name: "ModelMergeSweepCommand"
+        module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.models.model_merge_sweep_command"
+      handler:
+        name: "HandlerMergeSweepInitiate"
+        module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.handlers.handler_merge_sweep_initiate"
+      output_events:
+        - "ModelPRListRequest"
+    - event_model:
+        name: "ModelPRListResult"
+        module: "omnibase_infra.nodes.node_merge_sweep_pr_list_effect.models.model_pr_list_result"
+      handler:
+        name: "HandlerPRListComplete"
+        module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.handlers.handler_pr_list_complete"
+      output_events:
+        - "ModelClassifyInput"
+    - event_model:
+        name: "ModelClassifyResult"
+        module: "omnibase_infra.nodes.node_merge_sweep_classify_compute.models.model_classify_result"
+      handler:
+        name: "HandlerClassifyComplete"
+        module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.handlers.handler_classify_complete"
+      output_events:
+        - "ModelAutoMergeRequest"
+    - event_model:
+        name: "ModelAutoMergeResult"
+        module: "omnibase_infra.nodes.node_merge_sweep_auto_merge_effect.models.model_auto_merge_result"
+      handler:
+        name: "HandlerAutoMergeComplete"
+        module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.handlers.handler_auto_merge_complete"
+      output_events:
+        - "ModelMergeSweepResult"
