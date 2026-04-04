@@ -35,6 +35,7 @@ import hmac
 import json
 import os
 import time
+from collections.abc import Generator
 from ipaddress import IPv4Network
 from typing import Any
 from unittest.mock import patch
@@ -155,14 +156,27 @@ TEST_SHARED_SECRET = "test-hmac-secret-for-unit-tests"
 
 
 @pytest.fixture(autouse=True)
-def _set_llm_shared_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Set LOCAL_LLM_SHARED_SECRET for all tests in this module.
+def _set_llm_env(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
+    """Set required LLM env vars for all tests in this module.
 
-    This is autouse so that the HMAC fail-closed check passes for standard
-    transport tests. Tests that specifically validate missing-secret behavior
-    override this by unsetting the variable.
+    - LOCAL_LLM_SHARED_SECRET: HMAC fail-closed check passes for standard tests.
+    - LLM_ENDPOINT_CIDR_ALLOWLIST: Required since OMN-7410 removed the fallback default.
+      Uses 192.168.86.0/24 to match the test URL (192.168.86.201).
+
+    Tests that specifically validate missing-secret or missing-CIDR behavior
+    override these by unsetting the variables.
     """
+    from omnibase_infra.mixins.mixin_llm_http_transport import MixinLlmHttpTransport
+
     monkeypatch.setenv("LOCAL_LLM_SHARED_SECRET", TEST_SHARED_SECRET)
+    monkeypatch.setenv("LLM_ENDPOINT_CIDR_ALLOWLIST", "192.168.86.0/24")
+    # Clear cached CIDR on both the base class and the test harness subclass
+    # to prevent cross-test pollution (ClassVar caches on whichever class calls first)
+    MixinLlmHttpTransport._LOCAL_LLM_CIDRS = None
+    LlmTransportHarness._LOCAL_LLM_CIDRS = None
+    yield
+    MixinLlmHttpTransport._LOCAL_LLM_CIDRS = None
+    LlmTransportHarness._LOCAL_LLM_CIDRS = None
 
 
 @pytest.fixture
@@ -1507,7 +1521,7 @@ class TestCidrAllowlistValidation:
         harness = LlmTransportHarness()
 
         with patch.object(
-            MixinLlmHttpTransport,
+            LlmTransportHarness,
             "_LOCAL_LLM_CIDRS",
             (IPv4Network("10.0.0.0/8"),),
         ):
@@ -1521,7 +1535,7 @@ class TestCidrAllowlistValidation:
         harness = LlmTransportHarness()
 
         with patch.object(
-            MixinLlmHttpTransport,
+            LlmTransportHarness,
             "_LOCAL_LLM_CIDRS",
             (IPv4Network("10.0.0.0/8"), IPv4Network("172.16.0.0/12")),
         ):
@@ -1539,7 +1553,7 @@ class TestCidrAllowlistValidation:
         harness = LlmTransportHarness()
 
         with patch.object(
-            MixinLlmHttpTransport,
+            LlmTransportHarness,
             "_LOCAL_LLM_CIDRS",
             (),
         ):
@@ -1558,12 +1572,14 @@ class TestCidrAllowlistValidation:
 class TestParseCidrAllowlist:
     """Validate _parse_cidr_allowlist() with various env var inputs."""
 
-    def test_parse_cidr_default(self) -> None:
-        """Without setting env var, returns the default (192.168.86.0/24)."""
+    def test_parse_cidr_missing_raises(self) -> None:
+        """Without setting env var, raises RuntimeError (no fallback)."""
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("LLM_ENDPOINT_CIDR_ALLOWLIST", None)
-            result = _parse_cidr_allowlist()
-        assert result == (IPv4Network("192.168.86.0/24"),)
+            with pytest.raises(
+                RuntimeError, match="LLM_ENDPOINT_CIDR_ALLOWLIST is required"
+            ):
+                _parse_cidr_allowlist()
 
     def test_parse_cidr_custom_single(self) -> None:
         """A single custom CIDR parses correctly."""
@@ -1589,14 +1605,14 @@ class TestParseCidrAllowlist:
             result = _parse_cidr_allowlist()
         assert result == (IPv4Network("10.0.0.0/8"), IPv4Network("172.16.0.0/12"))
 
-    def test_parse_cidr_all_malformed_falls_back(self) -> None:
-        """When all entries are malformed, falls back to default."""
+    def test_parse_cidr_all_malformed_raises(self) -> None:
+        """When all entries are malformed, raises RuntimeError (no fallback)."""
         with patch.dict(
             os.environ,
             {"LLM_ENDPOINT_CIDR_ALLOWLIST": "garbage, also-garbage"},
         ):
-            result = _parse_cidr_allowlist()
-        assert result == (IPv4Network("192.168.86.0/24"),)
+            with pytest.raises(RuntimeError, match=r"All entries.*were malformed"):
+                _parse_cidr_allowlist()
 
     def test_parse_cidr_host_bits_accepted(self) -> None:
         """strict=False auto-masks host bits: 192.168.86.100/24 -> 192.168.86.0/24."""
@@ -1607,25 +1623,18 @@ class TestParseCidrAllowlist:
             result = _parse_cidr_allowlist()
         assert result == (IPv4Network("192.168.86.0/24"),)
 
-    def test_parse_cidr_empty_string_falls_back(self) -> None:
-        """An empty string env var falls back to default."""
+    def test_parse_cidr_empty_string_raises(self) -> None:
+        """An empty string env var raises RuntimeError (no fallback)."""
         with patch.dict(os.environ, {"LLM_ENDPOINT_CIDR_ALLOWLIST": ""}):
-            result = _parse_cidr_allowlist()
-        assert result == (IPv4Network("192.168.86.0/24"),)
+            with pytest.raises(RuntimeError, match=r"All entries.*were malformed"):
+                _parse_cidr_allowlist()
 
-    def test_parse_cidr_default_logs_warning(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """When env var is unset, a warning is logged about the default [OMN-2811]."""
+    def test_parse_cidr_missing_raises_with_message(self) -> None:
+        """When env var is unset, RuntimeError includes setup instructions [OMN-2811]."""
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("LLM_ENDPOINT_CIDR_ALLOWLIST", None)
-            with caplog.at_level("WARNING"):
-                result = _parse_cidr_allowlist()
-        assert result == (IPv4Network("192.168.86.0/24"),)
-        assert any(
-            "LLM_ENDPOINT_CIDR_ALLOWLIST not set" in record.message
-            for record in caplog.records
-        )
+            with pytest.raises(RuntimeError, match="Add it to"):
+                _parse_cidr_allowlist()
 
     def test_parse_cidr_explicit_value_no_default_warning(
         self, caplog: pytest.LogCaptureFixture
@@ -1639,17 +1648,11 @@ class TestParseCidrAllowlist:
             for record in caplog.records
         )
 
-    def test_parse_cidr_empty_string_no_not_set_warning(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Empty string is 'explicitly set' — no 'not set' warning [OMN-2811]."""
+    def test_parse_cidr_empty_string_raises_malformed(self) -> None:
+        """Empty string raises RuntimeError about malformed entries [OMN-2811]."""
         with patch.dict(os.environ, {"LLM_ENDPOINT_CIDR_ALLOWLIST": ""}):
-            with caplog.at_level("WARNING"):
+            with pytest.raises(RuntimeError, match=r"All entries.*were malformed"):
                 _parse_cidr_allowlist()
-        assert not any(
-            "LLM_ENDPOINT_CIDR_ALLOWLIST not set" in record.message
-            for record in caplog.records
-        )
 
 
 # ── HMAC Signing (OMN-2250) ───────────────────────────────────────────
