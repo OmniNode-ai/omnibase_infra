@@ -199,7 +199,9 @@ class TestSavingsEstimationE2E:
         assert estimate["heuristic_savings_usd"] > 0.0
 
         # Verify total = direct + heuristic
-        expected_total = estimate["direct_savings_usd"] + estimate["heuristic_savings_usd"]
+        expected_total = (
+            estimate["direct_savings_usd"] + estimate["heuristic_savings_usd"]
+        )
         assert abs(estimate["estimated_total_savings_usd"] - expected_total) < 1e-8
 
         # Verify counterfactual model is set
