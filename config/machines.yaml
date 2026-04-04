@@ -1,0 +1,23 @@
+machines:
+  - machine_id: m2-ultra
+    hostname: Stickybeatz-Studio
+    ip: 192.168.86.101
+    role: dev
+    omni_home: /Users/jonah/Code/omni_home
+    ssh_user: jonah
+
+  - machine_id: infra-server
+    hostname: omninode-infra
+    ip: 192.168.86.201
+    role: infra
+    omni_home: /data/omninode/omni_home
+    ssh_user: jonah
+    home_dir: /home/jonah
+    infisical_participant: true
+
+  - machine_id: omnibook
+    hostname: omnibook
+    ip: 192.168.86.246
+    role: dev
+    omni_home: /Users/jonah/Code/omni_home
+    ssh_user: jonah
