@@ -29,10 +29,10 @@ from omnibase_infra.services.observability.savings_estimation.config import (
     ConfigSavingsEstimation,
 )
 from omnibase_infra.services.observability.savings_estimation.consumer import (
-    ServiceSavingsEstimator,
-    _compute_validator_catch_savings,
     EnumCatchSeverity,
+    ServiceSavingsEstimator,
     ValidatorCatchSignal,
+    _compute_validator_catch_savings,
 )
 
 # ---------------------------------------------------------------------------
