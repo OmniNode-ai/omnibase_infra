@@ -69,13 +69,12 @@ class EnumCatchSeverity(StrEnum):
 
 
 # Heuristic avoided-rework estimation per catch severity.
-# These are estimated developer-minutes saved per catch, multiplied by an
-# assumed blended rate of ~$1/min ($60/hr). The resulting USD values are
-# rough order-of-magnitude estimates, not measured cost accounting.
+# These are rough order-of-magnitude USD estimates per catch, calibrated
+# from observed rework patterns. Not derived from a fixed hourly rate.
 _SEVERITY_SAVINGS_USD: dict[EnumCatchSeverity, float] = {
-    EnumCatchSeverity.CRITICAL: 0.50,  # ~30 min rework avoided
-    EnumCatchSeverity.MAJOR: 0.20,  # ~12 min rework avoided
-    EnumCatchSeverity.MINOR: 0.05,  # ~3 min rework avoided
+    EnumCatchSeverity.CRITICAL: 0.50,
+    EnumCatchSeverity.MAJOR: 0.20,
+    EnumCatchSeverity.MINOR: 0.05,
 }
 
 # Estimated tokens that would have been wasted in rework per severity.
@@ -95,6 +94,8 @@ _SEVERITY_CONFIDENCE: dict[EnumCatchSeverity, float] = {
 # Counterfactual model: the highest-cost configured routing candidate.
 # This is the model that _could_ have been selected for the request.
 # Used to compute direct savings (actual cost vs counterfactual cost).
+# TODO(OMN-7494): Replace hardcoded map with canonical model catalog lookup
+# once the model registry is available.
 _COUNTERFACTUAL_MODEL_MAP: dict[str, str] = {
     # If actual model is sonnet, counterfactual is opus (more expensive)
     "claude-sonnet-4": "claude-opus-4-6",
@@ -106,19 +107,18 @@ _COUNTERFACTUAL_MODEL_MAP: dict[str, str] = {
     "claude-3-opus": "claude-opus-4-6",
 }
 
-_DEFAULT_COUNTERFACTUAL = "claude-opus-4-6"
-
 
 def _resolve_counterfactual(actual_model_id: str) -> str:
     """Resolve the counterfactual model for a given actual model.
 
     Returns the highest-cost configured model within the same capability class.
+    Falls back to actual_model_id if no match is found.
     """
     lower = actual_model_id.lower()
     for key, value in _COUNTERFACTUAL_MODEL_MAP.items():
         if key in lower:
             return value
-    return _DEFAULT_COUNTERFACTUAL
+    return actual_model_id
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +303,9 @@ def _build_effectiveness_entries(
 
     # If we have only validator catches and no other signals, create a
     # minimal entry so the session still produces an estimate.
-    if not entries and buf.validator_catches:
+    # Gate on outcome_received to avoid misclassifying timeout-only sessions
+    # into the treatment cohort (treatment_group defaults to "treatment").
+    if not entries and buf.validator_catches and buf.outcome_received:
         entries.append(
             ModelEffectivenessEntry(
                 utilization_score=0.0,
