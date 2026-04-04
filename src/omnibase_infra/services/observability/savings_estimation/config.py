@@ -26,6 +26,7 @@ def _default_consumed_topics() -> list[str]:
         reg.resolve(topic_keys.SESSION_OUTCOME_CANONICAL),
         reg.resolve(topic_keys.HOOK_CONTEXT_INJECTED),
         reg.resolve(topic_keys.VALIDATOR_CATCH),
+        reg.resolve(topic_keys.PATTERN_ENFORCEMENT),
     ]
 
 

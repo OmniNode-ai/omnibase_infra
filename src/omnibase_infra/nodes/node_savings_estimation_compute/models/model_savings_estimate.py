@@ -6,6 +6,7 @@
 
 Related Tickets:
     - OMN-6964: Token savings emitter
+    - OMN-7494: Heuristic savings and counterfactual model
 """
 
 from __future__ import annotations
@@ -87,11 +88,19 @@ class ModelSavingsEstimate(BaseModel):
     direct_savings_usd: float = Field(
         default=0.0, ge=0.0, description="Directly measured savings"
     )
+    heuristic_savings_usd: float = Field(
+        default=0.0,
+        ge=0.0,
+        description=(
+            "Estimated heuristic savings from validator catches and avoided rework. "
+            "This is an estimate, not measured cost accounting."
+        ),
+    )
     direct_tokens_saved: int = Field(
         default=0, ge=0, description="Directly measured tokens saved"
     )
     estimated_total_savings_usd: float = Field(
-        default=0.0, ge=0.0, description="Total estimated savings"
+        default=0.0, ge=0.0, description="Total estimated savings (direct + heuristic)"
     )
     estimated_total_tokens_saved: int = Field(
         default=0, ge=0, description="Total estimated tokens saved"

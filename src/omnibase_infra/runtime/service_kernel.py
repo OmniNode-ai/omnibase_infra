@@ -1311,6 +1311,7 @@ async def bootstrap() -> int:
                     _savings_registry.resolve(topic_keys.SESSION_OUTCOME_CANONICAL),
                     _savings_registry.resolve(topic_keys.HOOK_CONTEXT_INJECTED),
                     _savings_registry.resolve(topic_keys.VALIDATOR_CATCH),
+                    _savings_registry.resolve(topic_keys.PATTERN_ENFORCEMENT),
                 ]
 
                 async def _savings_consumer_loop() -> None:

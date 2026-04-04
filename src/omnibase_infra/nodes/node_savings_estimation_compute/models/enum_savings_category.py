@@ -6,6 +6,7 @@
 
 Related Tickets:
     - OMN-6964: Token savings emitter
+    - OMN-7494: Heuristic avoided-rework from validator catches
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ class EnumSavingsCategory(StrEnum):
     ARCHITECTURE = "architecture"
     FILE = "file"
     TOOL = "tool"
+    VALIDATOR_CATCH = "validator_catch"
 
 
 __all__: list[str] = ["EnumSavingsCategory"]

@@ -129,6 +129,9 @@ class ServiceTopicRegistry:
                 "onex.evt.omnibase-infra.savings-estimated.v1"
             ),
             topic_keys.VALIDATOR_CATCH: ("onex.evt.omniclaude.validator-catch.v1"),
+            topic_keys.PATTERN_ENFORCEMENT: (
+                "onex.evt.omniclaude.pattern-enforcement.v1"
+            ),
             topic_keys.HOOK_CONTEXT_INJECTED: (
                 "onex.evt.omniclaude.hook-context-injected.v1"
             ),

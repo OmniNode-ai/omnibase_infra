@@ -11,16 +11,17 @@
 #
 # Related Tickets:
 #   - OMN-6964: Token savings emitter
+#   - OMN-7494: Heuristic savings from validator catches, counterfactual model
 name: "node_savings_estimation_compute"
 contract_name: "node_savings_estimation_compute"
 node_name: "node_savings_estimation_compute"
 contract_version:
   major: 0
-  minor: 1
+  minor: 2
   patch: 0
 node_version:
   major: 0
-  minor: 1
+  minor: 2
   patch: 0
 node_type: "COMPUTE_GENERIC"
 description: >
@@ -90,3 +91,4 @@ metadata:
     - attribution
   related_tickets:
     - "OMN-6964"
+    - "OMN-7494"

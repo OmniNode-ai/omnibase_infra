@@ -140,6 +140,9 @@ SAVINGS_ESTIMATED: Final[str] = "SAVINGS_ESTIMATED"
 VALIDATOR_CATCH: Final[str] = "VALIDATOR_CATCH"
 """Validator catch events from pre-commit hooks, CI checks, poly enforcer."""
 
+PATTERN_ENFORCEMENT: Final[str] = "PATTERN_ENFORCEMENT"
+"""Pattern enforcement events from omniclaude hooks (severity-tagged catches)."""
+
 HOOK_CONTEXT_INJECTED: Final[str] = "HOOK_CONTEXT_INJECTED"
 """Hook context injection events from omniclaude UserPromptSubmit hooks."""
 
@@ -265,6 +268,7 @@ __all__: list[str] = [
     "MANIFEST_INJECTED",
     "MANIFEST_INJECTION_FAILED",
     "MANIFEST_INJECTION_STARTED",
+    "PATTERN_ENFORCEMENT",
     "LLM_CALL_COMPLETED",
     "LLM_CALL_COMPLETED_INFRA",
     "LLM_EMBEDDING_REQUEST",

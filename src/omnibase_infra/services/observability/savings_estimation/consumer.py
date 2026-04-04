@@ -19,12 +19,14 @@ Consumed topics:
     - onex.evt.omniclaude.session-outcome.v1
     - onex.evt.omniclaude.hook-context-injected.v1
     - onex.evt.omniclaude.validator-catch.v1
+    - onex.evt.omniclaude.pattern-enforcement.v1
 
 Produced:
     - onex.evt.omnibase-infra.savings-estimated.v1
 
 Related Tickets:
     - OMN-5550: Create ServiceSavingsEstimator Kafka consumer
+    - OMN-7494: Heuristic savings from validator catches
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ import logging
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from enum import StrEnum
 from uuid import UUID
 
 from omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_estimation import (
@@ -40,7 +43,9 @@ from omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savin
 )
 from omnibase_infra.nodes.node_savings_estimation_compute.models import (
     EnumModelTier,
+    EnumSavingsCategory,
     ModelEffectivenessEntry,
+    ModelSavingsCategory,
     ModelSavingsEstimationInput,
 )
 from omnibase_infra.services.observability.savings_estimation.config import (
@@ -48,6 +53,77 @@ from omnibase_infra.services.observability.savings_estimation.config import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Severity classification for validator catches
+# ---------------------------------------------------------------------------
+
+
+class EnumCatchSeverity(StrEnum):
+    """Severity levels for validator catches."""
+
+    CRITICAL = "critical"
+    MAJOR = "major"
+    MINOR = "minor"
+
+
+# Heuristic avoided-rework estimation per catch severity.
+# These are estimated developer-minutes saved per catch, multiplied by an
+# assumed blended rate of ~$1/min ($60/hr). The resulting USD values are
+# rough order-of-magnitude estimates, not measured cost accounting.
+_SEVERITY_SAVINGS_USD: dict[EnumCatchSeverity, float] = {
+    EnumCatchSeverity.CRITICAL: 0.50,  # ~30 min rework avoided
+    EnumCatchSeverity.MAJOR: 0.20,  # ~12 min rework avoided
+    EnumCatchSeverity.MINOR: 0.05,  # ~3 min rework avoided
+}
+
+# Estimated tokens that would have been wasted in rework per severity.
+_SEVERITY_TOKENS_SAVED: dict[EnumCatchSeverity, int] = {
+    EnumCatchSeverity.CRITICAL: 2000,
+    EnumCatchSeverity.MAJOR: 800,
+    EnumCatchSeverity.MINOR: 200,
+}
+
+# Confidence in the heuristic estimate per severity.
+_SEVERITY_CONFIDENCE: dict[EnumCatchSeverity, float] = {
+    EnumCatchSeverity.CRITICAL: 0.7,
+    EnumCatchSeverity.MAJOR: 0.6,
+    EnumCatchSeverity.MINOR: 0.4,
+}
+
+# Counterfactual model: the highest-cost configured routing candidate.
+# This is the model that _could_ have been selected for the request.
+# Used to compute direct savings (actual cost vs counterfactual cost).
+_COUNTERFACTUAL_MODEL_MAP: dict[str, str] = {
+    # If actual model is sonnet, counterfactual is opus (more expensive)
+    "claude-sonnet-4": "claude-opus-4-6",
+    "claude-3-5-sonnet": "claude-opus-4-6",
+    "claude-3.5-sonnet": "claude-opus-4-6",
+    # If actual model is already opus, no cheaper alternative exists in same class
+    # so counterfactual is self (zero direct savings from routing).
+    "claude-opus-4-6": "claude-opus-4-6",
+    "claude-3-opus": "claude-opus-4-6",
+}
+
+_DEFAULT_COUNTERFACTUAL = "claude-opus-4-6"
+
+
+def _resolve_counterfactual(actual_model_id: str) -> str:
+    """Resolve the counterfactual model for a given actual model.
+
+    Returns the highest-cost configured model within the same capability class.
+    """
+    lower = actual_model_id.lower()
+    for key, value in _COUNTERFACTUAL_MODEL_MAP.items():
+        if key in lower:
+            return value
+    return _DEFAULT_COUNTERFACTUAL
+
+
+# ---------------------------------------------------------------------------
+# Signal dataclasses
+# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -68,6 +144,14 @@ class LlmCallSignal:
 
 
 @dataclass
+class ValidatorCatchSignal:
+    """Raw validator catch signal with severity for heuristic savings."""
+
+    severity: EnumCatchSeverity = EnumCatchSeverity.MINOR
+    validator_type: str = ""
+
+
+@dataclass
 class SessionBuffer:
     """Accumulates signals for a single session."""
 
@@ -75,11 +159,77 @@ class SessionBuffer:
     correlation_id: str = ""
     llm_calls: list[LlmCallSignal] = field(default_factory=list)
     injection_signals: list[InjectionSignal] = field(default_factory=list)
-    validator_catch_count: int = 0
+    validator_catches: list[ValidatorCatchSignal] = field(default_factory=list)
     treatment_group: str = "treatment"
     outcome_received: bool = False
     outcome_received_at: float = 0.0
     created_at: float = field(default_factory=lambda: time.monotonic())
+
+    @property
+    def validator_catch_count(self) -> int:
+        """Backwards-compatible count of validator catches."""
+        return len(self.validator_catches)
+
+
+def _classify_severity(raw: str) -> EnumCatchSeverity:
+    """Classify a severity string into an enum value.
+
+    Args:
+        raw: Raw severity string (e.g. 'error', 'CRITICAL', 'warning').
+
+    Returns:
+        Classified severity. Defaults to MINOR for unrecognized values.
+    """
+    lower = raw.lower().strip()
+    if lower in ("critical", "error", "fatal"):
+        return EnumCatchSeverity.CRITICAL
+    if lower in ("major", "warning", "warn"):
+        return EnumCatchSeverity.MAJOR
+    return EnumCatchSeverity.MINOR
+
+
+def _compute_validator_catch_savings(
+    catches: list[ValidatorCatchSignal],
+) -> tuple[float, int, float]:
+    """Compute heuristic avoided-rework savings from validator catches.
+
+    Applies diminishing returns: each subsequent catch in the same session
+    contributes less, using a logarithmic saturation curve. This prevents
+    a session with 50 MINOR catches from claiming enormous savings.
+
+    Formula: effective_multiplier = 1 / (1 + 0.3 * index)
+    This gives: catch 1 = 1.0x, catch 2 = 0.77x, catch 3 = 0.63x, ...
+
+    Args:
+        catches: List of validator catch signals for a session.
+
+    Returns:
+        Tuple of (total_savings_usd, total_tokens_saved, avg_confidence).
+    """
+    if not catches:
+        return 0.0, 0, 0.0
+
+    total_usd = 0.0
+    total_tokens = 0
+    confidence_sum = 0.0
+
+    # Sort by severity (critical first) so high-value catches get full weight
+    sorted_catches = sorted(catches, key=lambda c: c.severity)
+
+    for idx, catch in enumerate(sorted_catches):
+        # Diminishing returns: each subsequent catch contributes less
+        diminishing_factor = 1.0 / (1.0 + 0.3 * idx)
+
+        base_usd = _SEVERITY_SAVINGS_USD.get(catch.severity, 0.05)
+        base_tokens = _SEVERITY_TOKENS_SAVED.get(catch.severity, 200)
+        confidence = _SEVERITY_CONFIDENCE.get(catch.severity, 0.4)
+
+        total_usd += base_usd * diminishing_factor
+        total_tokens += int(base_tokens * diminishing_factor)
+        confidence_sum += confidence
+
+    avg_confidence = confidence_sum / len(catches) if catches else 0.0
+    return round(total_usd, 10), total_tokens, round(avg_confidence, 4)
 
 
 def _model_tier_from_id(model_id: str) -> EnumModelTier:
@@ -151,6 +301,19 @@ def _build_effectiveness_entries(
                 )
             )
 
+    # If we have only validator catches and no other signals, create a
+    # minimal entry so the session still produces an estimate.
+    if not entries and buf.validator_catches:
+        entries.append(
+            ModelEffectivenessEntry(
+                utilization_score=0.0,
+                patterns_count=0,
+                tokens_saved=0,
+                model_tier=tier,
+                is_output_tokens=False,
+            )
+        )
+
     return tuple(entries)
 
 
@@ -199,7 +362,7 @@ class ServiceSavingsEstimator:
             self._ingest_session_outcome(buf, payload)
         elif "hook-context-injected" in topic:
             self._ingest_injection(buf, payload)
-        elif "validator-catch" in topic:
+        elif "validator-catch" in topic or "pattern-enforcement" in topic:
             self._ingest_validator_catch(buf, payload)
 
     async def finalize_ready_sessions(self) -> list[dict[str, object]]:
@@ -281,7 +444,15 @@ class ServiceSavingsEstimator:
     def _ingest_validator_catch(
         self, buf: SessionBuffer, payload: dict[str, object]
     ) -> None:
-        buf.validator_catch_count += 1
+        raw_severity = str(payload.get("severity", "minor"))
+        validator_type = str(payload.get("validator_type", ""))
+        severity = _classify_severity(raw_severity)
+        buf.validator_catches.append(
+            ValidatorCatchSignal(
+                severity=severity,
+                validator_type=validator_type,
+            )
+        )
 
     async def _finalize_session(self, buf: SessionBuffer) -> dict[str, object] | None:
         effectiveness_entries = _build_effectiveness_entries(buf)
@@ -320,6 +491,49 @@ class ServiceSavingsEstimator:
             source_event_id = f"savings-{buf.session_id}-v{self._schema_version}"
             result = estimate.model_dump(mode="json")
             result["source_event_id"] = source_event_id
+
+            # --- Counterfactual model ---
+            counterfactual = _resolve_counterfactual(actual_model_id)
+            result["counterfactual_model_id"] = counterfactual
+
+            # --- Heuristic savings from validator catches (Task 3) ---
+            heuristic_usd, heuristic_tokens, heuristic_confidence = (
+                _compute_validator_catch_savings(buf.validator_catches)
+            )
+            result["heuristic_savings_usd"] = heuristic_usd
+
+            # Add validator_catch category to categories breakdown
+            if heuristic_usd > 0:
+                categories = list(result.get("categories", []))
+                categories.append(
+                    ModelSavingsCategory(
+                        category=EnumSavingsCategory.VALIDATOR_CATCH,
+                        savings_usd=heuristic_usd,
+                        tokens_saved=heuristic_tokens,
+                        confidence=heuristic_confidence,
+                    ).model_dump(mode="json")
+                )
+                result["categories"] = categories
+
+            # Update totals to include heuristic savings
+            direct_usd = float(result.get("direct_savings_usd", 0.0))
+            direct_tokens = int(result.get("direct_tokens_saved", 0))
+            result["estimated_total_savings_usd"] = round(
+                direct_usd + heuristic_usd, 10
+            )
+            result["estimated_total_tokens_saved"] = direct_tokens + heuristic_tokens
+
+            # Update heuristic confidence average
+            if heuristic_usd > 0:
+                existing_conf = float(result.get("heuristic_confidence_avg", 0.0))
+                # Weighted average: existing (from direct) + validator catch confidence
+                result["heuristic_confidence_avg"] = round(
+                    (existing_conf + heuristic_confidence) / 2.0
+                    if existing_conf > 0
+                    else heuristic_confidence,
+                    4,
+                )
+
             # Propagate treatment_group so omnidash can project it into the
             # savings_estimates table for A/B analysis.
             if buf.treatment_group:
