@@ -126,6 +126,9 @@ state_postgres = "omnibase_infra.backends.backend_probe:probe_postgres"
 [project.entry-points."onex.domain_plugins"]
 registration = "omnibase_infra.nodes.node_registration_orchestrator.plugin:PluginRegistration"
 
+[project.entry-points."onex.workflows"]
+build_loop = "omnibase_infra.workflows:build_loop_workflow.yaml"
+
 [dependency-groups]
 dev = [
     "pytest>=8.4.0,<9.0.0",
