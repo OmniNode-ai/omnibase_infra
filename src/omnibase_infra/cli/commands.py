@@ -21,6 +21,7 @@ from rich.console import Console
 from rich.table import Table
 
 from omnibase_infra.cli.artifact_reconcile import artifact_reconcile_cmd
+from omnibase_infra.cli.cli_env import env_group
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -713,6 +714,7 @@ def _print_result(name: str, result: object) -> None:
 # =============================================================================
 
 cli.add_command(artifact_reconcile_cmd)
+cli.add_command(env_group)
 
 
 if __name__ == "__main__":
