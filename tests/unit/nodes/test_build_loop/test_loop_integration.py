@@ -152,11 +152,9 @@ class TestBuildLoopLinearIntegration:
 
     @pytest.mark.asyncio
     async def test_no_linear_api_key_graceful_degradation(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
     ):
         """Without LINEAR_API_KEY, cycle completes with zero tickets."""
-        monkeypatch.delenv("LINEAR_API_KEY", raising=False)
-
         orchestrator = HandlerLoopOrchestrator()
         command = ModelLoopStartCommand(
             correlation_id=uuid4(),
@@ -178,11 +176,9 @@ class TestBuildLoopLinearIntegration:
 
     @pytest.mark.asyncio
     async def test_mocked_linear_tickets_flow_through_pipeline(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
     ):
         """Mocked Linear tickets should flow through fill -> classify -> dispatch."""
-        monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test_key")
-
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.raise_for_status = MagicMock()
@@ -194,7 +190,7 @@ class TestBuildLoopLinearIntegration:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            orchestrator = HandlerLoopOrchestrator()
+            orchestrator = HandlerLoopOrchestrator(linear_api_key="lin_api_test_key")
             command = ModelLoopStartCommand(
                 correlation_id=uuid4(),
                 max_cycles=1,
@@ -219,18 +215,16 @@ class TestBuildLoopLinearIntegration:
 
     @pytest.mark.asyncio
     async def test_linear_api_failure_graceful_degradation(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
     ):
         """Linear API failure should not crash the loop — graceful empty result."""
-        monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test_key")
-
         mock_client = AsyncMock()
         mock_client.post.side_effect = httpx.ConnectError("connection refused")
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            orchestrator = HandlerLoopOrchestrator()
+            orchestrator = HandlerLoopOrchestrator(linear_api_key="lin_api_test_key")
             command = ModelLoopStartCommand(
                 correlation_id=uuid4(),
                 max_cycles=1,
@@ -249,11 +243,9 @@ class TestBuildLoopLinearIntegration:
 
     @pytest.mark.asyncio
     async def test_classification_filters_non_buildable(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
     ):
         """Only AUTO_BUILDABLE tickets should reach the build dispatch phase."""
-        monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test_key")
-
         # All tickets are architecture/research — none should be AUTO_BUILDABLE
         arch_tickets = [
             {
@@ -278,7 +270,7 @@ class TestBuildLoopLinearIntegration:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            orchestrator = HandlerLoopOrchestrator()
+            orchestrator = HandlerLoopOrchestrator(linear_api_key="lin_api_test_key")
             command = ModelLoopStartCommand(
                 correlation_id=uuid4(),
                 max_cycles=1,

@@ -19,7 +19,6 @@ Related:
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from uuid import UUID
@@ -101,6 +100,7 @@ class HandlerLoopOrchestrator:
     def __init__(
         self,
         publisher: Callable[..., Awaitable[bool]] | None = None,
+        linear_api_key: str | None = None,
     ) -> None:
         self._reducer = HandlerLoopState()
         self._closeout = HandlerCloseout()
@@ -109,6 +109,7 @@ class HandlerLoopOrchestrator:
         self._classify = HandlerTicketClassify()
         self._dispatch = HandlerBuildDispatch()
         self._publisher = publisher
+        self._linear_api_key = linear_api_key
         # Inter-phase state: carry results between fill -> classify -> build
         self._last_fill_result: tuple[ModelScoredTicket, ...] = ()
         self._last_classify_result: tuple[ModelBuildTarget, ...] = ()
@@ -280,7 +281,9 @@ class HandlerLoopOrchestrator:
                 )
 
             elif intent.intent_type == EnumBuildLoopIntentType.START_FILL:
-                scored = await _fetch_scored_tickets_from_linear()
+                scored = await _fetch_scored_tickets_from_linear(
+                    api_key=self._linear_api_key,
+                )
                 fill_result = await self._rsd_fill.handle(
                     correlation_id=correlation_id,
                     scored_tickets=scored,
@@ -405,9 +408,15 @@ _PRIORITY_TO_RSD_SCORE: dict[int, float] = {
 }
 
 
-async def _fetch_scored_tickets_from_linear() -> tuple[ModelScoredTicket, ...]:
-    """Fetch backlog/unstarted tickets from Linear and score by priority."""
-    api_key = os.environ.get("LINEAR_API_KEY")
+async def _fetch_scored_tickets_from_linear(
+    api_key: str | None = None,
+) -> tuple[ModelScoredTicket, ...]:
+    """Fetch backlog/unstarted tickets from Linear and score by priority.
+
+    Args:
+        api_key: Linear API key. Caller is responsible for sourcing this
+                 from environment or config — handlers must not read env vars.
+    """
     if not api_key:
         logger.warning("LINEAR_API_KEY not set — returning empty ticket list")
         return ()
