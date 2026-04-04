@@ -429,7 +429,7 @@ async def _fetch_scored_tickets_from_linear(
           project: { name: { eq: "Active Sprint" } }
         }
         first: 20
-        orderBy: priority
+        orderBy: updatedAt
       ) {
         nodes {
           id
