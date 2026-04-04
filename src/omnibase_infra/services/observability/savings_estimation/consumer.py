@@ -33,6 +33,7 @@ import logging
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from uuid import UUID
 
 from omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_estimation import (
     HandlerSavingsEstimation,
@@ -297,18 +298,32 @@ class ServiceSavingsEstimator:
         if buf.llm_calls:
             actual_model_id = buf.llm_calls[0].model_id
 
-        savings_input = ModelSavingsEstimationInput(
-            session_id=buf.session_id,
-            effectiveness_entries=effectiveness_entries,
-            actual_total_tokens=actual_total_tokens,
-            actual_model_id=actual_model_id,
-        )
+        # Pass the session's correlation_id through to the estimate so it
+        # appears in the Kafka payload.  The omnidash projection handler uses
+        # correlation_id as the idempotency key (sourceEventId column).
+        input_kwargs: dict[str, object] = {
+            "session_id": buf.session_id,
+            "effectiveness_entries": effectiveness_entries,
+            "actual_total_tokens": actual_total_tokens,
+            "actual_model_id": actual_model_id,
+        }
+        if buf.correlation_id:
+            try:
+                input_kwargs["correlation_id"] = UUID(buf.correlation_id)
+            except ValueError:
+                pass  # keep auto-generated UUID if not a valid UUID string
+
+        savings_input = ModelSavingsEstimationInput(**input_kwargs)  # type: ignore[arg-type]
 
         try:
             estimate = await self._handler.handle(savings_input)
             source_event_id = f"savings-{buf.session_id}-v{self._schema_version}"
             result = estimate.model_dump(mode="json")
             result["source_event_id"] = source_event_id
+            # Propagate treatment_group so omnidash can project it into the
+            # savings_estimates table for A/B analysis.
+            if buf.treatment_group:
+                result["treatment_group"] = buf.treatment_group
             return result
         except Exception:
             logger.exception(
