@@ -23,9 +23,12 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from uuid import UUID
 
+import httpx
+
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.enums.enum_build_loop_intent_type import EnumBuildLoopIntentType
 from omnibase_infra.enums.enum_build_loop_phase import EnumBuildLoopPhase
+from omnibase_infra.enums.enum_buildability import EnumBuildability
 from omnibase_infra.nodes.node_autonomous_loop_orchestrator.models.model_loop_cycle_summary import (
     ModelLoopCycleSummary,
 )
@@ -65,6 +68,9 @@ from omnibase_infra.nodes.node_rsd_fill_compute.models.model_scored_ticket impor
 from omnibase_infra.nodes.node_ticket_classify_compute.handlers.handler_ticket_classify import (
     HandlerTicketClassify,
 )
+from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_classify_output import (
+    ModelTicketClassifyOutput,
+)
 from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_for_classification import (
     ModelTicketForClassification,
 )
@@ -94,6 +100,7 @@ class HandlerLoopOrchestrator:
     def __init__(
         self,
         publisher: Callable[..., Awaitable[bool]] | None = None,
+        linear_api_key: str | None = None,
     ) -> None:
         self._reducer = HandlerLoopState()
         self._closeout = HandlerCloseout()
@@ -102,6 +109,10 @@ class HandlerLoopOrchestrator:
         self._classify = HandlerTicketClassify()
         self._dispatch = HandlerBuildDispatch()
         self._publisher = publisher
+        self._linear_api_key = linear_api_key
+        # Inter-phase state: carry results between fill -> classify -> build
+        self._last_fill_result: tuple[ModelScoredTicket, ...] = ()
+        self._last_classify_result: tuple[ModelBuildTarget, ...] = ()
 
     async def handle(
         self,
@@ -270,13 +281,15 @@ class HandlerLoopOrchestrator:
                 )
 
             elif intent.intent_type == EnumBuildLoopIntentType.START_FILL:
-                # TODO(OMN-7324): Fetch real scored tickets from Linear/backlog
-                scored = _placeholder_scored_tickets()
+                scored = await _fetch_scored_tickets_from_linear(
+                    api_key=self._linear_api_key,
+                )
                 fill_result = await self._rsd_fill.handle(
                     correlation_id=correlation_id,
                     scored_tickets=scored,
                     max_tickets=5,
                 )
+                self._last_fill_result = fill_result.selected_tickets
                 return ModelBuildLoopEvent(
                     correlation_id=correlation_id,
                     source_phase=EnumBuildLoopPhase.FILLING,
@@ -286,11 +299,15 @@ class HandlerLoopOrchestrator:
                 )
 
             elif intent.intent_type == EnumBuildLoopIntentType.START_CLASSIFY:
-                # Convert filled tickets for classification
-                tickets_for_classify = _placeholder_tickets_for_classification()
+                tickets_for_classify = _scored_to_classification(
+                    self._last_fill_result,
+                )
                 classify_result = await self._classify.handle(
                     correlation_id=correlation_id,
                     tickets=tickets_for_classify,
+                )
+                self._last_classify_result = _extract_build_targets(
+                    classify_result,
                 )
                 return ModelBuildLoopEvent(
                     correlation_id=correlation_id,
@@ -301,8 +318,7 @@ class HandlerLoopOrchestrator:
                 )
 
             elif intent.intent_type == EnumBuildLoopIntentType.START_BUILD:
-                # TODO(OMN-7325): Use actual classified tickets
-                targets = _placeholder_build_targets()
+                targets = self._last_classify_result
                 dispatch_result = await self._dispatch.handle(
                     correlation_id=correlation_id,
                     targets=targets,
@@ -381,18 +397,124 @@ class HandlerLoopOrchestrator:
             )
 
 
-def _placeholder_scored_tickets() -> tuple[ModelScoredTicket, ...]:
-    """Placeholder: returns empty scored tickets until real backlog integration."""
-    return ()
+_LINEAR_API_URL = "https://api.linear.app/graphql"
+
+# Linear priority values: 0=No priority, 1=Urgent, 2=High, 3=Medium, 4=Low
+_PRIORITY_TO_RSD_SCORE: dict[int, float] = {
+    1: 4.0,
+    2: 3.0,
+    3: 2.0,
+    4: 1.0,
+}
 
 
-def _placeholder_tickets_for_classification() -> tuple[
-    ModelTicketForClassification, ...
-]:
-    """Placeholder: returns empty ticket list until real backlog integration."""
-    return ()
+async def _fetch_scored_tickets_from_linear(
+    api_key: str | None = None,
+) -> tuple[ModelScoredTicket, ...]:
+    """Fetch backlog/unstarted tickets from Linear and score by priority.
+
+    Args:
+        api_key: Linear API key. Caller is responsible for sourcing this
+                 from environment or config — handlers must not read env vars.
+    """
+    if not api_key:
+        logger.warning("LINEAR_API_KEY not set — returning empty ticket list")
+        return ()
+
+    query = """
+    query {
+      issues(
+        filter: {
+          state: { type: { in: ["backlog", "unstarted"] } }
+          project: { name: { eq: "Active Sprint" } }
+        }
+        first: 20
+        orderBy: priority
+      ) {
+        nodes {
+          id
+          identifier
+          title
+          priority
+          description
+          state { name type }
+          labels { nodes { name } }
+        }
+      }
+    }
+    """
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                _LINEAR_API_URL,
+                json={"query": query},
+                headers={
+                    "Authorization": api_key,
+                    "Content-Type": "application/json",
+                },
+                timeout=10.0,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning(
+            "Linear API request failed: %s — returning empty ticket list", exc
+        )
+        return ()
+
+    nodes = data.get("data", {}).get("issues", {}).get("nodes", [])
+    scored: list[ModelScoredTicket] = []
+    for node in nodes:
+        priority = node.get("priority", 0) or 0
+        rsd_score = _PRIORITY_TO_RSD_SCORE.get(priority, 0.5)
+        labels = tuple(
+            label["name"] for label in node.get("labels", {}).get("nodes", [])
+        )
+        scored.append(
+            ModelScoredTicket(
+                ticket_id=node.get("identifier", node.get("id", "")),
+                title=node.get("title", ""),
+                rsd_score=rsd_score,
+                priority=priority,
+                labels=labels,
+                description=node.get("description", "") or "",
+                state=node.get("state", {}).get("name", ""),
+            )
+        )
+
+    logger.info("Fetched %d tickets from Linear", len(scored))
+    return tuple(scored)
 
 
-def _placeholder_build_targets() -> tuple[ModelBuildTarget, ...]:
-    """Placeholder: returns empty build targets until real classification integration."""
-    return ()
+def _scored_to_classification(
+    scored_tickets: tuple[ModelScoredTicket, ...],
+) -> tuple[ModelTicketForClassification, ...]:
+    """Convert scored tickets from RSD fill into classification input format."""
+    return tuple(
+        ModelTicketForClassification(
+            ticket_id=t.ticket_id,
+            title=t.title,
+            description=t.description,
+            labels=t.labels,
+            state=t.state,
+            priority=t.priority,
+        )
+        for t in scored_tickets
+    )
+
+
+def _extract_build_targets(
+    classify_result: ModelTicketClassifyOutput,
+) -> tuple[ModelBuildTarget, ...]:
+    """Filter classification results to AUTO_BUILDABLE and convert to build targets."""
+
+    return tuple(
+        ModelBuildTarget(
+            ticket_id=c.ticket_id,
+            title=c.title,
+            buildability=c.buildability,
+        )
+        for c in classify_result.classifications
+        if c.buildability == EnumBuildability.AUTO_BUILDABLE
+    )
