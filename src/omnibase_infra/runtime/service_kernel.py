@@ -95,6 +95,9 @@ from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.health.model_llm_endpoint_health_config import (
     ModelLlmEndpointHealthConfig,
 )
+from omnibase_infra.nodes.node_autonomous_loop_orchestrator.plugin import (
+    PluginBuildLoop,
+)
 from omnibase_infra.nodes.node_contract_registry_reducer.contract_registration_event_router import (
     ContractRegistrationEventRouter,
     ProtocolIntentEffect,
@@ -1568,6 +1571,21 @@ async def bootstrap() -> int:
         except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "PluginDelegation failed to initialize, continuing without it "
+                "(correlation_id=%s)",
+                correlation_id,
+                exc_info=True,
+            )
+
+        # Try to register PluginBuildLoop (OMN-5113: autonomous build loop).
+        try:
+            plugin_registry.register(PluginBuildLoop())
+            logger.info(
+                "PluginBuildLoop registered (correlation_id=%s)",
+                correlation_id,
+            )
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+            logger.warning(
+                "PluginBuildLoop failed to initialize, continuing without it "
                 "(correlation_id=%s)",
                 correlation_id,
                 exc_info=True,
