@@ -463,7 +463,7 @@ async def _fetch_scored_tickets_from_linear(
         )
         return ()
 
-    nodes = data.get("data", {}).get("issues", {}).get("nodes", [])
+    nodes = (data.get("data") or {}).get("issues", {}).get("nodes", [])
     scored: list[ModelScoredTicket] = []
     for node in nodes:
         priority = node.get("priority", 0) or 0
