@@ -41,7 +41,7 @@ healthcheck:
   interval_s: 30
   timeout_s: 10
   retries: 5
-  start_period_s: 120
+  start_period_s: 1200
 volumes:
   - worker_logs:/app/logs
   - ../contracts:/app/contracts:ro

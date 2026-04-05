@@ -90,6 +90,8 @@ SECRET_KEYS: frozenset[str] = frozenset(
         # Keycloak secrets
         "KEYCLOAK_ADMIN_CLIENT_SECRET",
         "ONEX_SERVICE_CLIENT_SECRET",
+        # Linear API — injected via Infisical at runtime
+        "LINEAR_API_KEY",
     }
 )
 
