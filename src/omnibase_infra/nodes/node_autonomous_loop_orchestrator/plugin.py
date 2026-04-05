@@ -326,7 +326,7 @@ class PluginBuildLoop:
 
             await wiring.wire_subscriptions(
                 subcontract=subcontract,
-                node_name="autonomous-loop-orchestrator",
+                node_name="node_autonomous_loop_orchestrator",
             )
 
             self._wiring = wiring
