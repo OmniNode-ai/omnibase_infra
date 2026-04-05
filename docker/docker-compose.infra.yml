@@ -650,8 +650,9 @@ services:
   # OMN-5095: Workers have an extended start_period (600s) and retries (5)
   # because plugin initialization (intelligence DB ownership, schema fingerprint,
   # message type registration) must complete before /health returns 200.
-  # Unhealthy detection latency = start_period + (interval * retries) = 600s + 150s = 750s.
-  # AUTOHEAL_START_PERIOD (840s) must exceed start_period + retry window to avoid premature restarts.
+  # Unhealthy detection latency = start_period + (interval * retries) = 1200s + 150s = 1350s.
+  # AUTOHEAL_START_PERIOD must exceed start_period + retry window to avoid premature restarts.
+  # Workers wire ~166 Kafka consumers at startup (~15+ min), so 1200s start_period is needed.
   runtime-worker:
     !!merge <<: *runtime-base
     profiles: ["runtime", "full"]
@@ -677,7 +678,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 600s
+      start_period: 1200s
     deploy:
       mode: replicated
       replicas: ${WORKER_REPLICAS:-2}
