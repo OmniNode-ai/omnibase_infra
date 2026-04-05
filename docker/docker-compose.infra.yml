@@ -145,7 +145,7 @@ x-runtime-env: &runtime-env
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
   ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
   # Linear API for build loop ticket fetching
-  LINEAR_API_KEY: ${LINEAR_API_KEY:-}
+  LINEAR_API_KEY: ${LINEAR_API_KEY:?LINEAR_API_KEY must be set}
   # --- Infisical config (OMN-5382: removed from base env — injected per-bundle) ---
   # Infisical vars are only present when the secrets bundle is selected.
   # --- Container-internal service addresses (OMN-5381: same invariant as OMN-3431 for Kafka) ---

@@ -1091,6 +1091,7 @@ class TestDockerComposeProfiles:
                 # OMN-5439: Keycloak / ONEX service auth vars added with :? fail-fast
                 "ONEX_REGISTRATION_AUTO_ACK": "true",
                 "ONEX_SERVICE_CLIENT_SECRET": "test-service-secret",
+                "LINEAR_API_KEY": "test-linear-api-key",
             }
         )
 
