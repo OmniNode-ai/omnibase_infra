@@ -1502,27 +1502,38 @@ async def bootstrap() -> int:
         registration_plugin = PluginRegistration()
         plugin_registry.register(registration_plugin)
 
-        # Try to import and register PluginIntelligence (graceful degradation).
-        # omniintelligence is an optional dependency — kernel boots without it.
-        try:
-            from omniintelligence.runtime.plugin import (  # type: ignore[import-not-found]
-                PluginIntelligence,
-            )
+        # Register lightweight plugins BEFORE heavy ones. Plugin registration
+        # order determines Pass 2 (start_consumers) order. PluginDelegation (3
+        # topics) and PluginBuildLoop (1 topic) subscribe in seconds, while
+        # PluginIntelligence (46 topics) takes ~12 minutes. If Intelligence
+        # goes first, later plugins never get their consumers started before
+        # the runtime is restarted or killed.
 
-            plugin_registry.register(PluginIntelligence())
+        # Try to register PluginDelegation (OMN-7040: delegation pipeline).
+        try:
+            plugin_registry.register(PluginDelegation())
             logger.info(
-                "PluginIntelligence registered (correlation_id=%s)",
-                correlation_id,
-            )
-        except ImportError:
-            logger.debug(
-                "omniintelligence not installed, intelligence plugin not available "
-                "(correlation_id=%s)",
+                "PluginDelegation registered (correlation_id=%s)",
                 correlation_id,
             )
         except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
-                "PluginIntelligence failed to initialize, continuing without it "
+                "PluginDelegation failed to initialize, continuing without it "
+                "(correlation_id=%s)",
+                correlation_id,
+                exc_info=True,
+            )
+
+        # Try to register PluginBuildLoop (OMN-5113: autonomous build loop).
+        try:
+            plugin_registry.register(PluginBuildLoop())
+            logger.info(
+                "PluginBuildLoop registered (correlation_id=%s)",
+                correlation_id,
+            )
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+            logger.warning(
+                "PluginBuildLoop failed to initialize, continuing without it "
                 "(correlation_id=%s)",
                 correlation_id,
                 exc_info=True,
@@ -1562,31 +1573,28 @@ async def bootstrap() -> int:
                 exc_info=True,
             )
 
-        # Try to register PluginDelegation (OMN-7040: delegation pipeline).
+        # Try to import and register PluginIntelligence (graceful degradation).
+        # omniintelligence is an optional dependency — kernel boots without it.
+        # Registered LAST because it subscribes to 46 topics (~12 min startup).
         try:
-            plugin_registry.register(PluginDelegation())
-            logger.info(
-                "PluginDelegation registered (correlation_id=%s)",
-                correlation_id,
-            )
-        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "PluginDelegation failed to initialize, continuing without it "
-                "(correlation_id=%s)",
-                correlation_id,
-                exc_info=True,
+            from omniintelligence.runtime.plugin import (  # type: ignore[import-not-found]
+                PluginIntelligence,
             )
 
-        # Try to register PluginBuildLoop (OMN-5113: autonomous build loop).
-        try:
-            plugin_registry.register(PluginBuildLoop())
+            plugin_registry.register(PluginIntelligence())
             logger.info(
-                "PluginBuildLoop registered (correlation_id=%s)",
+                "PluginIntelligence registered (correlation_id=%s)",
+                correlation_id,
+            )
+        except ImportError:
+            logger.debug(
+                "omniintelligence not installed, intelligence plugin not available "
+                "(correlation_id=%s)",
                 correlation_id,
             )
         except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
-                "PluginBuildLoop failed to initialize, continuing without it "
+                "PluginIntelligence failed to initialize, continuing without it "
                 "(correlation_id=%s)",
                 correlation_id,
                 exc_info=True,
