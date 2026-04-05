@@ -482,9 +482,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 142 (2026-04-02): Chain learning system models (protocol_chain_clients, model_chain_learn_result)
 # - 146 (2026-04-01): Delegation pipeline dispatchers (OMN-7040: 3 dispatchers + wiring, each with
 #                     ModelEventEnvelope[object] | dict[str, object] handle() signature)
-# - 148 (2026-04-04): Build loop dispatcher (OMN-5113: DispatcherBuildLoopStart.handle() +
-#                     wire_build_loop_dispatchers, each with ModelEventEnvelope[object] | dict)
-INFRA_MAX_UNIONS = 148
+INFRA_MAX_UNIONS = 146
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
