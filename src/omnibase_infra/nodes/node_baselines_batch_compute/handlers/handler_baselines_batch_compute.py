@@ -436,7 +436,7 @@ class HandlerBaselinesBatchCompute:
                             0.0
                         ) AS success_rate,
                         AVG(aa.duration_ms) AS avg_duration_ms,
-                        SUM(aa.total_tokens) AS total_tokens
+                        0::BIGINT AS total_tokens
                     FROM agent_actions aa
                     WHERE aa.correlation_id = rd.correlation_id
                 ) action_stats ON TRUE
@@ -593,7 +593,7 @@ class HandlerBaselinesBatchCompute:
                             0.0
                         ) AS success_rate,
                         AVG(aa.duration_ms) AS avg_duration_ms,
-                        SUM(aa.total_tokens) AS total_tokens
+                        0::BIGINT AS total_tokens
                     FROM agent_actions aa
                     WHERE aa.correlation_id = rd.correlation_id
                 ) action_stats ON TRUE
