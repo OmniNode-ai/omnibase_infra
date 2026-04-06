@@ -174,7 +174,7 @@ class PluginEmitDaemon:
                     bootstrap_servers=kafka_servers,
                 )
                 kafka_bus = EventBusKafka(config=kafka_config)
-                await kafka_bus.connect()
+                await kafka_bus.start()
 
                 async def _kafka_publish(
                     topic: str,
@@ -182,8 +182,8 @@ class PluginEmitDaemon:
                     value: bytes,
                     headers: dict[str, str],
                 ) -> None:
-                    await kafka_bus.publish_raw(
-                        topic=topic, key=key, value=value, headers=headers
+                    await kafka_bus.publish(
+                        topic=topic, key=key, value=value, headers=None
                     )
 
                 publish_fn = _kafka_publish
