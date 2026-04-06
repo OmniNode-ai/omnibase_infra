@@ -104,9 +104,11 @@ async def wire_build_loop_handlers(
     publisher_cb = None
     if container.service_registry is not None:
         try:
+            # NOTE: service_kernel registers the concrete EventBus under the
+            # ProtocolEventBusPublisher key; mypy cannot verify Protocol-based DI.
             event_bus: ProtocolEventBusPublisher = (
                 await container.service_registry.resolve_service(
-                    ProtocolEventBusPublisher
+                    ProtocolEventBusPublisher  # type: ignore[type-abstract]
                 )
             )
             publisher_cb = _make_publisher(event_bus)
