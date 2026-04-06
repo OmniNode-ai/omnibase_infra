@@ -24,6 +24,8 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.runtime.auto_wiring.models import ModelLifecycleHooks
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,6 +77,11 @@ class ModelDiscoveredContract(BaseModel):
         default=None,
         description="SHA-256 hash of text for dedup/conflict detection",
     )
+    lifecycle_hooks: ModelLifecycleHooks | None = Field(
+        default=None,
+        description="Optional lifecycle hooks (on_start, validate_handshake, on_shutdown) "
+        "extracted from contract YAML. Replaces Plugin.initialize()/shutdown().",
+    )
 
     def with_parsed_data(self, handler_id: str) -> ModelDiscoveredContract:
         """Return new instance with handler_id populated.
@@ -106,7 +113,21 @@ class ModelDiscoveredContract(BaseModel):
             if isinstance(data, dict) and "handler_id" in data:
                 handler_id = data["handler_id"]
                 if isinstance(handler_id, str) and handler_id:
-                    return self.with_parsed_data(handler_id=handler_id)
+                    updates: dict[str, object] = {"handler_id": handler_id}
+                    # Extract lifecycle hooks if present
+                    lifecycle_data = data.get("lifecycle")
+                    if isinstance(lifecycle_data, dict):
+                        try:
+                            updates["lifecycle_hooks"] = ModelLifecycleHooks(
+                                **lifecycle_data
+                            )
+                        except Exception:  # noqa: BLE001 — parse error deferred to validation
+                            logger.debug(
+                                "Failed to parse lifecycle hooks from %s:%s",
+                                self.origin,
+                                self.ref,
+                            )
+                    return self.model_copy(update=updates)
         except yaml.YAMLError:
             # YAML parse errors will be caught during validation
             logger.debug(
