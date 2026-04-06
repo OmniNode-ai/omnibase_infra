@@ -13,7 +13,9 @@ The plugin handles:
 
 Design:
     Like PluginDelegation, this plugin has no PostgreSQL dependency.
-    The build loop pipeline activates unconditionally.
+    The build loop pipeline activates only on containers with
+    RUNTIME_PROFILE=effects or RUNTIME_PROFILE=all. This prevents
+    partition-steal when multiple containers run the same kernel image.
 
 Related:
     - OMN-7319: node_autonomous_loop_orchestrator
@@ -23,6 +25,7 @@ Related:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -84,15 +87,33 @@ class PluginBuildLoop:
     def display_name(self) -> str:
         return "Build Loop"
 
+    # Profiles that should run the build loop consumer.
+    # "effects" is the intended container; "all" is an escape hatch for
+    # single-container dev setups.
+    _ALLOWED_PROFILES: frozenset[str] = frozenset({"effects", "all"})
+
     def should_activate(self, config: ModelDomainPluginConfig) -> bool:
-        """Build loop plugin activates unconditionally."""
+        """Activate only on the runtime-effects container.
+
+        Uses RUNTIME_PROFILE env var (set in catalog manifests) to
+        prevent partition-steal when multiple containers share the same
+        Kafka consumer group for the build-loop topic.
+
+        Returns True when:
+        - RUNTIME_PROFILE is "effects" or "all"
+        - RUNTIME_PROFILE is unset (backwards compat for local dev)
+        """
+        profile = os.environ.get("RUNTIME_PROFILE", "")
+        activate = not profile or profile in self._ALLOWED_PROFILES
         logger.info(
-            "[BUILD-LOOP] PluginBuildLoop.should_activate() called "
-            "(node_identity=%s, correlation_id=%s)",
+            "[BUILD-LOOP] PluginBuildLoop.should_activate() -> %s "
+            "(RUNTIME_PROFILE=%r, node_identity=%s, correlation_id=%s)",
+            activate,
+            profile,
             config.node_identity,
             config.correlation_id,
         )
-        return True
+        return activate
 
     async def initialize(
         self,
