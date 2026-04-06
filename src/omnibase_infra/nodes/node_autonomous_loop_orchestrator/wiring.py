@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING, TypedDict
 from uuid import UUID
 
 from omnibase_core.enums import EnumInjectionScope, EnumMessageCategory
-
 from omnibase_infra.errors import ModelInfraErrorContext
 
 if TYPE_CHECKING:
