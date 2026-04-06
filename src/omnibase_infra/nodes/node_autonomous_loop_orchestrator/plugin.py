@@ -13,7 +13,9 @@ The plugin handles:
 
 Design:
     Like PluginDelegation, this plugin has no PostgreSQL dependency.
-    The build loop pipeline activates unconditionally.
+    The build loop pipeline activates only on containers with
+    RUNTIME_PROFILE=effects or RUNTIME_PROFILE=all. This prevents
+    partition-steal when multiple containers run the same kernel image.
 
 Related:
     - OMN-7319: node_autonomous_loop_orchestrator
@@ -23,6 +25,7 @@ Related:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -84,9 +87,33 @@ class PluginBuildLoop:
     def display_name(self) -> str:
         return "Build Loop"
 
+    # Profiles that should run the build loop consumer.
+    # "effects" is the intended container; "all" is an escape hatch for
+    # single-container dev setups.
+    _ALLOWED_PROFILES: frozenset[str] = frozenset({"effects", "all"})
+
     def should_activate(self, config: ModelDomainPluginConfig) -> bool:
-        """Build loop plugin activates unconditionally."""
-        return True
+        """Activate only on the runtime-effects container.
+
+        Uses RUNTIME_PROFILE env var (set in catalog manifests) to
+        prevent partition-steal when multiple containers share the same
+        Kafka consumer group for the build-loop topic.
+
+        Returns True when:
+        - RUNTIME_PROFILE is "effects" or "all"
+        - RUNTIME_PROFILE is unset (backwards compat for local dev)
+        """
+        profile = os.environ.get("RUNTIME_PROFILE", "")
+        activate = not profile or profile in self._ALLOWED_PROFILES
+        logger.info(
+            "[BUILD-LOOP] PluginBuildLoop.should_activate() -> %s "
+            "(RUNTIME_PROFILE=%r, node_identity=%s, correlation_id=%s)",
+            activate,
+            profile,
+            config.node_identity,
+            config.correlation_id,
+        )
+        return activate
 
     async def initialize(
         self,
@@ -228,6 +255,18 @@ class PluginBuildLoop:
         config: ModelDomainPluginConfig,
     ) -> ModelDomainPluginResult:
         """Start event consumers via EventBusSubcontractWiring."""
+        logger.info(
+            "[BUILD-LOOP] === PLUGIN start_consumers() ENTRY === "
+            "(correlation_id=%s, node_identity=%s, "
+            "handler_wired=%s, dispatcher_wired=%s, "
+            "event_bus_type=%s, dispatch_engine=%s)",
+            config.correlation_id,
+            config.node_identity,
+            self._handler_wiring_succeeded,
+            self._dispatcher_wiring_succeeded,
+            type(config.event_bus).__name__ if config.event_bus else "None",
+            type(config.dispatch_engine).__name__ if config.dispatch_engine else "None",
+        )
         start_time = time.time()
         correlation_id = config.correlation_id
 
@@ -314,6 +353,17 @@ class PluginBuildLoop:
                     },
                 )
 
+            logger.info(
+                "[BUILD-LOOP] Creating EventBusSubcontractWiring "
+                "(env=%s, node_name=%s, service=%s, version=%s, "
+                "subscribe_topics=%s)",
+                config.node_identity.env,
+                config.node_identity.node_name,
+                config.node_identity.service,
+                config.node_identity.version,
+                subcontract.subscribe_topics,
+            )
+
             wiring = EventBusSubcontractWiring(
                 event_bus=config.event_bus,
                 dispatch_engine=config.dispatch_engine,
@@ -324,6 +374,11 @@ class PluginBuildLoop:
                 result_applier=result_applier,
             )
 
+            logger.info(
+                "[BUILD-LOOP] Calling wire_subscriptions for "
+                "node_autonomous_loop_orchestrator (correlation_id=%s)",
+                correlation_id,
+            )
             await wiring.wire_subscriptions(
                 subcontract=subcontract,
                 node_name="node_autonomous_loop_orchestrator",

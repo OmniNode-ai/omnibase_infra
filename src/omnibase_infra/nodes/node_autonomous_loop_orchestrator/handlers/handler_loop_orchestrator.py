@@ -127,10 +127,15 @@ class HandlerLoopOrchestrator:
             ModelLoopOrchestratorResult with per-cycle summaries.
         """
         logger.info(
-            "Autonomous loop started (correlation_id=%s, max_cycles=%d, dry_run=%s)",
+            "[BUILD-LOOP] === HANDLER ENTRY === handle() called "
+            "(correlation_id=%s, max_cycles=%d, dry_run=%s, skip_closeout=%s, "
+            "requested_at=%s, linear_api_key_set=%s)",
             command.correlation_id,
             command.max_cycles,
             command.dry_run,
+            command.skip_closeout,
+            command.requested_at,
+            bool(self._linear_api_key),
         )
 
         summaries: list[ModelLoopCycleSummary] = []
@@ -139,6 +144,12 @@ class HandlerLoopOrchestrator:
         cycles_failed = 0
 
         for cycle_idx in range(command.max_cycles):
+            logger.info(
+                "[BUILD-LOOP] Starting cycle %d/%d (correlation_id=%s)",
+                cycle_idx + 1,
+                command.max_cycles,
+                command.correlation_id,
+            )
             summary = await self._run_cycle(
                 correlation_id=command.correlation_id,
                 skip_closeout=command.skip_closeout,
@@ -146,6 +157,19 @@ class HandlerLoopOrchestrator:
                 max_consecutive_failures=3,
             )
             summaries.append(summary)
+            logger.info(
+                "[BUILD-LOOP] Cycle %d/%d finished: final_phase=%s, "
+                "tickets_filled=%d, tickets_classified=%d, tickets_dispatched=%d, "
+                "error=%s (correlation_id=%s)",
+                cycle_idx + 1,
+                command.max_cycles,
+                summary.final_phase.value,
+                summary.tickets_filled,
+                summary.tickets_classified,
+                summary.tickets_dispatched,
+                summary.error_message,
+                command.correlation_id,
+            )
 
             if summary.final_phase == EnumBuildLoopPhase.COMPLETE:
                 cycles_completed += 1
@@ -162,10 +186,12 @@ class HandlerLoopOrchestrator:
                 break
 
         logger.info(
-            "Autonomous loop finished: %d completed, %d failed, %d total dispatched",
+            "[BUILD-LOOP] === HANDLER EXIT === Autonomous loop finished: "
+            "%d completed, %d failed, %d total dispatched (correlation_id=%s)",
             cycles_completed,
             cycles_failed,
             total_dispatched,
+            command.correlation_id,
         )
 
         return ModelLoopOrchestratorResult(
@@ -184,6 +210,13 @@ class HandlerLoopOrchestrator:
         max_consecutive_failures: int,
     ) -> ModelLoopCycleSummary:
         """Run a single build loop cycle through the FSM."""
+        logger.info(
+            "[BUILD-LOOP] _run_cycle entry (correlation_id=%s, "
+            "skip_closeout=%s, dry_run=%s)",
+            correlation_id,
+            skip_closeout,
+            dry_run,
+        )
         cycle_start = datetime.now(tz=UTC)
 
         # Initialize state
@@ -243,9 +276,24 @@ class HandlerLoopOrchestrator:
         """
         now = datetime.now(tz=UTC)
         correlation_id = state.correlation_id
+        logger.info(
+            "[BUILD-LOOP] _execute_intent: intent_type=%s, current_phase=%s "
+            "(correlation_id=%s)",
+            intent.intent_type.value
+            if hasattr(intent.intent_type, "value")
+            else intent.intent_type,
+            state.phase.value,
+            correlation_id,
+        )
 
         try:
             if intent.intent_type == EnumBuildLoopIntentType.START_CLOSEOUT:
+                logger.info(
+                    "[BUILD-LOOP] Phase CLOSING_OUT: invoking HandlerCloseout "
+                    "(correlation_id=%s, dry_run=%s)",
+                    correlation_id,
+                    state.dry_run,
+                )
                 await self._closeout.handle(
                     correlation_id=correlation_id,
                     dry_run=state.dry_run,
@@ -258,6 +306,12 @@ class HandlerLoopOrchestrator:
                 )
 
             elif intent.intent_type == EnumBuildLoopIntentType.START_VERIFY:
+                logger.info(
+                    "[BUILD-LOOP] Phase VERIFYING: invoking HandlerVerify "
+                    "(correlation_id=%s, dry_run=%s)",
+                    correlation_id,
+                    state.dry_run,
+                )
                 result = await self._verify.handle(
                     correlation_id=correlation_id,
                     dry_run=state.dry_run,
@@ -281,6 +335,12 @@ class HandlerLoopOrchestrator:
                 )
 
             elif intent.intent_type == EnumBuildLoopIntentType.START_FILL:
+                logger.info(
+                    "[BUILD-LOOP] Phase FILLING: fetching tickets from Linear "
+                    "(correlation_id=%s, api_key_set=%s)",
+                    correlation_id,
+                    bool(self._linear_api_key),
+                )
                 scored = await _fetch_scored_tickets_from_linear(
                     api_key=self._linear_api_key,
                 )
@@ -290,6 +350,13 @@ class HandlerLoopOrchestrator:
                     max_tickets=5,
                 )
                 self._last_fill_result = fill_result.selected_tickets
+                logger.info(
+                    "[BUILD-LOOP] Phase FILLING complete: scored=%d, selected=%d "
+                    "(correlation_id=%s)",
+                    len(scored),
+                    fill_result.total_selected,
+                    correlation_id,
+                )
                 return ModelBuildLoopEvent(
                     correlation_id=correlation_id,
                     source_phase=EnumBuildLoopPhase.FILLING,
@@ -299,6 +366,12 @@ class HandlerLoopOrchestrator:
                 )
 
             elif intent.intent_type == EnumBuildLoopIntentType.START_CLASSIFY:
+                logger.info(
+                    "[BUILD-LOOP] Phase CLASSIFYING: %d tickets to classify "
+                    "(correlation_id=%s)",
+                    len(self._last_fill_result),
+                    correlation_id,
+                )
                 tickets_for_classify = _scored_to_classification(
                     self._last_fill_result,
                 )
@@ -318,6 +391,14 @@ class HandlerLoopOrchestrator:
                 )
 
             elif intent.intent_type == EnumBuildLoopIntentType.START_BUILD:
+                logger.info(
+                    "[BUILD-LOOP] Phase BUILDING: %d targets to dispatch "
+                    "(correlation_id=%s, dry_run=%s, has_publisher=%s)",
+                    len(self._last_classify_result),
+                    correlation_id,
+                    state.dry_run,
+                    self._publisher is not None,
+                )
                 targets = self._last_classify_result
                 dispatch_result = await self._dispatch.handle(
                     correlation_id=correlation_id,
@@ -353,7 +434,10 @@ class HandlerLoopOrchestrator:
                 )
 
             elif intent.intent_type == EnumBuildLoopIntentType.CYCLE_COMPLETE:
-                # Terminal — no action needed
+                logger.info(
+                    "[BUILD-LOOP] Phase COMPLETE: cycle finished (correlation_id=%s)",
+                    correlation_id,
+                )
                 return ModelBuildLoopEvent(
                     correlation_id=correlation_id,
                     source_phase=EnumBuildLoopPhase.COMPLETE,
@@ -379,7 +463,14 @@ class HandlerLoopOrchestrator:
                 )
 
         except Exception as exc:
-            logger.exception("Intent execution failed: %s", intent.intent_type)
+            logger.exception(
+                "[BUILD-LOOP] Intent execution FAILED: intent_type=%s, "
+                "phase=%s, error=%s (correlation_id=%s)",
+                intent.intent_type,
+                state.phase.value,
+                exc,
+                correlation_id,
+            )
             emit_build_loop_friction(
                 phase=state.phase.value,
                 correlation_id=correlation_id,
