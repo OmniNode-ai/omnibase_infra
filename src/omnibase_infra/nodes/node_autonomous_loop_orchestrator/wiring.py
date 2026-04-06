@@ -12,68 +12,21 @@ Related:
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, TypedDict
 from uuid import UUID
 
 from omnibase_core.enums import EnumInjectionScope, EnumMessageCategory
-from omnibase_infra.errors import ModelInfraErrorContext
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
-    from omnibase_core.protocols.event_bus import ProtocolEventBusPublisher
+    from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
     from omnibase_infra.runtime import MessageDispatchEngine
 
 logger = logging.getLogger(__name__)
 
 ROUTE_ID_BUILD_LOOP_START = "route.build-loop.build-loop-start"
-
-
-def _make_publisher(
-    event_bus: ProtocolEventBusPublisher,
-) -> Callable[..., Awaitable[bool]]:
-    """Create a publisher callback that bridges ProtocolEventBusPublisher to
-    the HandlerLoopOrchestrator's expected signature.
-
-    The orchestrator calls ``publisher(event_type=..., payload=...,
-    correlation_id=..., topic=...)`` and expects a ``bool`` return.
-    """
-
-    async def _publish(
-        *,
-        event_type: str,
-        payload: dict[str, object],
-        correlation_id: UUID,
-        topic: str,
-    ) -> bool:
-        try:
-            value = json.dumps(
-                {
-                    "event_type": event_type,
-                    "correlation_id": str(correlation_id),
-                    "payload": payload,
-                },
-            ).encode()
-            key = str(correlation_id).encode()
-            await event_bus.publish(topic, key, value)
-            return True
-        except Exception:  # noqa: BLE001 — caller logs the False return
-            _ctx = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                operation="event_bus_publish",
-            )
-            logger.warning(
-                "Event bus publish failed (topic=%s, context=%s)",
-                topic,
-                _ctx,
-                exc_info=True,
-            )
-            return False
-
-    return _publish
 
 
 class WiringResult(TypedDict):
@@ -83,6 +36,7 @@ class WiringResult(TypedDict):
 
 async def wire_build_loop_handlers(
     container: ModelONEXContainer,
+    event_bus: ProtocolEventBusLike | None = None,
 ) -> WiringResult:
     """Register build loop handlers with the container.
 
@@ -91,11 +45,11 @@ async def wire_build_loop_handlers(
 
     Args:
         container: ONEX container instance to register services in.
+        event_bus: Optional event bus for publishing delegation payloads.
 
     Returns:
         WiringResult with list of registered service names.
     """
-    from omnibase_core.protocols.event_bus import ProtocolEventBusPublisher
     from omnibase_infra.nodes.node_autonomous_loop_orchestrator.handlers.handler_loop_orchestrator import (
         HandlerLoopOrchestrator,
     )
@@ -103,35 +57,8 @@ async def wire_build_loop_handlers(
     services_registered: list[str] = []
 
     linear_api_key = os.environ.get("LINEAR_API_KEY")
-
-    # Resolve event bus publisher so the orchestrator can publish delegation
-    # payloads to Kafka during the BUILD phase.
-    publisher_cb = None
-    if container.service_registry is not None:
-        try:
-            # NOTE: service_kernel registers the concrete EventBus under the
-            # ProtocolEventBusPublisher key; mypy cannot verify Protocol-based DI.
-            event_bus: ProtocolEventBusPublisher = (
-                await container.service_registry.resolve_service(
-                    ProtocolEventBusPublisher  # type: ignore[type-abstract]
-                )
-            )
-            publisher_cb = _make_publisher(event_bus)
-            logger.debug("Resolved ProtocolEventBusPublisher for build loop")
-        except Exception as exc:  # noqa: BLE001 — degrade to filesystem fallback
-            _ctx = ModelInfraErrorContext.with_correlation(
-                operation="resolve_event_bus_publisher",
-            )
-            logger.warning(
-                "Could not resolve ProtocolEventBusPublisher — "
-                "build loop will use filesystem fallback "
-                "(context=%s)",
-                _ctx,
-                exc_info=True,
-            )
-
     handler = HandlerLoopOrchestrator(
-        publisher=publisher_cb,
+        event_bus=event_bus,
         linear_api_key=linear_api_key,
     )
 

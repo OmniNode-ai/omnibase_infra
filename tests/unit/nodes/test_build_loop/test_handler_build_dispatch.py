@@ -1,9 +1,10 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Unit tests for HandlerBuildDispatch — delegation payloads and filesystem fallback.
+"""Unit tests for HandlerBuildDispatch — delegation payload construction.
 
 Related:
     - OMN-7381: Wire handler_build_dispatch to delegation orchestrator
+    - OMN-7676: Fix build dispatch to use injected event bus
     - OMN-7318: node_build_dispatch_effect
 """
 
@@ -111,61 +112,21 @@ class TestDryRun:
         assert len(result.delegation_payloads) == 0
 
     @pytest.mark.asyncio
-    async def test_dry_run_with_fallback(self) -> None:
+    async def test_dry_run_multiple_targets(self) -> None:
         handler = HandlerBuildDispatch()
 
+        targets = (
+            _target("OMN-2001", "First"),
+            _target("OMN-2002", "Second"),
+        )
         result = await handler.handle(
             correlation_id=uuid4(),
-            targets=(_target(),),
+            targets=targets,
             dry_run=True,
-            use_filesystem_fallback=True,
         )
 
-        assert result.total_dispatched == 1
+        assert result.total_dispatched == 2
         assert len(result.delegation_payloads) == 0
-
-
-# ------------------------------------------------------------------
-# Filesystem fallback
-# ------------------------------------------------------------------
-
-
-@pytest.mark.unit
-class TestFilesystemFallback:
-    @pytest.mark.asyncio
-    async def test_writes_manifest_when_fallback(
-        self, tmp_path: object, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import pathlib
-
-        state_dir = pathlib.Path(str(tmp_path))
-        monkeypatch.setenv("ONEX_STATE_DIR", str(state_dir))
-
-        handler = HandlerBuildDispatch()
-        result = await handler.handle(
-            correlation_id=uuid4(),
-            targets=(_target(),),
-            use_filesystem_fallback=True,
-        )
-
-        assert result.total_dispatched == 1
-        assert len(result.delegation_payloads) == 0
-        manifest = state_dir / "autopilot" / "dispatch" / "OMN-1234.json"
-        assert manifest.exists()
-
-    @pytest.mark.asyncio
-    async def test_raises_without_state_dir(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delenv("ONEX_STATE_DIR", raising=False)
-        handler = HandlerBuildDispatch()
-
-        with pytest.raises(RuntimeError, match="ONEX_STATE_DIR"):
-            await handler.handle(
-                correlation_id=uuid4(),
-                targets=(_target(),),
-                use_filesystem_fallback=True,
-            )
 
 
 # ------------------------------------------------------------------

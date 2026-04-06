@@ -6,24 +6,19 @@ This is an EFFECT handler - performs external I/O (delegation dispatch).
 
 Architectural rule: effect handlers must NOT have direct event bus access.
 Instead, this handler builds delegation request payloads and returns them
-in the result.  The orchestrator is responsible for publishing them to Kafka.
-
-Fallback mechanism: when the orchestrator does not have a publisher (e.g. in
-tests or when Kafka is unavailable), writes per-ticket JSON manifest files to
-``$ONEX_STATE_DIR/autopilot/dispatch/`` for consumption by
-``cron-buildloop.sh``.
+in the result.  The orchestrator is responsible for publishing them via
+whatever event bus the runtime injected.
 
 Related:
     - OMN-7318: node_build_dispatch_effect
     - OMN-7381: Wire handler_build_dispatch to delegation orchestrator
+    - OMN-7676: Fix build dispatch to use injected event bus
     - OMN-5113: Autonomous Build Loop epic
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
@@ -33,9 +28,7 @@ import yaml
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
-    EnumInfraTransportType,
 )
-from omnibase_infra.models.errors import ModelInfraErrorContext
 from omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_dispatch_outcome import (
     ModelBuildDispatchOutcome,
 )
@@ -94,23 +87,13 @@ _TOPIC_DELEGATION_REQUEST: str = _load_delegation_topic()
 _DELEGATION_EVENT_TYPE = "omnibase-infra.delegation-request"
 
 
-def _dispatch_dir() -> Path | None:
-    """Resolve the dispatch manifest directory from ONEX_STATE_DIR."""
-    state_dir = os.environ.get("ONEX_STATE_DIR", "")  # ONEX_EXCLUDE: runtime config
-    if not state_dir:
-        return None
-    return Path(state_dir) / "autopilot" / "dispatch"
-
-
 class HandlerBuildDispatch:
     """Dispatches ticket-pipeline builds for AUTO_BUILDABLE tickets via delegation.
 
-    Primary path: builds ``ModelDelegationPayload`` objects for each ticket
-    and returns them in the result.  The orchestrator publishes these to
-    Kafka (architectural rule: only orchestrators may access the event bus).
-
-    Fallback path: when ``use_filesystem_fallback=True``, writes per-ticket
-    JSON manifests to the dispatch directory for ``cron-buildloop.sh``.
+    Builds ``ModelDelegationPayload`` objects for each ticket and returns them
+    in the result.  The orchestrator publishes these via whatever event bus
+    the runtime injected (architectural rule: only orchestrators may access
+    the event bus).
 
     Failures on individual tickets do not block other dispatches.
     """
@@ -128,7 +111,6 @@ class HandlerBuildDispatch:
         correlation_id: UUID,
         targets: tuple[ModelBuildTarget, ...],
         dry_run: bool = False,
-        use_filesystem_fallback: bool = False,
     ) -> ModelBuildDispatchResult:
         """Dispatch builds for each target ticket.
 
@@ -136,35 +118,22 @@ class HandlerBuildDispatch:
             correlation_id: Cycle correlation ID.
             targets: Tickets to dispatch.
             dry_run: Skip actual dispatch.
-            use_filesystem_fallback: Write filesystem manifests instead of
-                building delegation payloads (used when no Kafka publisher
-                is available).
 
         Returns:
             ModelBuildDispatchResult with per-ticket outcomes and delegation
             payloads for the orchestrator to publish.
         """
         logger.info(
-            "Build dispatch: %d targets (correlation_id=%s, dry_run=%s, fallback=%s)",
+            "Build dispatch: %d targets (correlation_id=%s, dry_run=%s)",
             len(targets),
             correlation_id,
             dry_run,
-            use_filesystem_fallback,
         )
 
         outcomes: list[ModelBuildDispatchOutcome] = []
         delegation_payloads: list[ModelDelegationPayload] = []
         total_dispatched = 0
         total_failed = 0
-
-        # Filesystem fallback: only needed when explicitly requested
-        dispatch_path: Path | None = None
-        if use_filesystem_fallback and targets and not dry_run:
-            dispatch_path = _dispatch_dir()
-            if dispatch_path is None:
-                msg = "ONEX_STATE_DIR not set — cannot write dispatch manifest"
-                raise RuntimeError(msg)
-            dispatch_path.mkdir(parents=True, exist_ok=True)
 
         seen_ticket_ids: set[str] = set()
         for target in targets:
@@ -186,18 +155,11 @@ class HandlerBuildDispatch:
                 continue
 
             try:
-                if use_filesystem_fallback:
-                    self._write_dispatch_manifest(
-                        dispatch_path=dispatch_path,
-                        target=target,
-                        correlation_id=correlation_id,
-                    )
-                else:
-                    payload = self._build_delegation_payload(
-                        target=target,
-                        correlation_id=correlation_id,
-                    )
-                    delegation_payloads.append(payload)
+                payload = self._build_delegation_payload(
+                    target=target,
+                    correlation_id=correlation_id,
+                )
+                delegation_payloads.append(payload)
                 logger.info(
                     "Dispatched ticket-pipeline for %s: %s",
                     target.ticket_id,
@@ -212,28 +174,11 @@ class HandlerBuildDispatch:
                 )
                 total_dispatched += 1
             except Exception as exc:  # noqa: BLE001 — boundary: catch-all converts dispatch failure to outcome record
-                transport = (
-                    EnumInfraTransportType.FILESYSTEM
-                    if use_filesystem_fallback
-                    else EnumInfraTransportType.KAFKA
-                )
-                operation = (
-                    "dispatch_manifest_write"
-                    if use_filesystem_fallback
-                    else "delegation_payload_build"
-                )
-                error_ctx = ModelInfraErrorContext.with_correlation(
-                    transport_type=transport,
-                    operation=operation,
-                    target_name=target.ticket_id,
-                    correlation_id=correlation_id,
-                    original_error_type=type(exc).__name__,
-                )
                 logger.warning(
                     "Failed to dispatch %s: %s (correlation_id=%s)",
                     target.ticket_id,
                     exc,
-                    error_ctx.correlation_id,
+                    correlation_id,
                 )
                 emitted = emit_build_loop_friction(
                     phase="BUILDING",
@@ -271,7 +216,7 @@ class HandlerBuildDispatch:
         )
 
     # ------------------------------------------------------------------
-    # Primary dispatch: build delegation payload (orchestrator publishes)
+    # Build delegation payload (orchestrator publishes via event bus)
     # ------------------------------------------------------------------
 
     def _build_delegation_payload(
@@ -283,7 +228,7 @@ class HandlerBuildDispatch:
         """Build a delegation request payload for a single ticket.
 
         Returns a ``ModelDelegationPayload`` that the orchestrator will
-        publish to the delegation-request Kafka topic.
+        publish via the injected event bus.
         """
         now = datetime.now(tz=UTC)
         payload: dict[str, object] = {
@@ -302,47 +247,3 @@ class HandlerBuildDispatch:
             payload=payload,
             correlation_id=correlation_id,
         )
-
-    # ------------------------------------------------------------------
-    # Fallback dispatch: filesystem manifest
-    # ------------------------------------------------------------------
-
-    def _write_dispatch_manifest(
-        self,
-        *,
-        dispatch_path: Path | None,
-        target: ModelBuildTarget,
-        correlation_id: UUID,
-    ) -> None:
-        """Write a dispatch manifest JSON for a single ticket.
-
-        The manifest contains everything a downstream runner needs to spawn
-        ``claude -p "Run ticket-pipeline for {ticket_id}"``.
-
-        Raises:
-            RuntimeError: If ONEX_STATE_DIR is not set.
-        """
-        if dispatch_path is None:
-            msg = "ONEX_STATE_DIR not set — cannot write dispatch manifest"
-            raise RuntimeError(msg)
-
-        ticket_id = target.ticket_id
-        if not (ticket_id.isascii() and ticket_id.replace("-", "").isalnum()):
-            msg = f"Unsafe ticket_id for dispatch manifest: {ticket_id!r}"
-            raise ValueError(msg)
-
-        manifest = {
-            "ticket_id": ticket_id,
-            "title": target.title,
-            "buildability": target.buildability.value,
-            "correlation_id": str(correlation_id),
-            "dispatched_at": datetime.now(tz=UTC).isoformat(),
-            "status": "pending",
-            "command": f'claude -p "Run ticket-pipeline for {ticket_id}"',
-        }
-
-        manifest_path = dispatch_path / f"{ticket_id}.json"
-        temp_path = manifest_path.with_suffix(".json.tmp")
-        temp_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-        temp_path.replace(manifest_path)
-        logger.debug("Wrote dispatch manifest: %s", manifest_path)

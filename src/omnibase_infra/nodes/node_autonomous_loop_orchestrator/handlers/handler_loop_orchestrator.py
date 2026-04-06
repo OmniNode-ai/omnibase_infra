@@ -18,12 +18,16 @@ Related:
 
 from __future__ import annotations
 
+import json
 import logging
-from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import httpx
+
+if TYPE_CHECKING:
+    from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.enums.enum_build_loop_intent_type import EnumBuildLoopIntentType
@@ -99,7 +103,7 @@ class HandlerLoopOrchestrator:
 
     def __init__(
         self,
-        publisher: Callable[..., Awaitable[bool]] | None = None,
+        event_bus: ProtocolEventBusLike | None = None,
         linear_api_key: str | None = None,
     ) -> None:
         self._reducer = HandlerLoopState()
@@ -108,7 +112,7 @@ class HandlerLoopOrchestrator:
         self._rsd_fill = HandlerRsdFill()
         self._classify = HandlerTicketClassify()
         self._dispatch = HandlerBuildDispatch()
-        self._publisher = publisher
+        self._event_bus = event_bus
         self._linear_api_key = linear_api_key
         # Inter-phase state: carry results between fill -> classify -> build
         self._last_fill_result: tuple[ModelScoredTicket, ...] = ()
@@ -393,37 +397,29 @@ class HandlerLoopOrchestrator:
             elif intent.intent_type == EnumBuildLoopIntentType.START_BUILD:
                 logger.info(
                     "[BUILD-LOOP] Phase BUILDING: %d targets to dispatch "
-                    "(correlation_id=%s, dry_run=%s, has_publisher=%s)",
+                    "(correlation_id=%s, dry_run=%s, has_event_bus=%s)",
                     len(self._last_classify_result),
                     correlation_id,
                     state.dry_run,
-                    self._publisher is not None,
+                    self._event_bus is not None,
                 )
                 targets = self._last_classify_result
                 dispatch_result = await self._dispatch.handle(
                     correlation_id=correlation_id,
                     targets=targets,
                     dry_run=state.dry_run,
-                    use_filesystem_fallback=self._publisher is None,
                 )
 
-                # Orchestrator publishes delegation payloads (handlers
-                # must not have direct event bus access).
-                for dp in dispatch_result.delegation_payloads:
-                    if self._publisher is not None:
-                        success = await self._publisher(
-                            event_type=dp.event_type,
-                            payload=dp.payload,
-                            correlation_id=dp.correlation_id,
+                # Orchestrator publishes delegation payloads via the
+                # injected event bus (handlers must not have direct
+                # event bus access).
+                if self._event_bus is not None:
+                    for dp in dispatch_result.delegation_payloads:
+                        await self._event_bus.publish(
                             topic=dp.topic,
+                            key=None,
+                            value=json.dumps(dp.payload, default=str).encode(),
                         )
-                        if not success:
-                            logger.warning(
-                                "Publisher returned False for delegation payload "
-                                "(correlation_id=%s, topic=%s)",
-                                dp.correlation_id,
-                                dp.topic,
-                            )
 
                 return ModelBuildLoopEvent(
                     correlation_id=correlation_id,
