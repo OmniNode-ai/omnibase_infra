@@ -85,7 +85,19 @@ class DispatcherBuildLoopStart(MixinAsyncCircuitBreaker):
         envelope: ModelEventEnvelope[object] | dict[str, object],
     ) -> ModelDispatchResult:
         started_at = datetime.now(UTC)
+        logger.info(
+            "[BUILD-LOOP] === DISPATCHER ENTRY === DispatcherBuildLoopStart.handle() "
+            "called (envelope_type=%s)",
+            type(envelope).__name__,
+        )
         correlation_id, raw_payload = extract_envelope_fields(envelope)
+        logger.info(
+            "[BUILD-LOOP] Dispatcher extracted fields: correlation_id=%s, "
+            "payload_type=%s, payload_keys=%s",
+            correlation_id,
+            type(raw_payload).__name__,
+            list(raw_payload.keys()) if isinstance(raw_payload, dict) else "N/A",
+        )
 
         try:
             async with self._circuit_breaker_lock:
@@ -94,8 +106,28 @@ class DispatcherBuildLoopStart(MixinAsyncCircuitBreaker):
             payload = raw_payload
             if not isinstance(payload, ModelLoopStartCommand):
                 if isinstance(payload, dict):
+                    logger.info(
+                        "[BUILD-LOOP] Dispatcher deserializing dict to "
+                        "ModelLoopStartCommand (correlation_id=%s)",
+                        correlation_id,
+                    )
                     payload = ModelLoopStartCommand.model_validate(payload)
+                    logger.info(
+                        "[BUILD-LOOP] Dispatcher deserialization success: "
+                        "max_cycles=%d, dry_run=%s, skip_closeout=%s "
+                        "(correlation_id=%s)",
+                        payload.max_cycles,
+                        payload.dry_run,
+                        payload.skip_closeout,
+                        correlation_id,
+                    )
                 else:
+                    logger.warning(
+                        "[BUILD-LOOP] Dispatcher received unexpected payload type: %s "
+                        "(correlation_id=%s)",
+                        type(payload).__name__,
+                        correlation_id,
+                    )
                     return ModelDispatchResult(
                         dispatch_id=uuid4(),
                         status=EnumDispatchStatus.INVALID_MESSAGE,
@@ -111,6 +143,10 @@ class DispatcherBuildLoopStart(MixinAsyncCircuitBreaker):
 
             assert isinstance(payload, ModelLoopStartCommand)
 
+            logger.info(
+                "[BUILD-LOOP] Dispatcher invoking handler.handle() (correlation_id=%s)",
+                correlation_id,
+            )
             result = await self._handler.handle(payload)
 
             completed_at = datetime.now(UTC)
