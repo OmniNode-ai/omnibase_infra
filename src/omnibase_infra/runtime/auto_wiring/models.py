@@ -1,6 +1,9 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Pydantic models for contract auto-discovery and auto-wiring manifest."""
+"""Pydantic models for contract auto-discovery and auto-wiring manifest.
+
+Includes handler routing models needed for auto-wiring (OMN-7654).
+"""
 
 from __future__ import annotations
 
@@ -20,6 +23,45 @@ class ModelContractVersion(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.major}.{self.minor}.{self.patch}"
+
+
+class ModelHandlerRef(BaseModel):
+    """Reference to a handler class in a contract's handler_routing section."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
+
+    name: str = Field(..., description="Handler class name")
+    module: str = Field(..., description="Fully qualified module path")
+
+
+class ModelHandlerRoutingEntry(BaseModel):
+    """A single handler entry from contract handler_routing.handlers[]."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
+
+    handler: ModelHandlerRef = Field(..., description="Handler class reference")
+    event_model: ModelHandlerRef | None = Field(
+        default=None,
+        description="Event model reference (payload_type_match strategy)",
+    )
+    operation: str | None = Field(
+        default=None,
+        description="Operation name (operation_match strategy)",
+    )
+
+
+class ModelHandlerRouting(BaseModel):
+    """Handler routing declaration from contract YAML."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
+
+    routing_strategy: str = Field(
+        ..., description="Routing strategy (payload_type_match or operation_match)"
+    )
+    handlers: tuple[ModelHandlerRoutingEntry, ...] = Field(
+        default_factory=tuple,
+        description="Handler entries",
+    )
 
 
 class ModelEventBusWiring(BaseModel):
@@ -65,6 +107,9 @@ class ModelDiscoveredContract(BaseModel):
     )
     event_bus: ModelEventBusWiring | None = Field(
         default=None, description="Event bus wiring if declared"
+    )
+    handler_routing: ModelHandlerRouting | None = Field(
+        default=None, description="Handler routing if declared"
     )
 
 
