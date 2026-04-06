@@ -18,8 +18,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from omnibase_infra.runtime.auto_wiring.context import ModelAutoWiringContext
+pytestmark = pytest.mark.unit
+
 from omnibase_infra.runtime.auto_wiring.config import ModelLifecycleHookConfig
+from omnibase_infra.runtime.auto_wiring.context import ModelAutoWiringContext
 from omnibase_infra.runtime.auto_wiring.models import ModelLifecycleHooks
 from omnibase_infra.runtime.auto_wiring.result import ModelLifecycleHookResult
 from omnibase_infra.runtime.auto_wiring.wiring import (
@@ -326,7 +328,7 @@ class TestLifecycleHookExecutor:
             result = await executor.execute_hook(hook_config, context)
 
         assert result.success is False
-        assert "DB connection failed" in result.error_message
+        assert "RuntimeError" in result.error_message
 
     @pytest.mark.asyncio
     async def test_execute_startup_both_hooks(

@@ -1374,7 +1374,7 @@ pattern_exemptions:
   # ==========================================================================
   # Auto-Wiring Context Exemptions (OMN-7655)
   # ==========================================================================
-  - file_pattern: 'context\.py'
+  - file_pattern: 'runtime/auto_wiring/context\.py'
     violation_pattern: "Field 'handler_id' should use UUID"
     reason: >
       handler_id in ModelAutoWiringContext is a human-readable semantic identifier from handler contracts (e.g., "auth.handler"). Consistent with ModelHandlerIdentifier and other handler models. Not a UUID.

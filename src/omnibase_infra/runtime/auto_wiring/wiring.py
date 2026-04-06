@@ -25,8 +25,8 @@ import importlib
 import logging
 from collections.abc import Callable, Coroutine
 
-from omnibase_infra.runtime.auto_wiring.context import ModelAutoWiringContext
 from omnibase_infra.runtime.auto_wiring.config import ModelLifecycleHookConfig
+from omnibase_infra.runtime.auto_wiring.context import ModelAutoWiringContext
 from omnibase_infra.runtime.auto_wiring.models import ModelLifecycleHooks
 from omnibase_infra.runtime.auto_wiring.result import ModelLifecycleHookResult
 
@@ -147,7 +147,7 @@ class LifecycleHookExecutor:
             )
             return ModelLifecycleHookResult.failed(
                 phase=phase_name,
-                error_message=f"Hook '{hook_config.callable_ref}' raised: {e}",
+                error_message=f"Hook '{hook_config.callable_ref}' raised {type(e).__name__}",
             )
 
     async def execute_startup(

@@ -10,8 +10,8 @@ and Plugin.shutdown() with declarative, contract-driven lifecycle management.
     Created as part of OMN-7655 (Contract lifecycle hooks).
 """
 
-from omnibase_infra.runtime.auto_wiring.context import ModelAutoWiringContext
 from omnibase_infra.runtime.auto_wiring.config import ModelLifecycleHookConfig
+from omnibase_infra.runtime.auto_wiring.context import ModelAutoWiringContext
 from omnibase_infra.runtime.auto_wiring.models import ModelLifecycleHooks
 from omnibase_infra.runtime.auto_wiring.result import ModelLifecycleHookResult
 from omnibase_infra.runtime.auto_wiring.wiring import LifecycleHookExecutor
