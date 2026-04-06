@@ -43,7 +43,15 @@ logger = logging.getLogger(__name__)
 
 
 def _get_postgres_dsn() -> str | None:
-    """Build PostgreSQL DSN from environment variables."""
+    """Build PostgreSQL DSN from environment variables.
+
+    Always connects to ``omnibase_infra`` database regardless of the
+    ``POSTGRES_DATABASE`` env var.  The injection_effectiveness tables live in
+    the omnibase_infra database, not omnidash_analytics.  When the global env
+    sets ``POSTGRES_DATABASE=omnidash_analytics`` (for omnidash projections),
+    these tests would fail with ``UndefinedColumnError`` because the two
+    databases have incompatible ``injection_effectiveness`` schemas.
+    """
     host = os.getenv("POSTGRES_HOST")
     password = os.getenv("POSTGRES_PASSWORD")
 
@@ -51,7 +59,7 @@ def _get_postgres_dsn() -> str | None:
         return None
 
     port = os.getenv("POSTGRES_PORT", "5436")
-    database = os.getenv("POSTGRES_DATABASE", "omnibase_infra")
+    database = "omnibase_infra"
     user = os.getenv("POSTGRES_USER", "postgres")
 
     return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{database}"
