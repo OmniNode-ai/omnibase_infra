@@ -54,9 +54,7 @@ class ModelDiscoveredContract(BaseModel):
     )
     node_version: str = Field(default="1.0.0", description="Node version string")
     contract_path: Path = Field(..., description="Filesystem path to contract.yaml")
-    entry_point_name: str = Field(
-        ..., description="Name of the onex.nodes entry point"
-    )
+    entry_point_name: str = Field(..., description="Name of the onex.nodes entry point")
     package_name: str = Field(
         ..., description="Distribution package that registered the entry point"
     )

@@ -3075,6 +3075,32 @@ pattern_exemptions:
       ticket_id is a human-readable Linear identifier (e.g. "OMN-1234"), not a UUID.
 
     ticket: OMN-5113
+  # ==========================================================================
+  # Auto-Wiring Models entry_point_name / package_name Exemption (OMN-7653)
+  # ==========================================================================
+  # entry_point_name and package_name are Python packaging identifiers, not
+  # entity references requiring ID + display_name pattern.
+  - file_pattern: 'auto_wiring/models\.py'
+    violation_pattern: "Field 'entry_point_name' might reference an entity"
+    reason: >
+      entry_point_name is a Python packaging entry point identifier
+      (e.g., "node_contract_loader_effect") from importlib.metadata, not an
+      entity reference. It is a fixed string from pyproject.toml, not a
+      user-facing display name.
+
+    documentation:
+      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
+    ticket: OMN-7653
+  - file_pattern: 'auto_wiring/models\.py'
+    violation_pattern: "Field 'package_name' might reference an entity"
+    reason: >
+      package_name is a Python distribution package identifier
+      (e.g., "omnibase-infra") from importlib.metadata, not an entity
+      reference. It is a fixed string from the packaging ecosystem.
+
+    documentation:
+      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
+    ticket: OMN-7653
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
@@ -3184,6 +3210,29 @@ architecture_exemptions:
     documentation:
       - CLAUDE.md (Protocol File Naming - domain-grouping convention)
     ticket: OMN-5060
+  # ==========================================================================
+  # Auto-Wiring Models Exemption (OMN-7653)
+  # ==========================================================================
+  # auto_wiring/models.py contains 5 tightly coupled Pydantic models:
+  # - ModelContractVersion: semantic version from contract YAML
+  # - ModelEventBusWiring: event bus topic declarations
+  # - ModelDiscoveredContract: single discovered contract
+  # - ModelDiscoveryError: discovery error record
+  # - ModelAutoWiringManifest: complete discovery manifest
+  # These are always used together in the auto-wiring pipeline.
+  - file_pattern: 'auto_wiring/models\.py'
+    violation_pattern: '\d+ models in one file'
+    reason: >
+      Domain-grouped models for contract auto-discovery and auto-wiring.
+      ModelContractVersion and ModelEventBusWiring are value types embedded in
+      ModelDiscoveredContract; ModelDiscoveryError captures scan failures;
+      ModelAutoWiringManifest aggregates both. All five are always used together
+      and splitting them would create circular imports. Per CLAUDE.md
+      domain-grouping convention for cohesive models.
+
+    documentation:
+      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
+    ticket: OMN-7653
 # These handle complex union type violations
 union_exemptions:
   # ==========================================================================

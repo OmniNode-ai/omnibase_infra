@@ -110,12 +110,8 @@ class TestParseContract:
             package_version="1.0.0",
         )
         assert result.event_bus is not None
-        assert result.event_bus.subscribe_topics == (
-            "onex.evt.platform.test-input.v1",
-        )
-        assert result.event_bus.publish_topics == (
-            "onex.evt.platform.test-output.v1",
-        )
+        assert result.event_bus.subscribe_topics == ("onex.evt.platform.test-input.v1",)
+        assert result.event_bus.publish_topics == ("onex.evt.platform.test-output.v1",)
 
     @pytest.mark.unit
     def test_raises_on_non_dict_yaml(self, tmp_path: Path) -> None:
@@ -162,7 +158,7 @@ class TestResolveContractPath:
 
         cls = type("MyNode", (), {})
         with patch("inspect.getfile", return_value=str(module_file)):
-            with pytest.raises(FileNotFoundError, match="No contract.yaml found"):
+            with pytest.raises(FileNotFoundError, match=r"No contract\.yaml found"):
                 _resolve_contract_path(cls)
 
 
@@ -281,9 +277,7 @@ class TestModelAutoWiringManifest:
     def test_get_all_topics(self, tmp_path: Path) -> None:
         dir_a = tmp_path / "node_a"
         dir_a.mkdir()
-        path_a = _make_contract_yaml(
-            dir_a, name="node_a", with_event_bus=True
-        )
+        path_a = _make_contract_yaml(dir_a, name="node_a", with_event_bus=True)
 
         manifest = discover_contracts_from_paths([path_a])
         assert "onex.evt.platform.test-input.v1" in manifest.get_all_subscribe_topics()
