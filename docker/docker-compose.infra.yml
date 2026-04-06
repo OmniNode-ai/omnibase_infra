@@ -624,6 +624,10 @@ services:
       ONEX_INPUT_TOPIC: ${ONEX_EFFECTS_INPUT_TOPIC:-effect-requests}
       ONEX_OUTPUT_TOPIC: ${ONEX_EFFECTS_OUTPUT_TOPIC:-effect-responses}
       ONEX_GROUP_ID: ${ONEX_EFFECTS_GROUP_ID:-onex-runtime-effects}
+      # OMN-7569: Savings estimation consumer config (env_prefix=OMNIBASE_INFRA_SAVINGS_)
+      OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      # OMN-7569: HandlerRegistrationStoragePostgres reads POSTGRES_HOST directly from env
+      POSTGRES_HOST: postgres
     ports:
       - "${RUNTIME_EFFECTS_PORT:-8086}:8085"
     stop_grace_period: 90s

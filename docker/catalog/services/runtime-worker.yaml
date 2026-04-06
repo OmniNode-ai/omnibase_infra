@@ -24,6 +24,8 @@ hardcoded_env:
   KEYCLOAK_ADMIN_URL: http://keycloak:8080
   OTEL_SERVICE_NAME: omninode-runtime-worker
   RUNTIME_PROFILE: workers
+  OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+  POSTGRES_HOST: postgres
 operational_defaults:
   POSTGRES_USER: postgres
   ONEX_LOG_LEVEL: INFO
