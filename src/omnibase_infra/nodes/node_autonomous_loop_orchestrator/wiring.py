@@ -21,6 +21,8 @@ from uuid import UUID
 
 from omnibase_core.enums import EnumInjectionScope, EnumMessageCategory
 
+from omnibase_infra.errors import ModelInfraErrorContext
+
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
     from omnibase_core.protocols.event_bus import ProtocolEventBusPublisher
@@ -113,10 +115,15 @@ async def wire_build_loop_handlers(
             )
             publisher_cb = _make_publisher(event_bus)
             logger.debug("Resolved ProtocolEventBusPublisher for build loop")
-        except Exception:  # noqa: BLE001 — degrade to filesystem fallback
+        except Exception as exc:  # noqa: BLE001 — degrade to filesystem fallback
+            _ctx = ModelInfraErrorContext.with_correlation(
+                operation="resolve_event_bus_publisher",
+            )
             logger.warning(
                 "Could not resolve ProtocolEventBusPublisher — "
-                "build loop will use filesystem fallback",
+                "build loop will use filesystem fallback "
+                "(context=%s)",
+                _ctx,
                 exc_info=True,
             )
 
