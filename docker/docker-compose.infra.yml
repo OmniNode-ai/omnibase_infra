@@ -653,6 +653,9 @@ services:
   # Unhealthy detection latency = start_period + (interval * retries) = 1200s + 150s = 1350s.
   # AUTOHEAL_START_PERIOD must exceed start_period + retry window to avoid premature restarts.
   # Workers wire ~166 Kafka consumers at startup (~15+ min), so 1200s start_period is needed.
+  # OMN-7569: Default replicas=0 — workers join the same per-topic consumer groups
+  # as the main runtime on 1-partition topics, causing a constant rebalance storm.
+  # Scale to 0 until the kernel supports profile-based subscription filtering.
   runtime-worker:
     !!merge <<: *runtime-base
     profiles: ["runtime", "full"]
@@ -685,7 +688,7 @@ services:
       start_period: 1200s
     deploy:
       mode: replicated
-      replicas: ${WORKER_REPLICAS:-2}
+      replicas: ${WORKER_REPLICAS:-0}
       resources:
         limits:
           cpus: '0.5'
