@@ -108,6 +108,13 @@ TRUSTED_HANDLER_NAMESPACE_PREFIXES: Final[tuple[str, ...]] = (
 #   with status namespace_rejected (OMN-6829)
 # - omnimemory is a first-party package in the OmniNode ecosystem
 #
+# Why omnimarket. is included:
+# - omnimarket provides PluginMarket, a first-party domain plugin registered
+#   via pyproject.toml entry_points (onex.domain_plugins group)
+# - Without this prefix, discover_from_entry_points() rejects the entry point
+#   with status namespace_rejected (OMN-7646)
+# - omnimarket is a first-party package in the OmniNode ecosystem
+#
 # Third-party plugin namespaces must be explicitly configured via security config file.
 TRUSTED_PLUGIN_NAMESPACE_PREFIXES: Final[tuple[str, ...]] = (
     "omnibase_core.",
@@ -115,6 +122,7 @@ TRUSTED_PLUGIN_NAMESPACE_PREFIXES: Final[tuple[str, ...]] = (
     "omniclaude.",
     "omniintelligence.",
     "omnimemory.",
+    "omnimarket.",
 )
 
 # PEP 621 entry_points group name for domain plugin discovery.

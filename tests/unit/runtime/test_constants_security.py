@@ -52,6 +52,10 @@ class TestTrustedPluginNamespacePrefixes:
         """Test that omnimemory is a trusted plugin namespace (OMN-6829)."""
         assert "omnimemory." in TRUSTED_PLUGIN_NAMESPACE_PREFIXES
 
+    def test_contains_omnimarket_namespace(self) -> None:
+        """Test that omnimarket is a trusted plugin namespace (OMN-7646)."""
+        assert "omnimarket." in TRUSTED_PLUGIN_NAMESPACE_PREFIXES
+
     def test_is_tuple(self) -> None:
         """Test that the constant is a tuple (immutable), not a list."""
         assert isinstance(TRUSTED_PLUGIN_NAMESPACE_PREFIXES, tuple)
@@ -98,6 +102,7 @@ class TestPluginHandlerNamespaceRelationship:
         assert "omniclaude." in extra
         assert "omniintelligence." in extra
         assert "omnimemory." in extra
+        assert "omnimarket." in extra
 
 
 class TestDomainPluginEntryPointGroup:
