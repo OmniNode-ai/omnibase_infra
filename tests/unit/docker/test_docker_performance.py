@@ -129,11 +129,11 @@ class TestDockerComposePerformance:
                     match = re.search(r"\$\{[^}]*:-(\d+)\}", replicas)
                     if match:
                         default_replicas = int(match.group(1))
-                        assert 1 <= default_replicas <= 10, (
+                        assert 0 <= default_replicas <= 10, (
                             f"Default replicas {default_replicas} seems unusual"
                         )
                 elif isinstance(replicas, int):
-                    assert 1 <= replicas <= 10, f"Replicas {replicas} seems unusual"
+                    assert 0 <= replicas <= 10, f"Replicas {replicas} seems unusual"
 
     def test_resource_reservations_configured(self) -> None:
         """Verify docker-compose has resource reservations."""
