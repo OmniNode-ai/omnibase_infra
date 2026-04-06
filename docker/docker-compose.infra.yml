@@ -668,6 +668,10 @@ services:
       ONEX_INPUT_TOPIC: ${ONEX_WORKER_INPUT_TOPIC:-worker-requests}
       ONEX_OUTPUT_TOPIC: ${ONEX_WORKER_OUTPUT_TOPIC:-worker-responses}
       ONEX_GROUP_ID: ${ONEX_WORKER_GROUP_ID:-onex-runtime-workers}
+      # OMN-7569: Savings estimation consumer config (env_prefix=OMNIBASE_INFRA_SAVINGS_)
+      OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      # OMN-7569: HandlerRegistrationStoragePostgres reads POSTGRES_HOST directly from env
+      POSTGRES_HOST: postgres
     stop_grace_period: 90s
     volumes:
       - worker_logs:/app/logs
