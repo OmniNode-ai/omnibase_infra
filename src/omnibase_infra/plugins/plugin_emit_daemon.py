@@ -187,9 +187,7 @@ class PluginEmitDaemon:
                     )
 
                 publish_fn = _kafka_publish
-                logger.info(
-                    "[EMIT-DAEMON] Kafka publishing enabled: %s", kafka_servers
-                )
+                logger.info("[EMIT-DAEMON] Kafka publishing enabled: %s", kafka_servers)
             except Exception as e:  # noqa: BLE001
                 logger.warning(
                     "[EMIT-DAEMON] Failed to connect Kafka, running without: %s", e
@@ -217,9 +215,7 @@ class PluginEmitDaemon:
                 handler.transition_to_listening()
             except OSError as e:
                 if "Address already in use" in str(e):
-                    handler.transition_to_failed(
-                        f"Socket already bound: {socket_path}"
-                    )
+                    handler.transition_to_failed(f"Socket already bound: {socket_path}")
                     logger.warning(
                         "[EMIT-DAEMON] Socket %s already bound — "
                         "another daemon is running. Non-fatal.",
