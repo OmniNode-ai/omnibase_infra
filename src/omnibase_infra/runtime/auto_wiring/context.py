@@ -64,10 +64,12 @@ class ModelAutoWiringContext(BaseModel):
         min_length=1,
         description="Current lifecycle phase",
     )
+    # NOTE: Using Any because services are heterogeneous container-injected objects (DB pools, HTTP clients, etc.)
     services: dict[str, Any] = Field(
         default_factory=dict,
         description="Named services available to the hook from the container",
     )
+    # NOTE: Using Any because metadata values come from arbitrary contract YAML fields
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional contract metadata passed through from YAML",

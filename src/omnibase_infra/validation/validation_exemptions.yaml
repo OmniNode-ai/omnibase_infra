@@ -1371,6 +1371,17 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
     ticket: OMN-1097
+  # ==========================================================================
+  # Auto-Wiring Context Exemptions (OMN-7655)
+  # ==========================================================================
+  - file_pattern: 'context\.py'
+    violation_pattern: "Field 'handler_id' should use UUID"
+    reason: >
+      handler_id in ModelAutoWiringContext is a human-readable semantic identifier from handler contracts (e.g., "auth.handler"). Consistent with ModelHandlerIdentifier and other handler models. Not a UUID.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
+    ticket: OMN-7655
   - file_pattern: 'model_handler_security_policy\.py'
     violation_pattern: "contains anti-pattern 'Handler'"
     reason: >

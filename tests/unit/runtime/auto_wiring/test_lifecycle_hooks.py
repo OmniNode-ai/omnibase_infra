@@ -21,9 +21,9 @@ import pytest
 from omnibase_infra.runtime.auto_wiring.context import ModelAutoWiringContext
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelLifecycleHookConfig,
-    ModelLifecycleHookResult,
     ModelLifecycleHooks,
 )
+from omnibase_infra.runtime.auto_wiring.result import ModelLifecycleHookResult
 from omnibase_infra.runtime.auto_wiring.wiring import (
     LifecycleHookExecutor,
     resolve_hook_callable,
@@ -31,7 +31,6 @@ from omnibase_infra.runtime.auto_wiring.wiring import (
 from omnibase_infra.services.contract_publisher.sources.model_discovered import (
     ModelDiscoveredContract,
 )
-
 
 # ---------------------------------------------------------------------------
 # ModelLifecycleHookConfig
@@ -79,7 +78,7 @@ class TestModelLifecycleHookConfig:
 
     def test_frozen(self) -> None:
         config = ModelLifecycleHookConfig(callable_ref="pkg.hooks.start")
-        with pytest.raises(Exception):  # noqa: B017
+        with pytest.raises(Exception):
             config.callable_ref = "other.path"  # type: ignore[misc]
 
 
@@ -125,7 +124,7 @@ class TestModelLifecycleHooks:
 
     def test_frozen(self) -> None:
         hooks = ModelLifecycleHooks()
-        with pytest.raises(Exception):  # noqa: B017
+        with pytest.raises(Exception):
             hooks.on_start = ModelLifecycleHookConfig(  # type: ignore[misc]
                 callable_ref="pkg.hooks.start"
             )
@@ -142,7 +141,7 @@ class TestModelLifecycleHookResult:
     def test_succeeded(self) -> None:
         result = ModelLifecycleHookResult.succeeded("on_start")
         assert result.success is True
-        assert result.hook_name == "on_start"
+        assert result.phase == "on_start"
         assert result.error_message == ""
         assert result.background_workers == []
         assert bool(result) is True
@@ -233,18 +232,18 @@ class TestResolveHookCallable:
 class TestLifecycleHookExecutor:
     """Tests for the hook execution engine."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def executor(self) -> LifecycleHookExecutor:
         return LifecycleHookExecutor()
 
-    @pytest.fixture()
+    @pytest.fixture
     def base_context_kwargs(self) -> dict[str, str]:
         return {
             "handler_id": "test.handler",
             "node_kind": "COMPUTE",
         }
 
-    @pytest.mark.asyncio()
+    @pytest.mark.asyncio
     async def test_execute_hook_success(self, executor: LifecycleHookExecutor) -> None:
         hook_config = ModelLifecycleHookConfig(callable_ref="pkg.hooks.start")
         context = ModelAutoWiringContext(
@@ -265,7 +264,7 @@ class TestLifecycleHookExecutor:
         assert result.success is True
         mock_fn.assert_awaited_once_with(context)
 
-    @pytest.mark.asyncio()
+    @pytest.mark.asyncio
     async def test_execute_hook_resolution_failure(
         self, executor: LifecycleHookExecutor
     ) -> None:
@@ -282,10 +281,8 @@ class TestLifecycleHookExecutor:
         assert result.success is False
         assert "resolution failed" in result.error_message
 
-    @pytest.mark.asyncio()
-    async def test_execute_hook_timeout(
-        self, executor: LifecycleHookExecutor
-    ) -> None:
+    @pytest.mark.asyncio
+    async def test_execute_hook_timeout(self, executor: LifecycleHookExecutor) -> None:
         hook_config = ModelLifecycleHookConfig(
             callable_ref="pkg.hooks.slow",
             timeout_seconds=1.0,
@@ -309,7 +306,7 @@ class TestLifecycleHookExecutor:
         assert result.success is False
         assert "timed out" in result.error_message
 
-    @pytest.mark.asyncio()
+    @pytest.mark.asyncio
     async def test_execute_hook_exception(
         self, executor: LifecycleHookExecutor
     ) -> None:
@@ -333,7 +330,7 @@ class TestLifecycleHookExecutor:
         assert result.success is False
         assert "DB connection failed" in result.error_message
 
-    @pytest.mark.asyncio()
+    @pytest.mark.asyncio
     async def test_execute_startup_both_hooks(
         self,
         executor: LifecycleHookExecutor,
@@ -362,7 +359,7 @@ class TestLifecycleHookExecutor:
         assert len(results) == 2
         assert all(r.success for r in results)
 
-    @pytest.mark.asyncio()
+    @pytest.mark.asyncio
     async def test_execute_startup_required_hook_failure_aborts(
         self,
         executor: LifecycleHookExecutor,
@@ -394,7 +391,7 @@ class TestLifecycleHookExecutor:
         assert len(results) == 1
         assert not results[0].success
 
-    @pytest.mark.asyncio()
+    @pytest.mark.asyncio
     async def test_execute_startup_optional_hook_continues(
         self,
         executor: LifecycleHookExecutor,
@@ -428,7 +425,7 @@ class TestLifecycleHookExecutor:
         assert not results[0].success
         assert results[1].success
 
-    @pytest.mark.asyncio()
+    @pytest.mark.asyncio
     async def test_execute_startup_no_hooks(
         self,
         executor: LifecycleHookExecutor,
@@ -438,7 +435,7 @@ class TestLifecycleHookExecutor:
         results = await executor.execute_startup(hooks, base_context_kwargs)
         assert results == []
 
-    @pytest.mark.asyncio()
+    @pytest.mark.asyncio
     async def test_execute_shutdown(
         self,
         executor: LifecycleHookExecutor,
@@ -461,7 +458,7 @@ class TestLifecycleHookExecutor:
         assert result is not None
         assert result.success
 
-    @pytest.mark.asyncio()
+    @pytest.mark.asyncio
     async def test_execute_shutdown_no_hook(
         self,
         executor: LifecycleHookExecutor,
