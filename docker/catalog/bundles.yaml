@@ -36,6 +36,10 @@ runtime:
     - linear-relay
     - decision-store-consumer
     - waitlist-signup-notifier
+    - savings-estimation-consumer
+    - llm-cost-aggregation-consumer
+    - consumer-health-projection
+    - retry-worker
     - autoheal
   includes:
     - core

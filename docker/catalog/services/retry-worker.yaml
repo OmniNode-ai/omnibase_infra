@@ -1,0 +1,35 @@
+name: retry-worker
+description: Processes failed messages from dead-letter queues with exponential backoff
+image: runtime:latest
+layer: runtime
+container_name: omninode-retry-worker
+required_env:
+  - POSTGRES_PASSWORD
+hardcoded_env:
+  OMNIBASE_INFRA_RETRY_WORKER_POSTGRES_DSN: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omnibase_infra'
+operational_defaults:
+  ONEX_LOG_LEVEL: INFO
+  ONEX_ENVIRONMENT: local
+  OMNIMEMORY_ENABLED: 'false'
+ports: null
+# No HTTP health endpoint in this worker yet — process-level restart is sufficient.
+healthcheck: null
+depends_on:
+  - service: migration-gate
+    condition: service_healthy
+restart: unless-stopped
+resources:
+  cpus: '0.25'
+  memory: 128M
+  cpus_reservation: '0.1'
+  memory_reservation: 64M
+stop_grace_period: 60s
+command:
+  - python
+  - -m
+  - omnibase_infra.services.retry_worker.service_retry_worker
+labels:
+  com.omninode.service: retry-worker
+  com.omninode.layer: runtime
+  com.omninode.version: ${RUNTIME_VERSION:-0.1.0}
+  autoheal: 'true'
