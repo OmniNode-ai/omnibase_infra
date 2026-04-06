@@ -121,11 +121,19 @@ class HandlerTicketClassify:
     ) -> ModelTicketClassifyOutput:
         """Classify tickets by buildability.
 
-        Classification priority (first match wins):
+        Classification priority:
             1. SKIP — matches skip keywords or state is terminal
             2. BLOCKED — matches blocked keywords
-            3. NEEDS_ARCH_DECISION — matches architecture keywords
-            4. AUTO_BUILDABLE — matches buildable keywords (default)
+            3. AUTO_BUILDABLE — title contains buildable action verbs
+            4. NEEDS_ARCH_DECISION — arch keywords dominate AND no
+               buildable keywords in the title
+            5. AUTO_BUILDABLE — default fallback for unmatched tickets
+
+        The key insight: tickets whose *title* contains action verbs like
+        "add", "implement", "fix" are buildable even if the description
+        mentions "design" or "investigate".  NEEDS_ARCH_DECISION only wins
+        when the ticket has arch keywords but no buildable signal in the
+        title.
 
         Args:
             correlation_id: Cycle correlation ID.
@@ -149,7 +157,7 @@ class HandlerTicketClassify:
                 f"{ticket.title} {ticket.description} {' '.join(ticket.labels)}"
             )
 
-            # Priority order: SKIP > BLOCKED > NEEDS_ARCH > AUTO_BUILDABLE
+            # Priority order: SKIP > BLOCKED > (buildable vs arch) > default
             skip_matches = _match_keywords(combined_text, _SKIP_KEYWORDS)
             if skip_matches or ticket.state in ("Done", "Cancelled", "Duplicate"):
                 classifications.append(
@@ -182,8 +190,15 @@ class HandlerTicketClassify:
                 total_skipped += 1
                 continue
 
+            # Check both keyword sets before deciding.  Title-level buildable
+            # keywords override description-level arch keywords.
+            auto_matches = _match_keywords(combined_text, _AUTO_BUILDABLE_KEYWORDS)
+            title_auto_matches = _match_keywords(ticket.title, _AUTO_BUILDABLE_KEYWORDS)
             arch_matches = _match_keywords(combined_text, _ARCH_DECISION_KEYWORDS)
-            if arch_matches:
+
+            # Arch wins only when arch keywords present AND no buildable
+            # signal in the title.
+            if arch_matches and not title_auto_matches:
                 classifications.append(
                     ModelTicketClassification(
                         ticket_id=ticket.ticket_id,
@@ -197,7 +212,6 @@ class HandlerTicketClassify:
                 total_skipped += 1
                 continue
 
-            auto_matches = _match_keywords(combined_text, _AUTO_BUILDABLE_KEYWORDS)
             confidence = min(0.9, 0.3 + 0.1 * len(auto_matches))
             classifications.append(
                 ModelTicketClassification(
