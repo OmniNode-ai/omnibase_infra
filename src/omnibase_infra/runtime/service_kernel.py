@@ -1539,6 +1539,24 @@ async def bootstrap() -> int:
                 exc_info=True,
             )
 
+        # Try to register PluginEmitDaemon (OMN-7640: portable event publisher).
+        # Gated by ONEX_EMIT_DAEMON_ENABLED=true (default false).
+        try:
+            from omnibase_infra.plugins.plugin_emit_daemon import PluginEmitDaemon
+
+            plugin_registry.register(PluginEmitDaemon())
+            logger.info(
+                "PluginEmitDaemon registered (correlation_id=%s)",
+                correlation_id,
+            )
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+            logger.warning(
+                "PluginEmitDaemon failed to initialize, continuing without it "
+                "(correlation_id=%s)",
+                correlation_id,
+                exc_info=True,
+            )
+
         # Try to register PluginLlm (OMN-6600: LLM domain plugin).
         try:
             from omnibase_infra.adapters.llm.plugin_llm import PluginLlm
