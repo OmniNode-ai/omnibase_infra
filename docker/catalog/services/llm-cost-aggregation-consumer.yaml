@@ -1,0 +1,48 @@
+name: llm-cost-aggregation-consumer
+description: Aggregates LLM call costs from Kafka into PostgreSQL for cost trending
+image: runtime:latest
+layer: runtime
+container_name: omninode-llm-cost-aggregation-consumer
+required_env:
+  - POSTGRES_PASSWORD
+hardcoded_env:
+  OMNIBASE_INFRA_LLM_COST_POSTGRES_DSN: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omnibase_infra'
+  OMNIBASE_INFRA_LLM_COST_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+  OMNIBASE_INFRA_LLM_COST_HEALTH_CHECK_PORT: '8097'
+  OMNIBASE_INFRA_LLM_COST_HEALTH_CHECK_HOST: 0.0.0.0
+operational_defaults:
+  OMNIBASE_INFRA_LLM_COST_BATCH_SIZE: '100'
+  OMNIBASE_INFRA_LLM_COST_BATCH_TIMEOUT_MS: '1000'
+  ONEX_LOG_LEVEL: INFO
+  ONEX_ENVIRONMENT: local
+  OMNIMEMORY_ENABLED: 'false'
+ports:
+  external: 8097
+  internal: 8097
+healthcheck:
+  test: curl -sf http://localhost:8097/health
+  interval_s: 30
+  timeout_s: 10
+  retries: 3
+  start_period_s: 40
+depends_on:
+  - service: migration-gate
+    condition: service_healthy
+  - service: redpanda
+    condition: service_healthy
+restart: unless-stopped
+resources:
+  cpus: '0.5'
+  memory: 256M
+  cpus_reservation: '0.1'
+  memory_reservation: 64M
+stop_grace_period: 60s
+command:
+  - python
+  - -m
+  - omnibase_infra.services.observability.llm_cost_aggregation.consumer
+labels:
+  com.omninode.service: llm-cost-aggregation-consumer
+  com.omninode.layer: runtime
+  com.omninode.version: ${RUNTIME_VERSION:-0.1.0}
+  autoheal: 'true'
