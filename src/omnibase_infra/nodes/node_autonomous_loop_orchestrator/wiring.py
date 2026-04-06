@@ -12,8 +12,10 @@ Related:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, TypedDict
 from uuid import UUID
 
@@ -21,11 +23,52 @@ from omnibase_core.enums import EnumInjectionScope, EnumMessageCategory
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
+    from omnibase_core.protocols.event_bus import ProtocolEventBusPublisher
     from omnibase_infra.runtime import MessageDispatchEngine
 
 logger = logging.getLogger(__name__)
 
 ROUTE_ID_BUILD_LOOP_START = "route.build-loop.build-loop-start"
+
+
+def _make_publisher(
+    event_bus: ProtocolEventBusPublisher,
+) -> Callable[..., Awaitable[bool]]:
+    """Create a publisher callback that bridges ProtocolEventBusPublisher to
+    the HandlerLoopOrchestrator's expected signature.
+
+    The orchestrator calls ``publisher(event_type=..., payload=...,
+    correlation_id=..., topic=...)`` and expects a ``bool`` return.
+    """
+
+    async def _publish(
+        *,
+        event_type: str,
+        payload: dict[str, object],
+        correlation_id: UUID,
+        topic: str,
+    ) -> bool:
+        try:
+            value = json.dumps(
+                {
+                    "event_type": event_type,
+                    "correlation_id": str(correlation_id),
+                    "payload": payload,
+                },
+            ).encode()
+            key = str(correlation_id).encode()
+            await event_bus.publish(topic, key, value)
+            return True
+        except Exception:  # noqa: BLE001 — caller logs the False return
+            logger.warning(
+                "Event bus publish failed (topic=%s, correlation_id=%s)",
+                topic,
+                correlation_id,
+                exc_info=True,
+            )
+            return False
+
+    return _publish
 
 
 class WiringResult(TypedDict):
@@ -47,6 +90,7 @@ async def wire_build_loop_handlers(
     Returns:
         WiringResult with list of registered service names.
     """
+    from omnibase_core.protocols.event_bus import ProtocolEventBusPublisher
     from omnibase_infra.nodes.node_autonomous_loop_orchestrator.handlers.handler_loop_orchestrator import (
         HandlerLoopOrchestrator,
     )
@@ -54,7 +98,30 @@ async def wire_build_loop_handlers(
     services_registered: list[str] = []
 
     linear_api_key = os.environ.get("LINEAR_API_KEY")
-    handler = HandlerLoopOrchestrator(linear_api_key=linear_api_key)
+
+    # Resolve event bus publisher so the orchestrator can publish delegation
+    # payloads to Kafka during the BUILD phase.
+    publisher_cb = None
+    if container.service_registry is not None:
+        try:
+            event_bus: ProtocolEventBusPublisher = (
+                await container.service_registry.resolve_service(
+                    ProtocolEventBusPublisher
+                )
+            )
+            publisher_cb = _make_publisher(event_bus)
+            logger.debug("Resolved ProtocolEventBusPublisher for build loop")
+        except Exception:  # noqa: BLE001 — degrade to filesystem fallback
+            logger.warning(
+                "Could not resolve ProtocolEventBusPublisher — "
+                "build loop will use filesystem fallback",
+                exc_info=True,
+            )
+
+    handler = HandlerLoopOrchestrator(
+        publisher=publisher_cb,
+        linear_api_key=linear_api_key,
+    )
 
     if container.service_registry is not None:
         await container.service_registry.register_instance(
