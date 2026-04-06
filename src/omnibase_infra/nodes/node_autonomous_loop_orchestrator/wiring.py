@@ -62,10 +62,14 @@ def _make_publisher(
             await event_bus.publish(topic, key, value)
             return True
         except Exception:  # noqa: BLE001 — caller logs the False return
+            _ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                operation="event_bus_publish",
+            )
             logger.warning(
-                "Event bus publish failed (topic=%s, correlation_id=%s)",
+                "Event bus publish failed (topic=%s, context=%s)",
                 topic,
-                correlation_id,
+                _ctx,
                 exc_info=True,
             )
             return False
