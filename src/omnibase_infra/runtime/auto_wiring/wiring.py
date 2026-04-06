@@ -26,10 +26,8 @@ import logging
 from collections.abc import Callable, Coroutine
 
 from omnibase_infra.runtime.auto_wiring.context import ModelAutoWiringContext
-from omnibase_infra.runtime.auto_wiring.models import (
-    ModelLifecycleHookConfig,
-    ModelLifecycleHooks,
-)
+from omnibase_infra.runtime.auto_wiring.config import ModelLifecycleHookConfig
+from omnibase_infra.runtime.auto_wiring.models import ModelLifecycleHooks
 from omnibase_infra.runtime.auto_wiring.result import ModelLifecycleHookResult
 
 logger = logging.getLogger(__name__)
