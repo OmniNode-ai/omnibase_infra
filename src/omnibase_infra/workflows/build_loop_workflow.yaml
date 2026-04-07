@@ -13,6 +13,9 @@ description: >
 
 initial_command: onex.cmd.omnibase-infra.build-loop-start.v1
 terminal_event: onex.evt.omnibase-infra.build-loop-cycle-completed.v1
+input:
+  class: ModelLoopStartCommand
+  module: omnibase_infra.nodes.node_autonomous_loop_orchestrator.models.model_loop_start_command
 handler:
   class: HandlerLoopOrchestrator
   module: omnibase_infra.nodes.node_autonomous_loop_orchestrator.handlers.handler_loop_orchestrator
