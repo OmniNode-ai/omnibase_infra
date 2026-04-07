@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Pydantic models for contract auto-discovery and auto-wiring manifest.
+"""Pydantic models for contract auto-wiring.
 
-Includes handler routing models needed for auto-wiring (OMN-7654).
+Contains lifecycle hooks (OMN-7655) and auto-discovery manifest (OMN-7653).
 """
 
 from __future__ import annotations
@@ -10,6 +10,46 @@ from __future__ import annotations
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.runtime.auto_wiring.config import ModelLifecycleHookConfig
+
+# --- Lifecycle hooks (OMN-7655) ---
+
+
+class ModelLifecycleHooks(BaseModel):
+    """Contract-level lifecycle hooks for auto-wiring.
+
+    Declares optional hooks that the auto-wiring engine invokes during
+    node lifecycle transitions. These replace Plugin.initialize() and
+    Plugin.shutdown() with contract-declared, auditable callables.
+
+    Phase Ordering:
+        1. on_start — called after container wiring, before consumers start
+        2. validate_handshake — called after on_start, must pass for wiring
+        3. on_shutdown — called during graceful shutdown, before resources close
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    on_start: ModelLifecycleHookConfig | None = Field(
+        default=None,
+        description="Hook invoked during node startup after container wiring",
+    )
+    validate_handshake: ModelLifecycleHookConfig | None = Field(
+        default=None,
+        description="Hook invoked to validate runtime preconditions",
+    )
+    on_shutdown: ModelLifecycleHookConfig | None = Field(
+        default=None,
+        description="Hook invoked during graceful node shutdown",
+    )
+
+    def has_hooks(self) -> bool:
+        """Return True if any lifecycle hook is configured."""
+        return any([self.on_start, self.validate_handshake, self.on_shutdown])
+
+
+# --- Auto-discovery models (OMN-7653 / OMN-7654) ---
 
 
 class ModelContractVersion(BaseModel):
@@ -166,3 +206,16 @@ class ModelAutoWiringManifest(BaseModel):
             if c.event_bus:
                 topics.update(c.event_bus.publish_topics)
         return frozenset(topics)
+
+
+__all__ = [
+    "ModelAutoWiringManifest",
+    "ModelContractVersion",
+    "ModelDiscoveredContract",
+    "ModelDiscoveryError",
+    "ModelEventBusWiring",
+    "ModelHandlerRef",
+    "ModelHandlerRouting",
+    "ModelHandlerRoutingEntry",
+    "ModelLifecycleHooks",
+]

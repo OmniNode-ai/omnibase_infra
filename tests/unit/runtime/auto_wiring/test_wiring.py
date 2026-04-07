@@ -9,6 +9,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+    _derive_dispatcher_id,
+    _derive_message_category,
+    _derive_route_id,
+    _derive_topic_pattern_from_topic,
+    _detect_duplicate_topics,
+    _make_dispatch_callback,
+    wire_from_manifest,
+)
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
     ModelContractVersion,
@@ -24,20 +33,11 @@ from omnibase_infra.runtime.auto_wiring.report import (
     ModelContractWiringResult,
     ModelDuplicateTopicOwnership,
 )
-from omnibase_infra.runtime.auto_wiring.wiring import (
-    _derive_dispatcher_id,
-    _derive_message_category,
-    _derive_route_id,
-    _derive_topic_pattern_from_topic,
-    _detect_duplicate_topics,
-    _make_dispatch_callback,
-    wire_from_manifest,
-)
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_contract_version() -> ModelContractVersion:
     return ModelContractVersion(major=1, minor=0, patch=0)
@@ -91,9 +91,12 @@ def _make_contract(
 # Unit tests: helper functions
 # ---------------------------------------------------------------------------
 
+
 class TestDeriveTopicPattern:
     def test_five_segment_topic(self) -> None:
-        result = _derive_topic_pattern_from_topic("onex.evt.platform.node-introspection.v1")
+        result = _derive_topic_pattern_from_topic(
+            "onex.evt.platform.node-introspection.v1"
+        )
         assert result == "*.evt.platform.node-introspection.*"
 
     def test_short_topic_returns_exact(self) -> None:
@@ -117,10 +120,15 @@ class TestDeriveMessageCategory:
 
 class TestDeriveIds:
     def test_route_id(self) -> None:
-        assert _derive_route_id("my_node", "my_handler") == "route.auto.my_node.my_handler"
+        assert (
+            _derive_route_id("my_node", "my_handler") == "route.auto.my_node.my_handler"
+        )
 
     def test_dispatcher_id(self) -> None:
-        assert _derive_dispatcher_id("my_node", "my_handler") == "dispatcher.auto.my_node.my_handler"
+        assert (
+            _derive_dispatcher_id("my_node", "my_handler")
+            == "dispatcher.auto.my_node.my_handler"
+        )
 
 
 class TestMakeDispatchCallback:
@@ -139,6 +147,7 @@ class TestMakeDispatchCallback:
 # Unit tests: duplicate detection
 # ---------------------------------------------------------------------------
 
+
 class TestDetectDuplicateTopics:
     def test_no_duplicates(self) -> None:
         manifest = ModelAutoWiringManifest(
@@ -153,8 +162,16 @@ class TestDetectDuplicateTopics:
     def test_intra_package_duplicate(self) -> None:
         manifest = ModelAutoWiringManifest(
             contracts=(
-                _make_contract(name="a", package_name="pkg1", subscribe_topics=("onex.evt.platform.shared.v1",)),
-                _make_contract(name="b", package_name="pkg1", subscribe_topics=("onex.evt.platform.shared.v1",)),
+                _make_contract(
+                    name="a",
+                    package_name="pkg1",
+                    subscribe_topics=("onex.evt.platform.shared.v1",),
+                ),
+                _make_contract(
+                    name="b",
+                    package_name="pkg1",
+                    subscribe_topics=("onex.evt.platform.shared.v1",),
+                ),
             ),
         )
         dups = _detect_duplicate_topics(manifest)
@@ -166,8 +183,16 @@ class TestDetectDuplicateTopics:
     def test_cross_package_duplicate(self) -> None:
         manifest = ModelAutoWiringManifest(
             contracts=(
-                _make_contract(name="a", package_name="pkg1", subscribe_topics=("onex.evt.platform.shared.v1",)),
-                _make_contract(name="b", package_name="pkg2", subscribe_topics=("onex.evt.platform.shared.v1",)),
+                _make_contract(
+                    name="a",
+                    package_name="pkg1",
+                    subscribe_topics=("onex.evt.platform.shared.v1",),
+                ),
+                _make_contract(
+                    name="b",
+                    package_name="pkg2",
+                    subscribe_topics=("onex.evt.platform.shared.v1",),
+                ),
             ),
         )
         dups = _detect_duplicate_topics(manifest)
@@ -178,6 +203,7 @@ class TestDetectDuplicateTopics:
 # ---------------------------------------------------------------------------
 # Unit tests: wire_from_manifest
 # ---------------------------------------------------------------------------
+
 
 class TestWireFromManifest:
     @pytest.mark.asyncio
@@ -231,7 +257,7 @@ class TestWireFromManifest:
         fake_handler_cls.return_value = fake_handler_instance
 
         with patch(
-            "omnibase_infra.runtime.auto_wiring.wiring._import_handler_class",
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
             return_value=fake_handler_cls,
         ):
             report = await wire_from_manifest(manifest, engine)
@@ -254,7 +280,10 @@ class TestWireFromManifest:
         engine = MagicMock()
         report = await wire_from_manifest(manifest, engine)
         assert report.total_failed == 1
-        assert "ModuleNotFoundError" in report.results[0].reason or "ImportError" in report.results[0].reason
+        assert (
+            "ModuleNotFoundError" in report.results[0].reason
+            or "ImportError" in report.results[0].reason
+        )
 
     @pytest.mark.asyncio
     async def test_report_bool_true_when_no_failures(self) -> None:
@@ -314,6 +343,7 @@ class TestWireFromManifest:
 # Model tests
 # ---------------------------------------------------------------------------
 
+
 class TestModelHandlerRouting:
     def test_frozen(self) -> None:
         routing = _make_handler_routing()
@@ -331,13 +361,20 @@ class TestModelAutoWiringReport:
         report = ModelAutoWiringReport(
             results=(
                 ModelContractWiringResult(
-                    contract_name="a", package_name="p", outcome=EnumWiringOutcome.WIRED,
+                    contract_name="a",
+                    package_name="p",
+                    outcome=EnumWiringOutcome.WIRED,
                 ),
                 ModelContractWiringResult(
-                    contract_name="b", package_name="p", outcome=EnumWiringOutcome.SKIPPED,
+                    contract_name="b",
+                    package_name="p",
+                    outcome=EnumWiringOutcome.SKIPPED,
                 ),
                 ModelContractWiringResult(
-                    contract_name="c", package_name="p", outcome=EnumWiringOutcome.FAILED, reason="err",
+                    contract_name="c",
+                    package_name="p",
+                    outcome=EnumWiringOutcome.FAILED,
+                    reason="err",
                 ),
             ),
         )
