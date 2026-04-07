@@ -25,6 +25,10 @@ class ModelInferenceResponseData(BaseModel):
     model_used: str = Field(
         ..., description="Model identifier that produced the response."
     )
+    llm_call_id: str = Field(
+        default="",
+        description="Upstream LLM call ID for cost reconciliation (e.g. OpenAI id field).",
+    )
     latency_ms: int = Field(default=0, description="Inference latency in milliseconds.")
     prompt_tokens: int = Field(default=0, description="Prompt token count.")
     completion_tokens: int = Field(default=0, description="Completion token count.")
