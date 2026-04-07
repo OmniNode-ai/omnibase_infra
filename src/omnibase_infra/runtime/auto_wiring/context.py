@@ -18,6 +18,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
+# ONEX_EXCLUDE: dict_str_any - extensible contract metadata from YAML; schema-free by design
+_MetadataDict = dict[str, object]
+
 
 class ModelAutoWiringContext(BaseModel):
     """Context provided to lifecycle hook callables during auto-wiring.
@@ -63,11 +66,11 @@ class ModelAutoWiringContext(BaseModel):
         min_length=1,
         description="Current lifecycle phase",
     )
-    services: dict[str, object] = Field(
+    services: _MetadataDict = Field(
         default_factory=dict,
         description="Named services available to the hook from the container",
     )
-    metadata: dict[str, object] = Field(
+    metadata: _MetadataDict = Field(
         default_factory=dict,
         description="Additional contract metadata passed through from YAML",
     )
