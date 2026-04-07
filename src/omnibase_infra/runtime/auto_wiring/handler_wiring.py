@@ -24,7 +24,7 @@ import importlib
 import logging
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -54,6 +54,16 @@ DispatcherFunc = Callable[
     ["ModelEventEnvelope[object]"],
     Awaitable["ModelDispatchResult | None"],
 ]
+
+
+@runtime_checkable
+class ProtocolHandleable(Protocol):
+    """Protocol for objects with a handle() method (auto-wired handlers)."""
+
+    async def handle(
+        self,
+        envelope: ModelEventEnvelope[object],
+    ) -> ModelDispatchResult | None: ...
 
 
 def _import_handler_class(module_path: str, class_name: str) -> type:
@@ -98,7 +108,7 @@ def _validate_correlation_id(envelope: ModelEventEnvelope[object]) -> str:
 
 
 def _make_dispatch_callback(
-    handler_instance: object,
+    handler_instance: ProtocolHandleable,
 ) -> DispatcherFunc:
     """Create a dispatch callback wrapping a handler instance.
 
