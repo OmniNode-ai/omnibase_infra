@@ -23,7 +23,6 @@ Related Tickets:
 
 from __future__ import annotations
 
-import logging
 from uuid import uuid4
 
 import httpx
@@ -32,13 +31,10 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraUnavailableError,
-    RuntimeHostError,
 )
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
-
-logger = logging.getLogger(__name__)
 
 # Linear GraphQL endpoint
 _LINEAR_API_URL: str = "https://api.linear.app/graphql"
