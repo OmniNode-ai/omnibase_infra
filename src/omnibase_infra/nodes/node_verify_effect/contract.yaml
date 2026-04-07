@@ -16,6 +16,8 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 description: "Verifies system health before building: dashboard, runtime, data flow."
+deprecated: true
+deprecation_notice: "Migrated to omnimarket. Use omnimarket.nodes.node_verify_effect instead."
 input_model:
   name: "ModelVerifyInput"
   module: "omnibase_infra.nodes.node_verify_effect.models.model_verify"

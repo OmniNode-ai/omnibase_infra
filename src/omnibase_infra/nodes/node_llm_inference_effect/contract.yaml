@@ -149,6 +149,15 @@ capabilities:
     description: "Function/tool calling with structured arguments"
   - name: "circuit_breaker_protection"
     description: "Per-backend circuit breaker for provider fault isolation"
+# Golden path: llm_cost chain (llm-call-completed -> llm_cost_aggregates table)
+golden_path:
+  - "Complete LLM inference via provider-specific handler"
+  - "Emit llm-call-completed event to onex.evt.omniintelligence.llm-call-completed.v1"
+  - "Event consumed by node_projection_llm_cost in omnimarket"
+  - "Projection handler upserts row into llm_cost_aggregates table"
+  - "Verify row exists with model_name, total_tokens, estimated_cost_usd fields"
+  - "Golden chain test: omnimarket/tests/test_golden_chain_projection_llm_cost.py"
+
 # Metadata
 metadata:
   description: "LLM inference effect node for provider-agnostic inference operations. Delegates to provider-specific handlers (OpenAI-compatible, GLM, Gemini) via declarative operation routing. Supports chat completions and text completions with tool calling, generation parameters, and structured response parsing."
