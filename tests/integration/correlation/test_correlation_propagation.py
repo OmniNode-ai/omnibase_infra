@@ -46,11 +46,6 @@ pytestmark = [
 class TestCorrelationPreservation:
     """Tests for correlation ID preservation across handler boundaries.
 
-    TODO(OMN-1349): Add edge case tests for robustness:
-    - test_correlation_missing_from_message: Handler receives message without correlation_id
-    - test_correlation_malformed_uuid_string: Handler receives invalid UUID string
-    - test_correlation_none_value: Handler receives explicit None as correlation_id
-    - test_correlation_concurrent_messages: Multiple messages with different correlation IDs
     - test_correlation_empty_message: Handler receives empty dict message
     """
 

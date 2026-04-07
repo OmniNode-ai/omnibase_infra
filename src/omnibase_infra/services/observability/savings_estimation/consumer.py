@@ -94,8 +94,6 @@ _SEVERITY_CONFIDENCE: dict[EnumCatchSeverity, float] = {
 # Counterfactual model: the highest-cost configured routing candidate.
 # This is the model that _could_ have been selected for the request.
 # Used to compute direct savings (actual cost vs counterfactual cost).
-# TODO(OMN-7494): Replace hardcoded map with canonical model catalog lookup
-# once the model registry is available.
 _COUNTERFACTUAL_MODEL_MAP: dict[str, str] = {
     # If actual model is sonnet, counterfactual is opus (more expensive)
     "claude-sonnet-4": "claude-opus-4-6",

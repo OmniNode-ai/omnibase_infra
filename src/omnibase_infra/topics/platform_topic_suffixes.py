@@ -453,7 +453,7 @@ Published by the omnibase_infra baselines compute node after each baseline
 ROI computation cycle completes. The omnidash /baselines route subscribes to
 this topic to display baseline metrics in real time.
 
-Producer: omnibase_infra baselines compute node (TODO(OMN-4296): implement)
+Producer: omnibase_infra baselines compute node
 Consumer: omnidash /baselines dashboard
 """
 
