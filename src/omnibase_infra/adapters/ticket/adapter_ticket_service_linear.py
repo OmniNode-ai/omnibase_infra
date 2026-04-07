@@ -309,7 +309,7 @@ class AdapterTicketLinear:
                 "get_ticket",
             )
             issue = data.get("issue")
-            if not issue:
+            if not issue or not isinstance(issue, dict):
                 raise KeyError(f"Ticket not found: {ticket_id}")
             return _normalise_issue(issue)
 
@@ -319,10 +319,16 @@ class AdapterTicketLinear:
             {"identifier": ticket_id},
             "get_ticket_by_identifier",
         )
-        nodes = data.get("issueSearch", {}).get("nodes", [])
-        if not nodes:
+        search_result = data.get("issueSearch")
+        if not isinstance(search_result, dict):
             raise KeyError(f"Ticket not found: {ticket_id}")
-        return _normalise_issue(nodes[0])
+        nodes_raw = search_result.get("nodes", [])
+        if not isinstance(nodes_raw, list) or not nodes_raw:
+            raise KeyError(f"Ticket not found: {ticket_id}")
+        first = nodes_raw[0]
+        if not isinstance(first, dict):
+            raise KeyError(f"Ticket not found: {ticket_id}")
+        return _normalise_issue(first)
 
     async def list_tickets(
         self,
@@ -350,8 +356,13 @@ class AdapterTicketLinear:
             variables,
             "list_tickets",
         )
-        nodes = data.get("issues", {}).get("nodes", [])
-        return [_normalise_issue(n) for n in nodes]
+        issues_result = data.get("issues")
+        if not isinstance(issues_result, dict):
+            return []
+        nodes_raw = issues_result.get("nodes", [])
+        if not isinstance(nodes_raw, list):
+            return []
+        return [_normalise_issue(n) for n in nodes_raw if isinstance(n, dict)]
 
     async def get_ticket_status(self, ticket_id: str) -> str:
         """Get the current status of a ticket.
