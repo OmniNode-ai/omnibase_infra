@@ -14,10 +14,9 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from uuid import UUID
 
 import yaml
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.enums.enum_buildability import EnumBuildability
@@ -36,14 +35,14 @@ logger = logging.getLogger(__name__)
 _CONTRACT_PATH = Path(__file__).resolve().parent.parent / "contract.yaml"
 
 
-def _load_buildability_criteria() -> dict[str, Any]:
+def _load_buildability_criteria() -> dict[str, object]:
     """Load buildability_criteria from the node contract YAML."""
     with open(_CONTRACT_PATH, encoding="utf-8") as f:
         contract = yaml.safe_load(f)
     return contract.get("buildability_criteria", {})
 
 
-def _keywords_from_contract(criteria: dict[str, Any], key: str) -> frozenset[str]:
+def _keywords_from_contract(criteria: dict[str, object], key: str) -> frozenset[str]:
     """Extract a keyword frozenset from the contract criteria."""
     return frozenset(criteria.get(key, []))
 
@@ -62,9 +61,7 @@ _BLOCKED_TITLE_ONLY_KEYWORDS: frozenset[str] = _keywords_from_contract(
 _ARCH_DECISION_KEYWORDS: frozenset[str] = _keywords_from_contract(
     _CRITERIA, "arch_decision_keywords"
 )
-_SKIP_KEYWORDS: frozenset[str] = _keywords_from_contract(
-    _CRITERIA, "skip_keywords"
-)
+_SKIP_KEYWORDS: frozenset[str] = _keywords_from_contract(_CRITERIA, "skip_keywords")
 
 # "depends on" is checked separately with a smarter pattern that avoids
 # false positives from standard sub-task dependency documentation like
