@@ -95,9 +95,6 @@ from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.health.model_llm_endpoint_health_config import (
     ModelLlmEndpointHealthConfig,
 )
-from omnibase_infra.nodes.node_autonomous_loop_orchestrator.plugin import (
-    PluginBuildLoop,
-)
 from omnibase_infra.nodes.node_contract_registry_reducer.contract_registration_event_router import (
     ContractRegistrationEventRouter,
     ProtocolIntentEffect,
@@ -1520,10 +1517,9 @@ async def bootstrap() -> int:
 
         # Register lightweight plugins BEFORE heavy ones. Plugin registration
         # order determines Pass 2 (start_consumers) order. PluginDelegation (3
-        # topics) and PluginBuildLoop (1 topic) subscribe in seconds, while
-        # PluginIntelligence (46 topics) takes ~12 minutes. If Intelligence
-        # goes first, later plugins never get their consumers started before
-        # the runtime is restarted or killed.
+        # topics) subscribes in seconds, while PluginIntelligence (46 topics)
+        # takes ~12 minutes. If Intelligence goes first, later plugins never
+        # get their consumers started before the runtime is restarted or killed.
 
         # Try to register PluginDelegation (OMN-7040: delegation pipeline).
         try:
@@ -1535,21 +1531,6 @@ async def bootstrap() -> int:
         except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "PluginDelegation failed to initialize, continuing without it "
-                "(correlation_id=%s)",
-                correlation_id,
-                exc_info=True,
-            )
-
-        # Try to register PluginBuildLoop (OMN-5113: autonomous build loop).
-        try:
-            plugin_registry.register(PluginBuildLoop())
-            logger.info(
-                "PluginBuildLoop registered (correlation_id=%s)",
-                correlation_id,
-            )
-        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "PluginBuildLoop failed to initialize, continuing without it "
                 "(correlation_id=%s)",
                 correlation_id,
                 exc_info=True,
