@@ -19,6 +19,9 @@ from omnibase_infra.nodes.node_verify_effect.models.model_verify import (
     ModelVerifyCheck,
     ModelVerifyResult,
 )
+from omnibase_infra.nodes.node_verify_effect.runners.runner_dashboard_sweep import (
+    run_dashboard_sweep,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,16 +93,44 @@ class HandlerVerify:
         checks: list[ModelVerifyCheck] = []
         warnings: list[str] = []
 
-        # Check 1: Dashboard health (non-critical)
+        # Check 1: Dashboard sweep (non-critical / advisory)
         try:
-            logger.info("Checking dashboard health")
-            checks.append(
-                ModelVerifyCheck(
-                    name="dashboard_health", passed=True, critical=False, message="OK"
+            logger.info("Running dashboard sweep")
+            sweep = await run_dashboard_sweep()
+            if not sweep.reachable:
+                warnings.append(f"Dashboard unreachable: {sweep.summary}")
+                checks.append(
+                    ModelVerifyCheck(
+                        name="dashboard_health",
+                        passed=False,
+                        critical=False,
+                        message=sweep.summary,
+                    )
                 )
-            )
+            else:
+                # Add per-page checks for visibility
+                for page in sweep.pages:
+                    checks.append(
+                        ModelVerifyCheck(
+                            name=f"dashboard_page:{page.route}",
+                            passed=page.has_data,
+                            critical=False,
+                            message=page.message,
+                        )
+                    )
+                    if not page.has_data:
+                        warnings.append(f"Dashboard {page.route}: {page.message}")
+                # Overall dashboard health
+                checks.append(
+                    ModelVerifyCheck(
+                        name="dashboard_health",
+                        passed=sweep.pages_with_data > 0,
+                        critical=False,
+                        message=sweep.summary,
+                    )
+                )
         except Exception as exc:  # noqa: BLE001 — boundary: catch-all for dashboard health resilience
-            msg = f"Dashboard health check failed: {exc}"
+            msg = f"Dashboard sweep failed: {exc}"
             warnings.append(msg)
             checks.append(
                 ModelVerifyCheck(
