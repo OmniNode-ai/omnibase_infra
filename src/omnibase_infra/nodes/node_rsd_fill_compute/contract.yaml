@@ -15,6 +15,8 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 description: "Pure computation: selects top-N tickets by RSD score with deterministic tie-break."
+deprecated: true
+deprecation_notice: "Migrated to omnimarket. Use omnimarket.nodes.node_rsd_fill_compute instead."
 input_model:
   name: "ModelRsdFillInput"
   module: "omnibase_infra.nodes.node_rsd_fill_compute.models.model_rsd_fill"

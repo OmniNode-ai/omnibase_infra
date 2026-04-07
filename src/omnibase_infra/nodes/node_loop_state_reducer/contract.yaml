@@ -16,6 +16,8 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 description: "FSM-based state tracking for the autonomous build loop with circuit breaker."
+deprecated: true
+deprecation_notice: "Migrated to omnimarket. Use omnimarket.nodes.node_loop_state_reducer instead."
 input_model:
   name: "ModelBuildLoopEvent"
   module: "omnibase_infra.nodes.node_loop_state_reducer.models.model_build_loop_event"
