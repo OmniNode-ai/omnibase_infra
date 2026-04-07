@@ -31,6 +31,7 @@ dependencies = [
     #
     "omnibase-core>=0.39.0",
     "omnibase-spi>=0.20.4",
+    "omnimarket>=0.1.0",
     # ============================================================================
     # External Dependency Security Guidance
     # ============================================================================
@@ -164,6 +165,7 @@ override-dependencies = [
 
 [tool.uv.sources]
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
+omnimarket = { git = "https://github.com/OmniNode-ai/omnimarket.git", branch = "main" }
 
 
 [tool.ruff]
