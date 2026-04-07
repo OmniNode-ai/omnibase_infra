@@ -17,7 +17,8 @@ class EnumBuildLoopPhase(str, Enum):
 
     Phase Transitions:
         IDLE -> CLOSING_OUT: Build loop started, close out pending work first
-        CLOSING_OUT -> VERIFYING: Close-out complete, verify system health
+        CLOSING_OUT -> DEPLOYING: Close-out complete, trigger rebuild if PRs merged
+        DEPLOYING -> VERIFYING: Deploy triggered (or skipped), verify system health
         VERIFYING -> FILLING: Verification passed, fill sprint backlog
         FILLING -> CLASSIFYING: Backlog filled, classify tickets
         CLASSIFYING -> BUILDING: Tickets classified, dispatch builds
@@ -28,6 +29,7 @@ class EnumBuildLoopPhase(str, Enum):
 
     IDLE = "idle"
     CLOSING_OUT = "closing_out"
+    DEPLOYING = "deploying"
     VERIFYING = "verifying"
     FILLING = "filling"
     CLASSIFYING = "classifying"

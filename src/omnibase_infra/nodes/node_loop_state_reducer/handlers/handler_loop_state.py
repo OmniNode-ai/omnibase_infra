@@ -39,6 +39,10 @@ _TRANSITIONS: dict[
         EnumBuildLoopPhase.FAILED,
     ),
     EnumBuildLoopPhase.CLOSING_OUT: (
+        EnumBuildLoopPhase.DEPLOYING,
+        EnumBuildLoopPhase.FAILED,
+    ),
+    EnumBuildLoopPhase.DEPLOYING: (
         EnumBuildLoopPhase.VERIFYING,
         EnumBuildLoopPhase.FAILED,
     ),
@@ -63,6 +67,7 @@ _TRANSITIONS: dict[
 # Map phase -> intent type to emit on successful transition
 _PHASE_INTENTS: dict[EnumBuildLoopPhase, EnumBuildLoopIntentType] = {
     EnumBuildLoopPhase.CLOSING_OUT: EnumBuildLoopIntentType.START_CLOSEOUT,
+    EnumBuildLoopPhase.DEPLOYING: EnumBuildLoopIntentType.START_DEPLOY,
     EnumBuildLoopPhase.VERIFYING: EnumBuildLoopIntentType.START_VERIFY,
     EnumBuildLoopPhase.FILLING: EnumBuildLoopIntentType.START_FILL,
     EnumBuildLoopPhase.CLASSIFYING: EnumBuildLoopIntentType.START_CLASSIFY,
@@ -169,7 +174,7 @@ class HandlerLoopState:
             return new_state, []
 
         # Success: reset failure count, advance phase
-        # Handle skip_closeout: IDLE -> VERIFYING directly
+        # Handle skip_closeout: IDLE -> VERIFYING directly (skip CLOSING_OUT + DEPLOYING)
         next_phase = success_phase
         if state.phase == EnumBuildLoopPhase.IDLE and state.skip_closeout:
             next_phase = EnumBuildLoopPhase.VERIFYING

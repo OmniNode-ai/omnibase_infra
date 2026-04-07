@@ -20,6 +20,7 @@ class EnumBuildLoopIntentType(str, Enum):
     """
 
     START_CLOSEOUT = "build_loop.start_closeout"
+    START_DEPLOY = "build_loop.start_deploy"
     START_VERIFY = "build_loop.start_verify"
     START_FILL = "build_loop.start_fill"
     START_CLASSIFY = "build_loop.start_classify"
