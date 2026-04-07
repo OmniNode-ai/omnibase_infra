@@ -17,6 +17,9 @@ from omnibase_infra.runtime.auto_wiring.models.model_event_bus_wiring import (
 from omnibase_infra.runtime.auto_wiring.models.model_handler_routing import (
     ModelHandlerRouting,
 )
+from omnibase_infra.runtime.auto_wiring.models.model_lifecycle_hooks import (
+    ModelLifecycleHooks,
+)
 
 
 class ModelDiscoveredContract(BaseModel):
@@ -48,4 +51,7 @@ class ModelDiscoveredContract(BaseModel):
     )
     handler_routing: ModelHandlerRouting | None = Field(
         default=None, description="Handler routing if declared"
+    )
+    lifecycle_hooks: ModelLifecycleHooks | None = Field(
+        default=None, description="Lifecycle hooks if declared"
     )
