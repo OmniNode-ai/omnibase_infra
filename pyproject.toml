@@ -50,21 +50,21 @@ dependencies = [
     # Core dependencies
     "pydantic>=2.11.7,<3.0.0",
     "fastapi>=0.120.1,<0.136.0",
-    "uvicorn>=0.32.0,<0.43.0",
+    "uvicorn>=0.32.0,<0.45.0",
     "pyyaml>=6.0.2,<7.0.0",
     "aiohttp>=3.9.0,<4.0.0",
     # Database dependencies (for PostgreSQL connection manager)
     "asyncpg>=0.29.0,<0.32.0",
     "psycopg2-binary>=2.9.10,<3.0.0",
     # Service integration dependencies (for the actual tools we're migrating)
-    "redis>=6.0.0,<7.0.0", # For Redis/Valkey integration (redis-py 6.x required by omnibase_core)
+    "redis>=6.0.0,<8.0.0", # For Redis/Valkey integration (redis-py 6.x required by omnibase_core)
     "aiokafka>=0.11.0,<0.12.0", # For Kafka tools (async Python client)
     "confluent-kafka>=2.12.0,<3.0.0", # For Kafka integration (C-based high-performance client)
     "infisicalsdk>=1.0.15,<2.0.0", # For Infisical secret management (OMN-2286)
     # Vector and graph database dependencies (for Qdrant and Memgraph handlers)
     "qdrant-client>=1.16.0,<2.0.0", # Vector database client for semantic search
     "grpcio>=1.62.0,<2.0.0", # Explicit lower bound: fixes EnumTypeWrapper|None runtime error [OMN-3548]
-    "neo4j>=5.15.0,<6.0.0", # Bolt/Cypher client for Memgraph graph database
+    "neo4j>=5.15.0,<7.0.0", # Bolt/Cypher client for Memgraph graph database
     # CLI Dependencies
     "click>=8.1.0,<9.0.0",
     "rich>=13.7.0,<15.0.0",
@@ -89,7 +89,7 @@ dependencies = [
     "opentelemetry-instrumentation>=0.48b0,<0.62", # Base instrumentation
     "opentelemetry-instrumentation-fastapi>=0.48b0,<0.62", # FastAPI tracing
     "opentelemetry-instrumentation-asyncpg>=0.48b0,<0.62", # AsyncPG tracing
-    "opentelemetry-instrumentation-aiohttp-client>=0.48b0,<0.49", # AIOHTTP tracing
+    "opentelemetry-instrumentation-aiohttp-client>=0.48b0,<0.62", # AIOHTTP tracing
     "opentelemetry-instrumentation-kafka-python>=0.48b0,<0.62", # Kafka tracing
     "opentelemetry-instrumentation-redis>=0.48b0,<0.62", # Redis tracing
     # MCP (Model Context Protocol) integration
