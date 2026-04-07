@@ -15,6 +15,9 @@ import logging
 from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_closeout_effect.handlers.merge_sweep_runner import (
+    run_merge_sweep,
+)
 from omnibase_infra.nodes.node_closeout_effect.models.model_closeout import (
     ModelCloseoutResult,
 )
@@ -74,12 +77,23 @@ class HandlerCloseout:
                 warnings=("dry_run: no side effects executed",),
             )
 
-        # Phase 1: Merge sweep
+        # Phase 1: Merge sweep via gh CLI (OMN-7408)
         merge_sweep_ok = True
         prs_merged = 0
         try:
-            logger.info("Merge sweep: delegating to merge-sweep workflow")
-            merge_sweep_ok = True
+            sweep_result = await run_merge_sweep(dry_run=dry_run)
+            prs_merged = sweep_result.auto_merge_enabled
+            if sweep_result.errors:
+                for err in sweep_result.errors:
+                    warnings.append(f"Merge sweep: {err}")
+                merge_sweep_ok = False
+            else:
+                merge_sweep_ok = True
+            logger.info(
+                "Merge sweep complete: %d PRs classified, %d auto-merge enabled",
+                len(sweep_result.classified),
+                prs_merged,
+            )
         except Exception as exc:  # noqa: BLE001 — boundary: catch-all for merge-sweep resilience
             warnings.append(f"Merge sweep warning: {exc}")
             merge_sweep_ok = False
