@@ -27,6 +27,9 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelDiscoveredContract,
     ModelDiscoveryError,
     ModelEventBusWiring,
+    ModelHandlerRef,
+    ModelHandlerRouting,
+    ModelHandlerRoutingEntry,
 )
 
 logger = logging.getLogger(__name__)
@@ -247,6 +250,12 @@ def _parse_contract(
             publish_topics=tuple(eb_raw.get("publish_topics", [])),
         )
 
+    # Extract handler routing
+    handler_routing: ModelHandlerRouting | None = None
+    hr_raw = raw.get("handler_routing")
+    if isinstance(hr_raw, dict):
+        handler_routing = _parse_handler_routing(hr_raw)
+
     return ModelDiscoveredContract(
         name=raw.get("name", entry_point_name),
         node_type=raw.get("node_type", "UNKNOWN"),
@@ -258,4 +267,38 @@ def _parse_contract(
         package_name=package_name,
         package_version=package_version,
         event_bus=event_bus,
+        handler_routing=handler_routing,
+    )
+
+
+def _parse_handler_routing(hr_raw: dict) -> ModelHandlerRouting:
+    """Parse the handler_routing section from a contract YAML dict."""
+    entries: list[ModelHandlerRoutingEntry] = []
+    for h in hr_raw.get("handlers", []):
+        if not isinstance(h, dict):
+            continue
+        handler_ref_raw = h.get("handler")
+        if not isinstance(handler_ref_raw, dict):
+            continue
+        handler_ref = ModelHandlerRef(
+            name=handler_ref_raw.get("name", ""),
+            module=handler_ref_raw.get("module", ""),
+        )
+        event_model: ModelHandlerRef | None = None
+        em_raw = h.get("event_model")
+        if isinstance(em_raw, dict):
+            event_model = ModelHandlerRef(
+                name=em_raw.get("name", ""),
+                module=em_raw.get("module", ""),
+            )
+        entries.append(
+            ModelHandlerRoutingEntry(
+                handler=handler_ref,
+                event_model=event_model,
+                operation=h.get("operation"),
+            )
+        )
+    return ModelHandlerRouting(
+        routing_strategy=hr_raw.get("routing_strategy", "unknown"),
+        handlers=tuple(entries),
     )
