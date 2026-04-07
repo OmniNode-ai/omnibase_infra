@@ -20,6 +20,10 @@ allowlisted_handlers:
     violations:
       - missing_handler_routing
     ticket: '# migration pending'
+  - path: omnibase_infra/nodes/node_closeout_effect/handlers/merge_sweep_runner.py
+    violations:
+      - missing_handler_routing
+    ticket: 'OMN-7408'
   - path: omnibase_infra/nodes/node_decision_store_query_compute/handlers/handler_query_decisions.py
     violations:
       - missing_handler_routing
