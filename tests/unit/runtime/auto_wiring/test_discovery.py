@@ -16,10 +16,6 @@ from omnibase_infra.runtime.auto_wiring.discovery import (
     discover_contracts,
     discover_contracts_from_paths,
 )
-from omnibase_infra.runtime.auto_wiring.models import (
-    ModelAutoWiringManifest,
-    ModelDiscoveredContract,
-)
 
 _EP_MODULE = "omnibase_infra.runtime.auto_wiring.discovery.entry_points"
 
@@ -183,9 +179,7 @@ class TestDiscoverContracts:
 
     @pytest.mark.unit
     def test_discovers_contract_from_entry_point(self, tmp_path: Path) -> None:
-        contract_path = _make_contract_yaml(
-            tmp_path, name="my_effect", node_type="EFFECT_GENERIC"
-        )
+        _make_contract_yaml(tmp_path, name="my_effect", node_type="EFFECT_GENERIC")
         module_file = tmp_path / "node.py"
         module_file.write_text("")
 

@@ -18,15 +18,15 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-pytestmark = pytest.mark.unit
-
-from omnibase_infra.runtime.auto_wiring.config import ModelLifecycleHookConfig
 from omnibase_infra.runtime.auto_wiring.context import ModelAutoWiringContext
-from omnibase_infra.runtime.auto_wiring.models import ModelLifecycleHooks
-from omnibase_infra.runtime.auto_wiring.result import ModelLifecycleHookResult
-from omnibase_infra.runtime.auto_wiring.wiring import (
+from omnibase_infra.runtime.auto_wiring.lifecycle import (
     LifecycleHookExecutor,
     resolve_hook_callable,
+)
+from omnibase_infra.runtime.auto_wiring.models import (
+    ModelLifecycleHookConfig,
+    ModelLifecycleHookResult,
+    ModelLifecycleHooks,
 )
 from omnibase_infra.services.contract_publisher.sources.model_discovered import (
     ModelDiscoveredContract,
@@ -141,7 +141,7 @@ class TestModelLifecycleHookResult:
     def test_succeeded(self) -> None:
         result = ModelLifecycleHookResult.succeeded("on_start")
         assert result.success is True
-        assert result.phase == "on_start"
+        assert result.hook_name == "on_start"
         assert result.error_message == ""
         assert result.background_workers == []
         assert bool(result) is True
@@ -256,7 +256,7 @@ class TestLifecycleHookExecutor:
         mock_fn = AsyncMock(return_value=expected_result)
 
         with patch(
-            "omnibase_infra.runtime.auto_wiring.wiring.resolve_hook_callable",
+            "omnibase_infra.runtime.auto_wiring.lifecycle.resolve_hook_callable",
             return_value=mock_fn,
         ):
             result = await executor.execute_hook(hook_config, context)
@@ -298,7 +298,7 @@ class TestLifecycleHookExecutor:
             return ModelLifecycleHookResult.succeeded("on_start")
 
         with patch(
-            "omnibase_infra.runtime.auto_wiring.wiring.resolve_hook_callable",
+            "omnibase_infra.runtime.auto_wiring.lifecycle.resolve_hook_callable",
             return_value=slow_hook,
         ):
             result = await executor.execute_hook(hook_config, context)
@@ -322,13 +322,13 @@ class TestLifecycleHookExecutor:
             raise RuntimeError(msg)
 
         with patch(
-            "omnibase_infra.runtime.auto_wiring.wiring.resolve_hook_callable",
+            "omnibase_infra.runtime.auto_wiring.lifecycle.resolve_hook_callable",
             return_value=broken_hook,
         ):
             result = await executor.execute_hook(hook_config, context)
 
         assert result.success is False
-        assert "RuntimeError" in result.error_message
+        assert "DB connection failed" in result.error_message
 
     @pytest.mark.asyncio
     async def test_execute_startup_both_hooks(
@@ -351,7 +351,7 @@ class TestLifecycleHookExecutor:
         )
 
         with patch(
-            "omnibase_infra.runtime.auto_wiring.wiring.resolve_hook_callable",
+            "omnibase_infra.runtime.auto_wiring.lifecycle.resolve_hook_callable",
             return_value=mock_fn,
         ):
             results = await executor.execute_startup(hooks, base_context_kwargs)
@@ -382,7 +382,7 @@ class TestLifecycleHookExecutor:
         )
 
         with patch(
-            "omnibase_infra.runtime.auto_wiring.wiring.resolve_hook_callable",
+            "omnibase_infra.runtime.auto_wiring.lifecycle.resolve_hook_callable",
             return_value=mock_fn,
         ):
             results = await executor.execute_startup(hooks, base_context_kwargs)
@@ -415,7 +415,7 @@ class TestLifecycleHookExecutor:
         )
 
         with patch(
-            "omnibase_infra.runtime.auto_wiring.wiring.resolve_hook_callable",
+            "omnibase_infra.runtime.auto_wiring.lifecycle.resolve_hook_callable",
             return_value=mock_fn,
         ):
             results = await executor.execute_startup(hooks, base_context_kwargs)
@@ -450,7 +450,7 @@ class TestLifecycleHookExecutor:
         )
 
         with patch(
-            "omnibase_infra.runtime.auto_wiring.wiring.resolve_hook_callable",
+            "omnibase_infra.runtime.auto_wiring.lifecycle.resolve_hook_callable",
             return_value=mock_fn,
         ):
             result = await executor.execute_shutdown(hooks, base_context_kwargs)

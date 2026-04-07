@@ -1,8 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-# ruff: noqa: TRY400, BLE001
-# TRY400: logger.error is intentional to avoid leaking sensitive data in stack traces
-# BLE001: broad except is intentional — handler import failures must not crash the wiring scan
+# ruff: noqa: TRY400
+# TRY400 disabled: logger.error is intentional to avoid leaking sensitive data in stack traces
 """Handler auto-wiring engine for OMN-7654.
 
 Takes a :class:`ModelAutoWiringManifest` produced by contract auto-discovery
@@ -24,7 +23,7 @@ import importlib
 import logging
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -56,6 +55,16 @@ DispatcherFunc = Callable[
 ]
 
 
+@runtime_checkable
+class ProtocolHandleable(Protocol):
+    """Protocol for objects with a handle() method (auto-wired handlers)."""
+
+    async def handle(
+        self,
+        envelope: ModelEventEnvelope[object],
+    ) -> ModelDispatchResult | None: ...
+
+
 def _import_handler_class(module_path: str, class_name: str) -> type:
     """Import a handler class from its fully qualified module path.
 
@@ -76,7 +85,7 @@ def _import_handler_class(module_path: str, class_name: str) -> type:
 
 
 def _make_dispatch_callback(
-    handler_instance: Any,  # ONEX_EXCLUDE: any_type - dynamically loaded handler class
+    handler_instance: ProtocolHandleable,
 ) -> DispatcherFunc:
     """Create a dispatch callback wrapping a handler instance.
 
@@ -307,7 +316,7 @@ async def _wire_single_contract(
                 contract.event_bus.subscribe_topics,
             )
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — boundary: structured diagnostics for auto-wiring
         logger.error(
             "Failed to auto-wire contract '%s' from package '%s': %s",
             contract.name,

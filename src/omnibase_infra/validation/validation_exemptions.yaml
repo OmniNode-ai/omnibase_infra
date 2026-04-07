@@ -3087,76 +3087,45 @@ pattern_exemptions:
 
     ticket: OMN-5113
   # ==========================================================================
-  # Auto-Wiring Models entry_point_name / package_name Exemption (OMN-7653)
+  # Auto-Wiring Models Pattern Exemptions (OMN-7656)
   # ==========================================================================
-  # entry_point_name and package_name are Python packaging identifiers, not
-  # entity references requiring ID + display_name pattern.
-  - file_pattern: 'auto_wiring/models\.py'
-    violation_pattern: "Field 'entry_point_name' might reference an entity"
+  # auto_wiring/models.py uses 'Handler' in class names because these are
+  # handler-routing domain models (ModelHandlerRef, ModelHandlerRoutingEntry,
+  # ModelHandlerRouting) — the auto-wiring system discovers and wires handlers
+  # by definition. handler_id is a semantic string key (e.g., "my-handler"),
+  # not a UUID. entry_point_name/package_name are Python package identifiers.
+  - file_pattern: 'runtime/auto_wiring/models/'
+    violation_pattern: "contains anti-pattern 'Handler'"
     reason: >
-      entry_point_name is a Python packaging entry point identifier (e.g., "node_contract_loader_effect") from importlib.metadata, not an entity reference. It is a fixed string from pyproject.toml, not a user-facing display name.
+      Auto-wiring models describe handler routing configuration from contracts. Handler is the correct domain term for the auto-wiring bounded context.
 
     documentation:
-      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
-    ticket: OMN-7653
-  - file_pattern: 'auto_wiring/models\.py'
-    violation_pattern: "Field 'package_name' might reference an entity"
+      - CLAUDE.md (ONEX Architecture - Handler Types)
+    ticket: OMN-7656
+  - file_pattern: 'runtime/auto_wiring/models/'
+    violation_pattern: "Field 'handler_id' should use UUID"
     reason: >
-      package_name is a Python distribution package identifier (e.g., "omnibase-infra") from importlib.metadata, not an entity reference. It is a fixed string from the packaging ecosystem.
+      handler_id in auto-wiring is a semantic string key derived from the contract handler_id field, not a UUID.
 
-    documentation:
-      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
-    ticket: OMN-7653
-  # ==========================================================================
-  # Auto-Wiring Report entity name Exemption (OMN-7654)
-  # ==========================================================================
-  # contract_name and package_name in report.py are the same identifiers as
-  # in models.py — Python packaging identifiers, not entity references.
-  - file_pattern: 'auto_wiring/report\.py'
-    violation_pattern: "Field 'contract_name' might reference an entity"
+    ticket: OMN-7656
+  - file_pattern: 'runtime/auto_wiring/models/'
+    violation_pattern: "might reference an entity"
     reason: >
-      contract_name is a node name from the contract YAML, mirrored from ModelDiscoveredContract.name for correlation in wiring reports. Not an entity reference.
+      entry_point_name, package_name, and hook_name are Python package/module identifiers and lifecycle hook names, not entity references requiring ID + display_name pattern.
 
-    documentation:
-      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
-    ticket: OMN-7654
-  - file_pattern: 'auto_wiring/report\.py'
-    violation_pattern: "Field 'package_name' might reference an entity"
+    ticket: OMN-7656
+  - file_pattern: 'runtime/auto_wiring/context\.py'
+    violation_pattern: "Field 'handler_id' should use UUID"
     reason: >
-      package_name is a Python distribution package identifier mirrored from ModelDiscoveredContract.package_name for correlation in wiring reports. Not an entity reference.
+      handler_id in auto-wiring context is a semantic string key derived from the contract handler_id field, not a UUID.
 
-    documentation:
-      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
-    ticket: OMN-7654
-  # ==========================================================================
-  # Auto-Wiring Handler Ref Anti-Pattern Exemption (OMN-7654)
-  # ==========================================================================
-  # ModelHandlerRef is a contract-level reference to a handler class, not a
-  # runtime handler. "Handler" is the correct domain term from contract YAML.
-  - file_pattern: 'auto_wiring/models\.py'
-    violation_pattern: "Class name 'ModelHandlerRef' contains anti-pattern 'Handler'"
+    ticket: OMN-7656
+  - file_pattern: 'runtime/auto_wiring/report\.py'
+    violation_pattern: "might reference an entity"
     reason: >
-      ModelHandlerRef references handler classes declared in contract.yaml handler_routing sections. "Handler" is the established contract schema term, not a code-level handler anti-pattern.
+      contract_name and package_name are Python package identifiers used in auto-wiring diagnostics, not entity references requiring ID + display_name.
 
-    documentation:
-      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
-    ticket: OMN-7654
-  - file_pattern: 'auto_wiring/models\.py'
-    violation_pattern: "Class name 'ModelHandlerRouting' contains anti-pattern 'Handler'"
-    reason: >
-      ModelHandlerRouting mirrors the handler_routing section from contract YAML. "Handler" is the established contract schema term.
-
-    documentation:
-      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
-    ticket: OMN-7654
-  - file_pattern: 'auto_wiring/models\.py'
-    violation_pattern: "Class name 'ModelHandlerRoutingEntry' contains anti-pattern 'Handler'"
-    reason: >
-      ModelHandlerRoutingEntry is a single entry from contract.yaml handler_routing.handlers[]. "Handler" is the established contract schema term.
-
-    documentation:
-      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
-    ticket: OMN-7654
+    ticket: OMN-7656
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
@@ -3266,45 +3235,29 @@ architecture_exemptions:
     documentation:
       - CLAUDE.md (Protocol File Naming - domain-grouping convention)
     ticket: OMN-5060
+    # These handle complex union type violations
   # ==========================================================================
-  # Auto-Wiring Models Exemption (OMN-7653)
+  # Auto-Wiring Report Exemption (OMN-7656)
   # ==========================================================================
-  # auto_wiring/models.py contains 5 tightly coupled Pydantic models:
-  # - ModelContractVersion: semantic version from contract YAML
-  # - ModelEventBusWiring: event bus topic declarations
-  # - ModelDiscoveredContract: single discovered contract
-  # - ModelDiscoveryError: discovery error record
-  # - ModelAutoWiringManifest: complete discovery manifest
-  # These are always used together in the auto-wiring pipeline.
-  - file_pattern: 'auto_wiring/models\.py'
+  # report.py contains the auto-wiring report models: per-contract wiring
+  # result, duplicate topic ownership detection, and the aggregate report.
+  # These three models plus the outcome enum form a single reporting interface.
+  - file_pattern: 'runtime/auto_wiring/report\.py'
     violation_pattern: '\d+ models in one file'
     reason: >
-      Domain-grouped models for contract auto-discovery and auto-wiring. ModelContractVersion and ModelEventBusWiring are value types embedded in ModelDiscoveredContract; ModelDiscoveryError captures scan failures; ModelAutoWiringManifest aggregates both. All five are always used together and splitting them would create circular imports. Per CLAUDE.md domain-grouping convention for cohesive models.
+      Domain-grouped auto-wiring report models. ModelContractWiringResult, ModelDuplicateTopicOwnership, and ModelAutoWiringReport define the complete interface for auto-wiring diagnostics. Per CLAUDE.md domain-grouping convention for cohesive models.
 
     documentation:
       - CLAUDE.md (Protocol File Naming - domain-grouping convention)
-    ticket: OMN-7653
-  # ==========================================================================
-  # Auto-Wiring Report Models Exemption (OMN-7654)
-  # ==========================================================================
-  # auto_wiring/report.py contains 3 tightly coupled wiring report models.
-  - file_pattern: 'auto_wiring/report\.py'
-    violation_pattern: '\d+ models in one file'
-    reason: >
-      Domain-grouped wiring report models. ModelContractWiringResult, ModelDuplicateTopicOwnership, and ModelAutoWiringReport form the complete auto-wiring report interface. They are always used together and splitting would create unnecessary file proliferation.
-
-    documentation:
-      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
-    ticket: OMN-7654
-  - file_pattern: 'auto_wiring/report\.py'
+    ticket: OMN-7656
+  - file_pattern: 'runtime/auto_wiring/report\.py'
     violation_pattern: 'Mixed types in one file'
     reason: >
-      EnumWiringOutcome is a 3-value enum tightly coupled with ModelContractWiringResult and ModelAutoWiringReport. Splitting a 3-member enum into its own file adds unnecessary file proliferation for a cohesive report interface.
+      Auto-wiring report module contains cohesive types (enum + models) for wiring outcome reporting. EnumWiringOutcome is tightly coupled with ModelContractWiringResult.
 
     documentation:
-      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
-    ticket: OMN-7654
-# These handle complex union type violations
+      - CLAUDE.md (Protocol File Naming)
+    ticket: OMN-7656
 union_exemptions:
   # ==========================================================================
   # ModelNodeCapabilities Config Field Exemption

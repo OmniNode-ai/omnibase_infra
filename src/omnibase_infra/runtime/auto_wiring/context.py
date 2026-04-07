@@ -12,14 +12,12 @@ wiring state without exposing internal engine details.
 
 from __future__ import annotations
 
-import logging
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-logger = logging.getLogger(__name__)
-
-# ONEX_EXCLUDE: dict_str_any - extensible contract metadata from YAML; schema-free by design
-_MetadataDict = dict[str, object]
+# ONEX_EXCLUDE: dict_str_any - extensible contract metadata/services from YAML; schema-free by design
+_FlexDict = dict[str, Any]
 
 
 class ModelAutoWiringContext(BaseModel):
@@ -66,11 +64,11 @@ class ModelAutoWiringContext(BaseModel):
         min_length=1,
         description="Current lifecycle phase",
     )
-    services: _MetadataDict = Field(
+    services: _FlexDict = Field(
         default_factory=dict,
         description="Named services available to the hook from the container",
     )
-    metadata: _MetadataDict = Field(
+    metadata: _FlexDict = Field(
         default_factory=dict,
         description="Additional contract metadata passed through from YAML",
     )

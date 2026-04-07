@@ -31,7 +31,6 @@ from omnibase_infra.runtime.auto_wiring.report import (
     EnumWiringOutcome,
     ModelAutoWiringReport,
     ModelContractWiringResult,
-    ModelDuplicateTopicOwnership,
 )
 
 # ---------------------------------------------------------------------------
