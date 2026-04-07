@@ -22,12 +22,44 @@ REPOS=(
   omninode_infra
   omniweb
   onex_change_control
+  omnibase_compat
 )
 
 # Allow caller to override which repos to pull
 if [[ $# -gt 0 ]]; then
   REPOS=("$@")
 fi
+
+# === Pre-pull validation: detect bare repo corruption (OMN-7600) ===
+# If core.bare=true, git pull updates refs but NOT the working tree, causing
+# stale files. This is corruption in omni_home — repos must be non-bare clones.
+BARE_REPOS=()
+for repo in "${REPOS[@]}"; do
+  dir="$OMNI_HOME/$repo"
+  [[ -d "$dir" ]] || continue
+  is_bare=$(git -C "$dir" rev-parse --is-bare-repository 2>/dev/null || echo "unknown")
+  if [[ "$is_bare" == "true" ]]; then
+    BARE_REPOS+=("$repo")
+  fi
+done
+
+if [[ ${#BARE_REPOS[@]} -gt 0 ]]; then
+  echo ""
+  echo "ERROR: Bare repo corruption detected in omni_home!"
+  echo ""
+  echo "The following repos have core.bare=true, which means git pull"
+  echo "updates refs but NOT the working tree — files go stale silently."
+  echo ""
+  for repo in "${BARE_REPOS[@]}"; do
+    echo "  CORRUPT  $repo"
+    echo "           Fix: git -C $OMNI_HOME/$repo config core.bare false"
+    echo "           Then: git -C $OMNI_HOME/$repo reset --hard HEAD"
+  done
+  echo ""
+  echo "Fix all corrupted repos above, then re-run pull-all.sh."
+  exit 1
+fi
+# === End bare repo validation ===
 
 RESULTS_DIR=$(mktemp -d)
 trap 'rm -rf "$RESULTS_DIR"' EXIT
@@ -41,43 +73,6 @@ _pull_one() {
   if [[ ! -d "$dir" ]]; then
     echo "  MISSING  $repo"
     echo "MISSING" > "$result_file"
-    return
-  fi
-
-  local is_bare
-  is_bare=$(git -C "$dir" rev-parse --is-bare-repository 2>/dev/null)
-
-  if [[ "$is_bare" == "true" ]]; then
-    # Prune stale worktrees before fetch — prevents "main is checked out"
-    # errors from dead worktrees that still hold a ref to main.
-    git -C "$dir" worktree prune 2>/dev/null || true
-
-    # Bare clone: fetch origin main directly into the local main ref
-    local before after output
-    before=$(git -C "$dir" rev-parse main 2>/dev/null)
-    if output=$(git -C "$dir" fetch origin main:main 2>&1); then
-      after=$(git -C "$dir" rev-parse main 2>/dev/null)
-      if [[ "$before" == "$after" ]]; then
-        echo "  OK       $repo (already up to date)"
-      else
-        local commits
-        commits=$(git -C "$dir" log --oneline "${before}..${after}" 2>/dev/null | wc -l | tr -d ' ')
-        echo "  UPDATED  $repo (+${commits} commit(s))"
-      fi
-      echo "OK" > "$result_file"
-    elif echo "$output" | grep -q "checked out"; then
-      echo "  WARN     $repo (main checked out in a worktree, using FETCH_HEAD)"
-      if git -C "$dir" fetch origin main 2>/dev/null; then
-        echo "OK" > "$result_file"
-      else
-        echo "  FAILED   $repo (fetch failed even via FETCH_HEAD)"
-        echo "FAILED" > "$result_file"
-      fi
-    else
-      echo "  FAILED   $repo"
-      echo "           $output"
-      echo "FAILED" > "$result_file"
-    fi
     return
   fi
 
