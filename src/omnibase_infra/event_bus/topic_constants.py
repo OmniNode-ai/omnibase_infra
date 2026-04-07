@@ -479,10 +479,34 @@ TOPIC_DELEGATION_QUALITY_GATE_RESULT: Final[str] = (
 )
 """Event topic for quality gate evaluation results."""
 
+TOPIC_DELEGATION_ROUTING_REQUEST: Final[str] = (
+    "onex.cmd.omnibase-infra.delegation-routing-request.v1"
+)
+"""Command topic for routing reducer invocation from the delegation orchestrator."""
+
+TOPIC_DELEGATION_QUALITY_GATE_REQUEST: Final[str] = (
+    "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1"
+)
+"""Command topic for quality gate reducer invocation from the delegation orchestrator."""
+
+TOPIC_DELEGATION_INFERENCE_RESPONSE: Final[str] = (
+    "onex.evt.omnibase-infra.inference-response.v1"
+)
+"""Event topic for LLM inference responses in the delegation pipeline."""
+
+TOPIC_DELEGATION_TASK_DELEGATED: Final[str] = "onex.evt.omniclaude.task-delegated.v1"
+"""Backward-compatible event topic for omnidash delegation projection."""
+
+TOPIC_DELEGATION_BASELINE_COMPARISON: Final[str] = (
+    "onex.cmd.omnibase-infra.baseline-comparison-request.v1"
+)
+"""Command topic for baseline comparison compute from the delegation orchestrator."""
 
 __all__ = [
     "TOPIC_DELEGATION_COMPLETED",
     "TOPIC_DELEGATION_FAILED",
+    "TOPIC_DELEGATION_INFERENCE_RESPONSE",
+    "TOPIC_DELEGATION_QUALITY_GATE_REQUEST",
     "TOPIC_DELEGATION_QUALITY_GATE_RESULT",
     "TOPIC_DELEGATION_REQUEST",
     "TOPIC_DELEGATION_ROUTING_DECISION",
