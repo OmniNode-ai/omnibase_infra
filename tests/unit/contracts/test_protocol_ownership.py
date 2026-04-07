@@ -73,6 +73,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolPostgresAdapter": "nodes/node_registry_effect/protocols/protocol_postgres_adapter.py",
     "ProtocolToolExecutor": "handlers/mcp/protocols.py",
     "ProtocolLlmHandler": "nodes/node_llm_inference_effect/services/protocol_llm_handler.py",
+    "ProtocolLlmCaller": "nodes/node_delegation_orchestrator/delegation_intent_bridge.py",
     "ProtocolContractPublisherSource": "services/contract_publisher/sources/protocol.py",
     "ProtocolInjectionEffectivenessReader": "services/observability/injection_effectiveness/protocol_reader.py",
     "ProtocolTopicCatalogService": "services/protocol_topic_catalog_service.py",
