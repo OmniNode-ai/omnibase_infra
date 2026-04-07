@@ -81,12 +81,10 @@ from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_for_c
 from omnibase_infra.nodes.node_verify_effect.handlers.handler_verify import (
     HandlerVerify,
 )
+from omnibase_infra.runtime.emit_daemon.topics import TOPIC_DEPLOY_REBUILD_REQUESTED
 from omnibase_infra.utils.util_friction_emitter import emit_build_loop_friction
 
 logger = logging.getLogger(__name__)
-
-# Deploy topic: published after closeout merges PRs to trigger Docker rebuild.
-_DEPLOY_TOPIC = "onex.cmd.deploy.rebuild-requested.v1"
 
 
 class HandlerLoopOrchestrator:
@@ -335,13 +333,13 @@ class HandlerLoopOrchestrator:
                         "git_ref": "origin/main",
                     }
                     await self._event_bus.publish(
-                        topic=_DEPLOY_TOPIC,
+                        topic=TOPIC_DEPLOY_REBUILD_REQUESTED,
                         key=None,
                         value=json.dumps(payload).encode(),
                     )
                     logger.info(
                         "[BUILD-LOOP] Published ModelRebuildRequested to %s",
-                        _DEPLOY_TOPIC,
+                        TOPIC_DEPLOY_REBUILD_REQUESTED,
                     )
                 else:
                     logger.info(

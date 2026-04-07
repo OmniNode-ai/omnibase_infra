@@ -19,6 +19,7 @@ TOPIC_NOTIFICATION_BLOCKED = "onex.evt.omniclaude.notification-blocked.v1"
 TOPIC_NOTIFICATION_COMPLETED = "onex.evt.omniclaude.notification-completed.v1"
 
 TOPIC_BASELINES_COMPUTED = "onex.evt.omnibase-infra.baselines-computed.v1"
+TOPIC_DEPLOY_REBUILD_REQUESTED = "onex.cmd.deploy.rebuild-requested.v1"
 
 PHASE_METRICS_REGISTRATION = ModelEventRegistration(
     event_type="phase.metrics",
@@ -60,6 +61,7 @@ __all__: list[str] = [
     "TOPIC_BASELINES_COMPUTED",
     "TOPIC_PHASE_METRICS",
     "TOPIC_NOTIFICATION_BLOCKED",
+    "TOPIC_DEPLOY_REBUILD_REQUESTED",
     "TOPIC_NOTIFICATION_COMPLETED",
     "PHASE_METRICS_REGISTRATION",
 ]
