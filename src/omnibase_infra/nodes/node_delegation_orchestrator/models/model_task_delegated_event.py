@@ -34,6 +34,10 @@ class ModelTaskDelegatedEvent(BaseModel):
     session_id: UUID | None = Field(default=None, description="Source session ID.")
     task_type: str = Field(..., description="Task classification.")
     delegated_to: str = Field(..., description="Model/endpoint that handled the task.")
+    model_name: str = Field(
+        default="",
+        description="LLM model name from the routing decision (e.g. Qwen3-Coder-14B).",
+    )
     delegated_by: str = Field(
         default="delegation-pipeline",
         description="Source of the delegation.",

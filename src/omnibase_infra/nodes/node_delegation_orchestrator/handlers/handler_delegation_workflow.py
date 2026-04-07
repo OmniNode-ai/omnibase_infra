@@ -296,6 +296,7 @@ class HandlerDelegationWorkflow:
             session_id=None,
             task_type=workflow.request.task_type,
             delegated_to=workflow.inference_model_used,
+            model_name=workflow.routing_decision.selected_model,
             quality_gate_passed=result.passed,
             quality_gates_failed=list(result.failure_reasons),
             cost_usd=0.0,
