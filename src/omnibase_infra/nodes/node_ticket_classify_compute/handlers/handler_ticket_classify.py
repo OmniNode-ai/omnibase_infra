@@ -65,13 +65,24 @@ _AUTO_BUILDABLE_KEYWORDS: frozenset[str] = frozenset(
     }
 )
 
+# Strong blocked signals -- match anywhere in the ticket text.
 _BLOCKED_KEYWORDS: frozenset[str] = frozenset(
     {
         "blocked",
         "waiting",
-        "external",
         "third-party",
         "vendor",
+    }
+)
+
+# Weak blocked signals -- only block when they appear in the *title*.
+# In descriptions, "dependency" and "external" often appear in conceptual
+# discussion (e.g., "external service", "dependency injection") rather than
+# indicating an actual blocker.
+_BLOCKED_TITLE_ONLY_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "dependency",
+        "external",
     }
 )
 
@@ -204,6 +215,10 @@ class HandlerTicketClassify:
                 continue
 
             blocked_matches = _match_keywords(combined_text, _BLOCKED_KEYWORDS)
+            title_blocked_matches = _match_keywords(
+                ticket.title, _BLOCKED_TITLE_ONLY_KEYWORDS
+            )
+            blocked_matches = (*blocked_matches, *title_blocked_matches)
             has_dep_blocker = _has_real_dependency_blocker(combined_text)
             if has_dep_blocker:
                 blocked_matches = (*blocked_matches, "depends on")
