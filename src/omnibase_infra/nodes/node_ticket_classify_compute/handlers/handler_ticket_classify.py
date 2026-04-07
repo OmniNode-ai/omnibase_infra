@@ -106,6 +106,7 @@ def _has_real_dependency_blocker(text: str) -> bool:
         return False
     return True
 
+
 _ARCH_DECISION_KEYWORDS: frozenset[str] = frozenset(
     {
         "architecture",
