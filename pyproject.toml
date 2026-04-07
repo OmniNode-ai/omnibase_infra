@@ -89,7 +89,7 @@ dependencies = [
     "opentelemetry-instrumentation>=0.48b0,<0.62", # Base instrumentation
     "opentelemetry-instrumentation-fastapi>=0.48b0,<0.62", # FastAPI tracing
     "opentelemetry-instrumentation-asyncpg>=0.48b0,<0.62", # AsyncPG tracing
-    "opentelemetry-instrumentation-aiohttp-client>=0.48b0,<0.49", # AIOHTTP tracing
+    "opentelemetry-instrumentation-aiohttp-client>=0.48b0,<0.62", # AIOHTTP tracing
     "opentelemetry-instrumentation-kafka-python>=0.48b0,<0.62", # Kafka tracing
     "opentelemetry-instrumentation-redis>=0.48b0,<0.62", # Redis tracing
     # MCP (Model Context Protocol) integration
