@@ -104,8 +104,9 @@ handler_routing:
   routing_strategy: "payload_type_match"
   handlers:
     - operation: "orchestrate_loop"
-      handler_class: "HandlerLoopOrchestrator"
-      handler_module: "omnibase_infra.nodes.node_autonomous_loop_orchestrator.handlers.handler_loop_orchestrator"
+      handler:
+        name: "HandlerLoopOrchestrator"
+        module: "omnibase_infra.nodes.node_autonomous_loop_orchestrator.handlers.handler_loop_orchestrator"
       description: "Coordinate build loop through all phases"
       input_model:
         name: "ModelLoopStartCommand"

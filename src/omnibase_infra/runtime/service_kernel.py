@@ -95,18 +95,12 @@ from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.health.model_llm_endpoint_health_config import (
     ModelLlmEndpointHealthConfig,
 )
-from omnibase_infra.nodes.node_autonomous_loop_orchestrator.plugin import (
-    PluginBuildLoop,
-)
 from omnibase_infra.nodes.node_contract_registry_reducer.contract_registration_event_router import (
     ContractRegistrationEventRouter,
     ProtocolIntentEffect,
 )
 from omnibase_infra.nodes.node_contract_registry_reducer.reducer import (
     ContractRegistryReducer,
-)
-from omnibase_infra.nodes.node_delegation_orchestrator.plugin import (
-    PluginDelegation,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
     PluginRegistration,
@@ -1518,94 +1512,13 @@ async def bootstrap() -> int:
         registration_plugin = PluginRegistration()
         plugin_registry.register(registration_plugin)
 
-        # Register lightweight plugins BEFORE heavy ones. Plugin registration
-        # order determines Pass 2 (start_consumers) order. PluginDelegation (3
-        # topics) and PluginBuildLoop (1 topic) subscribe in seconds, while
-        # PluginIntelligence (46 topics) takes ~12 minutes. If Intelligence
-        # goes first, later plugins never get their consumers started before
-        # the runtime is restarted or killed.
-
-        # Try to register PluginDelegation (OMN-7040: delegation pipeline).
-        try:
-            plugin_registry.register(PluginDelegation())
-            logger.info(
-                "PluginDelegation registered (correlation_id=%s)",
-                correlation_id,
-            )
-        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "PluginDelegation failed to initialize, continuing without it "
-                "(correlation_id=%s)",
-                correlation_id,
-                exc_info=True,
-            )
-
-        # Try to register PluginBuildLoop (OMN-5113: autonomous build loop).
-        try:
-            plugin_registry.register(PluginBuildLoop())
-            logger.info(
-                "PluginBuildLoop registered (correlation_id=%s)",
-                correlation_id,
-            )
-        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "PluginBuildLoop failed to initialize, continuing without it "
-                "(correlation_id=%s)",
-                correlation_id,
-                exc_info=True,
-            )
-
-        # Try to register PluginEmitDaemon (OMN-7640: portable event publisher).
-        # Gated by ONEX_EMIT_DAEMON_ENABLED=true (default false).
-        try:
-            from omnibase_infra.plugins.plugin_emit_daemon import PluginEmitDaemon
-
-            plugin_registry.register(PluginEmitDaemon())
-            logger.info(
-                "PluginEmitDaemon registered (correlation_id=%s)",
-                correlation_id,
-            )
-        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "PluginEmitDaemon failed to initialize, continuing without it "
-                "(correlation_id=%s)",
-                correlation_id,
-                exc_info=True,
-            )
-
-        # Try to register PluginLlm (OMN-6600: LLM domain plugin).
-        try:
-            from omnibase_infra.adapters.llm.plugin_llm import PluginLlm
-
-            plugin_registry.register(PluginLlm())
-            logger.info(
-                "PluginLlm registered (correlation_id=%s)",
-                correlation_id,
-            )
-        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "PluginLlm failed to initialize, continuing without it "
-                "(correlation_id=%s)",
-                correlation_id,
-                exc_info=True,
-            )
-
-        # Try to register PluginDlq (OMN-6601: DLQ + retry worker).
-        try:
-            from omnibase_infra.dlq.plugin_dlq import PluginDlq
-
-            plugin_registry.register(PluginDlq())
-            logger.info(
-                "PluginDlq registered (correlation_id=%s)",
-                correlation_id,
-            )
-        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "PluginDlq failed to initialize, continuing without it "
-                "(correlation_id=%s)",
-                correlation_id,
-                exc_info=True,
-            )
+        # OMN-7662: PluginDelegation, PluginBuildLoop, PluginLlm, and PluginDlq
+        # have been migrated to contract-driven auto-wiring with lifecycle hooks.
+        # Their handler_routing is declared in contract.yaml and picked up by
+        # the auto-wiring engine. Custom init logic (LLM health probes, DLQ
+        # retry worker) is handled via lifecycle hooks in their contracts.
+        # Only PluginRegistration (heavyweight, DB-dependent) and
+        # PluginIntelligence (external optional dep) remain as explicit plugins.
 
         # Try to import and register PluginIntelligence (graceful degradation).
         # omniintelligence is an optional dependency — kernel boots without it.
@@ -1975,12 +1888,12 @@ async def bootstrap() -> int:
                 for contract in manifest.contracts:
                     if not contract.handler_routing:
                         continue
-                    lifecycle_hooks_raw = getattr(contract, "lifecycle_hooks", None)
+                    lifecycle_hooks_raw = contract.lifecycle_hooks
                     if (
                         lifecycle_hooks_raw is not None
                         and lifecycle_hooks_raw.has_hooks()
                     ):
-                        context_kwargs: dict[str, object] = {
+                        context_kwargs = {
                             "handler_id": contract.name,
                             "node_kind": contract.node_type,
                             "contract_version": str(contract.contract_version),

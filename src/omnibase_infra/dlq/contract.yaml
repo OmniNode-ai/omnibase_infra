@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - DLQ Retry Worker
+#
+# Infrastructure service for dead-letter-queue tracking and retry.
+# No handler_routing — this is a lifecycle-only service that manages
+# a background retry worker via lifecycle hooks.
+#
+# Related Tickets:
+#   - OMN-6601: Wire DLQ + retry worker into kernel lifecycle
+#   - OMN-7662: Extract lightweight infra plugins into lifecycle/contracts
+name: "service_dlq_retry_worker"
+contract_name: "service_dlq_retry_worker"
+node_name: "service_dlq_retry_worker"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  DLQ tracking and retry worker infrastructure service. Manages asyncpg pool, ServiceDlqTracking for replay history, and ServiceRetryWorker background task. Activated when OMNIBASE_INFRA_DLQ_ENABLED=true and OMNIBASE_INFRA_DB_URL is set.
+
+lifecycle:
+  on_start:
+    callable_ref: "omnibase_infra.dlq.lifecycle_dlq.on_start"
+    timeout_seconds: 30.0
+    required: false
+    idempotent: true
+  on_shutdown:
+    callable_ref: "omnibase_infra.dlq.lifecycle_dlq.on_shutdown"
+    timeout_seconds: 10.0
+    required: false
+    idempotent: true
+metadata:
+  description: "DLQ tracking and retry worker lifecycle service"
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-04-06"
+  tags:
+    - dlq
+    - retry
+    - infrastructure
+    - lifecycle
+  related_tickets:
+    - "OMN-6601"
+    - "OMN-7662"

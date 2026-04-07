@@ -74,6 +74,20 @@ handler_routing:
   execution_mode: "single"
   max_timeout_seconds: 600
 # =============================================================================
+# LIFECYCLE HOOKS (OMN-7662)
+# =============================================================================
+lifecycle:
+  on_start:
+    callable_ref: "omnibase_infra.adapters.llm.lifecycle_llm.on_start"
+    timeout_seconds: 30.0
+    required: false
+    idempotent: true
+  on_shutdown:
+    callable_ref: "omnibase_infra.adapters.llm.lifecycle_llm.on_shutdown"
+    timeout_seconds: 10.0
+    required: false
+    idempotent: true
+# =============================================================================
 # ERROR HANDLING (Circuit Breaker + Retry + Sanitization)
 # =============================================================================
 error_handling:

@@ -30,6 +30,8 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelHandlerRef,
     ModelHandlerRouting,
     ModelHandlerRoutingEntry,
+    ModelLifecycleHookConfig,
+    ModelLifecycleHooks,
 )
 
 logger = logging.getLogger(__name__)
@@ -256,6 +258,12 @@ def _parse_contract(
     if isinstance(hr_raw, dict):
         handler_routing = _parse_handler_routing(hr_raw)
 
+    # Extract lifecycle hooks
+    lifecycle_hooks: ModelLifecycleHooks | None = None
+    lc_raw = raw.get("lifecycle")
+    if isinstance(lc_raw, dict):
+        lifecycle_hooks = _parse_lifecycle_hooks(lc_raw)
+
     return ModelDiscoveredContract(
         name=raw.get("name", entry_point_name),
         node_type=raw.get("node_type", "UNKNOWN"),
@@ -268,6 +276,7 @@ def _parse_contract(
         package_version=package_version,
         event_bus=event_bus,
         handler_routing=handler_routing,
+        lifecycle_hooks=lifecycle_hooks,
     )
 
 
@@ -301,4 +310,44 @@ def _parse_handler_routing(hr_raw: dict) -> ModelHandlerRouting:
     return ModelHandlerRouting(
         routing_strategy=hr_raw.get("routing_strategy", "unknown"),
         handlers=tuple(entries),
+    )
+
+
+def _parse_lifecycle_hooks(lc_raw: dict) -> ModelLifecycleHooks:
+    """Parse the lifecycle section from a contract YAML dict."""
+    on_start: ModelLifecycleHookConfig | None = None
+    validate_handshake: ModelLifecycleHookConfig | None = None
+    on_shutdown: ModelLifecycleHookConfig | None = None
+
+    os_raw = lc_raw.get("on_start")
+    if isinstance(os_raw, dict):
+        on_start = ModelLifecycleHookConfig(
+            callable_ref=os_raw["callable_ref"],
+            timeout_seconds=os_raw.get("timeout_seconds", 10.0),
+            required=os_raw.get("required", True),
+            idempotent=os_raw.get("idempotent", True),
+        )
+
+    vh_raw = lc_raw.get("validate_handshake")
+    if isinstance(vh_raw, dict):
+        validate_handshake = ModelLifecycleHookConfig(
+            callable_ref=vh_raw["callable_ref"],
+            timeout_seconds=vh_raw.get("timeout_seconds", 10.0),
+            required=vh_raw.get("required", True),
+            idempotent=vh_raw.get("idempotent", True),
+        )
+
+    sd_raw = lc_raw.get("on_shutdown")
+    if isinstance(sd_raw, dict):
+        on_shutdown = ModelLifecycleHookConfig(
+            callable_ref=sd_raw["callable_ref"],
+            timeout_seconds=sd_raw.get("timeout_seconds", 10.0),
+            required=sd_raw.get("required", True),
+            idempotent=sd_raw.get("idempotent", True),
+        )
+
+    return ModelLifecycleHooks(
+        on_start=on_start,
+        validate_handshake=validate_handshake,
+        on_shutdown=on_shutdown,
     )

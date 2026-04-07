@@ -80,8 +80,9 @@ handler_routing:
   routing_strategy: "payload_type_match"
   handlers:
     - operation: "delegation.orchestrate"
-      handler_class: "HandlerDelegationWorkflow"
-      handler_module: "omnibase_infra.nodes.node_delegation_orchestrator.handlers.handler_delegation_workflow"
+      handler:
+        name: "HandlerDelegationWorkflow"
+        module: "omnibase_infra.nodes.node_delegation_orchestrator.handlers.handler_delegation_workflow"
       description: "Coordinate delegation through routing, inference, and quality gate"
       input_model:
         name: "ModelDelegationRequest"

@@ -3094,7 +3094,7 @@ pattern_exemptions:
   # ModelHandlerRouting) — the auto-wiring system discovers and wires handlers
   # by definition. handler_id is a semantic string key (e.g., "my-handler"),
   # not a UUID. entry_point_name/package_name are Python package identifiers.
-  - file_pattern: 'runtime/auto_wiring/models/'
+  - file_pattern: 'runtime/auto_wiring/models'
     violation_pattern: "contains anti-pattern 'Handler'"
     reason: >
       Auto-wiring models describe handler routing configuration from contracts. Handler is the correct domain term for the auto-wiring bounded context.
@@ -3102,13 +3102,13 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (ONEX Architecture - Handler Types)
     ticket: OMN-7656
-  - file_pattern: 'runtime/auto_wiring/models/'
+  - file_pattern: 'runtime/auto_wiring/models'
     violation_pattern: "Field 'handler_id' should use UUID"
     reason: >
       handler_id in auto-wiring is a semantic string key derived from the contract handler_id field, not a UUID.
 
     ticket: OMN-7656
-  - file_pattern: 'runtime/auto_wiring/models/'
+  - file_pattern: 'runtime/auto_wiring/models'
     violation_pattern: "might reference an entity"
     reason: >
       entry_point_name, package_name, and hook_name are Python package/module identifiers and lifecycle hook names, not entity references requiring ID + display_name pattern.
@@ -3258,6 +3258,28 @@ architecture_exemptions:
     documentation:
       - CLAUDE.md (Protocol File Naming)
     ticket: OMN-7656
+  # ==========================================================================
+  # Auto-Wiring models.py Compatibility Module Exemption (OMN-7662)
+  # ==========================================================================
+  # models.py is a compatibility re-export module that imports from models/
+  # (one-model-per-file). All 13 classes are defined in separate files under
+  # models/ and re-exported here for backward compatibility.
+  - file_pattern: 'auto_wiring/models\.py'
+    violation_pattern: '\d+ models in one file'
+    reason: >
+      Compatibility re-export module. All models are defined in individual files under auto_wiring/models/ and re-exported from models.py for import convenience.
+
+    documentation:
+      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
+    ticket: OMN-7662
+  - file_pattern: 'auto_wiring/models\.py'
+    violation_pattern: 'Mixed types in one file'
+    reason: >
+      Compatibility re-export module containing HandshakeFailureReason enum alongside model re-exports. All definitions live in auto_wiring/models/ individual files.
+
+    documentation:
+      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
+    ticket: OMN-7662
 union_exemptions:
   # ==========================================================================
   # ModelNodeCapabilities Config Field Exemption
