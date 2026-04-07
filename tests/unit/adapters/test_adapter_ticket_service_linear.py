@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Tests for AdapterTicketServiceLinear.
+"""Tests for AdapterTicketLinear.
 
 Covers:
     - get_ticket (UUID and human-readable identifier)
@@ -21,7 +21,7 @@ import httpx
 import pytest
 
 from omnibase_infra.adapters.ticket.adapter_ticket_service_linear import (
-    AdapterTicketServiceLinear,
+    AdapterTicketLinear,
     _build_issue_filter,
     _normalise_issue,
 )
@@ -62,8 +62,8 @@ _EXPECTED_NORMALISED: dict = {
 
 
 @pytest.fixture()
-def adapter() -> AdapterTicketServiceLinear:
-    return AdapterTicketServiceLinear(linear_api_key="lin_test_key_123")
+def adapter() -> AdapterTicketLinear:
+    return AdapterTicketLinear(linear_api_key="lin_test_key_123")
 
 
 def _mock_response(json_data: dict, status_code: int = 200) -> httpx.Response:
@@ -123,9 +123,9 @@ class TestBuildIssueFilter:
 class TestConstructor:
     def test_empty_api_key_raises(self) -> None:
         with pytest.raises(ValueError, match="non-empty linear_api_key"):
-            AdapterTicketServiceLinear(linear_api_key="")
+            AdapterTicketLinear(linear_api_key="")
 
-    def test_valid_construction(self, adapter: AdapterTicketServiceLinear) -> None:
+    def test_valid_construction(self, adapter: AdapterTicketLinear) -> None:
         assert adapter._api_key == "lin_test_key_123"
 
 
@@ -136,25 +136,19 @@ class TestConstructor:
 
 class TestGetTicket:
     @pytest.mark.asyncio()
-    async def test_get_ticket_by_uuid(
-        self, adapter: AdapterTicketServiceLinear
-    ) -> None:
+    async def test_get_ticket_by_uuid(self, adapter: AdapterTicketLinear) -> None:
         mock_resp = _mock_response({"data": {"issue": _SAMPLE_ISSUE_RAW}})
         with patch.object(adapter, "_get_client") as mock_get_client:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_resp
             mock_get_client.return_value = mock_client
 
-            result = await adapter.get_ticket(
-                "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-            )
+            result = await adapter.get_ticket("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
             assert result["identifier"] == "OMN-1234"
             assert result["status"] == "In Progress"
 
     @pytest.mark.asyncio()
-    async def test_get_ticket_by_identifier(
-        self, adapter: AdapterTicketServiceLinear
-    ) -> None:
+    async def test_get_ticket_by_identifier(self, adapter: AdapterTicketLinear) -> None:
         mock_resp = _mock_response(
             {"data": {"issueSearch": {"nodes": [_SAMPLE_ISSUE_RAW]}}}
         )
@@ -168,7 +162,7 @@ class TestGetTicket:
 
     @pytest.mark.asyncio()
     async def test_get_ticket_not_found_raises_key_error(
-        self, adapter: AdapterTicketServiceLinear
+        self, adapter: AdapterTicketLinear
     ) -> None:
         mock_resp = _mock_response({"data": {"issue": None}})
         with patch.object(adapter, "_get_client") as mock_get_client:
@@ -177,17 +171,13 @@ class TestGetTicket:
             mock_get_client.return_value = mock_client
 
             with pytest.raises(KeyError, match="Ticket not found"):
-                await adapter.get_ticket(
-                    "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-                )
+                await adapter.get_ticket("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
     @pytest.mark.asyncio()
     async def test_get_ticket_identifier_not_found(
-        self, adapter: AdapterTicketServiceLinear
+        self, adapter: AdapterTicketLinear
     ) -> None:
-        mock_resp = _mock_response(
-            {"data": {"issueSearch": {"nodes": []}}}
-        )
+        mock_resp = _mock_response({"data": {"issueSearch": {"nodes": []}}})
         with patch.object(adapter, "_get_client") as mock_get_client:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_resp
@@ -204,12 +194,8 @@ class TestGetTicket:
 
 class TestListTickets:
     @pytest.mark.asyncio()
-    async def test_list_tickets_no_filters(
-        self, adapter: AdapterTicketServiceLinear
-    ) -> None:
-        mock_resp = _mock_response(
-            {"data": {"issues": {"nodes": [_SAMPLE_ISSUE_RAW]}}}
-        )
+    async def test_list_tickets_no_filters(self, adapter: AdapterTicketLinear) -> None:
+        mock_resp = _mock_response({"data": {"issues": {"nodes": [_SAMPLE_ISSUE_RAW]}}})
         with patch.object(adapter, "_get_client") as mock_get_client:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_resp
@@ -221,11 +207,9 @@ class TestListTickets:
 
     @pytest.mark.asyncio()
     async def test_list_tickets_with_filters(
-        self, adapter: AdapterTicketServiceLinear
+        self, adapter: AdapterTicketLinear
     ) -> None:
-        mock_resp = _mock_response(
-            {"data": {"issues": {"nodes": [_SAMPLE_ISSUE_RAW]}}}
-        )
+        mock_resp = _mock_response({"data": {"issues": {"nodes": [_SAMPLE_ISSUE_RAW]}}})
         with patch.object(adapter, "_get_client") as mock_get_client:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_resp
@@ -237,9 +221,7 @@ class TestListTickets:
             assert len(result) == 1
 
     @pytest.mark.asyncio()
-    async def test_list_tickets_empty(
-        self, adapter: AdapterTicketServiceLinear
-    ) -> None:
+    async def test_list_tickets_empty(self, adapter: AdapterTicketLinear) -> None:
         mock_resp = _mock_response({"data": {"issues": {"nodes": []}}})
         with patch.object(adapter, "_get_client") as mock_get_client:
             mock_client = AsyncMock()
@@ -257,9 +239,7 @@ class TestListTickets:
 
 class TestGetTicketStatus:
     @pytest.mark.asyncio()
-    async def test_get_ticket_status(
-        self, adapter: AdapterTicketServiceLinear
-    ) -> None:
+    async def test_get_ticket_status(self, adapter: AdapterTicketLinear) -> None:
         mock_resp = _mock_response({"data": {"issue": _SAMPLE_ISSUE_RAW}})
         with patch.object(adapter, "_get_client") as mock_get_client:
             mock_client = AsyncMock()
@@ -279,9 +259,7 @@ class TestGetTicketStatus:
 
 class TestHealthCheck:
     @pytest.mark.asyncio()
-    async def test_health_check_success(
-        self, adapter: AdapterTicketServiceLinear
-    ) -> None:
+    async def test_health_check_success(self, adapter: AdapterTicketLinear) -> None:
         mock_resp = _mock_response({"data": {"viewer": {"id": "123"}}})
         with patch.object(adapter, "_get_client") as mock_get_client:
             mock_client = AsyncMock()
@@ -291,9 +269,7 @@ class TestHealthCheck:
             assert await adapter.health_check() is True
 
     @pytest.mark.asyncio()
-    async def test_health_check_failure(
-        self, adapter: AdapterTicketServiceLinear
-    ) -> None:
+    async def test_health_check_failure(self, adapter: AdapterTicketLinear) -> None:
         with patch.object(adapter, "_get_client") as mock_get_client:
             mock_client = AsyncMock()
             mock_client.post.side_effect = httpx.ConnectError("unreachable")
@@ -309,23 +285,19 @@ class TestHealthCheck:
 
 class TestWriteMethodsNotImplemented:
     @pytest.mark.asyncio()
-    async def test_create_ticket_raises(
-        self, adapter: AdapterTicketServiceLinear
-    ) -> None:
+    async def test_create_ticket_raises(self, adapter: AdapterTicketLinear) -> None:
         with pytest.raises(NotImplementedError, match="create_ticket"):
             await adapter.create_ticket(title="t", description="d")
 
     @pytest.mark.asyncio()
     async def test_update_ticket_status_raises(
-        self, adapter: AdapterTicketServiceLinear
+        self, adapter: AdapterTicketLinear
     ) -> None:
         with pytest.raises(NotImplementedError, match="update_ticket_status"):
             await adapter.update_ticket_status("OMN-1", "done")
 
     @pytest.mark.asyncio()
-    async def test_add_comment_raises(
-        self, adapter: AdapterTicketServiceLinear
-    ) -> None:
+    async def test_add_comment_raises(self, adapter: AdapterTicketLinear) -> None:
         with pytest.raises(NotImplementedError, match="add_comment"):
             await adapter.add_comment("OMN-1", "hello")
 
@@ -338,7 +310,7 @@ class TestWriteMethodsNotImplemented:
 class TestErrorHandling:
     @pytest.mark.asyncio()
     async def test_http_error_raises_infra_connection_error(
-        self, adapter: AdapterTicketServiceLinear
+        self, adapter: AdapterTicketLinear
     ) -> None:
         mock_resp = _mock_response({}, status_code=500)
         with patch.object(adapter, "_get_client") as mock_get_client:
@@ -347,30 +319,24 @@ class TestErrorHandling:
             mock_get_client.return_value = mock_client
 
             with pytest.raises(InfraConnectionError, match="HTTP 500"):
-                await adapter.get_ticket(
-                    "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-                )
+                await adapter.get_ticket("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
     @pytest.mark.asyncio()
     async def test_graphql_errors_raise_infra_unavailable(
-        self, adapter: AdapterTicketServiceLinear
+        self, adapter: AdapterTicketLinear
     ) -> None:
-        mock_resp = _mock_response(
-            {"errors": [{"message": "Rate limited"}]}
-        )
+        mock_resp = _mock_response({"errors": [{"message": "Rate limited"}]})
         with patch.object(adapter, "_get_client") as mock_get_client:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_resp
             mock_get_client.return_value = mock_client
 
             with pytest.raises(InfraUnavailableError, match="GraphQL errors"):
-                await adapter.get_ticket(
-                    "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-                )
+                await adapter.get_ticket("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
     @pytest.mark.asyncio()
     async def test_network_error_raises_infra_connection_error(
-        self, adapter: AdapterTicketServiceLinear
+        self, adapter: AdapterTicketLinear
     ) -> None:
         with patch.object(adapter, "_get_client") as mock_get_client:
             mock_client = AsyncMock()
@@ -378,9 +344,7 @@ class TestErrorHandling:
             mock_get_client.return_value = mock_client
 
             with pytest.raises(InfraConnectionError, match="connection failed"):
-                await adapter.get_ticket(
-                    "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-                )
+                await adapter.get_ticket("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
 
 # ---------------------------------------------------------------------------
@@ -390,9 +354,7 @@ class TestErrorHandling:
 
 class TestClose:
     @pytest.mark.asyncio()
-    async def test_close_with_client(
-        self, adapter: AdapterTicketServiceLinear
-    ) -> None:
+    async def test_close_with_client(self, adapter: AdapterTicketLinear) -> None:
         mock_client = AsyncMock()
         mock_client.is_closed = False
         adapter._client = mock_client
@@ -402,8 +364,6 @@ class TestClose:
         assert adapter._client is None
 
     @pytest.mark.asyncio()
-    async def test_close_without_client(
-        self, adapter: AdapterTicketServiceLinear
-    ) -> None:
+    async def test_close_without_client(self, adapter: AdapterTicketLinear) -> None:
         # Should not raise
         await adapter.close()

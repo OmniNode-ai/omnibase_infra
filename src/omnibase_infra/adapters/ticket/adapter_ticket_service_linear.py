@@ -110,7 +110,7 @@ query GetIssueByIdentifier($identifier: String!) {
 """
 
 
-def _normalise_issue(raw: dict[str, Any]) -> dict[str, Any]:
+def _normalise_issue(raw: dict[str, object]) -> dict[str, object]:
     """Flatten a Linear GraphQL issue node into a ContextValue-compatible dict.
 
     Converts nested objects (state, assignee, labels) to flat string values
@@ -136,14 +136,16 @@ def _normalise_issue(raw: dict[str, Any]) -> dict[str, Any]:
         ),
         "labels": [
             n.get("name", "")
-            for n in (labels_raw.get("nodes", []) if isinstance(labels_raw, dict) else [])
+            for n in (
+                labels_raw.get("nodes", []) if isinstance(labels_raw, dict) else []
+            )
         ],
         "created_at": raw.get("createdAt", ""),
         "updated_at": raw.get("updatedAt", ""),
     }
 
 
-def _build_issue_filter(filters: dict[str, Any]) -> dict[str, Any]:
+def _build_issue_filter(filters: dict[str, object]) -> dict[str, object]:
     """Translate simple key-value filters to Linear IssueFilter object.
 
     Supported filter keys:
@@ -152,7 +154,7 @@ def _build_issue_filter(filters: dict[str, Any]) -> dict[str, Any]:
         - label: str -> labels.name.eq
         - team: str -> team.key.eq
     """
-    gql_filter: dict[str, Any] = {}
+    gql_filter: dict[str, object] = {}
 
     if "status" in filters:
         gql_filter["state"] = {"name": {"eq": filters["status"]}}
@@ -166,7 +168,7 @@ def _build_issue_filter(filters: dict[str, Any]) -> dict[str, Any]:
     return gql_filter
 
 
-class AdapterTicketServiceLinear:
+class AdapterTicketLinear:
     """Linear API adapter implementing ProtocolTicketService.
 
     Read methods (get_ticket, list_tickets, get_ticket_status, health_check)
@@ -184,9 +186,7 @@ class AdapterTicketServiceLinear:
         timeout: float = _DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
         if not linear_api_key:
-            raise ValueError(
-                "AdapterTicketServiceLinear requires a non-empty linear_api_key"
-            )
+            raise ValueError("AdapterTicketLinear requires a non-empty linear_api_key")
         self._api_key = linear_api_key
         self._timeout = timeout
         self._client: httpx.AsyncClient | None = None
@@ -276,7 +276,8 @@ class AdapterTicketServiceLinear:
                 context=context,
             )
 
-        return data.get("data", {})
+        result: dict[str, Any] = data.get("data", {})
+        return result
 
     # ------------------------------------------------------------------
     # ProtocolTicketService — read methods
@@ -409,7 +410,7 @@ class AdapterTicketServiceLinear:
             NotImplementedError: Always.
         """
         raise NotImplementedError(
-            "AdapterTicketServiceLinear.create_ticket is not yet implemented "
+            "AdapterTicketLinear.create_ticket is not yet implemented "
             "(OMN-7587: write methods deferred)"
         )
 
@@ -420,7 +421,7 @@ class AdapterTicketServiceLinear:
             NotImplementedError: Always.
         """
         raise NotImplementedError(
-            "AdapterTicketServiceLinear.update_ticket_status is not yet implemented "
+            "AdapterTicketLinear.update_ticket_status is not yet implemented "
             "(OMN-7587: write methods deferred)"
         )
 
@@ -431,7 +432,7 @@ class AdapterTicketServiceLinear:
             NotImplementedError: Always.
         """
         raise NotImplementedError(
-            "AdapterTicketServiceLinear.add_comment is not yet implemented "
+            "AdapterTicketLinear.add_comment is not yet implemented "
             "(OMN-7587: write methods deferred)"
         )
 
@@ -450,4 +451,4 @@ class AdapterTicketServiceLinear:
             self._client = None
 
 
-__all__ = ["AdapterTicketServiceLinear"]
+__all__ = ["AdapterTicketLinear"]

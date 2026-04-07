@@ -3,7 +3,7 @@
 """Ticket service adapters."""
 
 from omnibase_infra.adapters.ticket.adapter_ticket_service_linear import (
-    AdapterTicketServiceLinear,
+    AdapterTicketLinear,
 )
 
-__all__ = ["AdapterTicketServiceLinear"]
+__all__ = ["AdapterTicketLinear"]
