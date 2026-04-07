@@ -1993,7 +1993,7 @@ async def bootstrap() -> int:
                                 logger.warning(
                                     "Auto-wiring lifecycle hook '%s' failed for "
                                     "'%s': %s (correlation_id=%s)",
-                                    hr.hook_name,
+                                    hr.phase,
                                     contract.name,
                                     hr.error_message,
                                     correlation_id,
