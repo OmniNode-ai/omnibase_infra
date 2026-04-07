@@ -29,6 +29,21 @@ from omnibase_infra.nodes.node_autonomous_loop_orchestrator.models.model_loop_or
 )
 
 
+class _FakeEventBus:
+    """Minimal event bus stub for testing publish calls."""
+
+    def __init__(self) -> None:
+        self.published: list[tuple[str, bytes | None, bytes]] = []
+
+    async def publish(self, topic: str, key: bytes | None, value: bytes) -> None:
+        self.published.append((topic, key, value))
+
+    async def publish_envelope(
+        self, envelope: object, topic: str, *, key: bytes | None = None
+    ) -> None:
+        pass
+
+
 @pytest.mark.unit
 class TestBuildLoopIntegration:
     """Full in-memory loop integration tests."""
@@ -240,6 +255,79 @@ class TestBuildLoopLinearIntegration:
         summary = result.cycle_summaries[0]
         assert summary.final_phase == EnumBuildLoopPhase.COMPLETE
         assert summary.tickets_filled == 0
+
+    @pytest.mark.asyncio
+    async def test_event_bus_receives_delegation_payloads(
+        self,
+    ):
+        """When an event bus is injected, orchestrator publishes delegation payloads."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = _make_linear_response(_SAMPLE_LINEAR_TICKETS)
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        event_bus = _FakeEventBus()
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            orchestrator = HandlerLoopOrchestrator(
+                event_bus=event_bus,
+                linear_api_key="lin_api_test_key",
+            )
+            command = ModelLoopStartCommand(
+                correlation_id=uuid4(),
+                max_cycles=1,
+                skip_closeout=True,
+                dry_run=False,
+                requested_at=datetime.now(tz=UTC),
+            )
+
+            result = await orchestrator.handle(command)
+
+        assert result.cycles_completed == 1
+        # 2 AUTO_BUILDABLE tickets dispatched -> 2 publish calls
+        assert result.cycle_summaries[0].tickets_dispatched == 2
+        assert len(event_bus.published) == 2
+        for topic, key, value in event_bus.published:
+            assert "delegation-request" in topic
+            assert key is None
+            assert len(value) > 0
+
+    @pytest.mark.asyncio
+    async def test_no_event_bus_skips_publishing(
+        self,
+    ):
+        """Without an event bus, orchestrator still completes but does not publish."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = _make_linear_response(_SAMPLE_LINEAR_TICKETS)
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            orchestrator = HandlerLoopOrchestrator(
+                linear_api_key="lin_api_test_key",
+            )
+            command = ModelLoopStartCommand(
+                correlation_id=uuid4(),
+                max_cycles=1,
+                skip_closeout=True,
+                dry_run=False,
+                requested_at=datetime.now(tz=UTC),
+            )
+
+            result = await orchestrator.handle(command)
+
+        assert result.cycles_completed == 1
+        assert result.cycle_summaries[0].tickets_dispatched == 2
 
     @pytest.mark.asyncio
     async def test_classification_filters_non_buildable(
