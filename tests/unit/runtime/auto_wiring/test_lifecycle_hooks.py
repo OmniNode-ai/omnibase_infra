@@ -141,7 +141,7 @@ class TestModelLifecycleHookResult:
     def test_succeeded(self) -> None:
         result = ModelLifecycleHookResult.succeeded("on_start")
         assert result.success is True
-        assert result.hook_name == "on_start"
+        assert result.phase == "on_start"
         assert result.error_message == ""
         assert result.background_workers == []
         assert bool(result) is True
