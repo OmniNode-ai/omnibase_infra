@@ -63,6 +63,10 @@ class ModelTaskDelegatedEvent(BaseModel):
         default=0, description="End-to-end delegation latency in ms."
     )
     is_shadow: bool = Field(default=False, description="Whether this was a shadow run.")
+    llm_call_id: str = Field(
+        default="",
+        description="Upstream LLM call ID for JOIN with llm_cost_aggregates.",
+    )
 
 
 __all__: list[str] = ["ModelTaskDelegatedEvent"]
