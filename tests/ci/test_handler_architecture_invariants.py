@@ -395,7 +395,6 @@ class TestWiringLocationInvariant:
         {
             "node_registration_orchestrator",
             "node_delegation_orchestrator",  # OMN-7040: delegation pipeline
-            "node_autonomous_loop_orchestrator",  # OMN-5113: build loop orchestrator
         }
     )
 
