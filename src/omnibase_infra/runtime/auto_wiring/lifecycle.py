@@ -121,7 +121,7 @@ class LifecycleHookExecutor:
         Returns:
             ModelLifecycleHookResult with success/failure status and diagnostics.
         """
-        hook_name = context.phase
+        phase_name = context.phase
 
         try:
             hook_fn = resolve_hook_callable(hook_config.callable_ref)
@@ -130,12 +130,12 @@ class LifecycleHookExecutor:
                 "Failed to resolve lifecycle hook",
                 extra={
                     "callable_ref": hook_config.callable_ref,
-                    "phase": hook_name,
+                    "phase": phase_name,
                     "error": str(e),
                 },
             )
             return ModelLifecycleHookResult.failed(
-                hook_name=hook_name,
+                phase=phase_name,
                 error_message=f"Hook resolution failed: {e}",
             )
 
@@ -147,7 +147,7 @@ class LifecycleHookExecutor:
             logger.debug(
                 "Lifecycle hook completed",
                 extra={
-                    "phase": hook_name,
+                    "phase": phase_name,
                     "callable_ref": hook_config.callable_ref,
                     "success": result.success,
                     "background_workers": result.background_workers,
@@ -158,13 +158,13 @@ class LifecycleHookExecutor:
             logger.warning(
                 "Lifecycle hook timed out",
                 extra={
-                    "phase": hook_name,
+                    "phase": phase_name,
                     "callable_ref": hook_config.callable_ref,
                     "timeout_seconds": hook_config.timeout_seconds,
                 },
             )
             return ModelLifecycleHookResult.failed(
-                hook_name=hook_name,
+                phase=phase_name,
                 error_message=(
                     f"Hook '{hook_config.callable_ref}' timed out "
                     f"after {hook_config.timeout_seconds}s"
@@ -174,13 +174,13 @@ class LifecycleHookExecutor:
             logger.exception(
                 "Lifecycle hook failed with exception",
                 extra={
-                    "phase": hook_name,
+                    "phase": phase_name,
                     "callable_ref": hook_config.callable_ref,
                     "error": str(e),
                 },
             )
             return ModelLifecycleHookResult.failed(
-                hook_name=hook_name,
+                phase=phase_name,
                 error_message=f"Hook '{hook_config.callable_ref}' raised: {e}",
             )
 
@@ -227,7 +227,7 @@ class LifecycleHookExecutor:
             return result
         except TimeoutError:
             last_result = ModelLifecycleHookResult.failed(
-                hook_name="validate_handshake",
+                phase="validate_handshake",
                 error_message=(
                     f"Handshake for '{handler_id}' exceeded total timeout "
                     f"of {hs_config.total_timeout_seconds}s"

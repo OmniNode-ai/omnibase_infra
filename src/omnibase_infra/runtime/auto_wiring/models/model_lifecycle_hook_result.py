@@ -12,7 +12,7 @@ class ModelLifecycleHookResult(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    hook_name: str = Field(
+    phase: str = Field(
         ...,
         min_length=1,
         description="Lifecycle phase name (on_start, validate_handshake, on_shutdown)",
@@ -33,21 +33,21 @@ class ModelLifecycleHookResult(BaseModel):
     @classmethod
     def succeeded(
         cls,
-        hook_name: str,
+        phase: str,
         background_workers: list[str] | None = None,
     ) -> ModelLifecycleHookResult:
         """Create a successful hook result."""
         return cls(
-            hook_name=hook_name,
+            phase=phase,
             success=True,
             background_workers=background_workers or [],
         )
 
     @classmethod
-    def failed(cls, hook_name: str, error_message: str) -> ModelLifecycleHookResult:
+    def failed(cls, phase: str, error_message: str) -> ModelLifecycleHookResult:
         """Create a failed hook result."""
         return cls(
-            hook_name=hook_name,
+            phase=phase,
             success=False,
             error_message=error_message,
         )
