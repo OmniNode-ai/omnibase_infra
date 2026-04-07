@@ -3137,6 +3137,27 @@ pattern_exemptions:
       contract_name and package_name are Python package identifiers used in auto-wiring diagnostics, not entity references requiring ID + display_name.
 
     ticket: OMN-7656
+  # ==========================================================================
+  # LLM Call ID Exemptions (OMN-7766)
+  # ==========================================================================
+  # llm_call_id is an external provider identifier (e.g., OpenAI chatcmpl-xxx),
+  # NOT an internal UUID. The _id suffix triggers a false positive.
+  - file_pattern: 'model_task_delegated_event\.py'
+    violation_pattern: "Field 'llm_call_id' should use UUID"
+    reason: >
+      llm_call_id is an external LLM provider call identifier (e.g., OpenAI chatcmpl-xxx). It is not an internal UUID — the format is provider-defined and varies across vendors.
+
+    documentation:
+      - CLAUDE.md (External Provider Identifiers)
+    ticket: OMN-7766
+  - file_pattern: 'model_inference_response_data\.py'
+    violation_pattern: "Field 'llm_call_id' should use UUID"
+    reason: >
+      llm_call_id is an external LLM provider call identifier (e.g., OpenAI chatcmpl-xxx). It is not an internal UUID — the format is provider-defined and varies across vendors.
+
+    documentation:
+      - CLAUDE.md (External Provider Identifiers)
+    ticket: OMN-7766
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
