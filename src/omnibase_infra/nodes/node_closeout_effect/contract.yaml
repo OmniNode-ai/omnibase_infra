@@ -15,6 +15,8 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 description: "Executes close-out phase: merge-sweep, quality gates, release readiness."
+deprecated: true
+deprecation_notice: "Migrated to omnimarket. Use omnimarket.nodes.node_closeout_effect instead."
 input_model:
   name: "ModelCloseoutInput"
   module: "omnibase_infra.nodes.node_closeout_effect.models.model_closeout"

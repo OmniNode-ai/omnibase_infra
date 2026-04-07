@@ -15,6 +15,8 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 description: "Dispatches ticket-pipeline builds via delegation."
+deprecated: true
+deprecation_notice: "Migrated to omnimarket. Use omnimarket.nodes.node_build_dispatch_effect instead."
 input_model:
   name: "ModelBuildDispatchInput"
   module: "omnibase_infra.nodes.node_build_dispatch_effect.models.model_build_dispatch"
