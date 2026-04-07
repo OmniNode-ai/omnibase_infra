@@ -18,6 +18,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
+    CMD_BASELINE_COMPARISON_REQUEST_V1 = "onex.cmd.omnibase-infra.baseline-comparison-request.v1"  # onex.cmd.omnibase-infra.baseline-comparison-request.v1
     CMD_BUILD_LOOP_BUILD_V1 = "onex.cmd.omnibase-infra.build-loop-build.v1"  # onex.cmd.omnibase-infra.build-loop-build.v1
     CMD_BUILD_LOOP_CLASSIFY_V1 = "onex.cmd.omnibase-infra.build-loop-classify.v1"  # onex.cmd.omnibase-infra.build-loop-classify.v1
     CMD_BUILD_LOOP_CLOSEOUT_V1 = "onex.cmd.omnibase-infra.build-loop-closeout.v1"  # onex.cmd.omnibase-infra.build-loop-closeout.v1
@@ -26,7 +27,9 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_BUILD_LOOP_VERIFY_V1 = "onex.cmd.omnibase-infra.build-loop-verify.v1"  # onex.cmd.omnibase-infra.build-loop-verify.v1
     CMD_CHAIN_LEARN_V1 = "onex.cmd.omnibase-infra.chain-learn.v1"  # onex.cmd.omnibase-infra.chain-learn.v1
     CMD_CONSUMER_RESTART_V1 = "onex.cmd.omnibase-infra.consumer-restart.v1"  # onex.cmd.omnibase-infra.consumer-restart.v1
+    CMD_DELEGATION_QUALITY_GATE_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1"  # onex.cmd.omnibase-infra.delegation-quality-gate-request.v1
     CMD_DELEGATION_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-request.v1"  # onex.cmd.omnibase-infra.delegation-request.v1
+    CMD_DELEGATION_ROUTING_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-routing-request.v1"  # onex.cmd.omnibase-infra.delegation-routing-request.v1
     CMD_LLM_COMPLETION_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-completion-request.v1"  # onex.cmd.omnibase-infra.llm-completion-request.v1
     CMD_LLM_EMBEDDING_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-embedding-request.v1"  # onex.cmd.omnibase-infra.llm-embedding-request.v1
     CMD_LLM_INFERENCE_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-inference-request.v1"  # onex.cmd.omnibase-infra.llm-inference-request.v1
