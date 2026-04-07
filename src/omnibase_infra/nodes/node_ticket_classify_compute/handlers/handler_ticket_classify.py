@@ -13,6 +13,10 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
+from typing import Any
+
+import yaml
 from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -29,61 +33,37 @@ from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_for_c
 
 logger = logging.getLogger(__name__)
 
-# Keyword sets for heuristic classification
-_AUTO_BUILDABLE_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "add",
-        "build",
-        "configure",
-        "connect",
-        "create",
-        "define",
-        "effect",
-        "enum",
-        "extract",
-        "fix",
-        "generate",
-        "handler",
-        "implement",
-        "migrate",
-        "model",
-        "move",
-        "node",
-        "reducer",
-        "refactor",
-        "register",
-        "rename",
-        "scaffold",
-        "setup",
-        "test",
-        "update",
-        "validate",
-        "verify",
-        "wire",
-        "wrap",
-        "write",
-    }
-)
+_CONTRACT_PATH = Path(__file__).resolve().parent.parent / "contract.yaml"
 
-# Strong blocked signals -- match anywhere in the ticket text.
-_BLOCKED_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "blocked",
-        "waiting",
-        "third-party",
-        "vendor",
-    }
-)
 
-# Weak blocked signals -- only block when they appear in the *title*.
-# In descriptions, "dependency" and "external" often appear in conceptual
-# discussion (e.g., "external service", "dependency injection") rather than
-# indicating an actual blocker.
-_BLOCKED_TITLE_ONLY_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "dependency",
-        "external",
-    }
+def _load_buildability_criteria() -> dict[str, Any]:
+    """Load buildability_criteria from the node contract YAML."""
+    with open(_CONTRACT_PATH, encoding="utf-8") as f:
+        contract = yaml.safe_load(f)
+    return contract.get("buildability_criteria", {})
+
+
+def _keywords_from_contract(criteria: dict[str, Any], key: str) -> frozenset[str]:
+    """Extract a keyword frozenset from the contract criteria."""
+    return frozenset(criteria.get(key, []))
+
+
+_CRITERIA = _load_buildability_criteria()
+
+_AUTO_BUILDABLE_KEYWORDS: frozenset[str] = _keywords_from_contract(
+    _CRITERIA, "auto_buildable_keywords"
+)
+_BLOCKED_KEYWORDS: frozenset[str] = _keywords_from_contract(
+    _CRITERIA, "blocked_keywords"
+)
+_BLOCKED_TITLE_ONLY_KEYWORDS: frozenset[str] = _keywords_from_contract(
+    _CRITERIA, "blocked_title_only_keywords"
+)
+_ARCH_DECISION_KEYWORDS: frozenset[str] = _keywords_from_contract(
+    _CRITERIA, "arch_decision_keywords"
+)
+_SKIP_KEYWORDS: frozenset[str] = _keywords_from_contract(
+    _CRITERIA, "skip_keywords"
 )
 
 # "depends on" is checked separately with a smarter pattern that avoids
@@ -100,39 +80,9 @@ def _has_real_dependency_blocker(text: str) -> bool:
     text_lower = text.lower()
     if "depends on" not in text_lower:
         return False
-    # If every "depends on" occurrence is followed by a task reference, it's
-    # sub-task ordering -- not a real blocker.
     if _DEPENDS_ON_FALSE_POSITIVE.search(text):
         return False
     return True
-
-
-_ARCH_DECISION_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "architecture",
-        "design",
-        "rfc",
-        "proposal",
-        "decision",
-        "evaluate",
-        "investigate",
-        "spike",
-        "research",
-        "tradeoff",
-    }
-)
-
-_SKIP_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "in progress",
-        "in-progress",
-        "wip",
-        "stale",
-        "duplicate",
-        "won't fix",
-        "wontfix",
-    }
-)
 
 
 def _match_keywords(text: str, keywords: frozenset[str]) -> tuple[str, ...]:
