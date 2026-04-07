@@ -44,7 +44,10 @@ def _load_buildability_criteria() -> dict[str, object]:
 
 def _keywords_from_contract(criteria: dict[str, object], key: str) -> frozenset[str]:
     """Extract a keyword frozenset from the contract criteria."""
-    return frozenset(criteria.get(key, []))
+    raw = criteria.get(key, [])
+    if not isinstance(raw, list):
+        return frozenset()
+    return frozenset(raw)
 
 
 _CRITERIA = _load_buildability_criteria()
