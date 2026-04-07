@@ -33,7 +33,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable
 
 from omnibase_infra.runtime.auto_wiring.context import ModelAutoWiringContext
 from omnibase_infra.runtime.auto_wiring.models import (
@@ -46,10 +46,7 @@ from omnibase_infra.runtime.auto_wiring.models import (
 
 logger = logging.getLogger(__name__)
 
-# Type alias for hook callables
-HookCallable = Callable[
-    [ModelAutoWiringContext], Coroutine[object, object, ModelLifecycleHookResult]
-]
+HookCallable = Callable[[ModelAutoWiringContext], Awaitable[ModelLifecycleHookResult]]
 
 
 def resolve_hook_callable(callable_ref: str) -> HookCallable:
@@ -124,7 +121,7 @@ class LifecycleHookExecutor:
         Returns:
             ModelLifecycleHookResult with success/failure status and diagnostics.
         """
-        phase_name = context.phase
+        hook_name = context.phase
 
         try:
             hook_fn = resolve_hook_callable(hook_config.callable_ref)
@@ -133,13 +130,13 @@ class LifecycleHookExecutor:
                 "Failed to resolve lifecycle hook",
                 extra={
                     "callable_ref": hook_config.callable_ref,
-                    "phase": phase_name,
+                    "phase": hook_name,
                     "error": str(e),
                 },
             )
             return ModelLifecycleHookResult.failed(
-                phase_name,
-                f"Hook resolution failed: {e}",
+                hook_name=hook_name,
+                error_message=f"Hook resolution failed: {e}",
             )
 
         try:
@@ -150,7 +147,7 @@ class LifecycleHookExecutor:
             logger.debug(
                 "Lifecycle hook completed",
                 extra={
-                    "phase": phase_name,
+                    "phase": hook_name,
                     "callable_ref": hook_config.callable_ref,
                     "success": result.success,
                     "background_workers": result.background_workers,
@@ -161,14 +158,14 @@ class LifecycleHookExecutor:
             logger.warning(
                 "Lifecycle hook timed out",
                 extra={
-                    "phase": phase_name,
+                    "phase": hook_name,
                     "callable_ref": hook_config.callable_ref,
                     "timeout_seconds": hook_config.timeout_seconds,
                 },
             )
             return ModelLifecycleHookResult.failed(
-                phase_name,
-                (
+                hook_name=hook_name,
+                error_message=(
                     f"Hook '{hook_config.callable_ref}' timed out "
                     f"after {hook_config.timeout_seconds}s"
                 ),
@@ -177,14 +174,14 @@ class LifecycleHookExecutor:
             logger.exception(
                 "Lifecycle hook failed with exception",
                 extra={
-                    "phase": phase_name,
+                    "phase": hook_name,
                     "callable_ref": hook_config.callable_ref,
                     "error": str(e),
                 },
             )
             return ModelLifecycleHookResult.failed(
-                phase_name,
-                f"Hook '{hook_config.callable_ref}' raised {type(e).__name__}",
+                hook_name=hook_name,
+                error_message=f"Hook '{hook_config.callable_ref}' raised: {e}",
             )
 
     async def execute_handshake(
@@ -212,8 +209,8 @@ class LifecycleHookExecutor:
 
         hook_config = hooks.validate_handshake
         hs_config = hooks.handshake_config
-        handler_id = str(context_kwargs.get("handler_id", "unknown"))
-        node_kind = str(context_kwargs.get("node_kind", "unknown"))
+        handler_id = context_kwargs.get("handler_id", "unknown")
+        node_kind = context_kwargs.get("node_kind", "unknown")
         max_attempts = 1 + hs_config.max_retries
         last_result: ModelLifecycleHookResult | None = None
 
@@ -230,8 +227,8 @@ class LifecycleHookExecutor:
             return result
         except TimeoutError:
             last_result = ModelLifecycleHookResult.failed(
-                "validate_handshake",
-                (
+                hook_name="validate_handshake",
+                error_message=(
                     f"Handshake for '{handler_id}' exceeded total timeout "
                     f"of {hs_config.total_timeout_seconds}s"
                 ),
@@ -264,8 +261,8 @@ class LifecycleHookExecutor:
         retry_delay: float,
     ) -> ModelLifecycleHookResult:
         """Run handshake attempts with retries. Quarantine on exhaustion."""
-        handler_id = str(context_kwargs.get("handler_id", "unknown"))
-        node_kind = str(context_kwargs.get("node_kind", "unknown"))
+        handler_id = context_kwargs.get("handler_id", "unknown")
+        node_kind = context_kwargs.get("node_kind", "unknown")
         last_result: ModelLifecycleHookResult | None = None
 
         for attempt in range(1, max_attempts + 1):
@@ -386,6 +383,6 @@ class LifecycleHookExecutor:
 __all__ = [
     "HookCallable",
     "LifecycleHookExecutor",
-    "_classify_failure",
     "resolve_hook_callable",
+    "_classify_failure",
 ]

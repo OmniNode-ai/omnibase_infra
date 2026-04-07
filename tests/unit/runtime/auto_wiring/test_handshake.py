@@ -19,22 +19,18 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from omnibase_infra.runtime.auto_wiring.config import ModelLifecycleHookConfig
 from omnibase_infra.runtime.auto_wiring.context import ModelAutoWiringContext
-from omnibase_infra.runtime.auto_wiring.enum_handshake_failure_reason import (
-    HandshakeFailureReason,
-)
-from omnibase_infra.runtime.auto_wiring.model_handshake_config import (
-    ModelHandshakeConfig,
-)
-from omnibase_infra.runtime.auto_wiring.model_quarantine_record import (
-    ModelQuarantineRecord,
-)
-from omnibase_infra.runtime.auto_wiring.models import ModelLifecycleHooks
-from omnibase_infra.runtime.auto_wiring.result import ModelLifecycleHookResult
-from omnibase_infra.runtime.auto_wiring.wiring import (
+from omnibase_infra.runtime.auto_wiring.lifecycle import (
     LifecycleHookExecutor,
     _classify_failure,
+)
+from omnibase_infra.runtime.auto_wiring.models import (
+    HandshakeFailureReason,
+    ModelHandshakeConfig,
+    ModelLifecycleHookConfig,
+    ModelLifecycleHookResult,
+    ModelLifecycleHooks,
+    ModelQuarantineRecord,
 )
 
 # ---------------------------------------------------------------------------
@@ -230,7 +226,7 @@ class TestExecuteHandshake:
         )
 
         with patch(
-            "omnibase_infra.runtime.auto_wiring.wiring.resolve_hook_callable",
+            "omnibase_infra.runtime.auto_wiring.lifecycle.resolve_hook_callable",
             return_value=mock_fn,
         ):
             result = await executor.execute_handshake(hooks, base_context_kwargs)
@@ -272,7 +268,7 @@ class TestExecuteHandshake:
         )
 
         with patch(
-            "omnibase_infra.runtime.auto_wiring.wiring.resolve_hook_callable",
+            "omnibase_infra.runtime.auto_wiring.lifecycle.resolve_hook_callable",
             return_value=mock_fn,
         ):
             result = await executor.execute_handshake(hooks, base_context_kwargs)
@@ -304,7 +300,7 @@ class TestExecuteHandshake:
         )
 
         with patch(
-            "omnibase_infra.runtime.auto_wiring.wiring.resolve_hook_callable",
+            "omnibase_infra.runtime.auto_wiring.lifecycle.resolve_hook_callable",
             return_value=mock_fn,
         ):
             result = await executor.execute_handshake(hooks, base_context_kwargs)
@@ -345,7 +341,7 @@ class TestExecuteHandshake:
             return ModelLifecycleHookResult.succeeded("validate_handshake")
 
         with patch(
-            "omnibase_infra.runtime.auto_wiring.wiring.resolve_hook_callable",
+            "omnibase_infra.runtime.auto_wiring.lifecycle.resolve_hook_callable",
             return_value=slow_hook,
         ):
             result = await executor.execute_handshake(hooks, base_context_kwargs)
@@ -382,7 +378,7 @@ class TestExecuteHandshake:
             return ModelLifecycleHookResult.succeeded("validate_handshake")
 
         with patch(
-            "omnibase_infra.runtime.auto_wiring.wiring.resolve_hook_callable",
+            "omnibase_infra.runtime.auto_wiring.lifecycle.resolve_hook_callable",
             return_value=slow_hook,
         ):
             result = await executor.execute_handshake(hooks, base_context_kwargs)
@@ -416,7 +412,7 @@ class TestExecuteHandshake:
         )
 
         with patch(
-            "omnibase_infra.runtime.auto_wiring.wiring.resolve_hook_callable",
+            "omnibase_infra.runtime.auto_wiring.lifecycle.resolve_hook_callable",
             return_value=mock_fn,
         ):
             await executor.execute_handshake(
@@ -494,7 +490,7 @@ class TestExecuteStartupWithHandshake:
             return mock_validate
 
         with patch(
-            "omnibase_infra.runtime.auto_wiring.wiring.resolve_hook_callable",
+            "omnibase_infra.runtime.auto_wiring.lifecycle.resolve_hook_callable",
             side_effect=mock_resolve,
         ):
             results = await executor.execute_startup(hooks, base_context_kwargs)
@@ -523,7 +519,7 @@ class TestExecuteStartupWithHandshake:
         )
 
         with patch(
-            "omnibase_infra.runtime.auto_wiring.wiring.resolve_hook_callable",
+            "omnibase_infra.runtime.auto_wiring.lifecycle.resolve_hook_callable",
             return_value=mock_fn,
         ):
             results = await executor.execute_startup(hooks, base_context_kwargs)
@@ -557,7 +553,7 @@ class TestExecuteStartupWithHandshake:
         )
 
         with patch(
-            "omnibase_infra.runtime.auto_wiring.wiring.resolve_hook_callable",
+            "omnibase_infra.runtime.auto_wiring.lifecycle.resolve_hook_callable",
             return_value=mock_fn,
         ):
             results = await executor.execute_startup(hooks, base_context_kwargs)
@@ -597,7 +593,7 @@ class TestExecuteStartupWithHandshake:
         )
 
         with patch(
-            "omnibase_infra.runtime.auto_wiring.wiring.resolve_hook_callable",
+            "omnibase_infra.runtime.auto_wiring.lifecycle.resolve_hook_callable",
             return_value=mock_fn,
         ):
             results = await executor.execute_startup(hooks, base_context_kwargs)

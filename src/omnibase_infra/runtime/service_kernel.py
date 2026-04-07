@@ -575,6 +575,22 @@ def load_runtime_config(
     return config
 
 
+def _topic_matches_pattern(topic: str, pattern: str) -> bool:
+    """Check if a topic string matches a wildcard topic pattern.
+
+    Supports ``*`` as a single-segment wildcard in ONEX topic patterns.
+    Example: ``*.evt.platform.node-introspection.*`` matches
+    ``onex.evt.platform.node-introspection.v1``.
+    """
+    topic_parts = topic.split(".")
+    pattern_parts = pattern.split(".")
+    if len(topic_parts) != len(pattern_parts):
+        return False
+    return all(
+        pp == "*" or pp == tp for tp, pp in zip(topic_parts, pattern_parts, strict=True)
+    )
+
+
 # ai-slop-ok: pre-existing === separators in example startup log in docstring
 async def bootstrap() -> int:
     """Bootstrap the ONEX runtime from contracts.
@@ -1911,13 +1927,172 @@ async def bootstrap() -> int:
                             exc_info=True,
                         )
 
+        # --- Auto-wiring: Contract discovery + handler wiring (OMN-7656) ---
+        #
+        # After explicit plugins register their handlers/dispatchers, auto-wiring
+        # discovers contracts from onex.nodes entry points and wires handlers
+        # that are NOT already claimed by explicit plugins.
+        #
+        # Coexistence: explicit plugins always take precedence. Auto-wiring only
+        # picks up contracts that have no plugin handler wired for the same topics.
+        # Topic collision detection logs warnings for overlapping subscriptions.
+        auto_wiring_report = None
+        lifecycle_executor = None
+        try:
+            from omnibase_infra.runtime.auto_wiring import (
+                LifecycleHookExecutor,
+                discover_contracts,
+                wire_from_manifest,
+            )
+
+            # 1. Discover all contracts from installed packages
+            auto_wiring_start = time.time()
+            manifest = discover_contracts()
+            logger.info(
+                "Auto-wiring discovery: %d contracts found, %d errors "
+                "(correlation_id=%s)",
+                manifest.total_discovered,
+                manifest.total_errors,
+                correlation_id,
+                extra={
+                    "discovered": [c.name for c in manifest.contracts],
+                    "errors": [
+                        {"entry_point": e.entry_point_name, "error": e.error}
+                        for e in manifest.errors
+                    ],
+                },
+            )
+
+            if manifest.total_discovered > 0:
+                # 2. Collect topics already claimed by explicit plugins
+                #    by inspecting registered routes on the dispatch engine
+                claimed_topic_patterns: set[str] = set()
+                for route in dispatch_engine._routes.values():
+                    claimed_topic_patterns.add(route.topic_pattern)
+
+                # 3. Run lifecycle hooks (on_start + validate_handshake)
+                lifecycle_executor = LifecycleHookExecutor()
+                for contract in manifest.contracts:
+                    if not contract.handler_routing:
+                        continue
+                    lifecycle_hooks_raw = getattr(contract, "lifecycle_hooks", None)
+                    if (
+                        lifecycle_hooks_raw is not None
+                        and lifecycle_hooks_raw.has_hooks()
+                    ):
+                        context_kwargs: dict[str, object] = {
+                            "handler_id": contract.name,
+                            "node_kind": contract.node_type,
+                            "contract_version": str(contract.contract_version),
+                        }
+                        hook_results = await lifecycle_executor.execute_startup(
+                            lifecycle_hooks_raw, context_kwargs
+                        )
+                        for hr in hook_results:
+                            if not hr.success:
+                                logger.warning(
+                                    "Auto-wiring lifecycle hook '%s' failed for "
+                                    "'%s': %s (correlation_id=%s)",
+                                    hr.hook_name,
+                                    contract.name,
+                                    hr.error_message,
+                                    correlation_id,
+                                )
+
+                quarantined = lifecycle_executor.get_quarantined_contracts()
+                quarantined_names = {q.handler_id for q in quarantined}
+                if quarantined:
+                    logger.warning(
+                        "Auto-wiring: %d contracts quarantined after handshake "
+                        "failure (correlation_id=%s)",
+                        len(quarantined),
+                        correlation_id,
+                        extra={
+                            "quarantined": [
+                                {
+                                    "handler_id": q.handler_id,
+                                    "reason": q.failure_reason.value,
+                                }
+                                for q in quarantined
+                            ],
+                        },
+                    )
+
+                # 4. Filter manifest to exclude quarantined contracts
+                from omnibase_infra.runtime.auto_wiring.models import (
+                    ModelAutoWiringManifest,
+                )
+
+                filtered_contracts = tuple(
+                    c for c in manifest.contracts if c.name not in quarantined_names
+                )
+                filtered_manifest = ModelAutoWiringManifest(
+                    contracts=filtered_contracts,
+                    errors=manifest.errors,
+                )
+
+                # 5. Wire handlers into dispatch engine
+                auto_wiring_report = await wire_from_manifest(
+                    manifest=filtered_manifest,
+                    dispatch_engine=dispatch_engine,
+                    event_bus=event_bus,
+                    environment=environment,
+                )
+
+                # 6. Topic collision detection: warn for auto-wired topics
+                #    that overlap with explicit plugin routes
+                if auto_wiring_report:
+                    for result in auto_wiring_report.results:
+                        for topic in result.topics_subscribed:
+                            for pattern in claimed_topic_patterns:
+                                if _topic_matches_pattern(topic, pattern):
+                                    logger.warning(
+                                        "Topic collision: auto-wired topic '%s' "
+                                        "(contract=%s) overlaps with explicit "
+                                        "plugin route pattern '%s' "
+                                        "(correlation_id=%s)",
+                                        topic,
+                                        result.contract_name,
+                                        pattern,
+                                        correlation_id,
+                                    )
+
+                auto_wiring_duration = time.time() - auto_wiring_start
+                logger.info(
+                    "Auto-wiring completed in %.3fs: wired=%d skipped=%d "
+                    "failed=%d quarantined=%d (correlation_id=%s)",
+                    auto_wiring_duration,
+                    auto_wiring_report.total_wired if auto_wiring_report else 0,
+                    auto_wiring_report.total_skipped if auto_wiring_report else 0,
+                    auto_wiring_report.total_failed if auto_wiring_report else 0,
+                    len(quarantined),
+                    correlation_id,
+                    extra={
+                        "duration_seconds": auto_wiring_duration,
+                        "wired": [
+                            r.contract_name
+                            for r in (
+                                auto_wiring_report.results if auto_wiring_report else ()
+                            )
+                            if r.outcome.value == "wired"
+                        ],
+                    },
+                )
+        except Exception:  # noqa: BLE001 — boundary: auto-wiring degrades gracefully
+            logger.warning(
+                "Auto-wiring failed; continuing with explicitly registered "
+                "plugins only (correlation_id=%s)",
+                correlation_id,
+                exc_info=True,
+            )
+
         # --- Freeze dispatch engine ---
-        # All plugins have registered their dispatchers. Freeze the engine
-        # to make it read-only and thread-safe for concurrent dispatch.
+        # All plugins and auto-wired handlers have registered their dispatchers.
+        # Freeze the engine to make it read-only and thread-safe for concurrent dispatch.
         dispatch_engine.freeze()
         logger.info(
             "MessageDispatchEngine frozen after all wire_dispatchers() "
-            "(correlation_id=%s)",
+            "and auto-wiring (correlation_id=%s)",
             correlation_id,
         )
 
@@ -2618,6 +2793,13 @@ async def bootstrap() -> int:
             f"Registration: {registration_status}",
             f"Contract Registry: {contract_registry_status}",
             f"Plugins: {', '.join(plugin_names) if plugin_names else 'none'}",
+            (
+                f"Auto-wiring: {auto_wiring_report.total_wired} wired, "
+                f"{auto_wiring_report.total_skipped} skipped, "
+                f"{auto_wiring_report.total_failed} failed"
+                if auto_wiring_report is not None
+                else "Auto-wiring: disabled (no contracts discovered)"
+            ),
             f"Health endpoint: http://0.0.0.0:{http_port}/health",
             f"Bootstrap time: {bootstrap_duration:.3f}s",
             f"Correlation ID: {correlation_id}",
