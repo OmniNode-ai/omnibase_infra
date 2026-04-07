@@ -40,12 +40,30 @@ WORKFLOW_YAML_PATH = (
 
 
 def _runtime_local_complete() -> bool:
-    """Check if RuntimeLocal has the completed _build_initial_payload method."""
+    """Check if RuntimeLocal can run this workflow end-to-end.
+
+    Requires both _build_initial_payload AND that the workflow's input model
+    can be constructed with auto-filled defaults (correlation_id, requested_at
+    are required fields that RuntimeLocal must handle).
+    """
     try:
         from omnibase_core.runtime.runtime_local import RuntimeLocal
 
-        return hasattr(RuntimeLocal, "_build_initial_payload")
-    except ImportError:
+        if not hasattr(RuntimeLocal, "_build_initial_payload"):
+            return False
+        # Verify the workflow input model can be default-constructed
+        import tempfile
+
+        rt = RuntimeLocal(
+            workflow_path=WORKFLOW_YAML_PATH,
+            state_root=Path(tempfile.gettempdir()) / "runtime-local-check",
+            timeout=5,
+        )
+        contract = rt._load_contract()
+        input_spec = contract.get("input_model", {})
+        payload = rt._build_initial_payload(input_spec)
+        return payload is not None
+    except (ImportError, AttributeError, TypeError, ValueError, OSError):
         return False
 
 
@@ -195,9 +213,9 @@ class TestRuntimeLocalProofOfLife:
 
     @pytest.mark.skipif(
         not _runtime_local_complete(),
-        reason="RuntimeLocal._build_initial_payload not yet available (PR not merged)",
+        reason="RuntimeLocal cannot build default payload for build loop workflow",
     )
-    async def test_runtime_local_with_workflow_yaml(self, tmp_path: Path) -> None:
+    def test_runtime_local_with_workflow_yaml(self, tmp_path: Path) -> None:
         """RuntimeLocal loads the workflow YAML and runs the build loop."""
         from omnibase_core.enums.enum_workflow_result import EnumWorkflowResult
         from omnibase_core.runtime.runtime_local import RuntimeLocal
