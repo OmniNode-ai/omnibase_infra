@@ -187,12 +187,13 @@ class TestWorkflowYamlValidity:
         assert cls is ModelLoopStartCommand
 
     def test_workflow_yaml_nodes_list(self) -> None:
-        """Workflow must declare all 7 nodes."""
+        """Workflow must declare all 8 nodes."""
         content = yaml.safe_load(WORKFLOW_YAML_PATH.read_text())
         nodes = content["nodes"]
-        assert len(nodes) == 7
+        assert len(nodes) == 8
         assert "node_autonomous_loop_orchestrator" in nodes
         assert "node_loop_state_reducer" in nodes
+        assert "node_deploy_effect" in nodes
 
 
 @pytest.mark.unit

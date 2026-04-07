@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Handler that orchestrates the 6-phase autonomous build loop.
+"""Handler that orchestrates the 7-phase autonomous build loop.
 
 The orchestrator REACTS to reducer-approved state. It never independently
 decides phase transitions — those are the sole authority of the reducer.
@@ -22,7 +22,7 @@ import json
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 
@@ -81,6 +81,7 @@ from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_for_c
 from omnibase_infra.nodes.node_verify_effect.handlers.handler_verify import (
     HandlerVerify,
 )
+from omnibase_infra.runtime.emit_daemon.topics import TOPIC_DEPLOY_REBUILD_REQUESTED
 from omnibase_infra.utils.util_friction_emitter import emit_build_loop_friction
 
 logger = logging.getLogger(__name__)
@@ -114,9 +115,10 @@ class HandlerLoopOrchestrator:
         self._dispatch = HandlerBuildDispatch()
         self._event_bus = event_bus
         self._linear_api_key = linear_api_key
-        # Inter-phase state: carry results between fill -> classify -> build
+        # Inter-phase state: carry results between phases
         self._last_fill_result: tuple[ModelScoredTicket, ...] = ()
         self._last_classify_result: tuple[ModelBuildTarget, ...] = ()
+        self._last_closeout_prs_merged: int = 0
 
     async def handle(
         self,
@@ -298,13 +300,58 @@ class HandlerLoopOrchestrator:
                     correlation_id,
                     state.dry_run,
                 )
-                await self._closeout.handle(
+                closeout_result = await self._closeout.handle(
                     correlation_id=correlation_id,
                     dry_run=state.dry_run,
                 )
+                self._last_closeout_prs_merged = closeout_result.prs_merged
                 return ModelBuildLoopEvent(
                     correlation_id=correlation_id,
                     source_phase=EnumBuildLoopPhase.CLOSING_OUT,
+                    success=True,
+                    timestamp=now,
+                )
+
+            elif intent.intent_type == EnumBuildLoopIntentType.START_DEPLOY:
+                logger.info(
+                    "[BUILD-LOOP] Phase DEPLOYING: prs_merged=%d "
+                    "(correlation_id=%s, dry_run=%s)",
+                    self._last_closeout_prs_merged,
+                    correlation_id,
+                    state.dry_run,
+                )
+                if (
+                    self._last_closeout_prs_merged > 0
+                    and self._event_bus is not None
+                    and not state.dry_run
+                ):
+                    payload = {
+                        "correlation_id": str(uuid4()),
+                        "requested_by": "build-loop",
+                        "scope": "runtime",
+                        "services": [],
+                        "git_ref": "origin/main",
+                    }
+                    await self._event_bus.publish(
+                        topic=TOPIC_DEPLOY_REBUILD_REQUESTED,
+                        key=None,
+                        value=json.dumps(payload).encode(),
+                    )
+                    logger.info(
+                        "[BUILD-LOOP] Published ModelRebuildRequested to %s",
+                        TOPIC_DEPLOY_REBUILD_REQUESTED,
+                    )
+                else:
+                    logger.info(
+                        "[BUILD-LOOP] Deploy skipped: prs_merged=%d, "
+                        "has_event_bus=%s, dry_run=%s",
+                        self._last_closeout_prs_merged,
+                        self._event_bus is not None,
+                        state.dry_run,
+                    )
+                return ModelBuildLoopEvent(
+                    correlation_id=correlation_id,
+                    source_phase=EnumBuildLoopPhase.DEPLOYING,
                     success=True,
                     timestamp=now,
                 )
