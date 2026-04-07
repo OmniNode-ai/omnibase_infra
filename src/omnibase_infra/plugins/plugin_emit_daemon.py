@@ -62,12 +62,13 @@ class PluginEmitDaemon:
 
     def should_activate(self, config: ModelDomainPluginConfig) -> bool:
         """Activate only when ONEX_EMIT_DAEMON_ENABLED=true."""
-        enabled = os.environ.get("ONEX_EMIT_DAEMON_ENABLED", "false").lower() == "true"
+        _flag = "ONEX_EMIT_DAEMON_ENABLED"  # ONEX_FLAG_EXEMPT: kernel-level plugin gate
+        enabled = os.environ.get(_flag, "false").lower() == "true"
         logger.info(
             "[EMIT-DAEMON] PluginEmitDaemon.should_activate() -> %s "
             "(ONEX_EMIT_DAEMON_ENABLED=%r, correlation_id=%s)",
             enabled,
-            os.environ.get("ONEX_EMIT_DAEMON_ENABLED", ""),
+            os.environ.get(_flag, ""),
             config.correlation_id,
         )
         return enabled
