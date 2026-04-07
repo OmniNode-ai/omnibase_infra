@@ -375,3 +375,105 @@ class TestBuildLoopLinearIntegration:
         assert summary.tickets_classified == 1
         # Architecture ticket should NOT be dispatched
         assert summary.tickets_dispatched == 0
+
+
+@pytest.mark.unit
+class TestBuildLoopDeployPhase:
+    """Tests for the DEPLOYING phase and ModelRebuildRequested event."""
+
+    @pytest.mark.asyncio
+    async def test_deploy_publishes_rebuild_event_when_prs_merged(self):
+        """When closeout merges PRs and event bus is present, deploy publishes rebuild event."""
+        event_bus = _FakeEventBus()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = _make_linear_response(_SAMPLE_LINEAR_TICKETS)
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("httpx.AsyncClient", return_value=mock_client),
+            patch(
+                "omnibase_infra.nodes.node_closeout_effect.handlers.handler_closeout.run_merge_sweep",
+            ) as mock_sweep,
+        ):
+            # Simulate merge sweep returning 3 PRs merged
+            mock_sweep_result = MagicMock()
+            mock_sweep_result.auto_merge_enabled = 3
+            mock_sweep_result.classified = [MagicMock()] * 5
+            mock_sweep_result.errors = []
+            mock_sweep.return_value = mock_sweep_result
+
+            orchestrator = HandlerLoopOrchestrator(
+                event_bus=event_bus,
+                linear_api_key="lin_api_test_key",
+            )
+            command = ModelLoopStartCommand(
+                correlation_id=uuid4(),
+                max_cycles=1,
+                skip_closeout=False,
+                dry_run=False,
+                requested_at=datetime.now(tz=UTC),
+            )
+
+            result = await orchestrator.handle(command)
+
+        assert result.cycles_completed == 1
+        # Should have deploy event + delegation payloads
+        deploy_events = [
+            (t, v) for t, _k, v in event_bus.published if "rebuild-requested" in t
+        ]
+        assert len(deploy_events) == 1
+        topic, value = deploy_events[0]
+        assert topic == "onex.cmd.deploy.rebuild-requested.v1"
+        import json
+
+        payload = json.loads(value)
+        assert payload["requested_by"] == "build-loop"
+        assert payload["scope"] == "runtime"
+        assert payload["git_ref"] == "origin/main"
+
+    @pytest.mark.asyncio
+    async def test_deploy_skipped_when_no_prs_merged(self):
+        """When closeout merges 0 PRs, deploy phase should not publish."""
+        event_bus = _FakeEventBus()
+
+        orchestrator = HandlerLoopOrchestrator(event_bus=event_bus)
+        command = ModelLoopStartCommand(
+            correlation_id=uuid4(),
+            max_cycles=1,
+            skip_closeout=False,
+            dry_run=True,
+            requested_at=datetime.now(tz=UTC),
+        )
+
+        result = await orchestrator.handle(command)
+
+        assert result.cycles_completed == 1
+        # Dry run closeout returns 0 prs_merged, so no rebuild event
+        deploy_events = [
+            t for t, _k, _v in event_bus.published if "rebuild-requested" in t
+        ]
+        assert len(deploy_events) == 0
+
+    @pytest.mark.asyncio
+    async def test_deploy_skipped_when_no_event_bus(self):
+        """Without an event bus, deploy phase completes without publishing."""
+        orchestrator = HandlerLoopOrchestrator()
+        command = ModelLoopStartCommand(
+            correlation_id=uuid4(),
+            max_cycles=1,
+            skip_closeout=False,
+            dry_run=True,
+            requested_at=datetime.now(tz=UTC),
+        )
+
+        result = await orchestrator.handle(command)
+
+        assert result.cycles_completed == 1
+        assert result.cycle_summaries[0].final_phase == EnumBuildLoopPhase.COMPLETE

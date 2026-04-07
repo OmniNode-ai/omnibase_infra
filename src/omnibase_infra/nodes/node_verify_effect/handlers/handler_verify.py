@@ -3,6 +3,7 @@
 """Handler that verifies system health before building.
 
 This is an EFFECT handler - performs external I/O (health checks).
+Delegates data verification to omnimarket's HandlerDataVerification node.
 
 Related:
     - OMN-7317: node_verify_effect
@@ -12,7 +13,19 @@ Related:
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from uuid import UUID
+
+from omnimarket.nodes.node_data_verification.handlers.handler_data_verification import (
+    HandlerDataVerification,
+    InmemoryDataSource,
+)
+from omnimarket.nodes.node_data_verification.models.model_data_verification_start_command import (
+    ModelDataVerificationStartCommand,
+)
+from omnimarket.nodes.node_data_verification.models.model_data_verification_state import (
+    EnumVerificationStatus,
+)
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_verify_effect.models.model_verify import (
@@ -27,11 +40,15 @@ logger = logging.getLogger(__name__)
 
 
 class HandlerVerify:
-    """Verifies system health: dashboard, runtime, data flow.
+    """Verifies system health: dashboard, runtime, data flow, data quality.
 
+    Delegates data verification to omnimarket's HandlerDataVerification.
     Non-critical failures produce warnings but do not block the loop.
     Only critical check failures cause the phase to fail.
     """
+
+    def __init__(self) -> None:
+        self._data_verifier = HandlerDataVerification()
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -51,7 +68,7 @@ class HandlerVerify:
         Checks:
             1. Dashboard health (non-critical)
             2. Runtime health (critical)
-            3. Data flow verification (non-critical)
+            3. Data flow verification via omnimarket node (non-critical)
 
         Args:
             correlation_id: Cycle correlation ID.
@@ -156,14 +173,31 @@ class HandlerVerify:
                 )
             )
 
-        # Check 3: Data flow verification (non-critical)
+        # Check 3: Data flow verification via omnimarket node (non-critical)
         try:
-            logger.info("Verifying data flow")
+            logger.info("Running data verification via omnimarket node")
+            verification_command = ModelDataVerificationStartCommand(
+                table_name="node_registrations",
+                correlation_id=str(correlation_id),
+                requested_at=datetime.now(tz=UTC),
+                dry_run=False,
+            )
+            data_source = InmemoryDataSource()
+            result, _completed = self._data_verifier.run_verification(
+                verification_command, data_source
+            )
+            data_passed = result.status != EnumVerificationStatus.FAIL
             checks.append(
                 ModelVerifyCheck(
-                    name="data_flow", passed=True, critical=False, message="OK"
+                    name="data_flow",
+                    passed=data_passed,
+                    critical=False,
+                    message=f"status={result.status.value}, rows={result.total_rows}, issues={len(result.issues)}",
                 )
             )
+            if not data_passed:
+                for issue in result.issues:
+                    warnings.append(f"Data verification: {issue}")
         except Exception as exc:  # noqa: BLE001 — boundary: catch-all for data flow resilience
             msg = f"Data flow verification failed: {exc}"
             warnings.append(msg)
