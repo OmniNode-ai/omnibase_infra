@@ -1893,7 +1893,7 @@ async def bootstrap() -> int:
                         lifecycle_hooks_raw is not None
                         and lifecycle_hooks_raw.has_hooks()
                     ):
-                        context_kwargs = {
+                        context_kwargs: dict[str, object] = {
                             "handler_id": contract.name,
                             "node_kind": contract.node_type,
                             "contract_version": str(contract.contract_version),
