@@ -33,6 +33,65 @@ handler_routing:
       handler:
         name: "HandlerTicketClassify"
         module: "omnibase_infra.nodes.node_ticket_classify_compute.handlers.handler_ticket_classify"
+buildability_criteria:
+  auto_buildable_keywords:
+    - add
+    - build
+    - configure
+    - connect
+    - create
+    - define
+    - effect
+    - enum
+    - extract
+    - fix
+    - generate
+    - handler
+    - implement
+    - migrate
+    - model
+    - move
+    - node
+    - reducer
+    - refactor
+    - register
+    - rename
+    - scaffold
+    - setup
+    - test
+    - update
+    - validate
+    - verify
+    - wire
+    - wrap
+    - write
+  blocked_keywords:
+    - blocked
+    - waiting
+    - third-party
+    - vendor
+  blocked_title_only_keywords:
+    - dependency
+    - external
+  arch_decision_keywords:
+    - architecture
+    - design
+    - rfc
+    - proposal
+    - decision
+    - evaluate
+    - investigate
+    - spike
+    - research
+    - tradeoff
+  skip_keywords:
+    - in progress
+    - in-progress
+    - wip
+    - stale
+    - duplicate
+    - "won't fix"
+    - wontfix
 metadata:
   description: "Ticket classify compute node for autonomous build loop"
   author: "OmniNode Team"

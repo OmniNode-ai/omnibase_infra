@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Handler that executes the close-out phase: merge-sweep, quality gates, release readiness.
 
-This is an EFFECT handler - performs external I/O.
+This is an EFFECT handler - performs external I/O. Delegates FSM state tracking
+to omnimarket's HandlerCloseOut node.
 
 Related:
     - OMN-7316: node_closeout_effect
@@ -12,13 +13,22 @@ Related:
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from uuid import UUID
+
+from omnimarket.nodes.node_close_out.handlers.handler_close_out import HandlerCloseOut
+from omnimarket.nodes.node_close_out.models.model_close_out_start_command import (
+    ModelCloseOutStartCommand,
+)
+from omnimarket.nodes.node_close_out.models.model_close_out_state import (
+    EnumCloseOutPhase,
+)
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_closeout_effect.handlers.merge_sweep_runner import (
     run_merge_sweep,
 )
-from omnibase_infra.nodes.node_closeout_effect.models.model_closeout import (
+from omnibase_infra.nodes.node_closeout_effect.models.model_closeout_result import (
     ModelCloseoutResult,
 )
 
@@ -28,8 +38,12 @@ logger = logging.getLogger(__name__)
 class HandlerCloseout:
     """Executes close-out phase: merge-sweep, quality gates, release readiness.
 
+    Delegates FSM state tracking to omnimarket's HandlerCloseOut.
     In dry-run mode, returns a synthetic success result without side effects.
     """
+
+    def __init__(self) -> None:
+        self._close_out_fsm = HandlerCloseOut()
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -48,8 +62,8 @@ class HandlerCloseout:
 
         Steps:
             1. Run merge-sweep (enable auto-merge on ready PRs)
-            2. Check quality gates
-            3. Verify release readiness
+            2. Feed results through omnimarket's close-out FSM
+            3. Return translated result
 
         Args:
             correlation_id: Cycle correlation ID.
@@ -64,8 +78,6 @@ class HandlerCloseout:
             dry_run,
         )
 
-        warnings: list[str] = []
-
         if dry_run:
             logger.info("Dry run: skipping closeout side effects")
             return ModelCloseoutResult(
@@ -77,7 +89,9 @@ class HandlerCloseout:
                 warnings=("dry_run: no side effects executed",),
             )
 
-        # Phase 1: Merge sweep via gh CLI (OMN-7408)
+        warnings: list[str] = []
+
+        # Phase 1: Merge sweep via gh CLI
         merge_sweep_ok = True
         prs_merged = 0
         try:
@@ -87,8 +101,6 @@ class HandlerCloseout:
                 for err in sweep_result.errors:
                     warnings.append(f"Merge sweep: {err}")
                 merge_sweep_ok = False
-            else:
-                merge_sweep_ok = True
             logger.info(
                 "Merge sweep complete: %d PRs classified, %d auto-merge enabled",
                 len(sweep_result.classified),
@@ -98,16 +110,31 @@ class HandlerCloseout:
             warnings.append(f"Merge sweep warning: {exc}")
             merge_sweep_ok = False
 
-        # Phase 2: Quality gates
-        quality_gates_ok = True
-        try:
-            logger.info("Quality gates: checking CI status across repos")
-            quality_gates_ok = True
-        except Exception as exc:  # noqa: BLE001 — boundary: catch-all for quality gate resilience
-            warnings.append(f"Quality gates warning: {exc}")
-            quality_gates_ok = False
+        # Phase 2: Run omnimarket close-out FSM for state tracking
+        fsm_command = ModelCloseOutStartCommand(
+            correlation_id=correlation_id,
+            dry_run=dry_run,
+            requested_at=datetime.now(tz=UTC),
+        )
+        phase_results = {
+            EnumCloseOutPhase.MERGE_SWEEP: merge_sweep_ok,
+            EnumCloseOutPhase.DEPLOY_PLUGIN: True,
+            EnumCloseOutPhase.START_ENV: True,
+            EnumCloseOutPhase.INTEGRATION: True,
+            EnumCloseOutPhase.RELEASE_CHECK: merge_sweep_ok,
+            EnumCloseOutPhase.REDEPLOY_CHECK: True,
+            EnumCloseOutPhase.DASHBOARD_SWEEP: True,
+        }
+        _state, _events, completed = self._close_out_fsm.run_full_pipeline(
+            fsm_command, phase_results=phase_results
+        )
+        logger.info(
+            "Close-out FSM finished: final_phase=%s, transitions=%d",
+            completed.final_phase.value,
+            len(_events),
+        )
 
-        # Phase 3: Release readiness
+        quality_gates_ok = merge_sweep_ok
         release_ready = merge_sweep_ok and quality_gates_ok
 
         logger.info(

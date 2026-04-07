@@ -1,15 +1,15 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 # Build loop workflow contract.
-# Declares the 7-node workflow that orchestrates the autonomous build loop
-# through 6 phases: CLOSING_OUT -> VERIFYING -> FILLING -> CLASSIFYING -> BUILDING -> COMPLETE
+# Declares the 8-node workflow that orchestrates the autonomous build loop
+# through 7 phases: CLOSING_OUT -> DEPLOYING -> VERIFYING -> FILLING -> CLASSIFYING -> BUILDING -> COMPLETE
 #
 # See: OMN-5113 — Autonomous Build Loop
 workflow_id: build_loop
-contract_version: {major: 1, minor: 0, patch: 0}
+contract_version: {major: 1, minor: 1, patch: 0}
 node_type: workflow
 description: >
-  Autonomous build loop 6-phase orchestration. Coordinates close-out, verification, sprint fill, ticket classification, and build dispatch through a reducer-driven FSM with circuit breaker protection.
+  Autonomous build loop 7-phase orchestration. Coordinates close-out, deploy, verification, sprint fill, ticket classification, and build dispatch through a reducer-driven FSM with circuit breaker protection. Delegates close-out FSM to omnimarket node_close_out and data verification to omnimarket node_data_verification.
 
 initial_command: onex.cmd.omnibase-infra.build-loop-start.v1
 terminal_event: onex.evt.omnibase-infra.build-loop-cycle-completed.v1
@@ -23,6 +23,7 @@ nodes:
   - node_autonomous_loop_orchestrator
   - node_loop_state_reducer
   - node_closeout_effect
+  - node_deploy_effect
   - node_verify_effect
   - node_rsd_fill_compute
   - node_ticket_classify_compute
@@ -37,6 +38,9 @@ event_flow:
   - source: node_autonomous_loop_orchestrator
     target: node_closeout_effect
     topic: internal
+  - source: node_autonomous_loop_orchestrator
+    target: node_deploy_effect
+    topic: onex.cmd.deploy.rebuild-requested.v1
   - source: node_autonomous_loop_orchestrator
     target: node_verify_effect
     topic: internal

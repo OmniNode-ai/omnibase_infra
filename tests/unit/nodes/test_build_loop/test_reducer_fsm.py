@@ -86,14 +86,18 @@ class TestReducerHappyPath:
     def test_full_cycle(
         self, reducer: HandlerLoopState, idle_state: ModelBuildLoopState
     ):
-        """Walk through IDLE -> CLOSING_OUT -> VERIFYING -> FILLING -> CLASSIFYING -> BUILDING -> COMPLETE."""
+        """Walk through IDLE -> CLOSING_OUT -> DEPLOYING -> VERIFYING -> FILLING -> CLASSIFYING -> BUILDING -> COMPLETE."""
         state = idle_state
 
         # IDLE -> CLOSING_OUT
         state, intents = reducer.delta(state, _event(state))
         assert state.phase == EnumBuildLoopPhase.CLOSING_OUT
 
-        # CLOSING_OUT -> VERIFYING
+        # CLOSING_OUT -> DEPLOYING
+        state, intents = reducer.delta(state, _event(state))
+        assert state.phase == EnumBuildLoopPhase.DEPLOYING
+
+        # DEPLOYING -> VERIFYING
         state, intents = reducer.delta(state, _event(state))
         assert state.phase == EnumBuildLoopPhase.VERIFYING
 

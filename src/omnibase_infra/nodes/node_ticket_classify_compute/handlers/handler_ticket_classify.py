@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 from uuid import UUID
+
+import yaml
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.enums.enum_buildability import EnumBuildability
@@ -29,70 +32,57 @@ from omnibase_infra.nodes.node_ticket_classify_compute.models.model_ticket_for_c
 
 logger = logging.getLogger(__name__)
 
-# Keyword sets for heuristic classification
-_AUTO_BUILDABLE_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "add",
-        "create",
-        "implement",
-        "fix",
-        "update",
-        "refactor",
-        "rename",
-        "move",
-        "extract",
-        "wire",
-        "register",
-        "migrate",
-        "test",
-        "node",
-        "handler",
-        "model",
-        "enum",
-        "compute",
-        "effect",
-        "reducer",
-    }
+_CONTRACT_PATH = Path(__file__).resolve().parent.parent / "contract.yaml"
+
+
+def _load_buildability_criteria() -> dict[str, object]:
+    """Load buildability_criteria from the node contract YAML."""
+    with open(_CONTRACT_PATH, encoding="utf-8") as f:
+        contract = yaml.safe_load(f)
+    return contract.get("buildability_criteria", {})
+
+
+def _keywords_from_contract(criteria: dict[str, object], key: str) -> frozenset[str]:
+    """Extract a keyword frozenset from the contract criteria."""
+    raw = criteria.get(key, [])
+    if not isinstance(raw, list):
+        return frozenset()
+    return frozenset(raw)
+
+
+_CRITERIA = _load_buildability_criteria()
+
+_AUTO_BUILDABLE_KEYWORDS: frozenset[str] = _keywords_from_contract(
+    _CRITERIA, "auto_buildable_keywords"
+)
+_BLOCKED_KEYWORDS: frozenset[str] = _keywords_from_contract(
+    _CRITERIA, "blocked_keywords"
+)
+_BLOCKED_TITLE_ONLY_KEYWORDS: frozenset[str] = _keywords_from_contract(
+    _CRITERIA, "blocked_title_only_keywords"
+)
+_ARCH_DECISION_KEYWORDS: frozenset[str] = _keywords_from_contract(
+    _CRITERIA, "arch_decision_keywords"
+)
+_SKIP_KEYWORDS: frozenset[str] = _keywords_from_contract(_CRITERIA, "skip_keywords")
+
+# "depends on" is checked separately with a smarter pattern that avoids
+# false positives from standard sub-task dependency documentation like
+# "Depends on: Task 2" or "Depends on: OMN-1234".
+_DEPENDS_ON_FALSE_POSITIVE: re.Pattern[str] = re.compile(
+    r"\bdepends on\b[:\s]*(task\b|omn-\d)",
+    re.IGNORECASE,
 )
 
-_BLOCKED_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "blocked",
-        "waiting",
-        "depends on",
-        "dependency",
-        "external",
-        "third-party",
-        "vendor",
-    }
-)
 
-_ARCH_DECISION_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "architecture",
-        "design",
-        "rfc",
-        "proposal",
-        "decision",
-        "evaluate",
-        "investigate",
-        "spike",
-        "research",
-        "tradeoff",
-    }
-)
-
-_SKIP_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "in progress",
-        "in-progress",
-        "wip",
-        "stale",
-        "duplicate",
-        "won't fix",
-        "wontfix",
-    }
-)
+def _has_real_dependency_blocker(text: str) -> bool:
+    """Check if 'depends on' appears as a genuine blocker, not sub-task linking."""
+    text_lower = text.lower()
+    if "depends on" not in text_lower:
+        return False
+    if _DEPENDS_ON_FALSE_POSITIVE.search(text):
+        return False
+    return True
 
 
 def _match_keywords(text: str, keywords: frozenset[str]) -> tuple[str, ...]:
@@ -176,6 +166,13 @@ class HandlerTicketClassify:
                 continue
 
             blocked_matches = _match_keywords(combined_text, _BLOCKED_KEYWORDS)
+            title_blocked_matches = _match_keywords(
+                ticket.title, _BLOCKED_TITLE_ONLY_KEYWORDS
+            )
+            blocked_matches = (*blocked_matches, *title_blocked_matches)
+            has_dep_blocker = _has_real_dependency_blocker(combined_text)
+            if has_dep_blocker:
+                blocked_matches = (*blocked_matches, "depends on")
             if blocked_matches:
                 classifications.append(
                     ModelTicketClassification(
