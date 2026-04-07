@@ -194,6 +194,7 @@ class TestExecuteHandshake:
         return {
             "handler_id": "test.handler",
             "node_kind": "COMPUTE",
+            "correlation_id": "test-cid",
         }
 
     @pytest.mark.asyncio
@@ -393,10 +394,20 @@ class TestExecuteHandshake:
             return_value=mock_fn,
         ):
             await executor.execute_handshake(
-                hooks, {"handler_id": "handler.a", "node_kind": "COMPUTE"}
+                hooks,
+                {
+                    "handler_id": "handler.a",
+                    "node_kind": "COMPUTE",
+                    "correlation_id": "cid-a",
+                },
             )
             await executor.execute_handshake(
-                hooks, {"handler_id": "handler.b", "node_kind": "EFFECT"}
+                hooks,
+                {
+                    "handler_id": "handler.b",
+                    "node_kind": "EFFECT",
+                    "correlation_id": "cid-b",
+                },
             )
 
         quarantined = executor.get_quarantined_contracts()
@@ -431,6 +442,7 @@ class TestExecuteStartupWithHandshake:
         return {
             "handler_id": "test.handler",
             "node_kind": "COMPUTE",
+            "correlation_id": "test-cid",
         }
 
     @pytest.mark.asyncio

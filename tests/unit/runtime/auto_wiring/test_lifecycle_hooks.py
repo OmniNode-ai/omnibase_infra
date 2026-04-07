@@ -173,10 +173,12 @@ class TestModelAutoWiringContext:
             handler_id="my.handler",
             node_kind="COMPUTE",
             phase="on_start",
+            correlation_id="test-cid",
         )
         assert ctx.handler_id == "my.handler"
         assert ctx.node_kind == "COMPUTE"
         assert ctx.phase == "on_start"
+        assert ctx.correlation_id == "test-cid"
         assert ctx.services == {}
         assert ctx.metadata == {}
 
@@ -186,6 +188,7 @@ class TestModelAutoWiringContext:
             node_kind="EFFECT",
             contract_version="1.2.3",
             phase="validate_handshake",
+            correlation_id="test-cid-full",
             services={"db": "mock_pool"},
             metadata={"region": "us-east-1"},
         )
@@ -198,6 +201,7 @@ class TestModelAutoWiringContext:
                 handler_id="my.handler",
                 node_kind="COMPUTE",
                 phase="on_start",
+                correlation_id="test-cid",
                 unexpected_field="value",
             )
 
@@ -241,6 +245,7 @@ class TestLifecycleHookExecutor:
         return {
             "handler_id": "test.handler",
             "node_kind": "COMPUTE",
+            "correlation_id": "test-cid",
         }
 
     @pytest.mark.asyncio
@@ -250,6 +255,7 @@ class TestLifecycleHookExecutor:
             handler_id="test.handler",
             node_kind="COMPUTE",
             phase="on_start",
+            correlation_id="test-cid",
         )
 
         expected_result = ModelLifecycleHookResult.succeeded("on_start")
@@ -275,6 +281,7 @@ class TestLifecycleHookExecutor:
             handler_id="test.handler",
             node_kind="COMPUTE",
             phase="on_start",
+            correlation_id="test-cid",
         )
 
         result = await executor.execute_hook(hook_config, context)
@@ -291,6 +298,7 @@ class TestLifecycleHookExecutor:
             handler_id="test.handler",
             node_kind="COMPUTE",
             phase="on_start",
+            correlation_id="test-cid",
         )
 
         async def slow_hook(_ctx: ModelAutoWiringContext) -> ModelLifecycleHookResult:
@@ -315,6 +323,7 @@ class TestLifecycleHookExecutor:
             handler_id="test.handler",
             node_kind="COMPUTE",
             phase="on_start",
+            correlation_id="test-cid",
         )
 
         async def broken_hook(_ctx: ModelAutoWiringContext) -> ModelLifecycleHookResult:

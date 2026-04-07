@@ -40,6 +40,7 @@ class ModelAutoWiringContext(BaseModel):
         phase: Current lifecycle phase (on_start, validate_handshake, on_shutdown).
         services: Dict of named services available to the hook.
             Populated by the wiring engine from the container.
+        correlation_id: Mandatory correlation ID for distributed tracing.
         metadata: Additional contract metadata passed through from YAML.
     """
 
@@ -67,6 +68,11 @@ class ModelAutoWiringContext(BaseModel):
     services: _FlexDict = Field(
         default_factory=dict,
         description="Named services available to the hook from the container",
+    )
+    correlation_id: str = Field(
+        ...,
+        min_length=1,
+        description="Correlation ID for tracing; must be non-empty",
     )
     metadata: _FlexDict = Field(
         default_factory=dict,

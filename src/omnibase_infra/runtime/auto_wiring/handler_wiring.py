@@ -1,7 +1,8 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-# ruff: noqa: TRY400
-# TRY400 disabled: logger.error is intentional to avoid leaking sensitive data in stack traces
+# ruff: noqa: TRY400, BLE001
+# TRY400: logger.error is intentional to avoid leaking sensitive data in stack traces
+# BLE001: broad except is intentional — handler import failures must not crash the wiring scan
 """Handler auto-wiring engine for OMN-7654.
 
 Takes a :class:`ModelAutoWiringManifest` produced by contract auto-discovery
@@ -23,7 +24,7 @@ import importlib
 import logging
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING
 
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -55,16 +56,6 @@ DispatcherFunc = Callable[
 ]
 
 
-@runtime_checkable
-class ProtocolHandleable(Protocol):
-    """Protocol for objects with a handle() method (auto-wired handlers)."""
-
-    async def handle(
-        self,
-        envelope: ModelEventEnvelope[object],
-    ) -> ModelDispatchResult | None: ...
-
-
 def _import_handler_class(module_path: str, class_name: str) -> type:
     """Import a handler class from its fully qualified module path.
 
@@ -84,23 +75,74 @@ def _import_handler_class(module_path: str, class_name: str) -> type:
     return cls
 
 
+def _validate_correlation_id(envelope: ModelEventEnvelope[object]) -> str:
+    """Extract and validate correlation_id from an envelope.
+
+    Raises:
+        RuntimeError: If correlation_id is missing or empty.
+
+    Returns:
+        The non-empty correlation_id string.
+    """
+    correlation_id = getattr(envelope, "correlation_id", None)
+    if correlation_id is None:
+        raise RuntimeError(
+            "Auto-wiring dispatch rejected: envelope is missing correlation_id"
+        )
+    cid_str = str(correlation_id)
+    if not cid_str.strip():
+        raise RuntimeError(
+            "Auto-wiring dispatch rejected: envelope correlation_id is empty"
+        )
+    return cid_str
+
+
 def _make_dispatch_callback(
-    handler_instance: ProtocolHandleable,
+    handler_instance: object,
 ) -> DispatcherFunc:
     """Create a dispatch callback wrapping a handler instance.
 
     The callback calls ``handler_instance.handle(envelope)`` and returns the
     result. This matches the ``DispatcherFunc`` signature expected by
     ``MessageDispatchEngine.register_dispatcher``.
+
+    Before dispatching, validates that the envelope carries a non-empty
+    ``correlation_id``.  Raises ``RuntimeError`` if missing or blank.
     """
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
     ) -> ModelDispatchResult | None:
+        _validate_correlation_id(envelope)
         handle_method = handler_instance.handle
-        return await handle_method(envelope)
+        result = await handle_method(envelope)
+        if result is not None:
+            _validate_output_events_correlation_id(result)
+        return result
 
     return _callback
+
+
+def _validate_output_events_correlation_id(
+    result: ModelDispatchResult,
+) -> None:
+    """Validate that output events in a dispatch result carry correlation_id.
+
+    Raises:
+        RuntimeError: If any output event is missing correlation_id.
+    """
+    for idx, event in enumerate(result.output_events):
+        cid = getattr(event, "correlation_id", None)
+        if cid is None:
+            raise RuntimeError(
+                f"Auto-wiring dispatch rejected: output_event[{idx}] "
+                f"({type(event).__name__}) is missing correlation_id"
+            )
+        if not str(cid).strip():
+            raise RuntimeError(
+                f"Auto-wiring dispatch rejected: output_event[{idx}] "
+                f"({type(event).__name__}) has empty correlation_id"
+            )
 
 
 def _derive_route_id(contract_name: str, handler_name: str) -> str:
@@ -316,7 +358,7 @@ async def _wire_single_contract(
                 contract.event_bus.subscribe_topics,
             )
 
-    except Exception as exc:  # noqa: BLE001 — boundary: structured diagnostics for auto-wiring
+    except Exception as exc:
         logger.error(
             "Failed to auto-wire contract '%s' from package '%s': %s",
             contract.name,

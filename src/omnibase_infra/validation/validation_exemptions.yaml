@@ -906,6 +906,17 @@ pattern_exemptions:
       - docs/patterns/correlation_id_tracking.md
     ticket: OMN-811
   # ==========================================================================
+  # Auto-Wiring Context correlation_id Exemption (OMN-7675)
+  # ==========================================================================
+  - file_pattern: 'auto_wiring/context\.py'
+    violation_pattern: "Field 'correlation_id' should use UUID"
+    reason: >
+      Auto-wiring context receives correlation_id as str for compatibility with the lifecycle hook system. Hooks forward the correlation_id from service_kernel which uses str throughout.
+
+    documentation:
+      - docs/patterns/correlation_id_tracking.md
+    ticket: OMN-7675
+  # ==========================================================================
   # MCP Handler Model Exemptions (OMN-1288)
   # ==========================================================================
   # tool_name in ModelMcpToolCall is the MCP protocol identifier for the tool
