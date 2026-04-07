@@ -24,7 +24,7 @@ import importlib
 import logging
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -76,7 +76,7 @@ def _import_handler_class(module_path: str, class_name: str) -> type:
 
 
 def _make_dispatch_callback(
-    handler_instance: object,
+    handler_instance: Any,  # ONEX_EXCLUDE: any_type - dynamically loaded handler class
 ) -> DispatcherFunc:
     """Create a dispatch callback wrapping a handler instance.
 
