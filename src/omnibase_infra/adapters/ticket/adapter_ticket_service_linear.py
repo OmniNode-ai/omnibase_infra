@@ -24,7 +24,6 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
-from typing import Any
 from uuid import uuid4
 
 import httpx
@@ -211,9 +210,9 @@ class AdapterTicketLinear:
     async def _execute_graphql(
         self,
         query: str,
-        variables: dict[str, Any],
+        variables: dict[str, object],
         operation: str,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Execute a GraphQL query against the Linear API.
 
         Args:
@@ -276,14 +275,14 @@ class AdapterTicketLinear:
                 context=context,
             )
 
-        result: dict[str, Any] = data.get("data", {})
+        result: dict[str, object] = data.get("data", {})
         return result
 
     # ------------------------------------------------------------------
     # ProtocolTicketService — read methods
     # ------------------------------------------------------------------
 
-    async def get_ticket(self, ticket_id: str) -> dict[str, Any]:
+    async def get_ticket(self, ticket_id: str) -> dict[str, object]:
         """Retrieve ticket details by identifier.
 
         Accepts both Linear UUIDs and human-readable identifiers
@@ -327,9 +326,9 @@ class AdapterTicketLinear:
 
     async def list_tickets(
         self,
-        filters: dict[str, Any] | None = None,
+        filters: dict[str, object] | None = None,
         limit: int = 50,
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, object]]:
         """List tickets matching optional filters.
 
         Args:
@@ -340,7 +339,7 @@ class AdapterTicketLinear:
         Returns:
             List of normalised ticket dicts.
         """
-        variables: dict[str, Any] = {"first": min(limit, 250)}
+        variables: dict[str, object] = {"first": min(limit, 250)}
         if filters:
             gql_filter = _build_issue_filter(filters)
             if gql_filter:
@@ -402,7 +401,7 @@ class AdapterTicketLinear:
         description: str,
         labels: list[str] | None = None,
         assignee: str | None = None,
-        metadata: dict[str, Any] | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> str:
         """Create a new ticket. Not yet implemented.
 
