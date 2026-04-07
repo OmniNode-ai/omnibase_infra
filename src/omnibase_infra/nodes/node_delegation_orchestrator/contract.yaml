@@ -46,8 +46,13 @@ event_bus:
     - "onex.evt.omnibase-infra.routing-decision.v1"
     - "onex.evt.omnibase-infra.quality-gate-result.v1"
   publish_topics:
+    - "onex.cmd.omnibase-infra.delegation-routing-request.v1"
+    - "onex.cmd.omnibase-infra.llm-inference-request.v1"
+    - "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1"
     - "onex.evt.omnibase-infra.delegation-completed.v1"
     - "onex.evt.omnibase-infra.delegation-failed.v1"
+    - "onex.evt.omniclaude.task-delegated.v1"
+    - "onex.cmd.omnibase-infra.baseline-comparison-request.v1"
 fsm:
   states:
     - RECEIVED
@@ -87,6 +92,25 @@ handler_routing:
         name: "ModelDelegationRequest"
         module: "omnibase_infra.nodes.node_delegation_orchestrator.models"
         description: "Delegation request to orchestrate."
+published_events:
+  - topic: "onex.cmd.omnibase-infra.delegation-routing-request.v1"
+    event_type: "RoutingIntent"
+    description: "Intent to invoke the delegation routing reducer"
+  - topic: "onex.cmd.omnibase-infra.llm-inference-request.v1"
+    event_type: "InferenceIntent"
+    description: "Intent to invoke LLM inference effect"
+  - topic: "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1"
+    event_type: "QualityGateIntent"
+    description: "Intent to invoke the delegation quality gate reducer"
+  - topic: "onex.evt.omnibase-infra.delegation-completed.v1"
+    event_type: "DelegationEvent"
+    description: "Delegation completed or failed event"
+  - topic: "onex.evt.omniclaude.task-delegated.v1"
+    event_type: "TaskDelegatedEvent"
+    description: "Backward-compatible event for omnidash delegation projection"
+  - topic: "onex.cmd.omnibase-infra.baseline-comparison-request.v1"
+    event_type: "BaselineIntent"
+    description: "Intent to invoke baseline comparison compute"
 error_handling:
   retry_policy:
     max_retries: 1
