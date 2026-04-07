@@ -64,7 +64,7 @@ dependencies = [
     # Vector and graph database dependencies (for Qdrant and Memgraph handlers)
     "qdrant-client>=1.16.0,<2.0.0", # Vector database client for semantic search
     "grpcio>=1.62.0,<2.0.0", # Explicit lower bound: fixes EnumTypeWrapper|None runtime error [OMN-3548]
-    "neo4j>=5.15.0,<6.0.0", # Bolt/Cypher client for Memgraph graph database
+    "neo4j>=5.15.0,<7.0.0", # Bolt/Cypher client for Memgraph graph database
     # CLI Dependencies
     "click>=8.1.0,<9.0.0",
     "rich>=13.7.0,<15.0.0",
