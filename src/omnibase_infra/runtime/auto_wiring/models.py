@@ -12,6 +12,17 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.runtime.auto_wiring.config import ModelLifecycleHookConfig
+from omnibase_infra.runtime.auto_wiring.enum_handshake_failure_reason import (
+    HandshakeFailureReason,
+)
+from omnibase_infra.runtime.auto_wiring.model_handshake_config import (
+    ModelHandshakeConfig,
+)
+from omnibase_infra.runtime.auto_wiring.model_quarantine_record import (
+    ModelQuarantineRecord,
+)
+
+# --- Lifecycle hooks (OMN-7655) ---
 
 # --- Lifecycle hooks (OMN-7655) ---
 
@@ -38,6 +49,10 @@ class ModelLifecycleHooks(BaseModel):
     validate_handshake: ModelLifecycleHookConfig | None = Field(
         default=None,
         description="Hook invoked to validate runtime preconditions",
+    )
+    handshake_config: ModelHandshakeConfig = Field(
+        default_factory=ModelHandshakeConfig,
+        description="Retry and timeout configuration for handshake validation",
     )
     on_shutdown: ModelLifecycleHookConfig | None = Field(
         default=None,
@@ -209,6 +224,7 @@ class ModelAutoWiringManifest(BaseModel):
 
 
 __all__ = [
+    "HandshakeFailureReason",
     "ModelAutoWiringManifest",
     "ModelContractVersion",
     "ModelDiscoveredContract",
@@ -217,5 +233,7 @@ __all__ = [
     "ModelHandlerRef",
     "ModelHandlerRouting",
     "ModelHandlerRoutingEntry",
+    "ModelHandshakeConfig",
     "ModelLifecycleHooks",
+    "ModelQuarantineRecord",
 ]

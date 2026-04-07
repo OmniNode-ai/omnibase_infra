@@ -22,6 +22,7 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     wire_from_manifest,
 )
 from omnibase_infra.runtime.auto_wiring.models import (
+    HandshakeFailureReason,
     ModelAutoWiringManifest,
     ModelContractVersion,
     ModelDiscoveredContract,
@@ -30,7 +31,9 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelHandlerRef,
     ModelHandlerRouting,
     ModelHandlerRoutingEntry,
+    ModelHandshakeConfig,
     ModelLifecycleHooks,
+    ModelQuarantineRecord,
 )
 from omnibase_infra.runtime.auto_wiring.report import (
     EnumWiringOutcome,
@@ -43,6 +46,7 @@ from omnibase_infra.runtime.auto_wiring.wiring import LifecycleHookExecutor
 
 __all__ = [
     "EnumWiringOutcome",
+    "HandshakeFailureReason",
     "LifecycleHookExecutor",
     "ModelAutoWiringContext",
     "ModelAutoWiringManifest",
@@ -56,9 +60,11 @@ __all__ = [
     "ModelHandlerRef",
     "ModelHandlerRouting",
     "ModelHandlerRoutingEntry",
+    "ModelHandshakeConfig",
     "ModelLifecycleHookConfig",
     "ModelLifecycleHookResult",
     "ModelLifecycleHooks",
+    "ModelQuarantineRecord",
     "discover_contracts",
     "discover_contracts_from_paths",
     "wire_from_manifest",
