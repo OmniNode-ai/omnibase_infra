@@ -533,6 +533,17 @@ pattern_exemptions:
   # ==========================================================================
   # Dispatch Model Semantic Identifier Exemptions (OMN-983)
   # ==========================================================================
+  # handler_id in quarantine records is a dotted class path (e.g., "my.module.Handler"),
+  # not a UUID. It identifies the contract handler by its import path.
+  - file_pattern: 'model_quarantine_record\.py'
+    violation_pattern: "Field 'handler_id' should use UUID"
+    reason: >
+      handler_id is a dotted class path identifying the contract handler (e.g., "my.module.HandlerClass"), not a UUID.
+
+    documentation:
+      - CLAUDE.md (Auto-wiring Architecture)
+    ticket: OMN-7657
+  # ==========================================================================
   # dispatcher_id, route_id are semantic identifiers (like policy_id), NOT UUIDs.
   # They are human-readable strings that identify dispatchers/routes by name.
   - file_pattern: 'model_dispatcher_registration\.py'
