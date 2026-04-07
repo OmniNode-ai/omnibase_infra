@@ -23,10 +23,13 @@ Related:
 from __future__ import annotations
 
 import logging
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from omnibase_infra.protocols import ProtocolEventBusLike
 
 from omnibase_infra.event_bus.topic_constants import (
     TOPIC_DELEGATION_INFERENCE_RESPONSE,
@@ -89,10 +92,10 @@ class DelegationIntentBridge:
 
     def __init__(
         self,
-        event_bus: object,
+        event_bus: ProtocolEventBusLike,
         llm_caller: ProtocolLlmCaller | None = None,
     ) -> None:
-        self._event_bus = event_bus
+        self._event_bus: ProtocolEventBusLike = event_bus
         self._llm_caller = llm_caller
 
     async def handle_routing_intent(
@@ -180,7 +183,7 @@ class DelegationIntentBridge:
         )
 
         correlation_id: UUID | None = getattr(model, "correlation_id", None)
-        envelope = ModelEventEnvelope(
+        envelope: ModelEventEnvelope[BaseModel] = ModelEventEnvelope(
             payload=model,
             correlation_id=correlation_id,
             envelope_timestamp=datetime.now(UTC),
