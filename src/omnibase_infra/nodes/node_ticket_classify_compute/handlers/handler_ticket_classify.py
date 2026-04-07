@@ -33,25 +33,35 @@ logger = logging.getLogger(__name__)
 _AUTO_BUILDABLE_KEYWORDS: frozenset[str] = frozenset(
     {
         "add",
+        "build",
+        "configure",
+        "connect",
         "create",
-        "implement",
-        "fix",
-        "update",
-        "refactor",
-        "rename",
-        "move",
-        "extract",
-        "wire",
-        "register",
-        "migrate",
-        "test",
-        "node",
-        "handler",
-        "model",
-        "enum",
-        "compute",
+        "define",
         "effect",
+        "enum",
+        "extract",
+        "fix",
+        "generate",
+        "handler",
+        "implement",
+        "migrate",
+        "model",
+        "move",
+        "node",
         "reducer",
+        "refactor",
+        "register",
+        "rename",
+        "scaffold",
+        "setup",
+        "test",
+        "update",
+        "validate",
+        "verify",
+        "wire",
+        "wrap",
+        "write",
     }
 )
 
@@ -59,13 +69,31 @@ _BLOCKED_KEYWORDS: frozenset[str] = frozenset(
     {
         "blocked",
         "waiting",
-        "depends on",
-        "dependency",
         "external",
         "third-party",
         "vendor",
     }
 )
+
+# "depends on" is checked separately with a smarter pattern that avoids
+# false positives from standard sub-task dependency documentation like
+# "Depends on: Task 2" or "Depends on: OMN-1234".
+_DEPENDS_ON_FALSE_POSITIVE: re.Pattern[str] = re.compile(
+    r"\bdepends on\b[:\s]*(task\b|omn-\d)",
+    re.IGNORECASE,
+)
+
+
+def _has_real_dependency_blocker(text: str) -> bool:
+    """Check if 'depends on' appears as a genuine blocker, not sub-task linking."""
+    text_lower = text.lower()
+    if "depends on" not in text_lower:
+        return False
+    # If every "depends on" occurrence is followed by a task reference, it's
+    # sub-task ordering -- not a real blocker.
+    if _DEPENDS_ON_FALSE_POSITIVE.search(text):
+        return False
+    return True
 
 _ARCH_DECISION_KEYWORDS: frozenset[str] = frozenset(
     {
@@ -176,6 +204,9 @@ class HandlerTicketClassify:
                 continue
 
             blocked_matches = _match_keywords(combined_text, _BLOCKED_KEYWORDS)
+            has_dep_blocker = _has_real_dependency_blocker(combined_text)
+            if has_dep_blocker:
+                blocked_matches = (*blocked_matches, "depends on")
             if blocked_matches:
                 classifications.append(
                     ModelTicketClassification(
