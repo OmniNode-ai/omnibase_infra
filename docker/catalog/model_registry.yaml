@@ -114,21 +114,6 @@ models:
     seed_cost_per_1k_tokens: 0.003
     seed_tokens_per_sec: 85
     tier: frontier_api
-  - model_key: "glm-4.7-flash"
-    provider: zhipu
-    transport: http
-    base_url_env: LLM_GLM_URL
-    api_key_env: LLM_GLM_API_KEY
-    # UNRELIABLE on z.ai as of 2026-04-08 — prefer glm-4.5 instead
-    capabilities:
-      - code_generation
-      - reasoning
-      - classification
-    context_window: 203000
-    seed_cost_per_1k_tokens: 0.0005
-    seed_tokens_per_sec: 120
-    concurrency_limit: 20
-    tier: frontier_api
   - model_key: "glm-5"
     provider: zhipu
     transport: http

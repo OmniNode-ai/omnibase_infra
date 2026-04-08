@@ -14,7 +14,7 @@ Routing table (from existing _HANDLER_ROUTING in delegation_orchestrator.py):
 
 Token-count optimization:
     If prompt tokens <= 40K, test/research tasks are eligible for
-    Qwen3-14B (LLM_CODER_FAST_URL, 40K context) as a faster alternative.
+    DeepSeek-R1-14B (LLM_CODER_FAST_URL, 24K context) as a faster alternative.
 
 Related:
     - OMN-7040: Node-based delegation pipeline
@@ -58,11 +58,11 @@ _ROUTING_TABLE: dict[str, tuple[str, str, str, int]] = {
     "document": ("DeepSeek-R1-32B", "LLM_DEEPSEEK_R1_URL", "low", 32768),
 }
 
-# Fast-path threshold: if prompt fits within 40K tokens, use faster model
-_FAST_PATH_TOKEN_THRESHOLD: int = 40960
-_FAST_PATH_MODEL: str = "Qwen3-14B"
+# Fast-path threshold: if prompt fits within 24K tokens, use faster model
+_FAST_PATH_TOKEN_THRESHOLD: int = 24576
+_FAST_PATH_MODEL: str = "deepseek-r1-14b"
 _FAST_PATH_ENV_VAR: str = "LLM_CODER_FAST_URL"
-_FAST_PATH_MAX_CONTEXT: int = 40960
+_FAST_PATH_MAX_CONTEXT: int = 24576
 _FAST_PATH_ELIGIBLE_TASKS: frozenset[str] = frozenset({"test", "research"})
 
 

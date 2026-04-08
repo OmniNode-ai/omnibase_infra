@@ -34,7 +34,7 @@ class HandlerLLMCompletion:
     Routing logic:
     - If ``endpoint_url`` is set on the request, use it directly.
     - Otherwise, estimate token count from messages and route to
-      ``LLM_CODER_FAST_URL`` (<= 40K tokens) or ``LLM_CODER_URL`` (> 40K).
+      ``LLM_CODER_FAST_URL`` (<= 24K tokens) or ``LLM_CODER_URL`` (> 24K).
     """
 
     def __init__(self, http_client: httpx.AsyncClient | None = None) -> None:
