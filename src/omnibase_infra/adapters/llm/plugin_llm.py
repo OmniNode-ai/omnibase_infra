@@ -52,6 +52,8 @@ _LLM_URL_ENV_VARS: tuple[str, ...] = (
     "LLM_EMBEDDING_URL",
     "LLM_DEEPSEEK_R1_URL",
     "LLM_SMALL_URL",
+    "LLM_GLM_URL",
+    "LLM_OPENROUTER_URL",
 )
 
 

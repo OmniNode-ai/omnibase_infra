@@ -34,3 +34,7 @@ class ModelRegistryEntry(BaseModel):
         default=0.0, description="Bootstrap throughput estimate."
     )
     tier: str = Field(default="local", description="Tier: local or frontier_api.")
+    concurrency_limit: int | None = Field(
+        default=None,
+        description="Max concurrent requests to this model. None means unlimited.",
+    )

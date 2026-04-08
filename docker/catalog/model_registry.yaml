@@ -110,6 +110,49 @@ models:
     seed_cost_per_1k_tokens: 0.003
     seed_tokens_per_sec: 85
     tier: frontier_api
+  - model_key: "glm-4.7-flash"
+    provider: zhipu
+    transport: http
+    base_url_env: LLM_GLM_URL
+    api_key_env: LLM_GLM_API_KEY
+    capabilities:
+      - code_generation
+      - reasoning
+      - classification
+    context_window: 203000
+    seed_cost_per_1k_tokens: 0.0005
+    seed_tokens_per_sec: 120
+    concurrency_limit: 20
+    tier: frontier_api
+  - model_key: "glm-5"
+    provider: zhipu
+    transport: http
+    base_url_env: LLM_GLM_URL
+    api_key_env: LLM_GLM_API_KEY
+    capabilities:
+      - code_generation
+      - deep_reasoning
+      - refactoring
+    context_window: 128000
+    seed_cost_per_1k_tokens: 0.01
+    seed_tokens_per_sec: 40
+    concurrency_limit: 2
+    tier: frontier_api
+  - model_key: "glm-5.1"
+    provider: zhipu
+    transport: http
+    base_url_env: LLM_GLM_URL
+    api_key_env: LLM_GLM_API_KEY
+    capabilities:
+      - code_generation
+      - deep_reasoning
+      - refactoring
+      - documentation
+    context_window: 128000
+    seed_cost_per_1k_tokens: 0.015
+    seed_tokens_per_sec: 35
+    concurrency_limit: 1
+    tier: frontier_api
   - model_key: "glm-5v-turbo"
     provider: zhipu
     transport: sdk
@@ -121,4 +164,17 @@ models:
     context_window: 32768
     seed_cost_per_1k_tokens: 0.002
     seed_tokens_per_sec: 60
+    tier: frontier_api
+  - model_key: "openrouter"
+    provider: openrouter
+    transport: http
+    base_url_env: LLM_OPENROUTER_URL
+    api_key_env: OPEN_ROUTER_API_KEY
+    capabilities:
+      - code_generation
+      - reasoning
+      - documentation
+    context_window: 128000
+    seed_cost_per_1k_tokens: 0.005
+    seed_tokens_per_sec: 80
     tier: frontier_api

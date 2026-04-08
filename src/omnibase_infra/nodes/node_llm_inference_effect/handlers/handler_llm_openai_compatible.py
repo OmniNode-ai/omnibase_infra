@@ -763,6 +763,21 @@ class HandlerLlmOpenaiCompatible:
                 content = message.get("content")
                 generated_text = str(content) if content is not None else None
 
+                # GLM reasoning models (4.7-flash, 5, 5.1) emit a
+                # reasoning_content field with chain-of-thought before
+                # the visible content. If content is empty but
+                # reasoning_content has text, use it as the response.
+                if not generated_text:
+                    reasoning = message.get("reasoning_content")
+                    if reasoning is not None:
+                        generated_text = str(reasoning)
+                        logger.debug(
+                            "Using reasoning_content as generated_text "
+                            "(content was empty). correlation_id=%s length=%d",
+                            correlation_id,
+                            len(generated_text),
+                        )
+
                 raw_tool_calls = message.get("tool_calls")
                 if isinstance(raw_tool_calls, list) and raw_tool_calls:
                     tool_calls = _parse_tool_calls(raw_tool_calls)
