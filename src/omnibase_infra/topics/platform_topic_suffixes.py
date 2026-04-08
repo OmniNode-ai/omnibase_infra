@@ -308,6 +308,39 @@ Producer: node_ast_extraction_compute
 Consumer: omniintelligence dispatch handlers 14-15 (persist + embed_graph)
 """
 
+# Intelligence pipeline gap-fill topics (OMN-7810)
+# These topics close provisioning gaps identified by the Event Bus Health dashboard.
+# Previously tracked under non-canonical aliases (e.g. _omniintelligence.pattern-refined.v1).
+
+SUFFIX_INTELLIGENCE_PATTERN_REFINED: str = (
+    "onex.evt.omniintelligence.pattern-refined.v1"
+)
+"""Topic for pattern refinement events (pattern re-evaluated with updated evidence).
+
+Producer: omniintelligence pattern refinement pipeline
+Consumer: omnidash Event Bus Health (monitored_topics)
+"""
+
+# =============================================================================
+# OMNINODE ROUTING TOPIC SUFFIXES (OMN-7810)
+# =============================================================================
+# Routing lifecycle topics for the omninode routing pipeline. Provisioned
+# so the Event Bus Health dashboard reports them as present.
+
+SUFFIX_OMNINODE_ROUTING_REQUESTED: str = "onex.cmd.omninode.routing-requested.v1"
+"""Command topic for routing request events.
+
+Producer: build loop orchestrator, delegation pipeline
+Consumer: model router, omnidash Event Bus Health (monitored_topics)
+"""
+
+SUFFIX_OMNINODE_ROUTING_COMPLETED: str = "onex.evt.omninode.routing-completed.v1"
+"""Event topic for routing completion events.
+
+Producer: model router
+Consumer: omnidash Event Bus Health (monitored_topics)
+"""
+
 # =============================================================================
 # OMNIMEMORY DOMAIN TOPIC SUFFIXES (omnimemory plugin)
 # =============================================================================
@@ -328,6 +361,16 @@ SUFFIX_OMNIMEMORY_DOCUMENT_REMOVED: str = "onex.evt.omnimemory.document-removed.
 
 SUFFIX_OMNIMEMORY_DOCUMENT_INDEXED: str = "onex.evt.omnimemory.document-indexed.v1"
 """Topic for document indexed events (document successfully indexed into vector store)."""
+
+SUFFIX_OMNIMEMORY_DOCUMENT_INGESTED: str = "onex.evt.omnimemory.document-ingested.v1"
+"""Topic for document ingested events (document fully ingested into the pipeline).
+
+Tracks the end-to-end document lifecycle: discovered → parsed → indexed → ingested.
+Previously tracked under non-canonical alias _omnimemory.document-ingested.v1 (OMN-7810).
+
+Producer: omnimemory ingestion pipeline
+Consumer: omnidash Event Bus Health (monitored_topics)
+"""
 
 SUFFIX_OMNIMEMORY_DOCUMENT_PARSE_FAILED: str = (
     "onex.evt.omnimemory.document-parse-failed.v1"
@@ -835,6 +878,20 @@ Provisioned so omnidash EventBusDataSource auto-subscribes via the onex.*
 topic catalog pattern. Previously bypassed via DB seed in OMN-5042; this
 registration closes that gap and makes topic creation deterministic at
 TopicProvisioner startup.
+"""
+
+# =============================================================================
+# OMNINODE ROUTING TOPIC SPEC REGISTRY (OMN-7810)
+# =============================================================================
+
+ALL_OMNINODE_ROUTING_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
+    ModelTopicSpec(suffix=SUFFIX_OMNINODE_ROUTING_REQUESTED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNINODE_ROUTING_COMPLETED, partitions=3),
+)
+"""Omninode routing lifecycle topic specs (OMN-7810).
+
+Provisioned so the Event Bus Health dashboard reports these topics as present
+on the broker. Previously tracked under non-canonical aliases.
 """
 
 # =============================================================================
@@ -1486,6 +1543,8 @@ ALL_INTELLIGENCE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_CRAWL_REQUESTED, partitions=1),
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_FILE_DISCOVERED, partitions=1),
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_ENTITIES_EXTRACTED, partitions=1),
+    # Pattern refinement events (OMN-7810 — gap-fill, 3 partitions)
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_PATTERN_REFINED, partitions=3),
 )
 """Intelligence domain topic specs provisioned for PluginIntelligence."""
 
@@ -1500,6 +1559,7 @@ ALL_OMNIMEMORY_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_DOCUMENT_REMOVED, partitions=3),
     ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_DOCUMENT_INDEXED, partitions=3),
     ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_DOCUMENT_PARSE_FAILED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_DOCUMENT_INGESTED, partitions=3),
     # --- Crawl command topics ---
     ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_CRAWL_TICK, partitions=3),
     ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_CRAWL_REQUESTED, partitions=3),
@@ -1622,6 +1682,7 @@ ALL_PROVISIONED_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     + (ALL_OMNIMEMORY_TOPIC_SPECS if _omnimemory_enabled() else ())
     + ALL_OMNIBASE_INFRA_TOPIC_SPECS
     + ALL_VALIDATION_TOPIC_SPECS
+    + ALL_OMNINODE_ROUTING_TOPIC_SPECS
     + ALL_OMNICLAUDE_TOPIC_SPECS
 )
 """All topic specs to be provisioned by TopicProvisioner at startup.

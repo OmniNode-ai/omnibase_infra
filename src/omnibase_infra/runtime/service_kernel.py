@@ -1069,6 +1069,41 @@ async def bootstrap() -> int:
                     correlation_id=correlation_id,
                 )
                 if not validation_result.is_valid:
+                    # OMN-7810: Auto-create missing topics before failing strict
+                    # validation. This handles topics that were added to the
+                    # provisioning registry but not yet created on the broker
+                    # (e.g. first startup after adding new topic suffixes).
+                    try:
+                        from omnibase_infra.event_bus.service_topic_manager import (
+                            TopicProvisioner as _AutoCreateProvisioner,
+                        )
+
+                        _auto_contracts_root = _get_contracts_dir()
+                        _auto_provisioner = _AutoCreateProvisioner(
+                            bootstrap_servers=kafka_bootstrap_servers,
+                            contracts_root=_auto_contracts_root,
+                        )
+                        _auto_result = (
+                            await _auto_provisioner.ensure_provisioned_topics_exist(
+                                correlation_id=correlation_id,
+                            )
+                        )
+                        if _auto_result["created"]:
+                            logger.info(
+                                "Auto-created %d missing topics after validation: %s "
+                                "(correlation_id=%s)",
+                                len(_auto_result["created"]),
+                                _auto_result["created"],
+                                correlation_id,
+                            )
+                    except Exception:  # noqa: BLE001
+                        logger.warning(
+                            "Auto-create missing topics failed (best-effort) "
+                            "(correlation_id=%s)",
+                            correlation_id,
+                            exc_info=True,
+                        )
+
                     if os.environ.get("STARTUP_VALIDATION_STRICT") == "1":
                         raise RuntimeError(
                             f"Missing topics: {validation_result.missing_topics}"
