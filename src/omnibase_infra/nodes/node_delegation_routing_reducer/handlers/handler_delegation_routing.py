@@ -13,7 +13,7 @@ Routing table (from existing _HANDLER_ROUTING in delegation_orchestrator.py):
     document -> DeepSeek-R1-32B     (LLM_DEEPSEEK_R1_URL, 32K context)
 
 Token-count optimization:
-    If prompt tokens <= 40K, test/research tasks are eligible for
+    If prompt tokens <= 24K, test/research tasks are eligible for
     DeepSeek-R1-14B (LLM_CODER_FAST_URL, 24K context) as a faster alternative.
 
 Related:
