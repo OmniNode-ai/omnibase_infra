@@ -46,10 +46,16 @@ async def validate_db_tables(contracts: list[dict], db_conn: object) -> list[dic
         db_io = contract.get("db_io", {}) or {}
         db_tables = db_io.get("db_tables", []) or []
         for table_decl in db_tables:
-            table_name = table_decl["name"]
+            table_name = table_decl.get("name")
+            if not table_name:
+                logger.warning(
+                    "Contract %s has a db_tables entry missing 'name'; skipping.",
+                    contract.get("name"),
+                )
+                continue
             database = table_decl.get("database", "omnidash_analytics")
             node_name = contract.get("name")
-            exists = await _table_exists(db_conn, table_name, database)
+            exists = await _table_exists(db_conn, table_name)
             if not exists:
                 warnings.append(
                     {
@@ -72,11 +78,12 @@ async def validate_db_tables(contracts: list[dict], db_conn: object) -> list[dic
     return warnings
 
 
-async def _table_exists(db_conn: object, table_name: str, database: str) -> bool:
-    """Return True if *table_name* exists in pg_tables for *database*.
+async def _table_exists(db_conn: object, table_name: str) -> bool:
+    """Return True if *table_name* exists in pg_tables (public schema).
 
     Uses a parameterised query against the PostgreSQL information schema to
     avoid any possibility of SQL injection from contract-sourced table names.
+    Checks the current connection's database only.
     """
     row = await db_conn.fetchval(  # type: ignore[attr-defined]
         "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = $1",
