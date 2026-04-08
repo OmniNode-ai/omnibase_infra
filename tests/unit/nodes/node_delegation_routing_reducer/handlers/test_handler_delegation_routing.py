@@ -6,7 +6,7 @@
 
 Tests cover:
     - Routing for each task type (test, research, document)
-    - Fast-path routing when prompt tokens <= 40K
+    - Fast-path routing when prompt tokens <= 24K
     - Fallback when LLM_CODER_FAST_URL is not configured
     - Error on missing required endpoint
     - Error on unknown task type
@@ -87,9 +87,9 @@ class TestFastPathRouting:
         # Short prompt (~10 tokens) should use fast path
         req = _request(task_type="test", prompt="Write tests for auth.py")
         decision = delta(req)
-        assert decision.selected_model == "Qwen3-14B"
+        assert decision.selected_model == "deepseek-r1-14b"
         assert decision.endpoint_url == "http://192.168.86.201:8001"
-        assert decision.max_context_tokens == 40960
+        assert decision.max_context_tokens == 24576
 
     def test_long_prompt_skips_fast_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("LLM_CODER_URL", "http://192.168.86.201:8000")
