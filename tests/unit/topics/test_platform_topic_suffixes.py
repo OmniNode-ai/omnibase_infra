@@ -61,6 +61,9 @@ from omnibase_infra.topics import (
     SUFFIX_TOPIC_CATALOG_QUERY,
     SUFFIX_TOPIC_CATALOG_RESPONSE,
 )
+from omnibase_infra.topics.platform_topic_suffixes import (
+    ALL_OMNINODE_ROUTING_TOPIC_SPECS,
+)
 
 pytestmark = [pytest.mark.unit]
 
@@ -454,6 +457,7 @@ class TestProvisionedTopicSpecs:
             + omnimemory_count
             + len(ALL_OMNIBASE_INFRA_TOPIC_SPECS)
             + len(ALL_VALIDATION_TOPIC_SPECS)
+            + len(ALL_OMNINODE_ROUTING_TOPIC_SPECS)
             + len(ALL_OMNICLAUDE_TOPIC_SPECS)
         )
         assert len(ALL_PROVISIONED_TOPIC_SPECS) == expected
