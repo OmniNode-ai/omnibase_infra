@@ -169,11 +169,19 @@ async def test_table_validator_does_not_raise_on_missing() -> None:
     contracts = [
         {
             "name": "node_a",
-            "db_io": {"db_tables": [{"name": "t1", "migration": "x.sql", "database": "db", "role": "r1"}]},
+            "db_io": {
+                "db_tables": [
+                    {"name": "t1", "migration": "x.sql", "database": "db", "role": "r1"}
+                ]
+            },
         },
         {
             "name": "node_b",
-            "db_io": {"db_tables": [{"name": "t2", "migration": "x.sql", "database": "db", "role": "r2"}]},
+            "db_io": {
+                "db_tables": [
+                    {"name": "t2", "migration": "x.sql", "database": "db", "role": "r2"}
+                ]
+            },
         },
     ]
     # Must not raise
