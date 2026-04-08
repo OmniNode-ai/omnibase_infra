@@ -131,6 +131,13 @@ done
 
 mkdir -p "${LOG_DIR}"
 
+ENV_FILE="${HOME}/.omnibase/.env"
+if [[ ! -f "${ENV_FILE}" ]]; then
+    printf '[deploy] ERROR: Required env file not found: %s\n' "${ENV_FILE}" >&2
+    printf '[deploy] Run scripts/bootstrap-infisical.sh to create it.\n' >&2
+    exit 1
+fi
+
 log_step "Deploy — target=${TARGET} skip-build=${SKIP_BUILD} dry-run=${DRY_RUN}"
 log_info "Log: ${LOG_FILE}"
 
@@ -314,9 +321,11 @@ deploy_prod() {
         kubectl apply -f "${k8s_dir}/k8s/" 2>&1 | tee -a "${LOG_FILE}"
 
         log_step "Wait for Rollout"
-        kubectl rollout status deployment -n omninode --timeout=120s 2>&1 | tee -a "${LOG_FILE}" || {
-            log_warn "Rollout status check timed out — check manually with: kubectl get pods -n omninode"
-        }
+        for deploy in $(kubectl get deployments -n omninode -o jsonpath='{.items[*].metadata.name}'); do
+            kubectl rollout status deployment/"${deploy}" -n omninode --timeout=120s 2>&1 | tee -a "${LOG_FILE}" || {
+                log_warn "Rollout status check failed for ${deploy} — check manually with: kubectl get pods -n omninode"
+            }
+        done
 
         log_step "Pod Status"
         kubectl get pods -n omninode 2>&1 | tee -a "${LOG_FILE}"

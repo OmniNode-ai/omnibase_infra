@@ -206,6 +206,7 @@ if [[ "${JSON_MODE}" == true ]]; then
     # Resolve output path
     if [[ -n "${OUTPUT_FILE}" ]]; then
         OUT="${OUTPUT_FILE}"
+        mkdir -p "$(dirname "${OUTPUT_FILE}")"
     else
         OUT="${SNAPSHOT_FILE}"
         mkdir -p "${SNAPSHOT_DIR}"
