@@ -14,7 +14,7 @@ class ModelRegistryEntry(BaseModel):
 
     model_key: str = Field(..., description="Unique model identifier.")
     provider: str = Field(..., description="Provider: local, anthropic, qwen, zhipu.")
-    transport: str = Field(..., description="Transport: http or sdk.")
+    transport: str = Field(..., description="Transport: http, sdk, or oauth.")
     base_url_env: str = Field(
         default="",
         description="Env var name for base URL (http transport).",

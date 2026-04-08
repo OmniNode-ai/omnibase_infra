@@ -72,8 +72,7 @@ models:
     tier: local
   - model_key: "claude-sonnet"
     provider: anthropic
-    transport: sdk
-    api_key_env: ANTHROPIC_API_KEY
+    transport: oauth # Claude Code uses OAuth, not ANTHROPIC_API_KEY
     capabilities:
       - code_generation
       - reasoning
