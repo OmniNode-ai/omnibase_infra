@@ -37,6 +37,7 @@ def _all_spec_suffixes() -> set[str]:
         + pts.ALL_OMNIMEMORY_TOPIC_SPECS
         + pts.ALL_OMNIBASE_INFRA_TOPIC_SPECS
         + pts.ALL_VALIDATION_TOPIC_SPECS
+        + pts.ALL_OMNINODE_ROUTING_TOPIC_SPECS
         + pts.ALL_OMNICLAUDE_TOPIC_SPECS
     )
     return {spec.suffix for spec in all_specs}
