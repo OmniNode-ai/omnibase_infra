@@ -13,16 +13,18 @@ OMNI_HOME="${OMNI_HOME:-/Volumes/PRO-G40/Code/omni_home}"
 
 REPOS=(
   omniclaude
+  omnibase_compat
   omnibase_core
   omnibase_infra
   omnibase_spi
   omnidash
+  omnigemini
   omniintelligence
+  omnimarket
   omnimemory
   omninode_infra
   omniweb
   onex_change_control
-  omnibase_compat
 )
 
 # Allow caller to override which repos to pull
