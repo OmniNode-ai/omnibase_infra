@@ -20,5 +20,6 @@ class EnumOmniclaudeTopic(str, Enum):
     """
     EVT_CONTEXT_AUDIT_DLQ_V1 = "onex.evt.omniclaude.context-audit-dlq.v1"  # onex.evt.omniclaude.context-audit-dlq.v1
     EVT_SESSION_COORDINATION_SIGNAL_V1 = "onex.evt.omniclaude.session-coordination-signal.v1"  # onex.evt.omniclaude.session-coordination-signal.v1
+    EVT_SESSION_ENDED_V1 = "onex.evt.omniclaude.session-ended.v1"  # onex.evt.omniclaude.session-ended.v1
     EVT_SESSION_STATUS_CHANGED_V1 = "onex.evt.omniclaude.session-status-changed.v1"  # onex.evt.omniclaude.session-status-changed.v1
     EVT_TASK_DELEGATED_V1 = "onex.evt.omniclaude.task-delegated.v1"  # onex.evt.omniclaude.task-delegated.v1

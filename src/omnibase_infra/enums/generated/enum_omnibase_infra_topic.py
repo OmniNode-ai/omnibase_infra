@@ -50,6 +50,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_ROW_COUNT_DIAGNOSTIC_V1 = "onex.evt.omnibase-infra.row-count-diagnostic.v1"  # onex.evt.omnibase-infra.row-count-diagnostic.v1
     EVT_RUNNER_HEALTH_SNAPSHOT_V1 = "onex.evt.omnibase-infra.runner-health-snapshot.v1"  # onex.evt.omnibase-infra.runner-health-snapshot.v1
     EVT_RUNTIME_ERROR_V1 = "onex.evt.omnibase-infra.runtime-error.v1"  # onex.evt.omnibase-infra.runtime-error.v1
+    EVT_SAVINGS_ESTIMATED_V1 = "onex.evt.omnibase-infra.savings-estimated.v1"  # onex.evt.omnibase-infra.savings-estimated.v1
     EVT_SERVICE_LIFECYCLE_V1 = "onex.evt.omnibase-infra.service-lifecycle.v1"  # onex.evt.omnibase-infra.service-lifecycle.v1
     EVT_SYSTEM_ALERT_V1 = "onex.evt.omnibase-infra.system-alert.v1"  # onex.evt.omnibase-infra.system-alert.v1
     EVT_TOOL_UPDATE_V1 = "onex.evt.omnibase-infra.tool-update.v1"  # onex.evt.omnibase-infra.tool-update.v1

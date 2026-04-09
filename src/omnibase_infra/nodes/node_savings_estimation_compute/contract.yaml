@@ -49,6 +49,15 @@ handler_routing:
         name: "ModelSavingsEstimationInput"
         module: "omnibase_infra.nodes.node_savings_estimation_compute.models"
         description: "Injection effectiveness data for savings computation."
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.evt.omniclaude.session-ended.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.savings-estimated.v1"
 topics:
   produces:
     - topic: "onex.evt.omnibase-infra.savings-estimated.v1"
