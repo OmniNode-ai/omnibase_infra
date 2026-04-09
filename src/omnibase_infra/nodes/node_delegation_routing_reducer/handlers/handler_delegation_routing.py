@@ -4,35 +4,42 @@
 # Copyright (c) 2026 OmniNode Team
 """Handler for delegation routing decisions.
 
-Pure function that maps (task_type, prompt_length) to a ModelRoutingDecision.
-Reads endpoint URLs from environment. No I/O beyond os.environ.
-
-Routing table (from existing _HANDLER_ROUTING in delegation_orchestrator.py):
-    test     -> Qwen3-Coder-30B-A3B (LLM_CODER_URL, 64K context)
-    research -> Qwen3-Coder-30B-A3B (LLM_CODER_URL, 64K context)
-    document -> DeepSeek-R1-32B     (LLM_DEEPSEEK_R1_URL, 32K context)
-
-Token-count optimization:
-    If prompt tokens <= 24K, test/research tasks are eligible for
-    DeepSeek-R1-14B (LLM_CODER_FAST_URL, 24K context) as a faster alternative.
+Iterates routing tiers declared in routing_tiers.yaml (local → cheap_cloud → claude)
+and returns the first tier that has a configured endpoint for the given task type.
+All tier order, model assignments, and retry counts come from the YAML config —
+no constants are hardcoded here.
 
 Related:
     - OMN-7040: Node-based delegation pipeline
+    - OMN-8029: Delegation pipeline — local→cheap-cloud→claude routing
 """
 
 from __future__ import annotations
 
 import os
-from uuid import UUID, uuid4
+from pathlib import Path
+from uuid import NAMESPACE_DNS, UUID, uuid5
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.nodes.node_delegation_orchestrator.models.model_delegation_request import (
     ModelDelegationRequest,
+)
+from omnibase_infra.nodes.node_delegation_routing_reducer.models.model_delegation_config import (
+    ModelDelegationConfig,
 )
 from omnibase_infra.nodes.node_delegation_routing_reducer.models.model_routing_decision import (
     ModelRoutingDecision,
 )
+from omnibase_infra.nodes.node_delegation_routing_reducer.models.model_tier_model import (
+    ModelTierModel,
+)
 
-# System prompts by task type
+# System prompts by task type — kept here because they are presentation strings,
+# not routing configuration.
 _SYSTEM_PROMPTS: dict[str, str] = {
     "test": (
         "You are a test generation assistant. Write comprehensive pytest unit tests "
@@ -49,37 +56,127 @@ _SYSTEM_PROMPTS: dict[str, str] = {
         "questions about its behavior, architecture, and design decisions. "
         "Be thorough and cite specific lines when relevant."
     ),
+    "code_generation": (
+        "You are a code generation assistant. Implement the requested functionality "
+        "following existing patterns, conventions, and architecture in the codebase."
+    ),
+    "code_review": (
+        "You are a code review assistant. Identify bugs, style violations, and "
+        "architectural issues in the provided code. Be specific and actionable."
+    ),
+    "refactor": (
+        "You are a refactoring assistant. Improve the structure, readability, and "
+        "maintainability of the provided code without changing its behavior."
+    ),
+    "reasoning": (
+        "You are a reasoning assistant. Think through the problem step by step "
+        "and provide a well-structured analysis."
+    ),
+    "planning": (
+        "You are a planning assistant. Break down the requested work into clear, "
+        "actionable steps with explicit acceptance criteria."
+    ),
+    "review": (
+        "You are a review assistant. Evaluate the provided artifacts against "
+        "the stated requirements and report any gaps or issues."
+    ),
+    "summarization": (
+        "You are a summarization assistant. Produce a concise, accurate summary "
+        "of the provided content."
+    ),
+    "simple_tasks": (
+        "You are a helpful assistant. Complete the requested task accurately."
+    ),
+    "escalation": (
+        "You are an expert assistant handling a complex task that requires deep "
+        "reasoning and careful consideration. Approach this methodically."
+    ),
+    "complex_reasoning": (
+        "You are an expert reasoning assistant. Analyze the problem deeply, "
+        "consider edge cases, and provide a comprehensive solution."
+    ),
+    "agent_orchestration": (
+        "You are an orchestration assistant. Coordinate the required sub-tasks "
+        "and ensure each is completed correctly before proceeding."
+    ),
 }
-
-# Routing table: task_type -> (model_name, env_var, cost_tier, max_context)
-_ROUTING_TABLE: dict[str, tuple[str, str, str, int]] = {
-    "test": ("Qwen3-Coder-30B-A3B", "LLM_CODER_URL", "low", 65536),
-    "research": ("Qwen3-Coder-30B-A3B", "LLM_CODER_URL", "low", 65536),
-    "document": ("DeepSeek-R1-32B", "LLM_DEEPSEEK_R1_URL", "low", 32768),
-}
-
-# Fast-path threshold: if prompt fits within 24K tokens, use faster model
-_FAST_PATH_TOKEN_THRESHOLD: int = 24576
-_FAST_PATH_MODEL: str = "deepseek-r1-14b"
-_FAST_PATH_ENV_VAR: str = "LLM_CODER_FAST_URL"
-_FAST_PATH_MAX_CONTEXT: int = 24576
-_FAST_PATH_ELIGIBLE_TASKS: frozenset[str] = frozenset({"test", "research"})
 
 
 def _estimate_prompt_tokens(prompt: str) -> int:
-    """Estimate token count from prompt character length.
-
-    Uses a rough 4 chars/token heuristic. This is sufficient for
-    routing decisions; exact counts come from the LLM response.
-    """
+    """Estimate token count from prompt character length (4 chars/token heuristic)."""
     return len(prompt) // 4
+
+
+def _backend_id_for_model(model_id: str) -> UUID:
+    """Generate a stable UUID for a model ID."""
+    return uuid5(NAMESPACE_DNS, f"omninode.ai/backends/{model_id}")
+
+
+def _select_model_for_task(
+    tier_models: tuple[ModelTierModel, ...],
+    task_type: str,
+    estimated_tokens: int,
+) -> ModelTierModel | None:
+    """Select the best model from a tier for the given task and token count.
+
+    Prefers fast-path models when prompt fits within their threshold.
+    Falls back to any model that declares the task type in use_for.
+    """
+    # Fast-path check: prefer model with threshold if tokens fit within both the
+    # fast-path threshold and the model's declared max context window.
+    for model in tier_models:
+        endpoint = os.environ.get(
+            model.env_var, ""
+        )  # ONEX_EXCLUDE: env_access - routing reads env to discover available backends
+        if (
+            task_type in model.use_for
+            and estimated_tokens <= model.max_context_tokens
+            and model.fast_path_threshold_tokens is not None
+            and estimated_tokens <= model.fast_path_threshold_tokens
+            and endpoint
+        ):
+            return model
+
+    # Standard selection: first model that handles this task, has endpoint set,
+    # and whose context window can accommodate the estimated token count.
+    for model in tier_models:
+        endpoint = os.environ.get(
+            model.env_var, ""
+        )  # ONEX_EXCLUDE: env_access - routing reads env to discover available backends
+        if (
+            task_type in model.use_for
+            and endpoint
+            and estimated_tokens <= model.max_context_tokens
+        ):
+            return model
+
+    return None
+
+
+_DEFAULT_CONFIG_PATH = (
+    Path(__file__).parent.parent.parent.parent / "configs" / "routing_tiers.yaml"
+)
+
+# Module-level config singleton — loaded once at import time.
+# Tests can override by replacing this variable before calling delta().
+_config: ModelDelegationConfig | None = None
+
+
+def _get_config() -> ModelDelegationConfig:
+    global _config  # noqa: PLW0603
+    if _config is None:
+        # I/O is performed here in the handler (EFFECT boundary), not in the pure model.
+        yaml_text = _DEFAULT_CONFIG_PATH.read_text()
+        _config = ModelDelegationConfig.from_yaml_text(yaml_text)
+    return _config
 
 
 def delta(request: ModelDelegationRequest) -> ModelRoutingDecision:
     """Compute routing decision for a delegation request.
 
-    Pure function: reads endpoint URLs from environment, applies
-    routing rules, returns immutable decision.
+    Iterates tiers in declaration order (local → cheap_cloud → claude).
+    Returns the first tier that has a configured endpoint and handles the
+    requested task type. Claude tier is always the final fallback.
 
     Args:
         request: The delegation request to route.
@@ -88,61 +185,66 @@ def delta(request: ModelDelegationRequest) -> ModelRoutingDecision:
         A routing decision with selected model, endpoint, and config.
 
     Raises:
-        ValueError: If task_type is unknown or required endpoint is not configured.
+        ProtocolConfigurationError: If no tier has a configured endpoint for the task type.
     """
+    config = _get_config()
     task_type = request.task_type
-
-    if task_type not in _ROUTING_TABLE:
-        msg = f"Unknown task_type: {task_type}"
-        raise ValueError(msg)
-
-    model_name, env_var, cost_tier, max_context = _ROUTING_TABLE[task_type]
     estimated_tokens = _estimate_prompt_tokens(request.prompt)
 
-    # Check fast-path eligibility
-    fast_url = os.environ.get(_FAST_PATH_ENV_VAR, "")
-    if (
-        task_type in _FAST_PATH_ELIGIBLE_TASKS
-        and estimated_tokens <= _FAST_PATH_TOKEN_THRESHOLD
-        and fast_url
-    ):
-        model_name = _FAST_PATH_MODEL
-        env_var = _FAST_PATH_ENV_VAR
-        max_context = _FAST_PATH_MAX_CONTEXT
-        rationale = (
-            f"Task '{task_type}' with ~{estimated_tokens} tokens fits within "
-            f"fast-path threshold ({_FAST_PATH_TOKEN_THRESHOLD}); "
-            f"routing to {_FAST_PATH_MODEL} for lower latency."
-        )
-    else:
-        rationale = (
-            f"Task '{task_type}' routed to {model_name} "
-            f"(~{estimated_tokens} estimated tokens, {max_context} max context)."
+    for tier in config.tiers:
+        selected = _select_model_for_task(tier.models, task_type, estimated_tokens)
+        if selected is None:
+            continue
+
+        endpoint_url = os.environ.get(
+            selected.env_var, ""
+        )  # ONEX_EXCLUDE: env_access - routing reads env to discover available backends
+        if not endpoint_url:
+            continue
+
+        system_prompt = _SYSTEM_PROMPTS.get(
+            task_type,
+            f"You are a helpful assistant completing a {task_type} task.",
         )
 
-    endpoint_url = os.environ.get(env_var, "")
-    if not endpoint_url:
-        msg = f"Required endpoint {env_var} is not configured in environment"
-        raise ValueError(msg)
+        rationale = (
+            f"Task '{task_type}' (~{estimated_tokens} tokens) routed to "
+            f"{selected.id} via tier '{tier.name}' "
+            f"(max_context={selected.max_context_tokens})."
+        )
+        if (
+            selected.fast_path_threshold_tokens
+            and estimated_tokens <= selected.fast_path_threshold_tokens
+        ):
+            rationale += f" Fast-path: tokens within {selected.fast_path_threshold_tokens} threshold."
 
-    return ModelRoutingDecision(
+        # Map cost tier from tier name
+        cost_tier_map = {"local": "low", "cheap_cloud": "medium", "claude": "high"}
+        cost_tier = cost_tier_map.get(tier.name, tier.name)
+
+        return ModelRoutingDecision(
+            correlation_id=request.correlation_id,
+            task_type=task_type,
+            selected_model=selected.id,
+            selected_backend_id=_backend_id_for_model(selected.id),
+            endpoint_url=endpoint_url,
+            cost_tier=cost_tier,
+            max_context_tokens=selected.max_context_tokens,
+            system_prompt=system_prompt,
+            rationale=rationale,
+        )
+
+    context = ModelInfraErrorContext.with_correlation(
         correlation_id=request.correlation_id,
-        task_type=task_type,
-        selected_model=model_name,
-        selected_backend_id=_backend_id_for_model(model_name),
-        endpoint_url=endpoint_url,
-        cost_tier=cost_tier,
-        max_context_tokens=max_context,
-        system_prompt=_SYSTEM_PROMPTS[task_type],
-        rationale=rationale,
+        transport_type=EnumInfraTransportType.RUNTIME,
+        operation="delegation_routing",
     )
-
-
-def _backend_id_for_model(model_name: str) -> UUID:
-    """Generate a stable UUID for a model name using UUID5 with DNS namespace."""
-    from uuid import NAMESPACE_DNS, uuid5
-
-    return uuid5(NAMESPACE_DNS, f"omninode.ai/backends/{model_name}")
+    msg = (
+        f"No tier has a configured endpoint for task_type='{task_type}'. "
+        f"Set at least one of the required env vars in routing_tiers.yaml "
+        f"(e.g., LLM_CODER_URL for local tier, ANTHROPIC_API_KEY for claude tier)."
+    )
+    raise ProtocolConfigurationError(msg, context=context)
 
 
 __all__: list[str] = ["delta"]

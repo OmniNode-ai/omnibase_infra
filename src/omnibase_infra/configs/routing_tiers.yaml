@@ -1,0 +1,77 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# routing_tiers.yaml — Declarative delegation escalation ladder.
+#
+# Loaded by node_delegation_routing_reducer at startup.
+# To change tier order, model assignments, or retry counts, edit this file only.
+# No handler changes are needed for operational tuning.
+#
+# Tier evaluation order: local → cheap_cloud → claude
+# The handler iterates tiers top-to-bottom, stopping at the first accepted result.
+#
+# Related Tickets:
+#   - OMN-8029: Delegation pipeline — local→cheap-cloud→claude routing
+tiers:
+  - name: local
+    models:
+      - id: qwen3-coder-30b
+        env_var: LLM_CODER_URL
+        max_context_tokens: 65536
+        use_for:
+          - code_generation
+          - code_review
+          - refactor
+          - test
+          - research
+      - id: deepseek-r1-14b
+        env_var: LLM_CODER_FAST_URL
+        max_context_tokens: 24576
+        use_for:
+          - test
+          - research
+          - reasoning
+          - planning
+          - review
+          - document
+        fast_path_threshold_tokens: 24576
+    eval_before_accept: true
+    eval_model: deepseek-r1-14b
+    max_retries: 2
+  - name: cheap_cloud
+    models:
+      - id: glm-z-ai
+        env_var: LLM_GLM_URL
+        max_context_tokens: 128000
+        use_for:
+          - code_generation
+          - reasoning
+          - research
+      - id: gemini-flash
+        env_var: LLM_GEMINI_FLASH_URL
+        max_context_tokens: 1000000
+        use_for:
+          - summarization
+          - simple_tasks
+          - document
+    eval_before_accept: true
+    eval_model: deepseek-r1-14b
+    max_retries: 1
+  - name: claude
+    models:
+      - id: claude-sonnet-4-6
+        env_var: ANTHROPIC_API_KEY
+        max_context_tokens: 200000
+        use_for:
+          - escalation
+          - complex_reasoning
+          - agent_orchestration
+          - code_generation
+          - reasoning
+          - planning
+          - test
+          - document
+          - research
+    eval_before_accept: false
+    max_retries: 0

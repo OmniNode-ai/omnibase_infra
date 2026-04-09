@@ -33,13 +33,13 @@ def _valid_decision(**overrides: object) -> ModelRoutingDecision:
     defaults: dict[str, object] = {
         "correlation_id": uuid4(),
         "task_type": "test",
-        "selected_model": "Qwen3-Coder-30B-A3B",
+        "selected_model": "qwen3-coder-30b",
         "selected_backend_id": uuid4(),
         "endpoint_url": "http://192.168.86.201:8000",
         "cost_tier": "low",
         "max_context_tokens": 65536,
         "system_prompt": "You are a test generation assistant.",
-        "rationale": "Test tasks route to Qwen3-Coder-30B for long context.",
+        "rationale": "Test tasks route to qwen3-coder-30b for long context.",
     }
     defaults.update(overrides)
     return ModelRoutingDecision(**defaults)  # type: ignore[arg-type]
