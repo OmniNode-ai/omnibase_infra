@@ -20,7 +20,7 @@ or depending on domain-specific models. It serves as the de facto reference
 implementation for external plugin authors.
 
 Design:
-    The smoke plugin is NOT ``PluginRegistration`` -- it avoids real-plugin-
+    The smoke plugin is NOT ``ServiceRegistration`` -- it avoids real-plugin-
     specific assumptions leaking into the test. Only the protocol contract
     matters.
 

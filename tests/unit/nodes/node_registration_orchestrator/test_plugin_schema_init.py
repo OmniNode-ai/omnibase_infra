@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Unit tests for PluginRegistration._initialize_schema (OMN-3567).
+"""Unit tests for ServiceRegistration._initialize_schema (OMN-3567).
 
 Verifies the deadlock-prevention logic introduced to serialize concurrent
 schema initialization via pg_advisory_xact_lock.
@@ -110,16 +110,16 @@ def _make_config() -> MagicMock:
 
 
 def _make_plugin_with_pool(pool: MagicMock) -> MagicMock:
-    """Construct a PluginRegistration with an injected pool.
+    """Construct a ServiceRegistration with an injected pool.
 
     Returns the plugin as MagicMock to avoid a forward-reference import at
-    module level; the object is a real PluginRegistration at runtime.
+    module level; the object is a real ServiceRegistration at runtime.
     """
     from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
-        PluginRegistration,
+        ServiceRegistration,
     )
 
-    plugin = PluginRegistration()
+    plugin = ServiceRegistration()
     plugin._pool = pool  # type: ignore[attr-defined]
     return plugin  # type: ignore[return-value]
 
@@ -438,10 +438,10 @@ class TestSchemaInitErrorHandling:
     ) -> None:
         """pool is None -> method returns early, logs WARNING but does not raise (R2)."""
         from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
-            PluginRegistration,
+            ServiceRegistration,
         )
 
-        plugin = PluginRegistration()
+        plugin = ServiceRegistration()
         plugin._pool = None  # type: ignore[attr-defined]
         config = _make_config()
 

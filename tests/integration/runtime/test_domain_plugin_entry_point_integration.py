@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Integration tests for real entry_point discovery (OMN-2022).
 
-These tests verify that the ``PluginRegistration`` class is discoverable via
+These tests verify that the ``ServiceRegistration`` class is discoverable via
 ``importlib.metadata.entry_points(group="onex.domain_plugins")`` when the
 package is installed, and that the full
 ``RegistryDomainPlugin.discover_from_entry_points()`` pipeline accepts it.
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 import pytest
 
 from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
-    PluginRegistration,
+    ServiceRegistration,
 )
 from omnibase_infra.runtime.constants_security import (
     DOMAIN_PLUGIN_ENTRY_POINT_GROUP,
@@ -75,7 +75,7 @@ def _get_registration_entry_point() -> EntryPoint | None:
 
 
 class TestEntryPointDiscoverability:
-    """Verify PluginRegistration is discoverable via importlib.metadata."""
+    """Verify ServiceRegistration is discoverable via importlib.metadata."""
 
     def test_entry_point_exists_in_group(self) -> None:
         """The 'registration' entry point exists in the onex.domain_plugins group."""
@@ -93,20 +93,20 @@ class TestEntryPointDiscoverability:
 
         expected_value = (
             "omnibase_infra.nodes.node_registration_orchestrator.plugin"
-            ":PluginRegistration"
+            ":ServiceRegistration"
         )
         assert ep.value == expected_value, (
             f"Entry point value mismatch: expected '{expected_value}', got '{ep.value}'"
         )
 
     def test_entry_point_loads_plugin_class(self) -> None:
-        """Loading the entry point returns the PluginRegistration class."""
+        """Loading the entry point returns the ServiceRegistration class."""
         ep = _get_registration_entry_point()
         assert ep is not None, "Entry point 'registration' not found"
 
         loaded_class = ep.load()
-        assert loaded_class is PluginRegistration, (
-            f"Expected PluginRegistration class, got {loaded_class}"
+        assert loaded_class is ServiceRegistration, (
+            f"Expected ServiceRegistration class, got {loaded_class}"
         )
 
     def test_loaded_class_instantiates(self) -> None:
@@ -128,7 +128,7 @@ class TestEntryPointDiscoverability:
         loaded_class = ep.load()
         instance = loaded_class()
         assert isinstance(instance, ProtocolDomainPlugin), (
-            f"PluginRegistration does not satisfy ProtocolDomainPlugin. "
+            f"ServiceRegistration does not satisfy ProtocolDomainPlugin. "
             f"Type: {type(instance)}"
         )
 
@@ -239,7 +239,7 @@ class TestDiscoverFromEntryPointsIntegration:
 
     def test_explicit_registration_takes_precedence(self) -> None:
         """Explicit registration wins over entry_point discovery."""
-        explicit_plugin = PluginRegistration()
+        explicit_plugin = ServiceRegistration()
         registry = RegistryDomainPlugin()
         registry.register(explicit_plugin)
 

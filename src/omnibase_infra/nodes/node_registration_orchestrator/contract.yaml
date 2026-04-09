@@ -601,7 +601,6 @@ golden_path:
   - "Projection handler upserts row into node_service_registry table"
   - "Verify row exists with service_name, health_status fields"
   - "Golden chain test: omnimarket/tests/test_golden_chain_projection_registration.py"
-
 metadata:
   description: "Registration workflow orchestrator that coordinates node lifecycle by calling reducer for intents and effect for execution."
   author: "OmniNode Team"

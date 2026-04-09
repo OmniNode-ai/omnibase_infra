@@ -106,7 +106,7 @@ from omnibase_infra.nodes.node_delegation_orchestrator.plugin import (
     PluginDelegation,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
-    PluginRegistration,
+    ServiceRegistration,
 )
 from omnibase_infra.observability.runtime_log_event_bridge import RuntimeLogEventBridge
 from omnibase_infra.observability.wiring_health.wiring_health_checker import (
@@ -666,7 +666,7 @@ async def bootstrap() -> int:
     health_server: ServiceHealth | None = None
     # Plugin system owns resource lifecycle (pools, publishers, dispatchers)
     plugin_registry: RegistryDomainPlugin | None = None
-    registration_plugin: PluginRegistration | None = None
+    registration_service: ServiceRegistration | None = None
     activated_plugins: list[ProtocolDomainPlugin] = []
     # ready_plugins tracks plugins that completed handler wiring successfully.
     # Only these plugins should have consumers started in Pass 2. Plugins in
@@ -1538,17 +1538,12 @@ async def bootstrap() -> int:
 
         # 4.5. Activate domain plugins via RegistryDomainPlugin (OMN-1992)
         #
-        # The plugin system replaces inline wiring of registration infrastructure.
-        # Each domain plugin encapsulates its own resource creation, handler wiring,
-        # dispatcher setup, and consumer startup. The kernel iterates registered
-        # plugins and calls the standard lifecycle:
-        #   should_activate() -> initialize() -> wire_handlers() ->
-        #   wire_dispatchers() -> start_consumers()
-        #
-        # Plugins are shut down in LIFO order during kernel shutdown.
+        # ServiceRegistration is kernel-native (OMN-7115): wired directly by
+        # the kernel, NOT through the plugin registry. It manages node
+        # introspection, heartbeats, and registration state — kernel-internal
+        # concerns that are always present.
         plugin_registry = RegistryDomainPlugin()
-        registration_plugin = PluginRegistration()
-        plugin_registry.register(registration_plugin)
+        registration_service = ServiceRegistration()
 
         # Register lightweight plugins BEFORE heavy ones. Plugin registration
         # order determines Pass 2 (start_consumers) order. PluginDelegation (3
@@ -1731,7 +1726,7 @@ async def bootstrap() -> int:
             # Graceful degradation (OMN-1992): config.name absence is logged
             # rather than raising ProtocolConfigurationError so kernels with
             # optional introspection can still boot.  Plugins that require
-            # node_identity (e.g. PluginRegistration.start_consumers) will
+            # node_identity (e.g. ServiceRegistration.start_consumers) will
             # return a "skipped" result instead of failing.
             logger.error(
                 "runtime_config.yaml missing 'name' field — plugin consumers "
@@ -1797,6 +1792,69 @@ async def bootstrap() -> int:
         # could modify the engine while an early plugin's consumer is already
         # dispatching messages through it.
         plugin_activation_start = time.time()
+
+        # --- Kernel-native: ServiceRegistration lifecycle (OMN-7115) ---
+        # ServiceRegistration runs its lifecycle directly, not through the
+        # plugin registry loop. It is always activated first.
+        if registration_service.should_activate(plugin_config):
+            reg_init = await registration_service.initialize(plugin_config)
+            if reg_init:
+                activated_plugins.append(registration_service)
+                if hasattr(registration_service, "validate_handshake") and callable(
+                    getattr(registration_service, "validate_handshake", None)
+                ):
+                    handshake_result = await registration_service.validate_handshake(
+                        plugin_config,
+                    )
+                    if not handshake_result:
+                        logger.error(
+                            "ServiceRegistration handshake FAILED: %s "
+                            "(correlation_id=%s)",
+                            handshake_result.error_message or "unknown",
+                            correlation_id,
+                        )
+                    else:
+                        logger.info(
+                            "ServiceRegistration handshake ATTESTED (%d checks) "
+                            "(correlation_id=%s)",
+                            len(handshake_result.checks),
+                            correlation_id,
+                        )
+                wire_result = await registration_service.wire_handlers(plugin_config)
+                if wire_result:
+                    dispatch_result = await registration_service.wire_dispatchers(
+                        plugin_config,
+                    )
+                    if not dispatch_result:
+                        logger.warning(
+                            "ServiceRegistration dispatcher wiring failed: %s "
+                            "(correlation_id=%s)",
+                            dispatch_result.get_error_message_or_default(),
+                            correlation_id,
+                        )
+                    ready_plugins.append(registration_service)
+                    logger.info(
+                        "ServiceRegistration wiring completed (correlation_id=%s)",
+                        correlation_id,
+                    )
+                else:
+                    logger.warning(
+                        "ServiceRegistration handler wiring failed: %s "
+                        "(correlation_id=%s)",
+                        wire_result.get_error_message_or_default(),
+                        correlation_id,
+                    )
+            else:
+                logger.warning(
+                    "ServiceRegistration initialization failed: %s (correlation_id=%s)",
+                    reg_init.get_error_message_or_default(),
+                    correlation_id,
+                )
+        else:
+            logger.info(
+                "ServiceRegistration skipped (not activated) (correlation_id=%s)",
+                correlation_id,
+            )
 
         # --- Pass 1: Initialize, validate handshake, wire handlers, wire dispatchers ---
         for plugin in plugin_registry.get_all():
@@ -2156,7 +2214,7 @@ async def bootstrap() -> int:
         # deregistration, heartbeat) and routes them to the ContractRegistryReducer.
         # The router also runs an internal tick timer for staleness computation.
         # Uses postgres_pool from the registration plugin.
-        postgres_pool = registration_plugin.postgres_pool
+        postgres_pool = registration_service.postgres_pool
         if config.contract_registry.enabled and postgres_pool is not None:
             # Import postgres handlers for contract persistence
             # Deferred import to avoid loading heavy dependencies when not needed
@@ -2593,7 +2651,7 @@ async def bootstrap() -> int:
                 wiring_health_task = None
 
         # 9.5. Introspection event consumer is now started by domain plugins
-        # during plugin activation (step 4.5). The PluginRegistration.start_consumers()
+        # during plugin activation (step 4.5). The ServiceRegistration.start_consumers()
         # method handles subscription using node_identity and EnumConsumerGroupPurpose.
 
         # 9.6. Start contract registry event consumer if router is available
@@ -2782,7 +2840,7 @@ async def bootstrap() -> int:
 
         # Display startup banner with key configuration
         # Get registration status from plugin (encapsulates backend details)
-        registration_status = registration_plugin.get_status_line()
+        registration_status = registration_service.get_status_line()
 
         # Contract registry status for banner
         if contract_router is not None:

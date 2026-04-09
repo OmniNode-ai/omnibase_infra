@@ -125,7 +125,7 @@ event_bus_kafka = "omnibase_infra.event_bus.event_bus_kafka:EventBusKafka"
 state_postgres = "omnibase_infra.backends.backend_probe:probe_postgres"
 
 [project.entry-points."onex.domain_plugins"]
-registration = "omnibase_infra.nodes.node_registration_orchestrator.plugin:PluginRegistration"
+registration = "omnibase_infra.nodes.node_registration_orchestrator.plugin:ServiceRegistration"
 
 [dependency-groups]
 dev = [

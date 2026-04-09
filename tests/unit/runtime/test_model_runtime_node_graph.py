@@ -83,7 +83,7 @@ class TestModelRuntimeNodeGraph:
         """Graph with a single node, no edges."""
         node = ModelNodeConfig(
             name="registration",
-            handler_class="omnibase_infra.nodes.PluginRegistration",
+            handler_class="omnibase_infra.nodes.ServiceRegistration",
         )
         graph = ModelRuntimeNodeGraph(
             nodes=(node,),

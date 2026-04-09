@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Unit tests for PluginRegistration._wire_registration_storage (OMN-5345).
+"""Unit tests for ServiceRegistration._wire_registration_storage (OMN-5345).
 
 Verifies that HandlerRegistrationStoragePostgres is instantiated and
 registered during plugin initialization so that:
@@ -33,12 +33,12 @@ def _make_config() -> MagicMock:
 
 
 def _make_plugin_with_pool(pool: MagicMock) -> MagicMock:
-    """Construct a PluginRegistration with an injected pool."""
+    """Construct a ServiceRegistration with an injected pool."""
     from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
-        PluginRegistration,
+        ServiceRegistration,
     )
 
-    plugin = PluginRegistration()
+    plugin = ServiceRegistration()
     plugin._pool = pool  # type: ignore[attr-defined]
     return plugin  # type: ignore[return-value]
 
@@ -52,10 +52,10 @@ class TestWireRegistrationStorage:
     ) -> None:
         """No pool -> returns early with WARNING, no handler created."""
         from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
-            PluginRegistration,
+            ServiceRegistration,
         )
 
-        plugin = PluginRegistration()
+        plugin = ServiceRegistration()
         plugin._pool = None  # type: ignore[attr-defined]
         config = _make_config()
 
@@ -143,10 +143,10 @@ class TestWireRegistrationStorage:
     async def test_shutdown_cleans_up_handler(self) -> None:
         """shutdown() calls handler.shutdown() and clears the reference."""
         from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
-            PluginRegistration,
+            ServiceRegistration,
         )
 
-        plugin = PluginRegistration()
+        plugin = ServiceRegistration()
         mock_handler = AsyncMock()
         mock_handler.shutdown = AsyncMock()
         plugin._registration_storage = mock_handler  # type: ignore[attr-defined]

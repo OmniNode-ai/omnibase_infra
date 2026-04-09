@@ -1538,6 +1538,18 @@ pattern_exemptions:
       - docs/patterns/container_dependency_injection.md (Registry patterns)
       - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
     ticket: OMN-1131
+  # Registration Service Exemption (OMN-7115)
+  # ==========================================================================
+  # ServiceRegistration is the kernel-native registration service, renamed from
+  # PluginRegistration as part of the contract auto-wiring migration. "Service"
+  # reflects its new role as a kernel-native service rather than a plugin.
+  - file_pattern: 'node_registration_orchestrator/plugin\.py'
+    class_pattern: "Class name 'ServiceRegistration'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      ServiceRegistration is a kernel-native service for node introspection, heartbeats, and registration state. Renamed from PluginRegistration (OMN-7115) to reflect direct kernel wiring rather than plugin registry.
+
+    ticket: OMN-7115
   - file_pattern: 'handlers/registration_storage/handler_registration_storage_postgres\.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'
