@@ -4,10 +4,22 @@
 # Copyright (c) 2026 OmniNode Team
 """Models for the delegation routing reducer node."""
 
+from omnibase_infra.nodes.node_delegation_routing_reducer.models.model_delegation_config import (
+    ModelDelegationConfig,
+)
 from omnibase_infra.nodes.node_delegation_routing_reducer.models.model_routing_decision import (
     ModelRoutingDecision,
 )
+from omnibase_infra.nodes.node_delegation_routing_reducer.models.model_routing_tier import (
+    ModelRoutingTier,
+)
+from omnibase_infra.nodes.node_delegation_routing_reducer.models.model_tier_model import (
+    ModelTierModel,
+)
 
 __all__: list[str] = [
+    "ModelDelegationConfig",
     "ModelRoutingDecision",
+    "ModelRoutingTier",
+    "ModelTierModel",
 ]
