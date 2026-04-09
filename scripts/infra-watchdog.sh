@@ -8,7 +8,7 @@
 # If any are not running (Created, Exited, or absent), restarts the infra stack.
 #
 # Runs on .201 as a systemd timer every 5 minutes.
-# Log: /var/log/onex/infra-watchdog.log
+# Log: ~/.local/log/onex/infra-watchdog.log
 # Unit: deploy/infra-watchdog.service + deploy/infra-watchdog.timer
 #
 # Install: see deploy/infra-watchdog.service (systemd) or README in this file.
@@ -16,7 +16,7 @@
 set -euo pipefail
 
 COMPOSE_FILE="${OMNI_HOME:-/home/jonah/Code/omni_home}/omnibase_infra/docker/docker-compose.infra.yml"
-LOG_FILE="/var/log/onex/infra-watchdog.log"
+LOG_FILE="${HOME}/.local/log/onex/infra-watchdog.log"
 INFRA_CONTAINERS=("omnibase-infra-postgres" "omnibase-infra-redpanda" "omnibase-infra-valkey")
 
 # Ensure log directory exists

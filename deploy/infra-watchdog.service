@@ -31,7 +31,8 @@ Environment="OMNI_HOME=/home/jonah/Code/omni_home"
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 
 # Ensure log dir exists before the script runs
-ExecStartPre=/bin/mkdir -p /var/log/onex
+# Use a user-writable path — /var/log is root-owned and mkdir would fail
+ExecStartPre=/bin/mkdir -p /home/jonah/.local/log/onex
 
 StandardOutput=journal
 StandardError=journal
