@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# infra-watchdog.timer — Triggers infra-watchdog.service every 5 minutes
+#
+# Install on .201:
+#   sudo cp deploy/infra-watchdog.service /etc/systemd/system/
+#   sudo cp deploy/infra-watchdog.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now infra-watchdog.timer
+#
+# Check status:
+#   systemctl status infra-watchdog.timer
+#   journalctl -u infra-watchdog.service -f
+#
+# Manual trigger (for testing):
+#   sudo systemctl start infra-watchdog.service
+
+[Unit]
+Description=ONEX Infra Stack Watchdog Timer
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+
+[Timer]
+# Run 60s after boot (give Docker time to fully start)
+OnBootSec=60s
+# Then every 5 minutes
+OnUnitActiveSec=5min
+# Ensure the timer activates its service even after a missed run
+Persistent=true
+Unit=infra-watchdog.service
+
+[Install]
+WantedBy=timers.target

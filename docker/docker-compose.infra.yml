@@ -567,6 +567,8 @@ services:
         condition: service_healthy
       redpanda:
         condition: service_healthy
+      valkey:
+        condition: service_healthy
     environment:
       !!merge <<: *runtime-env
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-omninode-runtime-main}
