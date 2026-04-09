@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
 """Environment variable validation for the OmniNode platform.
 
 Checks for missing critical vars, warns on known collisions and deprecations,

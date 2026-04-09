@@ -36,6 +36,10 @@ from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
 
+# Metadata dict type for unimplemented create_ticket stub.
+# ONEX_EXCLUDE: dict_str_any - unimplemented stub; no domain type exists yet
+_TicketMetadata = dict[str, object]
+
 # Linear GraphQL endpoint
 _LINEAR_API_URL: str = "https://api.linear.app/graphql"
 
@@ -408,14 +412,14 @@ class AdapterTicketLinear:
         description: str,
         labels: list[str] | None = None,
         assignee: str | None = None,
-        metadata: dict[str, object] | None = None,
+        metadata: _TicketMetadata | None = None,
     ) -> str:
         """Create a new ticket. Not yet implemented.
 
         Raises:
             NotImplementedError: Always.
         """
-        raise NotImplementedError(
+        raise NotImplementedError(  # stub-ok: write methods deferred to OMN-7587
             "AdapterTicketLinear.create_ticket is not yet implemented "
             "(OMN-7587: write methods deferred)"
         )
@@ -426,7 +430,7 @@ class AdapterTicketLinear:
         Raises:
             NotImplementedError: Always.
         """
-        raise NotImplementedError(
+        raise NotImplementedError(  # stub-ok: write methods deferred to OMN-7587
             "AdapterTicketLinear.update_ticket_status is not yet implemented "
             "(OMN-7587: write methods deferred)"
         )
@@ -437,7 +441,7 @@ class AdapterTicketLinear:
         Raises:
             NotImplementedError: Always.
         """
-        raise NotImplementedError(
+        raise NotImplementedError(  # stub-ok: write methods deferred to OMN-7587
             "AdapterTicketLinear.add_comment is not yet implemented "
             "(OMN-7587: write methods deferred)"
         )
