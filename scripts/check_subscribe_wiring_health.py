@@ -56,6 +56,7 @@ from omnibase_infra.topics.contract_topic_extractor import ContractTopicExtracto
 _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # omniclaude publishes these via hook scripts, not contract.yaml
     "onex.evt.omniclaude.session-started.v1": "Published by omniclaude hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
+    "onex.evt.omniclaude.session-ended.v1": "Published by omniclaude SessionEnd hook, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.prompt-submitted.v1": "Published by omniclaude hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.evt.omniclaude.tool-executed.v1": "Published by omniclaude hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
     "onex.cmd.omniintelligence.claude-hook-event.v1": "Published by omniclaude hooks | owner: jonah | expiry: 2026-12-01",
