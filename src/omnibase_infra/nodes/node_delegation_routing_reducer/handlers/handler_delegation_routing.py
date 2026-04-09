@@ -125,21 +125,27 @@ def _select_model_for_task(
     # Fast-path check: prefer model with threshold if tokens fit within both the
     # fast-path threshold and the model's declared max context window.
     for model in tier_models:
+        endpoint = os.environ.get(
+            model.env_var, ""
+        )  # ONEX_EXCLUDE: env_access - routing reads env to discover available backends
         if (
             task_type in model.use_for
             and estimated_tokens <= model.max_context_tokens
             and model.fast_path_threshold_tokens is not None
             and estimated_tokens <= model.fast_path_threshold_tokens
-            and os.environ.get(model.env_var, "")
+            and endpoint
         ):
             return model
 
     # Standard selection: first model that handles this task, has endpoint set,
     # and whose context window can accommodate the estimated token count.
     for model in tier_models:
+        endpoint = os.environ.get(
+            model.env_var, ""
+        )  # ONEX_EXCLUDE: env_access - routing reads env to discover available backends
         if (
             task_type in model.use_for
-            and os.environ.get(model.env_var, "")
+            and endpoint
             and estimated_tokens <= model.max_context_tokens
         ):
             return model
@@ -190,7 +196,9 @@ def delta(request: ModelDelegationRequest) -> ModelRoutingDecision:
         if selected is None:
             continue
 
-        endpoint_url = os.environ.get(selected.env_var, "")
+        endpoint_url = os.environ.get(
+            selected.env_var, ""
+        )  # ONEX_EXCLUDE: env_access - routing reads env to discover available backends
         if not endpoint_url:
             continue
 
