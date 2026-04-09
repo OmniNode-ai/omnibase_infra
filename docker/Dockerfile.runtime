@@ -179,8 +179,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps \
     "omninode-claude>=0.9.0,<2.0.0" \
     "omninode-memory>=0.9.0,<2.0.0" \
-    "omninode-intelligence>=0.15.0,<2.0.0" \
-    "omnimarket>=0.1.0,<2.0.0"
+    "omninode-intelligence>=0.15.0,<2.0.0"
+
+# Install omnimarket from git main until PyPI releases are automated (OMN-7980).
+# Pinned to main so every image rebuild picks up the latest merged nodes.
+# Switch back to PyPI range pin once the auto-tag-on-merge release pipeline
+# is confirmed publishing on each merge: "omnimarket>=0.2.0,<2.0.0"
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --no-deps \
+    "git+https://github.com/OmniNode-ai/omnimarket.git@main#egg=omnimarket"
 
 # Install CPU-only PyTorch (~2GB savings over CUDA wheels).
 # K8s runtime has no GPU; inference offloads to LLM servers via HTTP.
