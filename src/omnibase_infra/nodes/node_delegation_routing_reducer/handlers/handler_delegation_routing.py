@@ -20,6 +20,11 @@ import os
 from pathlib import Path
 from uuid import NAMESPACE_DNS, UUID, uuid5
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.nodes.node_delegation_orchestrator.models.model_delegation_request import (
     ModelDelegationRequest,
 )
@@ -117,19 +122,26 @@ def _select_model_for_task(
     Prefers fast-path models when prompt fits within their threshold.
     Falls back to any model that declares the task type in use_for.
     """
-    # Fast-path check: prefer model with threshold if tokens fit
+    # Fast-path check: prefer model with threshold if tokens fit within both the
+    # fast-path threshold and the model's declared max context window.
     for model in tier_models:
         if (
             task_type in model.use_for
+            and estimated_tokens <= model.max_context_tokens
             and model.fast_path_threshold_tokens is not None
             and estimated_tokens <= model.fast_path_threshold_tokens
             and os.environ.get(model.env_var, "")
         ):
             return model
 
-    # Standard selection: first model that handles this task and has endpoint set
+    # Standard selection: first model that handles this task, has endpoint set,
+    # and whose context window can accommodate the estimated token count.
     for model in tier_models:
-        if task_type in model.use_for and os.environ.get(model.env_var, ""):
+        if (
+            task_type in model.use_for
+            and os.environ.get(model.env_var, "")
+            and estimated_tokens <= model.max_context_tokens
+        ):
             return model
 
     return None
@@ -167,7 +179,7 @@ def delta(request: ModelDelegationRequest) -> ModelRoutingDecision:
         A routing decision with selected model, endpoint, and config.
 
     Raises:
-        ValueError: If no tier has a configured endpoint for the task type.
+        ProtocolConfigurationError: If no tier has a configured endpoint for the task type.
     """
     config = _get_config()
     task_type = request.task_type
@@ -214,12 +226,17 @@ def delta(request: ModelDelegationRequest) -> ModelRoutingDecision:
             rationale=rationale,
         )
 
+    context = ModelInfraErrorContext.with_correlation(
+        correlation_id=request.correlation_id,
+        transport_type=EnumInfraTransportType.RUNTIME,
+        operation="delegation_routing",
+    )
     msg = (
         f"No tier has a configured endpoint for task_type='{task_type}'. "
         f"Set at least one of the required env vars in routing_tiers.yaml "
         f"(e.g., LLM_CODER_URL for local tier, ANTHROPIC_API_KEY for claude tier)."
     )
-    raise ValueError(msg)
+    raise ProtocolConfigurationError(msg, context=context)
 
 
 __all__: list[str] = ["delta"]

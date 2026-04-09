@@ -25,6 +25,7 @@ from uuid import uuid4
 import pytest
 
 import omnibase_infra.nodes.node_delegation_routing_reducer.handlers.handler_delegation_routing as _handler_mod
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.nodes.node_delegation_orchestrator.models.model_delegation_request import (
     ModelDelegationRequest,
 )
@@ -143,7 +144,7 @@ class TestMissingEndpoint:
     ) -> None:
         """When all local and cloud env vars absent, only claude tier remains.
 
-        If ANTHROPIC_API_KEY is also missing, should raise ValueError.
+        If ANTHROPIC_API_KEY is also missing, should raise ProtocolConfigurationError.
         """
         monkeypatch.delenv("LLM_CODER_URL", raising=False)
         monkeypatch.delenv("LLM_CODER_FAST_URL", raising=False)
@@ -152,7 +153,7 @@ class TestMissingEndpoint:
         monkeypatch.delenv("LLM_GEMINI_FLASH_URL", raising=False)
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         req = _request(task_type="test")
-        with pytest.raises(ValueError, match="No tier"):
+        with pytest.raises(ProtocolConfigurationError, match="No tier"):
             delta(req)
 
     def test_missing_deepseek_escalates_to_claude(

@@ -34,7 +34,7 @@ def _valid_decision(**overrides: object) -> ModelRoutingDecision:
         "correlation_id": uuid4(),
         "task_type": "test",
         "selected_model": "qwen3-coder-30b",
-        "selected_backend_id": str(uuid4()),
+        "selected_backend_id": uuid4(),
         "endpoint_url": "http://192.168.86.201:8000",
         "cost_tier": "low",
         "max_context_tokens": 65536,
