@@ -135,6 +135,10 @@ def _select_model_for_task(
     return None
 
 
+_DEFAULT_CONFIG_PATH = (
+    Path(__file__).parent.parent.parent.parent / "configs" / "routing_tiers.yaml"
+)
+
 # Module-level config singleton — loaded once at import time.
 # Tests can override by replacing this variable before calling delta().
 _config: ModelDelegationConfig | None = None
@@ -143,7 +147,9 @@ _config: ModelDelegationConfig | None = None
 def _get_config() -> ModelDelegationConfig:
     global _config  # noqa: PLW0603
     if _config is None:
-        _config = ModelDelegationConfig.from_yaml()
+        # I/O is performed here in the handler (EFFECT boundary), not in the pure model.
+        yaml_text = _DEFAULT_CONFIG_PATH.read_text()
+        _config = ModelDelegationConfig.from_yaml_text(yaml_text)
     return _config
 
 

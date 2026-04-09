@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,10 +13,6 @@ from omnibase_infra.nodes.node_delegation_routing_reducer.models.model_routing_t
 )
 from omnibase_infra.nodes.node_delegation_routing_reducer.models.model_tier_model import (
     ModelTierModel,
-)
-
-_DEFAULT_CONFIG_PATH = (
-    Path(__file__).parent.parent.parent.parent / "configs" / "routing_tiers.yaml"
 )
 
 
@@ -33,17 +27,16 @@ class ModelDelegationConfig(BaseModel):
     )
 
     @classmethod
-    def from_yaml(cls, path: Path | None = None) -> ModelDelegationConfig:
-        """Load delegation config from a YAML file.
+    def from_yaml_text(cls, yaml_text: str) -> ModelDelegationConfig:
+        """Parse delegation config from raw YAML text.
 
         Args:
-            path: Path to routing_tiers.yaml. Defaults to the bundled config.
+            yaml_text: Contents of routing_tiers.yaml as a string.
 
         Returns:
             Parsed and validated DelegationConfig.
         """
-        config_path = path or _DEFAULT_CONFIG_PATH
-        raw = yaml.safe_load(config_path.read_text())
+        raw = yaml.safe_load(yaml_text)
         tiers = []
         for tier_data in raw.get("tiers", []):
             models = []
