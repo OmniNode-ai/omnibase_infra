@@ -69,9 +69,14 @@ from omnibase_infra.nodes.node_delegation_routing_reducer.handlers.handler_deleg
 @pytest.fixture(autouse=True)
 def _set_llm_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
     """Provide LLM endpoint env vars required by the routing reducer."""
+    import omnibase_infra.nodes.node_delegation_routing_reducer.handlers.handler_delegation_routing as _h
+
+    _h._config = None
     monkeypatch.setenv("LLM_CODER_URL", "http://192.168.86.201:8000")
     monkeypatch.setenv("LLM_CODER_FAST_URL", "http://192.168.86.201:8001")
     monkeypatch.setenv("LLM_DEEPSEEK_R1_URL", "http://192.168.86.200:8101")
+    yield
+    _h._config = None
 
 
 def _simulate_inference(
@@ -197,8 +202,9 @@ class TestDelegationPipelineHappyPath:
         )
 
         routing_decision = routing_delta(request)
-        assert routing_decision.selected_model == "DeepSeek-R1-32B"
-        assert routing_decision.endpoint_url == "http://192.168.86.200:8101"
+        # document tasks route to deepseek-r1-14b (LLM_CODER_FAST_URL) in the local tier
+        assert routing_decision.selected_model == "deepseek-r1-14b"
+        assert routing_decision.endpoint_url == "http://192.168.86.201:8001"
 
         orchestrator = HandlerDelegationWorkflow()
         orchestrator.handle_delegation_request(request)
