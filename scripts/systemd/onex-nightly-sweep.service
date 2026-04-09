@@ -1,0 +1,19 @@
+[Unit]
+Description=ONEX Nightly Sweep — publishes sweep-requested event to Kafka
+Documentation=https://github.com/OmniNode-ai/omnibase_infra/blob/main/systemd/onex-nightly-sweep.service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=jonah
+Environment=KAFKA_BOOTSTRAP_SERVERS=localhost:19092
+ExecStart=/bin/bash -c '\
+  rpk topic produce onex.cmd.verification.sweep-requested.v1 <<< \
+  "{\"correlation_id\":\"timer-nightly-sweep-$(date +%%Y%%m%%dT%%H%%M%%S)\",\"requested_by\":\"systemd-timer\",\"scope\":\"full\"}"'
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=onex-nightly-sweep
+
+[Install]
+WantedBy=multi-user.target

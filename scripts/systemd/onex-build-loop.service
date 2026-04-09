@@ -1,0 +1,19 @@
+[Unit]
+Description=ONEX Build Loop — publishes loop-requested event to Kafka
+Documentation=https://github.com/OmniNode-ai/omnibase_infra/blob/main/systemd/onex-build-loop.service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=jonah
+Environment=KAFKA_BOOTSTRAP_SERVERS=localhost:19092
+ExecStart=/bin/bash -c '\
+  rpk topic produce onex.cmd.build.loop-requested.v1 <<< \
+  "{\"correlation_id\":\"timer-build-loop-$(date +%%Y%%m%%dT%%H%%M%%S)\",\"requested_by\":\"systemd-timer\",\"scope\":\"overnight\"}"'
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=onex-build-loop
+
+[Install]
+WantedBy=multi-user.target
