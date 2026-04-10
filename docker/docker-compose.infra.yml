@@ -158,11 +158,11 @@ x-runtime-env: &runtime-env
   OMNIINTELLIGENCE_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omniintelligence"
   # --- OmniMemory domain plugin ---
   # PluginMemory.should_activate() checks OMNIMEMORY_MEMGRAPH_HOST or OMNIMEMORY_ENABLED.
-  # Pass both so the filesystem crawler and intent handlers activate when configured.
-  # Memgraph uses Docker-internal hostname (omnibase-infra-memgraph) when the omnimemory
-  # profile is active; defaults to empty so the plugin stays inactive by default.
+  # Both default to inactive values so the plugin stays opt-in.
+  # To enable: set OMNIMEMORY_ENABLED=true and OMNIMEMORY_MEMGRAPH_HOST=omnibase-infra-memgraph
+  # in the operator environment (e.g. via the memgraph bundle).
   OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-false}
-  OMNIMEMORY_MEMGRAPH_HOST: ${OMNIMEMORY_MEMGRAPH_HOST:-omnibase-infra-memgraph}
+  OMNIMEMORY_MEMGRAPH_HOST: ${OMNIMEMORY_MEMGRAPH_HOST:-}
   OMNIMEMORY_MEMGRAPH_PORT: ${OMNIMEMORY_MEMGRAPH_PORT:-7687}
   OMNIMEMORY_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnimemory"
   # Filesystem crawler path prefixes — comma-separated list of dirs to crawl for .md files
