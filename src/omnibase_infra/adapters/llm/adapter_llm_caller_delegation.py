@@ -112,6 +112,9 @@ class LlmCallerDelegation:
         latency_ms = int((time.monotonic() - t0) * 1000)
         usage = response.usage_statistics or {}
 
+        def _to_int(val: object) -> int:
+            return int(val) if isinstance(val, (int, float)) else 0
+
         logger.info(
             "LlmCallerDelegation: completed model=%s latency=%dms correlation_id=%s",
             intent.model,
@@ -124,9 +127,9 @@ class LlmCallerDelegation:
             content=response.generated_text,
             model_used=response.model_used or intent.model,
             latency_ms=latency_ms,
-            prompt_tokens=int(usage.get("prompt_tokens", 0)),
-            completion_tokens=int(usage.get("completion_tokens", 0)),
-            total_tokens=int(usage.get("total_tokens", 0)),
+            prompt_tokens=_to_int(usage.get("prompt_tokens")),
+            completion_tokens=_to_int(usage.get("completion_tokens")),
+            total_tokens=_to_int(usage.get("total_tokens")),
         )
 
 
