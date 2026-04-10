@@ -25,6 +25,9 @@ from omnibase_core.enums import EnumInjectionScope, EnumMessageCategory
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
     from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
+    from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
+        ProtocolEventBusSubscriber,
+    )
     from omnibase_infra.runtime import MessageDispatchEngine
 
 logger = logging.getLogger(__name__)
@@ -33,11 +36,6 @@ logger = logging.getLogger(__name__)
 ROUTE_ID_DELEGATION_REQUEST = "route.delegation.delegation-request"
 ROUTE_ID_ROUTING_DECISION = "route.delegation.routing-decision"
 ROUTE_ID_QUALITY_GATE_RESULT = "route.delegation.quality-gate-result"
-
-# Consumer group IDs for intent bridge subscriptions
-_BRIDGE_ROUTING_GROUP = "local.delegation.bridge.routing-request.v1"
-_BRIDGE_INFERENCE_GROUP = "local.delegation.bridge.inference-request.v1"
-_BRIDGE_QUALITY_GATE_GROUP = "local.delegation.bridge.quality-gate-request.v1"
 
 
 class WiringResult(TypedDict):
@@ -83,7 +81,7 @@ async def wire_delegation_handlers(
 
 
 async def wire_delegation_bridge(
-    event_bus: ProtocolEventBus,
+    event_bus: ProtocolEventBusSubscriber,
     llm_caller: object | None = None,
 ) -> dict[str, list[str] | str]:
     """Subscribe DelegationIntentBridge to the three intermediate intent topics.
@@ -106,11 +104,14 @@ async def wire_delegation_bridge(
     """
     import json
 
+    from pydantic import BaseModel
+
     from omnibase_infra.event_bus.topic_constants import (
         TOPIC_DELEGATION_INFERENCE_REQUEST,
         TOPIC_DELEGATION_QUALITY_GATE_REQUEST,
         TOPIC_DELEGATION_ROUTING_REQUEST,
     )
+    from omnibase_infra.models import ModelNodeIdentity
     from omnibase_infra.nodes.node_delegation_orchestrator.delegation_intent_bridge import (
         DelegationIntentBridge,
     )
@@ -127,7 +128,9 @@ async def wire_delegation_bridge(
     bridge = DelegationIntentBridge(event_bus=event_bus, llm_caller=llm_caller)  # type: ignore[arg-type]
     subscribed_topics: list[str] = []
 
-    def _parse_envelope_payload(message: object, model_class: type) -> object | None:
+    def _parse_envelope_payload(
+        message: object, model_class: type[BaseModel]
+    ) -> BaseModel | None:
         """Extract and validate payload from a raw Kafka message."""
         try:
             if hasattr(message, "value") and message.value:
@@ -186,24 +189,31 @@ async def wire_delegation_bridge(
             )
 
     if hasattr(event_bus, "subscribe"):
+        _bridge_identity = ModelNodeIdentity(
+            env="onex",
+            service="omnibase-infra",
+            node_name="delegation-intent-bridge",
+            version="v1",
+        )
+
         await event_bus.subscribe(
             topic=TOPIC_DELEGATION_ROUTING_REQUEST,
+            node_identity=_bridge_identity,
             on_message=_on_routing_intent,
-            group_id=_BRIDGE_ROUTING_GROUP,
         )
         subscribed_topics.append(TOPIC_DELEGATION_ROUTING_REQUEST)
 
         await event_bus.subscribe(
             topic=TOPIC_DELEGATION_INFERENCE_REQUEST,
+            node_identity=_bridge_identity,
             on_message=_on_inference_intent,
-            group_id=_BRIDGE_INFERENCE_GROUP,
         )
         subscribed_topics.append(TOPIC_DELEGATION_INFERENCE_REQUEST)
 
         await event_bus.subscribe(
             topic=TOPIC_DELEGATION_QUALITY_GATE_REQUEST,
+            node_identity=_bridge_identity,
             on_message=_on_quality_gate_intent,
-            group_id=_BRIDGE_QUALITY_GATE_GROUP,
         )
         subscribed_topics.append(TOPIC_DELEGATION_QUALITY_GATE_REQUEST)
 
