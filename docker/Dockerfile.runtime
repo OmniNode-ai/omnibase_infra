@@ -181,6 +181,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "omninode-memory>=0.9.0,<2.0.0" \
     "omninode-intelligence>=0.15.0,<2.0.0"
 
+# Install omnibase_compat before omnimarket — omnimarket declares it as a
+# required dependency but we use --no-deps for the git install, so it must
+# be present first. Pinned to git main until PyPI publishing is automated.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --no-deps \
+    "git+https://github.com/OmniNode-ai/omnibase_compat.git@main#egg=omnibase-compat"
+
 # Install omnimarket from git main until PyPI releases are automated (OMN-7980).
 # Pinned to main so every image rebuild picks up the latest merged nodes.
 # Switch back to PyPI range pin once the auto-tag-on-merge release pipeline
