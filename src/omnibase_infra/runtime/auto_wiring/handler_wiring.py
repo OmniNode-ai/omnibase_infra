@@ -20,6 +20,7 @@ This module performs I/O (module imports, Kafka subscriptions) — it is NOT pur
 from __future__ import annotations
 
 import importlib
+import inspect
 import logging
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
@@ -301,6 +302,7 @@ async def _wire_single_contract(
                 contract=contract,
                 entry=entry,
                 dispatch_engine=dispatch_engine,
+                event_bus=event_bus,
             )
             dispatchers_registered.append(dispatcher_id)
             routes_registered.extend(route_ids)
@@ -345,6 +347,7 @@ def _wire_handler_entry(
     contract: ModelDiscoveredContract,
     entry: ModelHandlerRoutingEntry,
     dispatch_engine: object,
+    event_bus: object | None = None,
 ) -> tuple[str, list[str]]:
     """Import a handler, create callback, register dispatcher + routes.
 
@@ -361,9 +364,22 @@ def _wire_handler_entry(
     handler_ref = entry.handler
     handler_cls = _import_handler_class(handler_ref.module, handler_ref.name)
 
-    # Instantiate handler with zero-arg constructor.
-    # Handlers that require DI params will fail here — they need manual wiring.
-    handler_instance = handler_cls()
+    # Inject event_bus if the handler's __init__ declares it as a keyword parameter.
+    # Handlers that accept event_bus receive the runtime event bus so they can publish
+    # phase-transition events. All other handlers are constructed with zero args.
+    handler_instance: ProtocolHandleable
+    if (
+        event_bus is not None
+        and "event_bus" in inspect.signature(handler_cls).parameters
+    ):
+        handler_instance = handler_cls(event_bus=event_bus)
+        logger.debug(
+            "Auto-wired event_bus into %s.%s",
+            handler_ref.module,
+            handler_ref.name,
+        )
+    else:
+        handler_instance = handler_cls()
 
     callback = _make_dispatch_callback(handler_instance)
     dispatcher_id = _derive_dispatcher_id(contract.name, handler_ref.name)
