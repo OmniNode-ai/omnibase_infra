@@ -111,6 +111,17 @@ _INV4_WIRING_EXEMPTIONS: frozenset[tuple[str, str]] = frozenset(
             "src/omnibase_infra/nodes/node_scope_workflow_orchestrator/contract.yaml",
             "HandlerScopeManifestWriteComplete",
         ),
+        # OMN-7040: Delegation pipeline reducers use module-level delta() functions,
+        # not ONEX handler class protocol. They are invoked directly by the orchestrator,
+        # not through the handler registry. Exempted from class-based wiring check.
+        (
+            "src/omnibase_infra/nodes/node_delegation_quality_gate_reducer/contract.yaml",
+            "HandlerQualityGate",
+        ),
+        (
+            "src/omnibase_infra/nodes/node_delegation_routing_reducer/contract.yaml",
+            "HandlerDelegationRouting",
+        ),
     }
 )
 
