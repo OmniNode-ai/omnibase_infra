@@ -465,10 +465,11 @@ class MixinKafkaDlq:
                         ),
                         timeout=self._timeout_seconds,
                     )
-            except Exception:  # noqa: BLE001 — best-effort cross-publish
-                logger.debug(
-                    "DLQ aggregation cross-publish to %s failed (non-blocking)",
+            except Exception as exc:  # noqa: BLE001 — best-effort cross-publish
+                logger.warning(
+                    "DLQ aggregation cross-publish to %s failed (non-blocking): %s",
                     _agg_topic,
+                    exc,
                     exc_info=True,
                 )
 
