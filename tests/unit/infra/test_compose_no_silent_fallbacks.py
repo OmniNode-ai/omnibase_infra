@@ -26,6 +26,9 @@ ALLOWED_EMPTY_DEFAULTS = {
     # OMN-4316: OMNIMEMORY_* vars are intentionally opt-in (empty = disabled)
     "OMNIMEMORY_ENABLED",
     "OMNIMEMORY_DB_URL",
+    # Qdrant vector store: opt-in (empty = Qdrant not configured)
+    "QDRANT_HOST",
+    "QDRANT_API_KEY",
     # Infisical: opt-in config store; empty = fall back to env vars
     "INFISICAL_ADDR",
     "INFISICAL_CLIENT_ID",
