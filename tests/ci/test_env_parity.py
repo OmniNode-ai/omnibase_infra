@@ -92,6 +92,8 @@ SECRET_KEYS: frozenset[str] = frozenset(
         "ONEX_SERVICE_CLIENT_SECRET",
         # Linear API — injected via Infisical at runtime
         "LINEAR_API_KEY",
+        # Qdrant vector store API key — credential, sourced from Infisical
+        "QDRANT_API_KEY",
     }
 )
 
@@ -106,6 +108,8 @@ LOCAL_ONLY_KEYS: frozenset[str] = frozenset(
         "POSTGRES_USER",  # k8s uses Infisical-sourced DSN; local docker uses default "postgres"
         # Local filesystem paths — not meaningful in container images
         "OMNIBASE_INFRA_DIR",
+        # OmniMemory crawl path — local server path, has no k8s equivalent
+        "OMNIMEMORY_CRAWL_PATH_PREFIXES",
     }
 )
 
@@ -127,6 +131,9 @@ CONFIGMAP_DEBT_KEYS: frozenset[str] = frozenset(
         "OMNIMEMORY_DB_URL",
         "OMNIMEMORY_MEMGRAPH_HOST",
         "OMNIMEMORY_MEMGRAPH_PORT",
+        # Qdrant vector store connection — not yet in k8s ConfigMap (tracked: OMN-4307)
+        "QDRANT_HOST",
+        "QDRANT_PORT",
         "OMNICLAUDE_CONTRACTS_ROOT",  # container-internal path (OMN-5382: re-added for PluginClaude.wire_dispatchers)
         "OMNICLAUDE_SKILLS_ROOT",  # container-internal path — same as CONTRACTS_ROOT
         "ONEX_REGISTRATION_AUTO_ACK",
