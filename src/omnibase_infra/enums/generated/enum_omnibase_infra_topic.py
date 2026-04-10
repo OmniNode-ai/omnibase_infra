@@ -28,6 +28,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_LLM_COMPLETION_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-completion-request.v1"  # onex.cmd.omnibase-infra.llm-completion-request.v1
     CMD_LLM_EMBEDDING_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-embedding-request.v1"  # onex.cmd.omnibase-infra.llm-embedding-request.v1
     CMD_LLM_INFERENCE_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-inference-request.v1"  # onex.cmd.omnibase-infra.llm-inference-request.v1
+    CMD_ONBOARDING_START_V1 = "onex.cmd.omnibase-infra.onboarding-start.v1"  # onex.cmd.omnibase-infra.onboarding-start.v1
     CMD_VECTOR_STORE_REQUEST_V1 = "onex.cmd.omnibase-infra.vector-store-request.v1"  # onex.cmd.omnibase-infra.vector-store-request.v1
     EVT_BASELINES_COMPUTED_V1 = "onex.evt.omnibase-infra.baselines-computed.v1"  # onex.evt.omnibase-infra.baselines-computed.v1
     EVT_CHAIN_LEARN_COMPLETE_V1 = "onex.evt.omnibase-infra.chain-learn-complete.v1"  # onex.evt.omnibase-infra.chain-learn-complete.v1
@@ -46,6 +47,8 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_INFERENCE_RESPONSE_V1 = "onex.evt.omnibase-infra.inference-response.v1"  # onex.evt.omnibase-infra.inference-response.v1
     EVT_LLM_CALL_COMPLETED_V1 = "onex.evt.omnibase-infra.llm-call-completed.v1"  # onex.evt.omnibase-infra.llm-call-completed.v1
     EVT_LLM_COMPLETION_COMPLETED_V1 = "onex.evt.omnibase-infra.llm-completion-completed.v1"  # onex.evt.omnibase-infra.llm-completion-completed.v1
+    EVT_ONBOARDING_COMPLETED_V1 = "onex.evt.omnibase-infra.onboarding-completed.v1"  # onex.evt.omnibase-infra.onboarding-completed.v1
+    EVT_ONBOARDING_STEP_VERIFIED_V1 = "onex.evt.omnibase-infra.onboarding-step-verified.v1"  # onex.evt.omnibase-infra.onboarding-step-verified.v1
     EVT_QUALITY_GATE_RESULT_V1 = "onex.evt.omnibase-infra.quality-gate-result.v1"  # onex.evt.omnibase-infra.quality-gate-result.v1
     EVT_ROUTING_DECISION_V1 = "onex.evt.omnibase-infra.routing-decision.v1"  # onex.evt.omnibase-infra.routing-decision.v1
     EVT_ROW_COUNT_DIAGNOSTIC_V1 = "onex.evt.omnibase-infra.row-count-diagnostic.v1"  # onex.evt.omnibase-infra.row-count-diagnostic.v1

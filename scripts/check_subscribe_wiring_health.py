@@ -74,7 +74,7 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
 # is the goal.
 #
 # Format: "topic": "reason | owner | expiry"
-# Current baseline: 2026-04-02 (44 entries)
+# Current baseline: 2026-04-10 (45 entries)
 # Target: 0 entries
 # ---------------------------------------------------------------------------
 # fmt: off
@@ -151,6 +151,8 @@ _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
     "onex.evt.skill.scope-manifest-written.v1": "Scope manifest write effect pending | owner: jonah | expiry: 2026-09-01",
     # Gmail archive cleanup — runtime tick published by scheduler
     "onex.int.platform.runtime-tick.v1": "Published by runtime scheduler | owner: jonah | expiry: 2026-09-01",
+    # Onboarding — triggered by omniclaude /onboarding skill, not Kafka publisher
+    "onex.cmd.omnibase-infra.onboarding-start.v1": "Triggered by /onboarding skill via claude -p, not Kafka | owner: jonah | expiry: 2026-12-01",
 }
 # fmt: on
 

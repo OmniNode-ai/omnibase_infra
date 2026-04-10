@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Ticket: OMN-8272
+name: "node_onboarding_orchestrator"
+node_type: "ORCHESTRATOR_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Onboarding orchestrator — loads the canonical graph, resolves a policy to a minimal step set, executes verification for each step, and renders markdown output. Emits lifecycle events on completion. No result field (Invariant I5).
+
+input_model:
+  name: "ModelOnboardingInput"
+  module: "omnibase_infra.nodes.node_onboarding_orchestrator.models.model_onboarding_input"
+  description: "Target capabilities to achieve, optional steps to skip, and failure behavior flag."
+output_model:
+  name: "ModelOnboardingOutput"
+  module: "omnibase_infra.nodes.node_onboarding_orchestrator.models.model_onboarding_output"
+  description: "Step results, success flag, counts, and rendered markdown output."
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    - event_model:
+        name: "ModelOnboardingInput"
+        module: "omnibase_infra.nodes.node_onboarding_orchestrator.models.model_onboarding_input"
+      handler:
+        name: "handle_onboarding"
+        module: "omnibase_infra.nodes.node_onboarding_orchestrator.handlers.handler_onboarding"
+capabilities:
+  - "onboarding.orchestrate"
+  - "onboarding.policy.resolve"
+  - "onboarding.step.verify"
+  - "onboarding.output.render"
+event_bus:
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.onboarding-start.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.onboarding-completed.v1"
+    - "onex.evt.omnibase-infra.onboarding-step-verified.v1"
+metadata:
+  description: "Onboarding orchestrator that loads the canonical graph, resolves policy, executes verifications, and renders markdown output"
+  ticket: "OMN-8272"
