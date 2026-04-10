@@ -25,6 +25,7 @@ ALLOWED_EMPTY_DEFAULTS = {
     "ROLE_OMNINODE_PASSWORD",
     # OMN-4316: OMNIMEMORY_* vars are intentionally opt-in (empty = disabled)
     "OMNIMEMORY_ENABLED",
+    "OMNIMEMORY_MEMGRAPH_HOST",
     "OMNIMEMORY_DB_URL",
     # Qdrant vector store: opt-in (empty = Qdrant not configured)
     "QDRANT_HOST",
