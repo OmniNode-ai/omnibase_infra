@@ -183,13 +183,44 @@ class PluginLlm:
         self,
         config: ModelDomainPluginConfig,
     ) -> ModelDomainPluginResult:
-        """Register LLM adapter in container for handler injection."""
+        """Register LLM adapter and DelegationIntentBridge in the container."""
         from omnibase_infra.runtime.models import ModelDomainPluginResult
 
-        if self._router is not None and config.container is not None:
+        services: list[str] = ["AdapterModelRouter"]
+
+        event_bus = getattr(config, "event_bus", None)
+        if event_bus is not None and config.container is not None:
+            from omnibase_core.enums import EnumInjectionScope
+            from omnibase_infra.adapters.llm.adapter_llm_caller_delegation import (
+                LlmCallerDelegation,
+            )
+            from omnibase_infra.nodes.node_delegation_orchestrator.delegation_intent_bridge import (
+                DelegationIntentBridge,
+            )
+
+            bridge = DelegationIntentBridge(
+                event_bus=event_bus,
+                llm_caller=LlmCallerDelegation(),
+            )
+            if config.container.service_registry is not None:
+                await config.container.service_registry.register_instance(
+                    interface=DelegationIntentBridge,
+                    instance=bridge,
+                    scope=EnumInjectionScope.GLOBAL,
+                    metadata={
+                        "description": "Delegation intent bridge with local-model LLM caller",
+                    },
+                )
+            services.append("DelegationIntentBridge")
             logger.info(
-                "PluginLlm: AdapterModelRouter available for injection "
+                "PluginLlm: DelegationIntentBridge registered with LlmCallerDelegation "
                 "(correlation_id=%s)",
+                config.correlation_id,
+            )
+        else:
+            logger.debug(
+                "PluginLlm: skipping DelegationIntentBridge registration — "
+                "no event_bus or container (correlation_id=%s)",
                 config.correlation_id,
             )
 
@@ -197,7 +228,7 @@ class PluginLlm:
             plugin_id=self.plugin_id,
             success=True,
             message="LLM handlers wired",
-            services_registered=["AdapterModelRouter"],
+            services_registered=services,
         )
 
     async def wire_dispatchers(

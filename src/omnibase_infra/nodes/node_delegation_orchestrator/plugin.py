@@ -338,16 +338,43 @@ class PluginDelegation:
                 node_name="delegation-orchestrator",
             )
 
+            from omnibase_infra.nodes.node_delegation_orchestrator.delegation_intent_bridge import (
+                DelegationIntentBridge,
+            )
             from omnibase_infra.nodes.node_delegation_orchestrator.wiring import (
                 wire_delegation_bridge,
             )
 
+            # Resolve the bridge registered by PluginLlm (has real LlmCallerDelegation).
+            # Fall back to None so routing/quality-gate intents still work without LLM.
+            llm_caller = None
+            if config.container.service_registry is not None:
+                try:
+                    existing_bridge = (
+                        await config.container.service_registry.resolve_service(
+                            DelegationIntentBridge
+                        )
+                    )
+                    llm_caller = existing_bridge.llm_caller
+                    logger.info(
+                        "PluginDelegation: resolved LlmCallerDelegation from container "
+                        "(correlation_id=%s)",
+                        correlation_id,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.debug(
+                        "PluginDelegation: DelegationIntentBridge not in container — "
+                        "inference intents will be disabled (correlation_id=%s)",
+                        correlation_id,
+                    )
+
             bridge_result = await wire_delegation_bridge(
                 event_bus=config.event_bus,
-                llm_caller=None,
+                llm_caller=llm_caller,
             )
             logger.info(
-                "DelegationIntentBridge wired (correlation_id=%s): %s",
+                "DelegationIntentBridge wired llm_caller=%s (correlation_id=%s): %s",
+                type(llm_caller).__name__ if llm_caller else "None",
                 correlation_id,
                 bridge_result,
             )

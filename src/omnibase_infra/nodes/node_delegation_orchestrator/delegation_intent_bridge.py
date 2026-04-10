@@ -98,6 +98,11 @@ class DelegationIntentBridge:
         self._event_bus: ProtocolEventBusLike = event_bus
         self._llm_caller = llm_caller
 
+    @property
+    def llm_caller(self) -> ProtocolLlmCaller | None:
+        """The LLM caller wired into this bridge, or None if not configured."""
+        return self._llm_caller
+
     async def handle_routing_intent(
         self, intent: ModelRoutingIntent
     ) -> ModelRoutingDecision:
