@@ -489,6 +489,11 @@ TOPIC_DELEGATION_QUALITY_GATE_REQUEST: Final[str] = (
 )
 """Command topic for quality gate reducer invocation from the delegation orchestrator."""
 
+TOPIC_DELEGATION_INFERENCE_REQUEST: Final[str] = (
+    "onex.cmd.omnibase-infra.delegation-inference-request.v1"
+)
+"""Command topic for LLM inference invocation from the delegation orchestrator."""
+
 TOPIC_DELEGATION_INFERENCE_RESPONSE: Final[str] = (
     "onex.evt.omnibase-infra.inference-response.v1"
 )
@@ -505,6 +510,7 @@ TOPIC_DELEGATION_BASELINE_COMPARISON: Final[str] = (
 __all__ = [
     "TOPIC_DELEGATION_COMPLETED",
     "TOPIC_DELEGATION_FAILED",
+    "TOPIC_DELEGATION_INFERENCE_REQUEST",
     "TOPIC_DELEGATION_INFERENCE_RESPONSE",
     "TOPIC_DELEGATION_QUALITY_GATE_REQUEST",
     "TOPIC_DELEGATION_QUALITY_GATE_RESULT",

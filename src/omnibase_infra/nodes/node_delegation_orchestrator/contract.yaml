@@ -48,6 +48,31 @@ event_bus:
   publish_topics:
     - "onex.evt.omnibase-infra.delegation-completed.v1"
     - "onex.evt.omnibase-infra.delegation-failed.v1"
+    - "onex.cmd.omnibase-infra.delegation-routing-request.v1"
+    - "onex.cmd.omnibase-infra.delegation-inference-request.v1"
+    - "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1"
+    - "onex.evt.omnibase-infra.inference-response.v1"
+    - "onex.evt.omniclaude.task-delegated.v1"
+    - "onex.cmd.omnibase-infra.baseline-comparison-request.v1"
+published_events:
+  - event_type: "RoutingIntent"
+    topic: "onex.cmd.omnibase-infra.delegation-routing-request.v1"
+    description: "Intent emitted by orchestrator to invoke the routing reducer for a delegation request."
+  - event_type: "InferenceIntent"
+    topic: "onex.cmd.omnibase-infra.delegation-inference-request.v1"
+    description: "Intent emitted by orchestrator to invoke LLM inference via the inference effect."
+  - event_type: "QualityGateIntent"
+    topic: "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1"
+    description: "Intent emitted by orchestrator to invoke the quality gate reducer."
+  - event_type: "DelegationEvent"
+    topic: "onex.evt.omnibase-infra.delegation-completed.v1"
+    description: "Delegation pipeline terminal event (completed or failed, topic set per-instance)."
+  - event_type: "TaskDelegatedEvent"
+    topic: "onex.evt.omniclaude.task-delegated.v1"
+    description: "Backward-compatible task-delegated event for omnidash projection."
+  - event_type: "BaselineIntent"
+    topic: "onex.cmd.omnibase-infra.baseline-comparison-request.v1"
+    description: "Intent to trigger baseline cost comparison for savings tracking."
 fsm:
   states:
     - RECEIVED

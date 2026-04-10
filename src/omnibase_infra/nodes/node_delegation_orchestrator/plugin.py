@@ -338,6 +338,20 @@ class PluginDelegation:
                 node_name="delegation-orchestrator",
             )
 
+            from omnibase_infra.nodes.node_delegation_orchestrator.wiring import (
+                wire_delegation_bridge,
+            )
+
+            bridge_result = await wire_delegation_bridge(
+                event_bus=config.event_bus,
+                llm_caller=None,
+            )
+            logger.info(
+                "DelegationIntentBridge wired (correlation_id=%s): %s",
+                correlation_id,
+                bridge_result,
+            )
+
             self._wiring = wiring
 
             logger.info(

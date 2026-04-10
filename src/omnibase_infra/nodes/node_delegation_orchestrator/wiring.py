@@ -5,6 +5,11 @@
 Registers delegation handlers in the DI container and wires dispatchers
 into the MessageDispatchEngine for event-driven routing.
 
+Also starts the DelegationIntentBridge, which subscribes to the three
+intermediate intent topics (routing-request, inference-request,
+quality-gate-request) and executes them inline, publishing results
+back to the topics the orchestrator consumes next.
+
 Related:
     - OMN-7040: Node-based delegation pipeline
 """
@@ -29,6 +34,11 @@ ROUTE_ID_DELEGATION_REQUEST = "route.delegation.delegation-request"
 ROUTE_ID_ROUTING_DECISION = "route.delegation.routing-decision"
 ROUTE_ID_QUALITY_GATE_RESULT = "route.delegation.quality-gate-result"
 
+# Consumer group IDs for intent bridge subscriptions
+_BRIDGE_ROUTING_GROUP = "local.delegation.bridge.routing-request.v1"
+_BRIDGE_INFERENCE_GROUP = "local.delegation.bridge.inference-request.v1"
+_BRIDGE_QUALITY_GATE_GROUP = "local.delegation.bridge.quality-gate-request.v1"
+
 
 class WiringResult(TypedDict):
     services: list[str]
@@ -42,8 +52,6 @@ async def wire_delegation_handlers(
 
     Registers:
     - HandlerDelegationWorkflow (orchestrator FSM)
-    - HandlerDelegationRouting (routing reducer — pure function, stateless)
-    - HandlerQualityGate (quality gate reducer — pure function, stateless)
 
     Args:
         container: ONEX container instance to register services in.
@@ -54,16 +62,10 @@ async def wire_delegation_handlers(
     from omnibase_infra.nodes.node_delegation_orchestrator.handlers.handler_delegation_workflow import (
         HandlerDelegationWorkflow,
     )
-    from omnibase_infra.nodes.node_delegation_quality_gate_reducer.handlers.handler_quality_gate import (
-        delta as quality_gate_delta,
-    )
-    from omnibase_infra.nodes.node_delegation_routing_reducer.handlers.handler_delegation_routing import (
-        delta as routing_delta,
-    )
 
     services_registered: list[str] = []
 
-    # 1. HandlerDelegationWorkflow — stateful orchestrator FSM
+    # HandlerDelegationWorkflow — stateful orchestrator FSM
     workflow_handler = HandlerDelegationWorkflow()
     if container.service_registry is not None:
         await container.service_registry.register_instance(
@@ -78,6 +80,147 @@ async def wire_delegation_handlers(
     logger.debug("Registered HandlerDelegationWorkflow in container")
 
     return WiringResult(services=services_registered, status="success")
+
+
+async def wire_delegation_bridge(
+    event_bus: ProtocolEventBus,
+    llm_caller: object | None = None,
+) -> dict[str, list[str] | str]:
+    """Subscribe DelegationIntentBridge to the three intermediate intent topics.
+
+    The orchestrator emits ModelRoutingIntent, ModelInferenceIntent, and
+    ModelQualityGateIntent as output_events. These are published to their
+    respective Kafka topics (declared in published_events in contract.yaml).
+    The bridge subscribes to those topics, executes each intent inline
+    (calling the routing reducer, LLM inference effect, or quality gate
+    reducer), and publishes results back to the topics the orchestrator
+    subscribes to next.
+
+    Args:
+        event_bus: The Kafka/inmemory event bus to subscribe on.
+        llm_caller: Optional LLM caller implementing ProtocolLlmCaller.
+            If None, inference intents will raise RuntimeError.
+
+    Returns:
+        Summary dict with subscribed topics and status.
+    """
+    import json
+
+    from omnibase_infra.event_bus.topic_constants import (
+        TOPIC_DELEGATION_INFERENCE_REQUEST,
+        TOPIC_DELEGATION_QUALITY_GATE_REQUEST,
+        TOPIC_DELEGATION_ROUTING_REQUEST,
+    )
+    from omnibase_infra.nodes.node_delegation_orchestrator.delegation_intent_bridge import (
+        DelegationIntentBridge,
+    )
+    from omnibase_infra.nodes.node_delegation_orchestrator.models.model_inference_intent import (
+        ModelInferenceIntent,
+    )
+    from omnibase_infra.nodes.node_delegation_orchestrator.models.model_quality_gate_intent import (
+        ModelQualityGateIntent,
+    )
+    from omnibase_infra.nodes.node_delegation_orchestrator.models.model_routing_intent import (
+        ModelRoutingIntent,
+    )
+
+    bridge = DelegationIntentBridge(event_bus=event_bus, llm_caller=llm_caller)  # type: ignore[arg-type]
+    subscribed_topics: list[str] = []
+
+    def _parse_envelope_payload(message: object, model_class: type) -> object | None:
+        """Extract and validate payload from a raw Kafka message."""
+        try:
+            if hasattr(message, "value") and message.value:
+                raw = json.loads(message.value)
+            elif isinstance(message, dict):
+                raw = message
+            else:
+                return None
+            # Unwrap envelope if present
+            payload = raw.get("payload", raw)
+            return model_class.model_validate(payload)
+        except Exception:  # noqa: BLE001
+            return None
+
+    async def _on_routing_intent(message: object) -> None:
+        intent = _parse_envelope_payload(message, ModelRoutingIntent)
+        if intent is None:
+            logger.warning("DelegationIntentBridge: failed to parse ModelRoutingIntent")
+            return
+        try:
+            await bridge.handle_routing_intent(intent)  # type: ignore[arg-type]
+        except Exception as exc:
+            logger.exception(
+                "DelegationIntentBridge: routing intent failed: %s",
+                exc,
+            )
+
+    async def _on_inference_intent(message: object) -> None:
+        intent = _parse_envelope_payload(message, ModelInferenceIntent)
+        if intent is None:
+            logger.warning(
+                "DelegationIntentBridge: failed to parse ModelInferenceIntent"
+            )
+            return
+        try:
+            await bridge.handle_inference_intent(intent)  # type: ignore[arg-type]
+        except Exception as exc:
+            logger.exception(
+                "DelegationIntentBridge: inference intent failed: %s",
+                exc,
+            )
+
+    async def _on_quality_gate_intent(message: object) -> None:
+        intent = _parse_envelope_payload(message, ModelQualityGateIntent)
+        if intent is None:
+            logger.warning(
+                "DelegationIntentBridge: failed to parse ModelQualityGateIntent"
+            )
+            return
+        try:
+            await bridge.handle_quality_gate_intent(intent)  # type: ignore[arg-type]
+        except Exception as exc:
+            logger.exception(
+                "DelegationIntentBridge: quality gate intent failed: %s",
+                exc,
+            )
+
+    if hasattr(event_bus, "subscribe"):
+        await event_bus.subscribe(
+            topic=TOPIC_DELEGATION_ROUTING_REQUEST,
+            on_message=_on_routing_intent,
+            group_id=_BRIDGE_ROUTING_GROUP,
+        )
+        subscribed_topics.append(TOPIC_DELEGATION_ROUTING_REQUEST)
+
+        await event_bus.subscribe(
+            topic=TOPIC_DELEGATION_INFERENCE_REQUEST,
+            on_message=_on_inference_intent,
+            group_id=_BRIDGE_INFERENCE_GROUP,
+        )
+        subscribed_topics.append(TOPIC_DELEGATION_INFERENCE_REQUEST)
+
+        await event_bus.subscribe(
+            topic=TOPIC_DELEGATION_QUALITY_GATE_REQUEST,
+            on_message=_on_quality_gate_intent,
+            group_id=_BRIDGE_QUALITY_GATE_GROUP,
+        )
+        subscribed_topics.append(TOPIC_DELEGATION_QUALITY_GATE_REQUEST)
+
+        logger.info(
+            "DelegationIntentBridge subscribed to %d intent topics: %s",
+            len(subscribed_topics),
+            subscribed_topics,
+        )
+    else:
+        logger.warning(
+            "DelegationIntentBridge: event_bus has no subscribe() — bridge not wired"
+        )
+
+    return {
+        "bridge_topics": subscribed_topics,
+        "status": "success" if subscribed_topics else "skipped",
+    }
 
 
 async def wire_delegation_dispatchers(
