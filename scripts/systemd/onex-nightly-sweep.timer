@@ -1,0 +1,12 @@
+[Unit]
+Description=ONEX Nightly Sweep — daily 03:00 trigger
+Documentation=https://github.com/OmniNode-ai/omnibase_infra/blob/main/systemd/onex-nightly-sweep.timer
+Requires=onex-nightly-sweep.service
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+Unit=onex-nightly-sweep.service
+
+[Install]
+WantedBy=timers.target

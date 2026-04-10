@@ -50,6 +50,27 @@ logger = logging.getLogger(__name__)
 # Receives a dict with routing decision fields. Must be non-blocking.
 RoutingEventCallback = Callable[[dict[str, object]], Awaitable[None]]
 
+# Provider names registered via LLM_*_URL env vars that map to the local tier.
+# Keys are the friendly provider name (LLM_CODER_URL → "coder").
+_LOCAL_TIER_PROVIDERS: frozenset[str] = frozenset(
+    {"coder", "coder_fast", "deepseek_r1", "embedding", "small"}
+)
+# Providers that route to cheap cloud APIs (GLM, OpenRouter, etc.)
+_CLOUD_CHEAP_TIER_PROVIDERS: frozenset[str] = frozenset({"glm", "openrouter"})
+
+
+def _provider_to_tier(provider_name: str) -> str:
+    """Map a friendly provider name to its delegation tier.
+
+    Returns one of: "local", "cheap_cloud", "claude".
+    Used for enriching routing-decided events with tier visibility.
+    """
+    if provider_name in _LOCAL_TIER_PROVIDERS:
+        return "local"
+    if provider_name in _CLOUD_CHEAP_TIER_PROVIDERS:
+        return "cheap_cloud"
+    return "claude"
+
 
 class AdapterModelRouter:
     """ProtocolModelRouter implementation with multi-provider routing.
@@ -347,6 +368,7 @@ class AdapterModelRouter:
                 "correlation_id": getattr(request, "correlation_id", None) or "",
                 "session_id": getattr(request, "session_id", None),
                 "selected_provider": selected_provider,
+                "selected_tier": _provider_to_tier(selected_provider),
                 "selected_model": getattr(request, "model", None) or "",
                 "reason": "fallback" if is_fallback else "round_robin",
                 "selection_mode": selection_mode,

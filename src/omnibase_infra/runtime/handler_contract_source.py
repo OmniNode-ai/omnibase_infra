@@ -678,20 +678,7 @@ class HandlerContractSource(ProtocolContractSource):
         # Validate against ModelHandlerContract
         contract = ModelHandlerContract.model_validate(validation_data)
 
-        # TODO(OMN-1420): Extract handler_class from ModelHandlerContract
-        #
-        # handler_contract.yaml files include a `handler_class` field for dynamic import
-        # (e.g., "omnibase_infra.handlers.handler_consul.HandlerConsul"), but
-        # ModelHandlerContract from omnibase_core does not have this field yet.
-        #
-        # Once ModelHandlerContract is updated to include handler_class, this code
-        # should be changed from:
-        #     handler_class=raw_data.get("handler_class")
-        # to:
-        #     handler_class=contract.handler_class
-        #
-        # For now, extract directly from raw YAML data to support dynamic handler loading.
-        # See: https://linear.app/omninode/issue/OMN-1420
+        # Extract handler_class from raw YAML data for dynamic handler loading.
         handler_class = (
             raw_data.get("handler_class") if isinstance(raw_data, dict) else None
         )

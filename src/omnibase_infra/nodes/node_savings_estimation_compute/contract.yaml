@@ -17,11 +17,11 @@ contract_name: "node_savings_estimation_compute"
 node_name: "node_savings_estimation_compute"
 contract_version:
   major: 0
-  minor: 2
+  minor: 3
   patch: 0
 node_version:
   major: 0
-  minor: 2
+  minor: 3
   patch: 0
 node_type: "COMPUTE_GENERIC"
 description: >
@@ -49,12 +49,23 @@ handler_routing:
         name: "ModelSavingsEstimationInput"
         module: "omnibase_infra.nodes.node_savings_estimation_compute.models"
         description: "Injection effectiveness data for savings computation."
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.evt.omniclaude.session-ended.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.savings-estimated.v1"
 topics:
   produces:
     - topic: "onex.evt.omnibase-infra.savings-estimated.v1"
       description: "Token savings estimation events"
       schema: "ModelSavingsEstimate"
-  consumes: []
+  consumes:
+    - topic: "onex.evt.omniclaude.session-ended.v1"
+      description: "Session ended events that trigger savings estimation computation"
 error_handling:
   retry_policy:
     max_retries: 0

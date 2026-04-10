@@ -61,9 +61,9 @@ from omnibase_infra.nodes.node_registration_orchestrator.node import (
     NodeRegistrationOrchestrator,
 )
 
-# Domain plugin (OMN-1346) - kernel initialization plugin
+# Kernel-native registration service (OMN-7115) — wired directly by the kernel
 from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
-    PluginRegistration,
+    ServiceRegistration,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.timeout_coordinator import (
     ModelTimeoutCoordinationResult,
@@ -97,8 +97,8 @@ __all__: list[str] = [
     "ModelTimeoutCoordinationResult",
     # Primary export - the declarative orchestrator
     "NodeRegistrationOrchestrator",
-    # Domain plugin (OMN-1346)
-    "PluginRegistration",
+    # Kernel-native registration service (OMN-7115)
+    "ServiceRegistration",
     # Route ID constants (OMN-1346)
     "ROUTE_ID_NODE_INTROSPECTION",
     "ROUTE_ID_NODE_REGISTRATION_ACKED",

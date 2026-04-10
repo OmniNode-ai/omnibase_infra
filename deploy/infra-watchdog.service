@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# infra-watchdog.service — ONEX infra stack watchdog (one-shot)
+#
+# Checks if core infra containers (postgres, redpanda, valkey) are running.
+# Triggered every 5 minutes by infra-watchdog.timer.
+#
+# Install on .201:
+#   sudo cp deploy/infra-watchdog.service /etc/systemd/system/
+#   sudo cp deploy/infra-watchdog.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now infra-watchdog.timer
+#   sudo systemctl status infra-watchdog.timer
+
+[Unit]
+Description=ONEX Infra Stack Watchdog
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=jonah
+Group=jonah
+
+# Absolute path to the watchdog script (must match the cloned repo location on .201)
+ExecStart=/home/jonah/Code/omni_home/omnibase_infra/scripts/infra-watchdog.sh
+
+Environment="OMNI_HOME=/home/jonah/Code/omni_home"
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+
+# Ensure log dir exists before the script runs
+# Use a user-writable path — /var/log is root-owned and mkdir would fail
+ExecStartPre=/bin/mkdir -p /home/jonah/.local/log/onex
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=infra-watchdog
+
+# Do not restart on failure — the timer will retry in 5 minutes anyway
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

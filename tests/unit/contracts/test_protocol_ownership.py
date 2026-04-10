@@ -73,6 +73,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolPostgresAdapter": "nodes/node_registry_effect/protocols/protocol_postgres_adapter.py",
     "ProtocolToolExecutor": "handlers/mcp/protocols.py",
     "ProtocolLlmHandler": "nodes/node_llm_inference_effect/services/protocol_llm_handler.py",
+    "ProtocolLlmCaller": "nodes/node_delegation_orchestrator/delegation_intent_bridge.py",
     "ProtocolContractPublisherSource": "services/contract_publisher/sources/protocol.py",
     "ProtocolInjectionEffectivenessReader": "services/observability/injection_effectiveness/protocol_reader.py",
     "ProtocolTopicCatalogService": "services/protocol_topic_catalog_service.py",
@@ -114,6 +115,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolRuntimeScheduler": "runtime/protocols/protocol_runtime_scheduler.py",
     "ProtocolSecretResolver": "runtime/config_discovery/models/protocol_secret_resolver.py",
     "ProtocolSecretResolverMetrics": "runtime/secret_resolver.py",
+    "ProtocolHandleable": "runtime/auto_wiring/handler_wiring.py",  # [RUNTIME] OMN-7656 auto-wiring dispatch
     # === [OBS] Observability protocols ===
     "ProtocolEmissionCountSource": "observability/wiring_health/protocol_emission_count_source.py",
     "ProtocolConsumptionCountSource": "observability/wiring_health/protocol_consumption_count_source.py",

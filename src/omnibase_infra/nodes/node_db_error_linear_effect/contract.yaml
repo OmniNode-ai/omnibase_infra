@@ -11,7 +11,7 @@
 #
 # Kafka Subscription Wiring:
 #   The runtime reads event_bus.subscribe_topics to wire Kafka subscriptions
-#   via EventBusSubcontractWiring (see PluginRegistration.start_consumers).
+#   via EventBusSubcontractWiring (see ServiceRegistration.start_consumers).
 #   Any ProtocolDomainPlugin that calls load_event_bus_subcontract on this
 #   contract will subscribe to TOPIC_DB_ERROR_V1 and route messages through
 #   the MessageDispatchEngine to HandlerLinearDbErrorReporter.
@@ -41,7 +41,7 @@ description: >
 # EVENT BUS SUBSCRIPTION (Kafka topic wiring)
 # =============================================================================
 # The runtime reads subscribe_topics to wire consumer subscriptions via
-# EventBusSubcontractWiring (PluginRegistration.start_consumers pattern).
+# EventBusSubcontractWiring (ServiceRegistration.start_consumers pattern).
 # Adding TOPIC_DB_ERROR_V1 here is the complete and only wiring required.
 # =============================================================================
 event_bus:

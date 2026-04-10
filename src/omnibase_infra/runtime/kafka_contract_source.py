@@ -194,7 +194,6 @@ class ContractYamlParser:  # ai-slop-ok: pre-existing
         # Extract handler_class from metadata section
         # NOTE: handler_class must be in metadata per ModelHandlerContract schema
         # (root-level extra fields are forbidden by Pydantic extra='forbid')
-        # TODO(OMN-1420): Use contract.handler_class once available in schema
         handler_class = None
         if isinstance(contract_data, dict):
             metadata = contract_data.get("metadata", {})

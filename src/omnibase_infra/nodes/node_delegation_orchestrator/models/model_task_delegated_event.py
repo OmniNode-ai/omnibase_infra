@@ -34,6 +34,10 @@ class ModelTaskDelegatedEvent(BaseModel):
     session_id: UUID | None = Field(default=None, description="Source session ID.")
     task_type: str = Field(..., description="Task classification.")
     delegated_to: str = Field(..., description="Model/endpoint that handled the task.")
+    model_name: str = Field(
+        default="",
+        description="LLM model name from the routing decision (e.g. Qwen3-Coder-14B).",
+    )
     delegated_by: str = Field(
         default="delegation-pipeline",
         description="Source of the delegation.",
@@ -59,6 +63,10 @@ class ModelTaskDelegatedEvent(BaseModel):
         default=0, description="End-to-end delegation latency in ms."
     )
     is_shadow: bool = Field(default=False, description="Whether this was a shadow run.")
+    llm_call_id: str = Field(
+        default="",
+        description="Upstream LLM call ID for JOIN with llm_cost_aggregates.",
+    )
 
 
 __all__: list[str] = ["ModelTaskDelegatedEvent"]

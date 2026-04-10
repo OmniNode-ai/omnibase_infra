@@ -13,7 +13,7 @@ Activation:
 
 Lifecycle:
     1. should_activate() — checks for any LLM_*_URL env var
-    2. initialize() — creates AdapterModelRouter, registers configured providers
+    2. initialize() — creates AdapterModelRouter with routing-decided callback
     3. wire_handlers() — registers router in container for handler injection
     4. wire_dispatchers() — no-op (no dispatch routes)
     5. start_consumers() — starts ServiceLlmEndpointHealth probe loop
@@ -22,6 +22,7 @@ Lifecycle:
 Related:
     - OMN-6600: Create LLM domain plugin for service_kernel
     - OMN-2319: SPI LLM protocol adapters
+    - OMN-8023: Wire routing-decided callback so routing decisions table populates
 """
 
 from __future__ import annotations
@@ -29,21 +30,58 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.adapters.llm.adapter_model_router import AdapterModelRouter
 from omnibase_infra.services.service_llm_endpoint_health import (
     ModelLlmEndpointHealthConfig,
     ServiceLlmEndpointHealth,
 )
+from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 
 if TYPE_CHECKING:
+    from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
     from omnibase_infra.runtime.models import (
         ModelDomainPluginConfig,
         ModelDomainPluginResult,
     )
 
 logger = logging.getLogger(__name__)
+
+
+def _make_routing_decided_callback(
+    event_bus: ProtocolEventBusLike,
+) -> Callable[[dict[str, object]], Awaitable[None]]:
+    """Return an async callback that emits routing-decided events to Kafka.
+
+    The callback is bound to the provided event_bus and the resolved
+    ROUTING_DECIDED topic.  Failures are logged at warning level and
+    dropped — routing events are best-effort observability.
+    """
+    topic_registry = ServiceTopicRegistry.from_defaults()
+    routing_topic = topic_registry.resolve(topic_keys.ROUTING_DECIDED)
+
+    async def _on_routing_decided(event: dict[str, object]) -> None:
+        envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+            payload=event,
+            correlation_id=str(event.get("correlation_id") or ""),
+            event_type="routing-decided",
+            source_tool="AdapterModelRouter",
+        )
+        try:
+            await event_bus.publish_envelope(envelope=envelope, topic=routing_topic)
+        except Exception:  # noqa: BLE001 — best-effort; must not crash the router
+            logger.warning(
+                "PluginLlm: failed to publish routing-decided event to %s",
+                routing_topic,
+                exc_info=True,
+            )
+
+    return _on_routing_decided
+
 
 # Environment variable prefixes checked for activation
 _LLM_URL_ENV_VARS: tuple[str, ...] = (
@@ -52,6 +90,8 @@ _LLM_URL_ENV_VARS: tuple[str, ...] = (
     "LLM_EMBEDDING_URL",
     "LLM_DEEPSEEK_R1_URL",
     "LLM_SMALL_URL",
+    "LLM_GLM_URL",
+    "LLM_OPENROUTER_URL",
 )
 
 
@@ -105,10 +145,25 @@ class PluginLlm:
         self,
         config: ModelDomainPluginConfig,
     ) -> ModelDomainPluginResult:
-        """Create AdapterModelRouter with configured endpoints."""
+        """Create AdapterModelRouter with configured endpoints and routing callback."""
         from omnibase_infra.runtime.models import ModelDomainPluginResult
 
-        self._router = AdapterModelRouter()
+        event_bus = getattr(config, "event_bus", None)
+        on_routing_decided = None
+        if event_bus is not None:
+            on_routing_decided = _make_routing_decided_callback(event_bus)
+            logger.info(
+                "PluginLlm: routing-decided callback wired to event_bus (correlation_id=%s)",
+                config.correlation_id,
+            )
+        else:
+            logger.debug(
+                "PluginLlm: no event_bus available, routing-decided callback skipped "
+                "(correlation_id=%s)",
+                config.correlation_id,
+            )
+
+        self._router = AdapterModelRouter(on_routing_decided=on_routing_decided)
 
         logger.info(
             "PluginLlm: initialized AdapterModelRouter with %d endpoint(s) "

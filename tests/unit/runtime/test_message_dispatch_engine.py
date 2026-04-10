@@ -957,7 +957,7 @@ class TestDispatchErrors:
         assert "projections" in result.error_message.lower()
 
     @pytest.mark.skip(
-        reason="TODO(OMN-934): Re-enable when ModelEventEnvelope.infer_category() is implemented in omnibase_core"
+        reason="Requires ModelEventEnvelope.infer_category() in omnibase_core"
     )
     @pytest.mark.asyncio
     async def test_dispatch_category_mismatch_returns_invalid_message(
@@ -1369,7 +1369,7 @@ class TestMetrics:
         assert metrics.no_dispatcher_count == 1
 
     @pytest.mark.skip(
-        reason="TODO(OMN-934): Re-enable when ModelEventEnvelope.infer_category() is implemented in omnibase_core"
+        reason="Requires ModelEventEnvelope.infer_category() in omnibase_core"
     )
     @pytest.mark.asyncio
     async def test_metrics_updated_on_category_mismatch(

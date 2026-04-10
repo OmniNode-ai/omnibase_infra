@@ -1,0 +1,12 @@
+[Unit]
+Description=ONEX Build Loop — daily 02:00 trigger
+Documentation=https://github.com/OmniNode-ai/omnibase_infra/blob/main/systemd/onex-build-loop.timer
+Requires=onex-build-loop.service
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+Unit=onex-build-loop.service
+
+[Install]
+WantedBy=timers.target

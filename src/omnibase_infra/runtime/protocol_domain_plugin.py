@@ -463,12 +463,12 @@ class RegistryDomainPlugin:
             RegistryDomainPlugin,
         )
         from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
-            PluginRegistration,
+            ServiceRegistration,
         )
 
         # 1. Register first-party plugins explicitly
         registry = RegistryDomainPlugin()
-        registry.register(PluginRegistration())
+        registry.register(ServiceRegistration())
 
         # 2. Discover third-party plugins from entry_points
         report = registry.discover_from_entry_points()

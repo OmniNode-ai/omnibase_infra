@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Registration domain plugin for kernel-level initialization.
 
-PluginRegistration implements ProtocolDomainPlugin for the Registration
+ServiceRegistration implements ProtocolDomainPlugin for the Registration
 domain, encapsulating all Registration-specific initialization code
 that was previously embedded in kernel.py.
 
@@ -26,7 +26,7 @@ Configuration:
 Example Usage:
     ```python
     from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
-        PluginRegistration,
+        ServiceRegistration,
     )
     from omnibase_infra.runtime.protocol_domain_plugin import (
         ModelDomainPluginConfig,
@@ -35,7 +35,7 @@ Example Usage:
 
     # Register plugin
     registry = RegistryDomainPlugin()
-    registry.register(PluginRegistration())
+    registry.register(ServiceRegistration())
 
     # During kernel bootstrap
     config = ModelDomainPluginConfig(container=container, event_bus=event_bus, ...)
@@ -198,7 +198,7 @@ def _get_default_projector_contracts_dir() -> Path:
 PROJECTOR_CONTRACTS_DEFAULT_DIR = _get_default_projector_contracts_dir()
 
 
-class PluginRegistration:
+class ServiceRegistration:
     """Registration domain plugin for kernel initialization.
 
     This plugin encapsulates all Registration-specific initialization that was
@@ -1645,9 +1645,9 @@ class PluginRegistration:
 # Verify protocol compliance at type-check time (mypy/pyright).
 # No runtime instantiation needed — avoids side-effects at import time.
 if TYPE_CHECKING:
-    _: ProtocolDomainPlugin = PluginRegistration()
+    _: ProtocolDomainPlugin = ServiceRegistration()
 
 __all__: list[str] = [
     "PROJECTOR_CONTRACTS_DEFAULT_DIR",
-    "PluginRegistration",
+    "ServiceRegistration",
 ]

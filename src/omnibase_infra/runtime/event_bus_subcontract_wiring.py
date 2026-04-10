@@ -724,9 +724,30 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
             envelope: ModelEventEnvelope[object] | None = None
             correlation_id: UUID = uuid4()  # Default if not in envelope
 
+            self._logger.info(
+                "[WIRING-CALLBACK] Message received on topic=%s, "
+                "consumer_group=%s, node=%s, "
+                "message_value_len=%d",
+                topic,
+                consumer_group,
+                self._node_name,
+                len(message.value) if message.value else 0,
+            )
+
             try:
                 envelope = self._deserialize_to_envelope(message, topic)
                 correlation_id = envelope.correlation_id or uuid4()
+
+                self._logger.info(
+                    "[WIRING-CALLBACK] Deserialized envelope: "
+                    "correlation_id=%s, event_type=%s, "
+                    "payload_type=%s, topic=%s, node=%s",
+                    correlation_id,
+                    getattr(envelope, "event_type", "none"),
+                    type(envelope.payload).__name__ if envelope.payload else "None",
+                    topic,
+                    self._node_name,
+                )
 
                 # Idempotency gate: check for duplicate messages
                 if self._idempotency_store and self._idempotency_config.enabled:
@@ -765,7 +786,22 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                         return  # Skip dispatch
 
                 # Dispatch via ProtocolDispatchEngine interface
+                self._logger.info(
+                    "[WIRING-CALLBACK] Dispatching to engine: topic=%s, "
+                    "correlation_id=%s, node=%s",
+                    topic,
+                    correlation_id,
+                    self._node_name,
+                )
                 result = await self._dispatch_engine.dispatch(topic, envelope)
+                self._logger.info(
+                    "[WIRING-CALLBACK] Dispatch complete: topic=%s, "
+                    "correlation_id=%s, result_type=%s, node=%s",
+                    topic,
+                    correlation_id,
+                    type(result).__name__ if result else "None",
+                    self._node_name,
+                )
 
                 # Apply dispatch result (publish output events + delegate intents)
                 if self._result_applier is not None and result is not None:

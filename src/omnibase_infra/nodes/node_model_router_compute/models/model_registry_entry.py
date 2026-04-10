@@ -14,7 +14,7 @@ class ModelRegistryEntry(BaseModel):
 
     model_key: str = Field(..., description="Unique model identifier.")
     provider: str = Field(..., description="Provider: local, anthropic, qwen, zhipu.")
-    transport: str = Field(..., description="Transport: http or sdk.")
+    transport: str = Field(..., description="Transport: http, sdk, or oauth.")
     base_url_env: str = Field(
         default="",
         description="Env var name for base URL (http transport).",
@@ -34,3 +34,7 @@ class ModelRegistryEntry(BaseModel):
         default=0.0, description="Bootstrap throughput estimate."
     )
     tier: str = Field(default="local", description="Tier: local or frontier_api.")
+    concurrency_limit: int | None = Field(
+        default=None,
+        description="Max concurrent requests to this model. None means unlimited.",
+    )

@@ -85,15 +85,15 @@ def _make_routing_decision(
     return ModelRoutingDecision(
         correlation_id=correlation_id,
         task_type=task_type,
-        selected_model="Qwen3-Coder-30B-A3B",
+        selected_model="qwen3-coder-30b",
         selected_backend_id=uuid5(
-            NAMESPACE_DNS, "omninode.ai/backends/Qwen3-Coder-30B-A3B"
+            NAMESPACE_DNS, "omninode.ai/backends/qwen3-coder-30b"
         ),
         endpoint_url="http://192.168.86.201:8000",
         cost_tier="low",
         max_context_tokens=65536,
         system_prompt="You are a test generation assistant.",
-        rationale="Task 'test' routed to Qwen3-Coder-30B-A3B.",
+        rationale="Task 'test' routed to qwen3-coder-30b.",
     )
 
 
@@ -105,11 +105,13 @@ def _make_inference_response(
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
     total_tokens: int = 0,
+    llm_call_id: str = "",
 ) -> ModelInferenceResponseData:
     return ModelInferenceResponseData(
         correlation_id=correlation_id,
         content=content,
         model_used=model_used,
+        llm_call_id=llm_call_id,
         latency_ms=latency_ms,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
@@ -171,6 +173,7 @@ class TestHappyPath:
             prompt_tokens=100,
             completion_tokens=50,
             total_tokens=150,
+            llm_call_id="chatcmpl-abc123",
         )
         intents = handler.handle_inference_response(response)
         assert len(intents) == 1
@@ -218,6 +221,7 @@ class TestHappyPath:
         assert isinstance(intents[2], ModelTaskDelegatedEvent)
         assert intents[2].correlation_id == cid
         assert intents[2].quality_gate_passed is True
+        assert intents[2].llm_call_id == "chatcmpl-abc123"
 
     def test_completed_result_has_positive_latency(self) -> None:
         handler = HandlerDelegationWorkflow()

@@ -95,9 +95,6 @@ from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.health.model_llm_endpoint_health_config import (
     ModelLlmEndpointHealthConfig,
 )
-from omnibase_infra.nodes.node_autonomous_loop_orchestrator.plugin import (
-    PluginBuildLoop,
-)
 from omnibase_infra.nodes.node_contract_registry_reducer.contract_registration_event_router import (
     ContractRegistrationEventRouter,
     ProtocolIntentEffect,
@@ -109,7 +106,7 @@ from omnibase_infra.nodes.node_delegation_orchestrator.plugin import (
     PluginDelegation,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
-    PluginRegistration,
+    ServiceRegistration,
 )
 from omnibase_infra.observability.runtime_log_event_bridge import RuntimeLogEventBridge
 from omnibase_infra.observability.wiring_health.wiring_health_checker import (
@@ -575,6 +572,22 @@ def load_runtime_config(
     return config
 
 
+def _topic_matches_pattern(topic: str, pattern: str) -> bool:
+    """Check if a topic string matches a wildcard topic pattern.
+
+    Supports ``*`` as a single-segment wildcard in ONEX topic patterns.
+    Example: ``*.evt.platform.node-introspection.*`` matches
+    ``onex.evt.platform.node-introspection.v1``.
+    """
+    topic_parts = topic.split(".")
+    pattern_parts = pattern.split(".")
+    if len(topic_parts) != len(pattern_parts):
+        return False
+    return all(
+        pp == "*" or pp == tp for tp, pp in zip(topic_parts, pattern_parts, strict=True)
+    )
+
+
 # ai-slop-ok: pre-existing === separators in example startup log in docstring
 async def bootstrap() -> int:
     """Bootstrap the ONEX runtime from contracts.
@@ -653,7 +666,7 @@ async def bootstrap() -> int:
     health_server: ServiceHealth | None = None
     # Plugin system owns resource lifecycle (pools, publishers, dispatchers)
     plugin_registry: RegistryDomainPlugin | None = None
-    registration_plugin: PluginRegistration | None = None
+    registration_service: ServiceRegistration | None = None
     activated_plugins: list[ProtocolDomainPlugin] = []
     # ready_plugins tracks plugins that completed handler wiring successfully.
     # Only these plugins should have consumers started in Pass 2. Plugins in
@@ -1056,6 +1069,41 @@ async def bootstrap() -> int:
                     correlation_id=correlation_id,
                 )
                 if not validation_result.is_valid:
+                    # OMN-7810: Auto-create missing topics before failing strict
+                    # validation. This handles topics that were added to the
+                    # provisioning registry but not yet created on the broker
+                    # (e.g. first startup after adding new topic suffixes).
+                    try:
+                        from omnibase_infra.event_bus.service_topic_manager import (
+                            TopicProvisioner as _AutoCreateProvisioner,
+                        )
+
+                        _auto_contracts_root = _get_contracts_dir()
+                        _auto_provisioner = _AutoCreateProvisioner(
+                            bootstrap_servers=kafka_bootstrap_servers,
+                            contracts_root=_auto_contracts_root,
+                        )
+                        _auto_result = (
+                            await _auto_provisioner.ensure_provisioned_topics_exist(
+                                correlation_id=correlation_id,
+                            )
+                        )
+                        if _auto_result["created"]:
+                            logger.info(
+                                "Auto-created %d missing topics after validation: %s "
+                                "(correlation_id=%s)",
+                                len(_auto_result["created"]),
+                                _auto_result["created"],
+                                correlation_id,
+                            )
+                    except Exception:  # noqa: BLE001
+                        logger.warning(
+                            "Auto-create missing topics failed (best-effort) "
+                            "(correlation_id=%s)",
+                            correlation_id,
+                            exc_info=True,
+                        )
+
                     if os.environ.get("STARTUP_VALIDATION_STRICT") == "1":
                         raise RuntimeError(
                             f"Missing topics: {validation_result.missing_topics}"
@@ -1490,24 +1538,18 @@ async def bootstrap() -> int:
 
         # 4.5. Activate domain plugins via RegistryDomainPlugin (OMN-1992)
         #
-        # The plugin system replaces inline wiring of registration infrastructure.
-        # Each domain plugin encapsulates its own resource creation, handler wiring,
-        # dispatcher setup, and consumer startup. The kernel iterates registered
-        # plugins and calls the standard lifecycle:
-        #   should_activate() -> initialize() -> wire_handlers() ->
-        #   wire_dispatchers() -> start_consumers()
-        #
-        # Plugins are shut down in LIFO order during kernel shutdown.
+        # ServiceRegistration is kernel-native (OMN-7115): wired directly by
+        # the kernel, NOT through the plugin registry. It manages node
+        # introspection, heartbeats, and registration state — kernel-internal
+        # concerns that are always present.
         plugin_registry = RegistryDomainPlugin()
-        registration_plugin = PluginRegistration()
-        plugin_registry.register(registration_plugin)
+        registration_service = ServiceRegistration()
 
         # Register lightweight plugins BEFORE heavy ones. Plugin registration
         # order determines Pass 2 (start_consumers) order. PluginDelegation (3
-        # topics) and PluginBuildLoop (1 topic) subscribe in seconds, while
-        # PluginIntelligence (46 topics) takes ~12 minutes. If Intelligence
-        # goes first, later plugins never get their consumers started before
-        # the runtime is restarted or killed.
+        # topics) subscribes in seconds, while PluginIntelligence (46 topics)
+        # takes ~12 minutes. If Intelligence goes first, later plugins never
+        # get their consumers started before the runtime is restarted or killed.
 
         # Try to register PluginDelegation (OMN-7040: delegation pipeline).
         try:
@@ -1524,16 +1566,19 @@ async def bootstrap() -> int:
                 exc_info=True,
             )
 
-        # Try to register PluginBuildLoop (OMN-5113: autonomous build loop).
+        # Try to register PluginEmitDaemon (OMN-7640: portable event publisher).
+        # Gated by ONEX_EMIT_DAEMON_ENABLED=true (default false).
         try:
-            plugin_registry.register(PluginBuildLoop())
+            from omnibase_infra.plugins.plugin_emit_daemon import PluginEmitDaemon
+
+            plugin_registry.register(PluginEmitDaemon())
             logger.info(
-                "PluginBuildLoop registered (correlation_id=%s)",
+                "PluginEmitDaemon registered (correlation_id=%s)",
                 correlation_id,
             )
         except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
-                "PluginBuildLoop failed to initialize, continuing without it "
+                "PluginEmitDaemon failed to initialize, continuing without it "
                 "(correlation_id=%s)",
                 correlation_id,
                 exc_info=True,
@@ -1681,7 +1726,7 @@ async def bootstrap() -> int:
             # Graceful degradation (OMN-1992): config.name absence is logged
             # rather than raising ProtocolConfigurationError so kernels with
             # optional introspection can still boot.  Plugins that require
-            # node_identity (e.g. PluginRegistration.start_consumers) will
+            # node_identity (e.g. ServiceRegistration.start_consumers) will
             # return a "skipped" result instead of failing.
             logger.error(
                 "runtime_config.yaml missing 'name' field — plugin consumers "
@@ -1747,6 +1792,69 @@ async def bootstrap() -> int:
         # could modify the engine while an early plugin's consumer is already
         # dispatching messages through it.
         plugin_activation_start = time.time()
+
+        # --- Kernel-native: ServiceRegistration lifecycle (OMN-7115) ---
+        # ServiceRegistration runs its lifecycle directly, not through the
+        # plugin registry loop. It is always activated first.
+        if registration_service.should_activate(plugin_config):
+            reg_init = await registration_service.initialize(plugin_config)
+            if reg_init:
+                activated_plugins.append(registration_service)
+                if hasattr(registration_service, "validate_handshake") and callable(
+                    getattr(registration_service, "validate_handshake", None)
+                ):
+                    handshake_result = await registration_service.validate_handshake(
+                        plugin_config,
+                    )
+                    if not handshake_result:
+                        logger.error(
+                            "ServiceRegistration handshake FAILED: %s "
+                            "(correlation_id=%s)",
+                            handshake_result.error_message or "unknown",
+                            correlation_id,
+                        )
+                    else:
+                        logger.info(
+                            "ServiceRegistration handshake ATTESTED (%d checks) "
+                            "(correlation_id=%s)",
+                            len(handshake_result.checks),
+                            correlation_id,
+                        )
+                wire_result = await registration_service.wire_handlers(plugin_config)
+                if wire_result:
+                    dispatch_result = await registration_service.wire_dispatchers(
+                        plugin_config,
+                    )
+                    if not dispatch_result:
+                        logger.warning(
+                            "ServiceRegistration dispatcher wiring failed: %s "
+                            "(correlation_id=%s)",
+                            dispatch_result.get_error_message_or_default(),
+                            correlation_id,
+                        )
+                    ready_plugins.append(registration_service)
+                    logger.info(
+                        "ServiceRegistration wiring completed (correlation_id=%s)",
+                        correlation_id,
+                    )
+                else:
+                    logger.warning(
+                        "ServiceRegistration handler wiring failed: %s "
+                        "(correlation_id=%s)",
+                        wire_result.get_error_message_or_default(),
+                        correlation_id,
+                    )
+            else:
+                logger.warning(
+                    "ServiceRegistration initialization failed: %s (correlation_id=%s)",
+                    reg_init.get_error_message_or_default(),
+                    correlation_id,
+                )
+        else:
+            logger.info(
+                "ServiceRegistration skipped (not activated) (correlation_id=%s)",
+                correlation_id,
+            )
 
         # --- Pass 1: Initialize, validate handshake, wire handlers, wire dispatchers ---
         for plugin in plugin_registry.get_all():
@@ -1893,13 +2001,172 @@ async def bootstrap() -> int:
                             exc_info=True,
                         )
 
+        # --- Auto-wiring: Contract discovery + handler wiring (OMN-7656) ---
+        #
+        # After explicit plugins register their handlers/dispatchers, auto-wiring
+        # discovers contracts from onex.nodes entry points and wires handlers
+        # that are NOT already claimed by explicit plugins.
+        #
+        # Coexistence: explicit plugins always take precedence. Auto-wiring only
+        # picks up contracts that have no plugin handler wired for the same topics.
+        # Topic collision detection logs warnings for overlapping subscriptions.
+        auto_wiring_report = None
+        lifecycle_executor = None
+        try:
+            from omnibase_infra.runtime.auto_wiring import (
+                LifecycleHookExecutor,
+                discover_contracts,
+                wire_from_manifest,
+            )
+
+            # 1. Discover all contracts from installed packages
+            auto_wiring_start = time.time()
+            manifest = discover_contracts()
+            logger.info(
+                "Auto-wiring discovery: %d contracts found, %d errors "
+                "(correlation_id=%s)",
+                manifest.total_discovered,
+                manifest.total_errors,
+                correlation_id,
+                extra={
+                    "discovered": [c.name for c in manifest.contracts],
+                    "errors": [
+                        {"entry_point": e.entry_point_name, "error": e.error}
+                        for e in manifest.errors
+                    ],
+                },
+            )
+
+            if manifest.total_discovered > 0:
+                # 2. Collect topics already claimed by explicit plugins
+                #    by inspecting registered routes on the dispatch engine
+                claimed_topic_patterns: set[str] = set()
+                for route in dispatch_engine._routes.values():
+                    claimed_topic_patterns.add(route.topic_pattern)
+
+                # 3. Run lifecycle hooks (on_start + validate_handshake)
+                lifecycle_executor = LifecycleHookExecutor()
+                for contract in manifest.contracts:
+                    if not contract.handler_routing:
+                        continue
+                    lifecycle_hooks_raw = getattr(contract, "lifecycle_hooks", None)
+                    if (
+                        lifecycle_hooks_raw is not None
+                        and lifecycle_hooks_raw.has_hooks()
+                    ):
+                        context_kwargs: dict[str, object] = {
+                            "handler_id": contract.name,
+                            "node_kind": contract.node_type,
+                            "contract_version": str(contract.contract_version),
+                        }
+                        hook_results = await lifecycle_executor.execute_startup(
+                            lifecycle_hooks_raw, context_kwargs
+                        )
+                        for hr in hook_results:
+                            if not hr.success:
+                                logger.warning(
+                                    "Auto-wiring lifecycle hook '%s' failed for "
+                                    "'%s': %s (correlation_id=%s)",
+                                    hr.phase,
+                                    contract.name,
+                                    hr.error_message,
+                                    correlation_id,
+                                )
+
+                quarantined = lifecycle_executor.get_quarantined_contracts()
+                quarantined_names = {q.handler_id for q in quarantined}
+                if quarantined:
+                    logger.warning(
+                        "Auto-wiring: %d contracts quarantined after handshake "
+                        "failure (correlation_id=%s)",
+                        len(quarantined),
+                        correlation_id,
+                        extra={
+                            "quarantined": [
+                                {
+                                    "handler_id": q.handler_id,
+                                    "reason": q.failure_reason.value,
+                                }
+                                for q in quarantined
+                            ],
+                        },
+                    )
+
+                # 4. Filter manifest to exclude quarantined contracts
+                from omnibase_infra.runtime.auto_wiring.models import (
+                    ModelAutoWiringManifest,
+                )
+
+                filtered_contracts = tuple(
+                    c for c in manifest.contracts if c.name not in quarantined_names
+                )
+                filtered_manifest = ModelAutoWiringManifest(
+                    contracts=filtered_contracts,
+                    errors=manifest.errors,
+                )
+
+                # 5. Wire handlers into dispatch engine
+                auto_wiring_report = await wire_from_manifest(
+                    manifest=filtered_manifest,
+                    dispatch_engine=dispatch_engine,
+                    event_bus=event_bus,
+                    environment=environment,
+                )
+
+                # 6. Topic collision detection: warn for auto-wired topics
+                #    that overlap with explicit plugin routes
+                if auto_wiring_report:
+                    for result in auto_wiring_report.results:
+                        for topic in result.topics_subscribed:
+                            for pattern in claimed_topic_patterns:
+                                if _topic_matches_pattern(topic, pattern):
+                                    logger.warning(
+                                        "Topic collision: auto-wired topic '%s' "
+                                        "(contract=%s) overlaps with explicit "
+                                        "plugin route pattern '%s' "
+                                        "(correlation_id=%s)",
+                                        topic,
+                                        result.contract_name,
+                                        pattern,
+                                        correlation_id,
+                                    )
+
+                auto_wiring_duration = time.time() - auto_wiring_start
+                logger.info(
+                    "Auto-wiring completed in %.3fs: wired=%d skipped=%d "
+                    "failed=%d quarantined=%d (correlation_id=%s)",
+                    auto_wiring_duration,
+                    auto_wiring_report.total_wired if auto_wiring_report else 0,
+                    auto_wiring_report.total_skipped if auto_wiring_report else 0,
+                    auto_wiring_report.total_failed if auto_wiring_report else 0,
+                    len(quarantined),
+                    correlation_id,
+                    extra={
+                        "duration_seconds": auto_wiring_duration,
+                        "wired": [
+                            r.contract_name
+                            for r in (
+                                auto_wiring_report.results if auto_wiring_report else ()
+                            )
+                            if r.outcome.value == "wired"
+                        ],
+                    },
+                )
+        except Exception:  # noqa: BLE001 — boundary: auto-wiring degrades gracefully
+            logger.warning(
+                "Auto-wiring failed; continuing with explicitly registered "
+                "plugins only (correlation_id=%s)",
+                correlation_id,
+                exc_info=True,
+            )
+
         # --- Freeze dispatch engine ---
-        # All plugins have registered their dispatchers. Freeze the engine
-        # to make it read-only and thread-safe for concurrent dispatch.
+        # All plugins and auto-wired handlers have registered their dispatchers.
+        # Freeze the engine to make it read-only and thread-safe for concurrent dispatch.
         dispatch_engine.freeze()
         logger.info(
             "MessageDispatchEngine frozen after all wire_dispatchers() "
-            "(correlation_id=%s)",
+            "and auto-wiring (correlation_id=%s)",
             correlation_id,
         )
 
@@ -1947,7 +2214,7 @@ async def bootstrap() -> int:
         # deregistration, heartbeat) and routes them to the ContractRegistryReducer.
         # The router also runs an internal tick timer for staleness computation.
         # Uses postgres_pool from the registration plugin.
-        postgres_pool = registration_plugin.postgres_pool
+        postgres_pool = registration_service.postgres_pool
         if config.contract_registry.enabled and postgres_pool is not None:
             # Import postgres handlers for contract persistence
             # Deferred import to avoid loading heavy dependencies when not needed
@@ -2384,7 +2651,7 @@ async def bootstrap() -> int:
                 wiring_health_task = None
 
         # 9.5. Introspection event consumer is now started by domain plugins
-        # during plugin activation (step 4.5). The PluginRegistration.start_consumers()
+        # during plugin activation (step 4.5). The ServiceRegistration.start_consumers()
         # method handles subscription using node_identity and EnumConsumerGroupPurpose.
 
         # 9.6. Start contract registry event consumer if router is available
@@ -2573,7 +2840,7 @@ async def bootstrap() -> int:
 
         # Display startup banner with key configuration
         # Get registration status from plugin (encapsulates backend details)
-        registration_status = registration_plugin.get_status_line()
+        registration_status = registration_service.get_status_line()
 
         # Contract registry status for banner
         if contract_router is not None:
@@ -2600,6 +2867,13 @@ async def bootstrap() -> int:
             f"Registration: {registration_status}",
             f"Contract Registry: {contract_registry_status}",
             f"Plugins: {', '.join(plugin_names) if plugin_names else 'none'}",
+            (
+                f"Auto-wiring: {auto_wiring_report.total_wired} wired, "
+                f"{auto_wiring_report.total_skipped} skipped, "
+                f"{auto_wiring_report.total_failed} failed"
+                if auto_wiring_report is not None
+                else "Auto-wiring: disabled (no contracts discovered)"
+            ),
             f"Health endpoint: http://0.0.0.0:{http_port}/health",
             f"Bootstrap time: {bootstrap_duration:.3f}s",
             f"Correlation ID: {correlation_id}",

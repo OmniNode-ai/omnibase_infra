@@ -592,6 +592,15 @@ health_check:
   enabled: true
   endpoint: "/health"
   interval_seconds: 30
+# Golden path: registration chain (node introspection -> node_service_registry table)
+golden_path:
+  - "Receive node introspection event on onex.evt.platform.node-introspection.v1"
+  - "Orchestrator coordinates registration workflow via reducer and effect nodes"
+  - "Emit registration-acked event to onex.evt.platform.node-registration-acked.v1"
+  - "Event consumed by node_projection_registration in omnimarket"
+  - "Projection handler upserts row into node_service_registry table"
+  - "Verify row exists with service_name, health_status fields"
+  - "Golden chain test: omnimarket/tests/test_golden_chain_projection_registration.py"
 metadata:
   description: "Registration workflow orchestrator that coordinates node lifecycle by calling reducer for intents and effect for execution."
   author: "OmniNode Team"

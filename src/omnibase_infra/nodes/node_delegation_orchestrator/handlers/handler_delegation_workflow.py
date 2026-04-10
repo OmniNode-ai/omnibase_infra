@@ -112,6 +112,7 @@ class DelegationWorkflowState:
     inference_prompt_tokens: int = 0
     inference_completion_tokens: int = 0
     inference_total_tokens: int = 0
+    inference_llm_call_id: str = ""
     gate_result: ModelQualityGateResult | None = None
     started_at_ns: int = field(default_factory=time.monotonic_ns)
 
@@ -225,6 +226,7 @@ class HandlerDelegationWorkflow:
         workflow.inference_prompt_tokens = response.prompt_tokens
         workflow.inference_completion_tokens = response.completion_tokens
         workflow.inference_total_tokens = response.total_tokens
+        workflow.inference_llm_call_id = response.llm_call_id
 
         assert workflow.request is not None
         gate_input = ModelQualityGateInput(
@@ -296,11 +298,13 @@ class HandlerDelegationWorkflow:
             session_id=None,
             task_type=workflow.request.task_type,
             delegated_to=workflow.inference_model_used,
+            model_name=workflow.routing_decision.selected_model,
             quality_gate_passed=result.passed,
             quality_gates_failed=list(result.failure_reasons),
             cost_usd=0.0,
             cost_savings_usd=round(estimated_claude_cost, 6),
             delegation_latency_ms=elapsed_ms,
+            llm_call_id=workflow.inference_llm_call_id,
         )
 
         events: list[GateResultEvent] = []

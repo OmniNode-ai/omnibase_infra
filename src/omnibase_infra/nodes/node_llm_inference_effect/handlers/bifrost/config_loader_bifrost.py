@@ -9,7 +9,7 @@ cost tier.
 
 Environment variables consumed:
     LLM_CODER_URL       - Qwen3-Coder-30B-A3B (RTX 5090, 64K ctx)
-    LLM_CODER_FAST_URL  - Qwen3-14B-AWQ (RTX 4090, 40K ctx)
+    LLM_CODER_FAST_URL  - DeepSeek-R1-Distill-Qwen-14B-AWQ (RTX 4090, 24K ctx)
     LLM_EMBEDDING_URL   - Qwen3-Embedding-8B-4bit (M2 Ultra)
     LLM_DEEPSEEK_R1_URL - DeepSeek-R1-Distill-Qwen-32B-bf16 (M2 Ultra)
     LLM_SMALL_URL       - Qwen2.5-Coder-7B MLX-4bit (MacBook Air, optional)

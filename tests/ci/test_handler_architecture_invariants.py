@@ -395,7 +395,6 @@ class TestWiringLocationInvariant:
         {
             "node_registration_orchestrator",
             "node_delegation_orchestrator",  # OMN-7040: delegation pipeline
-            "node_autonomous_loop_orchestrator",  # OMN-5113: build loop orchestrator
         }
     )
 
@@ -512,8 +511,10 @@ class TestNoDirectEnvAccessInHandlers:
         #   handler_runtime_target_collect.py:54-57 - 3x os.environ.get for env/kafka/kubeconfig
         #   handler_upsert_merge_gate.py:250 - LINEAR_API_KEY, no config injection path (OMN-3140)
         #   handler_upsert_merge_gate.py:253 - LINEAR_TEAM_ID, no config injection path (OMN-3140)
-        #   handler_delegation_routing.py:103,123 - os.environ.get for LLM endpoint URLs (OMN-7040)
-        max_allowed = 9
+        #   handler_delegation_routing.py:128,143,199 - os.environ.get for LLM endpoint discovery
+        #     (OMN-8029): routing handler must read env to determine which backends are available;
+        #     the env vars are model endpoint URLs declared in routing_tiers.yaml.
+        max_allowed = 12
         if len(violations) > max_allowed:
             assert False, (
                 f"Found {len(violations)} env access violations in node handlers "

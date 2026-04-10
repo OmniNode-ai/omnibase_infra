@@ -325,11 +325,6 @@ class SimpleAsyncEventBus:
 # Mock Handlers
 # =============================================================================
 
-# TODO(OMN-1349): Add edge case handling to mock handlers:
-# - MockHandlerB.handle should gracefully handle missing correlation_id (log warning, generate new)
-# - MockHandlerC.handle should validate correlation_id format before string conversion
-# - All handlers should include correlation_id in exception messages for debugging
-
 
 class MockHandlerA:
     """Mock handler that publishes events with correlation tracking.

@@ -141,6 +141,7 @@ ALLOWED_ROOT_DIRECTORIES: frozenset[str] = frozenset(
         "benchmarks",
         "tools",
         "bin",
+        "deploy",
         # Hidden directories (generally allowed)
         ".git",
         ".github",

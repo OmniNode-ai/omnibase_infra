@@ -353,6 +353,12 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.github.pr-merged.v1": "OMN-6726; produced by GHA workflow, no node contract — external event source | owner: jonah | expiry: 2026-09-01",
     # --- Post-merge check chain result (OMN-6727) ---
     "onex.evt.github.post-merge-result.v1": "OMN-6727; produced by PostMergeConsumer service, no node contract — service-level topic | owner: jonah | expiry: 2026-09-01",
+    # --- delegation pipeline routing topics (OMN-7040) ---
+    "onex.cmd.omninode.routing-requested.v1": "OMN-7040; delegation pipeline routing; contract.yaml in omninode_infra (cross-repo) | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omninode.routing-completed.v1": "OMN-7040; delegation pipeline routing; contract.yaml in omninode_infra (cross-repo) | owner: jonah | expiry: 2026-09-01",
+    # --- cross-repo intelligence/memory topics ---
+    "onex.evt.omniintelligence.pattern-refined.v1": "cross-repo topic; contract.yaml in omniintelligence repo | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omnimemory.document-ingested.v1": "cross-repo topic; contract.yaml in omnimemory repo | owner: jonah | expiry: 2026-09-01",
 }
 # fmt: on
 

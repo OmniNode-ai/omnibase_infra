@@ -468,7 +468,7 @@ class TestSchemaFingerprintErrorTypes:
 class TestPluginFingerprintPropagation:
     """Tests that schema fingerprint errors propagate out of plugin.validate_handshake().
 
-    PluginRegistration.validate_handshake() runs B1-B3 checks (OMN-2089).
+    ServiceRegistration.validate_handshake() runs B1-B3 checks (OMN-2089).
     Schema fingerprint errors are P0 hard gates that MUST escape the
     handshake validation so the kernel terminates. These tests confirm
     the re-raise path works through the handshake gate.
@@ -478,13 +478,13 @@ class TestPluginFingerprintPropagation:
     async def test_mismatch_error_propagates_from_plugin(self) -> None:
         """SchemaFingerprintMismatchError escapes plugin.validate_handshake()."""
         from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
-            PluginRegistration,
+            ServiceRegistration,
         )
         from omnibase_infra.runtime.protocol_domain_plugin import (
             ModelDomainPluginConfig,
         )
 
-        plugin = PluginRegistration()
+        plugin = ServiceRegistration()
         config = MagicMock(spec=ModelDomainPluginConfig)
         config.correlation_id = uuid4()
 
@@ -502,17 +502,17 @@ class TestPluginFingerprintPropagation:
             patch(f"{_plugin_mod}.ModelPostgresPoolConfig.validate_dsn"),
             patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create_pool,
             patch.object(
-                PluginRegistration,
+                ServiceRegistration,
                 "_load_projector",
                 new_callable=AsyncMock,
             ),
             patch.object(
-                PluginRegistration,
+                ServiceRegistration,
                 "_initialize_schema",
                 new_callable=AsyncMock,
             ),
             patch.object(
-                PluginRegistration,
+                ServiceRegistration,
                 "_initialize_snapshot_publisher",
                 new_callable=AsyncMock,
             ),
@@ -542,13 +542,13 @@ class TestPluginFingerprintPropagation:
     async def test_missing_error_propagates_from_plugin(self) -> None:
         """SchemaFingerprintMissingError escapes plugin.validate_handshake()."""
         from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
-            PluginRegistration,
+            ServiceRegistration,
         )
         from omnibase_infra.runtime.protocol_domain_plugin import (
             ModelDomainPluginConfig,
         )
 
-        plugin = PluginRegistration()
+        plugin = ServiceRegistration()
         config = MagicMock(spec=ModelDomainPluginConfig)
         config.correlation_id = uuid4()
 
@@ -564,17 +564,17 @@ class TestPluginFingerprintPropagation:
             patch(f"{_plugin_mod}.ModelPostgresPoolConfig.validate_dsn"),
             patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create_pool,
             patch.object(
-                PluginRegistration,
+                ServiceRegistration,
                 "_load_projector",
                 new_callable=AsyncMock,
             ),
             patch.object(
-                PluginRegistration,
+                ServiceRegistration,
                 "_initialize_schema",
                 new_callable=AsyncMock,
             ),
             patch.object(
-                PluginRegistration,
+                ServiceRegistration,
                 "_initialize_snapshot_publisher",
                 new_callable=AsyncMock,
             ),

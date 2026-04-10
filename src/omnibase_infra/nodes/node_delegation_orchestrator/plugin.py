@@ -14,7 +14,7 @@ The plugin handles:
     - Event consumer startup via EventBusSubcontractWiring
 
 Design:
-    Unlike PluginRegistration, this plugin has no PostgreSQL dependency.
+    Unlike ServiceRegistration, this plugin has no PostgreSQL dependency.
     The delegation pipeline is stateless (in-memory FSM per correlation_id)
     and activates unconditionally.
 

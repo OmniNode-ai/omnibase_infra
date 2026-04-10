@@ -533,6 +533,17 @@ pattern_exemptions:
   # ==========================================================================
   # Dispatch Model Semantic Identifier Exemptions (OMN-983)
   # ==========================================================================
+  # handler_id in quarantine records is a dotted class path (e.g., "my.module.Handler"),
+  # not a UUID. It identifies the contract handler by its import path.
+  - file_pattern: 'model_quarantine_record\.py'
+    violation_pattern: "Field 'handler_id' should use UUID"
+    reason: >
+      handler_id is a dotted class path identifying the contract handler (e.g., "my.module.HandlerClass"), not a UUID.
+
+    documentation:
+      - CLAUDE.md (Auto-wiring Architecture)
+    ticket: OMN-7657
+  # ==========================================================================
   # dispatcher_id, route_id are semantic identifiers (like policy_id), NOT UUIDs.
   # They are human-readable strings that identify dispatchers/routes by name.
   - file_pattern: 'model_dispatcher_registration\.py'
@@ -1371,6 +1382,17 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
     ticket: OMN-1097
+  # ==========================================================================
+  # Auto-Wiring Context Exemptions (OMN-7655)
+  # ==========================================================================
+  - file_pattern: 'runtime/auto_wiring/context\.py'
+    violation_pattern: "Field 'handler_id' should use UUID"
+    reason: >
+      handler_id in ModelAutoWiringContext is a human-readable semantic identifier from handler contracts (e.g., "auth.handler"). Consistent with ModelHandlerIdentifier and other handler models. Not a UUID.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
+    ticket: OMN-7655
   - file_pattern: 'model_handler_security_policy\.py'
     violation_pattern: "contains anti-pattern 'Handler'"
     reason: >
@@ -1516,6 +1538,18 @@ pattern_exemptions:
       - docs/patterns/container_dependency_injection.md (Registry patterns)
       - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
     ticket: OMN-1131
+  # Registration Service Exemption (OMN-7115)
+  # ==========================================================================
+  # ServiceRegistration is the kernel-native registration service, renamed from
+  # PluginRegistration as part of the contract auto-wiring migration. "Service"
+  # reflects its new role as a kernel-native service rather than a plugin.
+  - file_pattern: 'node_registration_orchestrator/plugin\.py'
+    class_pattern: "Class name 'ServiceRegistration'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      ServiceRegistration is a kernel-native service for node introspection, heartbeats, and registration state. Renamed from PluginRegistration (OMN-7115) to reflect direct kernel wiring rather than plugin registry.
+
+    ticket: OMN-7115
   - file_pattern: 'handlers/registration_storage/handler_registration_storage_postgres\.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'
@@ -3041,40 +3075,78 @@ pattern_exemptions:
 
     ticket: OMN-7292
   # ==========================================================================
-  # Autonomous Build Loop ticket_id Exemptions (OMN-5113)
+  # Auto-Wiring Models Pattern Exemptions (OMN-7656)
   # ==========================================================================
-  # ticket_id fields in build loop nodes use Linear ticket identifiers (e.g. "OMN-1234"),
-  # which are human-readable string identifiers, not UUIDs.
-  - file_pattern: 'model_ticket_classification\.py'
-    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+  # auto_wiring/models.py uses 'Handler' in class names because these are
+  # handler-routing domain models (ModelHandlerRef, ModelHandlerRoutingEntry,
+  # ModelHandlerRouting) — the auto-wiring system discovers and wires handlers
+  # by definition. handler_id is a semantic string key (e.g., "my-handler"),
+  # not a UUID. entry_point_name/package_name are Python package identifiers.
+  - file_pattern: 'runtime/auto_wiring/models/'
+    violation_pattern: "contains anti-pattern 'Handler'"
     reason: >
-      ticket_id is a human-readable Linear identifier (e.g. "OMN-1234"), not a UUID.
+      Auto-wiring models describe handler routing configuration from contracts. Handler is the correct domain term for the auto-wiring bounded context.
 
-    ticket: OMN-5113
-  - file_pattern: 'model_ticket_for_classification\.py'
-    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    documentation:
+      - CLAUDE.md (ONEX Architecture - Handler Types)
+    ticket: OMN-7656
+  - file_pattern: 'runtime/auto_wiring/models/'
+    violation_pattern: "Field 'handler_id' should use UUID"
     reason: >
-      ticket_id is a human-readable Linear identifier (e.g. "OMN-1234"), not a UUID.
+      handler_id in auto-wiring is a semantic string key derived from the contract handler_id field, not a UUID.
 
-    ticket: OMN-5113
-  - file_pattern: 'model_build_target\.py'
-    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    ticket: OMN-7656
+  - file_pattern: 'runtime/auto_wiring/models/'
+    violation_pattern: "might reference an entity"
     reason: >
-      ticket_id is a human-readable Linear identifier (e.g. "OMN-1234"), not a UUID.
+      entry_point_name, package_name, and hook_name are Python package/module identifiers and lifecycle hook names, not entity references requiring ID + display_name pattern.
 
-    ticket: OMN-5113
-  - file_pattern: 'model_build_dispatch_outcome\.py'
-    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    ticket: OMN-7656
+  - file_pattern: 'runtime/auto_wiring/context\.py'
+    violation_pattern: "Field 'handler_id' should use UUID"
     reason: >
-      ticket_id is a human-readable Linear identifier (e.g. "OMN-1234"), not a UUID.
+      handler_id in auto-wiring context is a semantic string key derived from the contract handler_id field, not a UUID.
 
-    ticket: OMN-5113
-  - file_pattern: 'model_scored_ticket\.py'
-    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    ticket: OMN-7656
+  - file_pattern: 'runtime/auto_wiring/report\.py'
+    violation_pattern: "might reference an entity"
     reason: >
-      ticket_id is a human-readable Linear identifier (e.g. "OMN-1234"), not a UUID.
+      contract_name and package_name are Python package identifiers used in auto-wiring diagnostics, not entity references requiring ID + display_name.
 
-    ticket: OMN-5113
+    ticket: OMN-7656
+  # ==========================================================================
+  # Model Name Exemption (OMN-7764)
+  # ==========================================================================
+  # model_name is a human-readable LLM model identifier (e.g., "Qwen3-Coder-14B"),
+  # NOT an entity reference requiring ID + display_name pattern.
+  - file_pattern: 'model_task_delegated_event\.py'
+    violation_pattern: "might reference an entity"
+    reason: >
+      model_name is a human-readable LLM model identifier string (e.g., "Qwen3-Coder-14B") from the routing decision. It is not a domain entity reference — it is a telemetry label for analytics dashboards.
+
+    documentation:
+      - CLAUDE.md (Delegation Pipeline - model routing)
+    ticket: OMN-7764
+  # LLM Call ID Exemptions (OMN-7766)
+  # ==========================================================================
+  # llm_call_id is an external provider identifier (e.g., OpenAI chatcmpl-xxx),
+  # NOT an internal UUID. The _id suffix triggers a false positive.
+  - file_pattern: 'model_task_delegated_event\.py'
+    violation_pattern: "Field 'llm_call_id' should use UUID"
+    reason: >
+      llm_call_id is an external LLM provider call identifier (e.g., OpenAI chatcmpl-xxx). It is not an internal UUID — the format is provider-defined and varies across vendors.
+
+    documentation:
+      - CLAUDE.md (External Provider Identifiers)
+    ticket: OMN-7766
+  - file_pattern: 'model_inference_response_data\.py'
+    violation_pattern: "Field 'llm_call_id' should use UUID"
+    reason: >
+      llm_call_id is an external LLM provider call identifier (e.g., OpenAI chatcmpl-xxx). It is not an internal UUID — the format is provider-defined and varies across vendors.
+
+    documentation:
+      - CLAUDE.md (External Provider Identifiers)
+    ticket: OMN-7766
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
@@ -3184,7 +3256,29 @@ architecture_exemptions:
     documentation:
       - CLAUDE.md (Protocol File Naming - domain-grouping convention)
     ticket: OMN-5060
-# These handle complex union type violations
+    # These handle complex union type violations
+  # ==========================================================================
+  # Auto-Wiring Report Exemption (OMN-7656)
+  # ==========================================================================
+  # report.py contains the auto-wiring report models: per-contract wiring
+  # result, duplicate topic ownership detection, and the aggregate report.
+  # These three models plus the outcome enum form a single reporting interface.
+  - file_pattern: 'runtime/auto_wiring/report\.py'
+    violation_pattern: '\d+ models in one file'
+    reason: >
+      Domain-grouped auto-wiring report models. ModelContractWiringResult, ModelDuplicateTopicOwnership, and ModelAutoWiringReport define the complete interface for auto-wiring diagnostics. Per CLAUDE.md domain-grouping convention for cohesive models.
+
+    documentation:
+      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
+    ticket: OMN-7656
+  - file_pattern: 'runtime/auto_wiring/report\.py'
+    violation_pattern: 'Mixed types in one file'
+    reason: >
+      Auto-wiring report module contains cohesive types (enum + models) for wiring outcome reporting. EnumWiringOutcome is tightly coupled with ModelContractWiringResult.
+
+    documentation:
+      - CLAUDE.md (Protocol File Naming)
+    ticket: OMN-7656
 union_exemptions:
   # ==========================================================================
   # ModelNodeCapabilities Config Field Exemption

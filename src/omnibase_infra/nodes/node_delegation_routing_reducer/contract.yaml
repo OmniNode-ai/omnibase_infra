@@ -50,7 +50,7 @@ config_dependencies:
     description: "Endpoint URL for Qwen3-Coder-30B-A3B (port 8000)"
     required: true
   - key: "LLM_CODER_FAST_URL"
-    description: "Endpoint URL for Qwen3-14B (port 8001)"
+    description: "Endpoint URL for DeepSeek-R1-14B (port 8001)"
     required: false
   - key: "LLM_DEEPSEEK_R1_URL"
     description: "Endpoint URL for DeepSeek-R1-32B (port 8101)"

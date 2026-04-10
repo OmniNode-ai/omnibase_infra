@@ -27,3 +27,8 @@ topics:
   - onex.evt.github.post-merge-result.v1
   # --- A/B eval completed event (OMN-6779) ---
   - onex.evt.omnibase-infra.eval-completed.v1
+  # --- Intelligence pipeline gap-fill topics (OMN-7810) ---
+  - onex.evt.omniintelligence.pattern-refined.v1
+  - onex.evt.omnimemory.document-ingested.v1
+  - onex.cmd.omninode.routing-requested.v1
+  - onex.evt.omninode.routing-completed.v1

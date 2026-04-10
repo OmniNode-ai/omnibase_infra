@@ -47,8 +47,7 @@ def _make_registry() -> tuple[ModelRegistryEntry, ...]:
         ModelRegistryEntry(
             model_key="claude-sonnet",
             provider="anthropic",
-            transport="sdk",
-            api_key_env="ANTHROPIC_API_KEY",
+            transport="oauth",
             capabilities=("code_generation", "reasoning", "vision"),
             context_window=200000,
             seed_cost_per_1k_tokens=0.015,
