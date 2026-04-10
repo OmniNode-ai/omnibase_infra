@@ -122,6 +122,13 @@ _INV4_WIRING_EXEMPTIONS: frozenset[tuple[str, str]] = frozenset(
             "src/omnibase_infra/nodes/node_delegation_routing_reducer/contract.yaml",
             "HandlerDelegationRouting",
         ),
+        # OMN-8272: node_onboarding_orchestrator uses a module-level async function
+        # (handle_onboarding) invoked via asyncio.run() from omnimarket's HandlerOnboarding.
+        # It is not wired through the handler registry — invoked directly by callers.
+        (
+            "src/omnibase_infra/nodes/node_onboarding_orchestrator/contract.yaml",
+            "handle_onboarding",
+        ),
     }
 )
 
