@@ -156,9 +156,21 @@ x-runtime-env: &runtime-env
   VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
   # OmniIntelligence domain plugin — Docker-internal hostname (same pattern as OMNIBASE_INFRA_DB_URL)
   OMNIINTELLIGENCE_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omniintelligence"
-  # --- OmniMemory (OMN-5382: removed from base env — injected per-bundle) ---
-  # OMNIMEMORY_ENABLED, OMNIMEMORY_MEMGRAPH_HOST/PORT, OMNIMEMORY_DB_URL
-  # are only present when the memgraph bundle is selected.
+  # --- OmniMemory domain plugin ---
+  # PluginMemory.should_activate() checks OMNIMEMORY_MEMGRAPH_HOST or OMNIMEMORY_ENABLED.
+  # Both default to inactive values so the plugin stays opt-in.
+  # To enable: set OMNIMEMORY_ENABLED=true and OMNIMEMORY_MEMGRAPH_HOST=omnibase-infra-memgraph
+  # in the operator environment (e.g. via the memgraph bundle).
+  OMNIMEMORY_ENABLED: ${OMNIMEMORY_ENABLED:-false}
+  OMNIMEMORY_MEMGRAPH_HOST: ${OMNIMEMORY_MEMGRAPH_HOST:-}
+  OMNIMEMORY_MEMGRAPH_PORT: ${OMNIMEMORY_MEMGRAPH_PORT:-7687}
+  OMNIMEMORY_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnimemory"
+  # Filesystem crawler path prefixes — comma-separated list of dirs to crawl for .md files
+  OMNIMEMORY_CRAWL_PATH_PREFIXES: ${OMNIMEMORY_CRAWL_PATH_PREFIXES:-/data/omninode/omni_home}
+  # Qdrant vector store (embeddings for semantic memory)
+  QDRANT_HOST: ${QDRANT_HOST:-}
+  QDRANT_PORT: ${QDRANT_PORT:-6333}
+  QDRANT_API_KEY: ${QDRANT_API_KEY:-}
   # OmniClaude domain plugin (OMN-3182): required by PluginClaude.wire_dispatchers()
   # Hardcoded to venv path — host OMNICLAUDE_CONTRACTS_ROOT points at /Volumes/...
   # which doesn't exist inside the container. The pip-installed package has its
