@@ -127,7 +127,7 @@ class TopicProvisioner:
             ContractTopicExtractor,
         )
 
-        extractor = ContractTopicExtractor()
+        extractor = ContractTopicExtractor(include_installed_packages=True)
         contract_entries = extractor.extract_all(
             contracts_root=self._contracts_root,
             skill_manifests_root=self._skill_manifests_root,
