@@ -74,7 +74,7 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
 # is the goal.
 #
 # Format: "topic": "reason | owner | expiry"
-# Current baseline: 2026-04-02 (44 entries)
+# Current baseline: 2026-04-10 (45 entries)
 # Target: 0 entries
 # ---------------------------------------------------------------------------
 # fmt: off

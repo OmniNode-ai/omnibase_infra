@@ -88,9 +88,14 @@ class TestNewEmployeePolicy:
     def test_all_existing_policies_still_load(self) -> None:
         """Regression guard: all builtin policies must still load without error."""
         policies = load_builtin_policies()
-        # At minimum the original 3 plus new_employee (4 total after merge)
-        assert len(policies) >= 3
-        for name in ["standalone_quickstart", "contributor_local", "full_platform"]:
+        # All 4 policies must be present: 3 original + new_employee
+        assert len(policies) >= 4
+        for name in [
+            "standalone_quickstart",
+            "contributor_local",
+            "full_platform",
+            "new_employee",
+        ]:
             assert name in policies, (
                 f"Existing policy '{name}' missing from load_builtin_policies()"
             )
