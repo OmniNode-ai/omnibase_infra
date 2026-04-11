@@ -342,6 +342,7 @@ async def _wire_single_contract(
     dispatchers_registered: list[str] = []
     routes_registered: list[str] = []
     topics_subscribed: list[str] = []
+    unsubscribers: list[Callable[[], Awaitable[None]]] = []
 
     try:
         # Import and wire each handler from handler_routing
@@ -372,12 +373,15 @@ async def _wire_single_contract(
                     node_identity, EnumConsumerGroupPurpose.CONSUME
                 )
                 callback = _make_event_bus_callback(topic, dispatch_engine)
-                typed_bus = cast("ProtocolEventBusSubscriber", event_bus)
-                _unsubscribe = await typed_bus.subscribe(
+                typed_bus: ProtocolEventBusSubscriber = cast(
+                    "ProtocolEventBusSubscriber", event_bus
+                )
+                unsubscribe = await typed_bus.subscribe(
                     topic=topic,
                     node_identity=node_identity,
                     on_message=callback,
                 )
+                unsubscribers.append(unsubscribe)
                 topics_subscribed.append(topic)
 
                 logger.info(
