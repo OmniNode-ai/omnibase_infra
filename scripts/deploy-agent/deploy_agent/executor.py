@@ -52,13 +52,17 @@ class DeployExecutor:
         timeout = PHASE_TIMEOUTS[Phase.PREFLIGHT]
 
         # Check git remote is reachable
-        _run(
+        result = _run(
             ["git", "-C", REPO_DIR, "ls-remote", "--exit-code", "origin"],
             timeout=timeout,
         )
+        if result.returncode != 0:
+            raise RuntimeError(f"Git remote unreachable: {result.stderr}")
 
         # Check docker is available
-        _run(["docker", "info"], timeout=timeout)
+        result = _run(["docker", "info"], timeout=timeout)
+        if result.returncode != 0:
+            raise RuntimeError(f"Docker unavailable: {result.stderr}")
 
         on_phase_update(Phase.PREFLIGHT, PhaseStatus.SUCCESS)
 
@@ -82,10 +86,12 @@ class DeployExecutor:
                 raise RuntimeError(f"Git fetch failed: {result.stderr}")
 
         # Reset to ref
-        _run(
+        result = _run(
             ["git", "-C", REPO_DIR, "reset", "--hard", git_ref],
             timeout=timeout,
         )
+        if result.returncode != 0:
+            raise RuntimeError(f"Git reset --hard {git_ref} failed: {result.stderr}")
 
         # Get SHA
         result = _run(
