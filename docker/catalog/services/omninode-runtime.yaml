@@ -29,6 +29,7 @@ hardcoded_env:
   KEYCLOAK_ADMIN_URL: http://keycloak:8080
   RUNTIME_PROFILE: main
   OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: 'true'
+  ENABLE_RUNTIME_LOG_BRIDGE: 'true'
 operational_defaults:
   POSTGRES_USER: postgres
   ONEX_LOG_LEVEL: INFO
