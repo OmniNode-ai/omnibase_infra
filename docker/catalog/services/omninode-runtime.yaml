@@ -9,6 +9,10 @@ required_env:
   - KEYCLOAK_ADMIN_CLIENT_SECRET
   - ONEX_SERVICE_CLIENT_SECRET
   - ONEX_REGISTRATION_AUTO_ACK
+  - LLM_CODER_URL
+  - LLM_CODER_FAST_URL
+  - LLM_EMBEDDING_URL
+  - LLM_DEEPSEEK_R1_URL
 hardcoded_env:
   OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omnibase_infra'
   OMNIINTELLIGENCE_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omniintelligence'
