@@ -24,7 +24,7 @@ import inspect
 import logging
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -40,6 +40,9 @@ from omnibase_infra.runtime.auto_wiring.report import (
 
 if TYPE_CHECKING:
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+    from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
+        ProtocolEventBusSubscriber,
+    )
     from omnibase_infra.models.dispatch.model_dispatch_result import (
         ModelDispatchResult,
     )
@@ -106,7 +109,7 @@ def _make_dispatch_callback(
 
 def _make_event_bus_callback(
     topic: str,
-    dispatch_engine: object,
+    dispatch_engine: ProtocolDispatchEngine,
 ) -> Callable[..., Awaitable[None]]:
     """Create a Kafka on_message callback that deserializes and dispatches to engine.
 
@@ -126,7 +129,7 @@ def _make_event_bus_callback(
             ].model_validate(data)
         else:
             envelope = message  # type: ignore[assignment]
-        await dispatch_engine.dispatch(topic, envelope)  # type: ignore[union-attr]
+        await dispatch_engine.dispatch(topic, envelope)
 
     return callback
 
@@ -351,7 +354,8 @@ async def _wire_single_contract(
                     node_identity, EnumConsumerGroupPurpose.CONSUME
                 )
                 callback = _make_event_bus_callback(topic, dispatch_engine)
-                unsubscribe = await event_bus.subscribe(
+                typed_bus = cast("ProtocolEventBusSubscriber", event_bus)
+                unsubscribe = await typed_bus.subscribe(
                     topic=topic,
                     node_identity=node_identity,
                     on_message=callback,
