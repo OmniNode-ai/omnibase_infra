@@ -62,6 +62,22 @@ _VALID_SEGMENT_PATTERN = re.compile(r"^[a-z0-9._-]+$")
 _VALID_PRODUCER_PATTERN = re.compile(r"^[a-z0-9-]+$")
 _VALID_VERSION_PATTERN = re.compile(r"^v[1-9]\d*$|^v1$")
 
+# Allowlist of known producer segments — must match the emitting repo (OMN-8507).
+# Any structurally-valid producer not in this set is rejected with "unknown producer".
+_KNOWN_PRODUCERS: frozenset[str] = frozenset(
+    {
+        "omnimarket",
+        "omnibase-infra",
+        "omniclaude",
+        "omniintelligence",
+        "omnimemory",
+        "omninode",
+        "omnibase-compat",
+        "github",
+        "platform",
+    }
+)
+
 # Regex to detect strings that look like complete ONEX topic names (for Python
 # scanning).  We require the string to start with 'onex.' AND end with a version
 # suffix (e.g. '.v1', '.v12').  This excludes partial-prefix strings like
@@ -137,6 +153,12 @@ def lint_topic(raw: str) -> LintResult:
         violations.append(
             f"invalid producer {producer!r} in topic {raw!r}; "
             f"must match ^[a-z0-9-]+$ (no underscores)"
+        )
+    elif producer not in _KNOWN_PRODUCERS:
+        violations.append(
+            f"unknown producer {producer!r} in topic {raw!r}; "
+            f"must be one of {sorted(_KNOWN_PRODUCERS)}. "
+            f"Did you mean the repo name (e.g. 'omnimarket' not {producer!r})?"
         )
 
     if not _VALID_SEGMENT_PATTERN.match(event_name):

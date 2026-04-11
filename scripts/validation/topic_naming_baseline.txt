@@ -18,3 +18,51 @@ onex.int.platform.runtime-tick.v1
 onex.contract.resolve.completed
 onex.contract.resolve.requested
 onex.snapshot.platform.registration-snapshots.v1
+
+# Producer-segment violations discovered by OMN-8507 (W6.10) allowlist check.
+# TODO(OMN-8507): artifact producer should be omnibase-infra
+onex.cmd.artifact.reconcile.v1
+onex.evt.artifact.change-detected.v1
+onex.evt.artifact.impact-analyzed.v1
+onex.evt.artifact.pr-comment-posted.v1
+onex.evt.artifact.update-plan-created.v1
+onex.evt.artifact.update-plan-emitted.v1
+# TODO(OMN-8507): router producer should be omnibase-infra
+onex.cmd.router.route-request.v1
+onex.evt.router.health-snapshot.v1
+onex.evt.router.routing-complete.v1
+onex.evt.router.routing-failed.v1
+onex.evt.router.routing-outcome.v1
+onex.evt.router.scoring-decision.v1
+# TODO(OMN-8507): rsd producer should be omnibase-infra
+onex.cmd.rsd.score.v1
+onex.evt.rsd.data-fetched.v1
+onex.evt.rsd.score-complete.v1
+onex.evt.rsd.score-failed.v1
+onex.evt.rsd.scores-calculated.v1
+onex.evt.rsd.scores-stored.v1
+# TODO(OMN-8507): runtime producer should be omnibase-infra
+onex.evt.runtime.tick.v1
+# TODO(OMN-8507): skill producer should be omnimarket or omnibase-infra
+onex.cmd.skill.merge-sweep.v1
+onex.cmd.skill.scope-check.v1
+onex.evt.skill.merge-sweep-auto-merged.v1
+onex.evt.skill.merge-sweep-classified.v1
+onex.evt.skill.merge-sweep-complete.v1
+onex.evt.skill.merge-sweep-failed.v1
+onex.evt.skill.merge-sweep-pr-list.v1
+onex.evt.skill.scope-check-complete.v1
+onex.evt.skill.scope-check-failed.v1
+onex.evt.skill.scope-extracted.v1
+onex.evt.skill.scope-file-read.v1
+onex.evt.skill.scope-manifest-written.v1
+# TODO(OMN-8507): validation producer should be omnibase-infra
+onex.evt.validation.cross-repo-run-completed.v1
+onex.evt.validation.cross-repo-run-started.v1
+onex.evt.validation.cross-repo-violations-batch.v1
+# TODO(OMN-8507): git/linear/deploy/pattern/omniweb producers found in Python source
+onex.evt.git.hook.v1
+onex.evt.linear.snapshot.v1
+onex.cmd.deploy.rebuild-requested.v1
+onex.evt.pattern.discovered.v1
+onex.evt.omniweb.waitlist-signup.v1

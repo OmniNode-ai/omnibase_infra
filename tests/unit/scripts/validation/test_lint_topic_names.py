@@ -15,7 +15,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-from scripts.validation.lint_topic_names import LintResult, lint_topic, scan_contracts
+from scripts.validation.lint_topic_names import (
+    _KNOWN_PRODUCERS,
+    LintResult,
+    lint_topic,
+    scan_contracts,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -132,6 +137,63 @@ def test_scan_wrong_prefix_caught(tmp_path: Path) -> None:
 
     violations = scan_contracts(contracts_dir)
     assert len(violations) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Producer allowlist (OMN-8507)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_unknown_producer_rejected() -> None:
+    """Linter must reject topic strings with producer not in the known-repos allowlist."""
+    result = lint_topic("onex.evt.review-bot.foo.v1")
+    assert not result.is_valid
+    assert any("unknown producer" in v for v in result.violations)
+    assert any("review-bot" in v for v in result.violations)
+
+
+@pytest.mark.unit
+def test_producer_with_underscore_rejected() -> None:
+    """Producer with underscore fails both producer-pattern and allowlist checks."""
+    result = lint_topic("onex.evt.review_bot.foo.v1")
+    assert not result.is_valid
+
+
+@pytest.mark.unit
+def test_known_producer_accepted() -> None:
+    """Linter must accept topic strings with producer in the known-repos allowlist."""
+    result = lint_topic("onex.evt.omnimarket.review-bot-foo.v1")
+    assert result.is_valid, f"Expected valid but got violations: {result.violations}"
+
+
+@pytest.mark.unit
+def test_all_known_producers_accepted() -> None:
+    """All entries in _KNOWN_PRODUCERS must produce valid 5-segment topics."""
+    for producer in _KNOWN_PRODUCERS:
+        result = lint_topic(f"onex.evt.{producer}.test-event.v1")
+        assert result.is_valid, (
+            f"Producer {producer!r} unexpectedly rejected: {result.violations}"
+        )
+
+
+@pytest.mark.unit
+def test_known_producers_allowlist_complete() -> None:
+    """_KNOWN_PRODUCERS contains all expected canonical producer segments."""
+    expected = {
+        "omnimarket",
+        "omnibase-infra",
+        "omniclaude",
+        "omniintelligence",
+        "omnimemory",
+        "omninode",
+        "omnibase-compat",
+        "github",
+        "platform",
+    }
+    assert expected.issubset(_KNOWN_PRODUCERS), (
+        f"Missing producers: {expected - _KNOWN_PRODUCERS}"
+    )
 
 
 # ---------------------------------------------------------------------------
