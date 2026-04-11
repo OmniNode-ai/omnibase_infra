@@ -1295,3 +1295,59 @@ class TestParseUsage:
         )
         assert usage.tokens_input == 0
         assert usage.tokens_output == 0
+
+
+@pytest.mark.unit
+class TestTimeoutPropagation:
+    """Regression tests: timeout_seconds from the request must reach _execute_llm_http_call.
+
+    Root cause (2026-04-11): _execute_with_auth() called _execute_llm_http_call()
+    without forwarding timeout_seconds when api_key=None and extra_headers=None.
+    The transport's 30.0s default was used regardless of the per-model config,
+    causing ONEX_CORE_092_TIMEOUT_ERROR on slow local LLMs (qwen3-coder=120s,
+    deepseek-r1=300s).
+    """
+
+    @pytest.mark.asyncio
+    async def test_custom_timeout_forwarded_to_transport_no_auth(self) -> None:
+        """timeout_seconds=120.0 must reach _execute_llm_http_call when api_key=None."""
+        transport = _make_transport()
+        transport._execute_llm_http_call.return_value = _make_openai_chat_response(
+            content="ok", finish_reason="stop", prompt_tokens=5, completion_tokens=2
+        )
+        handler = _make_handler(transport)
+
+        request = _make_chat_request(timeout_seconds=120.0)
+        await handler.handle(request, correlation_id=_CORRELATION_ID)
+
+        call_kwargs = transport._execute_llm_http_call.call_args
+        assert call_kwargs is not None, "_execute_llm_http_call was not called"
+        # timeout_seconds should be passed as keyword arg
+        actual_timeout = call_kwargs.kwargs.get("timeout_seconds")
+        assert actual_timeout == 120.0, (
+            f"Expected timeout_seconds=120.0 forwarded to _execute_llm_http_call, "
+            f"got {actual_timeout!r}. The transport's 30.0s default is being used "
+            f"instead of the per-model config value."
+        )
+
+    @pytest.mark.asyncio
+    async def test_default_timeout_forwarded_to_transport(self) -> None:
+        """Default timeout_seconds must still reach _execute_llm_http_call."""
+        transport = _make_transport()
+        transport._execute_llm_http_call.return_value = _make_openai_chat_response(
+            content="ok", finish_reason="stop", prompt_tokens=5, completion_tokens=2
+        )
+        handler = _make_handler(transport)
+
+        request = _make_chat_request()  # uses ModelLlmInferenceRequest default
+        default_timeout = request.timeout_seconds
+
+        await handler.handle(request, correlation_id=_CORRELATION_ID)
+
+        call_kwargs = transport._execute_llm_http_call.call_args
+        assert call_kwargs is not None
+        actual_timeout = call_kwargs.kwargs.get("timeout_seconds")
+        assert actual_timeout == default_timeout, (
+            f"Expected timeout_seconds={default_timeout} forwarded to transport, "
+            f"got {actual_timeout!r}."
+        )

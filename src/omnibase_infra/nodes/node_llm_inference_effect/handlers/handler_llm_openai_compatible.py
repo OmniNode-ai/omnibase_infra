@@ -597,6 +597,7 @@ class HandlerLlmOpenaiCompatible:
                 url=url,
                 payload=payload,
                 correlation_id=correlation_id,
+                timeout_seconds=timeout_seconds,
             )
 
         # Lock lives on the transport so that ALL handler instances sharing
@@ -633,6 +634,7 @@ class HandlerLlmOpenaiCompatible:
                     url=url,
                     payload=payload,
                     correlation_id=correlation_id,
+                    timeout_seconds=timeout_seconds,
                 )
             finally:
                 self._transport._http_client = original_client
