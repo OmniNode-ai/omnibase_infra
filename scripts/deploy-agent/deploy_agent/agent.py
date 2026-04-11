@@ -8,8 +8,6 @@ import asyncio
 import logging
 import os
 import signal
-import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 from aiohttp import web
@@ -19,7 +17,6 @@ from deploy_agent.events import (
     ModelRebuildRequested,
     Phase,
     PhaseStatus,
-    Scope,
 )
 from deploy_agent.executor import DeployExecutor
 from deploy_agent.health import create_health_app

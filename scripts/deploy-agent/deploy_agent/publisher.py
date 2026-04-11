@@ -8,18 +8,13 @@ import json
 import logging
 import subprocess
 import time
-from datetime import UTC, datetime, timezone
-from uuid import UUID
+from datetime import UTC, datetime
 
 from deploy_agent.events import (
     TOPIC_REBUILD_COMPLETED,
     ModelHealthCheck,
-    ModelRebuildCompleted,
-    Phase,
-    PhaseStatus,
-    Scope,
 )
-from deploy_agent.job_state import JobState, JobStore
+from deploy_agent.job_state import JobState
 
 logger = logging.getLogger(__name__)
 

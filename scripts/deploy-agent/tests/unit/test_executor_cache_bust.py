@@ -9,9 +9,8 @@ git is at the correct SHA (root cause of PR #1231 verification failure).
 from __future__ import annotations
 
 import subprocess
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import patch
 
-import pytest
 from deploy_agent.events import Phase, PhaseStatus, Scope
 from deploy_agent.executor import DeployExecutor
 
