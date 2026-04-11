@@ -120,6 +120,9 @@ onex-linear-relay = "omnibase_infra.cli.linear_relay:main"
 onex-status = "omnibase_infra.tui.__main__:run_status_tui"
 verify-container-manifest = "omnibase_infra.scripts.verify_container_manifest:main"
 
+[project.entry-points."onex.cli"]
+kafka = "omnibase_infra.cli.cli_kafka:kafka"
+
 [project.entry-points."onex.backends"]
 event_bus_kafka = "omnibase_infra.event_bus.event_bus_kafka:EventBusKafka"
 state_postgres = "omnibase_infra.backends.backend_probe:probe_postgres"
