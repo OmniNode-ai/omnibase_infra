@@ -201,9 +201,11 @@ x-runtime-env: &runtime-env
   # external nodes send their own ack. Must be explicitly set to true or false.
   ONEX_REGISTRATION_AUTO_ACK: ${ONEX_REGISTRATION_AUTO_ACK:?ONEX_REGISTRATION_AUTO_ACK must be set in ~/.omnibase/.env (true or false)}
   # --- LLM endpoints (OMN-7979) ---
-  # PluginLlm.should_activate() reads these from os.environ. Without them in
-  # the container, the LLM plugin skips activation and LlmCallerDelegation
-  # wires with llm_caller=None, breaking the delegation pipeline.
+  # PluginLlm.should_activate() returns true when any LLM_*_URL in
+  # _LLM_URL_ENV_VARS is set (e.g. LLM_SMALL_URL, LLM_GLM_URL,
+  # LLM_OPENROUTER_URL, or the four below). This compose contract requires
+  # these four baseline endpoints so delegation wiring is consistently
+  # available; without at least one, LlmCallerDelegation wires llm_caller=None.
   # Values come from ~/.omnibase/.env (or Infisical in managed deployments).
   LLM_CODER_URL: ${LLM_CODER_URL:?LLM_CODER_URL required for PluginLlm activation}
   LLM_CODER_FAST_URL: ${LLM_CODER_FAST_URL:?LLM_CODER_FAST_URL required for PluginLlm activation}
