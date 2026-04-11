@@ -30,6 +30,7 @@ hardcoded_env:
   RUNTIME_PROFILE: effects
   OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   POSTGRES_HOST: postgres
+  ENABLE_RUNTIME_LOG_BRIDGE: 'true'
 operational_defaults:
   POSTGRES_USER: postgres
   ONEX_LOG_LEVEL: INFO
