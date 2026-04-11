@@ -121,15 +121,25 @@ def _make_event_bus_callback(
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
     async def callback(message: object) -> None:
-        raw = getattr(message, "value", None)
-        if raw is not None:
-            data = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
-            envelope: ModelEventEnvelope[object] = ModelEventEnvelope[
-                object
-            ].model_validate(data)
-        else:
-            envelope = message  # type: ignore[assignment]
-        await dispatch_engine.dispatch(topic, envelope)
+        try:
+            raw = getattr(message, "value", None)
+            if raw is not None:
+                data = json.loads(
+                    raw.decode("utf-8") if isinstance(raw, bytes) else raw
+                )
+                envelope: ModelEventEnvelope[object] = ModelEventEnvelope[
+                    object
+                ].model_validate(data)
+            else:
+                envelope = message  # type: ignore[assignment]
+            await dispatch_engine.dispatch(topic, envelope)
+        except Exception as exc:  # noqa: BLE001 — boundary: log and discard; unsubscribe unavailable here
+            logger.error(
+                "Auto-wiring callback error: topic=%s error_type=%s error=%s",
+                topic,
+                type(exc).__name__,
+                exc,
+            )
 
     return callback
 
