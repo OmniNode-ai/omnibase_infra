@@ -131,7 +131,15 @@ def _make_event_bus_callback(
                     object
                 ].model_validate(data)
             else:
-                envelope = message  # type: ignore[assignment]
+                if not isinstance(message, ModelEventEnvelope):
+                    logger.warning(
+                        "Auto-wiring callback: message has no 'value' and is not a ModelEventEnvelope"
+                        " — dropping. topic=%s message_type=%s",
+                        topic,
+                        type(message).__name__,
+                    )
+                    return
+                envelope = message
             await dispatch_engine.dispatch(topic, envelope)
         except Exception as exc:  # noqa: BLE001 — boundary: log and discard; unsubscribe unavailable here
             logger.error(

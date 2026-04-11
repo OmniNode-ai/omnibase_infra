@@ -205,3 +205,66 @@ class TestSubscribeCallbackRoutesToDispatchEngine:
         assert len(captured_callbacks) == 1
         callback = captured_callbacks[0]
         assert callable(callback)
+
+
+# ---------------------------------------------------------------------------
+# Test 3 — raw=None fallback path (OMN-8512 CR fix)
+# ---------------------------------------------------------------------------
+
+
+class TestMakeEventBusCallbackFallbackPath:
+    """When raw is None, dispatch_engine must NOT receive a non-ModelEventEnvelope."""
+
+    @pytest.mark.asyncio
+    async def test_non_envelope_message_is_dropped_not_dispatched(self) -> None:
+        """A message with no .value attribute that is not a ModelEventEnvelope must
+        be dropped (dispatch_engine.dispatch not called) rather than passed through raw."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            _make_event_bus_callback,
+        )
+
+        dispatch_engine = MagicMock()
+        dispatch_engine.dispatch = AsyncMock()
+
+        callback = _make_event_bus_callback(
+            "onex.cmd.test.v1",
+            dispatch_engine,  # type: ignore[arg-type]
+        )
+
+        # A plain object with no .value — not a ModelEventEnvelope
+        bad_message = object()
+        await callback(bad_message)
+
+        # dispatch_engine must NOT have been called with the raw non-envelope
+        dispatch_engine.dispatch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_valid_envelope_message_passes_through(self) -> None:
+        """A message with no .value that IS already a ModelEventEnvelope must still be dispatched."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            _make_event_bus_callback,
+        )
+
+        dispatch_engine = MagicMock()
+        dispatch_engine.dispatch = AsyncMock()
+
+        callback = _make_event_bus_callback(
+            "onex.cmd.test.v1",
+            dispatch_engine,  # type: ignore[arg-type]
+        )
+
+        envelope = ModelEventEnvelope[object].model_construct(
+            event_type="onex.cmd.test.v1",
+            payload={},
+        )
+        await callback(envelope)
+
+        dispatch_engine.dispatch.assert_called_once()
+        _, call_envelope = dispatch_engine.dispatch.call_args.args
+        assert isinstance(call_envelope, ModelEventEnvelope)
