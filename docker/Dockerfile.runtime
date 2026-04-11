@@ -142,6 +142,13 @@ COPY uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev --no-install-project
 
+# ARG GIT_SHA placed immediately before COPY src/ so that passing
+# --build-arg GIT_SHA=<new-sha> invalidates this layer and all subsequent
+# layers, even when Docker's mtime-based cache would otherwise treat the
+# COPY as a hit (root cause of PR #1231 silent stale-code bug, OMN-8489).
+ARG GIT_SHA=unknown
+LABEL org.opencontainers.image.revision="${GIT_SHA}"
+
 # Copy source code (required for local package install with uv)
 # This layer invalidates when source code changes, but dependency layer remains cached
 COPY src/ ./src/
