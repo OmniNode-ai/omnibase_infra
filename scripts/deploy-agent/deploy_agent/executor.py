@@ -112,7 +112,6 @@ class DeployExecutor:
         seed_script = f"{REPO_DIR}/scripts/seed-infisical.py"
         venv_python = f"{REPO_DIR}/.venv/bin/python"
 
-        import os
         import shutil
 
         # Resolve Python: prefer venv, fall back to uv, then system python3
