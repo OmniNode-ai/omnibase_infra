@@ -110,6 +110,13 @@ LOCAL_ONLY_KEYS: frozenset[str] = frozenset(
         "OMNIBASE_INFRA_DIR",
         # OmniMemory crawl path — local server path, has no k8s equivalent
         "OMNIMEMORY_CRAWL_PATH_PREFIXES",
+        # LLM endpoints — lab-local GPU servers (192.168.86.*); k8s onex-dev
+        # routes to cluster-internal or public model endpoints via a different
+        # mechanism (tracked: OMN-7979). In local docker these activate PluginLlm.
+        "LLM_CODER_URL",
+        "LLM_CODER_FAST_URL",
+        "LLM_EMBEDDING_URL",
+        "LLM_DEEPSEEK_R1_URL",
     }
 )
 
