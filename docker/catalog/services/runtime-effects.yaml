@@ -9,6 +9,10 @@ required_env:
   - KEYCLOAK_ADMIN_CLIENT_SECRET
   - ONEX_SERVICE_CLIENT_SECRET
   - ONEX_REGISTRATION_AUTO_ACK
+  - LLM_CODER_URL
+  - LLM_CODER_FAST_URL
+  - LLM_EMBEDDING_URL
+  - LLM_DEEPSEEK_R1_URL
 hardcoded_env:
   OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omnibase_infra'
   OMNIINTELLIGENCE_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omniintelligence'
@@ -26,10 +30,6 @@ hardcoded_env:
   RUNTIME_PROFILE: effects
   OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   POSTGRES_HOST: postgres
-  LLM_CODER_URL: http://192.168.86.201:8000
-  LLM_CODER_FAST_URL: http://192.168.86.201:8001
-  LLM_EMBEDDING_URL: http://192.168.86.200:8100
-  LLM_DEEPSEEK_R1_URL: http://192.168.86.200:8101
 operational_defaults:
   POSTGRES_USER: postgres
   ONEX_LOG_LEVEL: INFO
@@ -49,7 +49,7 @@ healthcheck:
   interval_s: 45
   timeout_s: 10
   retries: 5
-  start_period_s: 900
+  start_period_s: 600
 volumes:
   - effects_logs:/app/logs
   - effects_data:/app/data
