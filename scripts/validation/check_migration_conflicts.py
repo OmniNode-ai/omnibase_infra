@@ -27,6 +27,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -90,7 +91,7 @@ def main() -> int:
         "omni_home",
         type=Path,
         nargs="?",
-        default=Path("/Users/jonah/Code/omni_home"),
+        default=Path(os.environ.get("OMNI_HOME", ".")),
         help="Path to omni_home directory",
     )
     args = parser.parse_args()

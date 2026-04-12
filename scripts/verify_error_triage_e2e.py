@@ -26,11 +26,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pathlib
 import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+
+_OMNI_HOME = pathlib.Path(os.environ["OMNI_HOME"])
 
 
 @dataclass
@@ -428,7 +431,7 @@ def verify_begin_day_probes(report: VerificationReport) -> None:
         ("check-boundary-parity", ["uv", "run", "check-boundary-parity", "--json"]),
     ]:
         # Run from onex_change_control
-        occ_dir = "/Volumes/PRO-G40/Code/omni_home/onex_change_control"
+        occ_dir = str(_OMNI_HOME / "onex_change_control")
         try:
             result = subprocess.run(
                 cmd,
@@ -483,9 +486,7 @@ def verify_close_day_skill(report: VerificationReport) -> None:
     import pathlib
 
     # Check skill files exist
-    skill_dir = pathlib.Path(
-        "/Volumes/PRO-G40/Code/omni_home/omniclaude/plugins/onex/skills/close_day"
-    )
+    skill_dir = _OMNI_HOME / "omniclaude" / "plugins" / "onex" / "skills" / "close_day"
     for f in ["SKILL.md", "prompt.md", "topics.yaml"]:
         exists = (skill_dir / f).exists()
         report.add(
@@ -633,7 +634,7 @@ def verify_adversarial_6c_malformed(report: VerificationReport) -> None:
 
 def verify_adversarial_6d_regression(report: VerificationReport) -> None:
     """6d: Row count regression — verify check-omnidash-health detects it."""
-    occ_dir = "/Volumes/PRO-G40/Code/omni_home/onex_change_control"
+    occ_dir = str(_OMNI_HOME / "onex_change_control")
     # Just verify the script exists and can be invoked
     result = subprocess.run(
         ["uv", "run", "check-omnidash-health", "--help"],
@@ -667,7 +668,7 @@ def verify_adversarial_6d_regression(report: VerificationReport) -> None:
 
 def verify_adversarial_6e_boundary(report: VerificationReport) -> None:
     """6e: Boundary mismatch — verify check-boundary-parity detects it."""
-    occ_dir = "/Volumes/PRO-G40/Code/omni_home/onex_change_control"
+    occ_dir = str(_OMNI_HOME / "onex_change_control")
     result = subprocess.run(
         ["uv", "run", "check-boundary-parity", "--help"],
         capture_output=True,
@@ -699,7 +700,7 @@ def verify_adversarial_6f_dashboard(report: VerificationReport) -> None:
     """6f: Operator visibility — verify /runtime-errors page components exist."""
     import pathlib
 
-    omnidash = pathlib.Path("/Volumes/PRO-G40/Code/omni_home/omnidash")
+    omnidash = _OMNI_HOME / "omnidash"
 
     files = [
         ("client/src/pages/RuntimeErrorsDashboard.tsx", "Dashboard page"),
@@ -729,9 +730,7 @@ def verify_service_kernel_wiring(report: VerificationReport) -> None:
     """Verify HandlerRuntimeErrorTriage is wired in service_kernel.py."""
     import pathlib
 
-    kernel_path = pathlib.Path(
-        "/Volumes/PRO-G40/Code/omni_home/omnibase_infra/src/omnibase_infra/runtime/service_kernel.py"
-    )
+    kernel_path = _OMNI_HOME / "omnibase_infra" / "src" / "omnibase_infra" / "runtime" / "service_kernel.py"
     if not kernel_path.exists():
         report.add(
             VerificationResult(
@@ -769,9 +768,14 @@ def verify_contract(report: VerificationReport) -> None:
     """Verify NodeRuntimeErrorTriageEffect contract.yaml."""
     import pathlib
 
-    contract = pathlib.Path(
-        "/Volumes/PRO-G40/Code/omni_home/omnibase_infra/src/omnibase_infra/"
-        "nodes/node_runtime_error_triage_effect/contract.yaml"
+    contract = (
+        _OMNI_HOME
+        / "omnibase_infra"
+        / "src"
+        / "omnibase_infra"
+        / "nodes"
+        / "node_runtime_error_triage_effect"
+        / "contract.yaml"
     )
     if not contract.exists():
         report.add(
@@ -810,9 +814,13 @@ def verify_omnidash_projection_wiring(report: VerificationReport) -> None:
     """Verify omnidash projections are wired for runtime error topics."""
     import pathlib
 
-    proj_file = pathlib.Path(
-        "/Volumes/PRO-G40/Code/omni_home/omnidash/server/consumers/"
-        "read-model/omnibase-infra-projections.ts"
+    proj_file = (
+        _OMNI_HOME
+        / "omnidash"
+        / "server"
+        / "consumers"
+        / "read-model"
+        / "omnibase-infra-projections.ts"
     )
     if not proj_file.exists():
         report.add(
@@ -857,9 +865,7 @@ def verify_migrations(report: VerificationReport) -> None:
     import pathlib
 
     # omnibase_infra migrations
-    infra_migrations = pathlib.Path(
-        "/Volumes/PRO-G40/Code/omni_home/omnibase_infra/docker/migrations/forward"
-    )
+    infra_migrations = _OMNI_HOME / "omnibase_infra" / "docker" / "migrations" / "forward"
     migration_055 = list(infra_migrations.glob("055_*"))
     report.add(
         VerificationResult(
@@ -870,9 +876,7 @@ def verify_migrations(report: VerificationReport) -> None:
     )
 
     # omnidash migrations
-    omnidash_migrations = pathlib.Path(
-        "/Volumes/PRO-G40/Code/omni_home/omnidash/migrations"
-    )
+    omnidash_migrations = _OMNI_HOME / "omnidash" / "migrations"
     migration_0036 = list(omnidash_migrations.glob("0036_*"))
     migration_0039 = list(omnidash_migrations.glob("0039_*"))
     report.add(
@@ -902,7 +906,7 @@ def verify_unit_tests(report: VerificationReport) -> None:
         "tests/unit/scripts/test_monitor_logs_runtime_emit.py",
         "tests/unit/nodes/test_handler_runtime_error_triage.py",
     ]
-    infra_dir = "/Volumes/PRO-G40/Code/omni_home/omnibase_infra"
+    infra_dir = str(_OMNI_HOME / "omnibase_infra")
 
     for test_file in test_files:
         result = subprocess.run(
@@ -1023,7 +1027,7 @@ def main() -> None:
     # Write report to disk
     import pathlib
 
-    report_dir = pathlib.Path("/Volumes/PRO-G40/Code/omni_home/docs/tracking")
+    report_dir = _OMNI_HOME / "docs" / "tracking"
     report_dir.mkdir(parents=True, exist_ok=True)
     report_path = report_dir / "2026-04-02-omn-5656-e2e-verification-results.json"
     report_path.write_text(json.dumps(report.to_dict(), indent=2))

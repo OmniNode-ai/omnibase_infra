@@ -56,7 +56,7 @@ if [[ ! -f "${PLIST_SRC}" ]]; then
 fi
 
 # Verify pull-all.sh exists at the path referenced in the plist
-PULL_ALL="/Volumes/PRO-G40/Code/omni_home/omnibase_infra/scripts/pull-all.sh"
+PULL_ALL="${OMNI_HOME}/omnibase_infra/scripts/pull-all.sh"
 if [[ ! -f "${PULL_ALL}" ]]; then
     echo "ERROR: pull-all.sh not found at ${PULL_ALL}" >&2
     echo "       The plist references this absolute path." >&2
