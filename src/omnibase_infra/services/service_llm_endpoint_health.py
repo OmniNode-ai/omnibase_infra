@@ -207,8 +207,8 @@ class ServiceLlmEndpointHealth:
 
         config = ModelLlmEndpointHealthConfig(
             endpoints={
-                "coder-14b": "http://192.168.86.201:8000",
-                "qwen-embedding": os.getenv("LLM_EMBEDDING_URL", "http://192.168.86.200:8100"),
+                "coder-14b": os.getenv("LLM_CODER_URL", ""),
+                "qwen-embedding": os.getenv("LLM_EMBEDDING_URL", ""),
             },
             probe_interval_seconds=30.0,
         )
@@ -451,7 +451,7 @@ class ServiceLlmEndpointHealth:
 
         Args:
             name: Logical endpoint name.
-            url: Base URL (e.g. ``http://192.168.86.201:8000``).
+            url: Base URL (e.g. ``http://localhost:8000``).
             correlation_id: Correlation ID for tracing.
 
         Returns:
