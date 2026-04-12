@@ -108,6 +108,7 @@ def scan_repos(omni_home: Path) -> dict[str, list[tuple[Path, int, str]]]:
 
 
 def main() -> int:
+    _omni_home_default = Path(os.environ.get("OMNI_HOME", "."))
     parser = argparse.ArgumentParser(
         description="Scan for TODO(OMN-XXXX) references across omni_home repos"
     )
@@ -115,7 +116,7 @@ def main() -> int:
         "omni_home",
         type=Path,
         nargs="?",
-        default=Path(os.environ.get("OMNI_HOME", ".")),
+        default=_omni_home_default,
         help="Path to omni_home directory",
     )
     parser.add_argument(

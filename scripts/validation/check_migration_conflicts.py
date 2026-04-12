@@ -84,6 +84,7 @@ def extract_tables_from_sql(path: Path) -> list[str]:
 
 
 def main() -> int:
+    _omni_home_default = Path(os.environ.get("OMNI_HOME", "."))
     parser = argparse.ArgumentParser(
         description="Check for migration conflicts across repos"
     )
@@ -91,7 +92,7 @@ def main() -> int:
         "omni_home",
         type=Path,
         nargs="?",
-        default=Path(os.environ.get("OMNI_HOME", ".")),
+        default=_omni_home_default,
         help="Path to omni_home directory",
     )
     args = parser.parse_args()
