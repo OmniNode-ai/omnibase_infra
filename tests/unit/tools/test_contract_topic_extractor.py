@@ -718,8 +718,10 @@ def test_extract_from_installed_packages_discovers_omnimarket_topics() -> None:
     extractor = ContractTopicExtractor(include_installed_packages=True)
     entries = extractor.extract_from_installed_packages()
 
-    omnimarket_topics = [e.topic for e in entries if "omnimarket" in e.topic]
-    assert len(omnimarket_topics) > 0, (
-        "Expected at least one omnimarket topic from installed package scan; "
+    omnimarket_entries = [
+        e for e in entries if any("omnimarket" in str(p) for p in e.source_contracts)
+    ]
+    assert len(omnimarket_entries) > 0, (
+        "Expected at least one topic sourced from omnimarket contracts; "
         "got none — check that omnimarket is installed and in _APPROVED_PACKAGES"
     )
