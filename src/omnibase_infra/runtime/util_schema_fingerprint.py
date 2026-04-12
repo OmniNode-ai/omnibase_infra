@@ -697,11 +697,12 @@ def _main() -> None:
     if args.manifest == "omniintelligence":
         env_var_name = "OMNIINTELLIGENCE_DB_URL"
         try:
-            from omniintelligence.runtime.model_schema_manifest import (
-                OMNIINTELLIGENCE_SCHEMA_MANIFEST,
-            )
+            import importlib
 
-            manifest_obj = OMNIINTELLIGENCE_SCHEMA_MANIFEST
+            _intel_mod = importlib.import_module(
+                "omniintelligence.runtime.model_schema_manifest"
+            )
+            manifest_obj = _intel_mod.OMNIINTELLIGENCE_SCHEMA_MANIFEST
         except ImportError:
             print(
                 "ERROR: omniintelligence package not installed. "
