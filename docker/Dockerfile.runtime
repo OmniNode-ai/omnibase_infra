@@ -195,6 +195,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps \
     "git+https://github.com/OmniNode-ai/omnibase_compat.git@main#egg=omnibase-compat"
 
+# Install onex_change_control before omnimarket — omnimarket's node_overseer_verifier
+# imports it at module level but omnimarket is installed --no-deps, so it must
+# be present first. Pinned to git main until PyPI publishing is automated.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --no-deps \
+    "git+https://github.com/OmniNode-ai/onex_change_control.git@main#egg=onex-change-control"
+
 # Install omnimarket from git main until PyPI releases are automated (OMN-7980).
 # Pinned to main so every image rebuild picks up the latest merged nodes.
 # Switch back to PyPI range pin once the auto-tag-on-merge release pipeline
