@@ -20,7 +20,7 @@ class ModelBaselineCaptureOutput(BaseModel):
         errors: Tuple of sanitized error messages (empty on success).
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     measurements_captured: int
     snapshot_emitted: bool

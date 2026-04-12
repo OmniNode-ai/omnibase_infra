@@ -12,7 +12,7 @@ Design decisions:
     D1: correlation_id is REQUIRED in the command (no default).
     D2: lookback_hours is capped at 168 (7 days) to bound query cost.
     D3: Emit only when measurements_captured > 0 (no empty snapshots).
-    D4: token counts read from action_details->>'total_tokens'; NULL treated as 0.
+    D4: token counts read from metadata->>'total_tokens'; NULL treated as 0.
     D5: Publisher callable matches PublisherTopicScoped.publish signature (same as
         HandlerBaselinesBatchCompute — no new protocol needed).
 
@@ -189,7 +189,7 @@ class HandlerBaselineCapture:
     ) -> tuple[list[ModelBaselinesBreakdownRow], int]:
         """Read agent_actions within the lookback window, grouped by agent_name.
 
-        Aggregates token counts (from action_details->>'total_tokens') and
+        Aggregates token counts (from metadata->>'total_tokens') and
         latency (duration_ms) per agent. Returns breakdown rows and total count.
 
         D4: NULL token values coerced to 0.
@@ -209,13 +209,13 @@ class HandlerBaselineCapture:
                 AVG(duration_ms) AS avg_latency_ms,
                 SUM(
                     COALESCE(
-                        (action_details->>'total_tokens')::bigint,
+                        (metadata->>'total_tokens')::bigint,
                         0
                     )
                 ) AS total_tokens,
                 AVG(
                     COALESCE(
-                        (action_details->>'total_tokens')::bigint,
+                        (metadata->>'total_tokens')::bigint,
                         0
                     )
                 ) AS avg_tokens,
@@ -291,7 +291,8 @@ class HandlerBaselineCapture:
             correlation_id: For tracing.
             since: Window start (lookback boundary).
         """
-        assert self._publisher is not None
+        if self._publisher is None:  # guarded by caller (D3)
+            return
         snapshot_id = uuid4()
         computed_at = datetime.now(UTC)
 
