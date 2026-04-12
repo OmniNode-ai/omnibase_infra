@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+# Ticket: OMN-7484
+name: "node_baseline_capture"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  EFFECT node: raw measurement capture for baselines pipeline (SOW Phase 2 — Track B4a). Reads existing pattern execution data (tokens, latency, model_used) from agent_actions and agent_routing_decisions. Emits onex.evt.omnibase-infra.baselines-computed.v1 with raw measurements so the omnidash consumer can project to baselines_snapshots. Does NOT compute deltas or ROI — that is deferred to B4b.
+
+input_model:
+  name: "ModelBaselineCaptureCommand"
+  module: "omnibase_infra.nodes.node_baseline_capture.models"
+  description: "Capture command with required correlation_id."
+output_model:
+  name: "ModelBaselineCaptureOutput"
+  module: "omnibase_infra.nodes.node_baseline_capture.models"
+  description: "Row count of raw measurements captured and snapshot_emitted flag."
+event_bus:
+  publish_topics:
+    - "onex.evt.omnibase-infra.baselines-computed.v1"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "baselines.capture"
+      handler:
+        name: "HandlerBaselineCapture"
+        module: "omnibase_infra.nodes.node_baseline_capture.handlers.handler_baseline_capture"
+metadata:
+  description: "Raw measurement capture for agent_actions (tokens, latency, model_used) — no baseline computation"
