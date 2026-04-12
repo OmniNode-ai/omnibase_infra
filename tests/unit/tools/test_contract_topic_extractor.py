@@ -687,3 +687,39 @@ def test_extract_from_real_nodes_directory() -> None:
         assert entry.topic.startswith("onex.")
         assert len(entry.source_contracts) >= 1
         assert entry.version.startswith("v")
+
+
+@pytest.mark.unit
+def test_approved_packages_includes_omnimarket() -> None:
+    """omnimarket must be in _APPROVED_PACKAGES so its topics are provisioned on boot.
+
+    Without omnimarket in the approved list, ContractTopicExtractor skips all
+    omnimarket contracts even when include_installed_packages=True, leaving 41+
+    nodes with unprovisioned topics and InfraTimeoutError on every boot cycle.
+    """
+    from omnibase_infra.tools.contract_topic_extractor import _APPROVED_PACKAGES
+
+    assert "omnimarket" in _APPROVED_PACKAGES, (
+        "omnimarket must be in _APPROVED_PACKAGES — omitting it causes 41+ nodes "
+        "to fail with InfraTimeoutError on every boot cycle"
+    )
+
+
+@pytest.mark.unit
+def test_extract_from_installed_packages_discovers_omnimarket_topics() -> None:
+    """ContractTopicExtractor discovers omnimarket topics when omnimarket is installed."""
+    import importlib.util
+
+    if importlib.util.find_spec("omnimarket") is None:
+        pytest.skip(
+            "omnimarket not installed — skipping installed-packages discovery test"
+        )
+
+    extractor = ContractTopicExtractor(include_installed_packages=True)
+    entries = extractor.extract_from_installed_packages()
+
+    omnimarket_topics = [e.topic for e in entries if "omnimarket" in e.topic]
+    assert len(omnimarket_topics) > 0, (
+        "Expected at least one omnimarket topic from installed package scan; "
+        "got none — check that omnimarket is installed and in _APPROVED_PACKAGES"
+    )

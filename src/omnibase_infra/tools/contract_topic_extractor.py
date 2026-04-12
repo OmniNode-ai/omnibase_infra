@@ -42,6 +42,7 @@ _APPROVED_PACKAGES: tuple[str, ...] = (
     "omniintelligence",
     "omnimemory",
     "omniclaude",
+    "omnimarket",
 )
 
 _VALID_KINDS: frozenset[str] = frozenset({"evt", "cmd", "intent"})
