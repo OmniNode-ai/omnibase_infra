@@ -148,9 +148,7 @@ class HandlerBaselineCapture:
             )
             safe_msg = sanitize_error_message(e)
             msg = f"Raw measurement read failed: {safe_msg}"
-            logger.exception(
-                msg, extra={"correlation_id": str(err_ctx.correlation_id)}
-            )
+            logger.exception(msg, extra={"correlation_id": str(err_ctx.correlation_id)})
             errors.append(msg)
 
         # D3: no empty snapshots
