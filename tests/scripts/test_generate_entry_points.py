@@ -196,15 +196,15 @@ def test_check_mode_exits_1_when_drifted(script, tmp_path: Path) -> None:  # typ
 @pytest.mark.unit
 def test_omnimarket_collect_and_build_smoke(script) -> None:  # type: ignore[no-untyped-def]
     """collect_node_dirs + build_entry_point_section work against the real omnimarket repo."""
-    omnimarket_root: Path
-    pkg: str
     try:
         omnimarket_root, pkg = script._resolve_repo("omnimarket")
     except ValueError:
         pytest.skip("omnimarket not resolvable from this environment")
+        return  # unreachable; satisfies static analysis
 
     if not omnimarket_root.exists():
         pytest.skip("omnimarket not found")
+        return  # unreachable; satisfies static analysis
 
     node_dirs = script.collect_node_dirs(omnimarket_root, pkg)
     # omnimarket has many nodes — ensure we found a reasonable number
