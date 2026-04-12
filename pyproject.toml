@@ -304,6 +304,7 @@ ignore = [
 "src/omnibase_infra/tools/contract_topic_extractor.py" = ["T201"]
 "src/omnibase_infra/scripts/verify_container_manifest.py" = ["T201"]
 "src/omnibase_infra/services/observability/llm_cost_aggregation/consumer.py" = ["T201"]
+"src/omnibase_infra/services/observability/delegation_projection/consumer.py" = ["T201"]
 # Intentional stdout sinks / fallback output
 "src/omnibase_infra/event_bus/service_topic_manager.py" = ["T201"]
 "src/omnibase_infra/observability/sinks/sink_logging_structured.py" = ["T201"]

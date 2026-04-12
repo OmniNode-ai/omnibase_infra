@@ -38,6 +38,7 @@ runtime:
     - waitlist-signup-notifier
     - savings-estimation-consumer
     - llm-cost-aggregation-consumer
+    - delegation-projection-consumer
     - consumer-health-projection
     - retry-worker
     - autoheal
