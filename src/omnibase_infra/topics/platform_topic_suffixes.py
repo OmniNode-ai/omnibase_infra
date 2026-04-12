@@ -826,6 +826,24 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
             "cleanup.policy": "delete",
         },  # 7 days
     ),
+    # GitHub PR triage status events (1 partition — low-throughput, OMN-2656)
+    ModelTopicSpec(
+        suffix=SUFFIX_GITHUB_PR_STATUS,
+        partitions=1,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
+    # Gmail intent received events (3 partitions — per-email drain cycle, OMN-2730)
+    ModelTopicSpec(
+        suffix=SUFFIX_GMAIL_INTENT_RECEIVED,
+        partitions=3,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
     # Eval completed events (3 partitions — low-throughput, per-eval-task, OMN-6798)
     ModelTopicSpec(
         suffix=SUFFIX_EVAL_COMPLETED,
@@ -1632,6 +1650,9 @@ ALL_OMNIMEMORY_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_EXPIRE_MEMORY, partitions=3),
     ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_ARCHIVE_MEMORY, partitions=3),
     ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_RESTORE_MEMORY, partitions=3),
+    # Reward binder events (3 partitions — OMN-2927)
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_REWARD_ASSIGNED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED, partitions=3),
 )
 """Omnimemory domain topic specs provisioned for PluginOmnimemory.
 
