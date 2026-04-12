@@ -32,6 +32,8 @@ import re
 import sys
 from pathlib import Path
 
+_OMNI_HOME_DEFAULT = Path(os.environ.get("OMNI_HOME", "."))
+
 TODO_PATTERN = re.compile(r"TODO\s*\(?\s*(OMN-\d+)\s*\)?", re.IGNORECASE)
 
 SKIP_DIRS = {
@@ -108,7 +110,6 @@ def scan_repos(omni_home: Path) -> dict[str, list[tuple[Path, int, str]]]:
 
 
 def main() -> int:
-    _omni_home_default = Path(os.environ.get("OMNI_HOME", "."))
     parser = argparse.ArgumentParser(
         description="Scan for TODO(OMN-XXXX) references across omni_home repos"
     )
@@ -116,7 +117,7 @@ def main() -> int:
         "omni_home",
         type=Path,
         nargs="?",
-        default=_omni_home_default,
+        default=_OMNI_HOME_DEFAULT,
         help="Path to omni_home directory",
     )
     parser.add_argument(

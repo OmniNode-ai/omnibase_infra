@@ -37,6 +37,8 @@ import re
 import sys
 from pathlib import Path
 
+_OMNI_HOME_DEFAULT = Path(os.environ.get("OMNI_HOME", "."))
+
 # Patterns to extract file paths from CLAUDE.md content
 BACKTICK_PATH = re.compile(r"`([^`]+)`")
 LINK_PATH = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
@@ -167,7 +169,6 @@ def check_claudemd(
 
 
 def main() -> int:
-    _omni_home_default = Path(os.environ.get("OMNI_HOME", "."))
     parser = argparse.ArgumentParser(
         description="Validate file path references in CLAUDE.md files"
     )
@@ -175,7 +176,7 @@ def main() -> int:
         "omni_home",
         type=Path,
         nargs="?",
-        default=_omni_home_default,
+        default=_OMNI_HOME_DEFAULT,
         help="Path to omni_home directory",
     )
     args = parser.parse_args()

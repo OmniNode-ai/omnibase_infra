@@ -32,6 +32,8 @@ import re
 import sys
 from pathlib import Path
 
+_OMNI_HOME_DEFAULT = Path(os.environ.get("OMNI_HOME", "."))
+
 MIGRATION_DIRS = [
     "migrations",
     "sql/migrations",
@@ -84,7 +86,6 @@ def extract_tables_from_sql(path: Path) -> list[str]:
 
 
 def main() -> int:
-    _omni_home_default = Path(os.environ.get("OMNI_HOME", "."))
     parser = argparse.ArgumentParser(
         description="Check for migration conflicts across repos"
     )
@@ -92,7 +93,7 @@ def main() -> int:
         "omni_home",
         type=Path,
         nargs="?",
-        default=_omni_home_default,
+        default=_OMNI_HOME_DEFAULT,
         help="Path to omni_home directory",
     )
     args = parser.parse_args()
