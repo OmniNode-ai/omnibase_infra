@@ -250,11 +250,15 @@ def _parse_contract(
             publish_topics=tuple(eb_raw.get("publish_topics", [])),
         )
 
-    # Extract handler routing
+    # Extract handler routing — new format (handler_routing:) or legacy (handler:)
     handler_routing: ModelHandlerRouting | None = None
     hr_raw = raw.get("handler_routing")
     if isinstance(hr_raw, dict):
         handler_routing = _parse_handler_routing(hr_raw)
+    else:
+        h_raw = raw.get("handler")
+        if isinstance(h_raw, dict):
+            handler_routing = _parse_legacy_handler(h_raw)
 
     return ModelDiscoveredContract(
         name=raw.get("name", entry_point_name),
@@ -301,4 +305,43 @@ def _parse_handler_routing(hr_raw: dict) -> ModelHandlerRouting:
     return ModelHandlerRouting(
         routing_strategy=hr_raw.get("routing_strategy", "unknown"),
         handlers=tuple(entries),
+    )
+
+
+def _parse_legacy_handler(h_raw: dict) -> ModelHandlerRouting | None:
+    """Synthesize a ModelHandlerRouting from the legacy handler: key.
+
+    Legacy format:
+        handler:
+          module: some.module.path
+          class: HandlerClassName
+          input_model: some.module.path.ModelClassName   # optional
+
+    Maps to payload_type_match routing with a single handler entry.
+    Returns None if the required module/class fields are missing.
+    """
+    module = h_raw.get("module", "")
+    class_name = h_raw.get("class", "")
+    if not module or not class_name:
+        return None
+
+    handler_ref = ModelHandlerRef(name=class_name, module=module)
+
+    event_model: ModelHandlerRef | None = None
+    input_model_str = h_raw.get("input_model")
+    if isinstance(input_model_str, str) and "." in input_model_str:
+        last_dot = input_model_str.rfind(".")
+        event_model = ModelHandlerRef(
+            name=input_model_str[last_dot + 1 :],
+            module=input_model_str[:last_dot],
+        )
+
+    entry = ModelHandlerRoutingEntry(
+        handler=handler_ref,
+        event_model=event_model,
+        operation=None,
+    )
+    return ModelHandlerRouting(
+        routing_strategy="payload_type_match",
+        handlers=(entry,),
     )
