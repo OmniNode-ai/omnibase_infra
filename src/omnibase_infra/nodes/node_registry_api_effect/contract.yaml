@@ -181,6 +181,7 @@ handler_routing:
       handler:
         name: "HandlerRegistryApiGetHealth"
         module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_health"
+        handler_type: "HTTP"
     - operation: "list_contracts"
       handler:
         name: "HandlerRegistryApiListContracts"
@@ -247,6 +248,7 @@ health_check:
 # ---------------------------------------------------------------------------
 metadata:
   description: "Wraps the Registry Discovery API with contract-driven configuration for the FastAPI service exposing node registrations and live service instances to the dashboard"
+  transport_type: "DATABASE"
   author: "OmniNode Team"
   license: "MIT"
   ticket: "OMN-1441"

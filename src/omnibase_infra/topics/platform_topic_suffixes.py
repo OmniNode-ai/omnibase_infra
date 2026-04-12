@@ -682,6 +682,52 @@ Producer: PostMergeConsumer (OMN-6727)
 Consumer: omnidash (future)
 """
 
+SUFFIX_GITHUB_PR_STATUS: str = "onex.evt.github.pr-status.v1"
+"""Topic suffix for GitHub PR triage status events (OMN-2656).
+
+Published by NodeGitHubPRPollerEffect for each open pull request found during
+a poll cycle. Each event carries a ModelGitHubPRStatusEvent payload with
+triage state, CI status, review state, and staleness information.
+
+Producer: NodeGitHubPRPollerEffect / HandlerGitHubApiPoll
+Consumer: omnidash PR triage dashboard (future)
+"""
+
+SUFFIX_GMAIL_INTENT_RECEIVED: str = "onex.evt.omnibase-infra.gmail-intent-received.v1"
+"""Topic suffix for Gmail intent received events (OMN-2730).
+
+Published by NodeGmailIntentPollerEffect for each email processed during a
+drain cycle. Each event carries a ModelGmailIntentPollerResult payload with
+URLs extracted, message IDs, and idempotency markers.
+
+Producer: NodeGmailIntentPollerEffect / HandlerGmailIntentPoll
+Consumer: omniintelligence intent classification pipeline
+"""
+
+SUFFIX_OMNIMEMORY_REWARD_ASSIGNED: str = "onex.evt.omnimemory.reward-assigned.v1"
+"""Topic suffix for reward assignment events (OMN-2927).
+
+Published by NodeRewardBinderEffect when a reinforcement reward is assigned to
+a pattern run. Each event carries a ModelRewardAssignedEvent payload with
+the reward value, policy ID, and run correlation ID.
+
+Producer: NodeRewardBinderEffect / HandlerRewardBinder
+Consumer: omniintelligence pattern learning pipeline
+"""
+
+SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED: str = (
+    "onex.evt.omnimemory.policy-state-updated.v1"
+)
+"""Topic suffix for policy state update events (OMN-2927).
+
+Published by NodeRewardBinderEffect when a policy state transition completes.
+Each event carries a ModelPolicyStateUpdatedEvent payload with the new policy
+state, transition reason, and correlation ID.
+
+Producer: NodeRewardBinderEffect / HandlerRewardBinder
+Consumer: omniintelligence pattern lifecycle pipeline
+"""
+
 # =============================================================================
 # OMNIBASE_INFRA DOMAIN TOPIC SPEC REGISTRY
 # =============================================================================

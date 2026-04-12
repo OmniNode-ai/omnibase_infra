@@ -39,6 +39,7 @@ handler_routing:
       handler:
         name: "HandlerLLMCompletion"
         module: "omnibase_infra.nodes.node_llm_completion_effect.handlers.handler_llm_completion"
+        handler_type: "HTTP"
 dependencies:
   - type: "environment"
     name: "LLM_CODER_URL"

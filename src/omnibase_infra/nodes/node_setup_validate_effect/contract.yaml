@@ -32,6 +32,7 @@ handler_routing:
       handler:
         name: "HandlerServiceValidate"
         module: "omnibase_infra.nodes.node_setup_validate_effect.handlers.handler_service_validate"
+        handler_type: "HTTP"
 capabilities:
   - "setup.validate.tcp"
   - "setup.validate.http"

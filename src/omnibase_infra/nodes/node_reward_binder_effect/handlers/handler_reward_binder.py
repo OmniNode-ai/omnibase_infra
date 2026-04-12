@@ -65,6 +65,10 @@ from omnibase_infra.nodes.node_reward_binder_effect.models.model_policy_state_up
 from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_binder_output import (
     ModelRewardBinderOutput,
 )
+from omnibase_infra.topics import (
+    SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED,
+    SUFFIX_OMNIMEMORY_REWARD_ASSIGNED,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -78,8 +82,8 @@ logger = logging.getLogger(__name__)
 # These constants mirror the contract for use in handler code.
 # Source of truth: contract.yaml
 # ==============================================================================
-_TOPIC_REWARD_ASSIGNED = "onex.evt.omnimemory.reward-assigned.v1"
-_TOPIC_POLICY_STATE_UPDATED = "onex.evt.omnimemory.policy-state-updated.v1"
+_TOPIC_REWARD_ASSIGNED = SUFFIX_OMNIMEMORY_REWARD_ASSIGNED
+_TOPIC_POLICY_STATE_UPDATED = SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED
 
 
 def _compute_objective_fingerprint(spec: ModelObjectiveSpec) -> str:

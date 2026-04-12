@@ -30,6 +30,7 @@ handler_routing:
       handler:
         name: "HandlerProbeHealth"
         module: "omnibase_infra.nodes.node_model_health_effect.handlers.handler_probe_health"
+        handler_type: "HTTP"
 metadata:
   description: "Model endpoint health probing for intelligent router"
   author: "OmniNode Team"

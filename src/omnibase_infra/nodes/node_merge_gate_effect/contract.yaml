@@ -59,6 +59,7 @@ handler_routing:
       handler:
         name: "HandlerUpsertMergeGate"
         module: "omnibase_infra.nodes.node_merge_gate_effect.handlers.handler_upsert_merge_gate"
+        handler_type: "HTTP"
       backend: "postgres"
       description: "Upsert merge gate decision into merge_gate_decisions, open Linear ticket on QUARANTINE."
       input_model:

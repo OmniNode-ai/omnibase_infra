@@ -62,6 +62,7 @@ from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_polle
 from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_poller_result import (
     ModelGitHubPollerResult,
 )
+from omnibase_infra.topics import SUFFIX_GITHUB_PR_STATUS
 from omnibase_infra.utils import sanitize_error_string
 
 logger = logging.getLogger(__name__)
@@ -208,7 +209,7 @@ class HandlerGitHubApiPoll:
         return EnumHandlerTypeCategory.EFFECT
 
     # Topic declared in contract.yaml event_bus.publish_topics
-    _DEFAULT_PUBLISH_TOPIC = "onex.evt.github.pr-status.v1"
+    _DEFAULT_PUBLISH_TOPIC = SUFFIX_GITHUB_PR_STATUS
 
     def __init__(
         self,
