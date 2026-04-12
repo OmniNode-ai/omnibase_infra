@@ -194,9 +194,7 @@ def test_check_mode_exits_1_when_drifted(script, tmp_path: Path) -> None:  # typ
 
 
 @pytest.mark.unit
-def test_resolve_repo_absolute_path_uses_src_subdir(
-    script, tmp_path: Path
-) -> None:
+def test_resolve_repo_absolute_path_uses_src_subdir(script, tmp_path: Path) -> None:
     """_resolve_repo with an absolute path derives package name from src/, not dir name."""
     repo_root = tmp_path / "my-repo-with-hyphens"
     src = repo_root / "src" / "my_package"
@@ -208,9 +206,7 @@ def test_resolve_repo_absolute_path_uses_src_subdir(
 
 
 @pytest.mark.unit
-def test_resolve_repo_absolute_path_no_src_raises(
-    script, tmp_path: Path
-) -> None:
+def test_resolve_repo_absolute_path_no_src_raises(script, tmp_path: Path) -> None:
     """_resolve_repo raises ValueError for absolute path with no src/ package."""
     repo_root = tmp_path / "empty-repo"
     repo_root.mkdir()
