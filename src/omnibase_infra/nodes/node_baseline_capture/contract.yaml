@@ -10,7 +10,7 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 description: >
-  EFFECT node: raw measurement capture for baselines pipeline (SOW Phase 2 — Track B4a). Reads existing pattern execution data (tokens, latency, model_used) from agent_actions and agent_routing_decisions. Emits onex.evt.omnibase-infra.baselines-computed.v1 with raw measurements so the omnidash consumer can project to baselines_snapshots. Does NOT compute deltas or ROI — that is deferred to B4b.
+  EFFECT node: raw measurement capture for baselines pipeline (SOW Phase 2 — Track B4a). Reads existing pattern execution data (tokens, latency, success status) from agent_actions. Emits onex.evt.omnibase-infra.baselines-computed.v1 with raw measurements so the omnidash consumer can project to baselines_snapshots. Does NOT compute deltas or ROI — that is deferred to B4b.
 
 input_model:
   name: "ModelBaselineCaptureCommand"

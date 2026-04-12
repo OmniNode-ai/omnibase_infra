@@ -52,6 +52,7 @@ from omnibase_infra.services.observability.baselines.models.model_baselines_snap
 from omnibase_infra.services.observability.baselines.models.model_baselines_trend_row import (
     ModelBaselinesTrendRow,
 )
+from omnibase_infra.errors import ModelInfraErrorContext
 from omnibase_infra.utils.util_db_transaction import set_statement_timeout
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
@@ -73,7 +74,8 @@ class ProtocolPublisher(Protocol):
         topic: str | None,
         correlation_id: object,
         **kwargs: object,
-    ) -> bool: ...
+    ) -> bool:
+        """Publish event to the configured topic; return True on success."""
 
 
 class HandlerBaselineCapture:
@@ -141,28 +143,37 @@ class HandlerBaselineCapture:
             )
             breakdown = rows
         except Exception as e:
+            err_ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                operation="read_raw_measurements",
+            )
             safe_msg = sanitize_error_message(e)
             msg = f"Raw measurement read failed: {safe_msg}"
-            logger.exception(msg, extra={"correlation_id": str(correlation_id)})
+            logger.exception(
+                msg, extra={"correlation_id": str(err_ctx.correlation_id)}
+            )
             errors.append(msg)
 
         # D3: no empty snapshots
         snapshot_emitted = False
         if self._publisher is not None and measurements_captured > 0:
             try:
-                await self._emit_snapshot(
+                snapshot_emitted = await self._emit_snapshot(
                     breakdown=breakdown,
                     correlation_id=correlation_id,
                     since=since,
                 )
-                snapshot_emitted = True
             except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
+                err_ctx = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    operation="emit_snapshot",
+                )
                 safe_msg = sanitize_error_message(e)
                 msg = f"Snapshot emit failed: {safe_msg}"
                 logger.warning(
                     "Failed to emit baselines snapshot (non-fatal): %s",
                     safe_msg,
-                    extra={"correlation_id": str(correlation_id)},
+                    extra={"correlation_id": str(err_ctx.correlation_id)},
                 )
                 errors.append(msg)
 
@@ -206,20 +217,7 @@ class HandlerBaselineCapture:
                 md5(agent_name)::uuid AS pattern_id,
                 agent_name AS pattern_label,
                 COUNT(*) AS sample_count,
-                AVG(duration_ms) AS avg_latency_ms,
-                SUM(
-                    COALESCE(
-                        (metadata->>'total_tokens')::bigint,
-                        0
-                    )
-                ) AS total_tokens,
-                AVG(
-                    COALESCE(
-                        (metadata->>'total_tokens')::bigint,
-                        0
-                    )
-                ) AS avg_tokens,
-                COUNT(*) AS success_count,
+                COUNT(*) FILTER (WHERE status = 'success') AS success_count,
                 COUNT(*) AS treatment_count,
                 0 AS control_count,
                 NOW() AS computed_at,
@@ -280,7 +278,7 @@ class HandlerBaselineCapture:
         breakdown: list[ModelBaselinesBreakdownRow],
         correlation_id: UUID,
         since: datetime,
-    ) -> None:
+    ) -> bool:
         """Emit baselines-computed snapshot with raw measurement breakdown.
 
         comparisons and trend are empty — B4a captures raw measurements only.
@@ -290,9 +288,12 @@ class HandlerBaselineCapture:
             breakdown: Per-agent raw measurement rows.
             correlation_id: For tracing.
             since: Window start (lookback boundary).
+
+        Returns:
+            True if the publisher accepted the event, False otherwise.
         """
         if self._publisher is None:  # guarded by caller (D3)
-            return
+            return False
         snapshot_id = uuid4()
         computed_at = datetime.now(UTC)
 
@@ -309,7 +310,7 @@ class HandlerBaselineCapture:
 
         payload = snapshot.model_dump(mode="json")
 
-        await self._publisher(
+        published = await self._publisher(
             event_type=_EVENT_TYPE_BASELINES_COMPUTED,
             payload=payload,
             topic=_TOPIC_BASELINES_COMPUTED,
@@ -323,8 +324,10 @@ class HandlerBaselineCapture:
                 "correlation_id": str(correlation_id),
                 "breakdown_rows": len(breakdown),
                 "topic": _TOPIC_BASELINES_COMPUTED,
+                "published": published,
             },
         )
+        return bool(published)
 
 
 __all__: list[str] = ["HandlerBaselineCapture", "ProtocolPublisher"]
