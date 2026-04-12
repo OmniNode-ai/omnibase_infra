@@ -81,30 +81,40 @@ class PluginEmitDaemon:
         start_time = time.time()
 
         try:
-            from omnimarket.nodes.node_emit_daemon.event_queue import (
-                BoundedEventQueue,
-            )
-            from omnimarket.nodes.node_emit_daemon.event_registry import (
-                EventRegistry,
-            )
-            from omnimarket.nodes.node_emit_daemon.handlers.handler_emit_daemon import (
-                HandlerEmitDaemon,
-            )
-            from omnimarket.nodes.node_emit_daemon.publisher_loop import (
-                KafkaPublisherLoop,
-            )
-            from omnimarket.nodes.node_emit_daemon.socket_server import (
-                EmitSocketServer,
-            )
+            from importlib.metadata import entry_points
+
+            eps = entry_points(group="onex.nodes")
+            emit_daemon_eps = [e for e in eps if e.name == "node_emit_daemon"]
+            if not emit_daemon_eps:
+                raise ImportError("node_emit_daemon not found in onex.nodes entry points")
+            node_pkg = emit_daemon_eps[0].load()
+
+            import importlib
+
+            BoundedEventQueue = importlib.import_module(
+                f"{node_pkg.__name__}.event_queue"
+            ).BoundedEventQueue
+            EventRegistry = importlib.import_module(
+                f"{node_pkg.__name__}.event_registry"
+            ).EventRegistry
+            HandlerEmitDaemon = importlib.import_module(
+                f"{node_pkg.__name__}.handlers.handler_emit_daemon"
+            ).HandlerEmitDaemon
+            KafkaPublisherLoop = importlib.import_module(
+                f"{node_pkg.__name__}.publisher_loop"
+            ).KafkaPublisherLoop
+            EmitSocketServer = importlib.import_module(
+                f"{node_pkg.__name__}.socket_server"
+            ).EmitSocketServer
         except ImportError as e:
             duration = time.time() - start_time
             logger.warning(
-                "[EMIT-DAEMON] omnimarket not installed, cannot start emit daemon: %s",
+                "[EMIT-DAEMON] node_emit_daemon not available, cannot start emit daemon: %s",
                 e,
             )
             return ModelDomainPluginResult.failed(
                 plugin_id=self.plugin_id,
-                error_message=f"omnimarket not installed: {e}",
+                error_message=f"node_emit_daemon not available: {e}",
                 duration_seconds=duration,
             )
 
@@ -135,12 +145,10 @@ class PluginEmitDaemon:
         if registry_path_str:
             registry = EventRegistry.from_yaml(Path(registry_path_str))
         else:
-            # Try default claude_code registry from omnimarket
+            # Try default claude_code registry from the already-loaded node package
             try:
-                import omnimarket.nodes.node_emit_daemon as _pkg
-
                 default_registry = (
-                    Path(_pkg.__file__).parent / "registries" / "claude_code.yaml"
+                    Path(node_pkg.__file__).parent / "registries" / "claude_code.yaml"
                 )
                 if default_registry.exists():
                     registry = EventRegistry.from_yaml(default_registry)
