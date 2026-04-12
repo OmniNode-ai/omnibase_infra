@@ -164,7 +164,15 @@ def _resolve_repo(repo_arg: str) -> tuple[Path, str]:
     """
     p = Path(repo_arg)
     if p.is_absolute() and p.is_dir():
-        return p, p.name
+        src = p / "src"
+        if src.is_dir():
+            subdirs = [d for d in src.iterdir() if d.is_dir() and not d.name.startswith("_")]
+            if subdirs:
+                return p, subdirs[0].name
+        raise ValueError(
+            f"Cannot determine package name for absolute path '{p}': "
+            f"no src/ subdirectory with a package found."
+        )
 
     # Try OMNI_HOME env var first, then cwd's parent (typical omni_home layout)
     omni_home_candidates = []
