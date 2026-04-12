@@ -104,7 +104,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # === [RUNTIME] Runtime-internal protocols ===
     "ProtocolContractDescriptor": "runtime/protocol_contract_descriptor.py",
     "ProtocolContractSource": "runtime/protocol_contract_source.py",
-    "ProtocolDomainPlugin": "runtime/protocol_domain_plugin.py",
+    # ProtocolDomainPlugin moved to omnibase_spi.protocols.runtime (OMN-8550)
     "ProtocolHandlerPluginLoader": "runtime/protocol_handler_plugin_loader.py",
     "ProtocolHandlerDiscovery": "runtime/protocol_handler_discovery.py",
     "ProtocolPolicy": "runtime/protocol_policy.py",
