@@ -3,7 +3,6 @@
 
 """Tests for the generate_entry_points.py script."""
 
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -197,6 +196,8 @@ def test_check_mode_exits_1_when_drifted(script, tmp_path: Path) -> None:  # typ
 @pytest.mark.unit
 def test_omnimarket_collect_and_build_smoke(script) -> None:  # type: ignore[no-untyped-def]
     """collect_node_dirs + build_entry_point_section work against the real omnimarket repo."""
+    omnimarket_root: Path
+    pkg: str
     try:
         omnimarket_root, pkg = script._resolve_repo("omnimarket")
     except ValueError:

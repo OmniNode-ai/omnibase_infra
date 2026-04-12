@@ -87,8 +87,6 @@ def _replace_entry_point_section(current: str, new_section: str) -> str:
     Replaces the entire [project.entry-points."onex.nodes"] block if it exists,
     otherwise appends it before the next [section] or at end of file.
     """
-    section_header = '[project.entry-points."onex.nodes"]'
-
     # Pattern: match the header line through the next blank line followed by [
     # or end of file. We use a non-greedy match per line.
     pattern = re.compile(
