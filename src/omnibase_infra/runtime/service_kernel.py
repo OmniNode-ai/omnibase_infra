@@ -1618,25 +1618,31 @@ async def bootstrap() -> int:
                 exc_info=True,
             )
 
-        # Try to import and register PluginIntelligence (graceful degradation).
-        # omniintelligence is an optional dependency — kernel boots without it.
-        # Registered LAST because it subscribes to 46 topics (~12 min startup).
+        # Try to load and register PluginIntelligence via entry-point discovery
+        # (graceful degradation). omniintelligence is an optional dependency —
+        # kernel boots without it. Registered LAST because it subscribes to
+        # 46 topics (~12 min startup).
         try:
-            from omniintelligence.runtime.plugin import (  # type: ignore[import-not-found]
-                PluginIntelligence,
-            )
+            from importlib.metadata import entry_points
 
-            plugin_registry.register(PluginIntelligence())
-            logger.info(
-                "PluginIntelligence registered (correlation_id=%s)",
-                correlation_id,
-            )
-        except ImportError:
-            logger.debug(
-                "omniintelligence not installed, intelligence plugin not available "
-                "(correlation_id=%s)",
-                correlation_id,
-            )
+            intel_eps = [
+                e
+                for e in entry_points(group="onex.domain_plugins")
+                if e.name == "intelligence"
+            ]
+            if intel_eps:
+                PluginIntelligence = intel_eps[0].load()
+                plugin_registry.register(PluginIntelligence())
+                logger.info(
+                    "PluginIntelligence registered (correlation_id=%s)",
+                    correlation_id,
+                )
+            else:
+                logger.debug(
+                    "omniintelligence not installed, intelligence plugin not available "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                )
         except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
             logger.warning(
                 "PluginIntelligence failed to initialize, continuing without it "
