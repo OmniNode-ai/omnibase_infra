@@ -18,8 +18,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.event_bus.topic_constants import TOPIC_DELEGATION_TASK_DELEGATED
-
 
 class ModelTaskDelegatedEvent(BaseModel):
     """Backward-compatible event payload for omnidash delegation projection.
@@ -32,7 +30,7 @@ class ModelTaskDelegatedEvent(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     topic: str = Field(
-        default=TOPIC_DELEGATION_TASK_DELEGATED,
+        ...,
         description="Kafka topic this event should be routed to.",
     )
     timestamp: str = Field(..., description="ISO-8601 timestamp.")

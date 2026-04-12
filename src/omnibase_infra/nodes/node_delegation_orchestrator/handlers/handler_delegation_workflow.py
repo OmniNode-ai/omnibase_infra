@@ -293,6 +293,7 @@ class HandlerDelegationWorkflow:
 
         # Backward-compatible task-delegated.v1 event for omnidash (Task 12)
         compat_event = ModelTaskDelegatedEvent(
+            topic="onex.evt.omniclaude.task-delegated.v1",
             timestamp=datetime.now(UTC).isoformat(),
             correlation_id=cid,
             session_id=None,
