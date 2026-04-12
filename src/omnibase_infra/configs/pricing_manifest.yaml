@@ -128,4 +128,4 @@ models:
     input_cost_per_1k: 0.0
     output_cost_per_1k: 0.0
     effective_date: "2026-03-19"
-    note: "Local model on M2 Ultra (port 8101) - zero API cost"
+    note: "Local model on RTX 4090 .201 (port 8001) - zero API cost"

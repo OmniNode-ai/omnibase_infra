@@ -5,7 +5,7 @@
 """Documentation generation adapter using DeepSeek-R1-Distill-Qwen-32B.
 
 Generates docstrings, README sections, and API documentation using
-DeepSeek-R1-Distill-Qwen-32B (endpoint :8101 on .200). Returns
+DeepSeek-R1-Distill-Qwen-32B (endpoint :8001 on .201). Returns
 ``ContractDelegatedResponse`` with visible attribution and a tracked prompt
 version.
 
@@ -13,7 +13,7 @@ Architecture:
     - Receives a ``task_type`` (docstring, readme, api_doc) and ``source``
       text to document
     - Delegates LLM inference to HandlerLlmOpenaiCompatible via
-      TransportHolderLlmHttp pointing at the DeepSeek-R1 endpoint (:8101)
+      TransportHolderLlmHttp pointing at the DeepSeek-R1 endpoint (:8001)
     - Returns ContractDelegatedResponse with attribution metadata
 
 System Prompt Derivation:
@@ -206,7 +206,7 @@ class AdapterDocumentationGeneration:
         Args:
             base_url: Base URL of the DeepSeek-R1 endpoint.  Defaults to the
                 ``LLM_DEEPSEEK_R1_URL`` environment variable, falling back to
-                ``http://localhost:8101``.
+                ``http://localhost:8001``.
             model: Model identifier string sent in inference requests.
             max_tokens: Maximum tokens for the documentation completion.
             temperature: Sampling temperature (lower = more deterministic).
@@ -247,7 +247,7 @@ class AdapterDocumentationGeneration:
                 context=context,
             )
         self._base_url: str = base_url or os.environ.get(
-            "LLM_DEEPSEEK_R1_URL", "http://localhost:8101"
+            "LLM_DEEPSEEK_R1_URL", "http://localhost:8001"
         )
         self._model: str = model
         self._max_tokens: int = max_tokens
