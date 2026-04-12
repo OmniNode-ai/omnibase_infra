@@ -4,15 +4,14 @@
 # Copyright (c) 2026 OmniNode Team
 """Handler that captures raw measurements from agent_actions and emits a baselines snapshot.
 
-SOW Phase 2 — Track B4a. Reads existing pattern execution data (tokens, latency,
-model_used) and emits onex.evt.omnibase-infra.baselines-computed.v1 without
+SOW Phase 2 — Track B4a. Reads existing pattern execution data (success/failure counts)
+from agent_actions and emits onex.evt.omnibase-infra.baselines-computed.v1 without
 computing deltas or ROI. Delta computation is deferred to B4b.
 
 Design decisions:
     D1: correlation_id is REQUIRED in the command (no default).
     D2: lookback_hours is capped at 168 (7 days) to bound query cost.
     D3: Emit only when measurements_captured > 0 (no empty snapshots).
-    D4: token counts read from metadata->>'total_tokens'; NULL treated as 0.
     D5: Publisher callable matches PublisherTopicScoped.publish signature (same as
         HandlerBaselinesBatchCompute — no new protocol needed).
 
@@ -81,9 +80,9 @@ class ProtocolPublisher(Protocol):
 class HandlerBaselineCapture:
     """EFFECT handler for raw baseline measurement capture.
 
-    Reads agent_actions and agent_routing_decisions within a lookback window,
-    packages per-agent aggregates as a ModelBaselinesSnapshotEvent, and emits
-    to onex.evt.omnibase-infra.baselines-computed.v1.
+    Reads agent_actions within a lookback window, packages per-agent success/failure
+    aggregates as a ModelBaselinesSnapshotEvent, and emits to
+    onex.evt.omnibase-infra.baselines-computed.v1.
 
     No delta or ROI computation — that is B4b (post-Tuesday).
 
@@ -200,10 +199,8 @@ class HandlerBaselineCapture:
     ) -> tuple[list[ModelBaselinesBreakdownRow], int]:
         """Read agent_actions within the lookback window, grouped by agent_name.
 
-        Aggregates token counts (from metadata->>'total_tokens') and
-        latency (duration_ms) per agent. Returns breakdown rows and total count.
-
-        D4: NULL token values coerced to 0.
+        Aggregates success/failure counts per agent. Returns breakdown rows and
+        total measurement count.
 
         Args:
             correlation_id: For logging.
