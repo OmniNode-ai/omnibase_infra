@@ -222,6 +222,7 @@ class TestHappyPath:
         assert intents[2].correlation_id == cid
         assert intents[2].quality_gate_passed is True
         assert intents[2].llm_call_id == "chatcmpl-abc123"
+        assert intents[2].topic == "onex.evt.omniclaude.task-delegated.v1"
 
     def test_completed_result_has_positive_latency(self) -> None:
         handler = HandlerDelegationWorkflow()
@@ -522,6 +523,83 @@ class TestConcurrentWorkflows:
 
         assert handler.workflows[cid2].state == EnumDelegationState.COMPLETED
         assert handler.workflows[cid1].state == EnumDelegationState.ROUTED
+
+
+# ---------------------------------------------------------------------------
+# Tests: Topic routing — ModelTaskDelegatedEvent carries topic field
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestTaskDelegatedEventTopicRouting:
+    """Verify ModelTaskDelegatedEvent carries the correct topic field.
+
+    The runtime kernel routes output_events by inspecting event.topic.
+    Without it, the compat event is silently dropped.
+    """
+
+    def test_compat_event_has_topic_on_gate_pass(self) -> None:
+        from omnibase_infra.event_bus.topic_constants import (
+            TOPIC_DELEGATION_TASK_DELEGATED,
+        )
+        from omnibase_infra.nodes.node_delegation_orchestrator.models.model_task_delegated_event import (
+            ModelTaskDelegatedEvent,
+        )
+
+        handler = HandlerDelegationWorkflow()
+        cid = uuid4()
+
+        handler.handle_delegation_request(_make_request(correlation_id=cid))
+        handler.handle_routing_decision(_make_routing_decision(cid))
+        handler.handle_inference_response(
+            _make_inference_response(correlation_id=cid, content="def test_x(): pass")
+        )
+        events = handler.handle_gate_result(_make_gate_result(cid, passed=True))
+
+        compat_events = [e for e in events if isinstance(e, ModelTaskDelegatedEvent)]
+        assert len(compat_events) == 1
+        assert compat_events[0].topic == TOPIC_DELEGATION_TASK_DELEGATED
+
+    def test_compat_event_has_topic_on_gate_fail(self) -> None:
+        from omnibase_infra.event_bus.topic_constants import (
+            TOPIC_DELEGATION_TASK_DELEGATED,
+        )
+        from omnibase_infra.nodes.node_delegation_orchestrator.models.model_task_delegated_event import (
+            ModelTaskDelegatedEvent,
+        )
+
+        handler = HandlerDelegationWorkflow()
+        cid = uuid4()
+
+        handler.handle_delegation_request(_make_request(correlation_id=cid))
+        handler.handle_routing_decision(_make_routing_decision(cid))
+        handler.handle_inference_response(
+            _make_inference_response(correlation_id=cid, content="I cannot help.")
+        )
+        events = handler.handle_gate_result(
+            _make_gate_result(cid, passed=False, failure_reasons=("REFUSAL",))
+        )
+
+        compat_events = [e for e in events if isinstance(e, ModelTaskDelegatedEvent)]
+        assert len(compat_events) == 1
+        assert compat_events[0].topic == TOPIC_DELEGATION_TASK_DELEGATED
+
+    def test_model_task_delegated_event_default_topic(self) -> None:
+        from omnibase_infra.event_bus.topic_constants import (
+            TOPIC_DELEGATION_TASK_DELEGATED,
+        )
+        from omnibase_infra.nodes.node_delegation_orchestrator.models.model_task_delegated_event import (
+            ModelTaskDelegatedEvent,
+        )
+
+        event = ModelTaskDelegatedEvent(
+            timestamp="2026-04-12T00:00:00Z",
+            correlation_id=uuid4(),
+            task_type="test",
+            delegated_to="qwen3-coder",
+            quality_gate_passed=True,
+        )
+        assert event.topic == TOPIC_DELEGATION_TASK_DELEGATED
 
 
 # ---------------------------------------------------------------------------
