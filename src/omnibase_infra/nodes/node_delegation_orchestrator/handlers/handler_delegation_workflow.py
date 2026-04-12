@@ -28,6 +28,7 @@ from uuid import UUID
 from omnibase_infra.event_bus.topic_constants import (
     TOPIC_DELEGATION_COMPLETED,
     TOPIC_DELEGATION_FAILED,
+    TOPIC_DELEGATION_TASK_DELEGATED,
 )
 from omnibase_infra.nodes.node_delegation_orchestrator.enums import (
     EnumDelegationState,
@@ -293,7 +294,7 @@ class HandlerDelegationWorkflow:
 
         # Backward-compatible task-delegated.v1 event for omnidash (Task 12)
         compat_event = ModelTaskDelegatedEvent(
-            topic="onex.evt.omniclaude.task-delegated.v1",
+            topic=TOPIC_DELEGATION_TASK_DELEGATED,
             timestamp=datetime.now(UTC).isoformat(),
             correlation_id=cid,
             session_id=None,

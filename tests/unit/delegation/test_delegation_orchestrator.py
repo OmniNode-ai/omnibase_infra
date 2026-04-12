@@ -222,7 +222,11 @@ class TestHappyPath:
         assert intents[2].correlation_id == cid
         assert intents[2].quality_gate_passed is True
         assert intents[2].llm_call_id == "chatcmpl-abc123"
-        assert intents[2].topic == "onex.evt.omniclaude.task-delegated.v1"
+        from omnibase_infra.event_bus.topic_constants import (
+            TOPIC_DELEGATION_TASK_DELEGATED,
+        )
+
+        assert intents[2].topic == TOPIC_DELEGATION_TASK_DELEGATED
 
     def test_completed_result_has_positive_latency(self) -> None:
         handler = HandlerDelegationWorkflow()
