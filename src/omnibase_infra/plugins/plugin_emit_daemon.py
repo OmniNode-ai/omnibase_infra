@@ -89,7 +89,9 @@ class PluginEmitDaemon:
             eps = entry_points(group="onex.nodes")
             emit_daemon_eps = [e for e in eps if e.name == "node_emit_daemon"]
             if not emit_daemon_eps:
-                raise ImportError("node_emit_daemon not found in onex.nodes entry points")
+                raise ImportError(
+                    "node_emit_daemon not found in onex.nodes entry points"
+                )
             node_entry = emit_daemon_eps[0].load()
             # Entry points load as classes, not modules. Resolve the defining module.
             node_module = (
