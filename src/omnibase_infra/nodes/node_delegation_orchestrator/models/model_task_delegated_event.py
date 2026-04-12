@@ -18,7 +18,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.event_bus.topic_constants import TOPIC_DELEGATION_TASK_DELEGATED
+from omnibase_infra.enums.generated.enum_omniclaude_topic import EnumOmniclaudeTopic
 
 
 class ModelTaskDelegatedEvent(BaseModel):
@@ -32,7 +32,7 @@ class ModelTaskDelegatedEvent(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     topic: str = Field(
-        default=TOPIC_DELEGATION_TASK_DELEGATED,
+        default=EnumOmniclaudeTopic.EVT_TASK_DELEGATED_V1,
         description="Kafka topic this event should be routed to.",
     )
     timestamp: str = Field(..., description="ISO-8601 timestamp.")
