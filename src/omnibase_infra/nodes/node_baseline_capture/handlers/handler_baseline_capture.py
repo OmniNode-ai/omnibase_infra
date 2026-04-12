@@ -36,6 +36,7 @@ from omnibase_infra.nodes.node_baseline_capture.models.model_baseline_capture_co
 from omnibase_infra.nodes.node_baseline_capture.models.model_baseline_capture_output import (
     ModelBaselineCaptureOutput,
 )
+from omnibase_infra.runtime.emit_daemon.topics import TOPIC_BASELINES_COMPUTED
 from omnibase_infra.services.observability.baselines.constants import (
     DEFAULT_QUERY_TIMEOUT,
 )
@@ -56,7 +57,7 @@ from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
-_TOPIC_BASELINES_COMPUTED = "onex.evt.omnibase-infra.baselines-computed.v1"
+_TOPIC_BASELINES_COMPUTED = TOPIC_BASELINES_COMPUTED
 _EVENT_TYPE_BASELINES_COMPUTED = "baselines.computed"
 _MAX_LOOKBACK_HOURS = 168
 
