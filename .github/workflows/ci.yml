@@ -616,7 +616,7 @@ jobs:
   # Reduced from 10 splits + -n auto after repeated xdist OOM crashes on shard 3
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/15)
-    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight]
+    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance]
     # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
     runs-on: >-
       ${{
@@ -848,6 +848,27 @@ jobs:
         with:
           checks: "migration-conflicts"
           warn-only: "true"
+
+
+  contract-compliance:
+    name: Contract Compliance Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v6
+      - name: Clone onex_change_control
+        run: git clone --depth=1 https://github.com/OmniNode-ai/onex_change_control.git /tmp/onex_change_control
+      - name: Install pyyaml
+        run: pip install pyyaml
+      - name: Run contract compliance check
+        run: |
+          python /tmp/onex_change_control/scripts/ci/run_contract_compliance_check.py \
+            --pr ${{ github.event.pull_request.number }} \
+            --repo ${{ github.repository }} \
+            --contracts-dir /tmp/onex_change_control/contracts
+        env:
+          EMERGENCY_BYPASS: ${{ secrets.EMERGENCY_BYPASS || '' }}
+          GH_TOKEN: ${{ github.token }}
 
   ci-summary:
     name: CI Summary
