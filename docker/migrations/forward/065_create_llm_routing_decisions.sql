@@ -58,8 +58,8 @@ CREATE TABLE IF NOT EXISTS llm_routing_decisions (
 -- INDEXES
 -- ============================================================================
 
-CREATE INDEX IF NOT EXISTS idx_lrd_correlation_id
-    ON llm_routing_decisions (correlation_id);
+-- idx_lrd_correlation_id omitted: UNIQUE (correlation_id) constraint already
+-- creates an implicit unique index covering this column.
 
 CREATE INDEX IF NOT EXISTS idx_lrd_created_at
     ON llm_routing_decisions (created_at DESC);
