@@ -29,6 +29,7 @@ from uuid import UUID, uuid4
 import asyncpg
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.errors import ModelInfraErrorContext
 from omnibase_infra.nodes.node_baseline_capture.models.model_baseline_capture_command import (
     ModelBaselineCaptureCommand,
 )
@@ -51,7 +52,6 @@ from omnibase_infra.services.observability.baselines.models.model_baselines_snap
 from omnibase_infra.services.observability.baselines.models.model_baselines_trend_row import (
     ModelBaselinesTrendRow,
 )
-from omnibase_infra.errors import ModelInfraErrorContext
 from omnibase_infra.utils.util_db_transaction import set_statement_timeout
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
