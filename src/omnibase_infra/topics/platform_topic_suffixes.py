@@ -337,6 +337,25 @@ Producer: omniintelligence pattern refinement pipeline
 Consumer: omnidash Event Bus Health (monitored_topics)
 """
 
+# Quality scoring pipeline topics (SOW Phase 2 Quality Score Lineage)
+SUFFIX_INTELLIGENCE_QUALITY_ASSESSMENT_CMD: str = (
+    "onex.cmd.omniintelligence.quality-assessment.v1"
+)
+"""Command topic to trigger quality scoring for a pattern or code artifact.
+
+Producer: NodePatternFeedbackEffect (after effectiveness scoring, OMN-8144)
+Consumer: omniintelligence quality-assessment dispatch handler
+"""
+
+SUFFIX_INTELLIGENCE_QUALITY_ASSESSMENT_COMPLETED: str = (
+    "onex.evt.omniintelligence.quality-assessment-completed.v1"
+)
+"""Event topic emitted after quality scoring completes with real computed scores.
+
+Producer: omniintelligence quality-assessment dispatch handler (NodeQualityScoringCompute)
+Consumer: omnidash omniintelligence-projections.ts -> pattern_quality_metrics table
+"""
+
 # =============================================================================
 # OMNINODE ROUTING TOPIC SUFFIXES (OMN-7810)
 # =============================================================================
@@ -1713,6 +1732,11 @@ ALL_INTELLIGENCE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_ENRICHED, partitions=3),
     # Pattern refinement events (OMN-7810 — gap-fill, 3 partitions)
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_PATTERN_REFINED, partitions=3),
+    # Quality scoring pipeline topics (SOW Phase 2 Quality Score Lineage)
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_QUALITY_ASSESSMENT_CMD, partitions=3),
+    ModelTopicSpec(
+        suffix=SUFFIX_INTELLIGENCE_QUALITY_ASSESSMENT_COMPLETED, partitions=3
+    ),
 )
 """Intelligence domain topic specs provisioned for PluginIntelligence."""
 
