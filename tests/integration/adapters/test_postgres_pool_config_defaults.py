@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 from omnibase_infra.runtime.models.model_postgres_pool_config import (
     ModelPostgresPoolConfig,
 )
