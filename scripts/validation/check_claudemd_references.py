@@ -32,9 +32,12 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
+
+_OMNI_HOME_DEFAULT = Path(os.environ.get("OMNI_HOME", "."))
 
 # Patterns to extract file paths from CLAUDE.md content
 BACKTICK_PATH = re.compile(r"`([^`]+)`")
@@ -173,7 +176,7 @@ def main() -> int:
         "omni_home",
         type=Path,
         nargs="?",
-        default=Path("/Users/jonah/Code/omni_home"),
+        default=_OMNI_HOME_DEFAULT,
         help="Path to omni_home directory",
     )
     args = parser.parse_args()

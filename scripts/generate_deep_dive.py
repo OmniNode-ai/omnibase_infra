@@ -879,7 +879,7 @@ def unique_commit_entries(repo_days: list[RepoDay]) -> list[CommitEntry]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    _default_root = os.environ.get("OMNI_HOME", "/Volumes/PRO-G40/Code/omni_home")
+    _default_root = os.environ.get("OMNI_HOME", ".")
     ap.add_argument(
         "--root",
         type=str,
