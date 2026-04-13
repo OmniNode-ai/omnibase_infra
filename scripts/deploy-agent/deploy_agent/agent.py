@@ -18,7 +18,7 @@ from deploy_agent.events import (
     Phase,
     PhaseStatus,
 )
-from deploy_agent.executor import DeployExecutor
+from deploy_agent.executor import SCOPE_BUNDLES, DeployExecutor
 from deploy_agent.health import create_health_app
 from deploy_agent.job_state import JobStore
 from deploy_agent.publisher import build_completion_payload, publish_result
@@ -133,6 +133,12 @@ class DeployAgent:
             # Git pull
             self._current_git_sha = self.executor.git_pull(
                 cmd.git_ref, on_phase_update=on_phase_update
+            )
+
+            # Regenerate compose from catalog (non-fatal — logs warning on failure)
+            self.executor.compose_gen(
+                SCOPE_BUNDLES.get(cmd.scope, ["core", "runtime"]),
+                on_phase_update=on_phase_update,
             )
 
             # Seed Infisical before containers start (non-fatal)

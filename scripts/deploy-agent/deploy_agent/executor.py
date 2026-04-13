@@ -20,6 +20,14 @@ from deploy_agent.events import (
     services_for_scope,
 )
 
+# Maps deploy scope to catalog bundle names used by compose_gen.
+# Scope.FULL regenerates both core and runtime bundles.
+SCOPE_BUNDLES: dict[Scope, list[str]] = {
+    Scope.CORE: ["core"],
+    Scope.RUNTIME: ["core", "runtime"],
+    Scope.FULL: ["core", "runtime"],
+}
+
 logger = logging.getLogger(__name__)
 
 REPO_DIR = "/data/omninode/omnibase_infra"
@@ -30,6 +38,7 @@ COMPOSE_PROJECT = "omnibase-infra"
 PHASE_TIMEOUTS = {
     Phase.PREFLIGHT: 30,
     Phase.GIT: 60,
+    Phase.COMPOSE_GEN: 120,
     Phase.CORE: 300,
     Phase.RUNTIME: 300,
     Phase.VERIFICATION: 120,
@@ -213,6 +222,48 @@ class DeployExecutor:
 
         on_phase_update(Phase.GIT, PhaseStatus.SUCCESS)
         return sha
+
+    def compose_gen(self, bundles: list[str], on_phase_update: PhaseCallback) -> None:
+        """Regenerate docker-compose.infra.yml from the catalog CLI.
+
+        Runs ``uv run python -m omnibase_infra.docker.catalog.cli generate
+        <bundles> --output <COMPOSE_FILE>`` so every deploy reflects the current
+        catalog state rather than a static snapshot. This closes the drift window
+        where catalog changes (e.g. new LLM_* env vars) were merged but never
+        landed in the running containers (OMN-8430).
+
+        Non-fatal if the catalog CLI binary is unavailable — logs a warning and
+        continues so that a missing virtualenv does not block a deploy entirely.
+        """
+        on_phase_update(Phase.COMPOSE_GEN, PhaseStatus.IN_PROGRESS)
+        timeout = PHASE_TIMEOUTS[Phase.COMPOSE_GEN]
+
+        selected = bundles if bundles else ["core", "runtime"]
+        cmd = [
+            "uv",
+            "run",
+            "--project",
+            REPO_DIR,
+            "python",
+            "-m",
+            "omnibase_infra.docker.catalog.cli",
+            "generate",
+            *selected,
+            "--output",
+            COMPOSE_FILE,
+        ]
+
+        result = _run(cmd, timeout=timeout, cwd=REPO_DIR)
+        if result.returncode != 0:
+            logger.warning(
+                "compose_gen returned non-zero (exit=%d) — continuing with existing compose file. stderr: %s",
+                result.returncode,
+                result.stderr[:500],
+            )
+        else:
+            logger.info("compose_gen complete: %s", result.stdout.strip())
+
+        on_phase_update(Phase.COMPOSE_GEN, PhaseStatus.SUCCESS)
 
     def seed_infisical(self, on_phase_update: PhaseCallback) -> None:
         """Seed Infisical with required secrets before runtime containers start.

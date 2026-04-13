@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
 # check_llm_endpoints.sh — probe all known LLM inference endpoints.
 # Exits 0 if all required endpoints are healthy, non-zero otherwise.
 #
