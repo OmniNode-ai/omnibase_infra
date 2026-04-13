@@ -117,7 +117,7 @@ class HandlerBaselineCapture:
 
         Reads agent_actions rows within the lookback window, aggregates per
         agent (model), and emits a ModelBaselinesSnapshotEvent with breakdown
-        rows containing raw token/latency measurements.
+        rows containing success/failure counts.
 
         D3: emit only when measurements_captured > 0.
 
