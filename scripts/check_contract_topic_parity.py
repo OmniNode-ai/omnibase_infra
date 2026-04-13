@@ -359,6 +359,16 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     # --- cross-repo intelligence/memory topics ---
     "onex.evt.omniintelligence.pattern-refined.v1": "cross-repo topic; contract.yaml in omniintelligence repo | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omnimemory.document-ingested.v1": "cross-repo topic; contract.yaml in omnimemory repo | owner: jonah | expiry: 2026-09-01",
+    # --- git/linear relay topics (OMN-8605) — no contract.yaml; producers are future-work, not yet implemented ---
+    "onex.evt.git.hook.v1": "OMN-8605; no contract.yaml; producer (onex-git-hook-relay) is future-work, not yet implemented | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.linear.snapshot.v1": "OMN-8605; no contract.yaml; producer (onex-linear-relay) is future-work, not yet implemented | owner: jonah | expiry: 2026-09-01",
+    # --- omniclaude injection effectiveness topics (OMN-8605) — no contract.yaml; producers not yet implemented ---
+    "onex.evt.omniclaude.context-utilization.v1": "OMN-8605; no contract.yaml; producer not yet implemented — topic suffix added ahead of producer work | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.agent-match.v1": "OMN-8605; no contract.yaml; producer not yet implemented — topic suffix added ahead of producer work | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.latency-breakdown.v1": "OMN-8605; no contract.yaml; producer not yet implemented — topic suffix added ahead of producer work | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.manifest-injection-started.v1": "OMN-8605; no contract.yaml; producer not yet implemented — topic suffix added ahead of producer work | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.manifest-injected.v1": "OMN-8605; no contract.yaml; producer not yet implemented — topic suffix added ahead of producer work | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.manifest-injection-failed.v1": "OMN-8605; no contract.yaml; producer not yet implemented — topic suffix added ahead of producer work | owner: jonah | expiry: 2026-09-01",
 }
 # fmt: on
 
