@@ -129,9 +129,11 @@ class ServiceRuntimeHealthMonitor:
 
         self._health_topic = topic_registry.resolve(topic_keys.RUNTIME_HEALTH_CHECK)
         self._event_bus = event_bus
-        self._bootstrap_servers = bootstrap_servers or os.environ.get(
-            "KAFKA_BOOTSTRAP_SERVERS", ""
-        )
+        # Only fall back to env var when caller passes None (not when they pass "").
+        if bootstrap_servers is None:
+            self._bootstrap_servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "")
+        else:
+            self._bootstrap_servers = bootstrap_servers
         self._check_interval = check_interval_seconds
         self._task: asyncio.Task[None] | None = None
         self._running = False
