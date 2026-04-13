@@ -372,6 +372,9 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     # --- code embedding + enrichment output topics (OMN-5657, OMN-5664, OMN-5665) ---
     "onex.evt.omniintelligence.code-embedded.v1": "OMN-5665; contract.yaml in omnimarket node_code_embedding_effect (cross-repo provisioning) | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omniintelligence.code-enriched.v1": "OMN-5664; contract.yaml in omnimarket node_code_enrichment_effect (cross-repo provisioning) | owner: jonah | expiry: 2026-09-01",
+    # --- quality scoring pipeline topics (SOW Phase 2) ---
+    "onex.cmd.omniintelligence.quality-assessment.v1": "SOW Phase 2; contract.yaml in omniintelligence repo (cross-repo provisioning); consumer: omniintelligence dispatch handler | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniintelligence.quality-assessment-completed.v1": "SOW Phase 2; contract.yaml in omniintelligence repo (cross-repo provisioning); consumer: omnidash pattern_quality_metrics projection | owner: jonah | expiry: 2026-09-01",
 }
 # fmt: on
 
