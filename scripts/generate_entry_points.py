@@ -166,7 +166,9 @@ def _resolve_repo(repo_arg: str) -> tuple[Path, str]:
     if p.is_absolute() and p.is_dir():
         src = p / "src"
         if src.is_dir():
-            subdirs = [d for d in src.iterdir() if d.is_dir() and not d.name.startswith("_")]
+            subdirs = [
+                d for d in src.iterdir() if d.is_dir() and not d.name.startswith("_")
+            ]
             if subdirs:
                 return p, subdirs[0].name
         raise ValueError(

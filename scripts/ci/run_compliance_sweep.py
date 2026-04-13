@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 """Standalone CI script: handler contract compliance sweep.
 
 Scans Python handler files for:
@@ -205,9 +207,7 @@ def sweep_repo(repo_root: Path, checks: list[str]) -> tuple[int, list[dict]]:
         if "logic-in-node" in checks and (
             "node.py" in handler_file.name or handler_file.name == "__init__.py"
         ):
-            findings.extend(
-                _check_logic_in_node(repo_name, rel_path, node_name, lines)
-            )
+            findings.extend(_check_logic_in_node(repo_name, rel_path, node_name, lines))
 
     return len(handler_files), findings
 
@@ -280,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
         all_findings.extend(findings)
 
     # Count by severity
-    severity_counts: dict[str, int] = {s: 0 for s in _SEVERITY_ORDER}
+    severity_counts: dict[str, int] = dict.fromkeys(_SEVERITY_ORDER, 0)
     for f in all_findings:
         sev = f["severity"].lower()
         severity_counts[sev] = severity_counts.get(sev, 0) + 1

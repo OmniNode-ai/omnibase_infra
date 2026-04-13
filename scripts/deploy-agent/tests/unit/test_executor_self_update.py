@@ -14,7 +14,6 @@ import sys
 from unittest.mock import call, patch
 
 import pytest
-
 from deploy_agent.executor import DeployExecutor
 
 SHA_LOCAL = "aaaaaaaabbbbbbbb"
@@ -29,10 +28,14 @@ def _fail(stderr: str = "") -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr=stderr)
 
 
-def _make_git_responses(*, dirty: bool = False, local: str = SHA_LOCAL, remote: str = SHA_REMOTE):
+def _make_git_responses(
+    *, dirty: bool = False, local: str = SHA_LOCAL, remote: str = SHA_REMOTE
+):
     """Return a side_effect list for _run: status, fetch, rev-parse HEAD, rev-parse origin/main."""
 
-    def side_effect(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedProcess:
+    def side_effect(
+        cmd: list[str], timeout: int, **kwargs
+    ) -> subprocess.CompletedProcess:
         if "status" in cmd and "--porcelain" in cmd:
             return _ok("M somefile.py" if dirty else "")
         if "fetch" in cmd:
@@ -69,7 +72,10 @@ class TestSelfUpdateDirtyTree:
     def test_dirty_tree_skips_update_without_execv(self) -> None:
         executor = DeployExecutor()
         with (
-            patch("deploy_agent.executor._run", side_effect=_make_git_responses(dirty=True)),
+            patch(
+                "deploy_agent.executor._run",
+                side_effect=_make_git_responses(dirty=True),
+            ),
             patch("os.execv") as mock_execv,
         ):
             executor.self_update()
@@ -80,7 +86,10 @@ class TestSelfUpdateCurrent:
     def test_already_current_does_not_execv(self) -> None:
         executor = DeployExecutor()
         with (
-            patch("deploy_agent.executor._run", side_effect=_make_git_responses(local=SHA_LOCAL, remote=SHA_LOCAL)),
+            patch(
+                "deploy_agent.executor._run",
+                side_effect=_make_git_responses(local=SHA_LOCAL, remote=SHA_LOCAL),
+            ),
             patch("os.execv") as mock_execv,
         ):
             executor.self_update()
@@ -110,7 +119,9 @@ class TestSelfUpdateBehind:
     def test_behind_fetch_failure_skips_execv(self) -> None:
         executor = DeployExecutor()
 
-        def side_effect(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedProcess:
+        def side_effect(
+            cmd: list[str], timeout: int, **kwargs
+        ) -> subprocess.CompletedProcess:
             if "status" in cmd and "--porcelain" in cmd:
                 return _ok()
             if "fetch" in cmd:
@@ -127,7 +138,9 @@ class TestSelfUpdateBehind:
     def test_behind_pull_failure_skips_execv(self) -> None:
         executor = DeployExecutor()
 
-        def side_effect(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedProcess:
+        def side_effect(
+            cmd: list[str], timeout: int, **kwargs
+        ) -> subprocess.CompletedProcess:
             if "status" in cmd and "--porcelain" in cmd:
                 return _ok()
             if "fetch" in cmd:
@@ -194,6 +207,8 @@ class TestSelfUpdateWiredIntoRebuildScope:
         executor._compose_build = fake_build  # type: ignore[method-assign]
         executor._compose_up = fake_up  # type: ignore[method-assign]
 
-        executor.rebuild_scope(Scope.RUNTIME, [], lambda p, s: None, skip_self_update=True)
+        executor.rebuild_scope(
+            Scope.RUNTIME, [], lambda p, s: None, skip_self_update=True
+        )
 
         assert received_skip == [True]

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 """Unit tests for run_compliance_sweep.py, run_duplication_sweep.py, run_contract_sweep.py."""
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ class TestComplianceSweep:
     def test_finds_hardcoded_topic(self):
         from run_compliance_sweep import sweep_repo
 
-        handlers_scanned, findings = sweep_repo(COMPLIANCE_REPO, ["hardcoded-topics"])
+        _, findings = sweep_repo(COMPLIANCE_REPO, ["hardcoded-topics"])
         hardcoded = [f for f in findings if f["violation_type"] == "HARDCODED_TOPIC"]
         assert len(hardcoded) >= 1
         assert any("onex.evt" in f["message"] for f in hardcoded)
@@ -36,7 +38,9 @@ class TestComplianceSweep:
         from run_compliance_sweep import sweep_repo
 
         _, findings = sweep_repo(COMPLIANCE_REPO, ["undeclared-transport"])
-        transport = [f for f in findings if f["violation_type"] == "UNDECLARED_TRANSPORT"]
+        transport = [
+            f for f in findings if f["violation_type"] == "UNDECLARED_TRANSPORT"
+        ]
         assert len(transport) >= 1
         assert any("httpx" in f["message"] for f in transport)
 
@@ -63,7 +67,9 @@ class TestComplianceSweep:
 
         from run_compliance_sweep import main
 
-        result = main(["--repo", str(tmp_path / "clean_repo"), "--checks", "hardcoded-topics"])
+        result = main(
+            ["--repo", str(tmp_path / "clean_repo"), "--checks", "hardcoded-topics"]
+        )
         assert result == 0
 
     def test_exit_1_on_findings(self):
@@ -201,8 +207,12 @@ class TestDuplicationSweep:
 
         shared = tmp_path / "omnidash" / "shared"
         shared.mkdir(parents=True)
-        (shared / "schema-a.ts").write_text('export const foo = pgTable("foo_table", {});\n')
-        (shared / "schema-b.ts").write_text('export const bar = pgTable("bar_table", {});\n')
+        (shared / "schema-a.ts").write_text(
+            'export const foo = pgTable("foo_table", {});\n'
+        )
+        (shared / "schema-b.ts").write_text(
+            'export const bar = pgTable("bar_table", {});\n'
+        )
         result = check_d1_drizzle_tables(tmp_path)
         assert result["status"] == "PASS"
 
@@ -221,7 +231,14 @@ class TestDuplicationSweep:
         from run_duplication_sweep import main
 
         result = main(
-            ["--omni-home", str(DUPLICATION_REPO), "--checks", "D1,D2", "--fail-on-severity", "error"]
+            [
+                "--omni-home",
+                str(DUPLICATION_REPO),
+                "--checks",
+                "D1,D2",
+                "--fail-on-severity",
+                "error",
+            ]
         )
         assert result == 1
 
@@ -276,13 +293,18 @@ class TestContractSweep:
 
         from run_contract_sweep import main
 
-        main([
-            "--omni-home", str(tmp_path),
-            "--repos", "nonexistent",
-            "--mode", "drift",
-            "--json",
-            "--no-check-boundaries",
-        ])
+        main(
+            [
+                "--omni-home",
+                str(tmp_path),
+                "--repos",
+                "nonexistent",
+                "--mode",
+                "drift",
+                "--json",
+                "--no-check-boundaries",
+            ]
+        )
         captured = capsys.readouterr()
         data = json_mod.loads(captured.out)
         assert data["sweep"] == "contract_sweep"
@@ -292,12 +314,17 @@ class TestContractSweep:
     def test_exit_0_when_clean(self, tmp_path):
         from run_contract_sweep import main
 
-        result = main([
-            "--omni-home", str(tmp_path),
-            "--repos", "nonexistent",
-            "--mode", "drift",
-            "--no-check-boundaries",
-        ])
+        result = main(
+            [
+                "--omni-home",
+                str(tmp_path),
+                "--repos",
+                "nonexistent",
+                "--mode",
+                "drift",
+                "--no-check-boundaries",
+            ]
+        )
         assert result == 0
 
     def test_missing_omni_home_returns_2(self):

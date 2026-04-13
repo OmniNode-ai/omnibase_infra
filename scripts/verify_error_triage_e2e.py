@@ -730,7 +730,14 @@ def verify_service_kernel_wiring(report: VerificationReport) -> None:
     """Verify HandlerRuntimeErrorTriage is wired in service_kernel.py."""
     import pathlib
 
-    kernel_path = _OMNI_HOME / "omnibase_infra" / "src" / "omnibase_infra" / "runtime" / "service_kernel.py"
+    kernel_path = (
+        _OMNI_HOME
+        / "omnibase_infra"
+        / "src"
+        / "omnibase_infra"
+        / "runtime"
+        / "service_kernel.py"
+    )
     if not kernel_path.exists():
         report.add(
             VerificationResult(
@@ -865,7 +872,9 @@ def verify_migrations(report: VerificationReport) -> None:
     import pathlib
 
     # omnibase_infra migrations
-    infra_migrations = _OMNI_HOME / "omnibase_infra" / "docker" / "migrations" / "forward"
+    infra_migrations = (
+        _OMNI_HOME / "omnibase_infra" / "docker" / "migrations" / "forward"
+    )
     migration_055 = list(infra_migrations.glob("055_*"))
     report.add(
         VerificationResult(

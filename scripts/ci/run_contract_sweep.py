@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 """Standalone CI script: contract sweep.
 
 Modes:
@@ -31,7 +33,7 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 DEFAULT_REPOS = [
@@ -131,6 +133,7 @@ def run_drift_mode(
                 text=True,
                 timeout=120,
                 cwd=str(change_control),
+                check=False,
             )
             drift_detected = proc.returncode == 1
             results.append(
@@ -279,7 +282,7 @@ def run_runtime_mode(omni_home: Path, full_verification: bool) -> dict:
             "error": f"omnibase_infra not found at {infra_path}",
         }
 
-    run_id = f"contract-sweep-{datetime.now(tz=timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+    run_id = f"contract-sweep-{datetime.now(tz=UTC).strftime('%Y%m%d-%H%M%S')}"
     cmd = ["uv", "run", "python", "-m", "omnibase_infra.verification.cli", "--json"]
     if not full_verification:
         cmd.append("--registration-only")
@@ -291,6 +294,7 @@ def run_runtime_mode(omni_home: Path, full_verification: bool) -> dict:
             text=True,
             timeout=120,
             cwd=str(infra_path),
+            check=False,
         )
     except FileNotFoundError:
         return {
@@ -395,7 +399,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:  # noqa: C901
+def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     omni_home = Path(args.omni_home)
