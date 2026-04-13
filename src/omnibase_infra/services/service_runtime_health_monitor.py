@@ -434,9 +434,16 @@ class ServiceRuntimeHealthMonitor:
 
         if aggregate_status != "HEALTHY":
             for dim in dimensions:
-                if dim.status != "HEALTHY":
+                if dim.status == "CRITICAL":
+                    logger.error(
+                        "Runtime health CRITICAL dimension=%s status=%s detail=%s",
+                        dim.name,
+                        dim.status,
+                        dim.detail,
+                    )
+                elif dim.status == "DEGRADED":
                     logger.warning(
-                        "Runtime health issue dimension=%s status=%s detail=%s",
+                        "Runtime health DEGRADED dimension=%s status=%s detail=%s",
                         dim.name,
                         dim.status,
                         dim.detail,
