@@ -65,11 +65,12 @@ import click
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_core.types import JsonType
+from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_GIT_HOOK
 
 logger = logging.getLogger(__name__)
 
 # Topic constant (mirrors omnibase_core TOPIC_GIT_HOOK_EVENT from PR#531)
-TOPIC_GIT_HOOK_EVENT = "onex.evt.git.hook.v1"
+TOPIC_GIT_HOOK_EVENT = SUFFIX_GIT_HOOK
 
 # Repo identifier pattern: {owner}/{name} — no absolute paths, no bare names
 _REPO_PATTERN = re.compile(r"^[\w.\-]+/[\w.\-]+$")

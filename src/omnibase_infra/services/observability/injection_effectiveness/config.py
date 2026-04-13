@@ -64,6 +64,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_OMNICLAUDE_AGENT_MATCH,
+    SUFFIX_OMNICLAUDE_CONTEXT_UTILIZATION,
+    SUFFIX_OMNICLAUDE_LATENCY_BREAKDOWN,
+    SUFFIX_OMNICLAUDE_MANIFEST_INJECTED,
+    SUFFIX_OMNICLAUDE_MANIFEST_INJECTION_FAILED,
+    SUFFIX_OMNICLAUDE_MANIFEST_INJECTION_STARTED,
+)
 from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 
 # Resolve OMN-6158 topics via canonical registry (no raw literals — OMN-3343)
@@ -110,13 +118,13 @@ class ConfigInjectionEffectivenessConsumer(BaseSettings):
     # 2 pipeline gap topics from OMN-6158)
     topics: list[str] = Field(
         default_factory=lambda: [
-            "onex.evt.omniclaude.context-utilization.v1",
-            "onex.evt.omniclaude.agent-match.v1",
-            "onex.evt.omniclaude.latency-breakdown.v1",
+            SUFFIX_OMNICLAUDE_CONTEXT_UTILIZATION,
+            SUFFIX_OMNICLAUDE_AGENT_MATCH,
+            SUFFIX_OMNICLAUDE_LATENCY_BREAKDOWN,
             # Manifest injection lifecycle topics (OMN-1888 / OMN-2942)
-            "onex.evt.omniclaude.manifest-injection-started.v1",
-            "onex.evt.omniclaude.manifest-injected.v1",
-            "onex.evt.omniclaude.manifest-injection-failed.v1",
+            SUFFIX_OMNICLAUDE_MANIFEST_INJECTION_STARTED,
+            SUFFIX_OMNICLAUDE_MANIFEST_INJECTED,
+            SUFFIX_OMNICLAUDE_MANIFEST_INJECTION_FAILED,
             # Context enrichment + injection recorded topics (OMN-6158)
             _T_CONTEXT_ENRICHMENT,
             _T_INJECTION_RECORDED,

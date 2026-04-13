@@ -32,12 +32,18 @@ from textual.message import Message
 if TYPE_CHECKING:
     from omnibase_core.types import JsonType
 
+from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_GIT_HOOK,
+    SUFFIX_GITHUB_PR_STATUS,
+    SUFFIX_LINEAR_SNAPSHOT,
+)
+
 logger = logging.getLogger(__name__)
 
 # Topic constants — sourced from event contracts, not hardcoded per-app
-TOPIC_PR_STATUS = "onex.evt.github.pr-status.v1"
-TOPIC_GIT_HOOK = "onex.evt.git.hook.v1"
-TOPIC_LINEAR_SNAPSHOT = "onex.evt.linear.snapshot.v1"
+TOPIC_PR_STATUS = SUFFIX_GITHUB_PR_STATUS
+TOPIC_GIT_HOOK = SUFFIX_GIT_HOOK
+TOPIC_LINEAR_SNAPSHOT = SUFFIX_LINEAR_SNAPSHOT
 
 _ALL_TOPICS = (TOPIC_PR_STATUS, TOPIC_GIT_HOOK, TOPIC_LINEAR_SNAPSHOT)
 

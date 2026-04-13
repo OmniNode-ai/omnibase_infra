@@ -18,6 +18,10 @@ from urllib.parse import urlparse
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_INTELLIGENCE_LLM_CALL_COMPLETED,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,7 +62,7 @@ class ConfigLlmCostAggregation(BaseSettings):
     # Topics to subscribe
     topics: list[str] = Field(
         default_factory=lambda: [
-            "onex.evt.omniintelligence.llm-call-completed.v1",
+            SUFFIX_INTELLIGENCE_LLM_CALL_COMPLETED,
         ],
         description="Kafka topics to consume for LLM cost aggregation",
     )

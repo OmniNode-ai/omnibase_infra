@@ -61,6 +61,11 @@ from omnibase_infra.nodes.node_contract_registry_reducer.models.model_contract_r
 from omnibase_infra.nodes.node_contract_registry_reducer.reducer import (
     ContractRegistryReducer,
 )
+from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_CONTRACT_DEREGISTERED,
+    SUFFIX_CONTRACT_REGISTERED,
+    SUFFIX_NODE_HEARTBEAT,
+)
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
@@ -70,9 +75,9 @@ logger = logging.getLogger(__name__)
 
 # Topic suffix patterns for event type matching
 # Topics are realm-agnostic (no environment prefix)
-TOPIC_SUFFIX_CONTRACT_REGISTERED = "onex.evt.platform.contract-registered.v1"
-TOPIC_SUFFIX_CONTRACT_DEREGISTERED = "onex.evt.platform.contract-deregistered.v1"
-TOPIC_SUFFIX_NODE_HEARTBEAT = "onex.evt.platform.node-heartbeat.v1"
+TOPIC_SUFFIX_CONTRACT_REGISTERED = SUFFIX_CONTRACT_REGISTERED
+TOPIC_SUFFIX_CONTRACT_DEREGISTERED = SUFFIX_CONTRACT_DEREGISTERED
+TOPIC_SUFFIX_NODE_HEARTBEAT = SUFFIX_NODE_HEARTBEAT
 
 
 class ContractRegistrationEventRouter:

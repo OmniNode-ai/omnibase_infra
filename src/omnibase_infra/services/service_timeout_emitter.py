@@ -39,6 +39,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums.generated.enum_platform_topic import EnumPlatformTopic
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.services.service_timeout_scanner import ServiceTimeoutScanner
@@ -238,8 +239,12 @@ class ServiceTimeoutEmitter:
 
     # Default topic suffixes following ONEX 5-segment realm-agnostic conventions.
     # The runtime composes the full qualified topic by prepending env.namespace.
-    DEFAULT_ACK_TIMEOUT_TOPIC = "onex.evt.platform.node-registration-ack-timed-out.v1"
-    DEFAULT_LIVENESS_EXPIRED_TOPIC = "onex.evt.platform.node-liveness-expired.v1"
+    DEFAULT_ACK_TIMEOUT_TOPIC = (
+        EnumPlatformTopic.EVT_NODE_REGISTRATION_ACK_TIMED_OUT_V1.value
+    )
+    DEFAULT_LIVENESS_EXPIRED_TOPIC = (
+        EnumPlatformTopic.EVT_NODE_LIVENESS_EXPIRED_V1.value
+    )
 
     # Error rate threshold for systemic issue detection.
     # When more than 50% of emissions fail in a single batch, this indicates

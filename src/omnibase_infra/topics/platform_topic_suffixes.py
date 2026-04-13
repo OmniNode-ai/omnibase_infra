@@ -693,6 +693,24 @@ Producer: NodeGitHubPRPollerEffect / HandlerGitHubApiPoll
 Consumer: omnidash PR triage dashboard (future)
 """
 
+SUFFIX_LINEAR_SNAPSHOT: str = "onex.evt.linear.snapshot.v1"
+"""Topic suffix for Linear workspace snapshot events.
+
+Published by onex-linear-relay CLI for each snapshot relayed to Kafka.
+
+Producer: onex-linear-relay (omnibase_infra CLI)
+Consumer: omnidash, omnibase_infra TUI
+"""
+
+SUFFIX_GIT_HOOK: str = "onex.evt.git.hook.v1"
+"""Topic suffix for git hook relay events.
+
+Published by onex-git-hook-relay CLI for each git hook event relayed to Kafka.
+
+Producer: onex-git-hook-relay (omnibase_infra CLI)
+Consumer: omnibase_infra TUI, omnidash
+"""
+
 SUFFIX_GMAIL_INTENT_RECEIVED: str = "onex.evt.omnibase-infra.gmail-intent-received.v1"
 """Topic suffix for Gmail intent received events (OMN-2730).
 
@@ -1047,6 +1065,48 @@ SUFFIX_OMNICLAUDE_AGENT_STATUS: str = "onex.evt.omniclaude.agent-status.v1"
 """Agent status observability topic. Emitted by omniclaude TopicBase.AGENT_STATUS (OMN-2846, OMN-2903).
 
 Consumed by omnibase_infra ServiceAgentActionsConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_CONTEXT_UTILIZATION: str = (
+    "onex.evt.omniclaude.context-utilization.v1"
+)
+"""Context utilization injection effectiveness topic. Emitted by omniclaude hooks (OMN-1889).
+
+Consumed by omnibase_infra ServiceInjectionEffectivenessConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_AGENT_MATCH: str = "onex.evt.omniclaude.agent-match.v1"
+"""Agent match injection effectiveness topic. Emitted by omniclaude hooks (OMN-1889).
+
+Consumed by omnibase_infra ServiceInjectionEffectivenessConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_LATENCY_BREAKDOWN: str = "onex.evt.omniclaude.latency-breakdown.v1"
+"""Latency breakdown injection effectiveness topic. Emitted by omniclaude hooks (OMN-1889).
+
+Consumed by omnibase_infra ServiceInjectionEffectivenessConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_MANIFEST_INJECTION_STARTED: str = (
+    "onex.evt.omniclaude.manifest-injection-started.v1"
+)
+"""Manifest injection started lifecycle topic. Emitted by omniclaude hooks (OMN-2942).
+
+Consumed by omnibase_infra ServiceInjectionEffectivenessConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_MANIFEST_INJECTED: str = "onex.evt.omniclaude.manifest-injected.v1"
+"""Manifest injected lifecycle topic. Emitted by omniclaude hooks (OMN-2942).
+
+Consumed by omnibase_infra ServiceInjectionEffectivenessConsumer.
+"""
+
+SUFFIX_OMNICLAUDE_MANIFEST_INJECTION_FAILED: str = (
+    "onex.evt.omniclaude.manifest-injection-failed.v1"
+)
+"""Manifest injection failed lifecycle topic. Emitted by omniclaude hooks (OMN-2942).
+
+Consumed by omnibase_infra ServiceInjectionEffectivenessConsumer.
 """
 
 SUFFIX_OMNICLAUDE_SKILL_STARTED: str = "onex.evt.omniclaude.skill-started.v1"

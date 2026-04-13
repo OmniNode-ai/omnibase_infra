@@ -92,6 +92,15 @@ from omnibase_infra.services.observability.agent_actions.models.model_routing_de
 from omnibase_infra.services.observability.agent_actions.writer_postgres import (
     WriterAgentActionsPostgres,
 )
+from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_OMNICLAUDE_AGENT_ACTIONS,
+    SUFFIX_OMNICLAUDE_AGENT_EXECUTION_LOGS,
+    SUFFIX_OMNICLAUDE_AGENT_STATUS,
+    SUFFIX_OMNICLAUDE_AGENT_TRANSFORMATION,
+    SUFFIX_OMNICLAUDE_DETECTION_FAILURE,
+    SUFFIX_OMNICLAUDE_PERFORMANCE_METRICS,
+    SUFFIX_OMNICLAUDE_ROUTING_DECISION,
+)
 
 if TYPE_CHECKING:
     from aiokafka.structs import ConsumerRecord
@@ -176,13 +185,13 @@ def mask_dsn_password(dsn: str) -> str:
 #   session_id, emitted_at) to internal conventions. ModelRoutingDecision (strict)
 #   is preserved for all downstream use.
 TOPIC_TO_MODEL: dict[str, type[BaseModel]] = {
-    "onex.evt.omniclaude.agent-actions.v1": ModelAgentAction,
-    "onex.evt.omniclaude.routing-decision.v1": ModelRoutingDecisionIngest,  # OMN-3422: was ModelRoutingDecision
-    "onex.evt.omniclaude.agent-transformation.v1": ModelTransformationEvent,
-    "onex.evt.omniclaude.performance-metrics.v1": ModelPerformanceMetric,
-    "onex.evt.omniclaude.detection-failure.v1": ModelDetectionFailure,
-    "onex.evt.omniclaude.agent-execution-logs.v1": ModelExecutionLog,  # OMN-2902
-    "onex.evt.omniclaude.agent-status.v1": ModelAgentStatusEvent,
+    SUFFIX_OMNICLAUDE_AGENT_ACTIONS: ModelAgentAction,
+    SUFFIX_OMNICLAUDE_ROUTING_DECISION: ModelRoutingDecisionIngest,  # OMN-3422: was ModelRoutingDecision
+    SUFFIX_OMNICLAUDE_AGENT_TRANSFORMATION: ModelTransformationEvent,
+    SUFFIX_OMNICLAUDE_PERFORMANCE_METRICS: ModelPerformanceMetric,
+    SUFFIX_OMNICLAUDE_DETECTION_FAILURE: ModelDetectionFailure,
+    SUFFIX_OMNICLAUDE_AGENT_EXECUTION_LOGS: ModelExecutionLog,  # OMN-2902
+    SUFFIX_OMNICLAUDE_AGENT_STATUS: ModelAgentStatusEvent,
 }
 
 # Map topics to writer method names.
@@ -190,13 +199,13 @@ TOPIC_TO_MODEL: dict[str, type[BaseModel]] = {
 # OMN-2902: "agent-execution-logs" → "onex.evt.omniclaude.agent-execution-logs.v1".
 # OMN-2986: All topic names must match config.py (canonical ONEX names).
 TOPIC_TO_WRITER_METHOD: dict[str, str] = {
-    "onex.evt.omniclaude.agent-actions.v1": "write_agent_actions",
-    "onex.evt.omniclaude.routing-decision.v1": "write_routing_decisions",
-    "onex.evt.omniclaude.agent-transformation.v1": "write_transformation_events",
-    "onex.evt.omniclaude.performance-metrics.v1": "write_performance_metrics",
-    "onex.evt.omniclaude.detection-failure.v1": "write_detection_failures",
-    "onex.evt.omniclaude.agent-execution-logs.v1": "write_execution_logs",  # OMN-2902
-    "onex.evt.omniclaude.agent-status.v1": "write_agent_status_events",
+    SUFFIX_OMNICLAUDE_AGENT_ACTIONS: "write_agent_actions",
+    SUFFIX_OMNICLAUDE_ROUTING_DECISION: "write_routing_decisions",
+    SUFFIX_OMNICLAUDE_AGENT_TRANSFORMATION: "write_transformation_events",
+    SUFFIX_OMNICLAUDE_PERFORMANCE_METRICS: "write_performance_metrics",
+    SUFFIX_OMNICLAUDE_DETECTION_FAILURE: "write_detection_failures",
+    SUFFIX_OMNICLAUDE_AGENT_EXECUTION_LOGS: "write_execution_logs",  # OMN-2902
+    SUFFIX_OMNICLAUDE_AGENT_STATUS: "write_agent_status_events",
 }
 
 

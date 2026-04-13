@@ -43,11 +43,12 @@ from uuid import uuid4
 import click
 
 from omnibase_core.types import JsonType
+from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_LINEAR_SNAPSHOT
 
 logger = logging.getLogger(__name__)
 
 # Topic constant (mirrors omnibase_core TOPIC_LINEAR_SNAPSHOT_EVENT from PR#531)
-TOPIC_LINEAR_SNAPSHOT_EVENT = "onex.evt.linear.snapshot.v1"
+TOPIC_LINEAR_SNAPSHOT_EVENT = SUFFIX_LINEAR_SNAPSHOT
 
 # Spool file location for non-blocking fallback
 _SPOOL_DIR = Path.home() / ".onex" / "spool"
