@@ -8,9 +8,10 @@ Related Tickets:
 
 from __future__ import annotations
 
+import os
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from omnibase_infra.topics import topic_keys
@@ -49,9 +50,20 @@ class ConfigSavingsEstimation(BaseSettings):
     )
 
     kafka_bootstrap_servers: str = Field(
-        ...,
-        description="Kafka bootstrap servers.",
+        default_factory=lambda: os.environ.get("KAFKA_BOOTSTRAP_SERVERS", ""),
+        description="Kafka bootstrap servers. Falls back to KAFKA_BOOTSTRAP_SERVERS env var.",
     )
+
+    @field_validator("kafka_bootstrap_servers")
+    @classmethod
+    def _require_bootstrap_servers(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError(
+                "kafka_bootstrap_servers is required. Set OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS "
+                "or KAFKA_BOOTSTRAP_SERVERS."
+            )
+        return v
+
     kafka_group_id: str = Field(
         default="savings-estimation",
         description="Consumer group ID for offset tracking.",

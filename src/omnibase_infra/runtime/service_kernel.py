@@ -1438,12 +1438,12 @@ async def bootstrap() -> int:
                     "Savings estimation consumer started (correlation_id=%s)",
                     correlation_id,
                 )
-            except Exception:  # noqa: BLE001 — best-effort, never blocks startup
-                logger.warning(
-                    "Failed to start savings estimation consumer, continuing "
-                    "without it (correlation_id=%s)",
+            except Exception:
+                logger.exception(
+                    "Failed to start savings estimation consumer — pipeline will write zero rows "
+                    "(correlation_id=%s). Check OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS "
+                    "or KAFKA_BOOTSTRAP_SERVERS env vars.",
                     correlation_id,
-                    exc_info=True,
                 )
                 savings_task = None
 
