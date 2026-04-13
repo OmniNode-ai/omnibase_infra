@@ -27,7 +27,7 @@ import asyncio
 import logging
 import os
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.models.health.model_runtime_health_check_event import (
@@ -37,6 +37,10 @@ from omnibase_infra.models.health.model_runtime_health_dimension import (
     ModelRuntimeHealthDimension,
 )
 from omnibase_infra.protocols import ProtocolTopicRegistry
+from omnibase_infra.protocols.protocol_auto_wiring_manifest_like import (
+    ProtocolAutoWiringManifestLike,
+)
+from omnibase_infra.protocols.protocol_kafka_admin_like import ProtocolKafkaAdminLike
 from omnibase_infra.topics import topic_keys
 from omnibase_infra.utils.correlation import generate_correlation_id
 
@@ -46,28 +50,30 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _discover_contracts() -> Any:  # ONEX_EXCLUDE: any_type
+def _discover_contracts() -> ProtocolAutoWiringManifestLike:
     """Module-level shim — allows tests to patch without lazy-import complications.
 
-    Returns Any because ModelAutoWiringManifest is imported lazily inside the
-    function body to avoid circular imports at module parse time.
+    The return type is declared as ``ProtocolAutoWiringManifestLike`` to avoid a
+    circular import of ``ModelAutoWiringManifest`` at module parse time while
+    still providing accurate type information to callers.
     """
     from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts
 
-    return discover_contracts()
+    return discover_contracts()  # type: ignore[return-value]
 
 
 def _get_kafka_admin_client(
     bootstrap_servers: str, request_timeout_ms: int
-) -> Any:  # ONEX_EXCLUDE: any_type
+) -> ProtocolKafkaAdminLike:
     """Module-level shim for AIOKafkaAdminClient — patchable in tests.
 
-    Returns Any because AIOKafkaAdminClient is imported lazily inside the
-    function body to avoid hard dependency at module import time.
+    The return type is declared as ``ProtocolKafkaAdminLike`` to avoid a hard
+    import of ``AIOKafkaAdminClient`` at module import time while still providing
+    accurate type information to callers.
     """
     from aiokafka.admin import AIOKafkaAdminClient
 
-    return AIOKafkaAdminClient(
+    return AIOKafkaAdminClient(  # type: ignore[return-value]
         bootstrap_servers=bootstrap_servers,
         request_timeout_ms=request_timeout_ms,
     )
@@ -198,9 +204,9 @@ class ServiceRuntimeHealthMonitor:
         subscribe_topics: set[str] = set()
         try:
             manifest = _discover_contracts()
-            contract_count = manifest.total_discovered  # type: ignore[attr-defined]
-            discovery_error_count = manifest.total_errors  # type: ignore[attr-defined]
-            subscribe_topics = set(manifest.all_subscribe_topics())  # type: ignore[attr-defined]
+            contract_count = manifest.total_discovered
+            discovery_error_count = manifest.total_errors
+            subscribe_topics = set(manifest.all_subscribe_topics())
 
             if discovery_error_count > 0:
                 dimensions.append(

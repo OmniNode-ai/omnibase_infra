@@ -62,6 +62,9 @@ See Also:
     - OMN-947 (F2) for snapshot publishing design
 """
 
+from omnibase_infra.protocols.protocol_auto_wiring_manifest_like import (
+    ProtocolAutoWiringManifestLike,
+)
 from omnibase_infra.protocols.protocol_capability_projection import (
     ProtocolCapabilityProjection,
 )
@@ -73,6 +76,7 @@ from omnibase_infra.protocols.protocol_event_projector import ProtocolEventProje
 from omnibase_infra.protocols.protocol_idempotency_store import (
     ProtocolIdempotencyStore,
 )
+from omnibase_infra.protocols.protocol_kafka_admin_like import ProtocolKafkaAdminLike
 from omnibase_infra.protocols.protocol_ledger_sink import ProtocolLedgerSink
 from omnibase_infra.protocols.protocol_message_dispatcher import (
     ProtocolMessageDispatcher,
@@ -104,6 +108,7 @@ from omnibase_infra.protocols.protocol_validation_ledger_repository import (
 )
 
 __all__: list[str] = [
+    "ProtocolAutoWiringManifestLike",
     "ProtocolCapabilityProjection",
     "ProtocolCapabilityQuery",
     "ProtocolContainerAware",
@@ -111,6 +116,7 @@ __all__: list[str] = [
     "ProtocolEventBusLike",
     "ProtocolEventProjector",
     "ProtocolIdempotencyStore",
+    "ProtocolKafkaAdminLike",
     "ProtocolLedgerSink",
     "ProtocolMessageDispatcher",
     "ProtocolMessageTypeRegistry",
