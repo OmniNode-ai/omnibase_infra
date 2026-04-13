@@ -1708,9 +1708,9 @@ ALL_INTELLIGENCE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_CRAWL_REQUESTED, partitions=1),
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_FILE_DISCOVERED, partitions=1),
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_ENTITIES_EXTRACTED, partitions=1),
-    # Code embedding + enrichment output topics (OMN-5664, OMN-5665 — low volume, 1 partition)
-    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_EMBEDDED, partitions=1),
-    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_ENRICHED, partitions=1),
+    # Code embedding + enrichment output topics (OMN-5664, OMN-5665 — 3 partitions, matches intelligence domain standard)
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_EMBEDDED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_ENRICHED, partitions=3),
     # Pattern refinement events (OMN-7810 — gap-fill, 3 partitions)
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_PATTERN_REFINED, partitions=3),
 )
