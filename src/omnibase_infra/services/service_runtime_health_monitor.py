@@ -277,7 +277,12 @@ class ServiceRuntimeHealthMonitor:
                     # topic name, ensuring exact-identity matching rather than a loose
                     # suffix match that could yield false positives on version tokens
                     # like "v1" (which appear in every consumer group name).
-                    non_empty_groups = set(all_group_ids) - empty_groups
+                    if describe_failed:
+                        # Consumer group states are unknown — do not compute coverage
+                        # from unreliable data; both dimensions degrade together.
+                        non_empty_groups: set[str] = set()
+                    else:
+                        non_empty_groups = set(all_group_ids) - empty_groups
                     uncovered: list[str] = []
                     for topic in sorted(subscribe_topics):
                         covered = any(topic in grp for grp in non_empty_groups)
@@ -294,6 +299,13 @@ class ServiceRuntimeHealthMonitor:
                                     f"describe_consumer_groups failed; "
                                     f"{consumer_group_count} groups listed but states unknown"
                                 ),
+                            )
+                        )
+                        dimensions.append(
+                            ModelRuntimeHealthDimension(
+                                name="topic_coverage",
+                                status="DEGRADED",
+                                detail="Consumer group states unknown — topic coverage cannot be verified",
                             )
                         )
                     elif empty_consumer_group_count > 0:
@@ -318,39 +330,43 @@ class ServiceRuntimeHealthMonitor:
                             )
                         )
 
-                    if uncovered_topic_count > 0:
-                        detail_topics = ", ".join(uncovered[:5])
-                        if len(uncovered) > 5:
-                            detail_topics += f" … +{len(uncovered) - 5} more"
-                        dimensions.append(
-                            ModelRuntimeHealthDimension(
-                                name="topic_coverage",
-                                status="CRITICAL"
-                                if uncovered_topic_count > 10
-                                else "DEGRADED",
-                                detail=(
-                                    f"{uncovered_topic_count} subscribe topic(s) have"
-                                    f" no active consumer group: {detail_topics}"
-                                ),
+                    if not describe_failed:
+                        if uncovered_topic_count > 0:
+                            detail_topics = ", ".join(uncovered[:5])
+                            if len(uncovered) > 5:
+                                detail_topics += f" … +{len(uncovered) - 5} more"
+                            dimensions.append(
+                                ModelRuntimeHealthDimension(
+                                    name="topic_coverage",
+                                    status="CRITICAL"
+                                    if uncovered_topic_count > 10
+                                    else "DEGRADED",
+                                    detail=(
+                                        f"{uncovered_topic_count} subscribe topic(s) have"
+                                        f" no active consumer group: {detail_topics}"
+                                    ),
+                                )
                             )
-                        )
-                    else:
-                        dimensions.append(
-                            ModelRuntimeHealthDimension(
-                                name="topic_coverage",
-                                status="HEALTHY",
-                                detail=(
-                                    f"All {len(subscribe_topics)} subscribe topics covered"
-                                ),
+                        else:
+                            dimensions.append(
+                                ModelRuntimeHealthDimension(
+                                    name="topic_coverage",
+                                    status="HEALTHY",
+                                    detail=(
+                                        f"All {len(subscribe_topics)} subscribe topics covered"
+                                    ),
+                                )
                             )
-                        )
 
                 finally:
                     if admin is not None:
                         try:
                             await admin.close()  # type: ignore[union-attr]
-                        except Exception:  # noqa: BLE001
-                            pass
+                        except Exception:  # noqa: BLE001 — best-effort admin close
+                            logger.debug(
+                                "Runtime health: failed to close Kafka admin client",
+                                exc_info=True,
+                            )
 
             except ImportError:
                 logger.debug(
@@ -411,7 +427,7 @@ class ServiceRuntimeHealthMonitor:
             for dim in dimensions:
                 if dim.status != "HEALTHY":
                     logger.warning(
-                        "Runtime health DEGRADED dimension=%s status=%s detail=%s",
+                        "Runtime health issue dimension=%s status=%s detail=%s",
                         dim.name,
                         dim.status,
                         dim.detail,
