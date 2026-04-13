@@ -125,7 +125,10 @@ class DeployExecutor:
         remote_sha = remote_result.stdout.strip()
 
         if local_sha == remote_sha:
-            logger.info("self_update: already at origin/main (%s), nothing to do", local_sha[:12])
+            logger.info(
+                "self_update: already at origin/main (%s), nothing to do",
+                local_sha[:12],
+            )
             return
 
         logger.info(
@@ -161,11 +164,13 @@ class DeployExecutor:
         mode = os.environ.get("DEPLOY_AGENT_MODE", "host")
         if mode == "container":
             # Let systemd/compose restart us from the freshly-pulled source.
-            logger.info("self_update: container mode — exiting with code 42 for supervisor respawn")
+            logger.info(
+                "self_update: container mode — exiting with code 42 for supervisor respawn"
+            )
             sys.exit(42)
         else:
             logger.info("self_update: host mode — re-execing process image")
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+            os.execv(sys.executable, [sys.executable] + sys.argv)  # noqa: S606
 
     def preflight(self, on_phase_update: PhaseCallback) -> None:
         on_phase_update(Phase.PREFLIGHT, PhaseStatus.IN_PROGRESS)

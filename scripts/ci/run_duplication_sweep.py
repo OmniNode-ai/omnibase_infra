@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+
 """Standalone CI script: duplication sweep.
 
 Checks:
@@ -69,7 +71,9 @@ def check_d1_drizzle_tables(omni_home: Path) -> dict:
     }
 
     if duplicates:
-        detail = f"{len(duplicates)} duplicate table(s): {', '.join(sorted(duplicates))}"
+        detail = (
+            f"{len(duplicates)} duplicate table(s): {', '.join(sorted(duplicates))}"
+        )
         findings = [
             {
                 "table": name,
@@ -226,6 +230,7 @@ def check_d3_migration_conflicts(omni_home: Path) -> dict:
             capture_output=True,
             text=True,
             timeout=60,
+            check=False,
         )
         output = result.stdout + result.stderr
     except FileNotFoundError:
@@ -284,7 +289,7 @@ def check_d3_migration_conflicts(omni_home: Path) -> dict:
 
 
 def check_d4_model_collisions(omni_home: Path) -> dict:
-    """D4: Cross-repo model name collisions (class ModelXxx in multiple repos)."""
+    """D4: Cross-repo model name collisions (same Model class name defined in multiple repos)."""
     class_pattern = re.compile(r"^class\s+(Model[A-Z]\w*)")
     model_locations: dict[str, list[dict]] = {}
 
@@ -312,9 +317,7 @@ def check_d4_model_collisions(omni_home: Path) -> dict:
             except (OSError, UnicodeDecodeError):
                 continue
 
-    duplicates = {
-        name: locs for name, locs in model_locations.items() if len(locs) > 1
-    }
+    duplicates = {name: locs for name, locs in model_locations.items() if len(locs) > 1}
 
     if duplicates:
         findings = [

@@ -676,12 +676,10 @@ services:
   # ONEX Runtime - Workers (Runtime Profile)
   # ==========================================================================
   # Scalable worker containers for parallel compute operations.
-  # OMN-5095: Workers have an extended start_period (600s) and retries (5)
-  # because plugin initialization (intelligence DB ownership, schema fingerprint,
-  # message type registration) must complete before /health returns 200.
+  # OMN-7235: Workers have an extended start_period (1200s) and retries (5) because
+  # ~166 Kafka consumer groups are joined sequentially at startup (~15+ min total).
   # Unhealthy detection latency = start_period + (interval * retries) = 1200s + 150s = 1350s.
-  # AUTOHEAL_START_PERIOD must exceed start_period + retry window to avoid premature restarts.
-  # Workers wire ~166 Kafka consumers at startup (~15+ min), so 1200s start_period is needed.
+  # AUTOHEAL_START_PERIOD (1500s) exceeds this window to prevent premature restarts.
   # OMN-7569: Default replicas=0 — workers join the same per-topic consumer groups
   # as the main runtime on 1-partition topics, causing a constant rebalance storm.
   # Scale to 0 until the kernel supports profile-based subscription filtering.
@@ -1105,10 +1103,10 @@ services:
     environment:
       AUTOHEAL_CONTAINER_LABEL: autoheal
       AUTOHEAL_INTERVAL: 60
-      # OMN-5095: Set to 840s (720s worker unhealthy window + 120s buffer) to avoid
-      # race condition where autoheal could trigger during a worker's initial health
-      # assessment. Workers need up to 600s start_period + 5×30s retries = 750s max.
-      AUTOHEAL_START_PERIOD: 840
+      # OMN-7235: Set to 1500s to exceed worker unhealthy detection window.
+      # Workers: start_period=1200s + retries=5×interval=30s = 1350s max.
+      # 1500s = 1350s + 150s buffer to prevent premature autoheal restarts.
+      AUTOHEAL_START_PERIOD: 1500
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     logging: *logging-defaults

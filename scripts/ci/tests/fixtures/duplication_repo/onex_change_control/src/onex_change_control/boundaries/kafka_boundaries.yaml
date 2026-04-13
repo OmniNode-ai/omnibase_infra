@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
 boundaries:
   - topic_name: onex.evt.omniclaude.session-started.v1
     producer_repo: omniclaude
