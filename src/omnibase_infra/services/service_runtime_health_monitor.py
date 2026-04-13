@@ -258,12 +258,15 @@ class ServiceRuntimeHealthMonitor:
                     consumer_group_count = len(all_group_ids)
 
                     # describe_consumer_groups to find empty ones
-                    described = {}
+                    described: dict[str, object] = {}
                     describe_failed = False
                     if all_group_ids:
                         try:
-                            described = await admin.describe_consumer_groups(  # type: ignore[union-attr]
+                            raw_described = await admin.describe_consumer_groups(  # type: ignore[union-attr]
                                 all_group_ids
+                            )
+                            described = dict(
+                                zip(all_group_ids, raw_described, strict=False)
                             )
                         except Exception as exc:  # noqa: BLE001
                             describe_failed = True
@@ -372,7 +375,7 @@ class ServiceRuntimeHealthMonitor:
                 finally:
                     if admin is not None:
                         try:
-                            await admin.close()  # type: ignore[union-attr]
+                            await admin.close()
                         except Exception:  # noqa: BLE001 — best-effort admin close
                             logger.debug(
                                 "Runtime health: failed to close Kafka admin client",

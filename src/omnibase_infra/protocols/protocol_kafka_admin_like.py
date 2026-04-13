@@ -29,6 +29,9 @@ class ProtocolKafkaAdminLike(Protocol):
     async def stop(self) -> None:
         pass
 
+    async def close(self) -> None:
+        pass
+
     async def list_consumer_groups(
         self, broker_ids: Sequence[int] | None = None
     ) -> Sequence[tuple[str, str | None]]:
