@@ -253,15 +253,15 @@ class ServiceRuntimeHealthMonitor:
 
                     # Check which subscribe topics have a matching non-empty group
                     # Consumer groups in ONEX typically encode the topic in the group ID
-                    # (e.g. "onex-runtime-consumer-<topic-suffix>"). We consider a
-                    # topic "covered" if at least one non-empty group ID contains any
-                    # word from the topic's suffix component.
+                    # (e.g. "onex-runtime-consumer-<topic-slug>"). We consider a topic
+                    # "covered" if at least one non-empty group ID contains the full
+                    # topic name, ensuring exact-identity matching rather than a loose
+                    # suffix match that could yield false positives on version tokens
+                    # like "v1" (which appear in every consumer group name).
                     non_empty_groups = set(all_group_ids) - empty_groups
                     uncovered: list[str] = []
                     for topic in sorted(subscribe_topics):
-                        # Extract suffix after last '.' separator as coverage key
-                        suffix = topic.rsplit(".", 1)[-1] if "." in topic else topic
-                        covered = any(suffix in grp for grp in non_empty_groups)
+                        covered = any(topic in grp for grp in non_empty_groups)
                         if not covered:
                             uncovered.append(topic)
                     uncovered_topic_count = len(uncovered)
