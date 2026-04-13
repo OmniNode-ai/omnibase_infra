@@ -538,4 +538,3 @@ node_validation_executor = "omnibase_infra.nodes.node_validation_executor"
 node_validation_ledger_projection_compute = "omnibase_infra.nodes.node_validation_ledger_projection_compute"
 node_validation_orchestrator = "omnibase_infra.nodes.node_validation_orchestrator"
 node_vector_store_effect = "omnibase_infra.nodes.node_vector_store_effect"
-
