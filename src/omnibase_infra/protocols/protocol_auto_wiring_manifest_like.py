@@ -25,7 +25,8 @@ class ProtocolAutoWiringManifestLike(Protocol):
     total_discovered: int
     total_errors: int
 
-    def all_subscribe_topics(self) -> Iterable[str]: ...
+    def all_subscribe_topics(self) -> Iterable[str]:
+        pass
 
 
 __all__: list[str] = ["ProtocolAutoWiringManifestLike"]

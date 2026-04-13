@@ -2979,6 +2979,22 @@ async def bootstrap() -> int:
             correlation_id,
         )
 
+        # Stop ServiceRuntimeHealthMonitor before tearing down runtime consumers.
+        if runtime_health_monitor is not None:
+            try:
+                await runtime_health_monitor.stop()
+                logger.debug(
+                    "ServiceRuntimeHealthMonitor stopped (correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — boundary: best-effort cleanup
+                logger.warning(
+                    "Error stopping ServiceRuntimeHealthMonitor (correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+            runtime_health_monitor = None
+
         # Stop runtime FIRST so introspection tasks flush their final events
         # while the event bus is still active. Moving this before consumer
         # unsubscribe fixes the ~29 introspection errors per shutdown cycle
@@ -3116,22 +3132,6 @@ async def bootstrap() -> int:
                 correlation_id,
             )
             savings_task = None
-
-        # Stop ServiceRuntimeHealthMonitor (OMN-8623)
-        if runtime_health_monitor is not None:
-            try:
-                await runtime_health_monitor.stop()
-                logger.debug(
-                    "ServiceRuntimeHealthMonitor stopped (correlation_id=%s)",
-                    correlation_id,
-                )
-            except Exception:  # noqa: BLE001 — boundary: best-effort cleanup
-                logger.warning(
-                    "Error stopping ServiceRuntimeHealthMonitor (correlation_id=%s)",
-                    correlation_id,
-                    exc_info=True,
-                )
-            runtime_health_monitor = None
 
         # Stop ServiceLlmEndpointHealth (OMN-6135)
         if llm_health_service is not None:
