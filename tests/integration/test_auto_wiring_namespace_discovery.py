@@ -72,17 +72,17 @@ def test_discover_contracts_tolerates_namespace_entry_points(tmp_path: Path) -> 
 def test_discover_contracts_handles_type_error_from_namespace_getfile(
     tmp_path: Path,
 ) -> None:
-    """TypeError from inspect.getfile on a namespace module is captured, not propagated."""
-    # Simulate a namespace module that raises TypeError when getfile is called
-    ns_mod = types.ModuleType("node_ns_raises")
-    ns_mod.__path__ = [str(tmp_path)]  # type: ignore[attr-defined]
-    # No contract.yaml in tmp_path
+    """TypeError from inspect.getfile on a module with no __file__ or __path__ is captured."""
+    # Simulate a module where inspect.getfile raises TypeError:
+    # no __path__ (skips namespace branch) and no __file__ (causes TypeError in Strategy 3).
+    bare_mod = types.ModuleType("node_bare_raises")
+    # Deliberately omit __path__ and __file__ so inspect.getfile raises TypeError
 
-    ep = _make_entry_point("raises_node", load_value=ns_mod)
+    ep = _make_entry_point("raises_node", load_value=bare_mod)
 
     # This must not raise
     with patch(_EP_MODULE, return_value=[ep]):
         manifest = discover_contracts()
 
-    # Error captured, discovery continues
+    # TypeError captured, discovery continues
     assert manifest.total_errors >= 1
