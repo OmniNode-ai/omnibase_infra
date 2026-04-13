@@ -104,7 +104,8 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # === [RUNTIME] Runtime-internal protocols ===
     "ProtocolContractDescriptor": "runtime/protocol_contract_descriptor.py",
     "ProtocolContractSource": "runtime/protocol_contract_source.py",
-    # ProtocolDomainPlugin moved to omnibase_spi.protocols.runtime (OMN-8550)
+    # [RUNTIME] OMN-8550: infra copy retained for backward compat during SPI migration; canonical moved to omnibase_spi.protocols.runtime
+    "ProtocolDomainPlugin": "runtime/protocol_domain_plugin.py",
     "ProtocolHandlerPluginLoader": "runtime/protocol_handler_plugin_loader.py",
     "ProtocolHandlerDiscovery": "runtime/protocol_handler_discovery.py",
     "ProtocolPolicy": "runtime/protocol_policy.py",
@@ -151,6 +152,10 @@ KNOWN_DUPLICATE_LOCATIONS: dict[str, list[str]] = {
     ],
     "ProtocolIntentEffect": [
         "nodes/node_contract_registry_reducer/contract_registration_event_router.py",
+    ],
+    # [NODE] OMN-7484: node_baseline_capture has its own publisher protocol (legitimate internal copy)
+    "ProtocolPublisher": [
+        "nodes/node_baseline_capture/handlers/handler_baseline_capture.py",
     ],
 }
 

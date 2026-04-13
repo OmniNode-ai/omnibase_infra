@@ -359,6 +359,16 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     # --- cross-repo intelligence/memory topics ---
     "onex.evt.omniintelligence.pattern-refined.v1": "cross-repo topic; contract.yaml in omniintelligence repo | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omnimemory.document-ingested.v1": "cross-repo topic; contract.yaml in omnimemory repo | owner: jonah | expiry: 2026-09-01",
+    # --- git/linear relay topics (OMN-8605) — external relay CLIs, no node contract ---
+    "onex.evt.git.hook.v1": "OMN-8605; produced by onex-git-hook-relay CLI, no node contract — external relay | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.linear.snapshot.v1": "OMN-8605; produced by onex-linear-relay CLI, no node contract — external relay | owner: jonah | expiry: 2026-09-01",
+    # --- omniclaude injection effectiveness topics (OMN-1889, OMN-2942) — cross-repo, produced by omniclaude ---
+    "onex.evt.omniclaude.context-utilization.v1": "OMN-1889; produced by omniclaude hooks, contract.yaml in omniclaude repo | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.agent-match.v1": "OMN-1889; produced by omniclaude hooks, contract.yaml in omniclaude repo | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.latency-breakdown.v1": "OMN-1889; produced by omniclaude hooks, contract.yaml in omniclaude repo | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.manifest-injection-started.v1": "OMN-2942; produced by omniclaude hooks, contract.yaml in omniclaude repo | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.manifest-injected.v1": "OMN-2942; produced by omniclaude hooks, contract.yaml in omniclaude repo | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniclaude.manifest-injection-failed.v1": "OMN-2942; produced by omniclaude hooks, contract.yaml in omniclaude repo | owner: jonah | expiry: 2026-09-01",
 }
 # fmt: on
 

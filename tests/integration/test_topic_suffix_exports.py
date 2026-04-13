@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from omnibase_infra.topics import __init__ as topics_init
+import omnibase_infra.topics as topics_init
 from omnibase_infra.topics import platform_topic_suffixes
 
 

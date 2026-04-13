@@ -889,6 +889,24 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
             "cleanup.policy": "delete",
         },  # 1 day — commands are short-lived
     ),
+    # Git hook relay events (3 partitions — low-throughput, OMN-8605)
+    ModelTopicSpec(
+        suffix=SUFFIX_GIT_HOOK,
+        partitions=3,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
+    # Linear snapshot relay events (3 partitions — low-throughput, OMN-8605)
+    ModelTopicSpec(
+        suffix=SUFFIX_LINEAR_SNAPSHOT,
+        partitions=3,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
 )
 """Omnibase_infra domain topic specs for internal effect nodes.
 
@@ -1213,9 +1231,16 @@ _OMNICLAUDE_AGENT_OBSERVABILITY_TOPIC_SUFFIXES: tuple[str, ...] = (
     SUFFIX_OMNICLAUDE_AGENT_STATUS,
     SUFFIX_OMNICLAUDE_SESSION_ENDED,
     SUFFIX_OMNICLAUDE_TOOL_EXECUTED,
+    SUFFIX_OMNICLAUDE_CONTEXT_UTILIZATION,
+    SUFFIX_OMNICLAUDE_AGENT_MATCH,
+    SUFFIX_OMNICLAUDE_LATENCY_BREAKDOWN,
+    SUFFIX_OMNICLAUDE_MANIFEST_INJECTION_STARTED,
+    SUFFIX_OMNICLAUDE_MANIFEST_INJECTED,
+    SUFFIX_OMNICLAUDE_MANIFEST_INJECTION_FAILED,
 )
-"""Agent observability topic suffixes consumed by ServiceAgentActionsConsumer and
-agent learning extraction consumer (OMN-7242)."""
+"""Agent observability topic suffixes consumed by ServiceAgentActionsConsumer,
+injection effectiveness consumer (OMN-1889, OMN-2942), and agent learning
+extraction consumer (OMN-7242)."""
 
 # =============================================================================
 # OMNICLAUDE CONTEXT AUDIT TOPIC SUFFIXES (OMN-5240)
