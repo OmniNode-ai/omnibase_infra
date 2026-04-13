@@ -104,7 +104,8 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # === [RUNTIME] Runtime-internal protocols ===
     "ProtocolContractDescriptor": "runtime/protocol_contract_descriptor.py",
     "ProtocolContractSource": "runtime/protocol_contract_source.py",
-    # [RUNTIME] OMN-8550: infra copy retained for backward compat during SPI migration; canonical moved to omnibase_spi.protocols.runtime
+    # [RUNTIME] OMN-8550: canonical location pending resolution. Currently present in omnibase_infra.runtime.protocol_domain_plugin.
+    # See OMN-8550 for SPI migration status. Follow-up tracked separately.
     "ProtocolDomainPlugin": "runtime/protocol_domain_plugin.py",
     "ProtocolHandlerPluginLoader": "runtime/protocol_handler_plugin_loader.py",
     "ProtocolHandlerDiscovery": "runtime/protocol_handler_discovery.py",
