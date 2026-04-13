@@ -17,7 +17,6 @@ Related Tickets:
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -315,10 +314,15 @@ class TestEventEmission:
 class TestLifecycle:
     @pytest.mark.asyncio
     async def test_start_stop(self):
+        manifest = _make_manifest(contracts=5, errors=0)
         monitor = ServiceRuntimeHealthMonitor(
             bootstrap_servers="", check_interval_seconds=9999.0
         )
-        await monitor.start()
+        with patch(
+            "omnibase_infra.services.service_runtime_health_monitor._discover_contracts",
+            return_value=manifest,
+        ):
+            await monitor.start()
         assert monitor._running
         assert monitor._task is not None
         await monitor.stop()
@@ -327,12 +331,17 @@ class TestLifecycle:
 
     @pytest.mark.asyncio
     async def test_start_idempotent(self):
+        manifest = _make_manifest(contracts=5, errors=0)
         monitor = ServiceRuntimeHealthMonitor(
             bootstrap_servers="", check_interval_seconds=9999.0
         )
-        await monitor.start()
-        task_before = monitor._task
-        await monitor.start()  # second call
+        with patch(
+            "omnibase_infra.services.service_runtime_health_monitor._discover_contracts",
+            return_value=manifest,
+        ):
+            await monitor.start()
+            task_before = monitor._task
+            await monitor.start()  # second call — should not re-run initial check
         assert monitor._task is task_before
         await monitor.stop()
 

@@ -120,6 +120,11 @@ class ServiceRuntimeHealthMonitor:
             topic_registry: Optional topic registry. Defaults to
                 ``ServiceTopicRegistry.from_defaults()``.
         """
+        if check_interval_seconds <= 0:
+            raise ValueError(
+                f"check_interval_seconds must be positive, got {check_interval_seconds}"
+            )
+
         if topic_registry is None:
             from omnibase_infra.topics.service_topic_registry import (
                 ServiceTopicRegistry,
@@ -139,10 +144,21 @@ class ServiceRuntimeHealthMonitor:
         self._running = False
 
     async def start(self) -> None:
-        """Start the background health check loop. Idempotent."""
+        """Start the background health check loop. Idempotent.
+
+        Runs the first health check immediately before entering the periodic loop
+        so callers get an initial signal without waiting one full interval.
+        """
         if self._running:
             return
         self._running = True
+        # Run the first check immediately so callers get an initial health signal.
+        try:
+            await self.run_once()
+        except Exception:  # noqa: BLE001 — best-effort; don't block startup
+            logger.warning(
+                "ServiceRuntimeHealthMonitor: initial check failed", exc_info=True
+            )
         self._task = asyncio.create_task(self._loop(), name="runtime-health-monitor")
         logger.info(
             "ServiceRuntimeHealthMonitor started (interval=%ds)",
@@ -232,14 +248,17 @@ class ServiceRuntimeHealthMonitor:
 
                     # describe_consumer_groups to find empty ones
                     described = {}
+                    describe_failed = False
                     if all_group_ids:
                         try:
                             described = await admin.describe_consumer_groups(  # type: ignore[union-attr]
                                 all_group_ids
                             )
                         except Exception as exc:  # noqa: BLE001
-                            logger.debug(
-                                "Runtime health: describe_consumer_groups failed — %s",
+                            describe_failed = True
+                            logger.warning(
+                                "Runtime health: describe_consumer_groups failed — %s; "
+                                "consumer group states unknown",
                                 exc,
                             )
 
@@ -266,7 +285,18 @@ class ServiceRuntimeHealthMonitor:
                             uncovered.append(topic)
                     uncovered_topic_count = len(uncovered)
 
-                    if empty_consumer_group_count > 0:
+                    if describe_failed:
+                        dimensions.append(
+                            ModelRuntimeHealthDimension(
+                                name="empty_consumer_groups",
+                                status="DEGRADED",
+                                detail=(
+                                    f"describe_consumer_groups failed; "
+                                    f"{consumer_group_count} groups listed but states unknown"
+                                ),
+                            )
+                        )
+                    elif empty_consumer_group_count > 0:
                         dimensions.append(
                             ModelRuntimeHealthDimension(
                                 name="empty_consumer_groups",
@@ -412,7 +442,7 @@ class ServiceRuntimeHealthMonitor:
         if self._event_bus is None:
             return
 
-        envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+        envelope: ModelEventEnvelope[ModelRuntimeHealthCheckEvent] = ModelEventEnvelope(
             payload=event,
             correlation_id=event.correlation_id,
             event_type="runtime-health-check",

@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import uuid
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -37,7 +39,7 @@ pytestmark = [
     pytest.mark.kafka,
 ]
 
-BOOTSTRAP_SERVERS = "localhost:19092"
+BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
 HEALTH_TOPIC = ServiceTopicRegistry.from_defaults().resolve(
     topic_keys.RUNTIME_HEALTH_CHECK
 )
@@ -50,7 +52,7 @@ async def kafka_consumer() -> AsyncGenerator[AIOKafkaConsumer, None]:
         HEALTH_TOPIC,
         bootstrap_servers=BOOTSTRAP_SERVERS,
         auto_offset_reset="latest",
-        group_id=f"test-runtime-health-monitor-{id(object())}",
+        group_id=f"test-runtime-health-monitor-{uuid.uuid4().hex}",
         enable_auto_commit=False,
     )
     await consumer.start()
@@ -106,7 +108,7 @@ async def test_run_once_emits_to_kafka(kafka_consumer: AIOKafkaConsumer) -> None
                     record = msgs[0]
                     break
         except TimeoutError:
-            pass
+            pass  # record stays None; assertion below will fail with a clear message
 
         assert record is not None, "Expected health-check event on Kafka topic"
         payload = json.loads(record.value)
