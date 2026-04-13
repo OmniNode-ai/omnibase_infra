@@ -27,7 +27,7 @@ import asyncio
 import logging
 import os
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.models.health.model_runtime_health_check_event import (
@@ -46,15 +46,25 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _discover_contracts() -> object:
-    """Module-level shim — allows tests to patch without lazy-import complications."""
+def _discover_contracts() -> Any:  # ONEX_EXCLUDE: any_type
+    """Module-level shim — allows tests to patch without lazy-import complications.
+
+    Returns Any because ModelAutoWiringManifest is imported lazily inside the
+    function body to avoid circular imports at module parse time.
+    """
     from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts
 
     return discover_contracts()
 
 
-def _get_kafka_admin_client(bootstrap_servers: str, request_timeout_ms: int) -> object:
-    """Module-level shim for AIOKafkaAdminClient — patchable in tests."""
+def _get_kafka_admin_client(
+    bootstrap_servers: str, request_timeout_ms: int
+) -> Any:  # ONEX_EXCLUDE: any_type
+    """Module-level shim for AIOKafkaAdminClient — patchable in tests.
+
+    Returns Any because AIOKafkaAdminClient is imported lazily inside the
+    function body to avoid hard dependency at module import time.
+    """
     from aiokafka.admin import AIOKafkaAdminClient
 
     return AIOKafkaAdminClient(
@@ -169,9 +179,9 @@ class ServiceRuntimeHealthMonitor:
         subscribe_topics: set[str] = set()
         try:
             manifest = _discover_contracts()
-            contract_count = manifest.total_discovered
-            discovery_error_count = manifest.total_errors
-            subscribe_topics = set(manifest.all_subscribe_topics())
+            contract_count = manifest.total_discovered  # type: ignore[attr-defined]
+            discovery_error_count = manifest.total_errors  # type: ignore[attr-defined]
+            subscribe_topics = set(manifest.all_subscribe_topics())  # type: ignore[attr-defined]
 
             if discovery_error_count > 0:
                 dimensions.append(
@@ -211,10 +221,10 @@ class ServiceRuntimeHealthMonitor:
                     admin = _get_kafka_admin_client(
                         self._bootstrap_servers, _KAFKA_ADMIN_TIMEOUT_MS
                     )
-                    await admin.start()
+                    await admin.start()  # type: ignore[union-attr]
 
                     # list_consumer_groups() returns list of (group_id, protocol_type) tuples
-                    all_groups_raw = await admin.list_consumer_groups()
+                    all_groups_raw = await admin.list_consumer_groups()  # type: ignore[union-attr]
                     all_group_ids = [g[0] for g in all_groups_raw]
                     consumer_group_count = len(all_group_ids)
 
@@ -222,7 +232,7 @@ class ServiceRuntimeHealthMonitor:
                     described = {}
                     if all_group_ids:
                         try:
-                            described = await admin.describe_consumer_groups(
+                            described = await admin.describe_consumer_groups(  # type: ignore[union-attr]
                                 all_group_ids
                             )
                         except Exception as exc:  # noqa: BLE001
@@ -306,7 +316,7 @@ class ServiceRuntimeHealthMonitor:
                 finally:
                     if admin is not None:
                         try:
-                            await admin.close()
+                            await admin.close()  # type: ignore[union-attr]
                         except Exception:  # noqa: BLE001
                             pass
 
