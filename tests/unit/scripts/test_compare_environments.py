@@ -127,10 +127,12 @@ def test_detects_wrong_postgres_user() -> None:
 
 @pytest.mark.unit
 def test_detects_missing_ecr_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+    import shutil
     import subprocess
 
     from compare_environments import check_ecr_tag_validity
 
+    monkeypatch.setattr(shutil, "which", lambda _x: "/usr/bin/aws")
     monkeypatch.setattr(
         subprocess,
         "run",

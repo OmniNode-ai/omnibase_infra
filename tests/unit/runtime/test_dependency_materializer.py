@@ -174,7 +174,8 @@ class TestEnumInfraResourceType:
 class TestModelPostgresPoolConfig:
     """Tests for PostgreSQL pool configuration."""
 
-    def test_default_values(self) -> None:
+    def test_default_values(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("POSTGRES_HOST", raising=False)
         config = ModelPostgresPoolConfig(database="testdb")
         assert config.host == "localhost"
         assert config.port == 5432
