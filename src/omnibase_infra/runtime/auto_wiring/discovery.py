@@ -79,7 +79,7 @@ def discover_contracts() -> ModelAutoWiringManifest:
 
         try:
             contract_path = _resolve_contract_path(node_cls)
-        except FileNotFoundError as exc:
+        except (FileNotFoundError, TypeError) as exc:
             logger.warning(
                 "No contract.yaml for entry point '%s' from '%s': %s",
                 ep.name,
@@ -178,15 +178,18 @@ def discover_contracts_from_paths(
 
 
 def _resolve_contract_path(node_cls: type) -> Path:
-    """Resolve the contract.yaml path for a node class.
+    """Resolve the contract.yaml path for a node class or module.
 
     Strategy:
-    1. If the class has a ``contract_path`` attribute, use it directly.
-    2. Otherwise, look for ``contract.yaml`` in the same directory as the
+    1. If the object has a ``contract_path`` attribute, use it directly.
+    2. For namespace packages (no ``__file__``), search each path in ``__path__``.
+    3. Otherwise, look for ``contract.yaml`` in the same directory as the
        module that defines the class.
 
     Raises:
         FileNotFoundError: If no contract.yaml can be located.
+        TypeError: If ``inspect.getfile`` cannot locate the source (re-raised
+            from caller's ``except (FileNotFoundError, TypeError)`` guard).
     """
     # Strategy 1: explicit contract_path attribute
     explicit = getattr(node_cls, "contract_path", None)
@@ -195,20 +198,35 @@ def _resolve_contract_path(node_cls: type) -> Path:
         if p.is_file():
             return p
 
-    # Strategy 2: sibling contract.yaml
+    # Strategy 2: namespace package — has __path__ but no __file__
+    # Entry points may resolve to namespace packages (directories without
+    # __init__.py).  inspect.getfile raises TypeError for these; check
+    # __path__ entries directly instead.
+    pkg_paths = getattr(node_cls, "__path__", None)
+    if pkg_paths is not None:
+        for pkg_dir in pkg_paths:
+            candidate = Path(pkg_dir) / "contract.yaml"
+            if candidate.is_file():
+                return candidate
+        raise FileNotFoundError(
+            f"No contract.yaml found in namespace package paths: {list(pkg_paths)}"
+        )
+
+    # Strategy 3: sibling contract.yaml (class or regular module)
     source_file = inspect.getfile(node_cls)
     module_dir = Path(source_file).parent
     candidate = module_dir / "contract.yaml"
     if candidate.is_file():
         return candidate
 
-    # Strategy 3: parent directory (for cases where node.py is in a subdir)
+    # Strategy 4: parent directory (for cases where node.py is in a subdir)
     parent_candidate = module_dir.parent / "contract.yaml"
     if parent_candidate.is_file():
         return parent_candidate
 
+    name = getattr(node_cls, "__name__", repr(node_cls))
     raise FileNotFoundError(
-        f"No contract.yaml found for {node_cls.__name__} "
+        f"No contract.yaml found for {name} "
         f"(searched {module_dir} and {module_dir.parent})"
     )
 

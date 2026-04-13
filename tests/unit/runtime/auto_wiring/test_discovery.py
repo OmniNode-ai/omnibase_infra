@@ -157,6 +157,60 @@ class TestResolveContractPath:
             with pytest.raises(FileNotFoundError, match=r"No contract\.yaml found"):
                 _resolve_contract_path(cls)
 
+    @pytest.mark.unit
+    def test_resolves_namespace_package_contract(self, tmp_path: Path) -> None:
+        # Namespace packages have __path__ but no __file__ — inspect.getfile
+        # raises TypeError for them. _resolve_contract_path must fall back to
+        # searching __path__ entries.
+        pkg_dir = tmp_path / "node_namespace_pkg"
+        pkg_dir.mkdir()
+        contract_file = pkg_dir / "contract.yaml"
+        contract_file.write_text("name: test")
+
+        # Simulate a namespace module: has __path__ but raises on getfile
+        import types
+
+        ns_mod = types.ModuleType("node_namespace_pkg")
+        ns_mod.__path__ = [str(pkg_dir)]  # type: ignore[attr-defined]
+        # Do NOT set __file__ — simulates namespace package
+
+        result = _resolve_contract_path(ns_mod)  # type: ignore[arg-type]
+        assert result == contract_file
+
+    @pytest.mark.unit
+    def test_namespace_package_without_contract_raises(self, tmp_path: Path) -> None:
+        pkg_dir = tmp_path / "node_empty_ns"
+        pkg_dir.mkdir()
+        # No contract.yaml in pkg_dir
+
+        import types
+
+        ns_mod = types.ModuleType("node_empty_ns")
+        ns_mod.__path__ = [str(pkg_dir)]  # type: ignore[attr-defined]
+
+        with pytest.raises(FileNotFoundError, match=r"No contract\.yaml found"):
+            _resolve_contract_path(ns_mod)  # type: ignore[arg-type]
+
+    @pytest.mark.unit
+    def test_discover_contracts_tolerates_namespace_package_entry_points(
+        self, tmp_path: Path
+    ) -> None:
+        # An entry point that loads a namespace module (no __file__) must be
+        # captured as an error rather than aborting the entire discovery scan.
+        import types
+
+        ns_mod = types.ModuleType("node_ns_no_contract")
+        ns_mod.__path__ = [str(tmp_path / "nonexistent")]  # type: ignore[attr-defined]
+
+        ep = _make_entry_point("ns_node", node_cls=None)
+        ep.load.return_value = ns_mod
+
+        with patch(_EP_MODULE, return_value=[ep]):
+            manifest = discover_contracts()
+
+        assert manifest.total_discovered == 0
+        assert manifest.total_errors == 1
+
 
 class TestDiscoverContracts:
     """Tests for discover_contracts (entry-point based)."""
