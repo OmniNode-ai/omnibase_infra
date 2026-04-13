@@ -175,6 +175,7 @@ class ServiceRuntimeHealthMonitor:
             try:
                 await self._task
             except asyncio.CancelledError:
+                # Expected: task.cancel() raises CancelledError on the awaiter.
                 pass
             self._task = None
         logger.info("ServiceRuntimeHealthMonitor stopped")
@@ -218,7 +219,11 @@ class ServiceRuntimeHealthMonitor:
                     )
                 )
         except Exception as exc:  # noqa: BLE001 — boundary: dimension degrades
-            logger.warning("Runtime health: discovery check failed — %s", exc)
+            logger.warning(
+                "Runtime health: discovery check failed — %s (correlation_id=%s)",
+                type(exc).__name__,
+                correlation_id,
+            )
             dimensions.append(
                 ModelRuntimeHealthDimension(
                     name="discovery_errors",
@@ -380,7 +385,11 @@ class ServiceRuntimeHealthMonitor:
                     )
                 )
             except Exception as exc:  # noqa: BLE001 — boundary: dimension degrades
-                logger.warning("Runtime health: consumer group check failed — %s", exc)
+                logger.warning(
+                    "Runtime health: consumer group check failed — %s (correlation_id=%s)",
+                    type(exc).__name__,
+                    correlation_id,
+                )
                 dimensions.append(
                     ModelRuntimeHealthDimension(
                         name="consumer_coverage",

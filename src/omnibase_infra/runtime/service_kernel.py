@@ -1452,6 +1452,12 @@ async def bootstrap() -> int:
         # Runs every 5 minutes and emits runtime-health-check.v1 events.
         # Checks: contract discovery errors, empty consumer groups, topic coverage.
         # Best-effort: failure does not block kernel startup.
+        #
+        # Direct instantiation is intentional: ModelONEXContainer is not yet
+        # created at this point in the kernel startup sequence (step 4 below).
+        # The monitor only needs event_bus, which is already wired. Wiring through
+        # the container would require deferring startup or restructuring the
+        # boot order — not worth the complexity for a best-effort health service.
         if use_kafka:
             try:
                 from omnibase_infra.services.service_runtime_health_monitor import (

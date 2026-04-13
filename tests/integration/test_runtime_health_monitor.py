@@ -108,7 +108,9 @@ async def test_run_once_emits_to_kafka(kafka_consumer: AIOKafkaConsumer) -> None
                     record = msgs[0]
                     break
         except TimeoutError:
-            pass  # record stays None; assertion below will fail with a clear message
+            # Timeout means no message arrived within the window.
+            # record stays None and the assertion below fails with a clear message.
+            pass
 
         assert record is not None, "Expected health-check event on Kafka topic"
         payload = json.loads(record.value)
