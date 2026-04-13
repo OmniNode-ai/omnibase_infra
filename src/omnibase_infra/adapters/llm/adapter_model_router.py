@@ -33,6 +33,9 @@ from omnibase_infra.adapters.llm.model_llm_adapter_request import (
 from omnibase_infra.adapters.llm.model_llm_adapter_response import (
     ModelLlmAdapterResponse,
 )
+from omnibase_infra.adapters.llm.model_routing_decided_event import (
+    ModelRoutingDecidedEvent,
+)
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraUnavailableError,
@@ -230,11 +233,11 @@ class AdapterModelRouter:
                     self._current_index = (idx + 1) % len(provider_order)
 
                 # Emit routing decision event (non-blocking, best-effort)
+                _is_fallback = attempted > 0
                 await self._emit_routing_decided(
                     request=request,
                     selected_provider=provider_name,
-                    selection_mode="round_robin",
-                    is_fallback=attempted > 0,
+                    is_fallback=_is_fallback,
                     candidates_evaluated=attempted + 1,
                     candidate_providers=provider_order,
                     latency_ms=round((time.monotonic() - t0) * 1000, 2),
@@ -348,13 +351,19 @@ class AdapterModelRouter:
         *,
         request: ModelLlmAdapterRequest,
         selected_provider: str,
-        selection_mode: str,
         is_fallback: bool,
         candidates_evaluated: int,
         candidate_providers: list[str],
         latency_ms: float,
     ) -> None:
         """Emit a routing decision event via the registered callback.
+
+        ``selection_mode`` is derived from routing state:
+        - ``"failover"`` when ``is_fallback`` is True (a prior provider failed)
+        - ``"round_robin"`` for a normal first-try load-balanced pick
+
+        ``fallback_indicator`` mirrors ``is_fallback`` using the canonical
+        SOW field name so downstream consumers have a stable contract.
 
         Non-blocking: failures are logged at warning level and dropped.
         Events are best-effort observability, not transactional guarantees.
@@ -363,23 +372,32 @@ class AdapterModelRouter:
             return
         try:
             from datetime import UTC, datetime
+            from uuid import UUID
 
-            event = {
-                "correlation_id": getattr(request, "correlation_id", None) or "",
-                "session_id": getattr(request, "session_id", None),
-                "selected_provider": selected_provider,
-                "selected_tier": _provider_to_tier(selected_provider),
-                "selected_model": getattr(request, "model", None) or "",
-                "reason": "fallback" if is_fallback else "round_robin",
-                "selection_mode": selection_mode,
-                "is_fallback": is_fallback,
-                "candidates_evaluated": candidates_evaluated,
-                "candidate_providers": candidate_providers,
-                "task_type": getattr(request, "task_type", None),
-                "latency_ms": latency_ms,
-                "timestamp": datetime.now(UTC).isoformat(),
-            }
-            await self._on_routing_decided(event)
+            raw_cid = getattr(request, "correlation_id", None)
+            try:
+                correlation_id: UUID | None = UUID(str(raw_cid)) if raw_cid else None
+            except (ValueError, AttributeError):
+                correlation_id = None
+
+            selection_mode = "failover" if is_fallback else "round_robin"
+            event = ModelRoutingDecidedEvent(
+                correlation_id=correlation_id,
+                session_id=getattr(request, "session_id", None),
+                selected_provider=selected_provider,
+                selected_tier=_provider_to_tier(selected_provider),
+                selected_model=getattr(request, "model", None) or "",
+                reason="fallback" if is_fallback else "round_robin",
+                selection_mode=selection_mode,
+                fallback_indicator=is_fallback,
+                is_fallback=is_fallback,
+                candidates_evaluated=candidates_evaluated,
+                candidate_providers=candidate_providers,
+                task_type=getattr(request, "task_type", None),
+                latency_ms=latency_ms,
+                timestamp=datetime.now(UTC).isoformat(),
+            )
+            await self._on_routing_decided(event.model_dump(mode="json"))
         except Exception:  # noqa: BLE001 — boundary: best-effort event emission
             logger.warning(
                 "Failed to emit routing-decided event",
