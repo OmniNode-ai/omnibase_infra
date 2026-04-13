@@ -369,6 +369,9 @@ _LEGACY_ALLOWLIST: dict[str, str] = {
     "onex.evt.omniclaude.manifest-injection-started.v1": "OMN-8605; no contract.yaml; producer not yet implemented — topic suffix added ahead of producer work | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omniclaude.manifest-injected.v1": "OMN-8605; no contract.yaml; producer not yet implemented — topic suffix added ahead of producer work | owner: jonah | expiry: 2026-09-01",
     "onex.evt.omniclaude.manifest-injection-failed.v1": "OMN-8605; no contract.yaml; producer not yet implemented — topic suffix added ahead of producer work | owner: jonah | expiry: 2026-09-01",
+    # --- code embedding + enrichment output topics (OMN-5657, OMN-5664, OMN-5665) ---
+    "onex.evt.omniintelligence.code-embedded.v1": "OMN-5665; contract.yaml in omnimarket node_code_embedding_effect (cross-repo provisioning) | owner: jonah | expiry: 2026-09-01",
+    "onex.evt.omniintelligence.code-enriched.v1": "OMN-5664; contract.yaml in omnimarket node_code_enrichment_effect (cross-repo provisioning) | owner: jonah | expiry: 2026-09-01",
 }
 # fmt: on
 

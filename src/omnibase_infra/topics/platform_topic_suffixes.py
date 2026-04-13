@@ -305,7 +305,23 @@ SUFFIX_INTELLIGENCE_CODE_ENTITIES_EXTRACTED: str = (
 """Event topic emitted when AST entities are extracted from a code file.
 
 Producer: node_ast_extraction_compute
-Consumer: omniintelligence dispatch handlers 14-15 (persist + embed_graph)
+Consumer: node_code_embedding_effect (omnimarket), node_code_enrichment_effect (omnimarket)
+"""
+
+SUFFIX_INTELLIGENCE_CODE_EMBEDDED: str = "onex.evt.omniintelligence.code-embedded.v1"
+"""Event topic emitted after a batch of code entities is embedded and stored in Qdrant.
+
+Producer: node_code_embedding_effect (omnimarket)
+Consumer: omnidash Event Bus Health (monitored_topics)
+Registered: OMN-5665, companion to PR #261
+"""
+
+SUFFIX_INTELLIGENCE_CODE_ENRICHED: str = "onex.evt.omniintelligence.code-enriched.v1"
+"""Event topic emitted after a batch of code entities is LLM-enriched in Postgres.
+
+Producer: node_code_enrichment_effect (omnimarket)
+Consumer: omnidash Event Bus Health (monitored_topics)
+Registered: OMN-5664, companion to PR #261
 """
 
 # Intelligence pipeline gap-fill topics (OMN-7810)
@@ -1692,6 +1708,9 @@ ALL_INTELLIGENCE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_CRAWL_REQUESTED, partitions=1),
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_FILE_DISCOVERED, partitions=1),
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_ENTITIES_EXTRACTED, partitions=1),
+    # Code embedding + enrichment output topics (OMN-5664, OMN-5665 — low volume, 1 partition)
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_EMBEDDED, partitions=1),
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CODE_ENRICHED, partitions=1),
     # Pattern refinement events (OMN-7810 — gap-fill, 3 partitions)
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_PATTERN_REFINED, partitions=3),
 )
