@@ -8,7 +8,6 @@ to namespace packages (no __file__) rather than raising TypeError.
 
 from __future__ import annotations
 
-import sys
 import types
 from importlib.metadata import EntryPoint
 from pathlib import Path
