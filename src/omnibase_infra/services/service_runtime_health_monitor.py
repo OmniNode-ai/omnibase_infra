@@ -46,14 +46,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _discover_contracts():  # type: ignore[return]
+def _discover_contracts() -> object:
     """Module-level shim — allows tests to patch without lazy-import complications."""
     from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts
 
     return discover_contracts()
 
 
-def _get_kafka_admin_client(bootstrap_servers: str, request_timeout_ms: int):  # type: ignore[return]
+def _get_kafka_admin_client(bootstrap_servers: str, request_timeout_ms: int) -> object:
     """Module-level shim for AIOKafkaAdminClient — patchable in tests."""
     from aiokafka.admin import AIOKafkaAdminClient
 
