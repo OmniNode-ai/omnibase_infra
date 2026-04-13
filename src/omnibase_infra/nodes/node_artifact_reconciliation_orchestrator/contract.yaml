@@ -60,6 +60,7 @@ handler_routing:
       handler:
         name: "HandlerPlanToPRComment"
         module: "omnibase_infra.nodes.node_artifact_reconciliation_orchestrator.handlers.handler_plan_to_pr_comment"
+        handler_type: "HTTP"
       output_events:
         - "onex.evt.artifact.pr-comment-posted.v1"
       description: "Post or update PR comment with the artifact update plan table."

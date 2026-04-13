@@ -18,7 +18,7 @@ from deploy_agent.events import (
     Phase,
     PhaseStatus,
 )
-from deploy_agent.executor import DeployExecutor
+from deploy_agent.executor import SCOPE_BUNDLES, DeployExecutor
 from deploy_agent.health import create_health_app
 from deploy_agent.job_state import JobStore
 from deploy_agent.publisher import build_completion_payload, publish_result
@@ -34,12 +34,13 @@ PUBLISH_RETRY_INTERVAL = 30
 
 
 class DeployAgent:
-    def __init__(self):
+    def __init__(self, *, skip_self_update: bool = False):
         self.job_store = JobStore(state_dir=STATE_DIR)
         self.executor = DeployExecutor()
         self._state = "idle"
         self._shutdown = False
         self._current_git_sha = ""
+        self._skip_self_update = skip_self_update
 
     def _get_state(self) -> str:
         return self._state
@@ -134,6 +135,12 @@ class DeployAgent:
                 cmd.git_ref, on_phase_update=on_phase_update
             )
 
+            # Regenerate compose from catalog (non-fatal — logs warning on failure)
+            self.executor.compose_gen(
+                SCOPE_BUNDLES.get(cmd.scope, ["core", "runtime"]),
+                on_phase_update=on_phase_update,
+            )
+
             # Seed Infisical before containers start (non-fatal)
             self.executor.seed_infisical(on_phase_update=on_phase_update)
 
@@ -143,6 +150,7 @@ class DeployAgent:
                 cmd.services,
                 on_phase_update=on_phase_update,
                 git_sha=self._current_git_sha,
+                skip_self_update=self._skip_self_update,
             )
 
             # Verify

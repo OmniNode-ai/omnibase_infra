@@ -39,10 +39,12 @@ handler_routing:
       handler:
         name: "HandlerVectorUpsert"
         module: "omnibase_infra.nodes.node_vector_store_effect.handlers.handler_vector_upsert"
+        handler_type: "HTTP"
     - operation: "vector.search"
       handler:
         name: "HandlerVectorSearch"
         module: "omnibase_infra.nodes.node_vector_store_effect.handlers.handler_vector_search"
+        handler_type: "HTTP"
 dependencies:
   - type: "environment"
     name: "QDRANT_URL"
@@ -62,6 +64,7 @@ error_handling:
     reset_timeout_ms: 60000
 metadata:
   description: "General-purpose Qdrant vector storage and retrieval"
+  transport_type: "QDRANT"
   author: "OmniNode Team"
   created: "2026-04-01"
   tags:

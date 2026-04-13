@@ -5,7 +5,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -18,15 +20,25 @@ from deploy_agent.events import (
     services_for_scope,
 )
 
+# Maps deploy scope to catalog bundle names used by compose_gen.
+# Scope.FULL regenerates both core and runtime bundles.
+SCOPE_BUNDLES: dict[Scope, list[str]] = {
+    Scope.CORE: ["core"],
+    Scope.RUNTIME: ["core", "runtime"],
+    Scope.FULL: ["core", "runtime"],
+}
+
 logger = logging.getLogger(__name__)
 
 REPO_DIR = "/data/omninode/omnibase_infra"
+DEPLOY_AGENT_DIR = "/data/omninode/deploy-agent"
 COMPOSE_FILE = f"{REPO_DIR}/docker/docker-compose.infra.yml"
 COMPOSE_PROJECT = "omnibase-infra"
 
 PHASE_TIMEOUTS = {
     Phase.PREFLIGHT: 30,
     Phase.GIT: 60,
+    Phase.COMPOSE_GEN: 120,
     Phase.CORE: 300,
     Phase.RUNTIME: 300,
     Phase.VERIFICATION: 120,
@@ -47,6 +59,114 @@ def _run(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedProcess:
 
 
 class DeployExecutor:
+    def self_update(self, *, skip: bool = False) -> None:
+        """Pull and re-exec deploy-agent itself if behind origin/main.
+
+        Called as the first step of every rebuild_scope() invocation so that
+        a bug-fix merged to main is picked up before the next deploy runs.
+
+        Safety rails:
+        - Skipped entirely when DEPLOY_AGENT_NO_SELF_UPDATE=1 is set.
+        - Skipped when the working tree is dirty (would discard uncommitted work).
+        - skip=True (--skip-self-update CLI flag) bypasses the check.
+        - Container mode (DEPLOY_AGENT_MODE=container) exits with code 42
+          instead of os.execv so the supervisor can respawn from the new binary.
+        """
+        if skip or os.environ.get("DEPLOY_AGENT_NO_SELF_UPDATE") == "1":
+            logger.info("self_update: skipped (kill-switch active)")
+            return
+
+        agent_dir = os.environ.get("DEPLOY_AGENT_DIR", DEPLOY_AGENT_DIR)
+        timeout = 60
+
+        # Abort if working tree is dirty — never silently discard changes.
+        status_result = _run(
+            ["git", "-C", agent_dir, "status", "--porcelain"],
+            timeout=timeout,
+        )
+        if status_result.returncode != 0:
+            logger.warning(
+                "self_update: git status failed (exit=%d), skipping update",
+                status_result.returncode,
+            )
+            return
+        if status_result.stdout.strip():
+            logger.warning(
+                "self_update: working tree is dirty, skipping update to avoid data loss"
+            )
+            return
+
+        # Fetch latest origin/main.
+        fetch_result = _run(
+            ["git", "-C", agent_dir, "fetch", "origin", "main"],
+            timeout=timeout,
+        )
+        if fetch_result.returncode != 0:
+            logger.warning(
+                "self_update: git fetch failed (exit=%d), skipping update: %s",
+                fetch_result.returncode,
+                fetch_result.stderr[:200],
+            )
+            return
+
+        head_result = _run(
+            ["git", "-C", agent_dir, "rev-parse", "HEAD"],
+            timeout=timeout,
+        )
+        remote_result = _run(
+            ["git", "-C", agent_dir, "rev-parse", "origin/main"],
+            timeout=timeout,
+        )
+        if head_result.returncode != 0 or remote_result.returncode != 0:
+            logger.warning("self_update: rev-parse failed, skipping update")
+            return
+
+        local_sha = head_result.stdout.strip()
+        remote_sha = remote_result.stdout.strip()
+
+        if local_sha == remote_sha:
+            logger.info("self_update: already at origin/main (%s), nothing to do", local_sha[:12])
+            return
+
+        logger.info(
+            "self_update: behind origin/main (local=%s remote=%s), pulling and re-execing",
+            local_sha[:12],
+            remote_sha[:12],
+        )
+
+        pull_result = _run(
+            ["git", "-C", agent_dir, "pull", "--ff-only", "origin", "main"],
+            timeout=timeout,
+        )
+        if pull_result.returncode != 0:
+            logger.warning(
+                "self_update: git pull failed (exit=%d), skipping re-exec: %s",
+                pull_result.returncode,
+                pull_result.stderr[:200],
+            )
+            return
+
+        # Sync deps so new imports are available after re-exec.
+        uv_result = _run(
+            ["uv", "sync", "--project", agent_dir],
+            timeout=120,
+        )
+        if uv_result.returncode != 0:
+            logger.warning(
+                "self_update: uv sync failed (exit=%d), proceeding with re-exec anyway: %s",
+                uv_result.returncode,
+                uv_result.stderr[:200],
+            )
+
+        mode = os.environ.get("DEPLOY_AGENT_MODE", "host")
+        if mode == "container":
+            # Let systemd/compose restart us from the freshly-pulled source.
+            logger.info("self_update: container mode — exiting with code 42 for supervisor respawn")
+            sys.exit(42)
+        else:
+            logger.info("self_update: host mode — re-execing process image")
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+
     def preflight(self, on_phase_update: PhaseCallback) -> None:
         on_phase_update(Phase.PREFLIGHT, PhaseStatus.IN_PROGRESS)
         timeout = PHASE_TIMEOUTS[Phase.PREFLIGHT]
@@ -102,6 +222,48 @@ class DeployExecutor:
 
         on_phase_update(Phase.GIT, PhaseStatus.SUCCESS)
         return sha
+
+    def compose_gen(self, bundles: list[str], on_phase_update: PhaseCallback) -> None:
+        """Regenerate docker-compose.infra.yml from the catalog CLI.
+
+        Runs ``uv run python -m omnibase_infra.docker.catalog.cli generate
+        <bundles> --output <COMPOSE_FILE>`` so every deploy reflects the current
+        catalog state rather than a static snapshot. This closes the drift window
+        where catalog changes (e.g. new LLM_* env vars) were merged but never
+        landed in the running containers (OMN-8430).
+
+        Non-fatal if the catalog CLI binary is unavailable — logs a warning and
+        continues so that a missing virtualenv does not block a deploy entirely.
+        """
+        on_phase_update(Phase.COMPOSE_GEN, PhaseStatus.IN_PROGRESS)
+        timeout = PHASE_TIMEOUTS[Phase.COMPOSE_GEN]
+
+        selected = bundles if bundles else ["core", "runtime"]
+        cmd = [
+            "uv",
+            "run",
+            "--project",
+            REPO_DIR,
+            "python",
+            "-m",
+            "omnibase_infra.docker.catalog.cli",
+            "generate",
+            *selected,
+            "--output",
+            COMPOSE_FILE,
+        ]
+
+        result = _run(cmd, timeout=timeout, cwd=REPO_DIR)
+        if result.returncode != 0:
+            logger.warning(
+                "compose_gen returned non-zero (exit=%d) — continuing with existing compose file. stderr: %s",
+                result.returncode,
+                result.stderr[:500],
+            )
+        else:
+            logger.info("compose_gen complete: %s", result.stdout.strip())
+
+        on_phase_update(Phase.COMPOSE_GEN, PhaseStatus.SUCCESS)
 
     def seed_infisical(self, on_phase_update: PhaseCallback) -> None:
         """Seed Infisical with required secrets before runtime containers start.
@@ -173,7 +335,9 @@ class DeployExecutor:
         on_phase_update: PhaseCallback,
         *,
         git_sha: str = "",
+        skip_self_update: bool = False,
     ) -> list[str]:
+        self.self_update(skip=skip_self_update)
         phase = Phase.CORE if scope == Scope.CORE else Phase.RUNTIME
         if scope == Scope.FULL:
             # Build images first (both scopes), then bring them up.

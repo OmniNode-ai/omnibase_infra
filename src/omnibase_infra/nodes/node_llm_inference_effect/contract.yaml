@@ -58,6 +58,7 @@ handler_routing:
       handler:
         name: "HandlerLlmOpenaiCompatible"
         module: "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible"
+        handler_type: "HTTP"
       description: "Execute LLM inference via OpenAI-compatible API (vLLM, OpenAI, GLM/Z.AI, etc.)"
     # Gemini CLI Subprocess Handler
     - operation: "inference.gemini_cli"

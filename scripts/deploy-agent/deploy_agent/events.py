@@ -24,6 +24,7 @@ class Scope(StrEnum):
 class Phase(StrEnum):
     PREFLIGHT = "preflight"
     GIT = "git"
+    COMPOSE_GEN = "compose_gen"
     SEED = "seed"
     CORE = "core"
     RUNTIME = "runtime"

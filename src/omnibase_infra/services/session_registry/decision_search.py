@@ -37,7 +37,7 @@ from qdrant_client.http import models as qdrant_models
 logger = logging.getLogger(__name__)
 
 _COLLECTION_NAME = "session_decisions"
-_DEFAULT_EMBEDDING_URL = "http://192.168.86.200:8100"
+_DEFAULT_EMBEDDING_URL = os.getenv("LLM_EMBEDDING_URL", "")
 _DEFAULT_EMBEDDING_MODEL = "Qwen3-Embedding-8B"
 
 

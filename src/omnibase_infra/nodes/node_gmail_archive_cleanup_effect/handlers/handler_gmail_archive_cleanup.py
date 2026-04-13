@@ -59,13 +59,14 @@ from omnibase_infra.nodes.node_gmail_archive_cleanup_effect.models.model_gmail_c
 from omnibase_infra.nodes.node_gmail_archive_cleanup_effect.models.model_gmail_cleanup_result import (
     ModelGmailCleanupResult,
 )
+from omnibase_infra.topics import SUFFIX_GMAIL_ARCHIVE_PURGED
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["HandlerGmailArchiveCleanup"]
 
 # Event type emitted per cleanup run
-_PURGED_EVENT_TYPE = "onex.evt.omnibase-infra.gmail-archive-purged.v1"
+_PURGED_EVENT_TYPE = SUFFIX_GMAIL_ARCHIVE_PURGED
 
 # Partition key: all cleanup events share a single partition
 _PARTITION_KEY = "gmail-archive-cleanup"

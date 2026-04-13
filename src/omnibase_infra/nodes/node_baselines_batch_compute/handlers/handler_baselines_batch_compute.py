@@ -55,12 +55,13 @@ from omnibase_infra.services.observability.baselines.models.model_baselines_tren
 from omnibase_infra.services.observability.baselines.models.model_batch_compute_baselines_result import (
     ModelBatchComputeBaselinesResult,
 )
+from omnibase_infra.topics import SUFFIX_BASELINES_COMPUTED
 from omnibase_infra.utils.util_db_transaction import set_statement_timeout
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
-_TOPIC_BASELINES_COMPUTED = "onex.evt.omnibase-infra.baselines-computed.v1"
+_TOPIC_BASELINES_COMPUTED = SUFFIX_BASELINES_COMPUTED
 _EVENT_TYPE_BASELINES_COMPUTED = "baselines.computed"
 
 

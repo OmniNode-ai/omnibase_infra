@@ -54,11 +54,12 @@ from omnibase_infra.nodes.node_gmail_intent_poller_effect.models.model_gmail_int
 from omnibase_infra.nodes.node_gmail_intent_poller_effect.models.model_gmail_intent_poller_result import (
     ModelGmailIntentPollerResult,
 )
+from omnibase_infra.topics import SUFFIX_GMAIL_INTENT_RECEIVED
 
 logger = logging.getLogger(__name__)
 
 # Event topic for gmail intent received events
-_GMAIL_INTENT_TOPIC: str = "onex.evt.omnibase-infra.gmail-intent-received.v1"
+_GMAIL_INTENT_TOPIC: str = SUFFIX_GMAIL_INTENT_RECEIVED
 
 # Maximum body_text length for event payloads
 _BODY_TEXT_MAX_CHARS: int = 4096
