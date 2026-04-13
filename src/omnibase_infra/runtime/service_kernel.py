@@ -689,6 +689,7 @@ async def bootstrap() -> int:
     baselines_task: asyncio.Task[None] | None = None
     _baselines_pool = None  # asyncpg.Pool | None, assigned inside try block
     savings_task: asyncio.Task[None] | None = None
+    runtime_health_monitor = None  # ServiceRuntimeHealthMonitor | None
     correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
 
@@ -1446,6 +1447,39 @@ async def bootstrap() -> int:
                     correlation_id,
                 )
                 savings_task = None
+
+        # 3.10. Start runtime health monitor (OMN-8623)
+        # Runs every 5 minutes and emits runtime-health-check.v1 events.
+        # Checks: contract discovery errors, empty consumer groups, topic coverage.
+        # Best-effort: failure does not block kernel startup.
+        if use_kafka:
+            try:
+                from omnibase_infra.services.service_runtime_health_monitor import (
+                    ServiceRuntimeHealthMonitor,
+                )
+
+                _health_interval = float(
+                    os.environ.get("RUNTIME_HEALTH_CHECK_INTERVAL", "300")
+                )
+                runtime_health_monitor = ServiceRuntimeHealthMonitor(
+                    event_bus=event_bus,  # type: ignore[arg-type]
+                    check_interval_seconds=_health_interval,
+                )
+                await runtime_health_monitor.start()
+                logger.info(
+                    "ServiceRuntimeHealthMonitor started "
+                    "(interval=%ds, correlation_id=%s)",
+                    int(_health_interval),
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — best-effort, never blocks startup
+                logger.warning(
+                    "Failed to start ServiceRuntimeHealthMonitor, continuing without it "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+                runtime_health_monitor = None
 
         # 4. Create and wire container for dependency injection
         container_start_time = time.time()
@@ -3077,6 +3111,22 @@ async def bootstrap() -> int:
             )
             savings_task = None
 
+        # Stop ServiceRuntimeHealthMonitor (OMN-8623)
+        if runtime_health_monitor is not None:
+            try:
+                await runtime_health_monitor.stop()
+                logger.debug(
+                    "ServiceRuntimeHealthMonitor stopped (correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — boundary: best-effort cleanup
+                logger.warning(
+                    "Error stopping ServiceRuntimeHealthMonitor (correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+            runtime_health_monitor = None
+
         # Stop ServiceLlmEndpointHealth (OMN-6135)
         if llm_health_service is not None:
             try:
@@ -3312,6 +3362,17 @@ async def bootstrap() -> int:
                 await savings_task
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
+
+        # Cleanup ServiceRuntimeHealthMonitor (OMN-8623)
+        if runtime_health_monitor is not None:
+            try:
+                await runtime_health_monitor.stop()
+            except Exception:  # noqa: BLE001 — boundary: best-effort cleanup
+                logger.warning(
+                    "Failed to stop ServiceRuntimeHealthMonitor during cleanup "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                )
 
         # Cleanup ServiceLlmEndpointHealth (OMN-6135)
         if llm_health_service is not None:

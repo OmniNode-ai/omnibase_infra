@@ -156,6 +156,9 @@ CONSUMER_HEALTH: Final[str] = "CONSUMER_HEALTH"
 CONSUMER_RESTART_CMD: Final[str] = "CONSUMER_RESTART_CMD"
 """Consumer restart commands issued by triage node."""
 
+RUNTIME_HEALTH_CHECK: Final[str] = "RUNTIME_HEALTH_CHECK"
+"""Runtime health check events from ServiceRuntimeHealthMonitor."""
+
 # ==============================================================================
 # Runtime Error Topics
 # ==============================================================================
@@ -278,6 +281,7 @@ __all__: list[str] = [
     "ROUTING_DECIDED",
     "REWARD_ASSIGNED",
     "RUNTIME_ERROR",
+    "RUNTIME_HEALTH_CHECK",
     "SAVINGS_ESTIMATED",
     "SESSION_OUTCOME_CANONICAL",
     "SESSION_OUTCOME_CURRENT",
