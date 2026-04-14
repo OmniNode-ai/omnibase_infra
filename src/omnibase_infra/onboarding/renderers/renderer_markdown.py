@@ -5,6 +5,9 @@
 
 from __future__ import annotations
 
+from omnibase_infra.nodes.node_onboarding_orchestrator.models.model_step_result import (
+    ModelStepResult,
+)
 from omnibase_infra.onboarding.model_onboarding_step import ModelOnboardingStep
 
 
@@ -14,32 +17,46 @@ class RendererOnboardingMarkdown:
     def render(
         self,
         steps: list[ModelOnboardingStep],
+        step_results: list[ModelStepResult],
         title: str = "Onboarding Checklist",
     ) -> str:
-        """Render steps as a markdown checklist.
+        """Render all steps with pass/fail indicators as a markdown checklist.
 
         Args:
-            steps: Resolved steps in execution order.
+            steps: All resolved steps in execution order.
+            step_results: Per-step execution results (same length and order as steps).
             title: Document title.
 
         Returns:
             Markdown string with checklist.
         """
+        result_by_key = {r.step_key: r for r in step_results}
+
         lines: list[str] = [
-            "<!-- GENERATED FROM canonical.yaml -- DO NOT EDIT MANUALLY -->",
-            "",
             f"# {title}",
             "",
         ]
 
-        for i, step in enumerate(steps, 1):
+        passed_count = sum(1 for r in step_results if r.passed)
+        lines.append(f"{passed_count}/{len(step_results)} steps passed")
+        lines.append("")
+
+        for step in steps:
+            result = result_by_key.get(step.step_key)
+            if result is None or result.passed:
+                indicator = "[x]"
+                suffix = ""
+            else:
+                indicator = "[!]"
+                suffix = f" — {result.message}" if result and result.message else ""
+
             lines.append(f"## {step.name}")
             lines.append("")
             if step.description:
                 lines.append(step.description)
                 lines.append("")
 
-            lines.append(f"- [ ] **{step.name}**")
+            lines.append(f"- {indicator} **{step.name}**{suffix}")
 
             if step.verification:
                 lines.append(

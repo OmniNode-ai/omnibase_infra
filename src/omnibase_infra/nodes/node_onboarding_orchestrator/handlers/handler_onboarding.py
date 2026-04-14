@@ -90,9 +90,9 @@ async def handle_onboarding(
             )
             completed_steps.append(step)
 
-    # Render output
+    # Render output — pass all steps (not just completed) so failed/skipped appear
     renderer = RendererOnboardingMarkdown()
-    rendered = renderer.render(completed_steps, title="Onboarding Progress")
+    rendered = renderer.render(steps, step_results, title="Onboarding Progress")
 
     all_passed = all(r.passed for r in step_results)
     return ModelOnboardingOutput(

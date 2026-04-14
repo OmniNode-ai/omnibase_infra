@@ -95,7 +95,7 @@ class TestHandleOnboarding:
 
     @pytest.mark.asyncio
     async def test_partial_progress_rendering(self) -> None:
-        """Rendered output includes only completed steps."""
+        """Rendered output includes all steps with correct pass/fail indicators."""
         input_model = ModelOnboardingInput(
             target_capabilities=["first_node_running"],
         )
@@ -114,7 +114,13 @@ class TestHandleOnboarding:
         ):
             output = await handle_onboarding(input_model)
 
-        # Only first step (Check Python) should be in rendered output
+        # All 5 steps appear in rendered output (not just completed ones)
         assert "Check Python" in output.rendered_output
-        # Third step (Install omnibase_core) should NOT be rendered
-        assert "Install omnibase_core" not in output.rendered_output
+        # Passed step shows [x] indicator
+        assert "[x]" in output.rendered_output
+        # Failed step shows [!] indicator
+        assert "[!]" in output.rendered_output
+        # No leaked HTML comment
+        assert "<!-- GENERATED FROM" not in output.rendered_output
+        # Summary line present
+        assert "steps passed" in output.rendered_output
