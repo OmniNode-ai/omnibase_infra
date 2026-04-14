@@ -140,6 +140,10 @@ class ServiceTopicRegistry:
             topic_keys.CONSUMER_RESTART_CMD: (
                 "onex.cmd.omnibase-infra.consumer-restart.v1"
             ),
+            # Runtime health check
+            topic_keys.RUNTIME_HEALTH_CHECK: (
+                "onex.evt.omnibase-infra.runtime-health-check.v1"
+            ),
             # Runtime error
             topic_keys.RUNTIME_ERROR: ("onex.evt.omnibase-infra.runtime-error.v1"),
             topic_keys.ERROR_TRIAGED: ("onex.evt.omnibase-infra.error-triaged.v1"),
