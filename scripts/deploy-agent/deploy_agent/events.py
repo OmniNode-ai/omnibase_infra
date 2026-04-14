@@ -13,6 +13,11 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validat
 
 TOPIC_REBUILD_REQUESTED = "onex.cmd.deploy.rebuild-requested.v1"
 TOPIC_REBUILD_COMPLETED = "onex.evt.deploy.rebuild-completed.v1"
+TOPIC_REBUILD_REJECTED = "onex.evt.deploy.rebuild-rejected.v1"
+
+
+class DeployInProgressError(RuntimeError):
+    """Raised when a second deploy arrives while one is already running."""
 
 
 class Scope(StrEnum):

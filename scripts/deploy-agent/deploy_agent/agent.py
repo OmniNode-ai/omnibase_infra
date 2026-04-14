@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -14,6 +15,8 @@ from aiohttp import web
 
 from deploy_agent.consumer import DeployConsumer
 from deploy_agent.events import (
+    TOPIC_REBUILD_REJECTED,
+    DeployInProgressError,
     ModelRebuildRequested,
     Phase,
     PhaseStatus,
@@ -21,6 +24,7 @@ from deploy_agent.events import (
 from deploy_agent.executor import SCOPE_BUNDLES, DeployExecutor
 from deploy_agent.health import create_health_app
 from deploy_agent.job_state import JobStore
+from deploy_agent.lock import single_flight_lock
 from deploy_agent.publisher import build_completion_payload, publish_result
 
 logger = logging.getLogger(__name__)
@@ -119,6 +123,17 @@ class DeployAgent:
         self._shutdown = True
 
     async def _execute_command(self, cmd: ModelRebuildRequested) -> None:
+        try:
+            with single_flight_lock():
+                await self._run_deploy(cmd)
+        except DeployInProgressError:
+            logger.warning(
+                "Single-flight lock held — rejecting %s (in_progress)",
+                cmd.correlation_id,
+            )
+            self._publish_rejected(cmd, reason="in_progress")
+
+    async def _run_deploy(self, cmd: ModelRebuildRequested) -> None:
         self._state = "deploying"
         cid = cmd.correlation_id
         health_checks = []
@@ -184,6 +199,26 @@ class DeployAgent:
                 logger.warning("Publish failed for %s, marked pending", cid)
 
         self._state = "idle"
+
+    def _publish_rejected(self, cmd: ModelRebuildRequested, *, reason: str) -> None:
+        from kafka import KafkaProducer
+
+        payload = json.dumps(
+            {
+                "correlation_id": str(cmd.correlation_id),
+                "reason": reason,
+                "scope": cmd.scope,
+            }
+        ).encode()
+        try:
+            producer = KafkaProducer(bootstrap_servers=BOOTSTRAP_SERVERS)
+            producer.send(TOPIC_REBUILD_REJECTED, payload)
+            producer.flush(timeout=5)
+            producer.close()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to publish rebuild-rejected for %s", cmd.correlation_id
+            )
 
     async def _retry_pending_publishes(self) -> None:
         pending = self.job_store.get_pending_publish()
