@@ -23,7 +23,7 @@
 #   - scripts/register-repo.py seed-shared  (seed /shared/* in Infisical)
 #
 # version: increment minor when adding keys, major on breaking structural changes.
-version: "1.0"
+version: "1.1"
 # Keys written to /shared/<transport>/ in Infisical.
 shared:
   "/shared/db/":
@@ -87,6 +87,9 @@ shared:
     # a dedicated platform transport rather than /shared/llm/.
     - ONEX_TREE_SERVICE_URL
     - METADATA_STAMPING_SERVICE_URL
+    # HMAC signing key for local LLM inference requests — shared across all services
+    # that call the inference server. Rotate regularly. (OMN-8778)
+    - LOCAL_LLM_SHARED_SECRET
   # NOT prefetched by ConfigPrefetcher — no EnumInfraTransportType.AUTH entry; keys resolved via shell env fallback.
   "/shared/auth/":
     - OPENAI_API_KEY
@@ -96,6 +99,11 @@ shared:
     - Z_AI_API_URL
     - SERVICE_AUTH_TOKEN
     - GH_PAT
+    # Anthropic API key — used by omniclaude and any service invoking Claude directly.
+    # Note: Claude Code itself uses OAuth (not this key), but services calling the
+    # Anthropic API programmatically (e.g. omniintelligence, omnimarket LLM nodes)
+    # require this key. (OMN-8778)
+    - ANTHROPIC_API_KEY
   # NOT prefetched by ConfigPrefetcher — the prefetch pipeline is not yet wired
   # to call prefetch_for_contracts() at runtime, so VALKEY keys resolve via shell
   # env fallback only.  (EnumInfraTransportType.VALKEY and the transport_config_map
@@ -115,6 +123,16 @@ shared:
   "/shared/env/":
     - SLACK_BOT_TOKEN
     - SLACK_CHANNEL_ID
+    # Linear API key — used by omniclaude, omnimarket, and CI scripts to query/update tickets.
+    # Previously seeded at /shared/env/ (OMN-3898); now formally registered. (OMN-8778)
+    - LINEAR_API_KEY
+    # CI callback token — used by the ci-relay service to authenticate CI status callbacks.
+    - CI_CALLBACK_TOKEN
+    # MCP API key — used by omniclaude MCP server for authenticated MCP client connections.
+    - MCP_API_KEY
+    # Logfire telemetry token — used by omnidash for LLM trace/eval ingestion.
+    # Infisical is secret storage only; injection pattern unchanged (env var at runtime).
+    - LOGFIRE_TOKEN
 # Keys that must NEVER be seeded into Infisical.
 # These live OUTSIDE repos (home dir or deployment secrets) and must never
 # appear in any repo .env file. Two distinct reasons apply — see subcategories:
