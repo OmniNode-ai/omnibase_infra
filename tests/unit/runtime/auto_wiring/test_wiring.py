@@ -120,8 +120,8 @@ class TestDeriveMessageCategory:
 class TestDeriveIds:
     def test_route_id(self) -> None:
         assert (
-            _derive_route_id("my_node", "my_handler", "my-topic")
-            == "route.auto.my_node.my_handler.my-topic"
+            _derive_route_id("my_node", "my_handler", "onex.evt.platform.my-topic.v1")
+            == "route.auto.my_node.my_handler.onex_evt_platform_my_topic_v1"
         )
 
     def test_dispatcher_id(self) -> None:

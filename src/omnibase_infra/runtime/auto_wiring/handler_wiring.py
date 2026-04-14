@@ -58,6 +58,24 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Matches DSNs, URLs, and connection strings that may contain credentials.
+_SENSITIVE_PATTERN = re.compile(
+    r"(?:postgresql|postgres|mysql|redis|amqp|kafka|mongodb|http|https)://\S*",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_exc(exc: BaseException) -> str:
+    """Return a sanitized one-line summary of an exception safe for logging/errors.
+
+    Strips URLs and DSNs that may carry passwords or hostnames, then truncates.
+    Only the exception type name + sanitized message is surfaced.
+    """
+    raw = str(exc) or type(exc).__name__
+    sanitized = _SENSITIVE_PATTERN.sub("<redacted>", raw)
+    return sanitized[:200]
+
+
 # Type alias matching MessageDispatchEngine.DispatcherFunc
 DispatcherFunc = Callable[
     ["ModelEventEnvelope[object]"],
@@ -90,6 +108,26 @@ class PreparedWiring:
     message_types: set[str] | None
     route_ids: list[str] = field(default_factory=list)
     routes: list[ModelDispatchRoute] = field(default_factory=list)
+
+
+@dataclass
+class PreparedContractWiring:
+    """All validated wiring data for one contract — no side effects yet.
+
+    Produced by _prepare_contract_wiring (pure) and consumed by
+    _commit_contract_wiring (side effects). Exists so wire_from_manifest can
+    validate every contract before touching the dispatch engine or event bus
+    (OMN-8735 — no partial state on startup abort).
+
+    If skip_result is set, the contract was skipped and no wiring is needed.
+    _commit_contract_wiring returns skip_result directly in that case.
+    """
+
+    contract: object  # ModelDiscoveredContract
+    prepared_wirings: list[PreparedWiring]
+    subscription_topics: list[str]  # topics to subscribe after commit
+    environment: str
+    skip_result: object = None  # ModelContractWiringResult | None
 
 
 def _import_handler_class(module_path: str, class_name: str) -> type:
@@ -357,13 +395,14 @@ def _make_event_bus_callback(
     return callback
 
 
-def _derive_route_id(contract_name: str, handler_name: str, topic_segment: str) -> str:
-    """Derive a route ID from contract name, handler name, and topic segment.
+def _derive_route_id(contract_name: str, handler_name: str, topic: str) -> str:
+    """Derive a route ID from contract name, handler name, and full topic path.
 
-    Incorporates handler identity to prevent duplicate registrations across
-    N x M orchestrator cross-products (OMN-8735).
+    Uses the full topic path (sanitized) to guarantee uniqueness across topics
+    that share a common segment (OMN-8735).
     """
-    return f"route.auto.{contract_name}.{handler_name}.{topic_segment}"
+    safe_topic = re.sub(r"[.\-]", "_", topic)
+    return f"route.auto.{contract_name}.{handler_name}.{safe_topic}"
 
 
 def _derive_dispatcher_id(contract_name: str, handler_name: str) -> str:
@@ -489,31 +528,52 @@ async def wire_from_manifest(
     Returns:
         A :class:`ModelAutoWiringReport` with per-contract outcomes.
     """
-    results: list[ModelContractWiringResult] = []
-
+    # Phase 1: Validate and prepare ALL contracts — no engine/bus side effects yet.
+    # Failures are collected; if any exist, we raise before touching anything (OMN-8735).
+    prepared_contracts: list[PreparedContractWiring] = []
+    failed_results: list[ModelContractWiringResult] = []
     for contract in manifest.contracts:
         try:
-            result = await _wire_single_contract(
+            prepared = _prepare_contract_wiring(
                 contract=contract,
                 dispatch_engine=dispatch_engine,
                 event_bus=event_bus,
                 environment=environment,
                 container=container,
             )
+            prepared_contracts.append(prepared)
         except Exception as exc:  # noqa: BLE001 — collect per-contract, raise after scan
-            exc_summary = str(exc)[:200] if str(exc) else type(exc).__name__
+            exc_summary = _sanitize_exc(exc)
             logger.error(
                 "Auto-wiring contract '%s' from package '%s' raised: %s",
                 contract.name,
                 contract.package_name,
                 type(exc).__name__,
             )
-            result = ModelContractWiringResult(
-                contract_name=contract.name,
-                package_name=contract.package_name,
-                outcome=EnumWiringOutcome.FAILED,
-                reason=f"{type(exc).__name__}: {exc_summary}",
+            failed_results.append(
+                ModelContractWiringResult(
+                    contract_name=contract.name,
+                    package_name=contract.package_name,
+                    outcome=EnumWiringOutcome.FAILED,
+                    reason=f"{type(exc).__name__}: {exc_summary}",
+                )
             )
+
+    # Check for failures before committing any side effects.
+    failures = failed_results
+    if failures:
+        from omnibase_core.models.errors import ModelOnexError
+
+        failed_reasons = [f"{r.contract_name}: {r.reason}" for r in failures]
+        raise ModelOnexError(
+            f"Auto-wiring failed for {len(failures)} contract(s): "
+            + "; ".join(failed_reasons)
+        )
+
+    # Phase 2: All contracts validated — commit registrations and subscriptions.
+    results: list[ModelContractWiringResult] = []
+    for pcw in prepared_contracts:
+        result = await _commit_contract_wiring(pcw, dispatch_engine, event_bus)
         results.append(result)
 
     duplicates = _detect_duplicate_topics(manifest)
@@ -539,59 +599,53 @@ async def wire_from_manifest(
         len(report.duplicates),
     )
 
-    if report.total_failed > 0:
-        from omnibase_core.models.errors import ModelOnexError
-
-        failed_reasons = [
-            f"{r.contract_name}: {r.reason}"
-            for r in report.results
-            if r.outcome == EnumWiringOutcome.FAILED
-        ]
-        raise ModelOnexError(
-            f"Auto-wiring failed for {report.total_failed} contract(s): "
-            + "; ".join(failed_reasons)
-        )
-
     return report
 
 
-async def _wire_single_contract(
+def _prepare_contract_wiring(
     *,
     contract: ModelDiscoveredContract,
-    dispatch_engine: ProtocolDispatchEngine,
+    dispatch_engine: object,
     event_bus: object | None,
     environment: str,
     container: object | None = None,
-) -> ModelContractWiringResult:
-    """Wire a single discovered contract into the dispatch engine.
+) -> PreparedContractWiring:
+    """Validate and prepare one contract for wiring — NO side effects.
 
-    Returns a result capturing success, skip, or failure.
+    Skipped contracts are encoded as PreparedContractWiring with skip_result set.
+    Wirable contracts have prepared_wirings populated and skip_result=None.
+
+    Raises on handler preparation failure so :func:`wire_from_manifest` can
+    collect all failures before touching the engine or event bus (OMN-8735).
     """
-    # Skip contracts without handler routing
     if contract.handler_routing is None:
-        return ModelContractWiringResult(
-            contract_name=contract.name,
-            package_name=contract.package_name,
-            outcome=EnumWiringOutcome.SKIPPED,
-            reason="No handler_routing declared in contract",
+        return PreparedContractWiring(
+            contract=contract,
+            prepared_wirings=[],
+            subscription_topics=[],
+            environment=environment,
+            skip_result=ModelContractWiringResult(
+                contract_name=contract.name,
+                package_name=contract.package_name,
+                outcome=EnumWiringOutcome.SKIPPED,
+                reason="No handler_routing declared in contract",
+            ),
         )
 
-    # Skip contracts without event bus subscriptions
     if contract.event_bus is None or not contract.event_bus.subscribe_topics:
-        return ModelContractWiringResult(
-            contract_name=contract.name,
-            package_name=contract.package_name,
-            outcome=EnumWiringOutcome.SKIPPED,
-            reason="No event_bus.subscribe_topics declared in contract",
+        return PreparedContractWiring(
+            contract=contract,
+            prepared_wirings=[],
+            subscription_topics=[],
+            environment=environment,
+            skip_result=ModelContractWiringResult(
+                contract_name=contract.name,
+                package_name=contract.package_name,
+                outcome=EnumWiringOutcome.SKIPPED,
+                reason="No event_bus.subscribe_topics declared in contract",
+            ),
         )
 
-    dispatchers_registered: list[str] = []
-    routes_registered: list[str] = []
-    topics_subscribed: list[str] = []
-    unsubscribers: list[Callable[[], Awaitable[None]]] = []
-
-    # Phase 1: Validate and prepare ALL handler entries without touching the engine.
-    # Any failure here aborts before any side effect is committed (OMN-8735).
     prepared_wirings: list[PreparedWiring] = []
     for entry in contract.handler_routing.handlers:
         try:
@@ -604,9 +658,9 @@ async def _wire_single_contract(
             )
             prepared_wirings.append(prepared)
         except Exception as exc:
-            exc_summary = str(exc)[:200] if str(exc) else type(exc).__name__
+            exc_summary = _sanitize_exc(exc)
             logger.error(
-                "Failed to wire handler '%s' for contract '%s' (package '%s'): %s",
+                "Failed to prepare handler '%s' for contract '%s' (package '%s'): %s",
                 entry.handler.name,
                 contract.name,
                 contract.package_name,
@@ -619,21 +673,46 @@ async def _wire_single_contract(
                 f"handler={entry.handler.name}: {type(exc).__name__}: {exc_summary}"
             ) from exc
 
-    # Phase 2: All handlers validated — commit registrations to the engine.
-    for prepared in prepared_wirings:
+    return PreparedContractWiring(
+        contract=contract,
+        prepared_wirings=prepared_wirings,
+        subscription_topics=list(contract.event_bus.subscribe_topics),
+        environment=environment,
+    )
+
+
+async def _commit_contract_wiring(
+    pcw: PreparedContractWiring,
+    dispatch_engine: object,
+    event_bus: object | None,
+) -> ModelContractWiringResult:
+    """Commit a validated :class:`PreparedContractWiring` to the engine and event bus.
+
+    All side effects (dispatcher/route registration, Kafka subscriptions) live here.
+    Must only be called after every contract in the manifest has been successfully
+    prepared (OMN-8735).
+    """
+    if pcw.skip_result is not None:
+        return pcw.skip_result  # type: ignore[return-value]
+
+    contract: ModelDiscoveredContract = pcw.contract  # type: ignore[assignment]
+    dispatchers_registered: list[str] = []
+    routes_registered: list[str] = []
+    topics_subscribed: list[str] = []
+
+    for prepared in pcw.prepared_wirings:
         dispatcher_id, route_ids = _commit_handler_wiring(prepared, dispatch_engine)
         dispatchers_registered.append(dispatcher_id)
         routes_registered.extend(route_ids)
 
-    # Subscribe to Kafka topics via event bus
-    if event_bus is not None and contract.event_bus:
+    if event_bus is not None and pcw.subscription_topics:
         from omnibase_infra.enums import EnumConsumerGroupPurpose
         from omnibase_infra.models import ModelNodeIdentity
         from omnibase_infra.utils import compute_consumer_group_id
 
-        for topic in contract.event_bus.subscribe_topics:
+        for topic in pcw.subscription_topics:
             node_identity = ModelNodeIdentity(
-                env=environment,
+                env=pcw.environment,
                 service=contract.package_name,
                 node_name=contract.name,
                 version=str(contract.contract_version),
@@ -645,12 +724,11 @@ async def _wire_single_contract(
             typed_bus: ProtocolEventBusSubscriber = cast(
                 "ProtocolEventBusSubscriber", event_bus
             )
-            unsubscribe = await typed_bus.subscribe(
+            await typed_bus.subscribe(
                 topic=topic,
                 node_identity=node_identity,
                 on_message=callback,
             )
-            unsubscribers.append(unsubscribe)
             topics_subscribed.append(topic)
 
             logger.info(
@@ -668,6 +746,30 @@ async def _wire_single_contract(
         routes_registered=tuple(routes_registered),
         topics_subscribed=tuple(topics_subscribed),
     )
+
+
+async def _wire_single_contract(
+    *,
+    contract: ModelDiscoveredContract,
+    dispatch_engine: ProtocolDispatchEngine,
+    event_bus: object | None,
+    environment: str,
+    container: object | None = None,
+) -> ModelContractWiringResult:
+    """Wire a single discovered contract into the dispatch engine.
+
+    Thin wrapper around _prepare_contract_wiring + _commit_contract_wiring.
+    Kept for backwards compatibility. New code should use wire_from_manifest
+    which validates all contracts before committing any side effects.
+    """
+    prepared = _prepare_contract_wiring(
+        contract=contract,
+        dispatch_engine=dispatch_engine,
+        event_bus=event_bus,
+        environment=environment,
+        container=container,
+    )
+    return await _commit_contract_wiring(prepared, dispatch_engine, event_bus)
 
 
 def _prepare_handler_wiring(
@@ -805,11 +907,10 @@ def _prepare_handler_wiring(
 
     # Pre-compute routes (no engine calls yet)
     route_ids: list[str] = []
-    routes: list[object] = []
+    routes: list[ModelDispatchRoute] = []
     if contract.event_bus:
         for topic in contract.event_bus.subscribe_topics:
-            topic_segment = re.sub(r"[.\-]", "_", topic)
-            route_id = _derive_route_id(contract.name, handler_ref.name, topic_segment)
+            route_id = _derive_route_id(contract.name, handler_ref.name, topic)
             topic_pattern = _derive_topic_pattern_from_topic(topic)
 
             route = ModelDispatchRoute(
