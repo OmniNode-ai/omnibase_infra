@@ -83,7 +83,7 @@ dependencies = [
     # Tracing and observability dependencies
     "sqlparse>=0.4.4,<0.6.0", # For secure SQL query sanitization in tracing
     "structlog>=23.2.0,<26.0.0", # Structured logging
-    "prometheus-client>=0.19.0,<0.25.0", # Metrics collection
+    "prometheus-client>=0.19.0,<0.26.0", # Metrics collection
     "opentelemetry-api>=1.27.0,<2.0.0", # OpenTelemetry API
     "opentelemetry-sdk>=1.27.0,<2.0.0", # OpenTelemetry SDK
     "opentelemetry-exporter-otlp-proto-http>=1.27.0,<2.0.0", # OTLP HTTP exporter (Phoenix uses HTTP, not gRPC)
