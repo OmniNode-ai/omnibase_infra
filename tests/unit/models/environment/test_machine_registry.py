@@ -53,7 +53,7 @@ class TestModelMachineEntry:
             _make_entry(omni_home="relative/path")
 
     def test_relative_resolved_home_dir_rejected(self) -> None:
-        with pytest.raises(ValidationError, match="omni_home must be absolute"):
+        with pytest.raises(ValidationError, match="resolved_home_dir must be absolute"):
             _make_entry(resolved_home_dir="relative/home")
 
     def test_infra_machine_paths(self) -> None:
