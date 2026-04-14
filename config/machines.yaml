@@ -1,0 +1,11 @@
+machines:
+  - machine_id: infra-server
+    hostname: infra-server
+    role: infra_server
+    omni_home: /home/jonah/Code/omni_home
+    resolved_home_dir: /home/jonah
+  - machine_id: m2-ultra
+    hostname: m2-ultra.local
+    role: dev_workstation
+    omni_home: /Users/jonah/Code/omni_home
+    resolved_home_dir: /Users/jonah
