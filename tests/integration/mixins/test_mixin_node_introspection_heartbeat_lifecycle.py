@@ -9,7 +9,6 @@ leaving the introspection topic stale.
 
 from __future__ import annotations
 
-import asyncio
 from uuid import uuid4
 
 import pytest
@@ -17,6 +16,8 @@ import pytest
 from omnibase_core.enums import EnumNodeKind
 from omnibase_infra.mixins import MixinNodeIntrospection
 from omnibase_infra.models.discovery import ModelIntrospectionConfig
+
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
 class _HeartbeatTestNode(MixinNodeIntrospection):
@@ -36,7 +37,6 @@ def node() -> _HeartbeatTestNode:
     return _HeartbeatTestNode()
 
 
-@pytest.mark.asyncio
 async def test_start_heartbeat_task_creates_task(node: _HeartbeatTestNode) -> None:
     await node.start_heartbeat_task()
     assert node._heartbeat_task is not None
@@ -44,7 +44,6 @@ async def test_start_heartbeat_task_creates_task(node: _HeartbeatTestNode) -> No
     await node.stop_heartbeat_task()
 
 
-@pytest.mark.asyncio
 async def test_stop_heartbeat_task_before_start_is_safe(
     node: _HeartbeatTestNode,
 ) -> None:
@@ -52,7 +51,6 @@ async def test_stop_heartbeat_task_before_start_is_safe(
     assert node._heartbeat_task is None
 
 
-@pytest.mark.asyncio
 async def test_start_heartbeat_task_is_idempotent(node: _HeartbeatTestNode) -> None:
     await node.start_heartbeat_task()
     task_ref = node._heartbeat_task
@@ -61,7 +59,6 @@ async def test_start_heartbeat_task_is_idempotent(node: _HeartbeatTestNode) -> N
     await node.stop_heartbeat_task()
 
 
-@pytest.mark.asyncio
 async def test_heartbeat_task_stops_cleanly(node: _HeartbeatTestNode) -> None:
     await node.start_heartbeat_task()
     assert node._heartbeat_task is not None
@@ -69,7 +66,6 @@ async def test_heartbeat_task_stops_cleanly(node: _HeartbeatTestNode) -> None:
     assert node._heartbeat_task is None
 
 
-@pytest.mark.asyncio
 async def test_protocol_methods_present(node: _HeartbeatTestNode) -> None:
     assert callable(getattr(node, "start_heartbeat_task", None))
     assert callable(getattr(node, "stop_heartbeat_task", None))
