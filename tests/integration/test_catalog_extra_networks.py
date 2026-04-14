@@ -114,3 +114,39 @@ def test_generate_compose_no_extra_networks_no_external_entry() -> None:
             f"Network '{net_name}' incorrectly marked external for a service "
             "that declares no extra_networks"
         )
+
+
+@pytest.mark.integration
+def test_generate_compose_default_network_not_overwritten_as_external() -> None:
+    """omnibase-infra-network in extra_networks must not overwrite the bridge definition."""
+    from omnibase_infra.docker.catalog.enum_infra_layer import EnumInfraLayer
+    from omnibase_infra.docker.catalog.manifest_schema import CatalogManifest
+    from omnibase_infra.docker.catalog.resolver import ResolvedStack
+
+    manifest = CatalogManifest(
+        name="test-svc",
+        description="",
+        image="test:latest",
+        layer=EnumInfraLayer.RUNTIME,
+        required_env=[],
+        hardcoded_env={},
+        operational_defaults={},
+        ports=None,
+        healthcheck=None,
+        volumes=[],
+        depends_on=[],
+        extra_networks=["omnibase-infra-network"],  # reserved name in extra_networks
+    )
+    stack = ResolvedStack(
+        manifests={"test-svc": manifest},
+        required_env=set(),
+        injected_env={},
+    )
+    compose = generate_compose(stack)
+
+    top_networks = compose["networks"]  # type: ignore[index]
+    default_net = top_networks["omnibase-infra-network"]
+    assert default_net.get("driver") == "bridge", (
+        "Default network must remain a bridge, not be overwritten as external"
+    )
+    assert "external" not in default_net

@@ -124,6 +124,8 @@ def generate_compose(resolved: ResolvedStack) -> dict[str, object]:
         }
     }
     for net in sorted(all_extra_networks):
+        if net == "omnibase-infra-network":
+            continue  # never overwrite the default bridge network as external
         top_networks[net] = {"name": net, "external": True}
 
     # Build top-level compose dict
