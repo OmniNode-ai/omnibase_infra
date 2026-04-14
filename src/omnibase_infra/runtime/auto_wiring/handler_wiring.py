@@ -26,6 +26,7 @@ import os
 import re
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
@@ -70,6 +71,23 @@ class ProtocolHandleable(Protocol):
         self,
         envelope: ModelEventEnvelope[object],
     ) -> ModelDispatchResult | None: ...
+
+
+@dataclass
+class PreparedWiring:
+    """Data needed to register one contract entry with the dispatch engine.
+
+    Produced by _prepare_handler_wiring (pure, no side effects) and consumed by
+    _commit_handler_wiring (side effects only). Separating the two phases ensures
+    that partial wiring never reaches the engine when a later entry fails (OMN-8735).
+    """
+
+    dispatcher_id: str
+    dispatcher: DispatcherFunc
+    category: object  # EnumMessageCategory, deferred import
+    message_types: set[str] | None
+    route_ids: list[str] = field(default_factory=list)
+    routes: list[object] = field(default_factory=list)  # list[ModelDispatchRoute]
 
 
 def _import_handler_class(module_path: str, class_name: str) -> type:
@@ -570,19 +588,19 @@ async def _wire_single_contract(
     topics_subscribed: list[str] = []
     unsubscribers: list[Callable[[], Awaitable[None]]] = []
 
-    # Validate all handler entries before registering any side effects (CR-8735).
-    # Fail-fast on first resolution error so no partial wiring reaches the engine.
+    # Phase 1: Validate and prepare ALL handler entries without touching the engine.
+    # Any failure here aborts before any side effect is committed (OMN-8735).
+    prepared_wirings: list[PreparedWiring] = []
     for entry in contract.handler_routing.handlers:
         try:
-            dispatcher_id, route_ids = _wire_handler_entry(
+            prepared = _prepare_handler_wiring(
                 contract=contract,
                 entry=entry,
                 dispatch_engine=dispatch_engine,
                 event_bus=event_bus,
                 container=container,
             )
-            dispatchers_registered.append(dispatcher_id)
-            routes_registered.extend(route_ids)
+            prepared_wirings.append(prepared)
         except Exception as exc:
             exc_summary = str(exc)[:200] if str(exc) else type(exc).__name__
             logger.error(
@@ -598,6 +616,12 @@ async def _wire_single_contract(
                 f"Auto-wiring contract '{contract.name}' failed: "
                 f"handler={entry.handler.name}: {type(exc).__name__}: {exc_summary}"
             ) from exc
+
+    # Phase 2: All handlers validated — commit registrations to the engine.
+    for prepared in prepared_wirings:
+        dispatcher_id, route_ids = _commit_handler_wiring(prepared, dispatch_engine)
+        dispatchers_registered.append(dispatcher_id)
+        routes_registered.extend(route_ids)
 
     # Subscribe to Kafka topics via event bus
     if event_bus is not None and contract.event_bus:
@@ -644,25 +668,28 @@ async def _wire_single_contract(
     )
 
 
-def _wire_handler_entry(
+def _prepare_handler_wiring(
     *,
     contract: ModelDiscoveredContract,
     entry: ModelHandlerRoutingEntry,
     dispatch_engine: object,
     event_bus: object | None = None,
     container: object | None = None,
-) -> tuple[str, list[str]]:
-    """Import a handler, create callback, register dispatcher + routes.
+) -> PreparedWiring:
+    """Validate and prepare one handler entry for wiring — NO side effects.
+
+    Instantiates the handler class, creates its dispatch callback, and
+    pre-computes all route data.  Nothing is registered with the engine here;
+    that is deferred to :func:`_commit_handler_wiring` so that the engine is
+    only mutated after every handler in the contract has been validated
+    successfully (OMN-8735).
 
     Returns:
-        Tuple of (dispatcher_id, list of route_ids registered).
+        A :class:`PreparedWiring` ready for :func:`_commit_handler_wiring`.
     """
     # Deferred imports to avoid circular dependencies
     from omnibase_infra.enums import EnumMessageCategory
     from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
-    from omnibase_infra.runtime.service_message_dispatch_engine import (
-        MessageDispatchEngine,
-    )
 
     handler_ref = entry.handler
     handler_cls = _import_handler_class(handler_ref.module, handler_ref.name)
@@ -703,7 +730,7 @@ def _wire_handler_entry(
                 handler_ref.name,
             )
         except Exception:  # noqa: BLE001 — DI resolution failed; try other paths
-            if event_bus is not None and "event_bus" in non_self_params:
+            if event_bus is not None and set(non_self_params) == {"event_bus"}:
                 handler_instance = handler_cls(event_bus=event_bus)
                 logger.debug(
                     "Auto-wired event_bus into %s.%s (container resolution failed)",
@@ -722,7 +749,7 @@ def _wire_handler_entry(
                 )
             else:
                 handler_instance = handler_cls()
-    elif event_bus is not None and "event_bus" in non_self_params:
+    elif event_bus is not None and set(non_self_params) == {"event_bus"}:
         handler_instance = handler_cls(event_bus=event_bus)
         logger.debug(
             "Auto-wired event_bus into %s.%s",
@@ -774,21 +801,12 @@ def _wire_handler_entry(
     if entry.event_model is not None:
         message_types = {entry.event_model.name}
 
-    # Register dispatcher
-    engine = dispatch_engine
-    if isinstance(engine, MessageDispatchEngine):
-        engine.register_dispatcher(
-            dispatcher_id=dispatcher_id,
-            dispatcher=callback,
-            category=category,
-            message_types=message_types,
-        )
-
-    # Register routes for each subscribe topic
+    # Pre-compute routes (no engine calls yet)
     route_ids: list[str] = []
+    routes: list[object] = []
     if contract.event_bus:
         for topic in contract.event_bus.subscribe_topics:
-            topic_segment = topic.split(".")[-2] if "." in topic else topic
+            topic_segment = re.sub(r"[.\-]", "_", topic)
             route_id = _derive_route_id(contract.name, handler_ref.name, topic_segment)
             topic_pattern = _derive_topic_pattern_from_topic(topic)
 
@@ -798,10 +816,69 @@ def _wire_handler_entry(
                 message_category=category,
                 dispatcher_id=dispatcher_id,
             )
-
-            if isinstance(engine, MessageDispatchEngine):
-                engine.register_route(route)
-
             route_ids.append(route_id)
+            routes.append(route)
 
-    return dispatcher_id, route_ids
+    return PreparedWiring(
+        dispatcher_id=dispatcher_id,
+        dispatcher=callback,
+        category=category,
+        message_types=message_types,
+        route_ids=route_ids,
+        routes=routes,
+    )
+
+
+def _commit_handler_wiring(
+    prepared: PreparedWiring,
+    dispatch_engine: object,
+) -> tuple[str, list[str]]:
+    """Register a prepared handler wiring with the dispatch engine (side effects only).
+
+    Must only be called after :func:`_prepare_handler_wiring` has succeeded for
+    ALL handlers in a contract, ensuring the engine is never mutated for a
+    partially-valid contract (OMN-8735).
+
+    Returns:
+        Tuple of (dispatcher_id, list of route_ids registered).
+    """
+    from omnibase_infra.runtime.service_message_dispatch_engine import (
+        MessageDispatchEngine,
+    )
+
+    engine = dispatch_engine
+    if isinstance(engine, MessageDispatchEngine):
+        engine.register_dispatcher(
+            dispatcher_id=prepared.dispatcher_id,
+            dispatcher=prepared.dispatcher,
+            category=prepared.category,
+            message_types=prepared.message_types,
+        )
+        for route in prepared.routes:
+            engine.register_route(route)
+
+    return prepared.dispatcher_id, prepared.route_ids
+
+
+def _wire_handler_entry(
+    *,
+    contract: ModelDiscoveredContract,
+    entry: ModelHandlerRoutingEntry,
+    dispatch_engine: object,
+    event_bus: object | None = None,
+    container: object | None = None,
+) -> tuple[str, list[str]]:
+    """Prepare and immediately commit one handler entry (single-contract shortcut).
+
+    Kept for backwards compatibility with call sites that don't need the
+    two-phase split.  New code should call _prepare_handler_wiring +
+    _commit_handler_wiring directly.
+    """
+    prepared = _prepare_handler_wiring(
+        contract=contract,
+        entry=entry,
+        dispatch_engine=dispatch_engine,
+        event_bus=event_bus,
+        container=container,
+    )
+    return _commit_handler_wiring(prepared, dispatch_engine)

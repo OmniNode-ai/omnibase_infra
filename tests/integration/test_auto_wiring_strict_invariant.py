@@ -108,4 +108,10 @@ async def test_wire_from_manifest_collects_all_failures_before_raising() -> None
         )
 
     error_msg = str(exc_info.value)
-    assert "3" in error_msg or "node_bad_0" in error_msg
+    assert "3" in error_msg, (
+        f"Expected failure count '3' in error message: {error_msg!r}"
+    )
+    for i in range(3):
+        assert f"node_bad_{i}" in error_msg, (
+            f"Expected contract name 'node_bad_{i}' in error message: {error_msg!r}"
+        )
