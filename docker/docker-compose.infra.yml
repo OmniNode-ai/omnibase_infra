@@ -663,6 +663,11 @@ services:
       - effects_data:/app/data
       - ../contracts:/app/contracts:ro
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+    networks:
+      # OMN-8714: runtime-effects must also join omnimemory-network so PluginMemory
+      # can reach Memgraph when deployed via the omnimemory compose stack.
+      - omnibase-infra-network
+      - omnimemory-network
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
@@ -1122,6 +1127,13 @@ networks:
   omnibase-infra-network:
     name: omnibase-infra-network
     driver: bridge
+  # OMN-8714: External network created by omnimemory compose stack.
+  # Declared here so runtime-effects can reach Memgraph when the omnimemory
+  # stack is running alongside the infra stack. Must already exist (created
+  # by omnimemory/docker-compose.yml) before infra-up is called.
+  omnimemory-network:
+    name: omnimemory-network
+    external: true
 # ==========================================================================
 # Volume Configuration
 # ==========================================================================
