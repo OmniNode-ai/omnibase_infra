@@ -720,7 +720,7 @@ async def _commit_contract_wiring(
             consumer_group = compute_consumer_group_id(
                 node_identity, EnumConsumerGroupPurpose.CONSUME
             )
-            callback = _make_event_bus_callback(topic, dispatch_engine)
+            callback = _make_event_bus_callback(topic, dispatch_engine)  # type: ignore[arg-type]
             typed_bus: ProtocolEventBusSubscriber = cast(
                 "ProtocolEventBusSubscriber", event_bus
             )
