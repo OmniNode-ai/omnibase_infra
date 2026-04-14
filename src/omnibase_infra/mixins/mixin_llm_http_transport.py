@@ -787,9 +787,11 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                     await self._reset_circuit_if_enabled()
                     _usage = data.get("usage") or {}
                     if isinstance(_usage, dict):
-                        if (_pt := _usage.get("prompt_tokens")) is not None:
+                        _pt = _usage.get("prompt_tokens")
+                        if isinstance(_pt, (int, float)):
                             _span.set_attribute("gen_ai.usage.input_tokens", int(_pt))
-                        if (_ct := _usage.get("completion_tokens")) is not None:
+                        _ct = _usage.get("completion_tokens")
+                        if isinstance(_ct, (int, float)):
                             _span.set_attribute("gen_ai.usage.output_tokens", int(_ct))
                     return data
 
