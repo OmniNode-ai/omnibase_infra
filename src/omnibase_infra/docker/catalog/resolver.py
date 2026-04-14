@@ -101,6 +101,7 @@ def _load_manifest(path: Path) -> CatalogManifest:
         resources=resources,
         stop_grace_period=raw.get("stop_grace_period"),
         catalog_env=raw.get("catalog_env", {}),
+        extra_networks=raw.get("extra_networks", []),
     )
 
 

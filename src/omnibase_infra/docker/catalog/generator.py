@@ -14,6 +14,7 @@ def generate_compose(resolved: ResolvedStack) -> dict[str, object]:
     """Generate a docker-compose dict from a resolved stack."""
     services: dict[str, dict[str, object]] = {}
     all_volumes: set[str] = set()
+    all_extra_networks: set[str] = set()
 
     for name, manifest in resolved.manifests.items():
         svc: dict[str, object] = {}
@@ -60,7 +61,11 @@ def generate_compose(resolved: ResolvedStack) -> dict[str, object]:
                     all_volumes.add(vol_name)
 
         # Networks
-        svc["networks"] = ["omnibase-infra-network"]
+        networks: list[str] = ["omnibase-infra-network"]
+        if manifest.extra_networks:
+            networks.extend(manifest.extra_networks)
+            all_extra_networks.update(manifest.extra_networks)
+        svc["networks"] = networks
 
         # Healthcheck
         if manifest.healthcheck:
@@ -111,16 +116,21 @@ def generate_compose(resolved: ResolvedStack) -> dict[str, object]:
 
         services[name] = svc
 
+    # Build top-level networks block
+    top_networks: dict[str, object] = {
+        "omnibase-infra-network": {
+            "name": "omnibase-infra-network",
+            "driver": "bridge",
+        }
+    }
+    for net in sorted(all_extra_networks):
+        top_networks[net] = {"name": net, "external": True}
+
     # Build top-level compose dict
     compose: dict[str, object] = {
         "name": "omnibase-infra",
         "services": services,
-        "networks": {
-            "omnibase-infra-network": {
-                "name": "omnibase-infra-network",
-                "driver": "bridge",
-            }
-        },
+        "networks": top_networks,
     }
 
     # Volumes

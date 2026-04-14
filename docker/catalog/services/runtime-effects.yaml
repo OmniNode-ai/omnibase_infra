@@ -55,6 +55,8 @@ volumes:
   - effects_logs:/app/logs
   - effects_data:/app/data
   - ../contracts:/app/contracts:ro
+extra_networks:
+  - omnimemory-network
 depends_on:
   - service: omninode-runtime
     condition: service_healthy
