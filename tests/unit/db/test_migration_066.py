@@ -13,6 +13,7 @@ Validates:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,13 @@ ROLLBACK_FILE = (
 )
 
 
+def _strip_comments(sql: str) -> str:
+    """Remove SQL line comments (--) and block comments (/* */) before asserting."""
+    sql = re.sub(r"--[^\n]*", "", sql)
+    sql = re.sub(r"/\*.*?\*/", "", sql, flags=re.DOTALL)
+    return sql
+
+
 @pytest.mark.unit
 class TestMigration066Files:
     """Validate that required migration files exist."""
@@ -51,26 +59,36 @@ class TestMigration066Schema:
     """Validate the schema changes declared in migration 066."""
 
     def test_migration_targets_routing_outcomes(self) -> None:
-        sql = MIGRATION_FILE.read_text()
-        assert "routing_outcomes" in sql, (
-            "Migration must target the routing_outcomes table"
-        )
+        sql = _strip_comments(MIGRATION_FILE.read_text())
+        assert re.search(
+            r"\bALTER\s+TABLE\b[^;]*\brouting_outcomes\b",
+            sql,
+            re.IGNORECASE,
+        ), "Migration must ALTER TABLE routing_outcomes"
 
     def test_migration_adds_quality_score_column(self) -> None:
-        sql = MIGRATION_FILE.read_text()
-        assert "quality_score" in sql, "Migration must add the quality_score column"
+        sql = _strip_comments(MIGRATION_FILE.read_text())
+        assert re.search(
+            r"\bADD\s+COLUMN\b[^;]*\bquality_score\b",
+            sql,
+            re.IGNORECASE,
+        ), "Migration must ADD COLUMN quality_score"
 
     def test_quality_score_is_double_precision(self) -> None:
-        sql = MIGRATION_FILE.read_text()
-        assert "DOUBLE PRECISION" in sql, (
-            "quality_score column must be declared as DOUBLE PRECISION"
-        )
+        sql = _strip_comments(MIGRATION_FILE.read_text())
+        assert re.search(
+            r"\bquality_score\s+DOUBLE\s+PRECISION\b",
+            sql,
+            re.IGNORECASE,
+        ), "quality_score column must be declared as DOUBLE PRECISION"
 
     def test_migration_is_idempotent(self) -> None:
-        sql = MIGRATION_FILE.read_text()
-        assert "ADD COLUMN IF NOT EXISTS" in sql, (
-            "Migration must use ADD COLUMN IF NOT EXISTS for idempotency"
-        )
+        sql = _strip_comments(MIGRATION_FILE.read_text())
+        assert re.search(
+            r"\bADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\b",
+            sql,
+            re.IGNORECASE,
+        ), "Migration must use ADD COLUMN IF NOT EXISTS for idempotency"
 
 
 @pytest.mark.unit
@@ -78,15 +96,25 @@ class TestMigration066Sentinel:
     """Validate the migration sentinel update."""
 
     def test_migration_updates_sentinel(self) -> None:
-        sql = MIGRATION_FILE.read_text().upper()
-        assert "MIGRATIONS_COMPLETE" in sql, (
-            "Migration must update db_metadata.migrations_complete"
-        )
-        assert "TRUE" in sql
+        sql = _strip_comments(MIGRATION_FILE.read_text())
+        assert re.search(
+            r"\bUPDATE\b[^;]*\bdb_metadata\b",
+            sql,
+            re.IGNORECASE,
+        ), "Migration must UPDATE db_metadata"
+        assert re.search(
+            r"\bmigrations_complete\s*=\s*TRUE\b",
+            sql,
+            re.IGNORECASE,
+        ), "Migration must set migrations_complete = TRUE"
 
     def test_migration_sets_schema_version(self) -> None:
-        sql = MIGRATION_FILE.read_text()
-        assert "'066'" in sql, "Migration must set schema_version = '066'"
+        sql = _strip_comments(MIGRATION_FILE.read_text())
+        assert re.search(
+            r"\bschema_version\s*=\s*'066'",
+            sql,
+            re.IGNORECASE,
+        ), "Migration must set schema_version = '066'"
 
 
 @pytest.mark.unit
@@ -94,10 +122,17 @@ class TestMigration066Rollback:
     """Validate the rollback file."""
 
     def test_rollback_drops_quality_score_column(self) -> None:
-        sql = ROLLBACK_FILE.read_text().upper()
-        assert "DROP COLUMN" in sql, "Rollback must drop the quality_score column"
-        assert "QUALITY_SCORE" in sql
+        sql = _strip_comments(ROLLBACK_FILE.read_text())
+        assert re.search(
+            r"\bDROP\s+COLUMN\b[^;]*\bquality_score\b",
+            sql,
+            re.IGNORECASE,
+        ), "Rollback must DROP COLUMN quality_score"
 
     def test_rollback_reverts_schema_version(self) -> None:
-        sql = ROLLBACK_FILE.read_text()
-        assert "'065'" in sql, "Rollback must revert schema_version to '065'"
+        sql = _strip_comments(ROLLBACK_FILE.read_text())
+        assert re.search(
+            r"\bschema_version\s*=\s*'065'",
+            sql,
+            re.IGNORECASE,
+        ), "Rollback must revert schema_version to '065'"
