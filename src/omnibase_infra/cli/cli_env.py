@@ -16,21 +16,22 @@ Related:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import click
 
 _MACHINES_YAML_DEFAULT = Path(__file__).parents[4] / "config" / "machines.yaml"
 
-# Fleet-wide constants — same across all machines
-_INFRA_HOST = "192.168.86.201"
-_KAFKA_BOOTSTRAP = f"{_INFRA_HOST}:19092"
-_POSTGRES_HOST = _INFRA_HOST
-_POSTGRES_PORT = "5436"
-_VALKEY_HOST = _INFRA_HOST
-_VALKEY_PORT = "6379"
-_MODEL = "opus[1m]"
-_OMNICLAUDE_MODE = "agent"
+# Fleet-wide constants — read from environment with fleet defaults
+_INFRA_HOST = os.environ.get("OMNI_INFRA_HOST", "192.168.86.201")
+_KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", f"{_INFRA_HOST}:19092")
+_POSTGRES_HOST = os.environ.get("POSTGRES_HOST", _INFRA_HOST)
+_POSTGRES_PORT = os.environ.get("POSTGRES_PORT", "5436")
+_VALKEY_HOST = os.environ.get("VALKEY_HOST", _INFRA_HOST)
+_VALKEY_PORT = os.environ.get("VALKEY_PORT", "6379")
+_MODEL = os.environ.get("OMNI_MODEL", "opus[1m]")
+_OMNICLAUDE_MODE = os.environ.get("OMNICLAUDE_MODE", "agent")
 
 
 @click.group("env")

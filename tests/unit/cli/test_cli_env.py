@@ -16,7 +16,6 @@ from omnibase_infra.cli.commands import cli
 from omnibase_infra.models.environment.model_machine_registry import (
     EnumMachineRole,
     ModelMachineEntry,
-    ModelMachineRegistry,
 )
 
 EXPECTED_ENV_KEYS = {

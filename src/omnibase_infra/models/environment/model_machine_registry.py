@@ -21,6 +21,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ValidationInfo,
     computed_field,
     field_validator,
     model_validator,
@@ -44,9 +45,9 @@ class ModelMachineEntry(BaseModel):
 
     @field_validator("omni_home", "resolved_home_dir", mode="after")
     @classmethod
-    def _require_absolute(cls, v: str) -> str:
+    def _require_absolute(cls, v: str, info: ValidationInfo) -> str:
         if not Path(v).is_absolute():
-            raise ValueError(f"omni_home must be absolute, got: {v}")
+            raise ValueError(f"{info.field_name} must be absolute, got: {v}")
         return v
 
     @computed_field  # type: ignore[prop-decorator]
