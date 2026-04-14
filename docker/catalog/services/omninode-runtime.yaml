@@ -13,6 +13,7 @@ required_env:
   - LLM_CODER_FAST_URL
   - LLM_EMBEDDING_URL
   - LLM_DEEPSEEK_R1_URL
+  - OMNIDASH_ANALYTICS_DB_URL
 hardcoded_env:
   OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omnibase_infra'
   OMNIINTELLIGENCE_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omniintelligence'

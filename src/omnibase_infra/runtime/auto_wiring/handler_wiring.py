@@ -22,8 +22,11 @@ from __future__ import annotations
 import importlib
 import inspect
 import logging
+import os
+import re
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
@@ -103,6 +106,167 @@ def _make_dispatch_callback(
     ) -> ModelDispatchResult | None:
         handle_method = handler_instance.handle
         return await handle_method(envelope)
+
+    return _callback
+
+
+_TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+_DB_URL_ENV_MAP: dict[str, str] = {
+    "omnidash_analytics": "OMNIDASH_ANALYTICS_DB_URL",
+    "omnibase_infra": "OMNIBASE_INFRA_DB_URL",
+}
+
+_TOPIC_TO_EVENT_TYPE: dict[str, str] = {
+    "node-heartbeat": "heartbeat",
+    "node-introspection": "introspection",
+}
+
+
+def _read_db_io_tables(contract_path: Path) -> list[dict[str, str]]:
+    """Read db_io.db_tables from a contract YAML. Returns [] if absent."""
+    try:
+        import yaml  # type: ignore[import-untyped]
+
+        with open(contract_path) as f:
+            raw = yaml.safe_load(f)
+        if not isinstance(raw, dict):
+            return []
+        db_io = raw.get("db_io") or {}
+        return list(db_io.get("db_tables") or [])
+    except Exception as exc:  # noqa: BLE001 — I/O boundary: safe to swallow YAML parse/file errors
+        logger.warning("Failed to read db_io from %s: %s", contract_path, exc)
+        return []
+
+
+def _build_sync_db_adapter(db_url: str) -> object:
+    """Build a synchronous psycopg2-backed DatabaseAdapter from a DSN.
+
+    Separated from _make_projection_dispatch_callback to allow test patching.
+    """
+    import psycopg2  # type: ignore[import-untyped]
+    import psycopg2.extras  # type: ignore[import-untyped]
+
+    class SyncPsycopg2Adapter:
+        _conn: object
+
+        def __init__(self, dsn: str) -> None:
+            self._dsn = dsn
+            self._conn = None
+
+        def _get_conn(self) -> object:
+            if self._conn is None or getattr(self._conn, "closed", False):
+                conn = psycopg2.connect(self._dsn)
+                conn.autocommit = True
+                self._conn = conn
+            return self._conn
+
+        def upsert(self, table: str, conflict_key: str, row: dict[str, object]) -> bool:
+            if not _TABLE_NAME_RE.match(table):
+                raise ValueError(f"Invalid table name: {table!r}")
+            conn = self._get_conn()
+            cols = list(row.keys())
+            quoted_cols = ", ".join(f'"{c}"' for c in cols)
+            placeholders = ", ".join(f"%({c})s" for c in cols)
+            updates = ", ".join(
+                f'"{c}" = EXCLUDED."{c}"' for c in cols if c != conflict_key
+            )
+            # table/conflict_key/cols validated by _TABLE_NAME_RE — not raw user input
+            parts = [
+                f'INSERT INTO "{table}" ({quoted_cols})',
+                f"VALUES ({placeholders})",
+                f'ON CONFLICT ("{conflict_key}") DO UPDATE SET {updates}',
+            ]
+            insert_sql = " ".join(parts)
+            with conn.cursor() as cur:  # type: ignore[union-attr, attr-defined]
+                cur.execute(insert_sql, row)
+            return True
+
+        def query(
+            self, table: str, filters: dict[str, object] | None = None
+        ) -> list[dict[str, object]]:
+            if not _TABLE_NAME_RE.match(table):
+                raise ValueError(f"Invalid table name: {table!r}")
+            conn = self._get_conn()
+            # table validated by _TABLE_NAME_RE — not user input
+            select_sql = f'SELECT * FROM "{table}"'  # noqa: S608
+            params: list[object] = []
+            if filters:
+                clauses = [f'"{k}" = %s' for k in filters]
+                select_sql += " WHERE " + " AND ".join(clauses)
+                params = list(filters.values())
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:  # type: ignore[union-attr, attr-defined]
+                cur.execute(select_sql, params or None)
+                return [dict(r) for r in cur.fetchall()]
+
+    return SyncPsycopg2Adapter(db_url)
+
+
+def _make_projection_dispatch_callback(
+    handler_instance: object,
+    db_tables: list[dict[str, str]],
+    subscribe_topics: tuple[str, ...],
+) -> DispatcherFunc:
+    """Create a dispatch callback for projection handlers (db_io.db_tables declared).
+
+    Builds a synchronous psycopg2 DatabaseAdapter per call and injects it into
+    input_data alongside _event_type derived from the topic name.
+    """
+    database = (
+        db_tables[0].get("database", "omnidash_analytics")
+        if db_tables
+        else "omnidash_analytics"
+    )
+    db_url_env = _DB_URL_ENV_MAP.get(database, "OMNIDASH_ANALYTICS_DB_URL")
+
+    async def _callback(
+        envelope: ModelEventEnvelope[object],
+    ) -> ModelDispatchResult | None:
+        db_url = os.environ.get(db_url_env, "")
+        if not db_url:
+            logger.error(
+                "Projection handler skipped: %s not set (database=%s)",
+                db_url_env,
+                database,
+            )
+            return None
+        try:
+            adapter = _build_sync_db_adapter(db_url)
+            topic = getattr(envelope, "topic", "") or ""
+            topic_segment = topic.split(".")[-2] if "." in topic else topic
+            event_type = _TOPIC_TO_EVENT_TYPE.get(topic_segment, "introspection")
+            payload = getattr(envelope, "payload", None)
+            input_data: dict[str, object] = (
+                dict(payload) if isinstance(payload, dict) else {}
+            )
+            if hasattr(payload, "model_dump"):
+                input_data = payload.model_dump(mode="python")  # type: ignore[union-attr]  # noqa: model-dump-bare
+            input_data["_db"] = adapter
+            input_data["_event_type"] = event_type
+            result = handler_instance.handle(input_data)  # type: ignore[union-attr]
+            logger.debug(
+                "Projection handler completed: topic=%s event_type=%s result=%s",
+                topic,
+                event_type,
+                result,
+            )
+        except TypeError as exc:
+            logger.error(
+                "Projection handler TypeError (likely missing _db or _event_type): "
+                "handler=%s topic=%s error=%s",
+                type(handler_instance).__name__,
+                getattr(envelope, "topic", "unknown"),
+                exc,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Projection handler error: handler=%s topic=%s error_type=%s error=%s",
+                type(handler_instance).__name__,
+                getattr(envelope, "topic", "unknown"),
+                type(exc).__name__,
+                exc,
+            )
+        return None
 
     return _callback
 
@@ -454,7 +618,26 @@ def _wire_handler_entry(
     else:
         handler_instance = handler_cls()
 
-    callback = _make_dispatch_callback(handler_instance)
+    # Use projection callback when contract declares db_io.db_tables.
+    # Projection handlers implement handle(input_data: dict) with _db injected
+    # rather than the standard async handle(envelope) protocol.
+    db_tables = _read_db_io_tables(contract.contract_path)
+    if db_tables:
+        subscribe_topics = (
+            contract.event_bus.subscribe_topics if contract.event_bus else ()
+        )
+        callback = _make_projection_dispatch_callback(
+            handler_instance,
+            db_tables,
+            subscribe_topics,
+        )
+        logger.info(
+            "Auto-wired projection handler with DB injection: handler=%s db_tables=%s",
+            handler_ref.name,
+            [t.get("name") for t in db_tables],
+        )
+    else:
+        callback = _make_dispatch_callback(handler_instance)
     dispatcher_id = _derive_dispatcher_id(contract.name, handler_ref.name)
 
     # Determine message category from subscribe topics
