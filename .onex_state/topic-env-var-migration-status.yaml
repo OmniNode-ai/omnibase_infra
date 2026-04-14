@@ -1,0 +1,34 @@
+# OMN-8784: Topic env var migration status
+# Tracks which nodes have been migrated from os.getenv("*_TOPIC") to contract-declared topics.
+timestamp: "2026-04-15T00:00:00Z"
+ticket: OMN-8784
+
+migrated:
+  - component: omnibase_infra/runtime/service_kernel.py
+    removed_vars:
+      - ONEX_INPUT_TOPIC
+      - ONEX_OUTPUT_TOPIC
+    status: migrated
+    hard_fail_on_set: true
+    notes: >
+      Deprecated env vars now raise ProtocolConfigurationError at startup.
+      Topics must be declared in node contract event_bus.subscribe_topics /
+      event_bus.publish_topics. _DEPRECATED_TOPIC_ENV_VARS constant guards this.
+
+pending:
+  - component: omnidash/server/intelligence-event-adapter.ts
+    vars:
+      - INTEL_REQUEST_TOPIC
+      - INTEL_COMPLETED_TOPIC
+      - INTEL_FAILED_TOPIC
+    status: out_of_scope
+    notes: >
+      TypeScript code in omnidash — not Python handler. Separate ticket required.
+      Omnidash connects to Kafka for observability, not the ONEX node contract system.
+
+ci_gate:
+  test_file: tests/unit/runtime/test_kernel_topic_env_var_removal.py
+  tests:
+    - test_no_topic_env_var_reads
+    - test_startup_assert_env_vars_absent
+  status: implemented
