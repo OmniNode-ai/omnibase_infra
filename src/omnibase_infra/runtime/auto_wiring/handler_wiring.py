@@ -437,6 +437,7 @@ async def wire_from_manifest(
     dispatch_engine: ProtocolDispatchEngine,
     event_bus: object | None = None,
     environment: str = "dev",
+    container: object | None = None,
 ) -> ModelAutoWiringReport:
     """Wire all discovered contracts into the dispatch engine and event bus.
 
@@ -444,7 +445,7 @@ async def wire_from_manifest(
     ``event_bus`` declarations:
 
     1. Import handler modules from ``handler_routing.handlers[].handler``.
-    2. Instantiate handler classes (zero-arg constructor).
+    2. Instantiate handler classes via DI container (if provided) or zero-arg ctor.
     3. Create dispatch callbacks wrapping each handler.
     4. Register dispatchers and routes on the dispatch engine.
     5. Subscribe to Kafka topics via the event bus (if provided).
@@ -460,6 +461,10 @@ async def wire_from_manifest(
         event_bus: Optional event bus for Kafka subscriptions. When None,
             topic subscriptions are skipped (dispatchers + routes still registered).
         environment: Environment name for consumer group derivation.
+        container: Optional DI container used to resolve handler constructor deps.
+            When provided, handlers with required params are resolved via
+            ``container.get_service(handler_cls)`` before falling back to
+            event_bus injection or raising (OMN-8735).
 
     Returns:
         A :class:`ModelAutoWiringReport` with per-contract outcomes.
@@ -473,6 +478,7 @@ async def wire_from_manifest(
                 dispatch_engine=dispatch_engine,
                 event_bus=event_bus,
                 environment=environment,
+                container=container,
             )
         except Exception as exc:  # noqa: BLE001 — collect per-contract, raise after scan
             logger.error(
@@ -534,6 +540,7 @@ async def _wire_single_contract(
     dispatch_engine: ProtocolDispatchEngine,
     event_bus: object | None,
     environment: str,
+    container: object | None = None,
 ) -> ModelContractWiringResult:
     """Wire a single discovered contract into the dispatch engine.
 
@@ -571,6 +578,7 @@ async def _wire_single_contract(
                 entry=entry,
                 dispatch_engine=dispatch_engine,
                 event_bus=event_bus,
+                container=container,
             )
             dispatchers_registered.append(dispatcher_id)
             routes_registered.extend(route_ids)
@@ -645,6 +653,7 @@ def _wire_handler_entry(
     entry: ModelHandlerRoutingEntry,
     dispatch_engine: object,
     event_bus: object | None = None,
+    container: object | None = None,
 ) -> tuple[str, list[str]]:
     """Import a handler, create callback, register dispatcher + routes.
 
@@ -665,9 +674,7 @@ def _wire_handler_entry(
     # otherwise fall back to event_bus injection or zero-arg construction (OMN-8735).
     handler_instance: ProtocolHandleable
     try:
-        sig = inspect.signature(
-            handler_cls.__init__ if hasattr(handler_cls, "__init__") else handler_cls
-        )
+        sig = inspect.signature(handler_cls)
     except (ValueError, TypeError):
         sig = inspect.signature(handler_cls)
     params = sig.parameters
@@ -685,10 +692,17 @@ def _wire_handler_entry(
         and v.default is inspect.Parameter.empty
     }
 
-    if dispatch_engine is not None and hasattr(dispatch_engine, "_container"):
-        container = dispatch_engine._container
+    # Resolve the effective container: explicit param takes precedence over
+    # dispatch_engine._container (legacy path kept for backwards compat).
+    _effective_container = container or (
+        getattr(dispatch_engine, "_container", None)
+        if dispatch_engine is not None
+        else None
+    )
+
+    if _effective_container is not None:
         try:
-            handler_instance = container.get_service(handler_cls)
+            handler_instance = _effective_container.get_service(handler_cls)
             logger.debug(
                 "Resolved %s.%s via DI container",
                 handler_ref.module,
@@ -703,8 +717,15 @@ def _wire_handler_entry(
                     handler_ref.name,
                 )
             elif non_self_params:
-                # Unsatisfiable — let it raise so startup fails loudly (OMN-8735).
-                handler_instance = handler_cls()
+                # Container resolution failed and deps are unsatisfiable — raise loudly
+                # so startup fails with a clear message rather than a cryptic TypeError
+                # from handler_cls() with missing args (OMN-8735).
+                dep_names = list(non_self_params)
+                raise TypeError(
+                    f"Handler {handler_ref.module}.{handler_ref.name} requires "
+                    f"constructor parameters {dep_names!r} but DI container "
+                    f"resolution also failed."
+                )
             else:
                 handler_instance = handler_cls()
     elif event_bus is not None and "event_bus" in non_self_params:

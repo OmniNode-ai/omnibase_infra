@@ -2157,6 +2157,7 @@ async def bootstrap() -> int:
                     dispatch_engine=dispatch_engine,
                     event_bus=event_bus,
                     environment=environment,
+                    container=container,
                 )
 
                 # 6. Topic collision detection: warn for auto-wired topics
