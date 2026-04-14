@@ -64,7 +64,7 @@ def render_settings(machine_id: str, registry: Path | None) -> None:
     click.echo(json.dumps(settings, indent=2))
 
 
-def render_settings_json(machine: object) -> dict:
+def render_settings_json(machine: object) -> dict[str, object]:
     """Build canonical settings.json dict from a ModelMachineEntry.
 
     Machine-specific values (paths) come from registry entry computed properties.
