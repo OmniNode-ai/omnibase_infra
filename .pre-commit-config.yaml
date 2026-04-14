@@ -77,7 +77,7 @@ repos:
         # forcing you to re-stage the changes. This keeps pre-commit and CI in sync.
       - id: mypy-type-check
         name: mypy (type checking)
-        entry: bash -c 'uv run mypy "$@" --show-error-codes --no-error-summary' --
+        entry: bash -c 'uv run --frozen mypy "$@" --show-error-codes --no-error-summary' --
         language: system
         types: [python]
         files: ^src/omnibase_infra/.*\.py$
