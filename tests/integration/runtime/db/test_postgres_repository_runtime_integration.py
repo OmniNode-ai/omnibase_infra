@@ -31,9 +31,7 @@ The S608 suppression for this file is configured in pyproject.toml under
 
 from __future__ import annotations
 
-import asyncio
 import uuid
-from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 import pytest
@@ -59,22 +57,8 @@ if TYPE_CHECKING:
 pytestmark = [
     pytest.mark.postgres,
     pytest.mark.integration,
-    pytest.mark.asyncio,
+    pytest.mark.asyncio(loop_scope="module"),
 ]
-
-
-@pytest.fixture(scope="module")
-def event_loop() -> Iterator[asyncio.AbstractEventLoop]:
-    """Create module-scoped event loop for async fixtures.
-
-    Required because db_pool and cleanup_test_table fixtures are module-scoped,
-    but pytest-asyncio's default event_loop fixture is function-scoped.
-    This prevents ScopeMismatch errors when module-scoped async fixtures
-    try to use the event loop.
-    """
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
 
 
 def _check_postgres_configured() -> tuple[bool, str]:
