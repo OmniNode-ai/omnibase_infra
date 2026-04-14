@@ -35,6 +35,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 import pytest
+import pytest_asyncio
 
 from omnibase_infra.errors.repository import (
     RepositoryContractError,
@@ -110,7 +111,7 @@ _TEST_TABLE_NAME = f"test_runtime_{uuid.uuid4().hex[:8]}"
 _TABLE_CREATED = False
 
 
-@pytest.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module")
 async def db_pool():
     """Create a connection pool for the test module.
 
@@ -128,7 +129,7 @@ async def db_pool():
     await pool.close()
 
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest_asyncio.fixture(scope="module", autouse=True)
 async def cleanup_test_table(db_pool):
     """Clean up test table after all tests complete."""
     yield
@@ -136,7 +137,7 @@ async def cleanup_test_table(db_pool):
         await conn.execute(f"DROP TABLE IF EXISTS {_TEST_TABLE_NAME}")
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def test_table(db_pool: asyncpg.Pool):
     """Create a temporary test table for isolation (reuses same table across tests)."""
     global _TABLE_CREATED  # noqa: PLW0603  # Module-scoped fixture state

@@ -41,7 +41,7 @@ import pytest
 from tests.performance.database.conftest import QueryAnalyzer
 
 # Mark all tests in this module as performance tests
-pytestmark = [pytest.mark.performance]
+pytestmark = [pytest.mark.performance, pytest.mark.asyncio(loop_scope="module")]
 
 # =============================================================================
 # Updated_At Index Tests (PR #101 Requirement)
