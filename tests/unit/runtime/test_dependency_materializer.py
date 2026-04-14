@@ -246,9 +246,10 @@ class TestModelPostgresPoolConfig:
 class TestModelKafkaProducerConfig:
     """Tests for Kafka producer configuration."""
 
-    def test_default_values(self) -> None:
+    def test_default_values(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "broker:9092")
         config = ModelKafkaProducerConfig()
-        assert config.bootstrap_servers == "localhost:19092"
+        assert config.bootstrap_servers == "broker:9092"
         assert config.timeout_seconds == 10.0
         assert config.acks == EnumKafkaAcks.ALL
 

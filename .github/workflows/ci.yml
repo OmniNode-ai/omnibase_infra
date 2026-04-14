@@ -73,6 +73,9 @@ jobs:
       - name: Check shared enum ownership
         run: python scripts/check_shared_enum_ownership.py src/
 
+      - name: Check Kafka bootstrap no localhost fallback (OMN-8783)
+        run: uv run python scripts/ci_check_kafka_no_localhost_default.py
+
       - name: Check topic suffix exports (F56)
         run: python scripts/validation/check_topic_suffix_exports.py
 

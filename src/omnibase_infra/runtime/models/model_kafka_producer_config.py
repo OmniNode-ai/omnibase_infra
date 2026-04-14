@@ -52,21 +52,22 @@ class ModelKafkaProducerConfig(BaseModel):
         """Create config from KAFKA_* environment variables.
 
         Raises:
+            KeyError: If KAFKA_BOOTSTRAP_SERVERS is not set in the environment.
+                Containers must always have this injected via compose overlay —
+                no silent localhost fallback (OMN-8783).
             ValueError: If numeric env vars contain non-numeric values
                 or KAFKA_ACKS contains an invalid acks value.
         """
+        # OMN-8783: Hard-fail if KAFKA_BOOTSTRAP_SERVERS is absent. Containers
+        # receive this via hardcoded_env in the catalog manifest (redpanda:9092).
+        # A missing env var means the overlay was not applied — fail loudly.
+        bootstrap = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
         try:
-            # kafka-fallback-ok — these model-level defaults are overridden at runtime by env vars
-            bootstrap = os.getenv(
-                "KAFKA_BOOTSTRAP_SERVERS", "localhost:19092"
-            )  # kafka-fallback-ok
-            timeout_ms = os.getenv(
-                "KAFKA_REQUEST_TIMEOUT_MS", "10000"
-            )  # kafka-fallback-ok
-            acks_raw = os.getenv("KAFKA_ACKS", "all")  # kafka-fallback-ok
+            timeout_ms = os.getenv("KAFKA_REQUEST_TIMEOUT_MS", "10000")
+            acks_raw = os.getenv("KAFKA_ACKS", "all")
             max_request_size_raw = os.getenv(
                 "KAFKA_MAX_REQUEST_SIZE", str(4 * 1024 * 1024)
-            )  # kafka-fallback-ok
+            )
             return cls(
                 bootstrap_servers=bootstrap,
                 timeout_seconds=float(timeout_ms) / 1000.0,

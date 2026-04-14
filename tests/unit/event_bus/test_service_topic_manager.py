@@ -59,10 +59,11 @@ def _make_provisioner(
 class TestTopicProvisioner:
     """Tests for TopicProvisioner."""
 
-    def test_init_defaults(self, contracts_root: Path) -> None:
-        """Default initialization uses environment or localhost."""
+    def test_init_defaults(self, contracts_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Default initialization reads KAFKA_BOOTSTRAP_SERVERS from env."""
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "redpanda:9092")
         manager = TopicProvisioner(contracts_root=contracts_root)
-        assert manager._bootstrap_servers is not None
+        assert manager._bootstrap_servers == "redpanda:9092"
         assert manager._request_timeout_ms == 30000
 
     def test_init_custom(self, contracts_root: Path) -> None:

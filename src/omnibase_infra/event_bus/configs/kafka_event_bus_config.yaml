@@ -34,7 +34,8 @@
 # =============================================================================
 # Kafka broker connection configuration
 # Comma-separated list of Kafka broker addresses
-bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS:-localhost:19092}"
+# OMN-8783: No localhost default — overlay must provide KAFKA_BOOTSTRAP_SERVERS.
+bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS}"
 # Environment identifier for message routing (e.g., "local", "dev", "staging", "prod")
 environment: "${KAFKA_ENVIRONMENT:-local}"
 # =============================================================================

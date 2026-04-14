@@ -247,9 +247,9 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
         else:
             import os
 
-            self._bootstrap_servers = os.environ.get(
-                "KAFKA_BOOTSTRAP_SERVERS", "localhost:19092"
-            )
+            # OMN-8783: Hard-fail if KAFKA_BOOTSTRAP_SERVERS is absent.
+            # Containers receive this via catalog hardcoded_env (redpanda:9092).
+            self._bootstrap_servers = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
 
         # Canonical topic resolver - all topic resolution delegates here
         self._topic_resolver = TopicResolver()
