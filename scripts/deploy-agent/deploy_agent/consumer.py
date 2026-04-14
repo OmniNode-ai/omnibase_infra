@@ -10,6 +10,7 @@ from typing import Any
 
 from kafka import KafkaConsumer
 
+from deploy_agent.auth import verify_command
 from deploy_agent.events import (
     TOPIC_REBUILD_REQUESTED,
     ModelRebuildRequested,
@@ -40,12 +41,13 @@ class DeployConsumer:
 
         Protocol:
         1. Poll message
-        2. Validate payload (schema, scope, services legality)
-        3. Check busy (has_active_job) -> reject "busy"
-        4. Check dedup (is_duplicate) -> reject "duplicate"
-        5. Persist job state (accepted)
-        6. Commit Kafka offset
-        7. Return (command, None)
+        2. Verify HMAC signature
+        3. Validate payload (schema, scope, services legality)
+        4. Check busy (has_active_job) -> reject "busy"
+        5. Check dedup (is_duplicate) -> reject "duplicate"
+        6. Persist job state (accepted)
+        7. Commit Kafka offset
+        8. Return (command, None)
         """
         records = self.consumer.poll(timeout_ms=1000)
         if not records:
@@ -64,7 +66,16 @@ class DeployConsumer:
         payload = msg.value
         correlation_id_str = payload.get("correlation_id", "unknown")
 
-        # Step 2: Validate payload
+        # Step 2: Verify HMAC signature
+        if not verify_command(payload):
+            logger.warning(
+                "Rejecting command (correlation_id=%s): invalid_signature",
+                correlation_id_str,
+            )
+            self.consumer.commit()
+            return None, "invalid_signature"
+
+        # Step 3: Validate payload
         try:
             cmd = ModelRebuildRequested.model_validate(payload)
         except Exception as e:  # noqa: BLE001
@@ -76,28 +87,28 @@ class DeployConsumer:
             self.consumer.commit()
             return None, "invalid_payload"
 
-        # Step 3: Check busy
+        # Step 4: Check busy
         if self.job_store.has_active_job():
             logger.info("Rejecting command %s: agent busy", cmd.correlation_id)
             self.consumer.commit()
             return None, "busy"
 
-        # Step 4: Check dedup
+        # Step 5: Check dedup
         if self.job_store.is_duplicate(cmd.correlation_id):
             logger.info("Rejecting command %s: duplicate", cmd.correlation_id)
             self.consumer.commit()
             return None, "duplicate"
 
-        # Step 5: Persist job state
+        # Step 6: Persist job state
         self.job_store.accept(
             correlation_id=cmd.correlation_id,
             command=payload,
         )
 
-        # Step 6: Commit offset
+        # Step 7: Commit offset
         self.consumer.commit()
 
-        # Step 7: Return accepted command
+        # Step 8: Return accepted command
         logger.info("Accepted command %s (scope=%s)", cmd.correlation_id, cmd.scope)
         return cmd, None
 
