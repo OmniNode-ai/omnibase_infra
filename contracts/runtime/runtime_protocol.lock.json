@@ -1,8 +1,18 @@
 {
   "schema_version": "1.0.0",
-  "package_version": "0.24.0",
-  "protocol_count": 20,
+  "package_version": "0.34.0",
+  "protocol_count": 22,
   "protocols": {
+    "ProtocolAutoWiringManifestLike": {
+      "runtime_checkable": false,
+      "method_count": 1,
+      "methods": {
+        "all_subscribe_topics": {
+          "parameters": [],
+          "return_annotation": "Iterable[str]"
+        }
+      }
+    },
     "ProtocolCapabilityProjection": {
       "runtime_checkable": true,
       "method_count": 6,
@@ -530,6 +540,58 @@
               "default": "None"
             }
           ],
+          "return_annotation": "None"
+        }
+      }
+    },
+    "ProtocolKafkaAdminLike": {
+      "runtime_checkable": false,
+      "method_count": 5,
+      "methods": {
+        "close": {
+          "parameters": [],
+          "return_annotation": "None"
+        },
+        "describe_consumer_groups": {
+          "parameters": [
+            {
+              "name": "group_ids",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "Sequence[str]",
+              "default": null
+            },
+            {
+              "name": "group_coordinator_id",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "int | None",
+              "default": "None"
+            },
+            {
+              "name": "include_authorized_operations",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "bool",
+              "default": "False"
+            }
+          ],
+          "return_annotation": "list[object]"
+        },
+        "list_consumer_groups": {
+          "parameters": [
+            {
+              "name": "broker_ids",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "Sequence[int] | None",
+              "default": "None"
+            }
+          ],
+          "return_annotation": "Sequence[tuple[str, str | None]]"
+        },
+        "start": {
+          "parameters": [],
+          "return_annotation": "None"
+        },
+        "stop": {
+          "parameters": [],
           "return_annotation": "None"
         }
       }

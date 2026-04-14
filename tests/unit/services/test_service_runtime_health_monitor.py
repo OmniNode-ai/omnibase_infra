@@ -194,14 +194,16 @@ class TestRunOnceWithKafka:
         # list_consumer_groups returns list of (group_id, protocol_type)
         admin.list_consumer_groups.return_value = [(g, "consumer") for g in groups]
 
-        # describe_consumer_groups returns {group_id: GroupMetadata}
-        described = {}
+        # describe_consumer_groups returns a list of GroupMetadata in the same
+        # order as the requested group_ids (matches AIOKafkaAdminClient behaviour
+        # and ProtocolKafkaAdminLike return type of list[object]).
+        described_list = []
         for g in groups:
             meta = MagicMock()
             meta.state = "Empty" if g in empty_groups else "Stable"
             meta.members = [] if g in empty_groups else [MagicMock()]
-            described[g] = meta
-        admin.describe_consumer_groups.return_value = described
+            described_list.append(meta)
+        admin.describe_consumer_groups.return_value = described_list
         return admin
 
     @pytest.mark.asyncio
