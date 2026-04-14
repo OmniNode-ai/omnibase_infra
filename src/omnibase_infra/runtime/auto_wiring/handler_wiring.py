@@ -243,7 +243,7 @@ def _make_projection_dispatch_callback(
                 input_data = payload.model_dump(mode="python")  # type: ignore[union-attr]  # noqa: model-dump-bare
             input_data["_db"] = adapter
             input_data["_event_type"] = event_type
-            result = handler_instance.handle(input_data)  # type: ignore[union-attr]
+            result = handler_instance.handle(input_data)  # type: ignore[union-attr, attr-defined]
             logger.debug(
                 "Projection handler completed: topic=%s event_type=%s result=%s",
                 topic,
