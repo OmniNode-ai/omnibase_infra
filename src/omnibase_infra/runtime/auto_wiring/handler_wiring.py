@@ -47,9 +47,11 @@ from omnibase_infra.runtime.auto_wiring.report import (
 
 if TYPE_CHECKING:
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+    from omnibase_infra.enums import EnumMessageCategory
     from omnibase_infra.models.dispatch.model_dispatch_result import (
         ModelDispatchResult,
     )
+    from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_infra.protocols.protocol_dispatch_engine import (
         ProtocolDispatchEngine,
     )
@@ -84,10 +86,10 @@ class PreparedWiring:
 
     dispatcher_id: str
     dispatcher: DispatcherFunc
-    category: object  # EnumMessageCategory, deferred import
+    category: EnumMessageCategory
     message_types: set[str] | None
     route_ids: list[str] = field(default_factory=list)
-    routes: list[object] = field(default_factory=list)  # list[ModelDispatchRoute]
+    routes: list[ModelDispatchRoute] = field(default_factory=list)
 
 
 def _import_handler_class(module_path: str, class_name: str) -> type:
