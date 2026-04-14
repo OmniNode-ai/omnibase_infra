@@ -702,7 +702,7 @@ def _wire_handler_entry(
 
     if _effective_container is not None:
         try:
-            handler_instance = _effective_container.get_service(handler_cls)
+            handler_instance = _effective_container.get_service(handler_cls)  # type: ignore[union-attr]
             logger.debug(
                 "Resolved %s.%s via DI container",
                 handler_ref.module,
