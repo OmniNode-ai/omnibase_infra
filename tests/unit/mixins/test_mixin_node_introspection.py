@@ -915,6 +915,138 @@ class TestMixinNodeIntrospectionTasks:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+class TestProtocolHeartbeatMethods:
+    """Verify MixinNodeIntrospection satisfies ProtocolNodeIntrospection heartbeat interface.
+
+    OMN-8691: The protocol requires start_heartbeat_task() / stop_heartbeat_task().
+    The mixin only exposed start_introspection_tasks() / stop_introspection_tasks(),
+    causing RuntimeHostProcess to silently fail on the protocol call and leaving
+    the introspection topic stale after restart.
+    """
+
+    async def test_start_heartbeat_task_method_exists(self) -> None:
+        """MixinNodeIntrospection must expose start_heartbeat_task()."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
+            event_bus=None,
+        )
+        node.initialize_introspection(config)
+        assert hasattr(node, "start_heartbeat_task"), (
+            "MixinNodeIntrospection must implement start_heartbeat_task() "
+            "to satisfy ProtocolNodeIntrospection (OMN-8691)"
+        )
+
+    async def test_stop_heartbeat_task_method_exists(self) -> None:
+        """MixinNodeIntrospection must expose stop_heartbeat_task()."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
+            event_bus=None,
+        )
+        node.initialize_introspection(config)
+        assert hasattr(node, "stop_heartbeat_task"), (
+            "MixinNodeIntrospection must implement stop_heartbeat_task() "
+            "to satisfy ProtocolNodeIntrospection (OMN-8691)"
+        )
+
+    async def test_start_heartbeat_task_starts_loop(self) -> None:
+        """start_heartbeat_task() must start the periodic heartbeat loop."""
+        node = MockNode()
+        event_bus = MockEventBus()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
+            event_bus=event_bus,
+        )
+        node.initialize_introspection(config)
+
+        await node.start_heartbeat_task()
+        try:
+            assert node._heartbeat_task is not None
+            assert not node._heartbeat_task.done()
+        finally:
+            await node.stop_heartbeat_task()
+
+    async def test_start_heartbeat_task_is_idempotent(self) -> None:
+        """Calling start_heartbeat_task() twice must not create duplicate tasks."""
+        node = MockNode()
+        event_bus = MockEventBus()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
+            event_bus=event_bus,
+        )
+        node.initialize_introspection(config)
+
+        await node.start_heartbeat_task()
+        first_task = node._heartbeat_task
+        await node.start_heartbeat_task()
+        assert node._heartbeat_task is first_task, (
+            "start_heartbeat_task() must be idempotent — second call must not "
+            "replace the running task"
+        )
+        await node.stop_heartbeat_task()
+
+    async def test_stop_heartbeat_task_cancels_loop(self) -> None:
+        """stop_heartbeat_task() must cancel the heartbeat loop and clear the task."""
+        node = MockNode()
+        event_bus = MockEventBus()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
+            event_bus=event_bus,
+        )
+        node.initialize_introspection(config)
+
+        await node.start_heartbeat_task()
+        assert node._heartbeat_task is not None
+
+        await node.stop_heartbeat_task()
+        assert node._heartbeat_task is None
+
+    async def test_stop_heartbeat_task_safe_when_not_started(self) -> None:
+        """stop_heartbeat_task() must be safe to call before start."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
+            event_bus=None,
+        )
+        node.initialize_introspection(config)
+        # Must not raise
+        await node.stop_heartbeat_task()
+
+    async def test_protocol_conformance(self) -> None:
+        """MixinNodeIntrospection must satisfy ProtocolNodeIntrospection runtime check."""
+        from omnibase_infra.protocols.protocol_node_introspection import (
+            ProtocolNodeIntrospection,
+        )
+
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
+            event_bus=None,
+        )
+        node.initialize_introspection(config)
+        assert isinstance(node, ProtocolNodeIntrospection), (
+            "MixinNodeIntrospection must satisfy ProtocolNodeIntrospection "
+            "at runtime (OMN-8691)"
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 class TestMixinNodeIntrospectionGracefulDegradation:
     """Tests for graceful degradation on errors."""
 

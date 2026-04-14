@@ -2905,6 +2905,41 @@ class MixinNodeIntrospection:
             extra={"node_id": self._introspection_node_id},
         )
 
+    async def start_heartbeat_task(self) -> None:
+        """Start the periodic heartbeat publishing task (ProtocolNodeIntrospection).
+
+        Satisfies ProtocolNodeIntrospection.start_heartbeat_task(). Delegates to
+        start_introspection_tasks(enable_heartbeat=True, enable_registry_listener=False)
+        so RuntimeHostProcess can call the protocol method without knowing about
+        the broader start_introspection_tasks API.
+
+        Idempotent — safe to call multiple times; will not create duplicate tasks.
+
+        OMN-8691: Missing method caused RuntimeHostProcess to silently fail the
+        protocol call and left the introspection topic stale after every restart.
+        """
+        await self.start_introspection_tasks(
+            enable_heartbeat=True,
+            enable_registry_listener=False,
+        )
+
+    async def stop_heartbeat_task(self) -> None:
+        """Stop the periodic heartbeat publishing task (ProtocolNodeIntrospection).
+
+        Satisfies ProtocolNodeIntrospection.stop_heartbeat_task(). Cancels only
+        the heartbeat task, leaving any registry listener and ACK listener running.
+        Safe to call even if the task was never started.
+
+        OMN-8691: Symmetric teardown companion to start_heartbeat_task().
+        """
+        if self._heartbeat_task is not None:
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            self._heartbeat_task = None
+
     def invalidate_introspection_cache(self) -> None:
         """Invalidate the introspection cache.
 
