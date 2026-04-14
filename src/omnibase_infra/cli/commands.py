@@ -715,5 +715,14 @@ def _print_result(name: str, result: object) -> None:
 cli.add_command(artifact_reconcile_cmd)
 
 
+# =============================================================================
+# Environment Commands (OMN-7528)
+# =============================================================================
+
+from omnibase_infra.cli.cli_env import env_group
+
+cli.add_command(env_group)
+
+
 if __name__ == "__main__":
     cli()
