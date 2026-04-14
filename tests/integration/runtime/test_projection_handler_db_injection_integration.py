@@ -18,10 +18,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
-    _build_sync_db_adapter,
     _make_projection_dispatch_callback,
     _read_db_io_tables,
-    _wire_handler_entry,
 )
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelContractVersion,

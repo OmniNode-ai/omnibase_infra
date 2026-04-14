@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -62,15 +63,18 @@ def test_read_db_io_tables_returns_empty_on_missing_file() -> None:
 
 @pytest.mark.unit
 def test_standard_callback_calls_async_handle() -> None:
-    handler = MagicMock()
+    received: list[object] = []
 
-    async def fake_handle(envelope: object) -> None:
-        return None
+    class FakeHandler:
+        async def handle(self, envelope: object) -> None:
+            received.append(envelope)
 
-    handler.handle = fake_handle
+    handler = FakeHandler()
     callback = _make_dispatch_callback(handler)
     envelope = MagicMock()
     asyncio.run(callback(envelope))
+    assert len(received) == 1
+    assert received[0] is envelope
 
 
 # ---------------------------------------------------------------------------
@@ -145,8 +149,10 @@ def test_projection_callback_maps_introspection_event_type() -> None:
 
 
 @pytest.mark.unit
-def test_projection_callback_skips_when_db_url_missing() -> None:
-    """When DB URL env var is absent, handler is NOT called and no exception is raised."""
+def test_projection_callback_skips_when_db_url_missing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """When DB URL env var is absent, handler is NOT called and error is logged."""
     call_count = [0]
 
     class FakeHandler:
@@ -162,16 +168,22 @@ def test_projection_callback_skips_when_db_url_missing() -> None:
     envelope.topic = "onex.evt.platform.node-heartbeat.v1"
     envelope.payload = {}
 
-    with patch(_PATCH_ENVIRON_GET, return_value=""):
-        result = asyncio.run(callback(envelope))
+    with caplog.at_level(
+        logging.ERROR, logger="omnibase_infra.runtime.auto_wiring.handler_wiring"
+    ):
+        with patch(_PATCH_ENVIRON_GET, return_value=""):
+            result = asyncio.run(callback(envelope))
 
     assert result is None
     assert call_count[0] == 0
+    assert any("not set" in r.message for r in caplog.records)
 
 
 @pytest.mark.unit
-def test_projection_callback_logs_type_error_not_raises() -> None:
-    """TypeError from handler is logged, not propagated."""
+def test_projection_callback_logs_type_error_not_raises(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """TypeError from handler is logged (not propagated), and log entry is emitted."""
 
     class BrokenHandler:
         def handle(self, input_data: dict) -> dict:
@@ -186,11 +198,15 @@ def test_projection_callback_logs_type_error_not_raises() -> None:
     envelope.payload = {}
     fake_adapter = MagicMock()
 
-    with patch(
-        _PATCH_ENVIRON_GET,
-        return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+    with caplog.at_level(
+        logging.ERROR, logger="omnibase_infra.runtime.auto_wiring.handler_wiring"
     ):
-        with patch(_PATCH_BUILD_ADAPTER, return_value=fake_adapter):
-            result = asyncio.run(callback(envelope))
+        with patch(
+            _PATCH_ENVIRON_GET,
+            return_value="postgresql://user:pass@host:5432/omnidash_analytics",
+        ):
+            with patch(_PATCH_BUILD_ADAPTER, return_value=fake_adapter):
+                result = asyncio.run(callback(envelope))
 
     assert result is None
+    assert any("TypeError" in r.message for r in caplog.records)

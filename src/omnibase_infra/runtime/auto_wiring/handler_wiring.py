@@ -229,7 +229,12 @@ def _make_projection_dispatch_callback(
         if db_tables
         else "omnidash_analytics"
     )
-    db_url_env = _DB_URL_ENV_MAP.get(database, "OMNIDASH_ANALYTICS_DB_URL")
+    if database not in _DB_URL_ENV_MAP:
+        raise ValueError(
+            f"Unknown database {database!r} in contract db_io — "
+            f"must be one of {sorted(_DB_URL_ENV_MAP)!r}"
+        )
+    db_url_env = _DB_URL_ENV_MAP[database]
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
@@ -246,7 +251,12 @@ def _make_projection_dispatch_callback(
             adapter = _build_sync_db_adapter(db_url)
             topic = getattr(envelope, "topic", "") or ""
             topic_segment = topic.split(".")[-2] if "." in topic else topic
-            event_type = _TOPIC_TO_EVENT_TYPE.get(topic_segment, "introspection")
+            if topic_segment not in _TOPIC_TO_EVENT_TYPE:
+                raise ValueError(
+                    f"Unknown topic segment {topic_segment!r} from topic {topic!r} — "
+                    f"must be one of {sorted(_TOPIC_TO_EVENT_TYPE)!r}"
+                )
+            event_type = _TOPIC_TO_EVENT_TYPE[topic_segment]
             payload = getattr(envelope, "payload", None)
             input_data: dict[str, object] = (
                 dict(payload) if isinstance(payload, dict) else {}
@@ -265,18 +275,17 @@ def _make_projection_dispatch_callback(
         except TypeError as exc:
             logger.error(
                 "Projection handler TypeError (likely missing _db or _event_type): "
-                "handler=%s topic=%s error=%s",
-                type(handler_instance).__name__,
-                getattr(envelope, "topic", "unknown"),
-                exc,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.error(
-                "Projection handler error: handler=%s topic=%s error_type=%s error=%s",
+                "handler=%s topic=%s error_type=%s",
                 type(handler_instance).__name__,
                 getattr(envelope, "topic", "unknown"),
                 type(exc).__name__,
-                exc,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Projection handler error: handler=%s topic=%s error_type=%s",
+                type(handler_instance).__name__,
+                getattr(envelope, "topic", "unknown"),
+                type(exc).__name__,
             )
         return None
 
