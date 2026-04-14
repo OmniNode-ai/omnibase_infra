@@ -58,6 +58,54 @@ def _run(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedProcess:
     )
 
 
+def verify_containers_up(
+    expected_containers: list[str], timeout_s: int = 120
+) -> tuple[bool, list[str]]:
+    """Poll docker ps until all expected containers are running or timeout expires."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}\t{{.State}}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "verify_containers_up: docker ps failed: %s", result.stderr[:200]
+            )
+            time.sleep(2)
+            continue
+        states = {
+            parts[0]: parts[1]
+            for line in result.stdout.strip().splitlines()
+            if (parts := line.split("\t", 1)) and len(parts) == 2
+        }
+        missing = [c for c in expected_containers if states.get(c) != "running"]
+        if not missing:
+            return True, []
+        logger.info(
+            "verify_containers_up: waiting for %d container(s): %s",
+            len(missing),
+            missing,
+        )
+        time.sleep(2)
+    # Final check to report exactly what is still not running
+    result = subprocess.run(
+        ["docker", "ps", "--format", "{{.Names}}\t{{.State}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    states = {
+        parts[0]: parts[1]
+        for line in result.stdout.strip().splitlines()
+        if (parts := line.split("\t", 1)) and len(parts) == 2
+    }
+    missing = [c for c in expected_containers if states.get(c) != "running"]
+    return False, missing
+
+
 class DeployExecutor:
     def self_update(self, *, skip: bool = False) -> None:
         """Pull and re-exec deploy-agent itself if behind origin/main.
@@ -422,6 +470,40 @@ class DeployExecutor:
         result = _run(cmd, timeout=timeout)
         if result.returncode != 0:
             raise RuntimeError(f"Docker compose up failed: {result.stderr}")
+
+        # Verify containers actually reached running state — docker compose up exits 0
+        # even when containers land in Created state (hit twice in production, 01:33 + 04:48).
+        expected = services if services else services_for_scope(scope)
+        logger.info(
+            "Verifying %d container(s) reached running state: %s",
+            len(expected),
+            expected,
+        )
+        ok, stuck = verify_containers_up(expected, timeout_s=120)
+        if not ok:
+            logger.warning(
+                "Containers stuck after compose up — attempting docker start recovery: %s",
+                stuck,
+            )
+            for name in stuck:
+                start_result = subprocess.run(
+                    ["docker", "start", name],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if start_result.returncode == 0:
+                    logger.info("docker start %s: ok", name)
+                else:
+                    logger.warning(
+                        "docker start %s failed: %s", name, start_result.stderr[:200]
+                    )
+            ok, stuck = verify_containers_up(expected, timeout_s=60)
+            if not ok:
+                raise RuntimeError(
+                    f"Containers still not running after docker start recovery: {stuck}"
+                )
+            logger.info("Recovery succeeded — all containers now running")
 
         on_phase_update(phase, PhaseStatus.SUCCESS)
 
