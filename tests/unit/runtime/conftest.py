@@ -44,12 +44,18 @@ if TYPE_CHECKING:
 def mock_wire_infrastructure() -> Generator[MagicMock, None, None]:
     """Mock wire_infrastructure_services and container to avoid wiring errors in tests.
 
-    This fixture mocks both:
+    This fixture mocks:
     1. wire_infrastructure_services - to be a no-op async function
     2. ModelONEXContainer - to have a mock service_registry with resolve_service
+    3. wire_from_manifest - to return a clean empty report (OMN-8735: auto-wiring
+       now raises on failure; kernel tests that don't test auto-wiring must skip it)
 
     Note: Returns a real RegistryProtocolBinding for handler registration to work.
     """
+    from omnibase_infra.runtime.auto_wiring.report import (
+        ModelAutoWiringReport,
+    )
+
     # Create a shared registry instance that will be used throughout the test
     shared_registry = RegistryProtocolBinding()
 
@@ -68,6 +74,14 @@ def mock_wire_infrastructure() -> Generator[MagicMock, None, None]:
         if service_class == RegistryProtocolBinding:
             return shared_registry
         return MagicMock()
+
+    async def noop_wire_from_manifest(**kwargs: object) -> ModelAutoWiringReport:
+        """Return a clean no-wiring report.
+
+        Kernel tests that don't test auto-wiring should not hit the real
+        wire_from_manifest which now raises on any failure (OMN-8735).
+        """
+        return ModelAutoWiringReport(results=(), duplicates=())
 
     with patch(
         "omnibase_infra.runtime.service_kernel.wire_infrastructure_services"
@@ -90,7 +104,15 @@ def mock_wire_infrastructure() -> Generator[MagicMock, None, None]:
             )
             mock_container.service_registry = mock_service_registry
             mock_container_cls.return_value = mock_container
-            yield mock_wire
+
+            # OMN-8735: wire_from_manifest now raises on any wiring failure.
+            # Mock it at the source module so the deferred import inside
+            # bootstrap() picks up the mock (kernel imports lazily).
+            with patch(
+                "omnibase_infra.runtime.auto_wiring.wire_from_manifest",
+                side_effect=noop_wire_from_manifest,
+            ):
+                yield mock_wire
 
 
 @pytest.fixture

@@ -2157,6 +2157,7 @@ async def bootstrap() -> int:
                     dispatch_engine=dispatch_engine,
                     event_bus=event_bus,
                     environment=environment,
+                    container=container,
                 )
 
                 # 6. Topic collision detection: warn for auto-wired topics
@@ -2178,33 +2179,36 @@ async def bootstrap() -> int:
                                     )
 
                 auto_wiring_duration = time.time() - auto_wiring_start
+
+                # Strict invariant (OMN-8735): wire_from_manifest raises on any
+                # failure, so reaching here guarantees total_failed == 0.
+                assert auto_wiring_report.total_failed == 0, (
+                    f"Auto-wiring postcondition violated: "
+                    f"total_failed={auto_wiring_report.total_failed}"
+                )
+
                 logger.info(
                     "Auto-wiring completed in %.3fs: wired=%d skipped=%d "
                     "failed=%d quarantined=%d (correlation_id=%s)",
                     auto_wiring_duration,
-                    auto_wiring_report.total_wired if auto_wiring_report else 0,
-                    auto_wiring_report.total_skipped if auto_wiring_report else 0,
-                    auto_wiring_report.total_failed if auto_wiring_report else 0,
+                    auto_wiring_report.total_wired,
+                    auto_wiring_report.total_skipped,
+                    auto_wiring_report.total_failed,
                     len(quarantined),
                     correlation_id,
                     extra={
                         "duration_seconds": auto_wiring_duration,
                         "wired": [
                             r.contract_name
-                            for r in (
-                                auto_wiring_report.results if auto_wiring_report else ()
-                            )
+                            for r in auto_wiring_report.results
                             if r.outcome.value == "wired"
                         ],
                     },
                 )
-        except Exception:  # noqa: BLE001 — boundary: auto-wiring degrades gracefully
-            logger.warning(
-                "Auto-wiring failed; continuing with explicitly registered "
-                "plugins only (correlation_id=%s)",
-                correlation_id,
-                exc_info=True,
-            )
+        except Exception:
+            # OMN-8735: auto-wiring failures are hard startup invariants — re-raise
+            # so the container exits non-zero. No swallow-and-continue.
+            raise
 
         # --- Freeze dispatch engine ---
         # All plugins and auto-wired handlers have registered their dispatchers.
