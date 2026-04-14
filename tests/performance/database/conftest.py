@@ -229,7 +229,7 @@ def _build_postgres_dsn() -> str:
     return _postgres_config.build_dsn()
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def postgres_pool() -> AsyncGenerator[asyncpg.Pool, None]:
     """Create asyncpg connection pool for database performance tests.
 
@@ -238,7 +238,7 @@ async def postgres_pool() -> AsyncGenerator[asyncpg.Pool, None]:
     avoids the overhead of creating a new pool for every test function.
 
     Note:
-        Uses @pytest_asyncio.fixture(scope="module") to ensure proper event loop
+        Uses @pytest_asyncio.fixture(scope="module", loop_scope="module") to ensure proper event loop
         handling with async fixtures at module scope.
 
     Yields:
@@ -275,7 +275,7 @@ async def postgres_pool() -> AsyncGenerator[asyncpg.Pool, None]:
     await pool.close()
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def schema_initialized(
     postgres_pool: asyncpg.Pool,
 ) -> asyncpg.Pool:
@@ -419,7 +419,7 @@ async def schema_initialized(
     return postgres_pool
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def seeded_test_data(
     schema_initialized: asyncpg.Pool,
 ) -> AsyncGenerator[dict[str, list], None]:

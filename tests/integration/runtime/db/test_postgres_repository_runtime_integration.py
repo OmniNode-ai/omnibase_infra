@@ -111,7 +111,7 @@ _TEST_TABLE_NAME = f"test_runtime_{uuid.uuid4().hex[:8]}"
 _TABLE_CREATED = False
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def db_pool():
     """Create a connection pool for the test module.
 
@@ -129,7 +129,7 @@ async def db_pool():
     await pool.close()
 
 
-@pytest_asyncio.fixture(scope="module", autouse=True)
+@pytest_asyncio.fixture(scope="module", loop_scope="module", autouse=True)
 async def cleanup_test_table(db_pool):
     """Clean up test table after all tests complete."""
     yield
