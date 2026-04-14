@@ -337,9 +337,13 @@ def _make_event_bus_callback(
     return callback
 
 
-def _derive_route_id(contract_name: str, handler_name: str) -> str:
-    """Derive a route ID from contract and handler names."""
-    return f"route.auto.{contract_name}.{handler_name}"
+def _derive_route_id(contract_name: str, handler_name: str, topic_segment: str) -> str:
+    """Derive a route ID from contract name, handler name, and topic segment.
+
+    Incorporates handler identity to prevent duplicate registrations across
+    N x M orchestrator cross-products (OMN-8735).
+    """
+    return f"route.auto.{contract_name}.{handler_name}.{topic_segment}"
 
 
 def _derive_dispatcher_id(contract_name: str, handler_name: str) -> str:
@@ -446,7 +450,9 @@ async def wire_from_manifest(
     5. Subscribe to Kafka topics via the event bus (if provided).
 
     Contracts without ``handler_routing`` or ``event_bus`` are skipped.
-    Errors on individual contracts are captured — they never abort the scan.
+    Per-contract failures are collected across the full scan; after all contracts
+    are processed, if any failures exist a ``ModelOnexError`` is raised listing
+    all of them (OMN-8735 strict invariant).
 
     Args:
         manifest: The auto-wiring manifest from discovery.
@@ -461,12 +467,26 @@ async def wire_from_manifest(
     results: list[ModelContractWiringResult] = []
 
     for contract in manifest.contracts:
-        result = await _wire_single_contract(
-            contract=contract,
-            dispatch_engine=dispatch_engine,
-            event_bus=event_bus,
-            environment=environment,
-        )
+        try:
+            result = await _wire_single_contract(
+                contract=contract,
+                dispatch_engine=dispatch_engine,
+                event_bus=event_bus,
+                environment=environment,
+            )
+        except Exception as exc:  # noqa: BLE001 — collect per-contract, raise after scan
+            logger.error(
+                "Auto-wiring contract '%s' from package '%s' raised: %s",
+                contract.name,
+                contract.package_name,
+                type(exc).__name__,
+            )
+            result = ModelContractWiringResult(
+                contract_name=contract.name,
+                package_name=contract.package_name,
+                outcome=EnumWiringOutcome.FAILED,
+                reason=f"{type(exc).__name__}: {exc}",
+            )
         results.append(result)
 
     duplicates = _detect_duplicate_topics(manifest)
@@ -491,6 +511,19 @@ async def wire_from_manifest(
         report.total_failed,
         len(report.duplicates),
     )
+
+    if report.total_failed > 0:
+        from omnibase_core.models.errors import ModelOnexError
+
+        failed_reasons = [
+            f"{r.contract_name}: {r.reason}"
+            for r in report.results
+            if r.outcome == EnumWiringOutcome.FAILED
+        ]
+        raise ModelOnexError(
+            f"Auto-wiring failed for {report.total_failed} contract(s): "
+            + "; ".join(failed_reasons)
+        )
 
     return report
 
@@ -528,10 +561,11 @@ async def _wire_single_contract(
     routes_registered: list[str] = []
     topics_subscribed: list[str] = []
     unsubscribers: list[Callable[[], Awaitable[None]]] = []
+    per_entry_failures: list[str] = []
 
-    try:
-        # Import and wire each handler from handler_routing
-        for entry in contract.handler_routing.handlers:
+    # Import and wire each handler from handler_routing; collect all failures.
+    for entry in contract.handler_routing.handlers:
+        try:
             dispatcher_id, route_ids = _wire_handler_entry(
                 contract=contract,
                 entry=entry,
@@ -540,55 +574,60 @@ async def _wire_single_contract(
             )
             dispatchers_registered.append(dispatcher_id)
             routes_registered.extend(route_ids)
+        except Exception as exc:  # noqa: BLE001 — collect per-entry, raise after scan
+            logger.error(
+                "Failed to wire handler '%s' for contract '%s' (package '%s'): %s",
+                entry.handler.name,
+                contract.name,
+                contract.package_name,
+                type(exc).__name__,
+            )
+            per_entry_failures.append(
+                f"handler={entry.handler.name}: {type(exc).__name__}: {exc}"
+            )
 
-        # Subscribe to Kafka topics via event bus
-        if event_bus is not None and contract.event_bus:
-            from omnibase_infra.enums import EnumConsumerGroupPurpose
-            from omnibase_infra.models import ModelNodeIdentity
-            from omnibase_infra.utils import compute_consumer_group_id
+    if per_entry_failures:
+        from omnibase_core.models.errors import ModelOnexError
 
-            for topic in contract.event_bus.subscribe_topics:
-                node_identity = ModelNodeIdentity(
-                    env=environment,
-                    service=contract.package_name,
-                    node_name=contract.name,
-                    version=str(contract.contract_version),
-                )
-                consumer_group = compute_consumer_group_id(
-                    node_identity, EnumConsumerGroupPurpose.CONSUME
-                )
-                callback = _make_event_bus_callback(topic, dispatch_engine)
-                typed_bus: ProtocolEventBusSubscriber = cast(
-                    "ProtocolEventBusSubscriber", event_bus
-                )
-                unsubscribe = await typed_bus.subscribe(
-                    topic=topic,
-                    node_identity=node_identity,
-                    on_message=callback,
-                )
-                unsubscribers.append(unsubscribe)
-                topics_subscribed.append(topic)
-
-                logger.info(
-                    "Auto-wired subscription: topic=%s consumer_group=%s node=%s",
-                    topic,
-                    consumer_group,
-                    contract.name,
-                )
-
-    except Exception as exc:  # noqa: BLE001 — boundary: structured diagnostics for auto-wiring
-        logger.error(
-            "Failed to auto-wire contract '%s' from package '%s': %s",
-            contract.name,
-            contract.package_name,
-            type(exc).__name__,
+        combined = "; ".join(per_entry_failures)
+        raise ModelOnexError(
+            f"Auto-wiring contract '{contract.name}' failed: {combined}"
         )
-        return ModelContractWiringResult(
-            contract_name=contract.name,
-            package_name=contract.package_name,
-            outcome=EnumWiringOutcome.FAILED,
-            reason=f"{type(exc).__name__}: {exc}",
-        )
+
+    # Subscribe to Kafka topics via event bus
+    if event_bus is not None and contract.event_bus:
+        from omnibase_infra.enums import EnumConsumerGroupPurpose
+        from omnibase_infra.models import ModelNodeIdentity
+        from omnibase_infra.utils import compute_consumer_group_id
+
+        for topic in contract.event_bus.subscribe_topics:
+            node_identity = ModelNodeIdentity(
+                env=environment,
+                service=contract.package_name,
+                node_name=contract.name,
+                version=str(contract.contract_version),
+            )
+            consumer_group = compute_consumer_group_id(
+                node_identity, EnumConsumerGroupPurpose.CONSUME
+            )
+            callback = _make_event_bus_callback(topic, dispatch_engine)
+            typed_bus: ProtocolEventBusSubscriber = cast(
+                "ProtocolEventBusSubscriber", event_bus
+            )
+            unsubscribe = await typed_bus.subscribe(
+                topic=topic,
+                node_identity=node_identity,
+                on_message=callback,
+            )
+            unsubscribers.append(unsubscribe)
+            topics_subscribed.append(topic)
+
+            logger.info(
+                "Auto-wired subscription: topic=%s consumer_group=%s node=%s",
+                topic,
+                consumer_group,
+                contract.name,
+            )
 
     return ModelContractWiringResult(
         contract_name=contract.name,
@@ -622,19 +661,66 @@ def _wire_handler_entry(
     handler_ref = entry.handler
     handler_cls = _import_handler_class(handler_ref.module, handler_ref.name)
 
-    # Inject event_bus if the handler's __init__ declares it as a keyword parameter.
-    # Handlers that accept event_bus receive the runtime event bus so they can publish
-    # phase-transition events. All other handlers are constructed with zero args.
+    # Resolve handler via DI container if available and the class has constructor deps,
+    # otherwise fall back to event_bus injection or zero-arg construction (OMN-8735).
     handler_instance: ProtocolHandleable
-    if (
-        event_bus is not None
-        and "event_bus" in inspect.signature(handler_cls).parameters
-    ):
+    try:
+        sig = inspect.signature(
+            handler_cls.__init__ if hasattr(handler_cls, "__init__") else handler_cls
+        )
+    except (ValueError, TypeError):
+        sig = inspect.signature(handler_cls)
+    params = sig.parameters
+    # Only concrete named params (POSITIONAL_OR_KEYWORD / KEYWORD_ONLY) without defaults
+    # are considered DI deps. VAR_POSITIONAL (*args) and VAR_KEYWORD (**kwargs) excluded.
+    _concrete_kinds = (
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    )
+    non_self_params = {
+        k: v
+        for k, v in params.items()
+        if k != "self"
+        and v.kind in _concrete_kinds
+        and v.default is inspect.Parameter.empty
+    }
+
+    if dispatch_engine is not None and hasattr(dispatch_engine, "_container"):
+        container = dispatch_engine._container
+        try:
+            handler_instance = container.get_service(handler_cls)
+            logger.debug(
+                "Resolved %s.%s via DI container",
+                handler_ref.module,
+                handler_ref.name,
+            )
+        except Exception:  # noqa: BLE001 — DI resolution failed; try other paths
+            if event_bus is not None and "event_bus" in non_self_params:
+                handler_instance = handler_cls(event_bus=event_bus)
+                logger.debug(
+                    "Auto-wired event_bus into %s.%s (container resolution failed)",
+                    handler_ref.module,
+                    handler_ref.name,
+                )
+            elif non_self_params:
+                # Unsatisfiable — let it raise so startup fails loudly (OMN-8735).
+                handler_instance = handler_cls()
+            else:
+                handler_instance = handler_cls()
+    elif event_bus is not None and "event_bus" in non_self_params:
         handler_instance = handler_cls(event_bus=event_bus)
         logger.debug(
             "Auto-wired event_bus into %s.%s",
             handler_ref.module,
             handler_ref.name,
+        )
+    elif non_self_params:
+        # Handler has constructor deps but no container and no event_bus — unsatisfiable.
+        # Raise immediately so startup fails loudly (OMN-8735).
+        dep_names = list(non_self_params)
+        raise TypeError(
+            f"Handler {handler_ref.module}.{handler_ref.name} requires constructor "
+            f"parameters {dep_names!r} but no DI container is available to satisfy them."
         )
     else:
         handler_instance = handler_cls()
@@ -687,7 +773,8 @@ def _wire_handler_entry(
     route_ids: list[str] = []
     if contract.event_bus:
         for topic in contract.event_bus.subscribe_topics:
-            route_id = _derive_route_id(contract.name, topic.split(".")[-2])
+            topic_segment = topic.split(".")[-2] if "." in topic else topic
+            route_id = _derive_route_id(contract.name, handler_ref.name, topic_segment)
             topic_pattern = _derive_topic_pattern_from_topic(topic)
 
             route = ModelDispatchRoute(

@@ -120,7 +120,8 @@ class TestDeriveMessageCategory:
 class TestDeriveIds:
     def test_route_id(self) -> None:
         assert (
-            _derive_route_id("my_node", "my_handler") == "route.auto.my_node.my_handler"
+            _derive_route_id("my_node", "my_handler", "my-topic")
+            == "route.auto.my_node.my_handler.my-topic"
         )
 
     def test_dispatcher_id(self) -> None:
@@ -267,8 +268,10 @@ class TestWireFromManifest:
         assert len(report.results[0].routes_registered) >= 1
 
     @pytest.mark.asyncio
-    async def test_wire_failure_import_error(self) -> None:
-        """Test that import errors are captured, not raised."""
+    async def test_wire_failure_import_error_raises(self) -> None:
+        """OMN-8735: import errors must raise, not be silently captured."""
+        from omnibase_core.models.errors import ModelOnexError
+
         handler_routing = _make_handler_routing(
             handler_name="MissingHandler",
             handler_module="nonexistent.module",
@@ -277,11 +280,101 @@ class TestWireFromManifest:
         manifest = ModelAutoWiringManifest(contracts=(contract,))
 
         engine = MagicMock()
-        report = await wire_from_manifest(manifest, engine)
-        assert report.total_failed == 1
-        assert (
-            "ModuleNotFoundError" in report.results[0].reason
-            or "ImportError" in report.results[0].reason
+        with pytest.raises(ModelOnexError):
+            await wire_from_manifest(manifest, engine)
+
+    @pytest.mark.asyncio
+    async def test_unsatisfiable_di_raises_on_startup(self) -> None:
+        """OMN-8735 negative test: handler with unsatisfiable DI deps must raise."""
+        from omnibase_core.models.errors import ModelOnexError
+        from omnibase_infra.runtime.service_message_dispatch_engine import (
+            MessageDispatchEngine,
+        )
+
+        handler_routing = _make_handler_routing(
+            handler_name="HandlerWithDeps",
+            handler_module="fake.module",
+        )
+        contract = _make_contract(handler_routing=handler_routing)
+        manifest = ModelAutoWiringManifest(contracts=(contract,))
+        engine = MessageDispatchEngine()
+
+        class HandlerWithDeps:
+            def __init__(self, required_service: object) -> None:
+                self.required_service = required_service
+
+            async def handle(self, envelope: object) -> None:
+                pass
+
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=HandlerWithDeps,
+        ):
+            with pytest.raises((ModelOnexError, TypeError)):
+                await wire_from_manifest(manifest, engine)
+
+    @pytest.mark.asyncio
+    async def test_multi_handler_orchestrator_distinct_route_ids(self) -> None:
+        """OMN-8735 positive test: N handlers x M topics produce N*M distinct route_ids."""
+        from omnibase_infra.runtime.service_message_dispatch_engine import (
+            MessageDispatchEngine,
+        )
+
+        topics = (
+            "onex.evt.platform.topic-alpha.v1",
+            "onex.evt.platform.topic-beta.v1",
+        )
+        handler_names = ["HandlerA", "HandlerB", "HandlerC"]
+
+        handlers_entries = tuple(
+            ModelHandlerRoutingEntry(
+                handler=ModelHandlerRef(name=name, module="fake.module"),
+                event_model=None,
+                operation=None,
+            )
+            for name in handler_names
+        )
+        handler_routing = ModelHandlerRouting(
+            routing_strategy="payload_type_match",
+            handlers=handlers_entries,
+        )
+        contract = _make_contract(
+            name="orchestrator_node",
+            subscribe_topics=topics,
+            handler_routing=handler_routing,
+        )
+        manifest = ModelAutoWiringManifest(contracts=(contract,))
+        engine = MessageDispatchEngine()
+
+        def make_fake_cls(name: str) -> type:
+            class FakeCls:
+                async def handle(self, envelope: object) -> None:
+                    pass
+
+            FakeCls.__name__ = name
+            return FakeCls
+
+        fake_classes = {name: make_fake_cls(name) for name in handler_names}
+
+        def fake_import(module: str, cls_name: str) -> type:
+            return fake_classes[cls_name]
+
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            side_effect=fake_import,
+        ):
+            report = await wire_from_manifest(manifest, engine)
+
+        all_route_ids: list[str] = []
+        for r in report.results:
+            all_route_ids.extend(r.routes_registered)
+
+        expected_count = len(handler_names) * len(topics)
+        assert len(all_route_ids) == expected_count, (
+            f"Expected {expected_count} route_ids, got {len(all_route_ids)}: {all_route_ids}"
+        )
+        assert len(set(all_route_ids)) == expected_count, (
+            f"Duplicate route_ids detected: {all_route_ids}"
         )
 
     @pytest.mark.asyncio
