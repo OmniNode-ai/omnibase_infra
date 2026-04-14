@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LINT="$SCRIPT_DIR/lint_topic_names.py"
 RC=0
 
-uv run python "$LINT" --scan-contracts src/omnibase_infra/nodes || RC=$?
-uv run python "$LINT" --scan-python src/omnibase_infra || RC=$?
+uv run --frozen python "$LINT" --scan-contracts src/omnibase_infra/nodes || RC=$?
+uv run --frozen python "$LINT" --scan-python src/omnibase_infra || RC=$?
 
 exit "$RC"

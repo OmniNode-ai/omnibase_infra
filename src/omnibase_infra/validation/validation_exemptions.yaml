@@ -3147,6 +3147,21 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (External Provider Identifiers)
     ticket: OMN-7766
+  # ==========================================================================
+  # ModelMachineEntry: machine_id Field Exemption (OMN-7527)
+  # ==========================================================================
+  # machine_id is a human-readable slug identifier (e.g., 'infra-server', 'm2-ultra'),
+  # not a UUID. It identifies machines in the fleet registry for log readability
+  # and operator configuration. Follows policy_id/dispatcher_id/scheduler_id pattern.
+  - file_pattern: 'model_machine_registry\.py'
+    violation_pattern: "Field 'machine_id' should use UUID"
+    reason: >
+      machine_id is a human-readable slug identifier (e.g., 'infra-server', 'm2-ultra'), not a UUID. Machine IDs appear in config/machines.yaml, CLI flags, and log messages where readability is required. UUID identifiers would degrade operator usability without providing entity-reference benefits. Consistent with policy_id, dispatcher_id, and scheduler_id patterns.
+
+    documentation:
+      - config/machines.yaml (Machine registry definitions)
+      - CLAUDE.md (Registry Naming Conventions)
+    ticket: OMN-7527
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
@@ -3279,6 +3294,29 @@ architecture_exemptions:
     documentation:
       - CLAUDE.md (Protocol File Naming)
     ticket: OMN-7656
+  # ==========================================================================
+  # ModelMachineRegistry: Domain-grouped machine registry models (OMN-7527)
+  # ==========================================================================
+  # model_machine_registry.py groups EnumMachineRole, ModelMachineEntry, and
+  # ModelMachineRegistry as a cohesive unit. All three are tightly coupled:
+  # the enum defines valid roles, the entry uses it, and the registry holds entries.
+  # Splitting would create 3 trivial files with forced cross-imports.
+  - file_pattern: 'model_machine_registry\.py'
+    violation_pattern: '\d+ models in one file'
+    reason: >
+      Domain-grouped machine registry models. ModelMachineEntry and ModelMachineRegistry define the complete machine fleet registry interface. Per CLAUDE.md domain-grouping convention for cohesive models always used together.
+
+    documentation:
+      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
+    ticket: OMN-7527
+  - file_pattern: 'model_machine_registry\.py'
+    violation_pattern: 'Mixed types in one file'
+    reason: >
+      EnumMachineRole is tightly coupled with ModelMachineEntry and ModelMachineRegistry. The enum defines the valid values for the role field; splitting it into a separate file would add cross-import complexity without benefit.
+
+    documentation:
+      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
+    ticket: OMN-7527
 union_exemptions:
   # ==========================================================================
   # ModelNodeCapabilities Config Field Exemption
