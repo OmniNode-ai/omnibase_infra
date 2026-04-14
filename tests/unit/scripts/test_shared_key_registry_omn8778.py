@@ -15,7 +15,9 @@ import pytest
 import yaml
 
 _REGISTRY_PATH = (
-    Path(__file__).resolve().parent.parent.parent.parent / "config" / "shared_key_registry.yaml"
+    Path(__file__).resolve().parent.parent.parent.parent
+    / "config"
+    / "shared_key_registry.yaml"
 )
 
 # Keys added by OMN-8778 and their expected Infisical paths.
@@ -36,7 +38,9 @@ def registry() -> dict[str, object]:
 
 class TestOMN8778SecretRegistration:
     def test_registry_file_exists(self) -> None:
-        assert _REGISTRY_PATH.exists(), f"shared_key_registry.yaml not found at {_REGISTRY_PATH}"
+        assert _REGISTRY_PATH.exists(), (
+            f"shared_key_registry.yaml not found at {_REGISTRY_PATH}"
+        )
 
     def test_registry_version_at_least_1_1(self, registry: dict[str, object]) -> None:
         version = str(registry.get("version", "0.0"))
@@ -56,7 +60,9 @@ class TestOMN8778SecretRegistration:
             f"OMN-8778 requires it to be registered there for Infisical seeding coverage."
         )
 
-    def test_no_required_key_in_bootstrap_only(self, registry: dict[str, object]) -> None:
+    def test_no_required_key_in_bootstrap_only(
+        self, registry: dict[str, object]
+    ) -> None:
         bootstrap: list[str] = registry.get("bootstrap_only", [])  # type: ignore[assignment]
         for key in _REQUIRED_KEYS:
             assert key not in bootstrap, (
