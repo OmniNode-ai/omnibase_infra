@@ -80,3 +80,36 @@ def test_generated_compose_includes_network_and_volumes() -> None:
     compose = generate_compose(resolved)
     assert "omnibase-infra-network" in compose["networks"]
     assert "postgres_data" in compose.get("volumes", {})
+
+
+@pytest.mark.unit
+def test_runtime_effects_has_omnimemory_network() -> None:
+    """runtime-effects must join omnimemory-network so PluginMemory can reach Memgraph."""
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["runtime"])
+    compose = generate_compose(resolved)
+    svc_networks = compose["services"]["runtime-effects"]["networks"]
+    assert "omnimemory-network" in svc_networks
+    assert "omnibase-infra-network" in svc_networks
+
+
+@pytest.mark.unit
+def test_extra_networks_declared_external_in_top_level() -> None:
+    """Extra networks must appear as external in the top-level networks block."""
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["runtime"])
+    compose = generate_compose(resolved)
+    top_networks = compose["networks"]
+    assert "omnimemory-network" in top_networks
+    assert top_networks["omnimemory-network"]["external"] is True
+
+
+@pytest.mark.unit
+def test_extra_networks_absent_for_services_without_them() -> None:
+    """Services without extra_networks must only be on omnibase-infra-network."""
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["core"])
+    compose = generate_compose(resolved)
+    pg_networks = compose["services"]["postgres"]["networks"]
+    assert pg_networks == ["omnibase-infra-network"]
+    assert "omnimemory-network" not in compose["networks"]

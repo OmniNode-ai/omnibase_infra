@@ -89,6 +89,11 @@ class CatalogManifest:
     stop_grace_period: str | None = None
     # Per-entry env overrides (e.g., per-entry OTEL name)
     catalog_env: dict[str, str] = field(default_factory=dict)
+    # Additional networks beyond the default omnibase-infra-network.
+    # Each entry is a network name; set external=True in the top-level compose
+    # networks block. Use when a service must reach containers on a separate
+    # compose-managed network (e.g. omnimemory-network for Memgraph).
+    extra_networks: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if isinstance(self.layer, str):
