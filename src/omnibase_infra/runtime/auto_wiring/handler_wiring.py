@@ -124,19 +124,23 @@ _TOPIC_TO_EVENT_TYPE: dict[str, str] = {
 
 
 def _read_db_io_tables(contract_path: Path) -> list[dict[str, str]]:
-    """Read db_io.db_tables from a contract YAML. Returns [] if absent."""
+    """Read db_io.db_tables from a contract YAML. Returns [] if db_io is absent.
+
+    Raises on YAML parse errors or unexpected file I/O failures so the caller
+    can mark the contract as broken rather than silently falling back to the
+    non-projection wiring path.
+    """
     try:
         import yaml  # type: ignore[import-untyped]
 
         with open(contract_path) as f:
             raw = yaml.safe_load(f)
-        if not isinstance(raw, dict):
-            return []
-        db_io = raw.get("db_io") or {}
-        return list(db_io.get("db_tables") or [])
-    except Exception as exc:  # noqa: BLE001 — I/O boundary: safe to swallow YAML parse/file errors
-        logger.warning("Failed to read db_io from %s: %s", contract_path, exc)
+    except FileNotFoundError:
         return []
+    if not isinstance(raw, dict):
+        return []
+    db_io = raw.get("db_io") or {}
+    return list(db_io.get("db_tables") or [])
 
 
 def _build_sync_db_adapter(db_url: str) -> object:
@@ -164,8 +168,13 @@ def _build_sync_db_adapter(db_url: str) -> object:
         def upsert(self, table: str, conflict_key: str, row: dict[str, object]) -> bool:
             if not _TABLE_NAME_RE.match(table):
                 raise ValueError(f"Invalid table name: {table!r}")
+            if not _TABLE_NAME_RE.match(conflict_key):
+                raise ValueError(f"Invalid conflict key: {conflict_key!r}")
             conn = self._get_conn()
             cols = list(row.keys())
+            bad_cols = [c for c in cols if not _TABLE_NAME_RE.match(str(c))]
+            if bad_cols:
+                raise ValueError(f"Invalid column names: {bad_cols!r}")
             quoted_cols = ", ".join(f'"{c}"' for c in cols)
             placeholders = ", ".join(f"%({c})s" for c in cols)
             updates = ", ".join(
@@ -192,6 +201,9 @@ def _build_sync_db_adapter(db_url: str) -> object:
             select_sql = f'SELECT * FROM "{table}"'  # noqa: S608
             params: list[object] = []
             if filters:
+                bad_keys = [k for k in filters if not _TABLE_NAME_RE.match(str(k))]
+                if bad_keys:
+                    raise ValueError(f"Invalid filter keys: {bad_keys!r}")
                 clauses = [f'"{k}" = %s' for k in filters]
                 select_sql += " WHERE " + " AND ".join(clauses)
                 params = list(filters.values())
