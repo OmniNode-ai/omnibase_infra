@@ -481,6 +481,7 @@ async def wire_from_manifest(
                 container=container,
             )
         except Exception as exc:  # noqa: BLE001 — collect per-contract, raise after scan
+            exc_summary = str(exc)[:200] if str(exc) else type(exc).__name__
             logger.error(
                 "Auto-wiring contract '%s' from package '%s' raised: %s",
                 contract.name,
@@ -491,7 +492,7 @@ async def wire_from_manifest(
                 contract_name=contract.name,
                 package_name=contract.package_name,
                 outcome=EnumWiringOutcome.FAILED,
-                reason=f"{type(exc).__name__}: {exc}",
+                reason=f"{type(exc).__name__}: {exc_summary}",
             )
         results.append(result)
 
@@ -568,9 +569,9 @@ async def _wire_single_contract(
     routes_registered: list[str] = []
     topics_subscribed: list[str] = []
     unsubscribers: list[Callable[[], Awaitable[None]]] = []
-    per_entry_failures: list[str] = []
 
-    # Import and wire each handler from handler_routing; collect all failures.
+    # Validate all handler entries before registering any side effects (CR-8735).
+    # Fail-fast on first resolution error so no partial wiring reaches the engine.
     for entry in contract.handler_routing.handlers:
         try:
             dispatcher_id, route_ids = _wire_handler_entry(
@@ -582,7 +583,8 @@ async def _wire_single_contract(
             )
             dispatchers_registered.append(dispatcher_id)
             routes_registered.extend(route_ids)
-        except Exception as exc:  # noqa: BLE001 — collect per-entry, raise after scan
+        except Exception as exc:
+            exc_summary = str(exc)[:200] if str(exc) else type(exc).__name__
             logger.error(
                 "Failed to wire handler '%s' for contract '%s' (package '%s'): %s",
                 entry.handler.name,
@@ -590,17 +592,12 @@ async def _wire_single_contract(
                 contract.package_name,
                 type(exc).__name__,
             )
-            per_entry_failures.append(
-                f"handler={entry.handler.name}: {type(exc).__name__}: {exc}"
-            )
+            from omnibase_core.models.errors import ModelOnexError
 
-    if per_entry_failures:
-        from omnibase_core.models.errors import ModelOnexError
-
-        combined = "; ".join(per_entry_failures)
-        raise ModelOnexError(
-            f"Auto-wiring contract '{contract.name}' failed: {combined}"
-        )
+            raise ModelOnexError(
+                f"Auto-wiring contract '{contract.name}' failed: "
+                f"handler={entry.handler.name}: {type(exc).__name__}: {exc_summary}"
+            ) from exc
 
     # Subscribe to Kafka topics via event bus
     if event_bus is not None and contract.event_bus:
@@ -673,10 +670,7 @@ def _wire_handler_entry(
     # Resolve handler via DI container if available and the class has constructor deps,
     # otherwise fall back to event_bus injection or zero-arg construction (OMN-8735).
     handler_instance: ProtocolHandleable
-    try:
-        sig = inspect.signature(handler_cls)
-    except (ValueError, TypeError):
-        sig = inspect.signature(handler_cls)
+    sig = inspect.signature(handler_cls)
     params = sig.parameters
     # Only concrete named params (POSITIONAL_OR_KEYWORD / KEYWORD_ONLY) without defaults
     # are considered DI deps. VAR_POSITIONAL (*args) and VAR_KEYWORD (**kwargs) excluded.
