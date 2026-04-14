@@ -3,6 +3,7 @@
 """Unit tests for MixinLlmHttpTransport.
 
 This test suite validates:
+- OpenTelemetry LLM span creation (OMN-8697)
 - HTTP status code to typed exception mapping (401, 403, 404, 429, 400, 422, 500-504)
 - 429 does NOT increment circuit breaker failure count
 - Retry-After header parsing (present, absent, unparseable, capped)
@@ -1877,3 +1878,145 @@ class TestFailClosedBehavior:
         )
 
         assert result == {"result": "ok"}
+
+
+# ── OpenTelemetry LLM Span (OMN-8697) ────────────────────────────────────
+
+
+@pytest.mark.unit
+class TestOtelLlmSpan:
+    """Verify that _execute_llm_http_call emits a gen_ai span to the active tracer.
+
+    Uses InMemorySpanExporter so we don't need a running Phoenix instance.
+    The global TracerProvider is restored after each test to avoid cross-test
+    pollution.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _install_in_memory_tracer(self) -> Generator[None, None, None]:
+        """Patch opentelemetry.trace.get_tracer to return a per-test in-memory tracer.
+
+        OTel only allows set_tracer_provider once per process. Instead, we patch
+        get_tracer directly so each test gets an isolated InMemorySpanExporter
+        without touching the global TracerProvider.
+        """
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
+        self._exporter = InMemorySpanExporter()
+        _provider = TracerProvider(resource=Resource.create({"service.name": "test"}))
+        _provider.add_span_processor(SimpleSpanProcessor(self._exporter))
+        _tracer = _provider.get_tracer("omnibase_infra.llm")
+
+        with patch("opentelemetry.trace.get_tracer", return_value=_tracer):
+            yield
+
+    async def test_span_created_on_success(self, correlation_id: UUID) -> None:
+        """A gen_ai span with model + server attributes is emitted on a successful call."""
+        response_body = {
+            "choices": [{"message": {"content": "pong"}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+        }
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _json_response(response_body)
+
+        client = _make_mock_client(handler)
+        harness = LlmTransportHarness(http_client=client)
+        payload = {
+            "model": "qwen3-coder",
+            "messages": [{"role": "user", "content": "ping"}],
+        }
+
+        await harness._execute_llm_http_call(
+            url=URL,
+            payload=payload,
+            correlation_id=correlation_id,
+        )
+
+        spans = self._exporter.get_finished_spans()
+        assert len(spans) == 1
+        span = spans[0]
+        assert span.name == "gen_ai.chat"
+        assert span.attributes["gen_ai.request.model"] == "qwen3-coder"
+        assert span.attributes["gen_ai.system"] == "openai"
+        assert span.attributes["gen_ai.operation.name"] == "chat"
+        assert span.attributes["server.address"] == URL
+
+    async def test_span_records_token_counts(self, correlation_id: UUID) -> None:
+        """Token counts from the response usage field are set as span attributes."""
+        response_body = {
+            "choices": [],
+            "usage": {"prompt_tokens": 42, "completion_tokens": 17},
+        }
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _json_response(response_body)
+
+        client = _make_mock_client(handler)
+        harness = LlmTransportHarness(http_client=client)
+        payload = {
+            "model": "deepseek-r1",
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+
+        await harness._execute_llm_http_call(
+            url=URL,
+            payload=payload,
+            correlation_id=correlation_id,
+        )
+
+        spans = self._exporter.get_finished_spans()
+        assert len(spans) == 1
+        span = spans[0]
+        assert span.attributes.get("gen_ai.usage.input_tokens") == 42
+        assert span.attributes.get("gen_ai.usage.output_tokens") == 17
+
+    async def test_span_uses_text_completion_op_without_messages(
+        self, correlation_id: UUID
+    ) -> None:
+        """Payload without 'messages' key results in 'text_completion' operation name."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _json_response({"result": "ok"})
+
+        client = _make_mock_client(handler)
+        harness = LlmTransportHarness(http_client=client)
+        payload = {"model": "qwen3-coder", "prompt": "Say hello"}
+
+        await harness._execute_llm_http_call(
+            url=URL,
+            payload=payload,
+            correlation_id=correlation_id,
+        )
+
+        spans = self._exporter.get_finished_spans()
+        assert len(spans) == 1
+        span = spans[0]
+        assert span.name == "gen_ai.text_completion"
+        assert span.attributes["gen_ai.operation.name"] == "text_completion"
+
+    async def test_span_emitted_even_on_error(self, correlation_id: UUID) -> None:
+        """A span is still finished (and recorded as error) when the call fails."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _json_response({"error": "bad request"}, status_code=400)
+
+        client = _make_mock_client(handler)
+        harness = LlmTransportHarness(http_client=client, cb_threshold=10)
+        payload = {"model": "qwen3-coder", "messages": []}
+
+        with pytest.raises(InfraRequestRejectedError):
+            await harness._execute_llm_http_call(
+                url=URL,
+                payload=payload,
+                correlation_id=correlation_id,
+                max_retries=0,
+            )
+
+        spans = self._exporter.get_finished_spans()
+        assert len(spans) == 1

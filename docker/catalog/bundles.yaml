@@ -43,6 +43,7 @@ runtime:
     - autoheal
   includes:
     - core
+    - tracing # OMN-8697: always wire Phoenix OTLP tracing with the runtime
 observability:
   description: "LLM observability — Phoenix traces and evals"
   services:
