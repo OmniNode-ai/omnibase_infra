@@ -40,6 +40,10 @@ Environment Variables:
     ONEX_LOG_LEVEL: Logging level (default: INFO)
     ONEX_ENVIRONMENT: Runtime environment name (default: local)
 
+    Removed (OMN-8784 — hard-fail if set):
+    ONEX_INPUT_TOPIC: Removed — declare topic in contract event_bus.subscribe_topics
+    ONEX_OUTPUT_TOPIC: Removed — declare topic in contract event_bus.publish_topics
+
 Note:
     This kernel uses the existing RuntimeHostProcess as the core runtime engine.
     A future refactor may integrate NodeOrchestrator as the primary execution
@@ -189,6 +193,13 @@ DEFAULT_INPUT_TOPIC = "requests"
 DEFAULT_OUTPUT_TOPIC = "responses"
 DEFAULT_GROUP_ID = "onex-runtime"
 
+# OMN-8784: Deprecated topic env vars — hard-fail if set.
+# Topics must be derived from contract subscriptions/publishes, not env vars.
+_DEPRECATED_TOPIC_ENV_VARS: tuple[str, ...] = (
+    "ONEX_INPUT_TOPIC",
+    "ONEX_OUTPUT_TOPIC",
+)
+
 # Port validation constants
 MIN_PORT = 1
 MAX_PORT = 65535
@@ -337,11 +348,13 @@ def load_runtime_config(
 
     Configuration Precedence:
         - File-based config is loaded and contract-validated first
-        - Environment variables (ONEX_GROUP_ID, ONEX_INPUT_TOPIC, ONEX_OUTPUT_TOPIC)
-          override corresponding YAML fields when a config file is present
+        - ONEX_GROUP_ID overrides consumer_group when a config file is present
+        - ONEX_INPUT_TOPIC and ONEX_OUTPUT_TOPIC are REMOVED (OMN-8784): topics must
+          be declared in node contract event_bus.subscribe_topics / event_bus.publish_topics.
+          Setting these vars now raises ProtocolConfigurationError at startup.
         - Environment overrides are re-validated against the same contract rules
           as the YAML file, preventing invalid env-var values from bypassing checks
-        - When no config file exists, environment variables and defaults are used
+        - When no config file exists, defaults are used (topic env vars still forbidden)
         - Note: Environment overrides (e.g., ONEX_ENVIRONMENT) are applied by the
           caller (bootstrap), not by this function
 
@@ -444,22 +457,32 @@ def load_runtime_config(
                 },
             )
 
+            # OMN-8784: Hard-fail if deprecated topic env vars are set.
+            # Topics must be declared in node contracts (event_bus.subscribe_topics /
+            # event_bus.publish_topics), not overridden via env vars.
+            for _deprecated_var in _DEPRECATED_TOPIC_ENV_VARS:
+                if os.environ.get(_deprecated_var) is not None:
+                    raise ProtocolConfigurationError(
+                        f"Environment variable {_deprecated_var} is set but has been removed "
+                        f"(OMN-8784). Topics must be declared in node contract "
+                        f"event_bus.subscribe_topics / event_bus.publish_topics. "
+                        f"Unset {_deprecated_var} and declare the topic in the node contract.",
+                        context=context,
+                        config_path=str(config_path),
+                    )
+
             # Environment variable overrides (highest priority per contract header).
             # Env-var values are merged into raw_config and re-validated against
             # the same contract rules that the YAML file was validated against.
             # This prevents invalid env-var values from bypassing contract checks.
             env_overrides: dict[str, str] = {}
             env_group_id = os.getenv("ONEX_GROUP_ID")
-            env_input_topic = os.getenv("ONEX_INPUT_TOPIC")
-            env_output_topic = os.getenv("ONEX_OUTPUT_TOPIC")
 
             # Reject empty-string env var overrides with a clear diagnostic.
             # An empty string passes the ``is not None`` check but would
             # produce a confusing Pydantic validation error downstream.
             _env_override_names = {
                 "ONEX_GROUP_ID": env_group_id,
-                "ONEX_INPUT_TOPIC": env_input_topic,
-                "ONEX_OUTPUT_TOPIC": env_output_topic,
             }
             for var_name, var_value in _env_override_names.items():
                 if var_value is not None and var_value.strip() == "":
@@ -473,10 +496,6 @@ def load_runtime_config(
 
             if env_group_id is not None:
                 env_overrides["consumer_group"] = env_group_id
-            if env_input_topic is not None:
-                env_overrides["input_topic"] = env_input_topic
-            if env_output_topic is not None:
-                env_overrides["output_topic"] = env_output_topic
             if env_overrides:
                 merged = {**raw_config, **env_overrides}
                 # Remove the group_id alias key if consumer_group is being overridden,
@@ -549,16 +568,45 @@ def load_runtime_config(
                 error_details=str(e),
             ) from e
 
-    # No config file - use environment variables and defaults
+    # No config file - use defaults (deprecated topic env vars hard-fail)
+    # OMN-8784: Hard-fail if deprecated topic env vars are set even in no-config path.
+    for _deprecated_var in _DEPRECATED_TOPIC_ENV_VARS:
+        if os.environ.get(_deprecated_var) is not None:
+            raise ProtocolConfigurationError(
+                f"Environment variable {_deprecated_var} is set but has been removed "
+                f"(OMN-8784). Topics must be declared in node contract "
+                f"event_bus.subscribe_topics / event_bus.publish_topics. "
+                f"Unset {_deprecated_var} and declare the topic in the node contract.",
+                context=ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="load_config",
+                    target_name=str(config_path),
+                    correlation_id=effective_correlation_id,
+                ),
+                config_path=str(config_path),
+            )
+    env_group_id = os.getenv("ONEX_GROUP_ID")
+    if env_group_id is not None and env_group_id.strip() == "":
+        raise ProtocolConfigurationError(
+            "Environment variable ONEX_GROUP_ID is set but empty. "
+            "Either unset it to use the default or provide a non-empty value.",
+            context=ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="load_config",
+                target_name=str(config_path),
+                correlation_id=effective_correlation_id,
+            ),
+            config_path=str(config_path),
+        )
     logger.info(
-        "No runtime config found at %s, using environment/defaults (correlation_id=%s)",
+        "No runtime config found at %s, using defaults (correlation_id=%s)",
         config_path,
         effective_correlation_id,
     )
     config = ModelRuntimeConfig(
-        input_topic=os.getenv("ONEX_INPUT_TOPIC", DEFAULT_INPUT_TOPIC),
-        output_topic=os.getenv("ONEX_OUTPUT_TOPIC", DEFAULT_OUTPUT_TOPIC),
-        consumer_group=os.getenv("ONEX_GROUP_ID", DEFAULT_GROUP_ID),
+        input_topic=DEFAULT_INPUT_TOPIC,
+        output_topic=DEFAULT_OUTPUT_TOPIC,
+        consumer_group=env_group_id if env_group_id is not None else DEFAULT_GROUP_ID,
     )
     logger.debug(
         "Runtime config constructed from environment/defaults (correlation_id=%s)",
@@ -632,9 +680,11 @@ async def bootstrap() -> int:
         ONEX_HTTP_PORT: Port for health check server (default: 8085)
         ONEX_LOG_LEVEL: Logging level (default: INFO)
         ONEX_ENVIRONMENT: Environment name (default: local)
-        ONEX_INPUT_TOPIC: Input topic override (default: requests)
-        ONEX_OUTPUT_TOPIC: Output topic override (default: responses)
         ONEX_GROUP_ID: Consumer group override (default: onex-runtime)
+
+        Removed (OMN-8784 — raises ProtocolConfigurationError if set):
+        ONEX_INPUT_TOPIC: Removed — declare topic in contract event_bus.subscribe_topics
+        ONEX_OUTPUT_TOPIC: Removed — declare topic in contract event_bus.publish_topics
 
     Example:
         >>> # Run bootstrap and handle exit code
