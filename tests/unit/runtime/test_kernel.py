@@ -453,6 +453,33 @@ class TestLoadRuntimeConfig:
         assert config.output_topic == "yaml-output"
         assert config.consumer_group == "valid-env-group"
 
+    def test_no_config_group_id_empty_string_raises_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ONEX_GROUP_ID empty string raises ProtocolConfigurationError in no-config path."""
+        monkeypatch.setenv("ONEX_GROUP_ID", "")
+        monkeypatch.delenv("ONEX_INPUT_TOPIC", raising=False)
+        monkeypatch.delenv("ONEX_OUTPUT_TOPIC", raising=False)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            load_runtime_config(contracts_dir=tmp_path)
+
+        error = exc_info.value
+        assert "set but empty" in str(error)
+        assert "ONEX_GROUP_ID" in str(error)
+
+    def test_no_config_group_id_valid_override_works(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ONEX_GROUP_ID valid value is accepted in no-config path."""
+        monkeypatch.setenv("ONEX_GROUP_ID", "my-test-group")
+        monkeypatch.delenv("ONEX_INPUT_TOPIC", raising=False)
+        monkeypatch.delenv("ONEX_OUTPUT_TOPIC", raising=False)
+
+        config = load_runtime_config(contracts_dir=tmp_path)
+
+        assert config.consumer_group == "my-test-group"
+
 
 @pytest.mark.skipif(not _SERVICE_REGISTRY_AVAILABLE, reason=_SKIP_REASON)
 class TestBootstrap:

@@ -585,6 +585,19 @@ def load_runtime_config(
                 ),
                 config_path=str(config_path),
             )
+    env_group_id = os.getenv("ONEX_GROUP_ID")
+    if env_group_id is not None and env_group_id.strip() == "":
+        raise ProtocolConfigurationError(
+            "Environment variable ONEX_GROUP_ID is set but empty. "
+            "Either unset it to use the default or provide a non-empty value.",
+            context=ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="load_config",
+                target_name=str(config_path),
+                correlation_id=effective_correlation_id,
+            ),
+            config_path=str(config_path),
+        )
     logger.info(
         "No runtime config found at %s, using defaults (correlation_id=%s)",
         config_path,
@@ -593,7 +606,7 @@ def load_runtime_config(
     config = ModelRuntimeConfig(
         input_topic=DEFAULT_INPUT_TOPIC,
         output_topic=DEFAULT_OUTPUT_TOPIC,
-        consumer_group=os.getenv("ONEX_GROUP_ID", DEFAULT_GROUP_ID),
+        consumer_group=env_group_id if env_group_id is not None else DEFAULT_GROUP_ID,
     )
     logger.debug(
         "Runtime config constructed from environment/defaults (correlation_id=%s)",
