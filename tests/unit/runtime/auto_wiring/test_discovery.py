@@ -330,3 +330,17 @@ class TestModelAutoWiringManifest:
         manifest = discover_contracts_from_paths([path_a])
         assert "onex.evt.platform.test-input.v1" in manifest.get_all_subscribe_topics()
         assert "onex.evt.platform.test-output.v1" in manifest.get_all_publish_topics()
+
+    @pytest.mark.unit
+    def test_protocol_method_all_subscribe_topics(self, tmp_path: Path) -> None:
+        """OMN-8854: ModelAutoWiringManifest must expose all_subscribe_topics()
+        to satisfy ProtocolAutoWiringManifestLike — the health monitor calls
+        this method directly and raises AttributeError when it is absent."""
+        dir_a = tmp_path / "node_a"
+        dir_a.mkdir()
+        path_a = _make_contract_yaml(dir_a, name="node_a", with_event_bus=True)
+
+        manifest = discover_contracts_from_paths([path_a])
+        # Must not raise AttributeError
+        topics = manifest.all_subscribe_topics()
+        assert "onex.evt.platform.test-input.v1" in topics

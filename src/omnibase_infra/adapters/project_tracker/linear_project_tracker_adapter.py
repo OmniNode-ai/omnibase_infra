@@ -44,10 +44,8 @@ def _parse_dt(value: object) -> datetime:
     return datetime.now(UTC)
 
 
-def _issue_from_mcp(  # stub-ok
-    d: dict[str, object],
-) -> ModelStubIssue:
-    """Translate a Linear MCP issue dict into the wire model shape."""
+def _issue_from_mcp(d: dict[str, object]) -> ModelStubIssue:  # stub-ok
+    """Translate a Linear MCP issue dict into ModelStubIssue wire shape."""
     state_raw = d.get("state")
     if isinstance(state_raw, dict):
         state = str(state_raw.get("name") or state_raw.get("type") or "unknown")

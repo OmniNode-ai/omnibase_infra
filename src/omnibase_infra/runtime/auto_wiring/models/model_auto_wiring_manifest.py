@@ -52,6 +52,10 @@ class ModelAutoWiringManifest(BaseModel):
                 topics.update(c.event_bus.subscribe_topics)
         return frozenset(topics)
 
+    def all_subscribe_topics(self) -> frozenset[str]:
+        """Alias satisfying ProtocolAutoWiringManifestLike (OMN-8854)."""
+        return self.get_all_subscribe_topics()
+
     def get_all_publish_topics(self) -> frozenset[str]:
         """Collect all publish topics across discovered contracts."""
         topics: set[str] = set()
