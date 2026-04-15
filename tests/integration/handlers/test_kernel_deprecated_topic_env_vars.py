@@ -10,7 +10,6 @@ ProtocolConfigurationError at startup — both with a config file and without.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -20,15 +19,16 @@ from omnibase_infra.runtime.service_kernel import load_runtime_config
 
 pytestmark = pytest.mark.integration
 
-_NONEXISTENT_CONTRACTS_DIR = Path("/tmp/onex-test-contracts-nonexistent-8784")
-
 
 class TestKernelDeprecatedTopicEnvVars:
     """OMN-8784: Verify kernel rejects deprecated topic env vars at startup."""
 
     @pytest.mark.parametrize("deprecated_var", ["ONEX_INPUT_TOPIC", "ONEX_OUTPUT_TOPIC"])
     def test_hard_fail_no_config_path(
-        self, deprecated_var: str, monkeypatch: pytest.MonkeyPatch
+        self,
+        deprecated_var: str,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         """Kernel raises ProtocolConfigurationError when deprecated topic env var is set
         and no config file exists (no-config path still enforces the guard).
@@ -36,18 +36,20 @@ class TestKernelDeprecatedTopicEnvVars:
         monkeypatch.setenv(deprecated_var, "some-topic-value")
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
-            load_runtime_config(_NONEXISTENT_CONTRACTS_DIR)
+            load_runtime_config(tmp_path / "contracts")
 
         assert deprecated_var in str(exc_info.value)
         assert "OMN-8784" in str(exc_info.value)
 
     @pytest.mark.parametrize("deprecated_var", ["ONEX_INPUT_TOPIC", "ONEX_OUTPUT_TOPIC"])
     def test_succeeds_when_env_var_absent(
-        self, deprecated_var: str, monkeypatch: pytest.MonkeyPatch
+        self,
+        deprecated_var: str,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         """Kernel loads successfully with defaults when deprecated topic env vars are unset."""
         monkeypatch.delenv(deprecated_var, raising=False)
 
-        # No config file exists — should return defaults without raising.
-        config = load_runtime_config(_NONEXISTENT_CONTRACTS_DIR)
+        config = load_runtime_config(tmp_path / "contracts")
         assert config is not None
