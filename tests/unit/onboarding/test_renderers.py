@@ -65,6 +65,7 @@ class TestRendererOnboardingMarkdown:
 
     def test_failed_step_shows_exclamation_indicator(self) -> None:
         steps = _get_standalone_steps()
+        assert len(steps) >= 2, "Need at least 2 steps to test fail indicator"
         results = [
             ModelStepResult(step_key=steps[0].step_key, passed=True, message="OK"),
             ModelStepResult(
@@ -104,6 +105,7 @@ class TestRendererOnboardingMarkdown:
 
     def test_all_steps_rendered_even_when_some_fail(self) -> None:
         steps = _get_standalone_steps()
+        assert len(steps) >= 2, "Need at least 2 steps to test mixed outcomes"
         results = [
             ModelStepResult(step_key=steps[0].step_key, passed=True, message="OK"),
             ModelStepResult(step_key=steps[1].step_key, passed=False, message="failed"),

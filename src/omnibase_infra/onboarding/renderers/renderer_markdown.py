@@ -9,6 +9,7 @@ from omnibase_infra.nodes.node_onboarding_orchestrator.models.model_step_result 
     ModelStepResult,
 )
 from omnibase_infra.onboarding.model_onboarding_step import ModelOnboardingStep
+from omnibase_infra.utils import sanitize_error_string
 
 
 class RendererOnboardingMarkdown:
@@ -55,7 +56,7 @@ class RendererOnboardingMarkdown:
                 suffix = ""
             else:
                 indicator = "[!]"
-                suffix = f" — {result.message}" if result.message else ""
+                suffix = f" — {sanitize_error_string(result.message)}" if result.message else ""
 
             lines.append(f"## {step.name}")
             lines.append("")
