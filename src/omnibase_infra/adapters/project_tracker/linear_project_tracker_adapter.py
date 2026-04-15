@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
 
 from omnibase_infra.adapters.project_tracker.model_stub_comment import ModelStubComment
 from omnibase_infra.adapters.project_tracker.model_stub_issue import ModelStubIssue
@@ -36,7 +35,7 @@ class LinearHealthStatus:
         self.diagnostics: dict[str, str] = {}
 
 
-def _parse_dt(value: Any) -> datetime:
+def _parse_dt(value: object) -> datetime:
     if isinstance(value, datetime):
         return value
     if isinstance(value, str):
@@ -45,7 +44,7 @@ def _parse_dt(value: Any) -> datetime:
     return datetime.now(UTC)
 
 
-def _issue_from_mcp(d: dict[str, Any]) -> ModelStubIssue:
+def _issue_from_mcp(d: dict[str, object]) -> ModelStubIssue:
     """Translate a Linear MCP issue dict into ModelStubIssue wire shape."""
     state_raw = d.get("state")
     if isinstance(state_raw, dict):
@@ -108,7 +107,7 @@ def _issue_from_mcp(d: dict[str, Any]) -> ModelStubIssue:
     )
 
 
-def _comment_from_mcp(d: dict[str, Any]) -> ModelStubComment:
+def _comment_from_mcp(d: dict[str, object]) -> ModelStubComment:
     user_raw = d.get("user")
     if isinstance(user_raw, dict):
         author = str(user_raw.get("name") or user_raw.get("id") or "linear-user")
@@ -124,7 +123,7 @@ def _comment_from_mcp(d: dict[str, Any]) -> ModelStubComment:
     )
 
 
-def _project_from_mcp(d: dict[str, Any]) -> ModelStubProject:
+def _project_from_mcp(d: dict[str, object]) -> ModelStubProject:
     progress_raw = d.get("progress", 0.0)
     progress = float(progress_raw) if isinstance(progress_raw, (int, float)) else 0.0
     state_raw = d.get("state")
@@ -164,14 +163,14 @@ class LinearProjectTrackerAdapter:
     def __init__(
         self,
         *,
-        mcp_get_issue: Callable[..., dict[str, Any]] | None = None,
-        mcp_list_issues: Callable[..., list[dict[str, Any]]] | None = None,
-        mcp_create_issue: Callable[..., dict[str, Any]] | None = None,
-        mcp_update_issue: Callable[..., dict[str, Any]] | None = None,
-        mcp_search_issues: Callable[..., list[dict[str, Any]]] | None = None,
-        mcp_add_comment: Callable[..., dict[str, Any]] | None = None,
-        mcp_get_project: Callable[..., dict[str, Any]] | None = None,
-        mcp_list_projects: Callable[..., list[dict[str, Any]]] | None = None,
+        mcp_get_issue: Callable[..., dict[str, object]] | None = None,
+        mcp_list_issues: Callable[..., list[dict[str, object]]] | None = None,
+        mcp_create_issue: Callable[..., dict[str, object]] | None = None,
+        mcp_update_issue: Callable[..., dict[str, object]] | None = None,
+        mcp_search_issues: Callable[..., list[dict[str, object]]] | None = None,
+        mcp_add_comment: Callable[..., dict[str, object]] | None = None,
+        mcp_get_project: Callable[..., dict[str, object]] | None = None,
+        mcp_list_projects: Callable[..., list[dict[str, object]]] | None = None,
     ) -> None:
         self._mcp_get_issue = mcp_get_issue
         self._mcp_list_issues = mcp_list_issues
@@ -203,7 +202,7 @@ class LinearProjectTrackerAdapter:
     # -- internal helpers --
 
     @staticmethod
-    def _require(callable_: Callable[..., Any] | None, name: str) -> Callable[..., Any]:
+    def _require(callable_: Callable[..., object] | None, name: str) -> Callable[..., object]:
         if callable_ is None:
             raise NotImplementedError(
                 f"LinearProjectTrackerAdapter: '{name}' callable not injected"
@@ -223,7 +222,7 @@ class LinearProjectTrackerAdapter:
         self, filters: dict[str, str] | None = None, limit: int = 50
     ) -> list[ModelStubIssue]:
         fn = self._require(self._mcp_list_issues, "mcp_list_issues")
-        kwargs: dict[str, Any] = {"limit": limit}
+        kwargs: dict[str, object] = {"limit": limit}
         if filters:
             kwargs.update(filters)
         result = fn(**kwargs)
@@ -241,7 +240,7 @@ class LinearProjectTrackerAdapter:
         team: str | None = None,
     ) -> ModelStubIssue:
         fn = self._require(self._mcp_create_issue, "mcp_create_issue")
-        kwargs: dict[str, Any] = {"title": title, "description": description}
+        kwargs: dict[str, object] = {"title": title, "description": description}
         if labels is not None:
             kwargs["labels"] = labels
         if assignee is not None:
