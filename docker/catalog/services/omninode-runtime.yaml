@@ -40,7 +40,6 @@ operational_defaults:
   KEYCLOAK_ISSUER: http://localhost:28080/realms/omninode
   ONEX_SERVICE_CLIENT_ID: onex-service
   OTEL_SERVICE_NAME: omninode-runtime-main
-  ONEX_INPUT_TOPIC: requests
   ONEX_OUTPUT_TOPIC: responses
   ONEX_GROUP_ID: onex-runtime-main
 ports:

@@ -598,7 +598,6 @@ services:
       !!merge <<: *runtime-env
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-omninode-runtime-main}
       RUNTIME_PROFILE: main
-      ONEX_INPUT_TOPIC: ${ONEX_INPUT_TOPIC:-requests}
       ONEX_OUTPUT_TOPIC: ${ONEX_OUTPUT_TOPIC:-responses}
       ONEX_GROUP_ID: ${ONEX_GROUP_ID:-onex-runtime-main}
       # OMN-2342: Gate intelligence introspection/heartbeat publishing to this
@@ -648,7 +647,6 @@ services:
       !!merge <<: *runtime-env
       OTEL_SERVICE_NAME: omninode-runtime-effects
       RUNTIME_PROFILE: effects
-      ONEX_INPUT_TOPIC: ${ONEX_EFFECTS_INPUT_TOPIC:-effect-requests}
       ONEX_OUTPUT_TOPIC: ${ONEX_EFFECTS_OUTPUT_TOPIC:-effect-responses}
       ONEX_GROUP_ID: ${ONEX_EFFECTS_GROUP_ID:-onex-runtime-effects}
       # OMN-7569: Savings estimation consumer config (env_prefix=OMNIBASE_INFRA_SAVINGS_)
@@ -702,7 +700,6 @@ services:
       !!merge <<: *runtime-env
       OTEL_SERVICE_NAME: omninode-runtime-worker
       RUNTIME_PROFILE: workers
-      ONEX_INPUT_TOPIC: ${ONEX_WORKER_INPUT_TOPIC:-worker-requests}
       ONEX_OUTPUT_TOPIC: ${ONEX_WORKER_OUTPUT_TOPIC:-worker-responses}
       ONEX_GROUP_ID: ${ONEX_WORKER_GROUP_ID:-onex-runtime-workers}
       # OMN-7569: Savings estimation consumer config (env_prefix=OMNIBASE_INFRA_SAVINGS_)

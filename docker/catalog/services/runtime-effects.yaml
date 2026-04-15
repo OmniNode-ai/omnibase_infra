@@ -39,7 +39,6 @@ operational_defaults:
   KEYCLOAK_ADMIN_CLIENT_ID: onex-admin
   KEYCLOAK_ISSUER: http://localhost:28080/realms/omninode
   ONEX_SERVICE_CLIENT_ID: onex-service
-  ONEX_INPUT_TOPIC: effect-requests
   ONEX_OUTPUT_TOPIC: effect-responses
   ONEX_GROUP_ID: onex-runtime-effects
 ports:
