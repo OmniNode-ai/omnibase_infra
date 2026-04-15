@@ -83,7 +83,9 @@ def test_no_dead_delegation_flags_in_live_config() -> None:
             continue
         for lineno, line in enumerate(text.splitlines(), 1):
             if pattern.search(line):
-                violations.append(f"{path.relative_to(repo_root)}:{lineno}: {line.strip()}")
+                violations.append(
+                    f"{path.relative_to(repo_root)}:{lineno}: {line.strip()}"
+                )
 
     assert not violations, (
         "Dead delegation flags found in live config (OMN-8779):\n"
