@@ -56,7 +56,11 @@ class RendererOnboardingMarkdown:
                 suffix = ""
             else:
                 indicator = "[!]"
-                suffix = f" — {sanitize_error_string(result.message)}" if result.message else ""
+                suffix = (
+                    f" — {sanitize_error_string(result.message)}"
+                    if result.message
+                    else ""
+                )
 
             lines.append(f"## {step.name}")
             lines.append("")
