@@ -29,9 +29,9 @@
 #   ONEX_CONTRACTS_DIR - Contract configuration directory (default: /app/contracts)
 #   ONEX_LOG_LEVEL    - Logging level (default: INFO)
 #   ONEX_ENVIRONMENT  - Environment name (default: local)
-#   ONEX_INPUT_TOPIC  - Input topic for event bus (default: requests)
-#   ONEX_OUTPUT_TOPIC - Output topic for event bus (default: responses)
 #   ONEX_GROUP_ID     - Consumer group ID (default: onex-runtime)
+#   Note: ONEX_INPUT_TOPIC and ONEX_OUTPUT_TOPIC were removed (OMN-8784).
+#         Topics must be declared in node contract event_bus.subscribe_topics / publish_topics.
 #
 # =============================================================================
 # PERFORMANCE OPTIMIZATION TIPS
@@ -305,8 +305,6 @@ ENV PYTHONUNBUFFERED=1 \
     ONEX_LOG_LEVEL=INFO \
     # Event bus configuration
     ONEX_ENVIRONMENT=local \
-    ONEX_INPUT_TOPIC=requests \
-    ONEX_OUTPUT_TOPIC=responses \
     ONEX_GROUP_ID=onex-runtime
 
 # Deployment identity env vars (stamped at build time from ARGs above).
