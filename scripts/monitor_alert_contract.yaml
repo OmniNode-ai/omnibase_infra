@@ -14,4 +14,4 @@ description: >
 
 event_bus:
   publish_topics:
-    - "onex.evt.monitor.alert-detected.v1"
+    - "onex.evt.omnibase-infra.monitor-alert-detected.v1"

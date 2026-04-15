@@ -1039,7 +1039,7 @@ class RuntimeErrorTailer(threading.Thread):
 # ---------------------------------------------------------------------------
 # Monitor alert emitter (OMN-8885)
 # ---------------------------------------------------------------------------
-# Dual-emits every Slack alert to onex.evt.monitor.alert-detected.v1.
+# Dual-emits every Slack alert to onex.evt.omnibase-infra.monitor-alert-detected.v1.
 # Gracefully degrades: if confluent-kafka is not installed or
 # KAFKA_BOOTSTRAP_SERVERS is unset, Kafka publish is silently skipped and
 # the Slack path continues unchanged.
@@ -1051,7 +1051,7 @@ def _load_monitor_alert_topic() -> str:
     Falls back to the literal string if PyYAML is missing or the file cannot
     be read, so the script can run without additional dependencies.
     """
-    _FALLBACK = "onex.evt.monitor.alert-detected.v1"
+    _FALLBACK = "onex.evt.omnibase-infra.monitor-alert-detected.v1"
     contract_path = Path(__file__).parent / "monitor_alert_contract.yaml"
     if not contract_path.exists():
         return _FALLBACK
