@@ -56,7 +56,10 @@ class LocalStubProjectTracker:
     def _load(self) -> dict[str, object]:
         if not self._state_file.exists():
             return {"issues": {}, "projects": {}, "comments": {}, "counter": 0}
-        return json.loads(self._state_file.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
+        data: dict[str, object] = json.loads(
+            self._state_file.read_text(encoding="utf-8")
+        )
+        return data
 
     def _save(self, state: dict[str, object]) -> None:
         self._state_root.mkdir(parents=True, exist_ok=True)
@@ -65,6 +68,10 @@ class LocalStubProjectTracker:
         tmp.replace(self._state_file)
 
     def _issue_from_dict(self, d: dict[str, object]) -> ModelStubIssue:
+        raw_labels = d.get("labels", [])
+        labels: list[str] = (
+            [str(x) for x in raw_labels] if isinstance(raw_labels, list) else []
+        )
         return ModelStubIssue(
             id=str(d["id"]),
             identifier=str(d["identifier"]),
@@ -75,7 +82,7 @@ class LocalStubProjectTracker:
             state=str(d.get("state", "todo")),
             priority=str(d["priority"]) if d.get("priority") is not None else None,
             assignee=str(d["assignee"]) if d.get("assignee") is not None else None,
-            labels=list(d.get("labels", [])),  # type: ignore[arg-type]
+            labels=labels,
             team=str(d["team"]) if d.get("team") is not None else None,
             project_id=str(d["project_id"])
             if d.get("project_id") is not None
@@ -94,6 +101,10 @@ class LocalStubProjectTracker:
         )
 
     def _project_from_dict(self, d: dict[str, object]) -> ModelStubProject:
+        raw_progress = d.get("progress", 0.0)
+        progress = (
+            float(raw_progress) if isinstance(raw_progress, (int, float)) else 0.0
+        )
         return ModelStubProject(
             id=str(d["id"]),
             name=str(d["name"]),
@@ -101,7 +112,7 @@ class LocalStubProjectTracker:
             if d.get("description") is not None
             else None,
             state=str(d["state"]) if d.get("state") is not None else None,
-            progress=float(d.get("progress", 0.0)),  # type: ignore[arg-type]
+            progress=progress,
             url=str(d["url"]) if d.get("url") is not None else None,
         )
 
@@ -130,8 +141,9 @@ class LocalStubProjectTracker:
             state = self._load()
         issues_map = state.get("issues", {})
         issues = [
-            self._issue_from_dict(v)  # type: ignore[arg-type]
+            self._issue_from_dict(v)
             for v in (issues_map.values() if isinstance(issues_map, dict) else [])
+            if isinstance(v, dict)
         ]
         if filters:
             for key, val in filters.items():
@@ -143,9 +155,10 @@ class LocalStubProjectTracker:
             state = self._load()
         issues_map = state.get("issues", {})
         for d in issues_map.values() if isinstance(issues_map, dict) else []:
-            row = d  # type: ignore[assignment]
-            if row.get("id") == issue_id or row.get("identifier") == issue_id:
-                return self._issue_from_dict(row)
+            if not isinstance(d, dict):
+                continue
+            if d.get("id") == issue_id or d.get("identifier") == issue_id:
+                return self._issue_from_dict(d)
         raise KeyError(f"Issue not found: {issue_id}")
 
     async def create_issue(
@@ -159,7 +172,10 @@ class LocalStubProjectTracker:
     ) -> ModelStubIssue:
         with self._lock:
             state = self._load()
-            counter = int(state.get("counter", 0)) + 1
+            raw_counter = state.get("counter", 0)
+            counter = (
+                int(raw_counter) if isinstance(raw_counter, (int, float, str)) else 0
+            ) + 1
             state["counter"] = counter
             issue_id = str(uuid.uuid4())
             identifier = f"STUB-{counter}"
@@ -194,17 +210,24 @@ class LocalStubProjectTracker:
             issues_map = state.get("issues", {})
             target_key: str | None = None
             for k, d in issues_map.items() if isinstance(issues_map, dict) else []:
-                row = d  # type: ignore[assignment]
-                if row.get("id") == issue_id or row.get("identifier") == issue_id:
+                if isinstance(d, dict) and (
+                    d.get("id") == issue_id or d.get("identifier") == issue_id
+                ):
                     target_key = k
                     break
             if target_key is None:
                 raise KeyError(f"Issue not found: {issue_id}")
-            row = issues_map[target_key]  # type: ignore[assignment,index]
-            row.update(updates)  # type: ignore[union-attr]
-            row["updated_at"] = _now_iso()  # type: ignore[index]
+            if not isinstance(issues_map, dict):
+                raise KeyError(f"Issue not found: {issue_id}")
+            existing = issues_map[target_key]
+            row: dict[str, object] = (
+                dict(existing) if isinstance(existing, dict) else {}
+            )
+            row.update(updates)
+            row["updated_at"] = _now_iso()
+            issues_map[target_key] = row
             self._save(state)
-        return self._issue_from_dict(row)  # type: ignore[arg-type]
+        return self._issue_from_dict(row)
 
     async def search_issues(self, query: str, limit: int = 50) -> list[ModelStubIssue]:
         with self._lock:
@@ -212,10 +235,13 @@ class LocalStubProjectTracker:
         q = query.lower()
         issues_map = state.get("issues", {})
         results = [
-            self._issue_from_dict(d)  # type: ignore[arg-type]
+            self._issue_from_dict(d)
             for d in (issues_map.values() if isinstance(issues_map, dict) else [])
-            if q in str(d.get("title", "")).lower()  # type: ignore[union-attr]
-            or q in str(d.get("description") or "").lower()  # type: ignore[union-attr]
+            if isinstance(d, dict)
+            and (
+                q in str(d.get("title", "")).lower()
+                or q in str(d.get("description") or "").lower()
+            )
         ]
         return results[:limit]
 
@@ -224,7 +250,8 @@ class LocalStubProjectTracker:
             state = self._load()
             issues_map = state.get("issues", {})
             found = any(
-                d.get("id") == issue_id or d.get("identifier") == issue_id  # type: ignore[union-attr]
+                isinstance(d, dict)
+                and (d.get("id") == issue_id or d.get("identifier") == issue_id)
                 for d in (issues_map.values() if isinstance(issues_map, dict) else [])
             )
             if not found:
@@ -250,7 +277,9 @@ class LocalStubProjectTracker:
             state = self._load()
         projects_map = state.get("projects", {})
         if isinstance(projects_map, dict) and project_id in projects_map:
-            return self._project_from_dict(projects_map[project_id])  # type: ignore[arg-type]
+            proj = projects_map[project_id]
+            if isinstance(proj, dict):
+                return self._project_from_dict(proj)
         raise KeyError(f"Project not found: {project_id}")
 
     async def list_projects(self, limit: int = 50) -> list[ModelStubProject]:
@@ -258,8 +287,9 @@ class LocalStubProjectTracker:
             state = self._load()
         projects_map = state.get("projects", {})
         return [
-            self._project_from_dict(v)  # type: ignore[arg-type]
+            self._project_from_dict(v)
             for v in list(
                 projects_map.values() if isinstance(projects_map, dict) else []
             )[:limit]
+            if isinstance(v, dict)
         ]
