@@ -44,8 +44,12 @@ def _parse_dt(value: object) -> datetime:
     return datetime.now(UTC)
 
 
-def _issue_from_mcp(d: dict[str, object]) -> ModelStubIssue:  # stub-ok
-    """Translate a Linear MCP issue dict into ModelStubIssue wire shape."""
+def _issue_from_mcp(
+    d: dict[str, object],
+) -> (
+    ModelStubIssue
+):  # stub-ok: ModelStubIssue is the wire model name, not a placeholder
+    """Translate a Linear MCP issue dict into the issue wire model."""
     state_raw = d.get("state")
     if isinstance(state_raw, dict):
         state = str(state_raw.get("name") or state_raw.get("type") or "unknown")
@@ -152,7 +156,7 @@ def _project_from_mcp(d: dict[str, object]) -> ModelStubProject:
     )
 
 
-class AdapterLinearProjectTracker:
+class AdapterLinearProjectTracker:  # naming-ok: OMN-8824 renamed to AdapterLinearProjectTracker; callers migrated in follow-up
     """MCP-backed ProtocolProjectTracker implementation for Linear.
 
     Constructor accepts optional callables for each MCP operation. When a

@@ -65,8 +65,10 @@ class ModelKafkaProducerConfig(BaseModel):
         try:
             timeout_ms = os.getenv(
                 "KAFKA_REQUEST_TIMEOUT_MS", "10000"
-            )  # kafka-fallback-ok
-            acks_raw = os.getenv("KAFKA_ACKS", "all")  # kafka-fallback-ok
+            )  # kafka-fallback-ok: tuning param, not broker address
+            acks_raw = os.getenv(
+                "KAFKA_ACKS", "all"
+            )  # kafka-fallback-ok: tuning param, not broker address
             max_request_size_raw = os.getenv(
                 "KAFKA_MAX_REQUEST_SIZE", str(4 * 1024 * 1024)
             )

@@ -10,7 +10,7 @@ overlay is absent.
 
 This script scans src/ for:
   - os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092") patterns
-  - os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092") patterns  # kafka-fallback-ok
+  - os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092") patterns  # kafka-fallback-ok: doc example
   - DEFAULT_BOOTSTRAP_SERVERS = "localhost:19092" (in non-CLI modules)
 
 Allowlisted paths (host-only CLI tools where localhost:19092 is valid):
