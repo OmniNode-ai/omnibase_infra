@@ -614,12 +614,34 @@ jobs:
           done
           echo "Contract path pre-flight: ${CHECKED} local modules checked, ${WARNINGS} warnings, ${SKIPPED} cross-repo references skipped"
 
+  contract-sync-gate:
+    name: Contract Sync Gate (Wave C) [OMN-8915]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install gh CLI
+        run: |
+          type gh || (apt-get update -qq && apt-get install -y -qq gh)
+
+      - name: Run contract-sync gate
+        run: |
+          PR="${{ github.event.pull_request.number || github.event.merge_group.head_sha }}"
+          if [[ -z "$PR" || "$PR" == "null" ]]; then
+            echo "No PR number available — skipping in merge_group context"
+            exit 0
+          fi
+          bash scripts/validate-pr-contract-sync.sh "$PR"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   # Parallel test execution - 15 splits for ~618 tests each
   # Split strategy: 9265 tests / 15 = ~618 tests per split (~2-3 min each)
   # Reduced from 10 splits + -n auto after repeated xdist OOM crashes on shard 3
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/15)
-    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance]
+    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-compliance, contract-sync-gate]
     # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
     runs-on: >-
       ${{
@@ -898,7 +920,7 @@ jobs:
         && fromJSON('["self-hosted","omnibase-ci"]')
         || fromJSON('["ubuntu-latest"]')
       }}
-    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, compliance]
+    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, migration-integration, migration-required-check, version-pin-check, compliance, contract-sync-gate]
     if: always()
 
     steps:
@@ -918,6 +940,7 @@ jobs:
           migrationintegration="${{ needs.migration-integration.result }}"
           migrationrequiredcheck="${{ needs.migration-required-check.result }}"
           compliance="${{ needs.compliance.result }}"
+          contractsync="${{ needs.contract-sync-gate.result }}"
 
           if [[ "$gate" == "success" ]] && \
              [[ "$lint" == "success" ]] && \
@@ -932,7 +955,8 @@ jobs:
              [[ "$schemahandshake" == "success" ]] && \
              [[ "$migrationintegration" == "success" ]] && \
              [[ "$migrationrequiredcheck" == "success" ]] && \
-             [[ "$compliance" == "success" || "$compliance" == "skipped" ]]; then
+             [[ "$compliance" == "success" || "$compliance" == "skipped" ]] && \
+             [[ "$contractsync" == "success" || "$contractsync" == "skipped" ]]; then
             echo "All checks passed successfully"
             echo "CI Tests Gate (15 splits): Passed"
             echo "Code Quality: Passed"
@@ -948,6 +972,7 @@ jobs:
             echo "Migration Integration: Passed"
             echo "Writer-Migration Coupling Check: Passed"
             echo "Contract Compliance: $compliance"
+            echo "Contract Sync Gate (Wave C): $contractsync"
             exit 0
           else
             echo "Checks failed"
@@ -965,6 +990,7 @@ jobs:
             echo "Migration Integration: $migrationintegration"
             echo "Writer-Migration Coupling Check: $migrationrequiredcheck"
             echo "Contract Compliance: $compliance"
+            echo "Contract Sync Gate (Wave C): $contractsync"
             exit 1
           fi
 
