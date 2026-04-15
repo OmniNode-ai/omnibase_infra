@@ -9,19 +9,19 @@
 # IMPORTANT: Environment Variable Substitution Mechanism
 # -------------------------------------------------------
 # The ${VAR_NAME:-default} syntax in this file is NOT processed by yaml.safe_load().
-# YAML reads these as literal strings (e.g., "${KAFKA_BOOTSTRAP_SERVERS:-localhost:19092}").
+# YAML reads these as literal strings (e.g., "${KAFKA_BOOTSTRAP_SERVERS}").
 #
 # Environment variable substitution happens AFTER YAML parsing in
 # ModelKafkaEventBusConfig.apply_environment_overrides(), which:
 # 1. Loads this file with yaml.safe_load() (treats ${...} as literal strings)
 # 2. Checks os.environ for matching environment variables (KAFKA_BOOTSTRAP_SERVERS, etc.)
 # 3. Overrides config values if environment variables are set
-# 4. Falls back to the literal defaults from this file if environment variables are not set
+# 4. Raises KeyError if KAFKA_BOOTSTRAP_SERVERS is absent — no localhost fallback (OMN-8783)
 #
 # Example: If KAFKA_BOOTSTRAP_SERVERS="kafka:9092" is set in environment:
-#   - YAML loads: bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS:-localhost:19092}"
+#   - YAML loads: bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS}"
 #   - apply_environment_overrides() detects KAFKA_BOOTSTRAP_SERVERS env var
-#   - Final value: "kafka:9092" (from environment, not from ${...} syntax)
+#   - Final value: "kafka:9092" (from environment)
 #
 # The ${...} syntax is used for documentation purposes to indicate which
 # environment variables can override each configuration value.

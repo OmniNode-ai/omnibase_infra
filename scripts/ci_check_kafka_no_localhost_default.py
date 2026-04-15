@@ -37,9 +37,15 @@ from pathlib import Path
 
 # Patterns that indicate a silent localhost fallback in container-facing code
 _VIOLATION_PATTERNS = [
-    re.compile(r'os\.environ\.get\s*\(\s*"KAFKA_BOOTSTRAP_SERVERS"\s*,\s*"localhost:\d+"\s*\)'),
-    re.compile(r'os\.getenv\s*\(\s*"KAFKA_BOOTSTRAP_SERVERS"\s*,\s*"localhost:\d+"\s*\)'),
-    re.compile(r'DEFAULT_BOOTSTRAP_SERVERS\s*=\s*"localhost:\d+"'),
+    re.compile(
+        r'os\.environ\.get\s*\(\s*["\']KAFKA_BOOTSTRAP_SERVERS["\']\s*,\s*["\']localhost:\d+["\']\s*\)',
+        re.DOTALL,
+    ),
+    re.compile(
+        r'os\.getenv\s*\(\s*["\']KAFKA_BOOTSTRAP_SERVERS["\']\s*,\s*["\']localhost:\d+["\']\s*\)',
+        re.DOTALL,
+    ),
+    re.compile(r'DEFAULT_BOOTSTRAP_SERVERS\s*=\s*["\']localhost:\d+["\']'),
 ]
 
 # Host-side CLI tools where localhost fallback is allowlisted (bootstrap_only bucket)
@@ -51,8 +57,9 @@ _ALLOWLIST = [
 
 
 def _is_allowlisted(path: Path, src_root: Path) -> bool:
-    rel = str(path.relative_to(src_root))
-    return any(rel.replace("\\", "/").startswith(a) for a in _ALLOWLIST)
+    rel = path.relative_to(src_root).as_posix()
+    rel_from_pkg = rel.split("omnibase_infra/", 1)[-1]
+    return any(rel.startswith(a) or rel_from_pkg.startswith(a) for a in _ALLOWLIST)
 
 
 def check(src_root: Path) -> list[str]:

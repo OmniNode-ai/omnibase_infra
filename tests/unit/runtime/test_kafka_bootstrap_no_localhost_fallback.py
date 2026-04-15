@@ -39,12 +39,7 @@ class TestKafkaBootstrapNoLocalhostFallback:
     def test_from_env_does_not_return_localhost(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """from_env() must never silently return localhost:19092."""
+        """from_env() must raise KeyError, never silently return localhost:19092."""
         monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
-        try:
-            config = ModelKafkaProducerConfig.from_env()
-            assert "localhost" not in config.bootstrap_servers, (
-                "from_env() must not fall back to localhost when KAFKA_BOOTSTRAP_SERVERS is unset"
-            )
-        except (KeyError, ValueError):
-            pass  # Expected — hard-fail is correct behavior
+        with pytest.raises(KeyError, match="KAFKA_BOOTSTRAP_SERVERS"):
+            ModelKafkaProducerConfig.from_env()

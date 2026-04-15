@@ -60,7 +60,9 @@ class TestTopicProvisioner:
     """Tests for TopicProvisioner."""
 
     def test_init_defaults(
-        self, contracts_root: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        contracts_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Default initialization reads KAFKA_BOOTSTRAP_SERVERS from env."""
         monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "redpanda:9092")
