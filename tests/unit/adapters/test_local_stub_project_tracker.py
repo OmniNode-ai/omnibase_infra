@@ -24,7 +24,6 @@ from omnibase_infra.adapters.project_tracker.local_stub_project_tracker import (
 )
 from omnibase_infra.adapters.project_tracker.model_stub_comment import ModelStubComment
 from omnibase_infra.adapters.project_tracker.model_stub_issue import ModelStubIssue
-from omnibase_infra.adapters.project_tracker.model_stub_project import ModelStubProject
 
 
 def run(coro):  # type: ignore[return]
