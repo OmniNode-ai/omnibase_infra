@@ -7,6 +7,8 @@ Wants=network-online.target
 Type=simple
 EnvironmentFile=/home/jonah/.omnibase/.env
 Environment="MONITOR_PROJECTS=omnibase-infra,omnibase-infra-runtime"
+Environment="MONITOR_FILE_LOGS=/home/jonah/.onex_state/logs/env-sync.log:/home/jonah/.onex_state/logs/hooks.log:/home/jonah/.onex_state/logs/pipeline-trace.log"
+Environment="MONITOR_JOURNALS=deploy-agent.service"
 ExecStart=/usr/bin/python3 /home/jonah/.omnibase/infra/deployed/0.34.0/scripts/monitor_logs.py
 Restart=always
 RestartSec=10

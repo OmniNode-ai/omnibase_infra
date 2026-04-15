@@ -1660,6 +1660,200 @@ class ContainerTailer(threading.Thread):
 
 
 # ---------------------------------------------------------------------------
+# File log tailer (OMN-8871)
+# ---------------------------------------------------------------------------
+
+# Default file log sources (colon-separated env var MONITOR_FILE_LOGS overrides)
+_ONEX_STATE_DIR = Path(
+    os.environ.get("ONEX_STATE_DIR", str(Path.home() / ".onex_state"))
+)
+_DEFAULT_FILE_LOGS = [
+    str(_ONEX_STATE_DIR / "logs" / "env-sync.log"),
+    str(_ONEX_STATE_DIR / "logs" / "hooks.log"),
+    str(_ONEX_STATE_DIR / "logs" / "pipeline-trace.log"),
+]
+
+# Default journal units (comma-separated env var MONITOR_JOURNALS overrides)
+_DEFAULT_JOURNALS = ["deploy-agent.service"]
+
+# Poll interval for FileTailer (seconds)
+_FILE_POLL_INTERVAL = 1.0
+
+
+class FileTailer(threading.Thread):
+    """Tail a plain file and alert on ERROR/CRITICAL lines.
+
+    Seeks to the end of the file on start, then polls every second for new
+    content. Uses the same dedup/cooldown logic as ContainerTailer, with a
+    cooldown key of the form ``file:<basename>``.
+    """
+
+    def __init__(
+        self,
+        path: str,
+        bot_token: str,
+        channel_id: str,
+        cooldown: int,
+        dry_run: bool,
+        stop_event: threading.Event,
+    ) -> None:
+        name = f"file-{Path(path).name}"
+        super().__init__(name=name, daemon=True)
+        self.path = path
+        self.bot_token = bot_token
+        self.channel_id = channel_id
+        self.cooldown = cooldown
+        self.dry_run = dry_run
+        self.stop_event = stop_event
+        self._cooldown_key = f"file:{Path(path).name}"
+
+    def run(self) -> None:
+        p = Path(self.path)
+        print(f"[monitor] Starting FileTailer for {self.path}")
+
+        # Wait for file to exist before seeking
+        while not self.stop_event.is_set():
+            if p.exists():
+                break
+            self.stop_event.wait(timeout=_FILE_POLL_INTERVAL)
+
+        if self.stop_event.is_set():
+            return
+
+        try:
+            fh = p.open("r")
+            fh.seek(0, 2)  # seek to end
+        except OSError as exc:
+            print(f"[monitor] Cannot open {self.path}: {exc}", file=sys.stderr)
+            return
+
+        context: deque[str] = deque(maxlen=CONTEXT_LINES)
+        try:
+            while not self.stop_event.is_set():
+                line = fh.readline()
+                if not line:
+                    self.stop_event.wait(timeout=_FILE_POLL_INTERVAL)
+                    # Re-open if file was rotated (inode changed)
+                    try:
+                        current_inode = p.stat().st_ino
+                        fh_inode = os.fstat(fh.fileno()).st_ino
+                        if current_inode != fh_inode:
+                            fh.close()
+                            fh = p.open("r")
+                    except OSError:
+                        pass
+                    continue
+                line = line.rstrip()
+                context.append(line)
+                if ERROR_PATTERN.search(line) and not IGNORE_PATTERN.search(line):
+                    self._maybe_alert(list(context))
+        finally:
+            fh.close()
+            print(f"[monitor] Stopped FileTailer for {self.path}")
+
+    def _maybe_alert(self, lines: list[str]) -> None:
+        now = time.time()
+        last, count = _cooldown_read(self._cooldown_key)
+        wait = _backoff_seconds(count)
+        if now - last < wait:
+            remaining = int(wait - (now - last))
+            print(
+                f"[monitor] Rate-limited {self._cooldown_key} "
+                f"(cooldown {remaining}s, alert #{count})"
+            )
+            return
+        _cooldown_write(self._cooldown_key, now, count + 1)
+        source_label = f"file:{Path(self.path).name}"
+        post_slack(self.bot_token, self.channel_id, source_label, lines, self.dry_run)
+
+
+# ---------------------------------------------------------------------------
+# Journal tailer (OMN-8871)
+# ---------------------------------------------------------------------------
+
+
+class JournalTailer(threading.Thread):
+    """Tail a systemd journal unit and alert on ERROR/CRITICAL lines.
+
+    Uses ``journalctl --user -u <unit> -f -o cat`` to stream log lines.
+    Applies the same dedup/cooldown as FileTailer with key ``journal:<unit>``.
+    """
+
+    def __init__(
+        self,
+        unit: str,
+        bot_token: str,
+        channel_id: str,
+        cooldown: int,
+        dry_run: bool,
+        stop_event: threading.Event,
+    ) -> None:
+        super().__init__(name=f"journal-{unit}", daemon=True)
+        self.unit = unit
+        self.bot_token = bot_token
+        self.channel_id = channel_id
+        self.cooldown = cooldown
+        self.dry_run = dry_run
+        self.stop_event = stop_event
+        self._cooldown_key = f"journal:{unit}"
+
+    def run(self) -> None:
+        cmd = [
+            "journalctl",
+            "--user",
+            "-u",
+            self.unit,
+            "-f",
+            "-o",
+            "cat",
+            "-n",
+            "0",
+        ]
+        print(f"[monitor] Starting JournalTailer for {self.unit}")
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
+            print(
+                f"[monitor] Cannot tail journal for {self.unit}: {exc}",
+                file=sys.stderr,
+            )
+            return
+
+        context: deque[str] = deque(maxlen=CONTEXT_LINES)
+        try:
+            for line in proc.stdout:  # type: ignore[union-attr]
+                if self.stop_event.is_set():
+                    break
+                line = line.rstrip()
+                context.append(line)
+                if ERROR_PATTERN.search(line) and not IGNORE_PATTERN.search(line):
+                    self._maybe_alert(list(context))
+        finally:
+            proc.terminate()
+            print(f"[monitor] Stopped JournalTailer for {self.unit}")
+
+    def _maybe_alert(self, lines: list[str]) -> None:
+        now = time.time()
+        last, count = _cooldown_read(self._cooldown_key)
+        wait = _backoff_seconds(count)
+        if now - last < wait:
+            remaining = int(wait - (now - last))
+            print(
+                f"[monitor] Rate-limited {self._cooldown_key} "
+                f"(cooldown {remaining}s, alert #{count})"
+            )
+            return
+        _cooldown_write(self._cooldown_key, now, count + 1)
+        source_label = f"journal:{self.unit}"
+        post_slack(self.bot_token, self.channel_id, source_label, lines, self.dry_run)
+
+
+# ---------------------------------------------------------------------------
 # Dynamic container watcher
 # ---------------------------------------------------------------------------
 
@@ -1873,6 +2067,8 @@ class LogMonitor:
         self._tailers: dict[str, ContainerTailer] = {}
         self._pg_tailers: dict[str, PostgresErrorTailer] = {}
         self._rt_tailers: dict[str, RuntimeErrorTailer] = {}
+        self._file_tailers: dict[str, FileTailer] = {}
+        self._journal_tailers: dict[str, JournalTailer] = {}
         self._rt_emitter = RuntimeErrorEmitter(dry_run)
         self._alert_emitter = MonitorAlertEmitter(dry_run)
         self._lock = threading.Lock()
@@ -1954,6 +2150,54 @@ class LogMonitor:
             tailer.start()
             self._rt_tailers[container] = tailer
 
+    def _file_log_paths(self) -> list[str]:
+        """Return file log paths from MONITOR_FILE_LOGS env var or defaults."""
+        raw = os.environ.get("MONITOR_FILE_LOGS", "")
+        if raw:
+            return [p.strip() for p in raw.split(":") if p.strip()]
+        return list(_DEFAULT_FILE_LOGS)
+
+    def _journal_units(self) -> list[str]:
+        """Return journal units from MONITOR_JOURNALS env var or defaults."""
+        if "MONITOR_JOURNALS" not in os.environ:
+            return list(_DEFAULT_JOURNALS)
+        raw = os.environ["MONITOR_JOURNALS"]
+        return [u.strip() for u in raw.split(",") if u.strip()]
+
+    def _start_file_tailer(self, path: str) -> None:
+        with self._lock:
+            existing = self._file_tailers.get(path)
+            if existing and existing.is_alive():
+                return
+            stop_event = threading.Event()
+            tailer = FileTailer(
+                path=path,
+                bot_token=self.bot_token,
+                channel_id=self.channel_id,
+                cooldown=self.cooldown,
+                dry_run=self.dry_run,
+                stop_event=stop_event,
+            )
+            tailer.start()
+            self._file_tailers[path] = tailer
+
+    def _start_journal_tailer(self, unit: str) -> None:
+        with self._lock:
+            existing = self._journal_tailers.get(unit)
+            if existing and existing.is_alive():
+                return
+            stop_event = threading.Event()
+            tailer = JournalTailer(
+                unit=unit,
+                bot_token=self.bot_token,
+                channel_id=self.channel_id,
+                cooldown=self.cooldown,
+                dry_run=self.dry_run,
+                stop_event=stop_event,
+            )
+            tailer.start()
+            self._journal_tailers[unit] = tailer
+
     def run(self) -> None:
         # Start tailers for already-running project containers
         for container in self._get_project_containers():
@@ -1964,6 +2208,14 @@ class LogMonitor:
         # Start postgres error tailers for any running postgres containers
         for pg_container in _discover_postgres_containers():
             self._start_pg_tailer(pg_container)
+
+        # Start file tailers (OMN-8871)
+        for path in self._file_log_paths():
+            self._start_file_tailer(path)
+
+        # Start journal tailers (OMN-8871)
+        for unit in self._journal_units():
+            self._start_journal_tailer(unit)
 
         # Start restart watcher (OMN-3596)
         _restart_stop = threading.Event()
