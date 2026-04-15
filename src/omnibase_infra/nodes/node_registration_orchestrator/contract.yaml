@@ -106,12 +106,6 @@ feature_flags:
     env_var: OMNIMEMORY_ENABLED
     category: infrastructure
     owner: omnimemory
-  - name: local_delegation
-    description: "Enable local agent delegation"
-    default_value: false
-    env_var: ENABLE_LOCAL_DELEGATION
-    category: intelligence
-    owner: omnibase_infra
   - name: phoenix_otel
     description: "Enable Phoenix OpenTelemetry tracing"
     default_value: false
