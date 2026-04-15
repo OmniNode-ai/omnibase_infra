@@ -5,7 +5,7 @@
 
 Single authoritative surface for selecting a `ProtocolProjectTracker`
 implementation. Token present (LINEAR_API_KEY or LINEAR_TOKEN) →
-`LinearProjectTrackerAdapter`. Absent → `LocalStubProjectTracker`.
+`AdapterLinearProjectTracker`. Absent → `LocalStubProjectTracker`.
 Fail-soft: NEVER raises; on any construction error (missing adapter
 module, constructor failure, bad token) falls back to `LocalStubProjectTracker`
 with a warning log.
@@ -47,10 +47,10 @@ def resolve_project_tracker(
     if token and not _force_construction_error:
         try:
             from omnibase_infra.adapters.project_tracker.linear_project_tracker_adapter import (
-                LinearProjectTrackerAdapter,
+                AdapterLinearProjectTracker,
             )
 
-            return LinearProjectTrackerAdapter()
+            return AdapterLinearProjectTracker()
         except Exception as exc:  # noqa: BLE001 — fail-soft is the contract
             # Log only the exception class name; never interpolate `exc` body to
             # avoid leaking upstream secrets (tokens, connection strings, PII).

@@ -44,7 +44,7 @@ def _parse_dt(value: object) -> datetime:
     return datetime.now(UTC)
 
 
-def _issue_from_mcp(d: dict[str, object]) -> ModelStubIssue:
+def _issue_from_mcp(d: dict[str, object]) -> ModelStubIssue:  # stub-ok
     """Translate a Linear MCP issue dict into ModelStubIssue wire shape."""
     state_raw = d.get("state")
     if isinstance(state_raw, dict):
@@ -152,7 +152,7 @@ def _project_from_mcp(d: dict[str, object]) -> ModelStubProject:
     )
 
 
-class LinearProjectTrackerAdapter:
+class AdapterLinearProjectTracker:
     """MCP-backed ProtocolProjectTracker implementation for Linear.
 
     Constructor accepts optional callables for each MCP operation. When a
@@ -212,7 +212,7 @@ class LinearProjectTrackerAdapter:
     ) -> Callable[..., object]:
         if callable_ is None:
             raise NotImplementedError(
-                f"LinearProjectTrackerAdapter: '{name}' callable not injected"
+                f"AdapterLinearProjectTracker: '{name}' callable not injected"
             )
         return callable_
 

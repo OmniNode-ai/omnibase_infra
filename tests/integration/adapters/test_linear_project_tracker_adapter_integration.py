@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Integration tests for LinearProjectTrackerAdapter.
+"""Integration tests for AdapterLinearProjectTracker.
 
 Exercises the adapter end-to-end with fake MCP callables that simulate a
 live Linear MCP server. Verifies issue creation → fetch → update →
@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 import pytest
 
 from omnibase_infra.adapters.project_tracker.linear_project_tracker_adapter import (
-    LinearProjectTrackerAdapter,
+    AdapterLinearProjectTracker,
 )
 from omnibase_infra.adapters.project_tracker.model_stub_issue import ModelStubIssue
 
@@ -92,7 +92,7 @@ class _FakeLinearMcp:
 @pytest.mark.asyncio
 async def test_full_issue_lifecycle() -> None:
     mcp = _FakeLinearMcp()
-    adapter = LinearProjectTrackerAdapter(
+    adapter = AdapterLinearProjectTracker(
         mcp_create_issue=mcp.create_issue,
         mcp_get_issue=mcp.get_issue,
         mcp_update_issue=mcp.update_issue,
@@ -134,7 +134,7 @@ async def test_full_issue_lifecycle() -> None:
 @pytest.mark.asyncio
 async def test_get_issue_missing_raises_key_error() -> None:
     mcp = _FakeLinearMcp()
-    adapter = LinearProjectTrackerAdapter(mcp_get_issue=mcp.get_issue)
+    adapter = AdapterLinearProjectTracker(mcp_get_issue=mcp.get_issue)
     await adapter.connect()
 
     with pytest.raises(KeyError):
@@ -145,7 +145,7 @@ async def test_get_issue_missing_raises_key_error() -> None:
 @pytest.mark.asyncio
 async def test_add_comment_on_missing_issue_raises_key_error() -> None:
     mcp = _FakeLinearMcp()
-    adapter = LinearProjectTrackerAdapter(mcp_add_comment=mcp.add_comment)
+    adapter = AdapterLinearProjectTracker(mcp_add_comment=mcp.add_comment)
     await adapter.connect()
 
     with pytest.raises(KeyError):
