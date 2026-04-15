@@ -23,7 +23,9 @@ pytestmark = pytest.mark.integration
 class TestKernelDeprecatedTopicEnvVars:
     """OMN-8784: Verify kernel rejects deprecated topic env vars at startup."""
 
-    @pytest.mark.parametrize("deprecated_var", ["ONEX_INPUT_TOPIC", "ONEX_OUTPUT_TOPIC"])
+    @pytest.mark.parametrize(
+        "deprecated_var", ["ONEX_INPUT_TOPIC", "ONEX_OUTPUT_TOPIC"]
+    )
     def test_hard_fail_no_config_path(
         self,
         deprecated_var: str,
@@ -41,7 +43,9 @@ class TestKernelDeprecatedTopicEnvVars:
         assert deprecated_var in str(exc_info.value)
         assert "OMN-8784" in str(exc_info.value)
 
-    @pytest.mark.parametrize("deprecated_var", ["ONEX_INPUT_TOPIC", "ONEX_OUTPUT_TOPIC"])
+    @pytest.mark.parametrize(
+        "deprecated_var", ["ONEX_INPUT_TOPIC", "ONEX_OUTPUT_TOPIC"]
+    )
     def test_succeeds_when_env_var_absent(
         self,
         deprecated_var: str,
