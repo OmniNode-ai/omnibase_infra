@@ -33,10 +33,8 @@ logger = logging.getLogger(__name__)
 # Feature flags toggled between ONEX_ON and ONEX_OFF modes.
 _ONEX_FEATURE_FLAGS: list[str] = [
     "ENABLE_REAL_TIME_EVENTS",
-    "ENABLE_PATTERN_ENFORCEMENT",
     "ENABLE_CONSUMER_HEALTH_EMITTER",
     "ENABLE_CONSUMER_HEALTH_TRIAGE",
-    "ENABLE_LOCAL_INFERENCE_PIPELINE",
 ]
 
 

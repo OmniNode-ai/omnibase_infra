@@ -12,10 +12,8 @@ documents the expected behavior and provides a verification function.
 | Flag                           | ON behavior                          | OFF behavior (baseline)              |
 |--------------------------------|--------------------------------------|--------------------------------------|
 | ENABLE_REAL_TIME_EVENTS        | Events emitted to Kafka in real time | Events still flow; no ONEX enrichment|
-| ENABLE_PATTERN_ENFORCEMENT     | Token/pattern tracking active        | Pattern matching skipped             |
 | ENABLE_CONSUMER_HEALTH_EMITTER | Health metrics emitted periodically  | No health metric emission            |
 | ENABLE_CONSUMER_HEALTH_TRIAGE  | Auto-triage on consumer lag          | No triage actions                    |
-| ENABLE_LOCAL_INFERENCE_PIPELINE| Local LLM inference pipeline active  | LLM pipeline bypassed                |
 
 ## Event Tagging in Baseline Mode
 
@@ -48,10 +46,8 @@ logger = logging.getLogger(__name__)
 # Flags that gate ONEX pipeline behavior
 ONEX_FEATURE_FLAGS: list[str] = [
     "ENABLE_REAL_TIME_EVENTS",
-    "ENABLE_PATTERN_ENFORCEMENT",
     "ENABLE_CONSUMER_HEALTH_EMITTER",
     "ENABLE_CONSUMER_HEALTH_TRIAGE",
-    "ENABLE_LOCAL_INFERENCE_PIPELINE",
 ]
 
 
