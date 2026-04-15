@@ -1,0 +1,15 @@
+[Unit]
+Description=OmniNode Log Monitor — Docker containers + Slack alerts
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/home/jonah/.omnibase/.env
+Environment="MONITOR_PROJECTS=omnibase-infra,omnibase-infra-runtime"
+ExecStart=/usr/bin/python3 /home/jonah/.omnibase/infra/deployed/0.34.0/scripts/monitor_logs.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
