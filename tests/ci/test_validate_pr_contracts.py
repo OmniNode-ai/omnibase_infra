@@ -12,7 +12,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.unit
 
 SCRIPT = Path(__file__).parent.parent.parent / "scripts" / "validate_pr_contracts.py"
 

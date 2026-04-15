@@ -67,7 +67,7 @@ class ModelKafkaProducerConfig(BaseModel):
                 "KAFKA_REQUEST_TIMEOUT_MS", "10000"
             )  # kafka-fallback-ok
             acks_raw = os.getenv("KAFKA_ACKS", "all")  # kafka-fallback-ok
-            max_request_size_raw = os.getenv(
+            max_request_size_raw = os.getenv(  # kafka-fallback-ok
                 "KAFKA_MAX_REQUEST_SIZE", str(4 * 1024 * 1024)
             )
             return cls(

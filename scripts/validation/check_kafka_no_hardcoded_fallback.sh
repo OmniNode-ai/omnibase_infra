@@ -21,7 +21,9 @@ MATCHES=$(grep -rn --include="*.py" \
     -E "os\.getenv\([[:space:]]*[\"']KAFKA_[^\"']+[\"'][[:space:]]*,[[:space:]]*[\"'][^\"']+[\"']" \
     . 2>/dev/null | \
     grep -v "# kafka-fallback-ok" | \
-    grep -v "# noqa" || true)
+    grep -v "# noqa" | \
+    grep -v "check_kafka_no_hardcoded_fallback.sh" | \
+    grep -v "ci_check_kafka_no_localhost_default.py" || true)
 
 if [ -n "$MATCHES" ]; then
     echo "ERROR: Hardcoded Kafka bootstrap fallback detected:"

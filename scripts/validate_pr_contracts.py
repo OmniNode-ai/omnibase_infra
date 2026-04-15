@@ -97,14 +97,32 @@ def validate(
             )
             continue
 
-        with open(contract_file, encoding="utf-8") as f:
-            contract_data = yaml.safe_load(f)
+        try:
+            with open(contract_file, encoding="utf-8") as f:
+                contract_data = yaml.safe_load(f)
+        except yaml.YAMLError as exc:
+            findings.append(
+                Finding(
+                    ticket_id=ticket_id,
+                    message=f"Contract file {contract_file.name} is invalid YAML: {exc}",
+                )
+            )
+            continue
 
         if contract_data is None:
             findings.append(
                 Finding(
                     ticket_id=ticket_id,
                     message=f"Contract file {contract_file.name} is empty or invalid YAML",
+                )
+            )
+            continue
+
+        if not isinstance(contract_data, dict):
+            findings.append(
+                Finding(
+                    ticket_id=ticket_id,
+                    message=f"Contract file {contract_file.name} must contain a YAML object at root",
                 )
             )
             continue
