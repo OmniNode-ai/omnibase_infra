@@ -657,6 +657,11 @@ services:
       POSTGRES_HOST: postgres
     ports:
       - "${RUNTIME_EFFECTS_PORT:-8086}:8085"
+    # OMN-8852: runtime-effects must also join omnimemory-network so PluginMemory
+    # can reach omnimemory-memgraph:7687. The base anchor only declares omnibase-infra-network.
+    networks:
+      - omnibase-infra-network
+      - omnimemory-network
     stop_grace_period: 90s
     volumes:
       - effects_logs:/app/logs
@@ -1122,6 +1127,11 @@ networks:
   omnibase-infra-network:
     name: omnibase-infra-network
     driver: bridge
+  # OMN-8852: omnimemory-network is owned by omnimemory/docker-compose.yml.
+  # runtime-effects must join it so PluginMemory can reach omnimemory-memgraph:7687.
+  omnimemory-network:
+    name: omnimemory-network
+    external: true
 # ==========================================================================
 # Volume Configuration
 # ==========================================================================
