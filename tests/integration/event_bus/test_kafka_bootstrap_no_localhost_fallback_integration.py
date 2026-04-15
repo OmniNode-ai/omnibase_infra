@@ -62,15 +62,8 @@ class TestKafkaBootstrapNoLocalhostFallback:
         """Constructor must not embed 'localhost' when env var is absent."""
         monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
 
-        try:
-            provisioner = TopicProvisioner(contracts_root=contracts_root)
-            # If we get here, the invariant is broken — assert no localhost fallback
-            assert "localhost" not in provisioner._bootstrap_servers, (
-                f"OMN-8783 regression: localhost fallback found in "
-                f"bootstrap_servers={provisioner._bootstrap_servers!r}"
-            )
-        except KeyError:
-            pass  # Expected — hard-fail is the correct behavior
+        with pytest.raises(KeyError, match="KAFKA_BOOTSTRAP_SERVERS"):
+            TopicProvisioner(contracts_root=contracts_root)
 
     def test_explicit_bootstrap_servers_accepted(
         self,
