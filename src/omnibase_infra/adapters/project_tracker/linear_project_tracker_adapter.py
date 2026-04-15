@@ -202,7 +202,9 @@ class LinearProjectTrackerAdapter:
     # -- internal helpers --
 
     @staticmethod
-    def _require(callable_: Callable[..., object] | None, name: str) -> Callable[..., object]:
+    def _require(
+        callable_: Callable[..., object] | None, name: str
+    ) -> Callable[..., object]:
         if callable_ is None:
             raise NotImplementedError(
                 f"LinearProjectTrackerAdapter: '{name}' callable not injected"
