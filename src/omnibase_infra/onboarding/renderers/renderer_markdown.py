@@ -37,18 +37,23 @@ class RendererOnboardingMarkdown:
             "",
         ]
 
-        passed_count = sum(1 for r in step_results if r.passed)
-        lines.append(f"{passed_count}/{len(step_results)} steps passed")
+        passed_count = sum(
+            1 for s in steps if result_by_key.get(s.step_key) and result_by_key[s.step_key].passed
+        )
+        lines.append(f"{passed_count}/{len(steps)} steps passed")
         lines.append("")
 
         for step in steps:
             result = result_by_key.get(step.step_key)
-            if result is None or result.passed:
+            if result is None:
+                indicator = "[?]"
+                suffix = " — Missing execution result"
+            elif result.passed:
                 indicator = "[x]"
                 suffix = ""
             else:
                 indicator = "[!]"
-                suffix = f" — {result.message}" if result and result.message else ""
+                suffix = f" — {result.message}" if result.message else ""
 
             lines.append(f"## {step.name}")
             lines.append("")

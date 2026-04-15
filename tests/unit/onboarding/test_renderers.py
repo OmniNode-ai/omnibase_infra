@@ -90,6 +90,18 @@ class TestRendererOnboardingMarkdown:
         output = renderer.render(steps, results)
         assert "steps passed" in output
 
+    def test_missing_step_result_renders_unknown_indicator(self) -> None:
+        steps = _get_standalone_steps()
+        # Only provide results for all steps except the first
+        results = [
+            ModelStepResult(step_key=s.step_key, passed=True, message="OK")
+            for s in steps[1:]
+        ]
+        renderer = RendererOnboardingMarkdown()
+        output = renderer.render(steps, results)
+        assert "[?]" in output
+        assert "Missing execution result" in output
+
     def test_all_steps_rendered_even_when_some_fail(self) -> None:
         steps = _get_standalone_steps()
         results = [
