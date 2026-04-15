@@ -94,9 +94,7 @@ class TestRendererOnboardingMarkdown:
         steps = _get_standalone_steps()
         results = [
             ModelStepResult(step_key=steps[0].step_key, passed=True, message="OK"),
-            ModelStepResult(
-                step_key=steps[1].step_key, passed=False, message="failed"
-            ),
+            ModelStepResult(step_key=steps[1].step_key, passed=False, message="failed"),
         ] + [
             ModelStepResult(
                 step_key=s.step_key,
