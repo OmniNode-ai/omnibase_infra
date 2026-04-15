@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Tests for LinearProjectTrackerAdapter.
+"""Tests for AdapterLinearProjectTracker.
 
 Uses callable injection — tests pass fake callables as constructor args
 so no live MCP server is required.
@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from omnibase_infra.adapters.project_tracker.linear_project_tracker_adapter import (
-    LinearProjectTrackerAdapter,
+    AdapterLinearProjectTracker,
 )
 from omnibase_infra.adapters.project_tracker.model_stub_comment import ModelStubComment
 from omnibase_infra.adapters.project_tracker.model_stub_issue import ModelStubIssue
@@ -38,13 +38,13 @@ _FAKE_ISSUE = {
 
 
 @pytest.mark.unit
-class TestLinearProjectTrackerAdapterLifecycle:
+class TestAdapterLinearProjectTrackerLifecycle:
     def test_connect_returns_true(self) -> None:
-        adapter = LinearProjectTrackerAdapter()
+        adapter = AdapterLinearProjectTracker()
         assert asyncio.run(adapter.connect()) is True
 
     def test_health_check_healthy_after_connect(self) -> None:
-        adapter = LinearProjectTrackerAdapter()
+        adapter = AdapterLinearProjectTracker()
 
         async def _run() -> None:
             await adapter.connect()
@@ -55,12 +55,12 @@ class TestLinearProjectTrackerAdapterLifecycle:
         asyncio.run(_run())
 
     def test_capabilities_read_write(self) -> None:
-        adapter = LinearProjectTrackerAdapter()
+        adapter = AdapterLinearProjectTracker()
         caps = asyncio.run(adapter.get_capabilities())
         assert "read" in caps and "write" in caps
 
     def test_close_resets_connected(self) -> None:
-        adapter = LinearProjectTrackerAdapter()
+        adapter = AdapterLinearProjectTracker()
 
         async def _run() -> None:
             await adapter.connect()
@@ -72,10 +72,10 @@ class TestLinearProjectTrackerAdapterLifecycle:
 
 
 @pytest.mark.unit
-class TestLinearProjectTrackerAdapterIssues:
+class TestAdapterLinearProjectTrackerIssues:
     def test_get_issue_delegates_to_mcp(self) -> None:
         fake = MagicMock(return_value=_FAKE_ISSUE)
-        adapter = LinearProjectTrackerAdapter(mcp_get_issue=fake)
+        adapter = AdapterLinearProjectTracker(mcp_get_issue=fake)
 
         async def _run() -> None:
             await adapter.connect()
@@ -95,7 +95,7 @@ class TestLinearProjectTrackerAdapterIssues:
 
     def test_get_issue_empty_result_raises_key_error(self) -> None:
         fake = MagicMock(return_value={})
-        adapter = LinearProjectTrackerAdapter(mcp_get_issue=fake)
+        adapter = AdapterLinearProjectTracker(mcp_get_issue=fake)
 
         async def _run() -> None:
             with pytest.raises(KeyError):
@@ -104,7 +104,7 @@ class TestLinearProjectTrackerAdapterIssues:
         asyncio.run(_run())
 
     def test_get_issue_without_callable_raises(self) -> None:
-        adapter = LinearProjectTrackerAdapter()
+        adapter = AdapterLinearProjectTracker()
 
         async def _run() -> None:
             with pytest.raises(NotImplementedError):
@@ -114,7 +114,7 @@ class TestLinearProjectTrackerAdapterIssues:
 
     def test_list_issues_with_filters_and_limit(self) -> None:
         fake = MagicMock(return_value=[_FAKE_ISSUE, _FAKE_ISSUE])
-        adapter = LinearProjectTrackerAdapter(mcp_list_issues=fake)
+        adapter = AdapterLinearProjectTracker(mcp_list_issues=fake)
 
         async def _run() -> None:
             results = await adapter.list_issues(filters={"state": "todo"}, limit=10)
@@ -126,12 +126,12 @@ class TestLinearProjectTrackerAdapterIssues:
 
     def test_list_issues_non_list_returns_empty(self) -> None:
         fake = MagicMock(return_value=None)
-        adapter = LinearProjectTrackerAdapter(mcp_list_issues=fake)
+        adapter = AdapterLinearProjectTracker(mcp_list_issues=fake)
         assert asyncio.run(adapter.list_issues()) == []
 
     def test_create_issue_forwards_kwargs(self) -> None:
         fake = MagicMock(return_value=_FAKE_ISSUE)
-        adapter = LinearProjectTrackerAdapter(mcp_create_issue=fake)
+        adapter = AdapterLinearProjectTracker(mcp_create_issue=fake)
 
         async def _run() -> None:
             issue = await adapter.create_issue(
@@ -156,7 +156,7 @@ class TestLinearProjectTrackerAdapterIssues:
 
     def test_create_issue_omits_none_kwargs(self) -> None:
         fake = MagicMock(return_value=_FAKE_ISSUE)
-        adapter = LinearProjectTrackerAdapter(mcp_create_issue=fake)
+        adapter = AdapterLinearProjectTracker(mcp_create_issue=fake)
 
         async def _run() -> None:
             await adapter.create_issue(title="T", description="D")
@@ -166,7 +166,7 @@ class TestLinearProjectTrackerAdapterIssues:
 
     def test_update_issue_delegates(self) -> None:
         fake = MagicMock(return_value=_FAKE_ISSUE)
-        adapter = LinearProjectTrackerAdapter(mcp_update_issue=fake)
+        adapter = AdapterLinearProjectTracker(mcp_update_issue=fake)
 
         async def _run() -> None:
             result = await adapter.update_issue("OMN-9999", {"state": "done"})
@@ -177,7 +177,7 @@ class TestLinearProjectTrackerAdapterIssues:
 
     def test_update_issue_missing_raises_key_error(self) -> None:
         fake = MagicMock(return_value={})
-        adapter = LinearProjectTrackerAdapter(mcp_update_issue=fake)
+        adapter = AdapterLinearProjectTracker(mcp_update_issue=fake)
 
         async def _run() -> None:
             with pytest.raises(KeyError):
@@ -187,7 +187,7 @@ class TestLinearProjectTrackerAdapterIssues:
 
     def test_search_issues_delegates(self) -> None:
         fake = MagicMock(return_value=[_FAKE_ISSUE])
-        adapter = LinearProjectTrackerAdapter(mcp_search_issues=fake)
+        adapter = AdapterLinearProjectTracker(mcp_search_issues=fake)
 
         async def _run() -> None:
             results = await adapter.search_issues("auth middleware", limit=5)
@@ -199,7 +199,7 @@ class TestLinearProjectTrackerAdapterIssues:
 
 
 @pytest.mark.unit
-class TestLinearProjectTrackerAdapterComments:
+class TestAdapterLinearProjectTrackerComments:
     def test_add_comment_delegates(self) -> None:
         fake = MagicMock(
             return_value={
@@ -209,7 +209,7 @@ class TestLinearProjectTrackerAdapterComments:
                 "createdAt": "2026-01-01T00:00:00Z",
             }
         )
-        adapter = LinearProjectTrackerAdapter(mcp_add_comment=fake)
+        adapter = AdapterLinearProjectTracker(mcp_add_comment=fake)
 
         async def _run() -> None:
             comment = await adapter.add_comment("abc-123", "hello")
@@ -222,7 +222,7 @@ class TestLinearProjectTrackerAdapterComments:
 
     def test_add_comment_missing_issue_raises_key_error(self) -> None:
         fake = MagicMock(return_value={})
-        adapter = LinearProjectTrackerAdapter(mcp_add_comment=fake)
+        adapter = AdapterLinearProjectTracker(mcp_add_comment=fake)
 
         async def _run() -> None:
             with pytest.raises(KeyError):
@@ -232,7 +232,7 @@ class TestLinearProjectTrackerAdapterComments:
 
 
 @pytest.mark.unit
-class TestLinearProjectTrackerAdapterProjects:
+class TestAdapterLinearProjectTrackerProjects:
     def test_get_project_delegates(self) -> None:
         fake = MagicMock(
             return_value={
@@ -244,7 +244,7 @@ class TestLinearProjectTrackerAdapterProjects:
                 "url": "https://linear.app/p/1",
             }
         )
-        adapter = LinearProjectTrackerAdapter(mcp_get_project=fake)
+        adapter = AdapterLinearProjectTracker(mcp_get_project=fake)
 
         async def _run() -> None:
             project = await adapter.get_project("p-1")
@@ -258,7 +258,7 @@ class TestLinearProjectTrackerAdapterProjects:
 
     def test_get_project_missing_raises_key_error(self) -> None:
         fake = MagicMock(return_value={})
-        adapter = LinearProjectTrackerAdapter(mcp_get_project=fake)
+        adapter = AdapterLinearProjectTracker(mcp_get_project=fake)
 
         async def _run() -> None:
             with pytest.raises(KeyError):
@@ -273,7 +273,7 @@ class TestLinearProjectTrackerAdapterProjects:
                 {"id": "p-2", "name": "B", "progress": 1.0},
             ]
         )
-        adapter = LinearProjectTrackerAdapter(mcp_list_projects=fake)
+        adapter = AdapterLinearProjectTracker(mcp_list_projects=fake)
 
         async def _run() -> None:
             results = await adapter.list_projects(limit=25)

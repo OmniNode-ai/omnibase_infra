@@ -71,12 +71,12 @@ class TestResolveProjectTrackerIntegration:
         """End-to-end token branch — activates once OMN-8816 lands."""
         pytest.importorskip(
             "omnibase_infra.adapters.project_tracker.linear_project_tracker_adapter",
-            reason="LinearProjectTrackerAdapter ships in OMN-8816; skip until merged",
+            reason="AdapterLinearProjectTracker ships in OMN-8816; skip until merged",
         )
         from omnibase_infra.adapters.project_tracker.linear_project_tracker_adapter import (
-            LinearProjectTrackerAdapter,
+            AdapterLinearProjectTracker,
         )
 
         with patch.dict("os.environ", {"LINEAR_TOKEN": "fake"}, clear=True):
             tracker = resolve_project_tracker(state_root=tmp_path)
-        assert isinstance(tracker, LinearProjectTrackerAdapter)
+        assert isinstance(tracker, AdapterLinearProjectTracker)

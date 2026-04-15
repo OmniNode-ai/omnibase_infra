@@ -5,7 +5,7 @@
 
 Three required branches (per plan Task 4.1):
     1. No token → LocalStubProjectTracker
-    2. LINEAR_TOKEN present → LinearProjectTrackerAdapter
+    2. LINEAR_TOKEN present → AdapterLinearProjectTracker
     3. Construction failure → fail-soft to LocalStubProjectTracker (never raises)
 """
 
@@ -33,15 +33,15 @@ class TestResolveProjectTracker:
     def test_returns_linear_adapter_when_token_present(self, tmp_path: Path) -> None:
         pytest.importorskip(
             "omnibase_infra.adapters.project_tracker.linear_project_tracker_adapter",
-            reason="LinearProjectTrackerAdapter ships in OMN-8816; skip until merged",
+            reason="AdapterLinearProjectTracker ships in OMN-8816; skip until merged",
         )
         from omnibase_infra.adapters.project_tracker.linear_project_tracker_adapter import (
-            LinearProjectTrackerAdapter,
+            AdapterLinearProjectTracker,
         )
 
         with patch.dict("os.environ", {"LINEAR_TOKEN": "fake-token"}, clear=True):
             tracker = resolve_project_tracker(state_root=tmp_path)
-            assert isinstance(tracker, LinearProjectTrackerAdapter)
+            assert isinstance(tracker, AdapterLinearProjectTracker)
 
     def test_never_raises_on_construction_failure(self, tmp_path: Path) -> None:
         with patch.dict("os.environ", {"LINEAR_TOKEN": "bad-token"}, clear=True):
@@ -55,12 +55,12 @@ class TestResolveProjectTracker:
         """LINEAR_API_KEY must be honored in addition to LINEAR_TOKEN."""
         pytest.importorskip(
             "omnibase_infra.adapters.project_tracker.linear_project_tracker_adapter",
-            reason="LinearProjectTrackerAdapter ships in OMN-8816; skip until merged",
+            reason="AdapterLinearProjectTracker ships in OMN-8816; skip until merged",
         )
         from omnibase_infra.adapters.project_tracker.linear_project_tracker_adapter import (
-            LinearProjectTrackerAdapter,
+            AdapterLinearProjectTracker,
         )
 
         with patch.dict("os.environ", {"LINEAR_API_KEY": "fake-token"}, clear=True):
             tracker = resolve_project_tracker(state_root=tmp_path)
-            assert isinstance(tracker, LinearProjectTrackerAdapter)
+            assert isinstance(tracker, AdapterLinearProjectTracker)
