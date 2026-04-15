@@ -38,7 +38,9 @@ class RendererOnboardingMarkdown:
         ]
 
         passed_count = sum(
-            1 for s in steps if result_by_key.get(s.step_key) and result_by_key[s.step_key].passed
+            1
+            for s in steps
+            if result_by_key.get(s.step_key) and result_by_key[s.step_key].passed
         )
         lines.append(f"{passed_count}/{len(steps)} steps passed")
         lines.append("")
