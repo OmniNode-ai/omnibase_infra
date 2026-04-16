@@ -200,7 +200,7 @@ class HandlerLlmOpenaiCompatible:
 
     def __init__(
         self,
-        transport: MixinLlmHttpTransport,
+        transport: MixinLlmHttpTransport | None = None,
     ) -> None:
         """Initialize handler with HTTP transport.
 
@@ -208,6 +208,8 @@ class HandlerLlmOpenaiCompatible:
             transport: An object providing ``_execute_llm_http_call`` for
                 making HTTP POST requests to LLM endpoints. Typically a
                 node or adapter that mixes in MixinLlmHttpTransport.
+                When None (auto-wired path), calls will raise RuntimeError
+                at handle() time.
         """
         self._transport = transport
         # WARNING: Not thread-safe. Concurrent handle() calls may overwrite
@@ -268,6 +270,12 @@ class HandlerLlmOpenaiCompatible:
         # Reset metrics from any previous call so that a failure in
         # _build_usage_metrics does not leave stale metrics visible.
         self.last_call_metrics = None
+
+        if self._transport is None:
+            raise RuntimeError(
+                "HandlerLlmOpenaiCompatible: transport not configured. "
+                "Pass a MixinLlmHttpTransport instance or wire via DI container."
+            )
 
         if correlation_id is None:
             correlation_id = uuid4()
@@ -579,6 +587,9 @@ class HandlerLlmOpenaiCompatible:
             InfraTimeoutError: On timeout after retries.
             InfraUnavailableError: On 5xx or circuit breaker open.
         """
+        assert self._transport is not None, (
+            "HandlerLlmOpenaiCompatible._execute_with_auth called with no transport"
+        )
         merged_headers: dict[str, str] = {}
         if extra_headers:
             merged_headers.update(extra_headers)

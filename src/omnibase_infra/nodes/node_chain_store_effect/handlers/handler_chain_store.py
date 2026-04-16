@@ -29,7 +29,9 @@ class HandlerChainStore:
     """Stores a verified chain entry and its prompt embedding to Qdrant."""
 
     def __init__(
-        self, qdrant_client: ProtocolChainVectorClient, vector_size: int = 4096
+        self,
+        qdrant_client: ProtocolChainVectorClient | None = None,
+        vector_size: int = 4096,
     ) -> None:
         self._qdrant_client = qdrant_client
         self._vector_size = vector_size
@@ -58,6 +60,14 @@ class HandlerChainStore:
         Returns:
             ModelChainStoreResult with success/failure status.
         """
+        if self._qdrant_client is None:
+            return ModelChainStoreResult(
+                correlation_id=correlation_id,
+                chain_id=chain_entry.chain_id,
+                success=False,
+                error_message="HandlerChainStore: qdrant_client not configured",
+            )
+
         logger.info(
             "Storing chain %s (correlation_id=%s, steps=%d)",
             chain_entry.chain_id,

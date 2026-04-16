@@ -122,8 +122,8 @@ class HandlerNodeIntrospected:
 
     def __init__(
         self,
-        projection_reader: ProjectionReaderRegistration,
-        reducer: RegistrationReducerService,
+        projection_reader: ProjectionReaderRegistration | None = None,
+        reducer: RegistrationReducerService | None = None,
         topic_store: ServiceIntrospectionTopicStore | None = None,
     ) -> None:
         """Initialize the handler with a projection reader and reducer service.
@@ -135,12 +135,17 @@ class HandlerNodeIntrospected:
         directly without wiring a full DI container while maintaining container-
         managed lifecycle in production.
 
+        All params default to None to satisfy OMN-8735 auto-wiring (no required
+        constructor params). The domain registry always provides real instances.
+
         Args:
             projection_reader: Reader for querying registration projection state.
+                When None, handle() will raise RuntimeError on actual invocation.
             reducer: Pure-function reducer service that encapsulates all
                 registration decision logic (state checks, event creation,
                 intent construction). Configuration such as liveness_interval_seconds
-                lives on the reducer, not on this handler.
+                lives on the reducer, not on this handler. When None, handle()
+                will raise RuntimeError on actual invocation.
             topic_store: Optional shared in-memory store for accumulating
                 event_bus publish topics from introspection events. When provided,
                 this handler populates the store on every introspection event so
@@ -213,6 +218,12 @@ class HandlerNodeIntrospected:
             RuntimeHostError: If projection query fails (propagated).
             ProtocolConfigurationError: If envelope timestamp is naive (no timezone info).
         """
+        if self._projection_reader is None or self._reducer is None:
+            raise RuntimeError(
+                "HandlerNodeIntrospected: projection_reader and reducer are required. "
+                "This handler must be wired via the domain registry, not auto-wiring."
+            )
+
         start_time = time.perf_counter()
 
         # Extract from envelope

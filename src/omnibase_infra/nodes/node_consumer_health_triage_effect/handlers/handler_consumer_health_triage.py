@@ -86,7 +86,7 @@ class HandlerConsumerHealthTriage:
 
     def __init__(
         self,
-        db_pool: Pool,
+        db_pool: Pool | None = None,
         producer: AIOKafkaProducer | None = None,
         *,
         slack_handler: Callable[[str], Awaitable[None]] | None = None,
@@ -95,7 +95,8 @@ class HandlerConsumerHealthTriage:
         """Initialize the triage handler.
 
         Args:
-            db_pool: asyncpg connection pool.
+            db_pool: asyncpg connection pool. When None (auto-wired path),
+                handle() will return a suppressed result with a warning.
             producer: AIOKafkaProducer for restart commands (optional).
             slack_handler: Async callable accepting a message string.
             linear_handler: Async callable accepting title and description kwargs.
@@ -145,6 +146,17 @@ class HandlerConsumerHealthTriage:
         Returns:
             ModelTriageResult with action taken and new state.
         """
+        if self._db_pool is None:
+            logger.warning(
+                "HandlerConsumerHealthTriage: db_pool not configured, suppressing event"
+            )
+            return ModelTriageResult(
+                fingerprint=event.fingerprint,
+                action="suppressed",
+                incident_state=EnumConsumerIncidentState.OPEN,
+                occurrence_count=0,
+            )
+
         if not self.is_enabled():
             return ModelTriageResult(
                 fingerprint=event.fingerprint,

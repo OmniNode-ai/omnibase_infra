@@ -104,4 +104,23 @@ async def handle_onboarding(
     )
 
 
-__all__ = ["handle_onboarding"]
+class HandlerOnboarding:
+    """Class wrapper for handle_onboarding — required for OMN-8735 auto-wiring.
+
+    The auto-wiring framework requires a class (not a bare function) so it can
+    inspect the constructor signature. This wrapper delegates to
+    ``handle_onboarding`` and requires no constructor arguments.
+    """
+
+    def __init__(self) -> None:  # stub-ok: stateless init
+        """Initialize the handler (stateless)."""
+
+    async def handle(
+        self,
+        input_model: ModelOnboardingInput,
+    ) -> ModelOnboardingOutput:
+        """Execute the onboarding orchestration."""
+        return await handle_onboarding(input_model)
+
+
+__all__ = ["handle_onboarding", "HandlerOnboarding"]

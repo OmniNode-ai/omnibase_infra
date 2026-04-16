@@ -86,11 +86,13 @@ class HandlerIntent(MixinEnvelopeExtraction):  # DEMO ONLY
         """
         return EnumHandlerTypeCategory.EFFECT
 
-    def __init__(self, container: ModelONEXContainer) -> None:
+    def __init__(self, container: ModelONEXContainer | None = None) -> None:
         """Initialize HandlerIntent with ONEX container for dependency injection.
 
         Args:
-            container: ONEX container for dependency injection.
+            container: ONEX container for dependency injection. When None
+                (auto-wired path), the handler operates in no-op mode until
+                initialized via initialize().
         """
         self._container = container
         self._graph_handler: HandlerGraph | None = None

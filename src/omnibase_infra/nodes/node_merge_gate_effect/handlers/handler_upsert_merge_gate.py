@@ -137,11 +137,12 @@ class HandlerUpsertMergeGate(MixinPostgresOpExecutor):
         True
     """
 
-    def __init__(self, pool: asyncpg.Pool) -> None:
+    def __init__(self, pool: asyncpg.Pool | None = None) -> None:
         """Initialise handler with asyncpg connection pool.
 
         Args:
             pool: asyncpg connection pool. Should be pre-configured and ready.
+                When None (auto-wired path), handle() returns a failure result.
         """
         self._pool = pool
 
@@ -170,6 +171,21 @@ class HandlerUpsertMergeGate(MixinPostgresOpExecutor):
             ModelBackendResult with success=True when upsert committed.
             Linear ticket failures are logged but do not cause success=False.
         """
+        if self._pool is None:
+            logger.warning(
+                "HandlerUpsertMergeGate: db pool not configured, skipping upsert "
+                "(correlation_id=%s)",
+                correlation_id,
+            )
+            from omnibase_infra.models.model_backend_result import ModelBackendResult
+
+            return ModelBackendResult(
+                success=False,
+                error="db pool not configured",
+                error_code="MERGE_GATE_NO_POOL",
+                correlation_id=correlation_id,
+            )
+
         # Resolve a single effective correlation ID used end-to-end
         effective_cid = payload.correlation_id or correlation_id
         return await self._execute_postgres_op(

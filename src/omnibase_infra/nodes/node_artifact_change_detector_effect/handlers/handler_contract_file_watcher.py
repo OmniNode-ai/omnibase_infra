@@ -160,18 +160,27 @@ class HandlerContractFileWatcher:
 
     def __init__(
         self,
-        watch_root: Path,
-        source_repo: str,
+        watch_root: Path | None = None,
+        source_repo: str | None = None,
         debounce_seconds: float = 1.0,
         contract_glob: str = _CONTRACT_GLOB,
     ) -> None:
+        import os
+
+        resolved_root = watch_root or Path(
+            os.environ.get("ONEX_WATCH_ROOT", str(Path.cwd()))  # ONEX_EXCLUDE: env
+        )
+        resolved_repo = source_repo or os.environ.get(  # ONEX_EXCLUDE: env
+            "ONEX_SOURCE_REPO", "omnibase_infra"
+        )
+
         if not _WATCHDOG_AVAILABLE:
             raise ImportError(
                 "watchdog is required for HandlerContractFileWatcher. "
                 "Install it with: uv add 'watchdog'"
             )
-        self._watch_root = watch_root
-        self._source_repo = source_repo
+        self._watch_root = resolved_root
+        self._source_repo = resolved_repo
         self._debounce_seconds = debounce_seconds
         self._contract_glob = contract_glob
 

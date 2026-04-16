@@ -84,11 +84,13 @@ class HandlerLedgerProjection:
         >>> # result.result contains the ModelIntent with ledger.append payload
     """
 
-    def __init__(self, container: ModelONEXContainer) -> None:
+    def __init__(self, container: ModelONEXContainer | None = None) -> None:
         """Initialize the ledger projection handler.
 
         Args:
-            container: ONEX dependency injection container.
+            container: ONEX dependency injection container. When None
+                (auto-wired path), the handler operates without container
+                services until execute() is called with a populated event.
         """
         self._container = container
         self._initialized: bool = False

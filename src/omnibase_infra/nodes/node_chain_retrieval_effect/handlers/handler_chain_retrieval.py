@@ -34,8 +34,8 @@ class HandlerChainRetrieval:
 
     def __init__(
         self,
-        embedding_client: ProtocolChainEmbeddingClient,
-        qdrant_client: ProtocolChainVectorClient,
+        embedding_client: ProtocolChainEmbeddingClient | None = None,
+        qdrant_client: ProtocolChainVectorClient | None = None,
         vector_size: int = 4096,
     ) -> None:
         self._embedding_client = embedding_client
@@ -172,10 +172,20 @@ class HandlerChainRetrieval:
 
     async def _get_embedding(self, text: str) -> list[float]:
         """Get embedding vector for text via the embedding client."""
+        if self._embedding_client is None:
+            raise RuntimeError(
+                "HandlerChainRetrieval: embedding_client is not configured. "
+                "Pass an embedding_client or configure via DI container."
+            )
         return await self._embedding_client.get_embedding(text)
 
     async def _ensure_collection(self) -> None:
         """Create the Qdrant collection if it doesn't exist."""
+        if self._qdrant_client is None:
+            logger.warning(
+                "HandlerChainRetrieval: qdrant_client is None, skipping collection check"
+            )
+            return
         try:
             exists = await asyncio.to_thread(
                 self._qdrant_client.collection_exists, COLLECTION_NAME
