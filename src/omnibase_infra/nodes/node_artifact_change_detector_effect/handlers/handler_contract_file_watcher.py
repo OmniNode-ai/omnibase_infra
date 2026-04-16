@@ -165,28 +165,13 @@ class HandlerContractFileWatcher:
         debounce_seconds: float = 1.0,
         contract_glob: str = _CONTRACT_GLOB,
     ) -> None:
-        import os
-
-        env_watch_root = os.environ.get("ONEX_WATCH_ROOT")  # ONEX_EXCLUDE: env
-        if watch_root is not None:
-            resolved_root = watch_root
-        elif env_watch_root:
-            resolved_root = Path(env_watch_root)
-        else:
-            raise RuntimeError(
-                "HandlerContractFileWatcher requires `watch_root` or ONEX_WATCH_ROOT"
-            )
-        resolved_repo = source_repo or os.environ.get(  # ONEX_EXCLUDE: env
-            "ONEX_SOURCE_REPO", "omnibase_infra"
-        )
-
-        if not _WATCHDOG_AVAILABLE:
-            raise ImportError(
-                "watchdog is required for HandlerContractFileWatcher. "
-                "Install it with: uv add 'watchdog'"
-            )
-        self._watch_root = resolved_root
-        self._source_repo = resolved_repo
+        # Store raw arguments; resolution is deferred to start() so that
+        # the no-arg constructor required for auto-wiring succeeds even when
+        # ONEX_WATCH_ROOT is not set at import time.
+        self._watch_root_arg = watch_root
+        self._source_repo_arg = source_repo
+        self._watch_root: Path | None = None  # resolved in start()
+        self._source_repo: str = "omnibase_infra"  # resolved in start()
         self._debounce_seconds = debounce_seconds
         self._contract_glob = contract_glob
 
@@ -204,6 +189,9 @@ class HandlerContractFileWatcher:
 
     def _seed_hashes(self) -> None:
         """Compute initial MD5 hashes for all existing contract files."""
+        assert self._watch_root is not None, (
+            "start() must be called before _seed_hashes"
+        )
         for path in self._watch_root.rglob(self._contract_glob):
             h = _md5_of_file(path)
             if h is not None:
@@ -216,6 +204,9 @@ class HandlerContractFileWatcher:
 
     def _build_trigger(self, changed: list[Path]) -> ModelUpdateTrigger:
         """Build a ModelUpdateTrigger for the given list of changed file paths."""
+        assert self._watch_root is not None, (
+            "start() must be called before _build_trigger"
+        )
         # Use relative paths from watch_root for portability
         relative_paths: list[str] = []
         for p in changed:
@@ -297,8 +288,33 @@ class HandlerContractFileWatcher:
         """Start the watchdog observer and seed initial file hashes.
 
         Raises:
-            FileNotFoundError: If ``watch_root`` does not exist.
+            RuntimeError: If neither ``watch_root`` nor ``ONEX_WATCH_ROOT`` is set.
+            FileNotFoundError: If the resolved ``watch_root`` does not exist.
         """
+        import os
+
+        env_watch_root = os.environ.get("ONEX_WATCH_ROOT")  # ONEX_EXCLUDE: env
+        if self._watch_root_arg is not None:
+            self._watch_root = self._watch_root_arg
+        elif env_watch_root:
+            self._watch_root = Path(env_watch_root)
+        else:
+            raise RuntimeError(
+                "HandlerContractFileWatcher requires `watch_root` or ONEX_WATCH_ROOT"
+            )
+        self._source_repo = (
+            self._source_repo_arg
+            or os.environ.get(  # ONEX_EXCLUDE: env
+                "ONEX_SOURCE_REPO", "omnibase_infra"
+            )
+        )
+
+        if not _WATCHDOG_AVAILABLE:
+            raise ImportError(
+                "watchdog is required for HandlerContractFileWatcher. "
+                "Install it with: uv add 'watchdog'"
+            )
+
         if not self._watch_root.exists():
             raise FileNotFoundError(
                 f"HandlerContractFileWatcher: watch_root does not exist: {self._watch_root}"
