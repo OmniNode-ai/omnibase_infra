@@ -11,7 +11,6 @@ import pytest
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess import (
-    EnumCliBackendStatus,
     HandlerLlmCliSubprocess,
 )
 
