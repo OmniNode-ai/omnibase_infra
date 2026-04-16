@@ -54,7 +54,7 @@ class HandlerScopeExtractComplete:
         )
         return ModelScopeManifestWriteRequest(
             correlation_id=extracted.correlation_id,
-            output_path=_DEFAULT_OUTPUT_PATH,
+            output_path=extracted.output_path,
             plan_file_path=extracted.plan_file_path,
             files=extracted.files,
             directories=extracted.directories,

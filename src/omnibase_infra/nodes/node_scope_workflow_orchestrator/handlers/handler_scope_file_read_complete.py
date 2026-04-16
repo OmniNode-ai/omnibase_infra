@@ -13,6 +13,10 @@ from __future__ import annotations
 import logging
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.errors.error_infra import InfraConnectionError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.nodes.node_scope_extract_compute.models.model_scope_extract_input import (
     ModelScopeExtractInput,
 )
@@ -47,9 +51,20 @@ class HandlerScopeFileReadComplete:
             result.file_path,
             result.success,
         )
+        if not result.success:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=result.correlation_id,
+                operation="scope_file_read",
+                target_name=result.file_path,
+            )
+            raise InfraConnectionError(
+                f"Scope file read failed: {result.error_message}",
+                context=context,
+            )
         return ModelScopeExtractInput(
             correlation_id=result.correlation_id,
             plan_file_path=result.file_path,
+            output_path=result.output_path,
             content=result.content,
         )
 

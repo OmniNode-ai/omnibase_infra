@@ -16,6 +16,10 @@ class ModelScopeFileReadResult(BaseModel):
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID.")
     file_path: str = Field(..., description="Path that was read.")
+    output_path: str = Field(
+        default="~/.claude/scope-manifest.json",
+        description="Path to write the scope manifest JSON.",
+    )
     content: str = Field(..., description="File content.")
     success: bool = Field(default=True, description="Whether the read succeeded.")
     error_message: str = Field(default="", description="Error message if read failed.")

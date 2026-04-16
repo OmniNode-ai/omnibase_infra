@@ -52,6 +52,7 @@ class HandlerScopeExtract:
         content: str,
         plan_file_path: str,
         correlation_id: UUID,
+        output_path: str = "~/.claude/scope-manifest.json",
     ) -> ModelScopeExtracted:
         """Extract scope items from plan content.
 
@@ -65,6 +66,7 @@ class HandlerScopeExtract:
             content: Plan file content.
             plan_file_path: Original plan file path.
             correlation_id: Workflow correlation ID.
+            output_path: Caller-specified output path to carry forward.
 
         Returns:
             ModelScopeExtracted with extracted scope items.
@@ -147,6 +149,7 @@ class HandlerScopeExtract:
         return ModelScopeExtracted(
             correlation_id=correlation_id,
             plan_file_path=plan_file_path,
+            output_path=output_path,
             files=tuple(files),
             directories=tuple(directories),
             repos=tuple(repos),

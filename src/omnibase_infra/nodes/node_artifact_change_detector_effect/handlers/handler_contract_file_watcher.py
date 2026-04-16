@@ -167,9 +167,15 @@ class HandlerContractFileWatcher:
     ) -> None:
         import os
 
-        resolved_root = watch_root or Path(
-            os.environ.get("ONEX_WATCH_ROOT", str(Path.cwd()))  # ONEX_EXCLUDE: env
-        )
+        env_watch_root = os.environ.get("ONEX_WATCH_ROOT")  # ONEX_EXCLUDE: env
+        if watch_root is not None:
+            resolved_root = watch_root
+        elif env_watch_root:
+            resolved_root = Path(env_watch_root)
+        else:
+            raise RuntimeError(
+                "HandlerContractFileWatcher requires `watch_root` or ONEX_WATCH_ROOT"
+            )
         resolved_repo = source_repo or os.environ.get(  # ONEX_EXCLUDE: env
             "ONEX_SOURCE_REPO", "omnibase_infra"
         )

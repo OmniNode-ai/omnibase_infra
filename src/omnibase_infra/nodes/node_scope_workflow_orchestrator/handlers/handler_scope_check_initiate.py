@@ -49,6 +49,7 @@ class HandlerScopeCheckInitiate:
         return ModelScopeFileReadRequest(
             file_path=command.plan_file_path,
             correlation_id=command.correlation_id,
+            output_path=command.output_path,
         )
 
 
