@@ -165,7 +165,14 @@ class HandlerContractFileWatcher:
         debounce_seconds: float = 1.0,
         contract_glob: str = _CONTRACT_GLOB,
     ) -> None:
-        # Store raw arguments; resolution is deferred to start() so that
+        # watchdog availability is checked at construction time (ImportError is
+        # a hard dependency failure, not a configuration failure).
+        if not _WATCHDOG_AVAILABLE:
+            raise ImportError(
+                "watchdog is required for HandlerContractFileWatcher. "
+                "Install it with: uv add 'watchdog'"
+            )
+        # watch_root/source_repo resolution is deferred to start() so that
         # the no-arg constructor required for auto-wiring succeeds even when
         # ONEX_WATCH_ROOT is not set at import time.
         self._watch_root_arg = watch_root
@@ -308,12 +315,6 @@ class HandlerContractFileWatcher:
                 "ONEX_SOURCE_REPO", "omnibase_infra"
             )
         )
-
-        if not _WATCHDOG_AVAILABLE:
-            raise ImportError(
-                "watchdog is required for HandlerContractFileWatcher. "
-                "Install it with: uv add 'watchdog'"
-            )
 
         if not self._watch_root.exists():
             raise FileNotFoundError(
