@@ -1466,6 +1466,198 @@ class ContainerTailer(threading.Thread):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Systemd health sweep (OMN-8872)
+# ---------------------------------------------------------------------------
+
+_SYSTEMD_SWEEP_INTERVAL = 60  # seconds
+
+
+class SystemdHealthSweep(threading.Thread):
+    """Daemon thread that polls systemctl for failed units every *interval* seconds.
+
+    Runs ``systemctl --user list-units --state=failed`` (and system scope where
+    applicable) and emits a Slack alert for each failed unit, including the last
+    few journal lines.  Uses the same ``_cooldown_write``/``_cooldown_read``
+    dedup pattern with key ``systemd:<unit>``.
+    """
+
+    def __init__(
+        self,
+        bot_token: str,
+        channel_id: str,
+        dry_run: bool,
+        stop_event: threading.Event,
+        interval: int = _SYSTEMD_SWEEP_INTERVAL,
+    ) -> None:
+        super().__init__(name="systemd-health-sweep", daemon=True)
+        self.bot_token = bot_token
+        self.channel_id = channel_id
+        self.dry_run = dry_run
+        self.stop_event = stop_event
+        self.interval = interval
+
+    def run(self) -> None:
+        print(f"[monitor] SystemdHealthSweep started (interval={self.interval}s)")
+        while not self.stop_event.is_set():
+            self._check()
+            self.stop_event.wait(timeout=self.interval)
+
+    def _failed_units(self) -> list[str]:
+        """Return list of failed unit names from both --user and system scope."""
+        units: list[str] = []
+        for scope_flag in (["--user"], []):
+            result = subprocess.run(
+                [
+                    "systemctl",
+                    *scope_flag,
+                    "list-units",
+                    "--state=failed",
+                    "--no-legend",
+                    "--no-pager",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().splitlines():
+                    parts = line.split()
+                    if parts:
+                        units.append(parts[0])
+        return units
+
+    def _journal_tail(self, unit: str, lines: int = 10) -> str:
+        """Return last *lines* journal entries for *unit*."""
+        result = subprocess.run(
+            [
+                "journalctl",
+                "-u",
+                unit,
+                "-n",
+                str(lines),
+                "--no-pager",
+                "--output=short",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
+
+    def _check(self) -> None:
+        for unit in self._failed_units():
+            cooldown_key = f"systemd:{unit}"
+            now = time.time()
+            last, count = _cooldown_read(cooldown_key)
+            wait = _backoff_seconds(count)
+            if now - last < wait:
+                continue
+            _cooldown_write(cooldown_key, now, count + 1)
+            journal = self._journal_tail(unit)
+            lines = [
+                f":rotating_light: *Systemd unit failed:* `{unit}`",
+                "*Journal tail:*",
+            ]
+            if journal:
+                lines.append(journal)
+            post_slack(
+                self.bot_token, self.channel_id, f"systemd:{unit}", lines, self.dry_run
+            )
+
+
+# ---------------------------------------------------------------------------
+# OOMKill sweep (OMN-8872)
+# ---------------------------------------------------------------------------
+
+_OOM_SWEEP_INTERVAL = 60  # seconds
+
+
+class OOMKillSweep(threading.Thread):
+    """Daemon thread that polls docker inspect for OOMKilled containers.
+
+    Checks ``State.OOMKilled`` for every container in *containers*.  Deduplicates
+    per container using the ``_cooldown_write``/``_cooldown_read`` pattern with
+    key ``docker:oom:<container>``.  Suppresses re-alert until the container
+    restarts (OOMKilled resets to false on restart).
+    """
+
+    def __init__(
+        self,
+        bot_token: str,
+        channel_id: str,
+        dry_run: bool,
+        stop_event: threading.Event,
+        containers: list[str],
+        interval: int = _OOM_SWEEP_INTERVAL,
+    ) -> None:
+        super().__init__(name="oom-kill-sweep", daemon=True)
+        self.bot_token = bot_token
+        self.channel_id = channel_id
+        self.dry_run = dry_run
+        self.stop_event = stop_event
+        self.containers = containers
+        self.interval = interval
+        # Track which containers were already OOMKilled so we only alert once per event
+        self._oom_seen: set[str] = set()
+
+    def run(self) -> None:
+        print(
+            f"[monitor] OOMKillSweep started (interval={self.interval}s, containers={len(self.containers)})"
+        )
+        while not self.stop_event.is_set():
+            self._check()
+            self.stop_event.wait(timeout=self.interval)
+
+    def _inspect_oom(self, container: str) -> bool:
+        """Return True if container State.OOMKilled is true."""
+        result = subprocess.run(
+            [_DOCKER, "inspect", "--format", "json", container],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return False
+        try:
+            items = json.loads(result.stdout)
+            if not items:
+                return False
+            return bool(items[0].get("State", {}).get("OOMKilled", False))
+        except (json.JSONDecodeError, KeyError, TypeError):
+            return False
+
+    def _check(self) -> None:
+        for container in self.containers:
+            is_oom = self._inspect_oom(container)
+            if is_oom:
+                if container in self._oom_seen:
+                    # Already alerted for this OOM event; wait for restart to clear
+                    continue
+                self._oom_seen.add(container)
+                cooldown_key = f"docker:oom:{container}"
+                now = time.time()
+                last, count = _cooldown_read(cooldown_key)
+                wait = _backoff_seconds(count)
+                if now - last < wait:
+                    continue
+                _cooldown_write(cooldown_key, now, count + 1)
+                lines = [
+                    f":skull: *OOMKilled detected:* `{container}` — CRITICAL",
+                    "Container was killed by the OOM killer. Check memory limits.",
+                ]
+                post_slack(
+                    self.bot_token,
+                    self.channel_id,
+                    f"oom:{container}",
+                    lines,
+                    self.dry_run,
+                )
+            else:
+                # Container restarted or recovered — clear seen state so next OOM alerts
+                self._oom_seen.discard(container)
+
+
 class LogMonitor:
     def __init__(
         self,
@@ -1590,6 +1782,27 @@ class LogMonitor:
         )
         restart_watcher.start()
 
+        # Start systemd health sweep (OMN-8872)
+        _systemd_stop = threading.Event()
+        systemd_sweep = SystemdHealthSweep(
+            bot_token=self.bot_token,
+            channel_id=self.channel_id,
+            dry_run=self.dry_run,
+            stop_event=_systemd_stop,
+        )
+        systemd_sweep.start()
+
+        # Start OOMKill sweep (OMN-8872)
+        _oom_stop = threading.Event()
+        oom_sweep = OOMKillSweep(
+            bot_token=self.bot_token,
+            channel_id=self.channel_id,
+            dry_run=self.dry_run,
+            stop_event=_oom_stop,
+            containers=restart_containers,
+        )
+        oom_sweep.start()
+
         # Watch for container start/die events
         cmd = [
             _DOCKER,
@@ -1634,6 +1847,8 @@ class LogMonitor:
             print("\n[monitor] Shutting down...")
         finally:
             _restart_stop.set()
+            _systemd_stop.set()
+            _oom_stop.set()
             proc.terminate()
 
 
