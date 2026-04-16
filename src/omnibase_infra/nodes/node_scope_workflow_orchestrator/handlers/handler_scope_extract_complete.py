@@ -22,8 +22,6 @@ from omnibase_infra.nodes.node_scope_manifest_write_effect.models.model_scope_ma
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_OUTPUT_PATH = "~/.claude/scope-manifest.json"
-
 
 class HandlerScopeExtractComplete:
     """Processes scope extraction result and prepares manifest write request."""
