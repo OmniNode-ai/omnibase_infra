@@ -11,6 +11,7 @@ Verifies that:
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_manifest import (
     ModelAutoWiringManifest,
@@ -158,13 +159,13 @@ def test_manifest_empty_contracts():
 def test_manifest_frozen():
     """Test that ModelAutoWiringManifest is immutable (frozen=True)."""
     manifest = ModelAutoWiringManifest()
-    with pytest.raises(Exception):  # Pydantic raises ValidationError or similar
+    with pytest.raises(ValidationError, match="frozen"):
         manifest.contracts = ()  # type: ignore[misc]
 
 
 def test_manifest_no_extra_fields():
     """Test that extra fields are forbidden."""
-    with pytest.raises(Exception):  # Pydantic ValidationError
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         ModelAutoWiringManifest(
             contracts=(),
             errors=(),
