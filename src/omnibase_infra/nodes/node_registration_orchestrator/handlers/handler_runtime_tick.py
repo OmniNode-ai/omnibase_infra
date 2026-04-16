@@ -129,8 +129,8 @@ class HandlerRuntimeTick:
 
     def __init__(
         self,
-        projection_reader: ProjectionReaderRegistration,
-        reducer: RegistrationReducerService,
+        projection_reader: ProjectionReaderRegistration | None = None,
+        reducer: RegistrationReducerService | None = None,
         snapshot_publisher: ProtocolSnapshotPublisher | None = None,
         timeout_coordinator: TimeoutCoordinator | None = None,
     ) -> None:
@@ -213,6 +213,11 @@ class HandlerRuntimeTick:
             ProtocolConfigurationError: If envelope_timestamp is naive (no timezone info).
         """
         start_time = time.perf_counter()
+
+        # Null-guard: handler requires projection_reader + reducer when called.
+        # They default to None only so auto-wiring can instantiate without args.
+        assert self._projection_reader is not None, "HandlerRuntimeTick: projection_reader not injected"
+        assert self._reducer is not None, "HandlerRuntimeTick: reducer not injected"
 
         # Extract from envelope
         tick = envelope.payload

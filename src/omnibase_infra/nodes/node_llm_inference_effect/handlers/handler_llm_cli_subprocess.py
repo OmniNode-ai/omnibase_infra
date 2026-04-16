@@ -76,7 +76,7 @@ class HandlerLlmCliSubprocess:
 
     def __init__(
         self,
-        cli: str,
+        cli: str = "claude",
         cli_args: list[str] | None = None,
         timeout: int = 120,
     ) -> None:
