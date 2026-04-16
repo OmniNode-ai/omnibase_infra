@@ -22,22 +22,26 @@ ORG="OmniNode-ai"
 FAILED=0
 
 for repo in "${REPOS[@]}"; do
-  ruleset_id=$(gh api "repos/$ORG/$repo/rulesets" 2>/dev/null \
-    | jq -r '.[] | select(.name | test("Merge Queue"; "i")) | .id' | head -1)
+  mapfile -t ruleset_ids < <(
+    gh api "repos/$ORG/$repo/rulesets" \
+      | jq -r '.[] | select(.name | test("Merge Queue"; "i")) | .id'
+  )
 
-  if [[ -z "$ruleset_id" ]]; then
-    echo "SKIP  $repo: no Merge Queue ruleset found"
+  if [[ ${#ruleset_ids[@]} -eq 0 ]]; then
+    echo "FAIL  $repo: no Merge Queue ruleset found"
+    FAILED=1
     continue
   fi
 
-  bypass=$(gh api "repos/$ORG/$repo/rulesets/$ruleset_id" 2>/dev/null | jq -c '.bypass_actors')
-
-  if [[ "$bypass" == "[]" ]]; then
-    echo "OK    $repo (ruleset $ruleset_id): bypass_actors=[]"
-  else
-    echo "FAIL  $repo (ruleset $ruleset_id): bypass_actors=$bypass"
-    FAILED=1
-  fi
+  for ruleset_id in "${ruleset_ids[@]}"; do
+    bypass=$(gh api "repos/$ORG/$repo/rulesets/$ruleset_id" | jq -c '.bypass_actors // []')
+    if [[ "$bypass" == "[]" ]]; then
+      echo "OK    $repo (ruleset $ruleset_id): bypass_actors=[]"
+    else
+      echo "FAIL  $repo (ruleset $ruleset_id): bypass_actors=$bypass"
+      FAILED=1
+    fi
+  done
 done
 
 if [[ "$FAILED" -ne 0 ]]; then
