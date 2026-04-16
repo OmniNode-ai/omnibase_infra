@@ -76,7 +76,7 @@ class HandlerLlmCliSubprocess:
 
     def __init__(
         self,
-        cli: str,
+        cli: str | None = None,
         cli_args: list[str] | None = None,
         timeout: int = 120,
     ) -> None:
@@ -85,8 +85,8 @@ class HandlerLlmCliSubprocess:
         self._timeout = timeout
 
     @property
-    def cli_name(self) -> str:
-        """Return the CLI binary name."""
+    def cli_name(self) -> str | None:
+        """Return the CLI binary name, or None if not configured."""
         return self._cli
 
     @property
@@ -112,6 +112,13 @@ class HandlerLlmCliSubprocess:
         from omnibase_infra.models.llm.model_llm_inference_response import (
             ModelLlmInferenceResponse,
         )
+
+        if self._cli is None:
+            return (
+                None,
+                EnumCliBackendStatus.UNAVAILABLE,
+                "cli not configured (no CLI binary specified)",
+            )
 
         if not shutil.which(self._cli):
             return (
