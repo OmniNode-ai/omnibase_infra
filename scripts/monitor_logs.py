@@ -1733,15 +1733,19 @@ class FileTailer(threading.Thread):
                 line = fh.readline()
                 if not line:
                     self.stop_event.wait(timeout=_FILE_POLL_INTERVAL)
-                    # Re-open if file was rotated (inode changed)
+                    # Re-open if file was rotated (inode change) or copytruncate (size shrink)
                     try:
-                        current_inode = p.stat().st_ino
+                        stat = p.stat()
+                        current_inode = stat.st_ino
+                        current_size = stat.st_size
                         fh_inode = os.fstat(fh.fileno()).st_ino
-                        if current_inode != fh_inode:
+                        fh_pos = fh.tell()
+                        if current_inode != fh_inode or current_size < fh_pos:
                             fh.close()
                             fh = p.open("r")
+                            context.clear()
                     except OSError:
-                        pass
+                        pass  # file may be temporarily absent during rotation
                     continue
                 line = line.rstrip()
                 context.append(line)

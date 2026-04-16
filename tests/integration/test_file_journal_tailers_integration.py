@@ -13,7 +13,6 @@ Does NOT require running journalctl or actual log files - just tests the happy p
 from __future__ import annotations
 
 import importlib.util
-import os
 import sys
 import tempfile
 import threading
@@ -69,7 +68,7 @@ def temp_log_file():
     try:
         Path(temp_path).unlink()
     except OSError:
-        pass
+        pass  # file may not exist if test failed before yield
 
 
 def test_file_tailer_instantiation(mock_slack_credentials, stop_event, temp_log_file):

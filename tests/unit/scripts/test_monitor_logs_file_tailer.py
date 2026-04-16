@@ -5,14 +5,12 @@
 from __future__ import annotations
 
 import importlib
-import io
-import json
 import sys
 import threading
 import time
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -288,8 +286,6 @@ class TestLogMonitorStartsFileTailers:
         )
 
         started: list[str] = []
-
-        original_start = m.FileTailer.start
 
         def capture_start(self: Any) -> None:
             started.append(self.path)
