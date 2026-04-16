@@ -137,3 +137,19 @@ class TestHandlerAutowiringCompliance:
 
         handler = HandlerScopeManifestWriteComplete()
         assert handler is not None
+
+    def test_handler_llm_cli_subprocess_no_args(self) -> None:
+        from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess import (
+            HandlerLlmCliSubprocess,
+        )
+
+        handler = HandlerLlmCliSubprocess()
+        assert handler is not None
+
+    def test_handler_runtime_tick_no_args(self) -> None:
+        from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_runtime_tick import (
+            HandlerRuntimeTick,
+        )
+
+        handler = HandlerRuntimeTick()
+        assert handler is not None
