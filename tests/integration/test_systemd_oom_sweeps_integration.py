@@ -13,7 +13,6 @@ Does NOT require running containers or systemd units - just tests the happy path
 from __future__ import annotations
 
 import importlib.util
-import os
 import sys
 import threading
 from pathlib import Path

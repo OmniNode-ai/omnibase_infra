@@ -137,7 +137,6 @@ class TestSystemdHealthSweep:
         )
 
         posted: list = []
-        call_count = 0
 
         def fake_post_slack(*args, **kwargs):
             posted.append(args)
