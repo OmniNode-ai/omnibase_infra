@@ -91,6 +91,18 @@ class HandlerChainRetrieval:
 
         # Step 2: Ensure collection exists
         await self._ensure_collection()
+        if self._qdrant_client is None:
+            logger.warning(
+                "HandlerChainRetrieval: qdrant_client not configured (correlation_id=%s)",
+                correlation_id,
+            )
+            return ModelChainRetrievalResult(
+                correlation_id=correlation_id,
+                matches=(),
+                best_match_similarity=0.0,
+                query_embedding=query_embedding,
+                is_hit=False,
+            )
 
         # Step 3: Query Qdrant
         try:

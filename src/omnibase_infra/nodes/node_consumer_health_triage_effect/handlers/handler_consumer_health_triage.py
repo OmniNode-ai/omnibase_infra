@@ -222,6 +222,7 @@ class HandlerConsumerHealthTriage:
 
         Returns dict with at least 'occurrence_count'.
         """
+        assert self._db_pool is not None  # guarded by handle() None-check
         async with self._db_pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -284,6 +285,7 @@ class HandlerConsumerHealthTriage:
         self, fingerprint: str, state: EnumConsumerIncidentState
     ) -> None:
         """Update the incident state for a fingerprint."""
+        assert self._db_pool is not None  # guarded by handle() None-check
         async with self._db_pool.acquire() as conn:
             await conn.execute(
                 """
@@ -300,6 +302,7 @@ class HandlerConsumerHealthTriage:
 
         Returns True if restart is allowed.
         """
+        assert self._db_pool is not None  # guarded by handle() None-check
         async with self._db_pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -329,6 +332,7 @@ class HandlerConsumerHealthTriage:
 
     async def _emit_restart_command(self, event: ModelConsumerHealthEvent) -> None:
         """Emit a restart command to the consumer restart topic."""
+        assert self._db_pool is not None  # guarded by handle() None-check
         if self._producer is None:
             logger.warning("Cannot emit restart command: no producer available")
             return

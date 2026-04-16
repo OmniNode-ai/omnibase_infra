@@ -317,6 +317,7 @@ class HandlerRuntimeErrorTriage:
 
         Returns the correlated fingerprint or None.
         """
+        assert self._db_pool is not None  # guarded by handle() None-check
         try:
             async with self._db_pool.acquire() as conn:
                 row = await conn.fetchrow(
@@ -341,6 +342,7 @@ class HandlerRuntimeErrorTriage:
         correlated_fingerprint: str | None,
     ) -> dict[str, object]:
         """Upsert incident row in runtime_error_triage table."""
+        assert self._db_pool is not None  # guarded by handle() None-check
         async with self._db_pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -403,6 +405,7 @@ class HandlerRuntimeErrorTriage:
 
     async def _update_incident_state(self, fingerprint: str, state: str) -> None:
         """Update the incident state for a fingerprint."""
+        assert self._db_pool is not None  # guarded by handle() None-check
         async with self._db_pool.acquire() as conn:
             await conn.execute(
                 """

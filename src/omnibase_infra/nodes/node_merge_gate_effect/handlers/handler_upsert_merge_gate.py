@@ -210,6 +210,7 @@ class HandlerUpsertMergeGate(MixinPostgresOpExecutor):
             payload: Merge gate decision payload.
             correlation_id: Correlation ID for tracing.
         """
+        assert self._pool is not None  # guarded by handle() None-check
         # Serialize violations to JSON
         violations_json = json.dumps(
             [v.model_dump(mode="json") for v in payload.violations]
