@@ -93,24 +93,6 @@ _APPROVED_WIRING_PREFIXES: tuple[str, ...] = ("registry_infra_",)
 # exemptions for handlers that pass the wiring check will cause test failure.
 _INV4_WIRING_EXEMPTIONS: frozenset[tuple[str, str]] = frozenset(
     {
-        # OMN-5406: Scope-check canary orchestrator handlers use payload_type_match
-        # routing and are dispatched via Kafka events, not through the handler registry.
-        (
-            "src/omnibase_infra/nodes/node_scope_workflow_orchestrator/contract.yaml",
-            "HandlerScopeCheckInitiate",
-        ),
-        (
-            "src/omnibase_infra/nodes/node_scope_workflow_orchestrator/contract.yaml",
-            "HandlerScopeFileReadComplete",
-        ),
-        (
-            "src/omnibase_infra/nodes/node_scope_workflow_orchestrator/contract.yaml",
-            "HandlerScopeExtractComplete",
-        ),
-        (
-            "src/omnibase_infra/nodes/node_scope_workflow_orchestrator/contract.yaml",
-            "HandlerScopeManifestWriteComplete",
-        ),
         # OMN-7040: Delegation pipeline reducers use module-level delta() functions,
         # not ONEX handler class protocol. They are invoked directly by the orchestrator,
         # not through the handler registry. Exempted from class-based wiring check.
@@ -121,13 +103,6 @@ _INV4_WIRING_EXEMPTIONS: frozenset[tuple[str, str]] = frozenset(
         (
             "src/omnibase_infra/nodes/node_delegation_routing_reducer/contract.yaml",
             "HandlerDelegationRouting",
-        ),
-        # OMN-8272: node_onboarding_orchestrator uses a module-level async function
-        # (handle_onboarding) invoked via asyncio.run() from omnimarket's HandlerOnboarding.
-        # It is not wired through the handler registry — invoked directly by callers.
-        (
-            "src/omnibase_infra/nodes/node_onboarding_orchestrator/contract.yaml",
-            "handle_onboarding",
         ),
     }
 )
