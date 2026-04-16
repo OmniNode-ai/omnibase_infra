@@ -216,7 +216,9 @@ class HandlerRuntimeTick:
 
         # Null-guard: handler requires projection_reader + reducer when called.
         # They default to None only so auto-wiring can instantiate without args.
-        assert self._projection_reader is not None, "HandlerRuntimeTick: projection_reader not injected"
+        assert self._projection_reader is not None, (
+            "HandlerRuntimeTick: projection_reader not injected"
+        )
         assert self._reducer is not None, "HandlerRuntimeTick: reducer not injected"
 
         # Extract from envelope
