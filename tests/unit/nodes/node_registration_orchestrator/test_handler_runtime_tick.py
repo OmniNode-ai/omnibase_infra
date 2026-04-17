@@ -665,3 +665,28 @@ class TestHandlerRuntimeTickTimezoneValidation:
         assert isinstance(output, ModelHandlerOutput)
         assert output.handler_id == "handler-runtime-tick"
         assert output.events == ()  # No events expected (empty projections)
+
+
+# ---------------------------------------------------------------------------
+# OMN-8735 follow-up: auto-wiring compliance — no-args construction
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_handler_runtime_tick_constructs_with_no_args() -> None:
+    """HandlerRuntimeTick must construct with no arguments for auto-wiring."""
+    handler = HandlerRuntimeTick()
+    assert handler.handler_id == "handler-runtime-tick"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_handler_runtime_tick_returns_empty_when_unconfigured() -> None:
+    """HandlerRuntimeTick with no deps returns empty output (null-guard path)."""
+    handler = HandlerRuntimeTick()
+    tick = create_runtime_tick()
+    envelope = create_envelope(tick, now=TEST_NOW)
+    output = await handler.handle(envelope)
+    assert isinstance(output, ModelHandlerOutput)
+    assert output.events == ()
+    assert output.intents == ()
