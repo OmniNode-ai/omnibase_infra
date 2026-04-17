@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 import threading
 import time
@@ -136,7 +137,7 @@ class TestFileTailerDedupWindow:
         alerted: list[Any] = []
 
         # Use a key prefix that matches what FileTailer uses
-        cooldown_key = f"file:{log_file.name}"
+        cooldown_key = f"file:{Path(log_file).expanduser().absolute()}"
 
         def fake_cooldown_read(key: str) -> tuple[float, int]:
             # Simulate already-alerted once with count=1
@@ -190,8 +191,12 @@ class TestJournalTailerUsesJournalctlFollow:
         stop_event = threading.Event()
         captured_cmd: list[list[str]] = []
 
+        # Back the mocked journal stream with a real pipe so the selectors-based
+        # JournalTailer.run() loop can register it (selectors needs fileno()).
+        r_fd, w_fd = os.pipe()
+        pipe_reader = os.fdopen(r_fd, "r")
         fake_proc = MagicMock()
-        fake_proc.stdout = iter([])  # empty — tailer exits immediately
+        fake_proc.stdout = pipe_reader
         fake_proc.terminate = MagicMock()
 
         def fake_popen(cmd: list[str], **kwargs: Any) -> MagicMock:
@@ -199,18 +204,22 @@ class TestJournalTailerUsesJournalctlFollow:
             stop_event.set()  # stop immediately after spawn
             return fake_proc
 
-        with patch("subprocess.Popen", side_effect=fake_popen):
-            tailer = m.JournalTailer(
-                unit="deploy-agent.service",
-                bot_token="xoxb-test",
-                channel_id="C123",
-                cooldown=0,
-                dry_run=False,
-                stop_event=stop_event,
-            )
-            tailer.daemon = True
-            tailer.start()
-            tailer.join(timeout=3)
+        try:
+            with patch("subprocess.Popen", side_effect=fake_popen):
+                tailer = m.JournalTailer(
+                    unit="deploy-agent.service",
+                    bot_token="xoxb-test",
+                    channel_id="C123",
+                    cooldown=0,
+                    dry_run=False,
+                    stop_event=stop_event,
+                )
+                tailer.daemon = True
+                tailer.start()
+                tailer.join(timeout=3)
+        finally:
+            os.close(w_fd)
+            pipe_reader.close()
 
         assert len(captured_cmd) >= 1, "JournalTailer must spawn a subprocess"
         cmd = captured_cmd[0]
@@ -227,29 +236,39 @@ class TestJournalTailerUsesJournalctlFollow:
         alerted: list[Any] = []
 
         error_output = "ERROR: rebuild failed — connection refused\n"
+        # Pipe-backed mock so the selectors-based JournalTailer.run() can poll
+        # a real fd. We write one error line then close the write end to signal
+        # EOF, which cleanly terminates the loop.
+        r_fd, w_fd = os.pipe()
+        pipe_reader = os.fdopen(r_fd, "r")
+        os.write(w_fd, error_output.encode())
+        os.close(w_fd)
         fake_proc = MagicMock()
-        fake_proc.stdout = iter([error_output])
+        fake_proc.stdout = pipe_reader
         fake_proc.terminate = MagicMock()
 
-        with (
-            patch("subprocess.Popen", return_value=fake_proc),
-            patch.object(
-                m, "post_slack", side_effect=lambda *a, **kw: alerted.append(a)
-            ),
-            patch.object(m, "_cooldown_read", return_value=(0.0, 0)),
-            patch.object(m, "_cooldown_write"),
-        ):
-            tailer = m.JournalTailer(
-                unit="deploy-agent.service",
-                bot_token="xoxb-test",
-                channel_id="C123",
-                cooldown=0,
-                dry_run=False,
-                stop_event=stop_event,
-            )
-            tailer.daemon = True
-            tailer.start()
-            tailer.join(timeout=3)
+        try:
+            with (
+                patch("subprocess.Popen", return_value=fake_proc),
+                patch.object(
+                    m, "post_slack", side_effect=lambda *a, **kw: alerted.append(a)
+                ),
+                patch.object(m, "_cooldown_read", return_value=(0.0, 0)),
+                patch.object(m, "_cooldown_write"),
+            ):
+                tailer = m.JournalTailer(
+                    unit="deploy-agent.service",
+                    bot_token="xoxb-test",
+                    channel_id="C123",
+                    cooldown=0,
+                    dry_run=False,
+                    stop_event=stop_event,
+                )
+                tailer.daemon = True
+                tailer.start()
+                tailer.join(timeout=3)
+        finally:
+            pipe_reader.close()
 
         assert len(alerted) >= 1, "ERROR in journal output must trigger Slack alert"
 
