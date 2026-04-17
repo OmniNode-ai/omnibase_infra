@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Periodic audit of branch protection settings across all OmniNode-ai repos.
+#
+# Checks:
+#   A) required_approving_review_count > 0 (blocks solo-dev workflow)
+#   B) required status check contexts that no longer match any recent CI check-run
+#
+# OMN-9034 — references overnight-failure-retrospective §4.1 and §7 P0
+
+name: Branch Protection Audit
+
+on:
+  schedule:
+    # Every 4 hours at minute 23 (offset to avoid thundering herd)
+    - cron: "23 */4 * * *"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    name: Audit Branch Protection
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run branch protection audit (report-only)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash scripts/audit-branch-protection.sh --owner OmniNode-ai --dry-run
