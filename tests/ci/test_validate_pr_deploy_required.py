@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from scripts.validation.validate_pr_deploy_required import (
@@ -26,6 +27,8 @@ from scripts.validation.validate_pr_deploy_required import (
     has_deploy_evidence,
     validate_pr_deploy_gate,
 )
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -174,7 +177,7 @@ class TestHasDeployEvidence:
         assert has_deploy_evidence(contract_path) is True
 
     def test_non_deploy_check_is_not_evidence(self, tmp_path: Path) -> None:
-        contract_path = _make_contract(tmp_path, [_non_deploy_dod_item()])
+        _make_contract(tmp_path, [_non_deploy_dod_item()])
         assert has_deploy_evidence(contract_path) is False
 
     def test_empty_dod_evidence_is_not_evidence(self, tmp_path: Path) -> None:
@@ -193,7 +196,7 @@ class TestHasDeployEvidence:
 class TestValidatePrDeployGate:
     def test_runtime_change_with_deploy_evidence_passes(self, tmp_path: Path) -> None:
         """DoD case 1: Dockerfile.runtime + ticket with deploy_step → PASS."""
-        contract_path = _make_contract(
+        _make_contract(
             tmp_path,
             [_deploy_dod_item("docker exec omninode-runtime echo deployed")],
         )
@@ -207,7 +210,7 @@ class TestValidatePrDeployGate:
 
     def test_runtime_change_without_deploy_evidence_fails(self, tmp_path: Path) -> None:
         """DoD case 2: Dockerfile.runtime + ticket without deploy_step → FAIL with incident reference."""
-        contract_path = _make_contract(tmp_path, [_non_deploy_dod_item()])
+        _make_contract(tmp_path, [_non_deploy_dod_item()])
         result = validate_pr_deploy_gate(
             changed_files=["docker/Dockerfile.runtime"],
             pr_body="Refs OMN-9999: update runtime Dockerfile",
