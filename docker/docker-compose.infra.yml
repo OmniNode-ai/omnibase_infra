@@ -391,9 +391,10 @@ services:
       --storage-snapshot-retention-count=2 --storage-wal-enabled=true --storage-snapshot-interval-sec=3600 --log-level=WARNING
 
     healthcheck:
-      # OMN-5176: nc (netcat) is NOT reliably in Memgraph v2.18.1 $PATH despite
-      # being installed. Use bash /dev/tcp probe which is always available.
-      test: ["CMD-SHELL", "echo > /dev/tcp/localhost/7687 || exit 1"]
+      # OMN-9061: previous `echo > /dev/tcp/...` needed bash, but CMD-SHELL uses
+      # /bin/sh which parses it as a file redirect ("Directory nonexistent").
+      # mgconsole ships in the image and proves Bolt accepts a real query.
+      test: ["CMD-SHELL", "echo 'RETURN 1;' | mgconsole --host localhost --port ${MEMGRAPH_BOLT_PORT:-7687} --output-format=csv"]
       interval: 10s
       timeout: 5s
       retries: 5
