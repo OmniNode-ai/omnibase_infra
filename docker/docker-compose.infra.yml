@@ -600,6 +600,11 @@ services:
       RUNTIME_PROFILE: main
       ONEX_OUTPUT_TOPIC: ${ONEX_OUTPUT_TOPIC:-responses}
       ONEX_GROUP_ID: ${ONEX_GROUP_ID:-onex-runtime-main}
+      # OMN-9060: HandlerRegistrationStoragePostgres reads POSTGRES_HOST directly
+      # from env (matches the override already present on runtime-effects and
+      # runtime-worker). Without it the handler throws KeyError during wiring and
+      # the container stays DEGRADED.
+      POSTGRES_HOST: postgres
       # OMN-2342: Gate intelligence introspection/heartbeat publishing to this
       # container only. Workers and effects containers inherit x-runtime-env but
       # do NOT set this flag, so they process intelligence events without
