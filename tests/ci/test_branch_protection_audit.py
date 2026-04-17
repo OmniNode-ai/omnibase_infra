@@ -1,312 +1,309 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Unit tests for scripts/audit-branch-protection.sh logic (OMN-9034).
+"""Unit tests for scripts/audit_branch_protection_lib.py (OMN-9034).
 
-Tests validate the two core checks by mocking subprocess.run to inject
-synthetic gh api JSON responses:
-  Check A — required_approving_review_count > 0 must be flagged
-  Check B — orphaned required status check context must be flagged
+Tests validate Check A / Check B / fix-payload logic by importing the lib
+directly and injecting a fake `gh` callable that returns canned JSON.
+No subprocess/bash/gh invocations happen at unit-test time — that's the
+whole point of the lib extraction (OMN-9034 thread 8).
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
-import subprocess
-from unittest.mock import patch
+from pathlib import Path
 
 import pytest
 
 pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
-# Helpers to build synthetic gh api responses
+# Import the lib from scripts/ (not on sys.path by default)
 # ---------------------------------------------------------------------------
+
+_LIB_PATH = (
+    Path(__file__).resolve().parents[2] / "scripts" / "audit_branch_protection_lib.py"
+)
+_spec = importlib.util.spec_from_file_location("audit_branch_protection_lib", _LIB_PATH)
+assert _spec is not None and _spec.loader is not None, f"cannot load {_LIB_PATH}"
+lib = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(lib)
 
 OWNER = "OmniNode-ai"
 REPO = "omnibase_infra"
 
 
-def _protection(rac: int = 0, contexts: list[str] | None = None) -> str:
-    payload: dict = {
-        "required_pull_request_reviews": {"required_approving_review_count": rac},
-        "required_status_checks": {
-            "strict": True,
-            "contexts": contexts or [],
-        },
-        "enforce_admins": {"enabled": False},
-        "restrictions": None,
-    }
-    return json.dumps(payload)
-
-
-def _check_runs(names: list[str]) -> str:
-    runs = [{"name": n, "status": "completed", "conclusion": "success"} for n in names]
-    return json.dumps({"check_runs": runs})
-
-
-def _commits(shas: list[str]) -> str:
-    return json.dumps([{"sha": sha} for sha in shas])
-
-
-def _run_script(
-    *,
-    protection_json: str,
-    commits_json: str,
-    check_runs_json: str,
-    extra_args: list[str] | None = None,
-) -> subprocess.CompletedProcess[str]:
-    """Run audit-branch-protection.sh with mocked gh api responses."""
-    import shutil
-
-    bash = shutil.which("bash")
-    assert bash, "bash not found"
-
-    script = "scripts/audit-branch-protection.sh"
-    args = [bash, script, "--repo", REPO] + (extra_args or [])
-
-    call_count = {"n": 0}
-
-    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        stdout = ""
-        if isinstance(cmd, list) and "gh" in cmd[0]:
-            url = next((a for a in cmd if "/" in a and not a.startswith("-")), "")
-            if (
-                "branches/main/protection" in url
-                and "required_status_checks" not in url
-            ):
-                stdout = protection_json
-            elif "commits?per_page" in url:
-                stdout = commits_json
-            elif "check-runs" in url:
-                stdout = check_runs_json
-            call_count["n"] += 1
-        return subprocess.CompletedProcess(cmd, returncode=0, stdout=stdout, stderr="")
-
-    import omnibase_infra
-
-    with patch("subprocess.run", side_effect=fake_run):
-        result = subprocess.run(
-            args,
-            capture_output=True,
-            text=True,
-            cwd=".",
-            check=False,
-        )
-    return result
-
-
 # ---------------------------------------------------------------------------
-# Case (a): clean — no violations
+# Helpers to build synthetic gh api responses
 # ---------------------------------------------------------------------------
 
 
-def test_clean_repo() -> None:
-    import os
-    from pathlib import Path
-
-    repo_root = Path(__file__).resolve().parents[2]
-    script_path = repo_root / "scripts" / "audit-branch-protection.sh"
-    assert script_path.exists(), f"script missing: {script_path}"
-
-    result = subprocess.run(
-        [
-            "bash",
-            str(script_path),
-            "--repo",
-            REPO,
-            "--dry-run",
-        ],
-        capture_output=True,
-        text=True,
-        cwd=str(repo_root),
-        env={
-            **os.environ,
-            "_MOCK_PROTECTION": _protection(rac=0, contexts=[]),
-            "_MOCK_COMMITS": _commits([]),
-            "_MOCK_CHECK_RUNS": _check_runs([]),
-        },
-        check=False,
-    )
-    # When no branch protection data is available (gh returns error) script exits 0
-    # The real network test is covered by integration; here we just confirm script runs
-    assert result.returncode in (0, 1)  # env-dependent; structural test
-
-
-# ---------------------------------------------------------------------------
-# Case (b): required_approving_review_count=1 → Check A violation
-# ---------------------------------------------------------------------------
-
-
-class TestCheckA:
-    """Check A: required_approving_review_count > 0."""
-
-    def _make_completed(
-        self, stdout: str, rc: int = 0
-    ) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(
-            ["gh"], returncode=rc, stdout=stdout, stderr=""
-        )
-
-    def test_rac_violation_detected(self) -> None:
-        protection = _protection(rac=1, contexts=[])
-        commits = _commits(["abc123"])
-        check_runs = _check_runs(["ci / build"])
-
-        responses = {
-            "branches/main/protection": protection,
-            "commits?per_page": commits,
-            "check-runs": check_runs,
+def _protection_payload(rac: int = 0, contexts: list[str] | None = None) -> str:
+    return json.dumps(
+        {
+            "required_pull_request_reviews": {"required_approving_review_count": rac},
+            "required_status_checks": {
+                "strict": True,
+                "contexts": contexts or [],
+            },
+            "enforce_admins": {"enabled": False},
+            "restrictions": None,
         }
+    )
 
-        def fake_run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
-            if not isinstance(cmd, list):
-                return self._make_completed("")
-            url = next(
-                (a for a in cmd if "/" in str(a) and not str(a).startswith("-")), ""
-            )
-            for key, val in responses.items():
-                if key in url:
-                    return self._make_completed(val)
-            return self._make_completed("")
 
-        with patch("subprocess.run", side_effect=fake_run):
-            result = subprocess.run(
-                ["bash", "scripts/audit-branch-protection.sh", "--repo", REPO],
-                capture_output=True,
-                text=True,
-                cwd="/Volumes/PRO-G40/Code/omni_worktrees/OMN-BP-AUDIT/omnibase_infra",
-                check=False,
-            )
+def _check_runs_payload(names: list[str]) -> str:
+    return json.dumps(
+        {"check_runs": [{"name": n, "status": "completed"} for n in names]}
+    )
 
-        # Script itself is not mocked at subprocess level — this tests invocation shape
-        assert result.returncode in (0, 1)
 
-    def test_rac_zero_is_clean(self) -> None:
-        protection = _protection(rac=0, contexts=[])
-        assert '"required_approving_review_count": 0' in protection
+def _fake_gh(
+    protection_json: str,
+    commits: list[str],
+    check_runs_by_sha: dict[str, list[str]],
+) -> tuple[lib.GhCaller, list[list[str]]]:
+    """Build a fake `gh` callable and a call-log list for assertion."""
+    calls: list[list[str]] = []
 
-    def test_rac_one_is_violation(self) -> None:
-        protection = _protection(rac=1)
-        parsed = json.loads(protection)
-        rac = parsed["required_pull_request_reviews"]["required_approving_review_count"]
-        assert rac > 0, "rac=1 must be flagged as a violation"
+    def gh(args: list[str]) -> tuple[int, str]:
+        calls.append(args)
+        url = next((a for a in args if "/" in a and not a.startswith("-")), "")
+        if url.endswith("/branches/main/protection"):
+            return 0, protection_json
+        if "/commits?per_page=" in url:
+            # Return one sha per line (jq .[].sha format)
+            return 0, "\n".join(commits) + ("\n" if commits else "")
+        if "/check-runs" in url:
+            sha = url.split("/commits/")[1].split("/check-runs")[0]
+            names = check_runs_by_sha.get(sha, [])
+            return 0, _check_runs_payload(names)
+        return 1, ""
 
-    def test_fix_payload_removes_reviews(self) -> None:
-        protection = _protection(rac=2, contexts=["ci / lint"])
-        parsed = json.loads(protection)
-
-        # Simulate what the --fix branch does: build PUT payload dropping reviews
-        payload: dict = {}
-        rsc = parsed.get("required_status_checks")
-        if rsc:
-            payload["required_status_checks"] = {
-                "strict": rsc.get("strict", False),
-                "contexts": rsc.get("contexts", []),
-            }
-        payload["enforce_admins"] = False
-        payload["required_pull_request_reviews"] = None
-        payload["restrictions"] = None
-
-        assert payload["required_pull_request_reviews"] is None
-        assert payload["required_status_checks"]["contexts"] == ["ci / lint"]
+    return gh, calls
 
 
 # ---------------------------------------------------------------------------
-# Case (c): orphaned required status check context → Check B violation
+# parse_required_approving_review_count
 # ---------------------------------------------------------------------------
 
 
-class TestCheckB:
-    """Check B: required context not seen in recent check-runs."""
+class TestParseRac:
+    def test_zero_when_field_absent(self) -> None:
+        assert lib.parse_required_approving_review_count("{}") == 0
 
-    def test_orphan_context_detected(self) -> None:
-        required_ctx = "ci / old-job-name"
-        protection = _protection(rac=0, contexts=[required_ctx])
-        commits_data = _commits(["sha1", "sha2"])
-        check_runs_data = _check_runs(["ci / new-job-name", "ci / lint"])
-
-        # The script checks: is required_ctx in seen check-run names?
-        # Simulate the grep logic
-        seen = {"ci / new-job-name", "ci / lint"}
-        assert required_ctx not in seen, (
-            "orphaned context should not appear in seen names"
+    def test_zero_when_value_zero(self) -> None:
+        assert (
+            lib.parse_required_approving_review_count(_protection_payload(rac=0)) == 0
         )
 
-    def test_matching_context_is_clean(self) -> None:
-        required_ctx = "ci / build"
-        protection = _protection(rac=0, contexts=[required_ctx])
-        check_runs_data = _check_runs(["ci / build", "ci / lint"])
-
-        seen = {"ci / build", "ci / lint"}
-        assert required_ctx in seen, "matching context should be present in seen names"
-
-    def test_empty_contexts_is_clean(self) -> None:
-        protection = _protection(rac=0, contexts=[])
-        parsed = json.loads(protection)
-        contexts = parsed["required_status_checks"]["contexts"]
-        assert contexts == []
-
-    def test_multiple_contexts_partial_orphan(self) -> None:
-        contexts = ["ci / build", "ci / stale-job"]
-        seen = {"ci / build", "ci / lint"}
-        orphaned = [c for c in contexts if c not in seen]
-        assert orphaned == ["ci / stale-job"]
-        assert len(orphaned) == 1
-
-
-# ---------------------------------------------------------------------------
-# Case (d): --fix mutates payload correctly (unit-level simulation)
-# ---------------------------------------------------------------------------
-
-
-class TestFixMutation:
-    """Verify --fix branch produces correct PUT payload."""
-
-    def test_fix_preserves_status_checks_drops_reviews(self) -> None:
-        original = _protection(rac=3, contexts=["ci / build", "ci / test"])
-        parsed = json.loads(original)
-
-        # Replicate fix_payload construction from the shell script's python3 inline
-        payload: dict = {}
-        rsc = parsed.get("required_status_checks")
-        if rsc:
-            payload["required_status_checks"] = {
-                "strict": rsc.get("strict", False),
-                "contexts": rsc.get("contexts", []),
-            }
-        payload["enforce_admins"] = bool(
-            (parsed.get("enforce_admins") or {}).get("enabled", False)
+    def test_extracts_positive_value(self) -> None:
+        assert (
+            lib.parse_required_approving_review_count(_protection_payload(rac=3)) == 3
         )
-        payload["required_pull_request_reviews"] = None
-        payload["restrictions"] = None
+
+    def test_malformed_json_returns_zero(self) -> None:
+        assert lib.parse_required_approving_review_count("not json") == 0
+
+
+# ---------------------------------------------------------------------------
+# parse_required_contexts
+# ---------------------------------------------------------------------------
+
+
+class TestParseContexts:
+    def test_empty_when_absent(self) -> None:
+        assert lib.parse_required_contexts("{}") == []
+
+    def test_extracts_list(self) -> None:
+        ctxs = lib.parse_required_contexts(
+            _protection_payload(contexts=["ci / build", "ci / lint"])
+        )
+        assert ctxs == ["ci / build", "ci / lint"]
+
+
+# ---------------------------------------------------------------------------
+# build_fix_payload
+# ---------------------------------------------------------------------------
+
+
+class TestBuildFixPayload:
+    def test_preserves_status_checks_drops_reviews(self) -> None:
+        original = _protection_payload(rac=3, contexts=["ci / build", "ci / test"])
+        payload = lib.build_fix_payload(original)
 
         assert payload["required_pull_request_reviews"] is None
+        assert payload["restrictions"] is None
+        assert payload["enforce_admins"] is False
+        assert payload["required_status_checks"]["strict"] is True
         assert set(payload["required_status_checks"]["contexts"]) == {
             "ci / build",
             "ci / test",
         }
-        assert payload["required_status_checks"]["strict"] is True
 
-    def test_fix_handles_missing_status_checks(self) -> None:
-        parsed: dict = {
-            "required_pull_request_reviews": {"required_approving_review_count": 1},
-            "enforce_admins": {"enabled": True},
-            "restrictions": None,
-        }
-
-        payload: dict = {}
-        rsc = parsed.get("required_status_checks")
-        if rsc:
-            payload["required_status_checks"] = {
-                "strict": rsc.get("strict", False),
-                "contexts": rsc.get("contexts", []),
+    def test_handles_missing_status_checks(self) -> None:
+        source = json.dumps(
+            {
+                "required_pull_request_reviews": {"required_approving_review_count": 1},
+                "enforce_admins": {"enabled": True},
+                "restrictions": None,
             }
-        payload["enforce_admins"] = bool(
-            (parsed.get("enforce_admins") or {}).get("enabled", False)
         )
-        payload["required_pull_request_reviews"] = None
-        payload["restrictions"] = None
+        payload = lib.build_fix_payload(source)
 
         assert "required_status_checks" not in payload
         assert payload["enforce_admins"] is True
         assert payload["required_pull_request_reviews"] is None
+
+
+# ---------------------------------------------------------------------------
+# find_orphan_contexts
+# ---------------------------------------------------------------------------
+
+
+class TestFindOrphans:
+    def test_detects_orphan(self) -> None:
+        orphans = lib.find_orphan_contexts(
+            ["ci / old-job", "ci / build"], {"ci / build", "ci / lint"}
+        )
+        assert orphans == ["ci / old-job"]
+
+    def test_all_matching_returns_empty(self) -> None:
+        orphans = lib.find_orphan_contexts(["ci / build"], {"ci / build", "ci / lint"})
+        assert orphans == []
+
+    def test_empty_required_returns_empty(self) -> None:
+        assert lib.find_orphan_contexts([], {"ci / build"}) == []
+
+
+# ---------------------------------------------------------------------------
+# collect_seen_check_run_names — exercises pagination (OMN-9034 thread 7)
+# ---------------------------------------------------------------------------
+
+
+class TestCollectSeen:
+    def test_paginates_when_page_full(self) -> None:
+        # A single commit with 2 pages of 100 check-runs each, then a short 3rd page.
+        page1 = [f"ci / job-{i}" for i in range(100)]
+        page2 = [f"ci / job-{i}" for i in range(100, 200)]
+        page3 = [f"ci / job-{i}" for i in range(200, 250)]
+
+        call_count = {"n": 0}
+
+        def gh(args: list[str]) -> tuple[int, str]:
+            call_count["n"] += 1
+            url = next((a for a in args if "/" in a and not a.startswith("-")), "")
+            if "/commits?per_page=" in url:
+                return 0, "sha-one\n"
+            if "/check-runs" in url:
+                if url.endswith("&page=1"):
+                    return 0, _check_runs_payload(page1)
+                if url.endswith("&page=2"):
+                    return 0, _check_runs_payload(page2)
+                if url.endswith("&page=3"):
+                    return 0, _check_runs_payload(page3)
+                return 0, _check_runs_payload([])
+            return 1, ""
+
+        seen = lib.collect_seen_check_run_names(OWNER, REPO, 5, gh)
+
+        assert len(seen) == 250
+        assert "ci / job-0" in seen
+        assert "ci / job-249" in seen
+
+    def test_stops_on_empty_page_after_full(self) -> None:
+        """Page 1 returns exactly PAGE_SIZE runs → must fetch page 2.
+        Page 2 returns empty → loop must terminate. Regression guard for
+        pagination that would otherwise loop forever on a busy repo.
+        """
+        page1 = [f"ci / j{i}" for i in range(100)]
+
+        def gh(args: list[str]) -> tuple[int, str]:
+            url = next((a for a in args if "/" in a and not a.startswith("-")), "")
+            if "/commits?per_page=" in url:
+                return 0, "sha-one\n"
+            if "/check-runs" in url and url.endswith("&page=1"):
+                return 0, _check_runs_payload(page1)
+            if "/check-runs" in url and url.endswith("&page=2"):
+                return 0, _check_runs_payload([])
+            return 1, ""
+
+        seen = lib.collect_seen_check_run_names(OWNER, REPO, 5, gh)
+        assert len(seen) == 100
+        assert "ci / j0" in seen
+
+
+# ---------------------------------------------------------------------------
+# audit_repo — end-to-end (still injected, no real gh)
+# ---------------------------------------------------------------------------
+
+
+class TestAuditRepo:
+    def test_clean_repo_returns_ok(self) -> None:
+        gh, _ = _fake_gh(
+            _protection_payload(rac=0, contexts=["ci / build"]),
+            ["sha1"],
+            {"sha1": ["ci / build", "ci / lint"]},
+        )
+        result = lib.audit_repo(OWNER, REPO, gh)
+        assert result["status"] == "ok"
+        assert result["rac"] == 0
+        assert result["orphan_contexts"] == []
+        # Explicit behavioral assertion — not returncode-in-(0,1) smoke test
+        assert REPO in result["message"]
+
+    def test_rac_violation_is_flagged(self) -> None:
+        gh, _ = _fake_gh(
+            _protection_payload(rac=1, contexts=[]),
+            ["sha1"],
+            {"sha1": []},
+        )
+        result = lib.audit_repo(OWNER, REPO, gh)
+        assert result["status"] == "violation"
+        assert result["rac"] == 1
+        assert "Check A" in result["message"]
+        assert "must be 0" in result["message"]
+
+    def test_orphan_context_is_flagged(self) -> None:
+        gh, _ = _fake_gh(
+            _protection_payload(rac=0, contexts=["ci / old-job"]),
+            ["sha1", "sha2"],
+            {"sha1": ["ci / new-job"], "sha2": ["ci / lint"]},
+        )
+        result = lib.audit_repo(OWNER, REPO, gh)
+        assert result["status"] == "violation"
+        assert result["orphan_contexts"] == ["ci / old-job"]
+        assert "Check B" in result["message"]
+        assert "ci / old-job" in result["message"]
+
+    def test_inaccessible_protection_returns_skip(self) -> None:
+        def gh(args: list[str]) -> tuple[int, str]:
+            return 1, ""  # gh api call fails
+
+        result = lib.audit_repo(OWNER, REPO, gh)
+        assert result["status"] == "skip"
+        assert REPO in result["message"]
+
+    def test_both_checks_fail_accumulates_messages(self) -> None:
+        gh, _ = _fake_gh(
+            _protection_payload(rac=2, contexts=["ci / missing"]),
+            ["sha1"],
+            {"sha1": ["ci / present"]},
+        )
+        result = lib.audit_repo(OWNER, REPO, gh)
+        assert result["status"] == "violation"
+        assert result["rac"] == 2
+        assert result["orphan_contexts"] == ["ci / missing"]
+        assert "Check A" in result["message"]
+        assert "Check B" in result["message"]
+
+
+# ---------------------------------------------------------------------------
+# Page size constant — guards against regression to per_page=50 (thread 7)
+# ---------------------------------------------------------------------------
+
+
+def test_page_size_is_github_max() -> None:
+    """GitHub REST API caps per_page at 100. Regression guard for thread 7."""
+    assert lib.PAGE_SIZE == 100

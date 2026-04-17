@@ -8,6 +8,12 @@
 #   B) required status check contexts that no longer match any recent CI check-run
 #
 # OMN-9034 — references overnight-failure-retrospective §4.1 and §7 P0
+#
+# Token: uses CROSS_REPO_PAT if configured (required for cross-repo audit of 9
+# sibling repos). Falls back to GITHUB_TOKEN with a warning, in which case
+# only the current repo is audited and all other repos will [SKIP] with
+# "branch protection not enabled or inaccessible" — that is expected and
+# documented here so an on-call does not get confused.
 
 name: Branch Protection Audit
 
@@ -30,8 +36,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Check CROSS_REPO_PAT is configured
+        id: pat_check
+        env:
+          CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+        run: |
+          if [ -z "$CROSS_REPO_PAT" ]; then
+            echo "::warning::CROSS_REPO_PAT is not set — audit will SKIP 9 sibling repos."
+            echo "To audit across the org, set CROSS_REPO_PAT to a PAT with repo scope."
+            echo "has_pat=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_pat=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run branch protection audit (report-only)
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # CROSS_REPO_PAT has repo scope across the org; GITHUB_TOKEN is
+          # scoped to this repo only and will cause SKIPs on siblings.
+          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || secrets.GITHUB_TOKEN }}
         run: |
           bash scripts/audit-branch-protection.sh --owner OmniNode-ai --dry-run
