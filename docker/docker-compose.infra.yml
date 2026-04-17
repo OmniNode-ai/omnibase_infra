@@ -598,7 +598,9 @@ services:
       !!merge <<: *runtime-env
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-omninode-runtime-main}
       RUNTIME_PROFILE: main
-      ONEX_OUTPUT_TOPIC: ${ONEX_OUTPUT_TOPIC:-responses}
+      # OMN-8840/OMN-8784: ONEX_OUTPUT_TOPIC removed (banned env var).
+      # Topics come from each node's contract.yaml event_bus declaration;
+      # setting this var raises ProtocolConfigurationError at kernel bootstrap.
       ONEX_GROUP_ID: ${ONEX_GROUP_ID:-onex-runtime-main}
       # OMN-2342: Gate intelligence introspection/heartbeat publishing to this
       # container only. Workers and effects containers inherit x-runtime-env but
@@ -647,7 +649,8 @@ services:
       !!merge <<: *runtime-env
       OTEL_SERVICE_NAME: omninode-runtime-effects
       RUNTIME_PROFILE: effects
-      ONEX_OUTPUT_TOPIC: ${ONEX_EFFECTS_OUTPUT_TOPIC:-effect-responses}
+      # OMN-8840/OMN-8784: ONEX_OUTPUT_TOPIC removed (banned env var).
+      # Topics come from each node's contract.yaml event_bus declaration.
       ONEX_GROUP_ID: ${ONEX_EFFECTS_GROUP_ID:-onex-runtime-effects}
       # OMN-7569: Savings estimation consumer config (env_prefix=OMNIBASE_INFRA_SAVINGS_)
       OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
@@ -700,7 +703,8 @@ services:
       !!merge <<: *runtime-env
       OTEL_SERVICE_NAME: omninode-runtime-worker
       RUNTIME_PROFILE: workers
-      ONEX_OUTPUT_TOPIC: ${ONEX_WORKER_OUTPUT_TOPIC:-worker-responses}
+      # OMN-8840/OMN-8784: ONEX_OUTPUT_TOPIC removed (banned env var).
+      # Topics come from each node's contract.yaml event_bus declaration.
       ONEX_GROUP_ID: ${ONEX_WORKER_GROUP_ID:-onex-runtime-workers}
       # OMN-7569: Savings estimation consumer config (env_prefix=OMNIBASE_INFRA_SAVINGS_)
       OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
