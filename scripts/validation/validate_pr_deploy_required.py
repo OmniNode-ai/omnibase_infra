@@ -26,7 +26,6 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from re import Pattern
 
 import yaml
 
@@ -63,7 +62,7 @@ RUNTIME_PATH_PATTERNS = [
 DEPLOY_KEYWORDS = ["docker exec", "rpk topic produce", "deploy"]
 
 
-def _glob_to_regex(pattern: str) -> Pattern[str]:
+def _glob_to_regex(pattern: str) -> re.Pattern[str]:
     """Convert a glob pattern (with ** support) to a compiled regex."""
     # Escape everything except * and ?
     parts = re.split(r"(\*\*|\*|\?)", pattern)
@@ -80,7 +79,7 @@ def _glob_to_regex(pattern: str) -> Pattern[str]:
     return re.compile("^" + "".join(regex_parts) + "$")
 
 
-_COMPILED_RUNTIME_PATTERNS: list[Pattern[str]] = [
+_COMPILED_RUNTIME_PATTERNS: list[re.Pattern[str]] = [
     _glob_to_regex(p) for p in RUNTIME_PATH_PATTERNS
 ]
 
