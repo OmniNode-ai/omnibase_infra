@@ -281,8 +281,8 @@ services:
       # Runtime configuration
       ONEX_ENVIRONMENT: test
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-DEBUG}
-      ONEX_INPUT_TOPIC: onex.evt.platform.node-introspection.v1
-      ONEX_OUTPUT_TOPIC: onex.evt.platform.registration-completed.v1
+      # OMN-8840/OMN-8784: ONEX_INPUT_TOPIC / ONEX_OUTPUT_TOPIC removed (banned env vars).
+      # e2e runtime derives topics from node contracts mounted at /app/contracts.
       ONEX_GROUP_ID: onex-runtime-e2e
       ONEX_CONTRACTS_DIR: /app/contracts
     ports:

@@ -40,7 +40,8 @@ operational_defaults:
   KEYCLOAK_ISSUER: http://localhost:28080/realms/omninode
   ONEX_SERVICE_CLIENT_ID: onex-service
   OTEL_SERVICE_NAME: omninode-runtime-main
-  ONEX_OUTPUT_TOPIC: responses
+  # OMN-8840/OMN-8784: ONEX_OUTPUT_TOPIC removed (banned env var).
+  # Topics come from each node's contract.yaml event_bus declaration.
   ONEX_GROUP_ID: onex-runtime-main
 ports:
   external: 8085
