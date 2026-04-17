@@ -1745,8 +1745,12 @@ class FileTailer(threading.Thread):
                         fh_inode = os.fstat(fh.fileno()).st_ino
                         fh_pos = fh.tell()
                         if current_inode != fh_inode or current_size < fh_pos:
+                            # Open the new file BEFORE closing the old handle so
+                            # a failed reopen (racy rotation) does not leave the
+                            # tailer running on a closed fd.
+                            new_fh = p.open("r")
                             fh.close()
-                            fh = p.open("r")
+                            fh = new_fh
                             context.clear()
                     except OSError:
                         pass  # file may be temporarily absent during rotation
@@ -2178,6 +2182,8 @@ class LogMonitor:
         raw = os.environ.get("MONITOR_JOURNALS", "")
         if not raw:
             return list(_DEFAULT_JOURNALS)
+        if raw.strip() == "_disabled":
+            return []
         return [u.strip() for u in raw.split(",") if u.strip()]
 
     def _start_file_tailer(self, path: str) -> None:
