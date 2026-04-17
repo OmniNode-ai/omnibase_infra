@@ -177,7 +177,7 @@ class TestHasDeployEvidence:
         assert has_deploy_evidence(contract_path) is True
 
     def test_non_deploy_check_is_not_evidence(self, tmp_path: Path) -> None:
-        _make_contract(tmp_path, [_non_deploy_dod_item()])
+        contract_path = _make_contract(tmp_path, [_non_deploy_dod_item()])
         assert has_deploy_evidence(contract_path) is False
 
     def test_empty_dod_evidence_is_not_evidence(self, tmp_path: Path) -> None:
