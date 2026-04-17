@@ -12,9 +12,10 @@ ports:
   external: 7687
   internal: 7687
 healthcheck:
-  # /dev/tcp is a bash-ism; the default CMD-SHELL uses /bin/sh (dash on Debian)
-  # which does not support it. Invoke bash explicitly.
-  test: bash -c 'echo > /dev/tcp/localhost/7687' || exit 1
+  # OMN-9061: previous sh `echo > /dev/tcp/...` parsed as a file redirect and
+  # failed with "Directory nonexistent". mgconsole ships in the image and proves
+  # the Bolt listener actually accepts a query, not just the port being open.
+  test: echo 'RETURN 1;' | mgconsole --host localhost --port ${MEMGRAPH_BOLT_PORT:-7687} --output-format=csv
   interval_s: 10
   timeout_s: 5
   retries: 5
