@@ -12,11 +12,28 @@ Verifies end-to-end integration aspects:
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+def _source_omnibase_env() -> None:
+    """Load ~/.omnibase/.env into os.environ before Kafka/DB/Infisical operations."""
+    env_path = Path.home() / ".omnibase" / ".env"
+    if not env_path.exists():
+        return
+    for raw in env_path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key, value.strip())
+
+
+_source_omnibase_env()
 
 # Add scripts directory to path for imports
 _SCRIPTS_DIR = str(Path(__file__).resolve().parents[2] / "scripts")
