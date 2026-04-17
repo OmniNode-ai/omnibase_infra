@@ -101,19 +101,26 @@ def _run_script(
 
 
 def test_clean_repo() -> None:
+    import os
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "audit-branch-protection.sh"
+    assert script_path.exists(), f"script missing: {script_path}"
+
     result = subprocess.run(
         [
             "bash",
-            "scripts/audit-branch-protection.sh",
+            str(script_path),
             "--repo",
             REPO,
             "--dry-run",
         ],
         capture_output=True,
         text=True,
-        cwd="/Volumes/PRO-G40/Code/omni_worktrees/OMN-BP-AUDIT/omnibase_infra",
+        cwd=str(repo_root),
         env={
-            **__import__("os").environ,
+            **os.environ,
             "_MOCK_PROTECTION": _protection(rac=0, contexts=[]),
             "_MOCK_COMMITS": _commits([]),
             "_MOCK_CHECK_RUNS": _check_runs([]),
