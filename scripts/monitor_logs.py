@@ -1048,23 +1048,40 @@ class RuntimeErrorTailer(threading.Thread):
 def _load_monitor_alert_topic() -> str:
     """Load the alert-detected topic name from monitor_alert_contract.yaml.
 
-    Falls back to the literal string if PyYAML is missing or the file cannot
-    be read, so the script can run without additional dependencies.
+    Fail-closed: if the contract file exists but cannot be parsed, or the
+    topic is missing from it, raise RuntimeError rather than silently falling
+    back to a hardcoded literal.  A hardcoded fallback would make contract
+    drift invisible and could silently publish alerts to the wrong topic.
+
+    The only safe fallback is when the contract file is absent entirely (i.e.
+    the monitoring script is running in a stripped environment without the
+    contract YAML deployed alongside it).
     """
-    _FALLBACK = "onex.evt.omnibase-infra.monitor-alert-detected.v1"
     contract_path = Path(__file__).parent / "monitor_alert_contract.yaml"
     if not contract_path.exists():
-        return _FALLBACK
+        # Contract not deployed — disable Kafka emission for this emitter.
+        # MonitorAlertEmitter._init_clients() will log the degradation.
+        return ""
     try:
         import yaml  # type: ignore[import-untyped]
-
+    except ImportError as exc:
+        raise RuntimeError(
+            "PyYAML is required to load monitor_alert_contract.yaml "
+            "but is not installed. Install it or remove the contract file."
+        ) from exc
+    try:
         data = yaml.safe_load(contract_path.read_text())
-        topics = data.get("event_bus", {}).get("publish_topics", [])
-        if topics:
-            return str(topics[0])
-    except Exception:  # noqa: BLE001
-        pass
-    return _FALLBACK
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to parse monitor_alert_contract.yaml: {exc}"
+        ) from exc
+    topics = (data or {}).get("event_bus", {}).get("publish_topics", [])
+    if not topics:
+        raise RuntimeError(
+            "monitor_alert_contract.yaml exists but contains no "
+            "event_bus.publish_topics entries. Contract is malformed."
+        )
+    return str(topics[0])
 
 
 _TOPIC_MONITOR_ALERT_V1 = _load_monitor_alert_topic()
@@ -1087,6 +1104,14 @@ class MonitorAlertEmitter:
         self._host = socket.gethostname()
 
     def _init_clients(self) -> bool:
+        if not _TOPIC_MONITOR_ALERT_V1:
+            print(
+                "[monitor] monitor_alert_contract.yaml not deployed; "
+                "monitor alert Kafka emission disabled",
+                file=sys.stderr,
+            )
+            return False
+
         kafka_servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "")
         if not kafka_servers:
             print(
@@ -1123,6 +1148,10 @@ class MonitorAlertEmitter:
             )
             return False
 
+    # Hard cap on text fields forwarded to Kafka to prevent oversized messages
+    # and avoid creating a second durable path for secrets or PII in raw logs.
+    _KAFKA_TEXT_LIMIT = 2000
+
     def emit(
         self,
         container: str,
@@ -1139,6 +1168,11 @@ class MonitorAlertEmitter:
 
         now = datetime.now(UTC)
         alert_id = str(uuid.uuid4())
+        # Sanitize and bound text fields before forwarding to Kafka.  Raw log
+        # content can contain secrets, ANSI sequences, or PII; stripping control
+        # chars and capping length prevents both data leakage and oversized messages.
+        safe_full = _sanitize_log_text(full_message_text)[: self._KAFKA_TEXT_LIMIT]
+        safe_excerpt = _sanitize_log_text(raw_log_excerpt)[: self._KAFKA_TEXT_LIMIT]
         event_payload = {
             "alert_id": alert_id,
             "source": container,
@@ -1147,8 +1181,8 @@ class MonitorAlertEmitter:
             "container": container,
             "exit_code": exit_code,
             "restart_count": restart_count,
-            "full_message_text": full_message_text,
-            "raw_log_excerpt": raw_log_excerpt,
+            "full_message_text": safe_full,
+            "raw_log_excerpt": safe_excerpt,
             "detected_at": now.isoformat(),
             "host": self._host,
         }
