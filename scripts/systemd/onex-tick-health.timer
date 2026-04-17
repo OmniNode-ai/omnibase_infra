@@ -1,0 +1,12 @@
+[Unit]
+Description=ONEX Health Tick — every hour at :03
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+Requires=onex-tick-health.service
+
+[Timer]
+OnCalendar=*-*-* *:03:00
+Persistent=true
+Unit=onex-tick-health.service
+
+[Install]
+WantedBy=timers.target

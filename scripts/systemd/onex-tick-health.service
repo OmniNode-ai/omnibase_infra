@@ -1,0 +1,16 @@
+[Unit]
+Description=ONEX Health Tick — probe infra + LLM endpoints
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.omnibase/.env
+ExecStart=/bin/bash %h/Code/omni_home/omnibase_infra/scripts/ticks/health-tick.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=onex-tick-health
+
+[Install]
+WantedBy=default.target

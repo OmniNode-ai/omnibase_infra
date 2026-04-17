@@ -1,0 +1,12 @@
+[Unit]
+Description=ONEX Merge-Sweep Tick — every hour at :23
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+Requires=onex-tick-merge-sweep.service
+
+[Timer]
+OnCalendar=*-*-* *:23:00
+Persistent=true
+Unit=onex-tick-merge-sweep.service
+
+[Install]
+WantedBy=timers.target

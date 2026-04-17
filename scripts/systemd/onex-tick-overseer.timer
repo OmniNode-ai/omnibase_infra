@@ -1,0 +1,12 @@
+[Unit]
+Description=ONEX Overseer Tick — every 15 minutes
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+Requires=onex-tick-overseer.service
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+Unit=onex-tick-overseer.service
+
+[Install]
+WantedBy=timers.target
