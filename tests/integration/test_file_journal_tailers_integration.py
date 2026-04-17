@@ -133,12 +133,19 @@ def test_file_tailer_lifecycle(mock_slack_credentials, stop_event, temp_log_file
 
 def test_journal_tailer_lifecycle_mock(mock_slack_credentials, stop_event, monkeypatch):
     """Test that JournalTailer can be started and stopped cleanly with mocked subprocess."""
+    import os as _os
     import subprocess
     from unittest.mock import MagicMock
 
-    # Mock Popen to avoid actual journalctl call
+    # Back the mocked journal stream with a real pipe so the selectors-based
+    # JournalTailer.run() loop can register it (selectors needs fileno()).
+    # Nothing gets written to the pipe, so selector.select(timeout=0.5) always
+    # times out and the loop rechecks stop_event deterministically.
+    r_fd, w_fd = _os.pipe()
+    pipe_reader = _os.fdopen(r_fd, "r")
+
     mock_popen = MagicMock()
-    mock_popen.stdout = iter([])  # Empty iterator
+    mock_popen.stdout = pipe_reader
     mock_popen.terminate = MagicMock()
 
     def mock_popen_constructor(*args, **kwargs):
@@ -155,20 +162,24 @@ def test_journal_tailer_lifecycle_mock(mock_slack_credentials, stop_event, monke
         stop_event=stop_event,
     )
 
-    # Start the thread
-    tailer.start()
-    assert tailer.is_alive()
+    try:
+        # Start the thread
+        tailer.start()
+        assert tailer.is_alive()
 
-    # Give it a moment to start
-    time.sleep(0.1)
+        # Give it a moment to start
+        time.sleep(0.1)
 
-    # Stop it
-    stop_event.set()
-    tailer.join(timeout=2.0)
-    assert not tailer.is_alive()
+        # Stop it
+        stop_event.set()
+        tailer.join(timeout=2.0)
+        assert not tailer.is_alive()
 
-    # Verify terminate was called
-    mock_popen.terminate.assert_called_once()
+        # Verify terminate was called
+        mock_popen.terminate.assert_called_once()
+    finally:
+        _os.close(w_fd)
+        pipe_reader.close()
 
 
 def test_file_tailer_cooldown_key(mock_slack_credentials, stop_event, temp_log_file):
@@ -181,7 +192,7 @@ def test_file_tailer_cooldown_key(mock_slack_credentials, stop_event, temp_log_f
         dry_run=True,
         stop_event=stop_event,
     )
-    expected_key = f"file:{Path(temp_log_file).name}"
+    expected_key = f"file:{Path(temp_log_file).expanduser().absolute()}"
     assert tailer._cooldown_key == expected_key
 
 
