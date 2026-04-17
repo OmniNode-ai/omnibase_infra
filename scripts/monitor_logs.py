@@ -41,6 +41,7 @@ import hashlib
 import json
 import os
 import re
+import selectors
 import shlex
 import shutil
 import socket
@@ -1705,7 +1706,9 @@ class FileTailer(threading.Thread):
         self.cooldown = cooldown
         self.dry_run = dry_run
         self.stop_event = stop_event
-        self._cooldown_key = f"file:{Path(path).name}"
+        # Use absolute path to avoid cooldown-key collisions when two configured
+        # sources share a basename (e.g. /srv/a/env-sync.log vs /srv/b/env-sync.log).
+        self._cooldown_key = f"file:{Path(path).expanduser().absolute()}"
 
     def run(self) -> None:
         p = Path(self.path)
@@ -1837,15 +1840,24 @@ class JournalTailer(threading.Thread):
             return
 
         context: deque[str] = deque(maxlen=CONTEXT_LINES)
+        selector = selectors.DefaultSelector()
         try:
-            for line in proc.stdout:  # type: ignore[union-attr]
-                if self.stop_event.is_set():
+            selector.register(proc.stdout, selectors.EVENT_READ)  # type: ignore[arg-type]
+            while not self.stop_event.is_set():
+                # Poll with a short timeout so `stop_event.set()` can interrupt
+                # an idle `journalctl` stream deterministically.
+                if not selector.select(timeout=0.5):
+                    continue
+                raw = proc.stdout.readline()  # type: ignore[union-attr]
+                if not raw:
+                    # EOF — journalctl exited
                     break
-                line = line.rstrip()
+                line = raw.rstrip()
                 context.append(line)
                 if ERROR_PATTERN.search(line) and not IGNORE_PATTERN.search(line):
                     self._maybe_alert(list(context))
         finally:
+            selector.close()
             proc.terminate()
             print(f"[monitor] Stopped JournalTailer for {self.unit}")
 
