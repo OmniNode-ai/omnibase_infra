@@ -1722,7 +1722,11 @@ class FileTailer(threading.Thread):
 
         try:
             fh = p.open("r")
-            fh.seek(0, 2)  # seek to end
+            try:
+                fh.seek(0, 2)  # seek to end
+            except OSError:
+                fh.close()
+                raise
         except OSError as exc:
             print(f"[monitor] Cannot open {self.path}: {exc}", file=sys.stderr)
             return
@@ -2162,10 +2166,18 @@ class LogMonitor:
         return list(_DEFAULT_FILE_LOGS)
 
     def _journal_units(self) -> list[str]:
-        """Return journal units from MONITOR_JOURNALS env var or defaults."""
-        if "MONITOR_JOURNALS" not in os.environ:
+        """Return journal units from MONITOR_JOURNALS env var or defaults.
+
+        An empty string (``MONITOR_JOURNALS=""``) is treated the same as the
+        variable being unset — i.e. the default units are used.  This is
+        consistent with ``_file_log_paths()`` which also falls back to defaults
+        when ``MONITOR_FILE_LOGS`` is empty.  To explicitly disable all journal
+        monitoring set ``MONITOR_JOURNALS=_disabled`` (no journals match that
+        pattern and the resulting list will be empty).
+        """
+        raw = os.environ.get("MONITOR_JOURNALS", "")
+        if not raw:
             return list(_DEFAULT_JOURNALS)
-        raw = os.environ["MONITOR_JOURNALS"]
         return [u.strip() for u in raw.split(",") if u.strip()]
 
     def _start_file_tailer(self, path: str) -> None:
