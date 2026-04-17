@@ -1037,6 +1037,182 @@ class RuntimeErrorTailer(threading.Thread):
 
 
 # ---------------------------------------------------------------------------
+# Monitor alert emitter (OMN-8885)
+# ---------------------------------------------------------------------------
+# Dual-emits every Slack alert to onex.evt.omnibase-infra.monitor-alert-detected.v1.
+# Gracefully degrades: if confluent-kafka is not installed or
+# KAFKA_BOOTSTRAP_SERVERS is unset, Kafka publish is silently skipped and
+# the Slack path continues unchanged.
+
+
+def _load_monitor_alert_topic() -> str:
+    """Load the alert-detected topic name from monitor_alert_contract.yaml.
+
+    Fail-closed: if the contract file exists but cannot be parsed, or the
+    topic is missing from it, raise RuntimeError rather than silently falling
+    back to a hardcoded literal.  A hardcoded fallback would make contract
+    drift invisible and could silently publish alerts to the wrong topic.
+
+    The only safe fallback is when the contract file is absent entirely (i.e.
+    the monitoring script is running in a stripped environment without the
+    contract YAML deployed alongside it).
+    """
+    contract_path = Path(__file__).parent / "monitor_alert_contract.yaml"
+    if not contract_path.exists():
+        # Contract not deployed — disable Kafka emission for this emitter.
+        # MonitorAlertEmitter._init_clients() will log the degradation.
+        return ""
+    try:
+        import yaml  # type: ignore[import-untyped]
+    except ImportError as exc:
+        raise RuntimeError(
+            "PyYAML is required to load monitor_alert_contract.yaml "
+            "but is not installed. Install it or remove the contract file."
+        ) from exc
+    try:
+        data = yaml.safe_load(contract_path.read_text())
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to parse monitor_alert_contract.yaml: {exc}"
+        ) from exc
+    topics = (data or {}).get("event_bus", {}).get("publish_topics", [])
+    if not topics:
+        raise RuntimeError(
+            "monitor_alert_contract.yaml exists but contains no "
+            "event_bus.publish_topics entries. Contract is malformed."
+        )
+    return str(topics[0])
+
+
+_TOPIC_MONITOR_ALERT_V1 = _load_monitor_alert_topic()
+
+
+class MonitorAlertEmitter:
+    """Publishes monitor alert events to Kafka alongside the existing Slack path.
+
+    Mirrors the graceful-degradation pattern from PostgresErrorEmitter and
+    RuntimeErrorEmitter: if confluent-kafka is not installed or the broker
+    env var is missing, the emitter self-disables and returns without raising.
+    """
+
+    def __init__(self, dry_run: bool) -> None:
+        self.dry_run = dry_run
+        from typing import Any
+
+        self._producer: Any = None
+        self._init_ok = self._init_clients()
+        self._host = socket.gethostname()
+
+    def _init_clients(self) -> bool:
+        if not _TOPIC_MONITOR_ALERT_V1:
+            print(
+                "[monitor] monitor_alert_contract.yaml not deployed; "
+                "monitor alert Kafka emission disabled",
+                file=sys.stderr,
+            )
+            return False
+
+        kafka_servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "")
+        if not kafka_servers:
+            print(
+                "[monitor] KAFKA_BOOTSTRAP_SERVERS not set; "
+                "monitor alert Kafka emission disabled",
+                file=sys.stderr,
+            )
+            return False
+
+        try:
+            import confluent_kafka
+
+            self._producer = confluent_kafka.Producer(
+                {
+                    "bootstrap.servers": kafka_servers,
+                    "acks": "all",
+                    "enable.idempotence": "true",
+                    "retries": 5,
+                    "request.timeout.ms": 10000,
+                }
+            )
+            return True
+        except ImportError:
+            print(
+                "[monitor] confluent-kafka not installed; "
+                "monitor alert Kafka emission disabled",
+                file=sys.stderr,
+            )
+            return False
+        except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
+            print(
+                f"[monitor] Failed to create Kafka producer for monitor alerts: {exc}",
+                file=sys.stderr,
+            )
+            return False
+
+    # Hard cap on text fields forwarded to Kafka to prevent oversized messages
+    # and avoid creating a second durable path for secrets or PII in raw logs.
+    _KAFKA_TEXT_LIMIT = 2000
+
+    def emit(
+        self,
+        container: str,
+        severity: str,
+        pattern_matched: str,
+        full_message_text: str,
+        raw_log_excerpt: str,
+        exit_code: int | None = None,
+        restart_count: int | None = None,
+    ) -> None:
+        """Emit one alert-detected event.  No-op if emitter is disabled."""
+        if not self._init_ok:
+            return
+
+        now = datetime.now(UTC)
+        alert_id = str(uuid.uuid4())
+        # Sanitize and bound text fields before forwarding to Kafka.  Raw log
+        # content can contain secrets, ANSI sequences, or PII; stripping control
+        # chars and capping length prevents both data leakage and oversized messages.
+        safe_full = _sanitize_log_text(full_message_text)[: self._KAFKA_TEXT_LIMIT]
+        safe_excerpt = _sanitize_log_text(raw_log_excerpt)[: self._KAFKA_TEXT_LIMIT]
+        event_payload = {
+            "alert_id": alert_id,
+            "source": container,
+            "severity": severity,
+            "pattern_matched": pattern_matched,
+            "container": container,
+            "exit_code": exit_code,
+            "restart_count": restart_count,
+            "full_message_text": safe_full,
+            "raw_log_excerpt": safe_excerpt,
+            "detected_at": now.isoformat(),
+            "host": self._host,
+        }
+
+        if self.dry_run:
+            print(f"[DRY RUN] Would emit monitor alert event for {container}:")
+            print(json.dumps(event_payload, indent=2))
+            return
+
+        try:
+            payload_bytes = json.dumps(event_payload).encode("utf-8")
+            if self._producer is not None:
+                self._producer.produce(
+                    topic=_TOPIC_MONITOR_ALERT_V1,
+                    value=payload_bytes,
+                    key=alert_id.encode("utf-8"),
+                )
+                self._producer.flush(timeout=10)
+                print(
+                    f"[monitor] Emitted alert-detected event "
+                    f"(alert_id={alert_id[:8]}..., container={container})"
+                )
+        except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
+            print(
+                f"[monitor] Kafka publish failed for monitor alert from {container}: {exc}",
+                file=sys.stderr,
+            )
+
+
+# ---------------------------------------------------------------------------
 # Restart watcher (OMN-3596)
 # ---------------------------------------------------------------------------
 
@@ -1349,6 +1525,7 @@ class ContainerTailer(threading.Thread):
         cooldown: int,
         dry_run: bool,
         stop_event: threading.Event,
+        alert_emitter: MonitorAlertEmitter | None = None,
     ) -> None:
         super().__init__(name=f"tail-{container}", daemon=True)
         self.container = container
@@ -1358,6 +1535,7 @@ class ContainerTailer(threading.Thread):
         self.dry_run = dry_run
         self.stop_event = stop_event
         self._context: deque[str] = deque(maxlen=CONTEXT_LINES)
+        self._alert_emitter = alert_emitter
 
     def run(self) -> None:
         cmd = [
@@ -1433,7 +1611,17 @@ class ContainerTailer(threading.Thread):
             )
             return
         _cooldown_write(self.container, now, count + 1)
+        full_text = "\n".join(lines)
         post_slack(self.bot_token, self.channel_id, self.container, lines, self.dry_run)
+        # Dual-emit to Kafka (OMN-8885) — Slack path above is unchanged
+        if self._alert_emitter is not None:
+            self._alert_emitter.emit(
+                container=self.container,
+                severity="ERROR",
+                pattern_matched="ERROR_PATTERN",
+                full_message_text=full_text,
+                raw_log_excerpt=full_text[:500],
+            )
 
     def _maybe_warning_alert(self, label: str, lines: list[str]) -> None:
         """Post a labelled Slack warning alert with independent cooldown.
@@ -1456,9 +1644,19 @@ class ContainerTailer(threading.Thread):
         _cooldown_write(cooldown_key, now, count + 1)
         # Include the warning label in the container identifier for Slack triage
         container_label = f"{self.container} [{label}]"
+        full_text = "\n".join(lines)
         post_slack(
             self.bot_token, self.channel_id, container_label, lines, self.dry_run
         )
+        # Dual-emit to Kafka (OMN-8885) — Slack path above is unchanged
+        if self._alert_emitter is not None:
+            self._alert_emitter.emit(
+                container=self.container,
+                severity="WARNING",
+                pattern_matched=label,
+                full_message_text=full_text,
+                raw_log_excerpt=full_text[:500],
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1676,6 +1874,7 @@ class LogMonitor:
         self._pg_tailers: dict[str, PostgresErrorTailer] = {}
         self._rt_tailers: dict[str, RuntimeErrorTailer] = {}
         self._rt_emitter = RuntimeErrorEmitter(dry_run)
+        self._alert_emitter = MonitorAlertEmitter(dry_run)
         self._lock = threading.Lock()
 
     def _get_project_containers(self) -> list[str]:
@@ -1711,6 +1910,7 @@ class LogMonitor:
                 self.cooldown,
                 self.dry_run,
                 stop_event,
+                alert_emitter=self._alert_emitter,
             )
             tailer.start()
             self._tailers[container] = tailer

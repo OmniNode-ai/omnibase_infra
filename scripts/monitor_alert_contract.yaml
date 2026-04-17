@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Contract for monitor_logs.py alert Kafka emission (OMN-8885).
+# Topic names are declared here — never hardcoded in monitor_logs.py source.
+#
+name: "monitor_alert_emitter"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+description: >
+  Declares the Kafka topics emitted by monitor_logs.py MonitorAlertEmitter. Every Slack alert is dual-emitted to the alert-detected topic so that node_monitor_alert_responder (OMN-8886) can classify and dispatch remediation.
+
+event_bus:
+  publish_topics:
+    - "onex.evt.omnibase-infra.monitor-alert-detected.v1"
