@@ -1017,6 +1017,18 @@ single source of truth.
 
 ---
 
+## Branch protection
+
+Before any `gh api --method PUT .../branches/main/protection` mutation, run the dry-run audit first to confirm the current state:
+
+```bash
+bash scripts/audit-branch-protection.sh --repo <repo> --dry-run
+```
+
+The script checks two invariants: (A) `required_approving_review_count` must be 0 (solo-dev workflow), and (B) every required status check context must match a check-run name seen on the last 5 commits. A periodic CI job (`.github/workflows/branch-protection-audit.yml`, schedule `23 */4 * * *`) runs this automatically and fails the workflow on any violation.
+
+---
+
 **Python**: 3.12+ | **Ready?** → Check `docs/patterns/` for implementation guides
 
 **Bottom Line**: Declarative nodes, container injection, agent-driven development. No backwards compatibility, no custom node logic.
