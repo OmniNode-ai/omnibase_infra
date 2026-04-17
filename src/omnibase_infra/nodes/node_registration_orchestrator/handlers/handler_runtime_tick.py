@@ -53,12 +53,6 @@ from omnibase_infra.models.registration.events.model_node_liveness_expired impor
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_context import (
     ModelReducerContext,
 )
-from omnibase_infra.nodes.node_registration_orchestrator.services import (
-    RegistrationReducerService,
-)
-from omnibase_infra.projectors.projection_reader_registration import (
-    ProjectionReaderRegistration,
-)
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 from omnibase_infra.utils import (
     sanitize_error_message,
@@ -66,8 +60,14 @@ from omnibase_infra.utils import (
 )
 
 if TYPE_CHECKING:
+    from omnibase_infra.nodes.node_registration_orchestrator.services import (
+        RegistrationReducerService,
+    )
     from omnibase_infra.nodes.node_registration_orchestrator.timeout_coordinator import (
         TimeoutCoordinator,
+    )
+    from omnibase_infra.projectors.projection_reader_registration import (
+        ProjectionReaderRegistration,
     )
     from omnibase_infra.protocols.protocol_snapshot_publisher import (
         ProtocolSnapshotPublisher,
@@ -129,8 +129,8 @@ class HandlerRuntimeTick:
 
     def __init__(
         self,
-        projection_reader: ProjectionReaderRegistration,
-        reducer: RegistrationReducerService,
+        projection_reader: ProjectionReaderRegistration | None = None,
+        reducer: RegistrationReducerService | None = None,
         snapshot_publisher: ProtocolSnapshotPublisher | None = None,
         timeout_coordinator: TimeoutCoordinator | None = None,
     ) -> None:
@@ -227,6 +227,27 @@ class HandlerRuntimeTick:
             correlation_id=correlation_id,
         )
         validate_timezone_aware_with_context(now, ctx)
+
+        # Null-guard: handler constructs without required deps for auto-wiring.
+        # Return empty output when projection_reader or reducer are not configured.
+        if self._projection_reader is None or self._reducer is None:
+            logger.warning(
+                "HandlerRuntimeTick: projection_reader or reducer not configured — skipping tick",
+                extra={"correlation_id": str(correlation_id)},
+            )
+            processing_time_ms = (time.perf_counter() - start_time) * 1000
+            return ModelHandlerOutput(
+                input_envelope_id=envelope.envelope_id,
+                correlation_id=correlation_id,
+                handler_id=self.handler_id,
+                node_kind=self.node_kind,
+                events=(),
+                intents=(),
+                projections=(),
+                result=None,
+                processing_time_ms=processing_time_ms,
+                timestamp=now,
+            )
 
         # Coordinator path: delegate to TimeoutCoordinator when wired.
         # Single side-effecting operation (best-effort, at-least-once).

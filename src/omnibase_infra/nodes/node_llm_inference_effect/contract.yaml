@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 # OMN-8735: handler constructor compliance refactor (2026-04-15)
+# OMN-8735 follow-up: HandlerLlmCliSubprocess null-guard compliance (2026-04-16)
 # Copyright (c) 2026 OmniNode Team
 #
 # ONEX Node Contract
@@ -15,7 +16,7 @@ contract_name: "node_llm_inference_effect"
 node_name: "node_llm_inference_effect"
 contract_version:
   major: 1
-  minor: 0
+  minor: 1
   patch: 0
 node_version:
   major: 0
