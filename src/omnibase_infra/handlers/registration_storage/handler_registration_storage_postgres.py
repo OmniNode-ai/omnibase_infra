@@ -578,7 +578,7 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
                 # - node_version: VARCHAR -> ModelSemVer
                 records.append(
                     ModelRegistrationRecord(
-                        node_id=UUID(row["node_id"]),
+                        node_id=UUID(str(row["node_id"])),
                         node_type=EnumNodeKind(row["node_type"]),
                         node_version=ModelSemVer.parse(row["node_version"]),
                         capabilities=capabilities,
