@@ -74,7 +74,9 @@ class ModelSavingsEstimate(BaseModel):
         default_factory=uuid4,
         description="Correlation ID for tracing",
     )
-    schema_version: str = Field(default="1.0", description="Schema version")
+    schema_version: str = Field(
+        default="1.0", description="Schema version"
+    )  # string-version-ok: Kafka wire envelope; cross-service consumers deserialize as plain string
     actual_total_tokens: int = Field(
         default=0, ge=0, description="Total tokens consumed"
     )

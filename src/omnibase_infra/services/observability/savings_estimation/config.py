@@ -115,7 +115,7 @@ class ConfigSavingsEstimation(BaseSettings):
         description="Size of in-memory finalized session set for dedup optimization.",
     )
 
-    schema_version: str = Field(
+    schema_version: str = Field(  # string-version-ok: configures version injected into Kafka savings event wire format; consumers deserialize as plain string
         default="1.0",
         description="Schema version for produced savings events.",
     )

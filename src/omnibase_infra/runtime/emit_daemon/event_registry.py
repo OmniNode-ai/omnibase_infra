@@ -134,7 +134,7 @@ class ModelEventRegistration(BaseModel):
         default_factory=tuple,
         description="Tuple of field names that must be present in payload",
     )
-    schema_version: str = Field(
+    schema_version: str = Field(  # string-version-ok: injected into Kafka event metadata for cross-service schema evolution tracking
         default="1.0.0",
         description="Semantic version of the event schema",
     )

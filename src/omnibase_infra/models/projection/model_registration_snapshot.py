@@ -162,7 +162,7 @@ class ModelRegistrationSnapshot(BaseModel):
     )
 
     # Schema Versioning (wire-format compatibility marker)
-    schema_version: str = Field(
+    schema_version: str = Field(  # string-version-ok: cross-language wire format; consumers in non-Python runtimes deserialize as plain string
         default="1.0.0",
         description=(
             "Schema format version for consumer compatibility. "

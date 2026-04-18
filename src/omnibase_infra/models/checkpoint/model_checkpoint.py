@@ -77,7 +77,7 @@ class ModelCheckpoint(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     # ── Common header ────────────────────────────────────────────────
-    schema_version: str = Field(
+    schema_version: str = Field(  # string-version-ok: checkpoint persisted to disk/DB; plain string preserves serialization compatibility for append-only checkpoint records
         default=CHECKPOINT_SCHEMA_VERSION,
         description="Forward-compatibility version string.",
     )

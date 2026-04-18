@@ -114,7 +114,7 @@ class ModelProjectorSchema(BaseModel):
         description="List of index definitions",
     )
 
-    schema_version: str = Field(
+    schema_version: str = Field(  # string-version-ok: validated internally via field_validator; used as plain string in SQL comment generation
         default="1.0.0",
         description="Schema version string (semver format)",
     )
