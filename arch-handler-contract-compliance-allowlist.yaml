@@ -181,3 +181,7 @@ allowlisted_handlers:
     violations:
       - undeclared_transport
     ticket: 'OMN-7264'
+  - path: omnibase_infra/nodes/node_registration_orchestrator/handlers/handler_node_registration_acked.py
+    violations:
+      - missing_handler_routing
+    ticket: 'OMN-9194'
