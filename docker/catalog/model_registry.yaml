@@ -11,6 +11,7 @@ models:
     provider: local
     transport: http
     base_url_env: LLM_CODER_URL
+    health_path: "/health"
     # cyankiwi/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit on 192.168.86.201:8000
     # Context extended to 112K via TurboQuant aither-kvcache K4/V3 compression
     capabilities:
@@ -26,6 +27,7 @@ models:
     provider: local
     transport: http
     base_url_env: LLM_CODER_FAST_URL
+    health_path: "/health"
     # Corianas/DeepSeek-R1-Distill-Qwen-14B-AWQ on 192.168.86.201:8001
     capabilities:
       - deep_reasoning
@@ -40,6 +42,7 @@ models:
     provider: local
     transport: http
     base_url_env: LLM_DEEPSEEK_R1_URL
+    health_path: "/health"
     capabilities:
       - deep_reasoning
       - code_review
@@ -105,6 +108,7 @@ models:
     transport: http
     base_url_env: LLM_GLM_URL
     api_key_env: LLM_GLM_API_KEY
+    health_path: ""
     capabilities:
       - code_generation
       - refactoring
