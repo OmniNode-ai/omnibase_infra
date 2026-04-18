@@ -17,7 +17,7 @@ and wires handlers into the :class:`MessageDispatchEngine`:
 This module performs I/O (module imports, Kafka subscriptions) — it is NOT pure.
 
 CI gate: any PR touching this module MUST satisfy the runtime-startup gate defined in
-``omnibase_infra/CLAUDE.md`` § "Runtime Startup is a First-Class CI Gate (OMN-9126)".
+``CLAUDE.md`` § "Runtime Startup is a First-Class CI Gate (OMN-9126)" (repo root).
 """
 
 from __future__ import annotations

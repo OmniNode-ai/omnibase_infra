@@ -16,7 +16,7 @@ If this PR touches `auto_wiring/`, `service_kernel.py`, handler `__init__` signa
 - [ ] Test loads the **real** contract manifest from disk (no fake/stub handlers)
 - [ ] Test calls `wire_from_manifest` with the same args the kernel uses in production
 - [ ] Test asserts zero wiring failures
-- [ ] CI boots `omninode-runtime` in a compose sandbox and asserts `RestartCount == 0` after 45s
+- [ ] CI boots `omninode-runtime` in a compose sandbox, waits for Docker `healthy` within compose `start_period`, and asserts `RestartCount == 0` at the health-ready checkpoint
 - [ ] N/A — this PR does not touch any of the above
 
 ## Type safety checklist

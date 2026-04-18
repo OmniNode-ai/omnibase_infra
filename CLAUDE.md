@@ -797,7 +797,12 @@ Any PR that touches `auto_wiring/`, `service_kernel.py`, handler `__init__` sign
 2. Runs `wire_from_manifest` with the same args the kernel passes in production.
 3. Asserts zero failures for required handlers.
 
-CI must additionally boot `omninode-runtime` in a compose sandbox and assert `RestartCount == 0` after 45s.
+CI must additionally boot `omninode-runtime` in a compose sandbox and assert:
+
+- the container reaches Docker healthy state within the configured compose `start_period` (currently 600s for `omninode-runtime`, see `docker/docker-compose.infra.yml`), and
+- `RestartCount == 0` at the health-ready checkpoint — not a fixed 45s wall-clock window.
+
+Ad-hoc short timeouts are forbidden: any PR that shortens the gate below `start_period` must also update the compose healthcheck in the same PR, with justification.
 
 **Forbidden:** aspirational integration gates — "there's a test file but it uses fake handlers." The boot must actually happen against real handlers.
 
