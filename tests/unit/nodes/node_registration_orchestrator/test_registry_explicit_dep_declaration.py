@@ -266,7 +266,7 @@ def test_declaration_matches_runtime_handler_dependencies_literal() -> None:
     # Monkey-patch the module-level helper so we don't need real handler
     # modules to be importable in tests.
     orig_loader = module._load_handler_class
-    module._load_handler_class = _fake_load_handler_class  # type: ignore[assignment]
+    module._load_handler_class = _fake_load_handler_class
     try:
         # Use MagicMocks for all runtime deps. Materialization does not
         # actually USE them beyond forwarding to handler constructors,
@@ -278,22 +278,62 @@ def test_declaration_matches_runtime_handler_dependencies_literal() -> None:
             catalog_service=MagicMock(),
         )
     finally:
-        module._load_handler_class = orig_loader  # type: ignore[assignment]
+        module._load_handler_class = orig_loader
 
-    # Every handler that was actually instantiated MUST be present in the
-    # declaration with an identical dep-key set. The reverse direction
-    # (declaration >= instantiated) is allowed: the declaration may list a
-    # handler whose contract.yaml entry has been temporarily removed (e.g.
-    # ``HandlerNodeRegistrationAcked`` under the OMN-9194 tactical unblock,
-    # which Task 7 restores). We DO NOT require the declaration set to be
-    # a strict equality with the instantiated set for exactly that reason.
-    missing_from_declaration = set(captured_kwargs.keys()) - set(declared_shape.keys())
-    assert not missing_from_declaration, (
+    # Coherence invariant: the set of handlers that ``create_registry``
+    # actually instantiates at runtime MUST equal the set of handlers
+    # declared in ``_EXPLICIT_DEPENDENCY_SHAPE``.
+    #
+    # Strict equality in BOTH directions is the enforcement mechanism that
+    # catches drift between declaration and materialization:
+    #
+    # * instantiated \ declared → a handler was added to contract.yaml or
+    #   create_registry but the declaration was not updated (runtime wiring
+    #   silently diverges from the declarative surface).
+    # * declared \ instantiated → a handler was removed from contract.yaml
+    #   or create_registry but the declaration still advertises it
+    #   (discovery-time callers get stale info about what will actually
+    #   wire at runtime).
+    #
+    # Temporary per-handler exceptions (e.g. OMN-9194's tactical removal of
+    # ``HandlerNodeRegistrationAcked`` from contract.yaml, which Task 7
+    # OMN-9202 restores) MUST be encoded explicitly in the allowlist below
+    # rather than by loosening the equality check — that keeps the default
+    # invariant sharp and forces each exemption to carry a ticket reference.
+    DECLARATION_ONLY_ALLOWLIST: set[str] = {
+        # HandlerNodeRegistrationAcked: declared here so the HandlerResolver
+        # has the shape ready the moment Task 7 (OMN-9202) restores the
+        # contract.yaml entry. Until then, create_registry does not
+        # instantiate it because the contract loader does not surface it.
+        # This exemption is DELETED when OMN-9202 merges.
+        "HandlerNodeRegistrationAcked",
+    }
+
+    declared_handlers = set(declared_shape.keys())
+    materialized_handlers = set(captured_kwargs.keys())
+    expected_materialized = declared_handlers - DECLARATION_ONLY_ALLOWLIST
+
+    # Direction 1: every instantiated handler MUST be declared.
+    unexpected_materialized = materialized_handlers - declared_handlers
+    assert not unexpected_materialized, (
         f"Handlers were instantiated at runtime but are NOT declared: "
-        f"{sorted(missing_from_declaration)}. Every instantiated handler "
+        f"{sorted(unexpected_materialized)}. Every instantiated handler "
         f"MUST appear in _EXPLICIT_DEPENDENCY_SHAPE."
     )
 
+    # Direction 2: every declared handler (minus explicit allowlist) MUST
+    # be instantiated. This catches stale declarations.
+    missing_materialized = expected_materialized - materialized_handlers
+    assert not missing_materialized, (
+        f"Handlers are declared in _EXPLICIT_DEPENDENCY_SHAPE but NOT "
+        f"instantiated by create_registry: {sorted(missing_materialized)}. "
+        f"Either instantiate them at runtime or add them to "
+        f"DECLARATION_ONLY_ALLOWLIST with a ticket reference documenting "
+        f"the temporary exemption."
+    )
+
+    # Direction 3: for handlers in both sets, the kwargs set must match
+    # the declared dep-key set exactly.
     for handler_name, materialized in captured_kwargs.items():
         declared_keys = set(declared_shape[handler_name])
         assert materialized == declared_keys, (
