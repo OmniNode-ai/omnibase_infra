@@ -125,27 +125,8 @@ jobs:
             exit 0
           fi
 
-          # Count deleted and added tests/integration/*.py files in this PR
-          DELETED=$(git diff --name-status origin/main...HEAD \
-            | awk '$1 == "D" && $2 ~ /^tests\/integration\/[^/]+\.py$/ {print $2}' \
-            | wc -l | tr -d ' ')
-          ADDED=$(git diff --name-status origin/main...HEAD \
-            | awk '($1 == "A" || $1 == "M") && $2 ~ /^tests\/integration\/[^/]+\.py$/ {print $2}' \
-            | wc -l | tr -d ' ')
-
-          echo "Integration test files deleted: $DELETED"
-          echo "Integration test files added/modified: $ADDED"
-
-          if [ "$DELETED" -eq 0 ]; then
-            echo "No integration test files deleted — gate passed"
-            exit 0
-          fi
-
-          if [ "$ADDED" -ge "$DELETED" ]; then
-            echo "Deleted tests covered by $ADDED replacement(s) — gate passed"
-            exit 0
-          fi
-
-          UNMATCHED=$((DELETED - ADDED))
-          echo "::error::PR deletes $DELETED integration test file(s) with only $ADDED replacement(s). $UNMATCHED deletion(s) are unmatched. Either add replacement tests in tests/integration/ or include [skip-test-removal-gate: <reason>] in the PR body for legitimate consolidation."
-          exit 1
+          # Counting logic lives in a Python script so it can be unit-tested
+          # against synthetic git diff outputs. See
+          # tests/ci/test_validate_test_removal_gate.py for the hardened
+          # rename/modify coverage (CR thread on PR #1336).
+          python scripts/validation/validate_test_removal_gate.py --base origin/main
