@@ -1,0 +1,176 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# OMN-8731: Nightly integration test suite against dockerized e2e stack
+#
+# Runs the full integration test suite nightly against docker-compose.e2e.yml.
+# Must NOT target the live .201 instance — all services are containerized.
+#
+# Constraint check: workflow asserts INTEGRATION_POSTGRES_HOST != 192.168.86.201.
+
+name: Nightly Integration Tests
+
+on:
+  schedule:
+    # Off-peak, not :00/:30 per cron convention
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+    inputs:
+      success_threshold:
+        description: 'Minimum consecutive green runs to declare stable (overrides env default)'
+        required: false
+        default: ''
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.6.14"
+  PYTHON_VERSION: "3.12"
+  CACHE_VERSION: "0.4.0"
+  # Contract-declared success threshold — number of consecutive green runs for stability
+  SUCCESS_THRESHOLD: "3"
+  # E2E stack uses containerized postgres — never the .201 instance
+  INTEGRATION_POSTGRES_HOST: "localhost"
+  INTEGRATION_POSTGRES_PORT: "5433"
+  INTEGRATION_POSTGRES_USER: "postgres"
+  INTEGRATION_POSTGRES_PASSWORD: "test-password"
+  INTEGRATION_POSTGRES_DB: "omnibase_infra"
+  OMNIBASE_INFRA_DB_URL: "postgresql://postgres:test-password@localhost:5433/omnibase_infra"
+  # E2E kafka exposed on host port
+  KAFKA_BOOTSTRAP_SERVERS: "localhost:19092"
+  ONEX_EVENT_BUS_TYPE: "kafka"
+  ONEX_ENVIRONMENT: "test"
+  LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
+
+jobs:
+  guard-live-host:
+    name: Assert not targeting live .201
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject if INTEGRATION_POSTGRES_HOST targets .201
+        run: |
+          HOST="${INTEGRATION_POSTGRES_HOST}"
+          if [[ "$HOST" == "192.168.86.201" ]]; then
+            echo "::error::INTEGRATION_POSTGRES_HOST=$HOST targets the live .201 instance. This workflow must use the containerized e2e stack only."
+            exit 1
+          fi
+          echo "Host check passed: $HOST (not live .201)"
+
+  integration-tests:
+    name: Integration Test Suite (e2e stack)
+    needs: guard-live-host
+    # OMNINODE_SELF_HOSTED_RUNS_ON_V1 — do not edit inline; update plan + all occurrences together
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Load cached uv
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/uv.lock') }}-${{ env.CACHE_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --reinstall-package omnibase-core --reinstall-package omnibase-spi
+
+      - name: Spin up e2e stack
+        run: |
+          docker compose -f docker/docker-compose.e2e.yml up -d \
+            postgres redpanda valkey redpanda-topic-manager
+
+      - name: Wait for health checks
+        run: |
+          echo "Waiting for postgres..."
+          timeout 120 bash -c 'until docker exec omnibase-infra-postgres pg_isready -U postgres -d omnibase_infra; do sleep 2; done'
+
+          echo "Waiting for redpanda..."
+          timeout 120 bash -c 'until docker exec omnibase-infra-redpanda rpk cluster health 2>/dev/null | grep -q "Healthy:.*true"; do sleep 2; done'
+
+          echo "Waiting for valkey..."
+          timeout 60 bash -c 'until docker exec omnibase-infra-valkey valkey-cli ping | grep -q PONG; do sleep 2; done'
+
+          echo "Waiting for topic manager to complete..."
+          timeout 60 bash -c 'until [ "$(docker inspect -f "{{.State.Status}}" omnibase-infra-topic-manager 2>/dev/null)" = "exited" ]; do sleep 2; done'
+
+          echo "All services healthy"
+
+      - name: Run integration tests
+        run: |
+          THRESHOLD="${{ github.event.inputs.success_threshold || env.SUCCESS_THRESHOLD }}"
+          echo "Success threshold: $THRESHOLD consecutive green runs"
+          uv run pytest tests/integration/ \
+            -m integration \
+            -v \
+            --tb=short \
+            --junitxml=nightly-integration-junit.xml \
+            --timeout=300 \
+            --timeout-method=thread
+
+      - name: Tear down e2e stack
+        if: always()
+        run: docker compose -f docker/docker-compose.e2e.yml down -v --remove-orphans
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-integration-results-${{ github.run_id }}
+          path: nightly-integration-junit.xml
+          retention-days: 30
+
+  notify-on-failure:
+    name: Failure Alert
+    needs: [guard-live-host, integration-tests]
+    if: failure()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Post Slack alert
+        if: ${{ env.SLACK_BOT_TOKEN != '' }}
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
+          curl -sf -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "channel": "#ci-alerts",
+              "text": ":red_circle: *Nightly Integration Tests failed* on `omnibase_infra`\nRun: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+            }' || echo "Slack notify failed (non-fatal)"
+
+      - name: Post GitHub summary on failure
+        run: |
+          echo "## Nightly Integration Test Failure" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Workflow run:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Jobs failed:**" >> $GITHUB_STEP_SUMMARY
+          echo "- guard-live-host: ${{ needs.guard-live-host.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- integration-tests: ${{ needs.integration-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Review test artifacts and stack logs. Re-run with workflow_dispatch to confirm fix." >> $GITHUB_STEP_SUMMARY
