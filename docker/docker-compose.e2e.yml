@@ -181,6 +181,14 @@ services:
       rpk topic create onex.evt.omniintelligence.pattern-lifecycle-transitioned.v1 --brokers redpanda:9092 -p 3 || true
       rpk topic create onex.evt.pattern.discovered.v1 --brokers redpanda:9092 -p 3 || true
 
+      # OmniMarket domain topics — Phase 2 (pr-polish pipeline) [OMN-8998]
+      rpk topic create onex.cmd.omnimarket.pr-thread-reply.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create onex.cmd.omnimarket.pr-conflict-hunk.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create onex.cmd.omnimarket.pr-ci-fix.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create onex.evt.omnimarket.pr-thread-replied.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create onex.evt.omnimarket.pr-conflict-resolved.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create onex.evt.omnimarket.pr-ci-fix-attempted.v1 --brokers redpanda:9092 -p 3 || true
+
       echo 'Topics created successfully!'
       rpk topic list --brokers redpanda:9092
       "
