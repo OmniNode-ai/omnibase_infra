@@ -62,12 +62,14 @@ def _contract(
     )
 
 
-def _fake_handler_cls() -> MagicMock:
-    cls = MagicMock()
-    instance = MagicMock()
-    instance.handle = AsyncMock(return_value=None)
-    cls.return_value = instance
-    return cls
+def _fake_handler_cls() -> type:
+    """Real class — ModelHandlerResolverContext.handler_cls requires ``type`` (OMN-9201)."""
+
+    class FakeHandler:
+        async def handle(self, envelope: object) -> None:
+            return None
+
+    return FakeHandler
 
 
 # ---------------------------------------------------------------------------

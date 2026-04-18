@@ -23,7 +23,6 @@ CI gate: any PR touching this module MUST satisfy the runtime-startup gate defin
 from __future__ import annotations
 
 import importlib
-import inspect
 import logging
 import os
 import re
@@ -33,8 +32,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
+from omnibase_core.enums.enum_handler_resolution_outcome import (
+    EnumHandlerResolutionOutcome,
+)
+from omnibase_core.models.errors import ModelOnexError
+from omnibase_core.models.resolver.model_handler_resolver_context import (
+    ModelHandlerResolverContext,
+)
 from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
     ProtocolEventBusSubscriber,
+)
+from omnibase_core.services.service_handler_resolver import ServiceHandlerResolver
+from omnibase_core.services.service_local_handler_ownership_query import (
+    ServiceLocalHandlerOwnershipQuery,
 )
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -46,6 +56,11 @@ from omnibase_infra.runtime.auto_wiring.report import (
     ModelAutoWiringReport,
     ModelContractWiringResult,
     ModelDuplicateTopicOwnership,
+    ModelHandlerWiringOutcome,
+    ModelSkippedHandlerEntry,
+)
+from omnibase_spi.protocols.runtime.protocol_handler_ownership_query import (
+    ProtocolHandlerOwnershipQuery,
 )
 
 if TYPE_CHECKING:
@@ -100,17 +115,31 @@ class ProtocolHandleable(Protocol):
 class PreparedWiring:
     """Data needed to register one contract entry with the dispatch engine.
 
-    Produced by _prepare_handler_wiring (pure, no side effects) and consumed by
-    _commit_handler_wiring (side effects only). Separating the two phases ensures
-    that partial wiring never reaches the engine when a later entry fails (OMN-8735).
+    Produced by _prepare_handler_wiring (pure), consumed by
+    _commit_handler_wiring (side effects only). Two phases ensure partial
+    wiring never reaches the engine on later failure (OMN-8735).
+    ``resolution_outcome`` / ``handler_name`` / ``skip_reason`` carry the
+    resolver's per-handler outcome into the wiring report (OMN-9201).
     """
 
     dispatcher_id: str
     dispatcher: DispatcherFunc
     category: EnumMessageCategory
     message_types: set[str] | None
+    handler_name: str = ""
+    resolution_outcome: EnumHandlerResolutionOutcome = (
+        EnumHandlerResolutionOutcome.UNRESOLVABLE
+    )
+    skip_reason: str = ""
     route_ids: list[str] = field(default_factory=list)
     routes: list[ModelDispatchRoute] = field(default_factory=list)
+
+    @property
+    def is_skip(self) -> bool:
+        return (
+            self.resolution_outcome
+            is EnumHandlerResolutionOutcome.RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP
+        )
 
 
 @dataclass
@@ -150,6 +179,28 @@ def _import_handler_class(module_path: str, class_name: str) -> type:
     mod = importlib.import_module(module_path)
     cls = getattr(mod, class_name)
     return cls
+
+
+def _assert_is_ownership_query(obj: object) -> None:
+    """Infra-boundary runtime protocol check for ProtocolHandlerOwnershipQuery.
+
+    The core-hosted resolver types ``ownership_query`` as ``object | None``
+    because ``compat → core → spi → infra`` forbids a core-to-spi import.
+    Conformance MUST be verified here before the object reaches the resolver.
+    See plan §Layering Invariants.
+    """
+    if not isinstance(obj, ProtocolHandlerOwnershipQuery):
+        raise ModelOnexError(
+            "handler_wiring: ownership_query does not conform to "
+            f"ProtocolHandlerOwnershipQuery (got {type(obj).__name__!r})."
+        )
+
+
+async def _skip_dispatcher(
+    envelope: ModelEventEnvelope[object],
+) -> ModelDispatchResult | None:
+    """Sentinel dispatcher for LOCAL_OWNERSHIP_SKIP entries; never registered."""
+    return None
 
 
 def _make_dispatch_callback(
@@ -523,14 +574,25 @@ async def wire_from_manifest(
         event_bus: Optional event bus for Kafka subscriptions. When None,
             topic subscriptions are skipped (dispatchers + routes still registered).
         environment: Environment name for consumer group derivation.
-        container: Optional DI container used to resolve handler constructor deps.
-            When provided, handlers with required params are resolved via
-            ``container.get_service(handler_cls)`` before falling back to
-            event_bus injection or raising (OMN-8735).
+        container: Optional DI container used to resolve handler constructor
+            deps. Threaded into ``ModelHandlerResolverContext`` and consumed
+            by ``ServiceHandlerResolver`` at precedence Step 3 (OMN-9199).
 
     Returns:
         A :class:`ModelAutoWiringReport` with per-contract outcomes.
     """
+    # Construct the resolver + ownership query ONCE per wiring pass from the
+    # manifest itself (OMN-9201). The ownership query is set-membership
+    # against the locally discovered node_name set — no I/O, no SQL. See
+    # omnibase_core/services/service_local_handler_ownership_query.py.
+    resolver = ServiceHandlerResolver()
+    ownership_query: object = ServiceLocalHandlerOwnershipQuery(
+        local_node_names=frozenset(c.name for c in manifest.contracts)
+    )
+    # Infra-boundary protocol conformance check. This is the ONLY place where
+    # core+spi types meet via isinstance; see plan §Layering Invariants.
+    _assert_is_ownership_query(ownership_query)
+
     # Phase 1: Validate and prepare ALL contracts — no engine/bus side effects yet.
     # Failures are collected; if any exist, we raise before touching anything (OMN-8735).
     prepared_contracts: list[PreparedContractWiring] = []
@@ -540,11 +602,18 @@ async def wire_from_manifest(
             prepared = _prepare_contract_wiring(
                 contract=contract,
                 dispatch_engine=dispatch_engine,
+                resolver=resolver,
+                ownership_query=ownership_query,
                 event_bus=event_bus,
                 environment=environment,
                 container=container,
             )
             prepared_contracts.append(prepared)
+        except TypeError:
+            # OMN-8735 invariant: resolver-exhaustion TypeError must NOT be
+            # demoted to a collectable failure. Propagate unchanged so the
+            # kernel crashes loudly at boot.
+            raise
         except Exception as exc:  # noqa: BLE001 — collect per-contract, raise after scan
             exc_summary = _sanitize_exc(exc)
             logger.error(
@@ -565,8 +634,6 @@ async def wire_from_manifest(
     # Check for failures before committing any side effects.
     failures = failed_results
     if failures:
-        from omnibase_core.models.errors import ModelOnexError
-
         failed_reasons = [f"{r.contract_name}: {r.reason}" for r in failures]
         raise ModelOnexError(
             f"Auto-wiring failed for {len(failures)} contract(s): "
@@ -609,17 +676,19 @@ def _prepare_contract_wiring(
     *,
     contract: ModelDiscoveredContract,
     dispatch_engine: object,
+    resolver: ServiceHandlerResolver,
+    ownership_query: object,
     event_bus: object | None,
     environment: str,
     container: object | None = None,
+    materialized_explicit_dependencies: (dict[str, dict[str, object]] | None) = None,
 ) -> PreparedContractWiring:
-    """Validate and prepare one contract for wiring — NO side effects.
+    """Prepare one contract for wiring — NO side effects.
 
-    Skipped contracts are encoded as PreparedContractWiring with skip_result set.
-    Wirable contracts have prepared_wirings populated and skip_result=None.
-
-    Raises on handler preparation failure so :func:`wire_from_manifest` can
-    collect all failures before touching the engine or event bus (OMN-8735).
+    Skipped contracts encode the skip on ``skip_result``. Handler-preparation
+    failures raise ``ModelOnexError`` (caller collects across contracts).
+    Resolver-Step-6 ``TypeError`` propagates unchanged to preserve the
+    OMN-8735 fail-fast invariant.
     """
     if contract.handler_routing is None:
         return PreparedContractWiring(
@@ -656,10 +725,17 @@ def _prepare_contract_wiring(
                 contract=contract,
                 entry=entry,
                 dispatch_engine=dispatch_engine,
+                resolver=resolver,
+                ownership_query=ownership_query,
                 event_bus=event_bus,
                 container=container,
+                materialized_explicit_dependencies=materialized_explicit_dependencies,
             )
             prepared_wirings.append(prepared)
+        except TypeError:
+            # OMN-8735 invariant: resolver Step 6 exhaustion must NOT be
+            # wrapped. Propagate unchanged so the kernel crashes loudly.
+            raise
         except Exception as exc:
             exc_summary = _sanitize_exc(exc)
             logger.error(
@@ -669,8 +745,6 @@ def _prepare_contract_wiring(
                 contract.package_name,
                 type(exc).__name__,
             )
-            from omnibase_core.models.errors import ModelOnexError
-
             raise ModelOnexError(
                 f"Auto-wiring contract '{contract.name}' failed: "
                 f"handler={entry.handler.name}: {type(exc).__name__}: {exc_summary}"
@@ -689,11 +763,13 @@ async def _commit_contract_wiring(
     dispatch_engine: object,
     event_bus: object | None,
 ) -> ModelContractWiringResult:
-    """Commit a validated :class:`PreparedContractWiring` to the engine and event bus.
+    """Commit a validated PreparedContractWiring to the engine and event bus.
 
-    All side effects (dispatcher/route registration, Kafka subscriptions) live here.
-    Must only be called after every contract in the manifest has been successfully
-    prepared (OMN-8735).
+    All side effects (dispatcher/route registration, Kafka subscriptions)
+    happen here. OMN-8735 requires every contract in the manifest has been
+    prepared successfully before this is called. Per-handler resolver
+    outcomes are projected into ``ModelContractWiringResult.wirings``;
+    LOCAL_OWNERSHIP_SKIP entries land in ``skipped_handlers`` (OMN-9201).
     """
     if pcw.skip_result is not None:
         return pcw.skip_result  # type: ignore[return-value]
@@ -702,11 +778,28 @@ async def _commit_contract_wiring(
     dispatchers_registered: list[str] = []
     routes_registered: list[str] = []
     topics_subscribed: list[str] = []
+    wirings: list[ModelHandlerWiringOutcome] = []
+    skipped_handlers: list[ModelSkippedHandlerEntry] = []
 
     for prepared in pcw.prepared_wirings:
         dispatcher_id, route_ids = _commit_handler_wiring(prepared, dispatch_engine)
-        dispatchers_registered.append(dispatcher_id)
-        routes_registered.extend(route_ids)
+        if prepared.is_skip:
+            skipped_handlers.append(
+                ModelSkippedHandlerEntry(
+                    handler_name=prepared.handler_name,
+                    reason=prepared.skip_reason,
+                )
+            )
+        else:
+            dispatchers_registered.append(dispatcher_id)
+            routes_registered.extend(route_ids)
+        wirings.append(
+            ModelHandlerWiringOutcome(
+                handler_name=prepared.handler_name,
+                resolution_outcome=prepared.resolution_outcome,
+                skipped_reason=prepared.skip_reason,
+            )
+        )
 
     if event_bus is not None and pcw.subscription_topics:
         from omnibase_infra.enums import EnumConsumerGroupPurpose
@@ -748,6 +841,8 @@ async def _commit_contract_wiring(
         dispatchers_registered=tuple(dispatchers_registered),
         routes_registered=tuple(routes_registered),
         topics_subscribed=tuple(topics_subscribed),
+        wirings=tuple(wirings),
+        skipped_handlers=tuple(skipped_handlers),
     )
 
 
@@ -764,10 +859,21 @@ async def _wire_single_contract(
     Thin wrapper around _prepare_contract_wiring + _commit_contract_wiring.
     Kept for backwards compatibility. New code should use wire_from_manifest
     which validates all contracts before committing any side effects.
+
+    Constructs a single-contract ownership query locally so the resolver's
+    ownership-skip step resolves affirmatively for the caller's contract.
     """
+    resolver = ServiceHandlerResolver()
+    ownership_query: object = ServiceLocalHandlerOwnershipQuery(
+        local_node_names=frozenset({contract.name})
+    )
+    _assert_is_ownership_query(ownership_query)
+
     prepared = _prepare_contract_wiring(
         contract=contract,
         dispatch_engine=dispatch_engine,
+        resolver=resolver,
+        ownership_query=ownership_query,
         event_bus=event_bus,
         environment=environment,
         container=container,
@@ -780,99 +886,83 @@ def _prepare_handler_wiring(
     contract: ModelDiscoveredContract,
     entry: ModelHandlerRoutingEntry,
     dispatch_engine: object,
+    resolver: ServiceHandlerResolver,
+    ownership_query: object,
     event_bus: object | None = None,
     container: object | None = None,
+    materialized_explicit_dependencies: (dict[str, dict[str, object]] | None) = None,
 ) -> PreparedWiring:
-    """Validate and prepare one handler entry for wiring — NO side effects.
+    """Prepare one handler entry — delegates construction to the resolver.
 
-    Instantiates the handler class, creates its dispatch callback, and
-    pre-computes all route data.  Nothing is registered with the engine here;
-    that is deferred to :func:`_commit_handler_wiring` so that the engine is
-    only mutated after every handler in the contract has been validated
-    successfully (OMN-8735).
+    The full precedence chain (ownership skip → node registry → container →
+    event_bus → zero-arg → TypeError) lives in
+    ``omnibase_core.services.service_handler_resolver.ServiceHandlerResolver``
+    (OMN-9199). No engine mutation here; side effects happen in
+    :func:`_commit_handler_wiring` (OMN-8735 two-phase invariant).
 
-    Returns:
-        A :class:`PreparedWiring` ready for :func:`_commit_handler_wiring`.
+    OMN-8735 fail-fast is preserved: the resolver's Step 6 ``TypeError`` is
+    NOT caught here; it propagates unchanged to the caller. ``is_skip``
+    entries returned from this function MUST NOT be committed.
     """
-    # Deferred imports to avoid circular dependencies
     from omnibase_infra.enums import EnumMessageCategory
     from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
 
     handler_ref = entry.handler
     handler_cls = _import_handler_class(handler_ref.module, handler_ref.name)
 
-    # Resolve handler via DI container if available and the class has constructor deps,
-    # otherwise fall back to event_bus injection or zero-arg construction (OMN-8735).
-    handler_instance: ProtocolHandleable
-    sig = inspect.signature(handler_cls)
-    params = sig.parameters
-    # Only concrete named params (POSITIONAL_OR_KEYWORD / KEYWORD_ONLY) without defaults
-    # are considered DI deps. VAR_POSITIONAL (*args) and VAR_KEYWORD (**kwargs) excluded.
-    _concrete_kinds = (
-        inspect.Parameter.POSITIONAL_OR_KEYWORD,
-        inspect.Parameter.KEYWORD_ONLY,
-    )
-    non_self_params = {
-        k: v
-        for k, v in params.items()
-        if k != "self"
-        and v.kind in _concrete_kinds
-        and v.default is inspect.Parameter.empty
-    }
-
-    # Resolve the effective container: explicit param takes precedence over
-    # dispatch_engine._container (legacy path kept for backwards compat).
     _effective_container = container or (
         getattr(dispatch_engine, "_container", None)
         if dispatch_engine is not None
         else None
     )
 
-    if _effective_container is not None:
-        try:
-            handler_instance = _effective_container.get_service(handler_cls)  # type: ignore[union-attr]
-            logger.debug(
-                "Resolved %s.%s via DI container",
-                handler_ref.module,
-                handler_ref.name,
-            )
-        except Exception:  # noqa: BLE001 — DI resolution failed; try other paths
-            if event_bus is not None and set(non_self_params) == {"event_bus"}:
-                handler_instance = handler_cls(event_bus=event_bus)
-                logger.debug(
-                    "Auto-wired event_bus into %s.%s (container resolution failed)",
-                    handler_ref.module,
-                    handler_ref.name,
-                )
-            elif non_self_params:
-                # Container resolution failed and deps are unsatisfiable — raise loudly
-                # so startup fails with a clear message rather than a cryptic TypeError
-                # from handler_cls() with missing args (OMN-8735).
-                dep_names = list(non_self_params)
-                raise TypeError(
-                    f"Handler {handler_ref.module}.{handler_ref.name} requires "
-                    f"constructor parameters {dep_names!r} but DI container "
-                    f"resolution also failed."
-                )
-            else:
-                handler_instance = handler_cls()
-    elif event_bus is not None and set(non_self_params) == {"event_bus"}:
-        handler_instance = handler_cls(event_bus=event_bus)
-        logger.debug(
-            "Auto-wired event_bus into %s.%s",
-            handler_ref.module,
-            handler_ref.name,
+    # node_name=contract.name: established ONEX naming convention — see
+    # ModelNodeIdentity construction at _commit_contract_wiring below.
+    ctx = ModelHandlerResolverContext(
+        handler_cls=handler_cls,
+        handler_module=handler_ref.module,
+        handler_name=handler_ref.name,
+        contract_name=contract.name,
+        node_name=contract.name,
+        explicit_dependency_shape=None,
+        materialized_explicit_dependencies=materialized_explicit_dependencies,
+        event_bus=event_bus,
+        container=_effective_container,
+        ownership_query=ownership_query,
+    )
+    resolution = resolver.resolve(ctx)
+
+    # Determine category + message types up-front; both skip and non-skip
+    # paths carry them on PreparedWiring for deterministic reporting.
+    category_str = "EVENT"
+    if contract.event_bus and contract.event_bus.subscribe_topics:
+        category_str = _derive_message_category(contract.event_bus.subscribe_topics[0])
+    category = EnumMessageCategory(category_str)
+
+    message_types: set[str] | None = None
+    if entry.event_model is not None:
+        message_types = {entry.event_model.name}
+
+    if (
+        resolution.outcome
+        is EnumHandlerResolutionOutcome.RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP
+    ):
+        # Deliberate skip — caller records it in skipped_handlers; nothing
+        # is registered on the dispatch engine (OMN-9201).
+        return PreparedWiring(
+            dispatcher_id="",
+            dispatcher=_skip_dispatcher,
+            category=category,
+            message_types=message_types,
+            handler_name=handler_ref.name,
+            resolution_outcome=resolution.outcome,
+            skip_reason=resolution.skipped_reason,
         )
-    elif non_self_params:
-        # Handler has constructor deps but no container and no event_bus — unsatisfiable.
-        # Raise immediately so startup fails loudly (OMN-8735).
-        dep_names = list(non_self_params)
-        raise TypeError(
-            f"Handler {handler_ref.module}.{handler_ref.name} requires constructor "
-            f"parameters {dep_names!r} but no DI container is available to satisfy them."
-        )
-    else:
-        handler_instance = handler_cls()
+
+    # Narrow at the infra boundary: core types handler_instance as
+    # object | None per §Layering Invariants; non-skip outcomes guarantee
+    # a constructed handler.
+    handler_instance = cast("ProtocolHandleable", resolution.handler_instance)
 
     # Use projection callback when contract declares db_io.db_tables.
     # Projection handlers implement handle(input_data: dict) with _db injected
@@ -896,18 +986,6 @@ def _prepare_handler_wiring(
         callback = _make_dispatch_callback(handler_instance)
     dispatcher_id = _derive_dispatcher_id(contract.name, handler_ref.name)
 
-    # Determine message category from subscribe topics
-    category_str = "EVENT"
-    if contract.event_bus and contract.event_bus.subscribe_topics:
-        category_str = _derive_message_category(contract.event_bus.subscribe_topics[0])
-
-    category = EnumMessageCategory(category_str)
-
-    # Determine message types from entry
-    message_types: set[str] | None = None
-    if entry.event_model is not None:
-        message_types = {entry.event_model.name}
-
     # Pre-compute routes (no engine calls yet)
     route_ids: list[str] = []
     routes: list[ModelDispatchRoute] = []
@@ -930,6 +1008,8 @@ def _prepare_handler_wiring(
         dispatcher=callback,
         category=category,
         message_types=message_types,
+        handler_name=handler_ref.name,
+        resolution_outcome=resolution.outcome,
         route_ids=route_ids,
         routes=routes,
     )
@@ -945,9 +1025,17 @@ def _commit_handler_wiring(
     ALL handlers in a contract, ensuring the engine is never mutated for a
     partially-valid contract (OMN-8735).
 
+    Skip entries (``prepared.is_skip``) are no-ops — the resolver emitted
+    ``RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP`` for this handler, so nothing is
+    registered on the dispatch engine (OMN-9201).
+
     Returns:
-        Tuple of (dispatcher_id, list of route_ids registered).
+        Tuple of (dispatcher_id, list of route_ids registered). Returns
+        ``("", [])`` for skip entries.
     """
+    if prepared.is_skip:
+        return "", []
+
     from omnibase_infra.runtime.service_message_dispatch_engine import (
         MessageDispatchEngine,
     )
@@ -980,10 +1068,18 @@ def _wire_handler_entry(
     two-phase split.  New code should call _prepare_handler_wiring +
     _commit_handler_wiring directly.
     """
+    resolver = ServiceHandlerResolver()
+    ownership_query: object = ServiceLocalHandlerOwnershipQuery(
+        local_node_names=frozenset({contract.name})
+    )
+    _assert_is_ownership_query(ownership_query)
+
     prepared = _prepare_handler_wiring(
         contract=contract,
         entry=entry,
         dispatch_engine=dispatch_engine,
+        resolver=resolver,
+        ownership_query=ownership_query,
         event_bus=event_bus,
         container=container,
     )

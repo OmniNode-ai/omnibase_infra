@@ -250,15 +250,15 @@ class TestWireFromManifest:
         # Create a real engine instance
         engine = MessageDispatchEngine()
 
-        # Mock the import to return a fake handler class
-        fake_handler_cls = MagicMock()
-        fake_handler_instance = MagicMock()
-        fake_handler_instance.handle = AsyncMock(return_value=None)
-        fake_handler_cls.return_value = fake_handler_instance
+        # ModelHandlerResolverContext requires ``handler_cls: type`` (OMN-9201),
+        # so use a real class rather than a MagicMock.
+        class FakeHandler:
+            async def handle(self, envelope: object) -> None:
+                return None
 
         with patch(
             "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
-            return_value=fake_handler_cls,
+            return_value=FakeHandler,
         ):
             report = await wire_from_manifest(manifest, engine)
 
