@@ -8,6 +8,13 @@
 # 14 days (tracked via PROMOTION_DATE).
 #
 # Exemptions: docs-only, config-only, and pure refactor PRs.
+#
+# OMN-8732: Test removal gate
+#
+# Hard-blocks merge when a PR deletes a tests/integration/*.py file
+# without adding a replacement. Override: include
+# [skip-test-removal-gate: <reason>] in the PR body for legitimate
+# test consolidation.
 
 name: Integration Test Check
 
@@ -96,3 +103,49 @@ jobs:
             echo "::warning::Feature PR without integration test. This will become a hard gate after $PROMOTION_DATE. Consider adding a test in tests/integration/ or tests/e2e/."
             exit 0
           fi
+
+  check-test-removal:
+    name: Integration Test Removal Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect integration test deletions without replacements
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+
+          # Allow legitimate test consolidation via override token
+          if echo "${PR_BODY:-}" | grep -qF '[skip-test-removal-gate:'; then
+            echo "skip-test-removal-gate token found — bypassing test removal check"
+            exit 0
+          fi
+
+          # Count deleted and added tests/integration/*.py files in this PR
+          DELETED=$(git diff --name-status origin/main...HEAD \
+            | awk '$1 == "D" && $2 ~ /^tests\/integration\/[^/]+\.py$/ {print $2}' \
+            | wc -l | tr -d ' ')
+          ADDED=$(git diff --name-status origin/main...HEAD \
+            | awk '($1 == "A" || $1 == "M") && $2 ~ /^tests\/integration\/[^/]+\.py$/ {print $2}' \
+            | wc -l | tr -d ' ')
+
+          echo "Integration test files deleted: $DELETED"
+          echo "Integration test files added/modified: $ADDED"
+
+          if [ "$DELETED" -eq 0 ]; then
+            echo "No integration test files deleted — gate passed"
+            exit 0
+          fi
+
+          if [ "$ADDED" -ge "$DELETED" ]; then
+            echo "Deleted tests covered by $ADDED replacement(s) — gate passed"
+            exit 0
+          fi
+
+          UNMATCHED=$((DELETED - ADDED))
+          echo "::error::PR deletes $DELETED integration test file(s) with only $ADDED replacement(s). $UNMATCHED deletion(s) are unmatched. Either add replacement tests in tests/integration/ or include [skip-test-removal-gate: <reason>] in the PR body for legitimate consolidation."
+          exit 1
