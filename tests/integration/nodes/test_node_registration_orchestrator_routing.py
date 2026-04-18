@@ -36,8 +36,9 @@ The handler_routing section defines:
 Handler ID Mapping:
     - handler-node-introspected -> ModelNodeIntrospectionEvent
     - handler-runtime-tick -> ModelRuntimeTick
-    - handler-node-registration-acked -> ModelNodeRegistrationAcked
     - handler-node-heartbeat -> ModelNodeHeartbeatEvent
+    (OMN-9194: handler-node-registration-acked removed until registry
+    wiring lands; the topic is still routed via dispatcher.)
 
 Running Tests:
     # Run all handler routing tests:
@@ -138,21 +139,22 @@ class TestHandlerRoutingContract:
             )
 
     def test_expected_handler_count(self, contract_data: dict) -> None:
-        """Verify contract defines exactly 6 handlers.
+        """Verify contract defines exactly 5 handlers.
 
-        The registration orchestrator routes:
+        The registration orchestrator routes (OMN-9194 removed the acked entry):
         1. ModelNodeIntrospectionEvent -> HandlerNodeIntrospected
         2. ModelRuntimeTick -> HandlerRuntimeTick
-        3. ModelNodeRegistrationAcked -> HandlerNodeRegistrationAcked
-        4. ModelNodeHeartbeatEvent -> HandlerNodeHeartbeat
-        5. ModelTopicCatalogQuery -> HandlerTopicCatalogQuery  # OMN-2313
-        6. ModelTopicCatalogRequest -> HandlerCatalogRequest  # OMN-2923
+        3. ModelNodeHeartbeatEvent -> HandlerNodeHeartbeat
+        4. ModelTopicCatalogQuery -> HandlerTopicCatalogQuery  # OMN-2313
+        5. ModelTopicCatalogRequest -> HandlerCatalogRequest  # OMN-2923
         """
         handler_routing = contract_data.get("handler_routing", {})
         handlers = handler_routing.get("handlers", [])
 
-        assert len(handlers) == 6, (
-            f"Expected exactly 6 handler entries, found {len(handlers)}. "
+        # OMN-9194: HandlerNodeRegistrationAcked removed as tactical unblock
+        # under OMN-8735 strict auto-wiring; re-add when registry wiring lands.
+        assert len(handlers) == 5, (
+            f"Expected exactly 5 handler entries, found {len(handlers)}. "
             f"Events: {[h.get('event_model', {}).get('name', 'unknown') for h in handlers]}"
         )
 
@@ -161,10 +163,12 @@ class TestHandlerRoutingContract:
         handler_routing = contract_data.get("handler_routing", {})
         handlers = handler_routing.get("handlers", [])
 
+        # OMN-9194: ModelNodeRegistrationAcked removed from payload_type_match
+        # routing as tactical unblock; existing dispatcher still handles the
+        # topic. Re-add when registry wiring lands.
         expected_event_models = {
             "ModelNodeIntrospectionEvent",
             "ModelRuntimeTick",
-            "ModelNodeRegistrationAcked",
             "ModelNodeHeartbeatEvent",
             "ModelTopicCatalogQuery",  # OMN-2313
             "ModelTopicCatalogRequest",  # OMN-2923
@@ -187,10 +191,11 @@ class TestHandlerRoutingContract:
         handler_routing = contract_data.get("handler_routing", {})
         handlers = handler_routing.get("handlers", [])
 
+        # OMN-9194: HandlerNodeRegistrationAcked removed from payload_type_match
+        # routing as tactical unblock; re-add when registry wiring lands.
         expected_handlers = {
             "HandlerNodeIntrospected",
             "HandlerRuntimeTick",
-            "HandlerNodeRegistrationAcked",
             "HandlerNodeHeartbeat",
             "HandlerTopicCatalogQuery",  # OMN-2313
             "HandlerCatalogRequest",  # OMN-2923
@@ -264,29 +269,28 @@ class TestHandlerRoutingMappings:
             f"got '{tick_handler['handler']['name']}'"
         )
 
-    def test_registration_acked_maps_to_correct_handler(
+    def test_registration_acked_not_in_payload_type_match_routing(
         self, contract_data: dict
     ) -> None:
-        """Verify ModelNodeRegistrationAcked maps to HandlerNodeRegistrationAcked."""
+        """OMN-9194: ModelNodeRegistrationAcked is intentionally absent from
+        payload_type_match handler routing until proper registry wiring lands.
+        The existing dispatcher_node_registration_acked.py still routes this topic.
+        """
         handler_routing = contract_data.get("handler_routing", {})
         handlers = handler_routing.get("handlers", [])
 
-        # Find the handler entry for ModelNodeRegistrationAcked
-        acked_handler = None
-        for handler_entry in handlers:
-            if (
-                handler_entry.get("event_model", {}).get("name")
-                == "ModelNodeRegistrationAcked"
-            ):
-                acked_handler = handler_entry
-                break
-
-        assert acked_handler is not None, (
-            "No handler mapping found for ModelNodeRegistrationAcked"
+        acked_handler = next(
+            (
+                h
+                for h in handlers
+                if h.get("event_model", {}).get("name") == "ModelNodeRegistrationAcked"
+            ),
+            None,
         )
-        assert acked_handler["handler"]["name"] == "HandlerNodeRegistrationAcked", (
-            f"ModelNodeRegistrationAcked should map to HandlerNodeRegistrationAcked, "
-            f"got '{acked_handler['handler']['name']}'"
+
+        assert acked_handler is None, (
+            "OMN-9194: ModelNodeRegistrationAcked must remain unrouted in "
+            "payload_type_match handlers until registry wiring lands."
         )
 
 
@@ -513,32 +517,28 @@ class TestHandlerRoutingOutputEvents:
         else:
             pytest.fail("HandlerRuntimeTick not found in handlers")
 
-    def test_registration_acked_handler_output_events(
+    def test_registration_acked_handler_output_events_absent(
         self, contract_data: dict
     ) -> None:
-        """Verify HandlerNodeRegistrationAcked declares expected output events."""
+        """OMN-9194: HandlerNodeRegistrationAcked entry is removed from
+        payload_type_match routing until proper registry wiring lands; this
+        test confirms the absence.
+        """
         handler_routing = contract_data.get("handler_routing", {})
         handlers = handler_routing.get("handlers", [])
 
-        # Find the registration acked handler
-        for handler_entry in handlers:
-            if (
-                handler_entry.get("handler", {}).get("name")
-                == "HandlerNodeRegistrationAcked"
-            ):
-                output_events = handler_entry.get("output_events", [])
-                expected_events = {
-                    "ModelNodeRegistrationAckReceived",
-                    "ModelNodeBecameActive",
-                }
-                actual_events = set(output_events)
-                assert expected_events <= actual_events, (
-                    f"HandlerNodeRegistrationAcked missing expected output events. "
-                    f"Missing: {expected_events - actual_events}"
-                )
-                break
-        else:
-            pytest.fail("HandlerNodeRegistrationAcked not found in handlers")
+        acked_handler = next(
+            (
+                h
+                for h in handlers
+                if h.get("handler", {}).get("name") == "HandlerNodeRegistrationAcked"
+            ),
+            None,
+        )
+        assert acked_handler is None, (
+            "OMN-9194: HandlerNodeRegistrationAcked must be absent from "
+            "payload_type_match handler routing until registry wiring lands."
+        )
 
 
 # =============================================================================
@@ -697,10 +697,12 @@ class TestHandlerRoutingInitialization:
     def test_subcontract_has_expected_handlers(self) -> None:
         """Verify subcontract defines expected handler entries.
 
+        OMN-9194: ModelNodeRegistrationAcked removed from payload_type_match
+        routing until proper registry wiring lands.
+
         The subcontract should include entries for:
         - ModelNodeIntrospectionEvent -> handler-node-introspected
         - ModelRuntimeTick -> handler-runtime-tick
-        - ModelNodeRegistrationAcked -> handler-node-registration-acked
         - ModelNodeHeartbeatEvent -> handler-node-heartbeat
         """
         from omnibase_infra.nodes.node_registration_orchestrator.node import (
@@ -712,7 +714,6 @@ class TestHandlerRoutingInitialization:
         expected_mappings = {
             "ModelNodeIntrospectionEvent": "handler-node-introspected",
             "ModelRuntimeTick": "handler-runtime-tick",
-            "ModelNodeRegistrationAcked": "handler-node-registration-acked",
             "ModelNodeHeartbeatEvent": "handler-node-heartbeat",
             "ModelTopicCatalogQuery": "handler-topic-catalog-query",  # OMN-2313
             "ModelTopicCatalogRequest": "handler-catalog-request",  # OMN-2923
@@ -794,8 +795,10 @@ class TestRouteToHandlers:
         assert entry is not None, "No routing entry for ModelRuntimeTick"
         assert entry.handler_key == "handler-runtime-tick"
 
-    def test_subcontract_routes_registration_acked(self) -> None:
-        """Verify ModelNodeRegistrationAcked maps to handler-node-registration-acked."""
+    def test_subcontract_does_not_route_registration_acked(self) -> None:
+        """OMN-9194: ModelNodeRegistrationAcked is intentionally absent from
+        payload_type_match subcontract handlers until registry wiring lands.
+        """
         from omnibase_infra.nodes.node_registration_orchestrator.node import (
             _create_handler_routing_subcontract,
         )
@@ -811,8 +814,10 @@ class TestRouteToHandlers:
             None,
         )
 
-        assert entry is not None, "No routing entry for ModelNodeRegistrationAcked"
-        assert entry.handler_key == "handler-node-registration-acked"
+        assert entry is None, (
+            "OMN-9194: ModelNodeRegistrationAcked must remain unrouted in the "
+            "handler_routing subcontract until registry wiring lands."
+        )
 
     def test_subcontract_routes_heartbeat_event(self) -> None:
         """Verify ModelNodeHeartbeatEvent maps to handler-node-heartbeat."""
@@ -842,11 +847,11 @@ class TestRouteToHandlers:
 
         subcontract = _create_handler_routing_subcontract()
 
-        # Expected routing keys
+        # OMN-9194: ModelNodeRegistrationAcked removed from payload_type_match
+        # routing until registry wiring lands.
         expected_keys = {
             "ModelNodeIntrospectionEvent",
             "ModelRuntimeTick",
-            "ModelNodeRegistrationAcked",
             "ModelNodeHeartbeatEvent",
             "ModelTopicCatalogQuery",  # OMN-2313
             "ModelTopicCatalogRequest",  # OMN-2923
@@ -1003,10 +1008,11 @@ class TestHandlerRoutingContractCodeConsistency:
         handler_keys = {entry.handler_key for entry in subcontract.handlers}
 
         # Expected handler IDs based on contract
+        # OMN-9194: handler-node-registration-acked removed from routing
+        # subcontract until registry wiring lands.
         expected_handler_ids = {
             "handler-node-introspected",
             "handler-runtime-tick",
-            "handler-node-registration-acked",
             "handler-node-heartbeat",
             "handler-topic-catalog-query",  # OMN-2313
             "handler-catalog-request",  # OMN-2923
