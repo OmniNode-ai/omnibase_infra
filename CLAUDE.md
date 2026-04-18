@@ -789,6 +789,20 @@ uv run pytest tests/ -n 0 -xvs
 | `cleanup_consul_test_services` | Cleans Consul test registrations |
 | `cleanup_postgres_test_projections` | Cleans PostgreSQL test rows |
 
+### Runtime Startup is a First-Class CI Gate (OMN-9126)
+
+Any PR that touches `auto_wiring/`, `service_kernel.py`, handler `__init__` signatures, or kernel-level registration MUST include a test that:
+
+1. Loads the real contract manifest from disk.
+2. Runs `wire_from_manifest` with the same args the kernel passes in production.
+3. Asserts zero failures for required handlers.
+
+CI must additionally boot `omninode-runtime` in a compose sandbox and assert `RestartCount == 0` after 45s.
+
+**Forbidden:** aspirational integration gates — "there's a test file but it uses fake handlers." The boot must actually happen against real handlers.
+
+**Strict-mode invariants** that tighten acceptance land AFTER all downstream consumers are compliant, not before. If a strict gate must ship first, it ships behind an env flag (default OFF) and is flipped in a separate PR once compliance is merged.
+
 ---
 
 ## Contract-Driven Config Discovery

@@ -15,6 +15,9 @@ and wires handlers into the :class:`MessageDispatchEngine`:
 6. Return a :class:`ModelAutoWiringReport` with per-contract outcomes.
 
 This module performs I/O (module imports, Kafka subscriptions) — it is NOT pure.
+
+CI gate: any PR touching this module MUST satisfy the runtime-startup gate defined in
+``omnibase_infra/CLAUDE.md`` § "Runtime Startup is a First-Class CI Gate (OMN-9126)".
 """
 
 from __future__ import annotations
