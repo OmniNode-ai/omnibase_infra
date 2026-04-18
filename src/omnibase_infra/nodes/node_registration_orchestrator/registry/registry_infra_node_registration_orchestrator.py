@@ -92,7 +92,9 @@ from __future__ import annotations
 
 import importlib
 import logging
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from omnibase_core.services.service_handler_registry import ServiceHandlerRegistry
@@ -277,6 +279,99 @@ class RegistryInfraNodeRegistrationOrchestrator:
         result = await handler.handle(envelope)
         ```
     """
+
+    # ---------------------------------------------------------------------
+    # Declaration vs materialization (OMN-9198, HandlerResolver Phase 1)
+    # ---------------------------------------------------------------------
+    #
+    # This registry exposes TWO intentionally distinct code paths for
+    # handler dependencies:
+    #
+    # 1. ``declare_explicit_dependencies()`` -- classmethod returning the
+    #    pure declarative *shape* (handler name -> tuple of dep keys). No
+    #    side effects, no runtime object construction, no container access.
+    #    Safe to call at contract-discovery time before any runtime state
+    #    exists. Used by the HandlerResolver auto-wiring path (Task 3) and
+    #    by Task 10 validators for cross-registry coherence checks.
+    #
+    # 2. ``create_registry(...)`` -- instance materialization. Takes
+    #    projection_reader / reducer / projector / catalog_service, builds
+    #    the per-handler dependency map with live objects, instantiates
+    #    handlers, and returns a frozen ServiceHandlerRegistry.
+    #
+    # The per-handler dependency key sets MUST match between the two paths.
+    # This is asserted by a dedicated unit test (consistency proof).
+    #
+    # **Intentional duplication** (plan
+    # ``docs/plans/2026-04-18-handler-resolver-architecture.md`` Task 6
+    # Tradeoff Note): declaration and materialization each state the
+    # dependency key set once, on purpose. Do NOT try to unify them in
+    # Phase 1 -- doing so would either (a) leak runtime object construction
+    # into the declaration phase or (b) introduce a hidden declarative
+    # side-channel in the materialization phase. A later phase may collapse
+    # the two via a shared source; not in scope here.
+    # ---------------------------------------------------------------------
+
+    # Single source of truth for the declarative shape.
+    # Must stay in lockstep with the ``handler_dependencies`` map inside
+    # ``create_registry()``. A coherence test asserts that each handler
+    # declared here has an identical set of keys in the materialized map.
+    _EXPLICIT_DEPENDENCY_SHAPE: Mapping[str, tuple[str, ...]] = MappingProxyType(
+        {
+            "HandlerNodeIntrospected": (
+                "projection_reader",
+                "reducer",
+                "topic_store",
+            ),
+            "HandlerRuntimeTick": (
+                "projection_reader",
+                "reducer",
+            ),
+            "HandlerNodeRegistrationAcked": (
+                "projection_reader",
+                "reducer",
+            ),
+            "HandlerNodeHeartbeat": (
+                "projection_reader",
+                "reducer",
+            ),
+            "HandlerTopicCatalogQuery": ("catalog_service",),
+            "HandlerCatalogRequest": ("topic_store",),
+        }
+    )
+
+    @classmethod
+    def declare_explicit_dependencies(cls) -> Mapping[str, tuple[str, ...]]:
+        """Return the declarative explicit-dependency shape for this node.
+
+        The shape is a pure data structure mapping each handler class name
+        (as declared in ``contract.yaml``'s ``handler_routing``) to the
+        tuple of dependency keys that handler's constructor expects.
+
+        Consumed by the HandlerResolver auto-wiring path at contract-discovery
+        time, BEFORE any runtime state (container, event bus, projector) has
+        been constructed. As such this method:
+
+        * is a classmethod (no instance required),
+        * accepts no arguments (no contract parsing needed -- the shape is
+          fixed at class-definition time),
+        * does NOT touch the container, event bus, or any mutable service,
+        * does NOT import handler modules,
+        * returns an immutable ``MappingProxyType`` so callers cannot
+          accidentally mutate shared state.
+
+        Returns:
+            An immutable mapping ``{handler_name: (dep_key_1, dep_key_2, ...)}``.
+            Keys match ``handler_routing.handlers[].handler.name`` in
+            contract.yaml. Values enumerate the constructor kwargs that
+            ``create_registry`` will populate at wiring time.
+
+        See Also:
+            ``create_registry``: materialization side -- resolves each key
+                in the shape to a concrete object at wiring time.
+            ``docs/plans/2026-04-18-handler-resolver-architecture.md`` Task 6.
+        """
+        return cls._EXPLICIT_DEPENDENCY_SHAPE
 
     @staticmethod
     def create_registry(
