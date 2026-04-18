@@ -72,7 +72,7 @@ class ModelObservabilityEnvelope(BaseModel):
     producer_id: str = Field(  # ONEX_EXCLUDE: string_id - external service identifier
         ..., description="Identifier of the service/component that produced the event."
     )
-    schema_version: str = Field(
+    schema_version: str = Field(  # string-version-ok: observability event envelope; cross-service consumers deserialize schema version as plain string
         ...,
         description="Version of the event schema for evolution tracking.",
     )

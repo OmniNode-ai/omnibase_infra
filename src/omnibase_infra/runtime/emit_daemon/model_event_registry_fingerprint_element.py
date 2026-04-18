@@ -36,7 +36,9 @@ class ModelEventRegistryFingerprintElement(BaseModel):
     topic_template: str = Field(
         ..., description="Canonical ONEX topic suffix (no env prefix)"
     )
-    schema_version: str = Field(..., description="Semantic version of the event schema")
+    schema_version: str = Field(
+        ..., description="Semantic version of the event schema"
+    )  # string-version-ok: fingerprint element serialized as plain string for SHA-256 canonical tuple hashing
     partition_key_field: str = Field(
         ..., description="Partition key field name, or empty string if None"
     )

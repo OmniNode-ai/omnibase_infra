@@ -82,7 +82,9 @@ class ModelEventHeaders(BaseModel):
 
     source: str
     event_type: str
-    schema_version: str = Field(default="1.0.0")
+    schema_version: str = Field(
+        default="1.0.0"
+    )  # string-version-ok: event bus wire headers; Kafka/cross-service consumers deserialize as plain string
     destination: str | None = Field(default=None)
     trace_id: str | None = Field(default=None)
     span_id: str | None = Field(default=None)

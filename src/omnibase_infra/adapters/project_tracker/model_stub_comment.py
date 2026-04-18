@@ -20,7 +20,9 @@ _SCHEMA_VERSION = "1.0"
 class ModelStubComment(BaseModel):
     model_config = {"frozen": True, "extra": "allow"}
 
-    schema_version: str = Field(default=_SCHEMA_VERSION)
+    schema_version: str = Field(
+        default=_SCHEMA_VERSION
+    )  # string-version-ok: wire-format model mirroring external project tracker API contract
     id: str
     body: str
     author: str

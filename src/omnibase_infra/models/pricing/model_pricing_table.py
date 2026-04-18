@@ -72,7 +72,7 @@ class ModelPricingTable(BaseModel):
         from_attributes=True,
     )
 
-    schema_version: str = Field(
+    schema_version: str = Field(  # string-version-ok: YAML manifest format discriminator; external YAML files serialize version as plain string
         ...,
         min_length=1,
         description="Version of the pricing manifest schema.",
