@@ -1,0 +1,4 @@
+# CODEOWNERS — strict-gate files require explicit review
+# OMN-9125: gate PRs touching these files must have @jonahgabriel review
+src/omnibase_infra/runtime/auto_wiring/handler_wiring.py @jonahgabriel
+src/omnibase_infra/runtime/service_kernel.py @jonahgabriel

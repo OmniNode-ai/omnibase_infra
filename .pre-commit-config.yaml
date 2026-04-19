@@ -402,6 +402,14 @@ repos:
         types: [python]
         exclude: ^tests/|^examples/|^scripts/
         stages: [pre-commit]
+      # OMN-9125: Strict-gate ordering — gate PRs must have compliance PRs land first
+      - id: check-strict-gate-ordering
+        name: Strict-gate ordering check
+        entry: bash scripts/check-strict-gate-ordering.sh
+        language: system
+        pass_filenames: false
+        files: ^src/omnibase_infra/runtime/(auto_wiring/handler_wiring|service_kernel)\.py$
+        stages: [pre-commit]
 # Configuration
 default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit]
