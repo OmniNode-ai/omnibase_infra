@@ -56,8 +56,8 @@ from omnibase_infra.runtime.auto_wiring.report import (
     ModelAutoWiringReport,
     ModelContractWiringResult,
     ModelDuplicateTopicOwnership,
-    ModelHandlerWiringOutcome,
-    ModelSkippedHandlerEntry,
+    ModelSkippedEntry,
+    ModelWiringOutcome,
 )
 from omnibase_spi.protocols.runtime.protocol_handler_ownership_query import (
     ProtocolHandlerOwnershipQuery,
@@ -778,14 +778,14 @@ async def _commit_contract_wiring(
     dispatchers_registered: list[str] = []
     routes_registered: list[str] = []
     topics_subscribed: list[str] = []
-    wirings: list[ModelHandlerWiringOutcome] = []
-    skipped_handlers: list[ModelSkippedHandlerEntry] = []
+    wirings: list[ModelWiringOutcome] = []
+    skipped_handlers: list[ModelSkippedEntry] = []
 
     for prepared in pcw.prepared_wirings:
         dispatcher_id, route_ids = _commit_handler_wiring(prepared, dispatch_engine)
         if prepared.is_skip:
             skipped_handlers.append(
-                ModelSkippedHandlerEntry(
+                ModelSkippedEntry(
                     handler_name=prepared.handler_name,
                     reason=prepared.skip_reason,
                 )
@@ -794,7 +794,7 @@ async def _commit_contract_wiring(
             dispatchers_registered.append(dispatcher_id)
             routes_registered.extend(route_ids)
         wirings.append(
-            ModelHandlerWiringOutcome(
+            ModelWiringOutcome(
                 handler_name=prepared.handler_name,
                 resolution_outcome=prepared.resolution_outcome,
                 skipped_reason=prepared.skip_reason,

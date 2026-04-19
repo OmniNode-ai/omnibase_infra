@@ -434,7 +434,7 @@ class TestWireFromManifestResolverOutcomes:
 
     @pytest.mark.asyncio
     async def test_wired_handler_outcome_is_recorded(self) -> None:
-        """Per-handler ModelHandlerWiringOutcome rows are populated."""
+        """Per-handler ModelWiringOutcome rows are populated."""
         from omnibase_infra.runtime.service_message_dispatch_engine import (
             MessageDispatchEngine,
         )

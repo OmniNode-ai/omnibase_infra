@@ -31,7 +31,7 @@ class EnumWiringOutcome(str, Enum):
     FAILED = "failed"
 
 
-class ModelHandlerWiringOutcome(BaseModel):
+class ModelWiringOutcome(BaseModel):
     """Per-handler resolver outcome row within a contract-level wiring result.
 
     Populated from :class:`omnibase_core.models.resolver.ModelHandlerResolution`
@@ -58,11 +58,11 @@ class ModelHandlerWiringOutcome(BaseModel):
     )
 
 
-class ModelSkippedHandlerEntry(BaseModel):
+class ModelSkippedEntry(BaseModel):
     """Skip-only record surfaced at the contract level.
 
     See ``docs/plans/2026-04-18-handler-resolver-architecture.md`` §Known Types
-    Inventory: this is narrower than :class:`ModelHandlerWiringOutcome`
+    Inventory: this is narrower than :class:`ModelWiringOutcome`
     because the outcomes list records every resolved handler, while this list
     is the filtered skip subset surfaced at the contract level.
     """
@@ -91,7 +91,7 @@ class ModelContractWiringResult(BaseModel):
     topics_subscribed: tuple[str, ...] = Field(
         default_factory=tuple, description="Kafka topics subscribed"
     )
-    wirings: tuple[ModelHandlerWiringOutcome, ...] = Field(
+    wirings: tuple[ModelWiringOutcome, ...] = Field(
         default_factory=tuple,
         description=(
             "Per-handler resolver outcomes recorded by "
@@ -99,7 +99,7 @@ class ModelContractWiringResult(BaseModel):
             "handler_routing entries."
         ),
     )
-    skipped_handlers: tuple[ModelSkippedHandlerEntry, ...] = Field(
+    skipped_handlers: tuple[ModelSkippedEntry, ...] = Field(
         default_factory=tuple,
         description=(
             "Handlers skipped by the resolver's "
