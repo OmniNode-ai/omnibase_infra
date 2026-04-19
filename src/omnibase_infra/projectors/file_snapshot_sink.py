@@ -23,7 +23,25 @@ class FileSnapshotSink:
         self._root = root
         self._root.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def _validate_segment(name: str, value: str) -> None:
+        """Reject path-traversal / separator inputs for a single filesystem segment."""
+        if value in {"", ".", ".."} or any(sep in value for sep in ("/", "\\")):
+            raise ValueError(f"Invalid {name}: {value!r}")
+
     async def publish(self, topic: str, key: str, value: BaseModel) -> None:
-        topic_dir = self._root / topic
+        self._validate_segment("topic", topic)
+        self._validate_segment("key", key)
+        root = self._root.resolve()
+        topic_dir = (root / topic).resolve()
+        if not topic_dir.is_relative_to(root):
+            raise ValueError(
+                f"Resolved topic directory escapes snapshot root: {topic_dir}"
+            )
         topic_dir.mkdir(parents=True, exist_ok=True)
-        (topic_dir / f"{key}.json").write_text(value.model_dump_json(indent=2))
+        target = (topic_dir / f"{key}.json").resolve()
+        if not target.is_relative_to(topic_dir):
+            raise ValueError(
+                f"Resolved snapshot path escapes topic directory: {target}"
+            )
+        target.write_text(value.model_dump_json(indent=2), encoding="utf-8")
