@@ -8,6 +8,8 @@ NodeRegistrationReducer node, following ONEX container-based DI pattern.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -54,6 +56,42 @@ class RegistryInfraNodeRegistrationReducer:
         result = await reducer.process(input_data)
         ```
     """
+
+    # ---------------------------------------------------------------------
+    # Declaration vs materialization (OMN-9198, HandlerResolver Phase 1)
+    # ---------------------------------------------------------------------
+    #
+    # This reducer node declares NO event handlers -- its contract.yaml has
+    # no ``handler_routing`` section; reduction is driven by the pure
+    # ``delta(state, event) -> (new_state, intents)`` pattern on the node
+    # itself. Therefore the explicit-dependency shape is an empty mapping.
+    #
+    # The classmethod is still exposed so the HandlerResolver auto-wiring
+    # path (Task 3) and Task 10 validators can treat every per-node
+    # registry uniformly -- every ``RegistryInfra<Node>`` class answers
+    # ``declare_explicit_dependencies()`` and the resolver doesn't need to
+    # special-case handler-less nodes.
+    # ---------------------------------------------------------------------
+
+    _EXPLICIT_DEPENDENCY_SHAPE: Mapping[str, tuple[str, ...]] = MappingProxyType({})
+
+    @classmethod
+    def declare_explicit_dependencies(cls) -> Mapping[str, tuple[str, ...]]:
+        """Return the declarative explicit-dependency shape for this node.
+
+        The reducer declares no event handlers (its contract.yaml has no
+        ``handler_routing`` section), so the shape is an empty mapping.
+        The method exists for uniformity across all per-node registries
+        so the HandlerResolver auto-wiring path (Task 3) can treat every
+        registry identically at contract-discovery time.
+
+        Returns:
+            An immutable empty mapping.
+
+        See Also:
+            ``docs/plans/2026-04-18-handler-resolver-architecture.md`` Task 6.
+        """
+        return cls._EXPLICIT_DEPENDENCY_SHAPE
 
     def __init__(self, container: ModelONEXContainer) -> None:
         """Initialize the registry with ONEX container.
