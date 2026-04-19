@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from omnibase_spi.protocols.services.protocol_project_tracker import (
@@ -50,7 +50,12 @@ def resolve_project_tracker(
                 AdapterLinearProjectTracker,
             )
 
-            return AdapterLinearProjectTracker()
+            # cast: AdapterLinearProjectTracker returns ModelStub* typed
+            # variants that are structural-compatible subclasses of the
+            # canonical ModelIssue/ModelComment/ModelProject declared by
+            # ProtocolProjectTracker. Runtime @runtime_checkable suffices.
+            # Stub type consolidation is tracked separately (OMN-9210).
+            return cast("ProtocolProjectTracker", AdapterLinearProjectTracker())
         except Exception as exc:  # noqa: BLE001 — fail-soft is the contract
             # Log only the exception class name; never interpolate `exc` body to
             # avoid leaking upstream secrets (tokens, connection strings, PII).
@@ -70,4 +75,6 @@ def resolve_project_tracker(
         LocalStubProjectTracker,
     )
 
-    return LocalStubProjectTracker(state_root=state_root)
+    return cast(
+        "ProtocolProjectTracker", LocalStubProjectTracker(state_root=state_root)
+    )
