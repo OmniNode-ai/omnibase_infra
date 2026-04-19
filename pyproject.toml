@@ -106,6 +106,9 @@ dependencies = [
     # Security: CVE-2026-32597 (HIGH) - PyJWT <2.12.0 accepts unknown `crit` header extensions.
     # Transitive dependency (via mcp/httpx/authlib). Explicitly declared to enforce minimum version.
     "pyjwt>=2.12.0",
+    # LLM provider SDK: Google Gemini via google-genai (async client).
+    # Consumed by AdapterLlmProviderGemini (OMN-5069). See plan OMN-5064.
+    "google-genai>=1.0,<2.0",
 ]
 
 [tool.hatch.build.targets.wheel]
