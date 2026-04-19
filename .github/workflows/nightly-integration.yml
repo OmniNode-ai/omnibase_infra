@@ -31,13 +31,23 @@ env:
   CACHE_VERSION: "0.4.0"
   # Contract-declared success threshold — number of consecutive green runs for stability
   SUCCESS_THRESHOLD: "3"
-  # E2E stack uses containerized postgres — never the .201 instance
+  # All host vars pinned to localhost — the .201 guard below rejects any value
+  # that resolves to the live instance.
   INTEGRATION_POSTGRES_HOST: "localhost"
+  OMNI_INFRA_HOST: "localhost"
+  POSTGRES_HOST: "localhost"
+  REDPANDA_ADVERTISE_HOST: "localhost"
   INTEGRATION_POSTGRES_PORT: "5433"
   INTEGRATION_POSTGRES_USER: "postgres"
-  INTEGRATION_POSTGRES_PASSWORD: "test-password"
+  # NB: "test-password" is the default in docker/docker-compose.e2e.yml
+  # (POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test-password}) — this is NOT a
+  # production credential. The secret-scanner false-positive here is
+  # acknowledged (see checkov CKV_SECRET_4 + gitleaks allowlist). Override via
+  # repo secret only if a different password is desired for the e2e stack.
+  # checkov:skip=CKV_SECRET_4:Test-only ephemeral docker-compose.e2e.yml password
+  INTEGRATION_POSTGRES_PASSWORD: ${{ secrets.INTEGRATION_POSTGRES_PASSWORD || 'test-password' }}
   INTEGRATION_POSTGRES_DB: "omnibase_infra"
-  OMNIBASE_INFRA_DB_URL: "postgresql://postgres:test-password@localhost:5433/omnibase_infra"
+  OMNIBASE_INFRA_DB_URL: ${{ secrets.OMNIBASE_INFRA_DB_URL || format('postgresql://postgres:{0}@localhost:5433/omnibase_infra', secrets.INTEGRATION_POSTGRES_PASSWORD || 'test-password') }}
   # E2E kafka exposed on host port
   KAFKA_BOOTSTRAP_SERVERS: "localhost:19092"
   ONEX_EVENT_BUS_TYPE: "kafka"
@@ -49,14 +59,23 @@ jobs:
     name: Assert not targeting live .201
     runs-on: ubuntu-latest
     steps:
-      - name: Reject if INTEGRATION_POSTGRES_HOST targets .201
+      - name: Reject if ANY host variable targets .201
+        # Broadened guard (per CR review): check all host vars the runtime
+        # might pick up, not just INTEGRATION_POSTGRES_HOST. If any evaluates
+        # to 192.168.86.201 the e2e workflow fails closed.
         run: |
-          HOST="${INTEGRATION_POSTGRES_HOST}"
-          if [[ "$HOST" == "192.168.86.201" ]]; then
-            echo "::error::INTEGRATION_POSTGRES_HOST=$HOST targets the live .201 instance. This workflow must use the containerized e2e stack only."
-            exit 1
-          fi
-          echo "Host check passed: $HOST (not live .201)"
+          fail=0
+          for HOST_VAR in INTEGRATION_POSTGRES_HOST OMNI_INFRA_HOST POSTGRES_HOST REDPANDA_ADVERTISE_HOST; do
+            HOST="${!HOST_VAR:-}"
+            if [[ "$HOST" == "192.168.86.201" ]]; then
+              echo "::error::${HOST_VAR}=$HOST targets the live .201 instance. This workflow must use the containerized e2e stack only."
+              fail=1
+            else
+              echo "${HOST_VAR}=${HOST:-<unset>} (ok)"
+            fi
+          done
+          [[ $fail -eq 0 ]] || exit 1
+          echo "Host checks passed: no host variable points to live .201"
 
   integration-tests:
     name: Integration Test Suite (e2e stack)
