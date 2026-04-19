@@ -17,6 +17,109 @@ PLIST = SCRIPTS_DIR / "ai.omninode.bare-clone-sync.plist"
 INSTALL_SCRIPT = SCRIPTS_DIR / "install-bare-clone-sync.sh"
 
 
+def _make_omniclaude_source(
+    root: Path, file_contents: dict[str, str] | None = None
+) -> Path:
+    """Create a fake omniclaude repo with a minimal plugins/onex/ tree.
+
+    Returns the path to the repo root. Commits an initial state so the
+    refresh logic in pull-all.sh can `git archive HEAD`.
+    """
+    omniclaude = root / "omniclaude"
+    onex = omniclaude / "plugins" / "onex"
+    (onex / "skills").mkdir(parents=True)
+    (onex / "hooks").mkdir(parents=True)
+    (onex / "lib").mkdir(parents=True)
+    (onex / "agents").mkdir(parents=True)
+
+    defaults = {
+        "plugins/onex/skills/example.md": "# example skill\n",
+        "plugins/onex/hooks/example.sh": "#!/bin/sh\necho hooked\n",
+        "plugins/onex/lib/example.py": "VERSION = 'v1'\n",
+        "plugins/onex/agents/example.yaml": "name: example\n",
+    }
+    for rel, contents in (file_contents or defaults).items():
+        p = omniclaude / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(contents)
+
+    # Initialize as a git repo so `git archive HEAD` works. Also set up a
+    # bare upstream so `git pull --ff-only` succeeds (otherwise pull-all.sh
+    # reports the repo as FAILED and exits 1, which is unrelated to the
+    # cache-refresh logic we are testing).
+    subprocess.run(
+        ["git", "init", "-q", "--initial-branch=main"], cwd=omniclaude, check=True
+    )
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "add", "."],
+        cwd=omniclaude,
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "-m",
+            "init",
+        ],
+        cwd=omniclaude,
+        check=True,
+    )
+
+    upstream = root / "omniclaude.git"
+    subprocess.run(
+        ["git", "init", "-q", "--bare", "--initial-branch=main", str(upstream)],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(upstream)], cwd=omniclaude, check=True
+    )
+    subprocess.run(
+        ["git", "push", "-q", "-u", "origin", "main"], cwd=omniclaude, check=True
+    )
+    return omniclaude
+
+
+def _make_versioned_cache(
+    home: Path, initial_files: dict[str, str] | None = None
+) -> Path:
+    """Create a versioned plugin cache mirroring the real layout.
+
+    Layout: <home>/.claude/plugins/cache/omninode-tools/onex/<version>/
+    """
+    cache = home / ".claude" / "plugins" / "cache" / "omninode-tools" / "onex" / "2.2.5"
+    (cache / "skills").mkdir(parents=True)
+    if initial_files:
+        for rel, contents in initial_files.items():
+            p = cache / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(contents)
+    # Seed the .deployed-commit marker so detection prefers this path
+    # over any fallback directory search.
+    (cache / ".deployed-commit").write_text("0" * 40)
+    return cache
+
+
+def _run_pull_all(
+    omni_home: Path, fake_home: Path, repos: list[str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Invoke pull-all.sh with controlled OMNI_HOME and HOME."""
+    env = {
+        **os.environ,
+        "OMNI_HOME": str(omni_home),
+        "HOME": str(fake_home),
+    }
+    # Drop CLAUDE_PLUGIN_ROOT so the auto-detection path is exercised.
+    env.pop("CLAUDE_PLUGIN_ROOT", None)
+    args = ["bash", str(PULL_ALL), *(repos or ["omniclaude"])]
+    return subprocess.run(args, capture_output=True, text=True, env=env, check=False)
+
+
 @pytest.mark.unit
 class TestPullAllScript:
     """Tests for pull-all.sh."""
@@ -79,6 +182,129 @@ class TestPullAllScript:
             # The bare repo has no main ref and no remote, so it will
             # report FAILED — that's expected. The key is no crash.
             assert result.returncode in (0, 1)
+
+
+@pytest.mark.unit
+class TestPluginCacheRefresh:
+    """Tests for the plugin cache refresh logic in pull-all.sh (OMN-7369)."""
+
+    def test_detects_versioned_cache_path(self, tmp_path: Path) -> None:
+        """Refresh triggers when cache lives under cache/omninode-tools/onex/<ver>/."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_omniclaude_source(omni_home)
+        cache = _make_versioned_cache(fake_home)
+
+        result = _run_pull_all(omni_home, fake_home)
+        assert result.returncode == 0, (
+            f"pull-all.sh failed: stdout={result.stdout} stderr={result.stderr}"
+        )
+        assert "Plugin cache refreshed" in result.stdout, (
+            f"Cache refresh did not trigger; output: {result.stdout}"
+        )
+        # The real commit should replace the 0...0 placeholder.
+        deployed = (cache / ".deployed-commit").read_text().strip()
+        assert deployed != "0" * 40
+        assert len(deployed) == 40
+
+    def test_refresh_copies_all_plugin_subdirs(self, tmp_path: Path) -> None:
+        """Refresh copies hooks, lib, agents — not just skills/."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_omniclaude_source(omni_home)
+        cache = _make_versioned_cache(fake_home)
+
+        result = _run_pull_all(omni_home, fake_home)
+        assert result.returncode == 0, result.stderr
+
+        # Every subdir from the source must appear in the refreshed cache.
+        assert (cache / "skills" / "example.md").exists()
+        assert (cache / "hooks" / "example.sh").exists()
+        assert (cache / "lib" / "example.py").exists()
+        assert (cache / "agents" / "example.yaml").exists()
+
+    def test_content_hash_written_after_refresh(self, tmp_path: Path) -> None:
+        """.content-hash is computed and stored after a refresh."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_omniclaude_source(omni_home)
+        cache = _make_versioned_cache(fake_home)
+
+        result = _run_pull_all(omni_home, fake_home)
+        assert result.returncode == 0, result.stderr
+
+        hash_file = cache / ".content-hash"
+        assert hash_file.exists(), ".content-hash was not created"
+        content = hash_file.read_text().strip()
+        # shasum produces a 40-char hex digest.
+        assert len(content) == 40
+        assert all(c in "0123456789abcdef" for c in content)
+
+    def test_deployed_commit_preserved_alongside_hash(self, tmp_path: Path) -> None:
+        """Existing .deployed-commit behavior is preserved."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        omniclaude = _make_omniclaude_source(omni_home)
+        cache = _make_versioned_cache(fake_home)
+
+        expected_commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=omniclaude, text=True
+        ).strip()
+
+        result = _run_pull_all(omni_home, fake_home)
+        assert result.returncode == 0, result.stderr
+
+        assert (cache / ".deployed-commit").read_text().strip() == expected_commit
+        assert (cache / ".content-hash").exists()
+
+    def test_no_cache_skips_cleanly(self, tmp_path: Path) -> None:
+        """Missing plugin cache is a no-op, not an error."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        # No cache created.
+
+        _make_omniclaude_source(omni_home)
+
+        result = _run_pull_all(omni_home, fake_home)
+        assert result.returncode == 0, (
+            f"pull-all.sh should succeed with no cache; "
+            f"stdout={result.stdout} stderr={result.stderr}"
+        )
+        assert "Plugin cache refreshed" not in result.stdout
+        assert "WARN: Plugin cache refresh failed" not in result.stdout
+
+    def test_refresh_is_idempotent(self, tmp_path: Path) -> None:
+        """Second run with no changes does not re-trigger a refresh."""
+        omni_home = tmp_path / "omni_home"
+        omni_home.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _make_omniclaude_source(omni_home)
+        _make_versioned_cache(fake_home)
+
+        first = _run_pull_all(omni_home, fake_home)
+        assert first.returncode == 0
+        assert "Plugin cache refreshed" in first.stdout
+
+        second = _run_pull_all(omni_home, fake_home)
+        assert second.returncode == 0
+        # On the second run, commit + content hash both match — no refresh.
+        assert "Plugin cache refreshed" not in second.stdout
 
 
 @pytest.mark.unit
