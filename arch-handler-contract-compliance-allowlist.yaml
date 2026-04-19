@@ -4,11 +4,6 @@ allowlisted_handlers:
       - missing_handler_routing
       - logic_in_node
     ticket: '# migration pending'
-  - path: omnibase_infra/nodes/node_registration_orchestrator/handlers/handler_node_registration_acked.py
-    violations:
-      - missing_handler_routing
-    ticket: OMN-9194
-    notes: 'Tactical unblock: handler removed from contract until registry wiring lands. File kept for dispatcher + upcoming re-wire.'
   - path: omnibase_infra/nodes/node_artifact_reconciliation_orchestrator/handlers/handler_plan_to_pr_comment.py
     violations:
       - undeclared_transport

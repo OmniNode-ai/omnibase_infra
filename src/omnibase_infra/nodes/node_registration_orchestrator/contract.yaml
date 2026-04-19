@@ -420,14 +420,25 @@ handler_routing:
         state_filters:
           - "AWAITING_ACK"
           - "ACTIVE"
-    # OMN-9194: HandlerNodeRegistrationAcked entry removed as a tactical unblock.
-    # Under OMN-8735 strict auto-wiring, this handler crashed the runtime because
-    # its constructor dependencies (ProjectionReaderRegistration, RegistrationReducerService)
-    # are registered into ServiceHandlerRegistry but not under the class key used by
-    # `container.get_service(handler_cls)` in the auto-wiring path. The existing
-    # dispatcher (dispatcher_node_registration_acked.py) continues to route this
-    # topic; the payload_type_match handler entry for ModelNodeRegistrationAcked
-    # will be re-added once the registry wiring lands per OMN-9194.
+    # ModelNodeRegistrationAcked -> HandlerNodeRegistrationAcked
+    # Acknowledgment processing - node confirms it received registration acceptance.
+    # Validates state transition and emits:
+    #   - NodeRegistrationAckReceived for successful acknowledgment
+    #   - NodeBecameActive when transitioning to active state
+    - event_model:
+        name: "ModelNodeRegistrationAcked"
+        module: "omnibase_infra.models.registration.commands.model_node_registration_acked"
+      handler:
+        name: "HandlerNodeRegistrationAcked"
+        module: "omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_registration_acked"
+      message_category: "COMMAND"
+      output_events:
+        - "ModelNodeRegistrationAckReceived"
+        - "ModelNodeBecameActive"
+      state_transition:
+        valid_from_states:
+          - "AWAITING_ACK"
+        target_state: "ACTIVE"
     # ModelNodeHeartbeatEvent -> HandlerNodeHeartbeat
     # Heartbeat processing - updates liveness tracking for active nodes.
     - event_model:

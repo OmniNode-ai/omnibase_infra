@@ -1397,12 +1397,10 @@ class TestLoadHandlerRoutingSubcontractIntegration:
         assert len(result.handlers) >= 4  # At least 4 handlers defined
 
         # Verify expected handlers exist
-        # OMN-9194: ModelNodeRegistrationAcked removed from payload_type_match
-        # routing as tactical unblock until registry wiring lands.
         routing_keys = {entry.routing_key for entry in result.handlers}
         assert "ModelNodeIntrospectionEvent" in routing_keys
         assert "ModelRuntimeTick" in routing_keys
-        assert "ModelNodeRegistrationAcked" not in routing_keys
+        assert "ModelNodeRegistrationAcked" in routing_keys
         assert "ModelNodeHeartbeatEvent" in routing_keys
 
     def test_real_contract_handler_keys_are_valid(self) -> None:
