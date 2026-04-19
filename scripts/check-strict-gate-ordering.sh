@@ -40,21 +40,43 @@ fi
 if [[ "${CI:-}" == "true" ]]; then
   PR_BODY="${PR_BODY:-}"
   if [[ -z "$PR_BODY" ]]; then
-    echo "WARNING: check-strict-gate-ordering: PR_BODY not set in CI — skipping body check." >&2
+    echo "ERROR: check-strict-gate-ordering: PR_BODY not set in CI." >&2
+    echo "  This check must fail closed for strict-gate files." >&2
+    echo "  Set PR_BODY in CI (or add a PR-body fetch step) before running this hook." >&2
+    exit 1
+  fi
+
+  # Must have a checked gate option AND corresponding non-empty evidence.
+  # "Compliance PR(s):" for the downstream-compliant option, or
+  # "Flag config:"     for the feature-flag option.
+  has_downstream=false
+  has_flag=false
+
+  if echo "$PR_BODY" | grep -qiE '^\s*-\s*\[[xX]\]\s*\*\*Yes\*\*.*ALL downstream'; then
+    has_downstream=true
+  fi
+  if echo "$PR_BODY" | grep -qiE '^\s*-\s*\[[xX]\]\s*\*\*Yes, but behind a feature flag\*\*'; then
+    has_flag=true
+  fi
+
+  if [[ "$has_downstream" == "true" ]] && \
+     echo "$PR_BODY" | grep -qiE 'Compliance PR\(s\):[[:space:]]*(https?://|#[0-9]+)'; then
+    echo "check-strict-gate-ordering: strict-gate ordering confirmed (compliance PR evidence)." >&2
     exit 0
   fi
 
-  # Must have at least one compliance PR link or feature-flag note.
-  if echo "$PR_BODY" | grep -qE '\[x\].*Yes.*ALL downstream' || \
-     echo "$PR_BODY" | grep -qE '\[x\].*Yes.*behind a feature flag'; then
-    echo "check-strict-gate-ordering: strict-gate ordering checkbox confirmed." >&2
+  if [[ "$has_flag" == "true" ]] && \
+     echo "$PR_BODY" | grep -qiE 'Flag config:[[:space:]]*(https?://|[[:graph:]]+)'; then
+    echo "check-strict-gate-ordering: strict-gate ordering confirmed (feature-flag evidence)." >&2
     exit 0
   fi
 
   echo "ERROR: check-strict-gate-ordering: This PR touches a strict-gate file." >&2
   echo "  Files: ${GATE_FILES[*]}" >&2
   echo "  You must check one of the 'Yes' boxes in the 'Strict-gate ordering' section" >&2
-  echo "  of the PR template and link the compliance PRs or feature-flag config." >&2
+  echo "  of the PR template AND fill the matching evidence line:" >&2
+  echo "    - 'Yes' option  -> 'Compliance PR(s): <link or #num>' must be populated" >&2
+  echo "    - 'Flag' option -> 'Flag config: <link or identifier>' must be populated" >&2
   exit 1
 fi
 
