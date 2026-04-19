@@ -3,6 +3,13 @@
 """Auto-wiring report models for OMN-7654.
 
 Captures per-contract wiring outcomes: success, skip, or failure with reason.
+
+Per-handler resolver outcomes and skip entries (added for OMN-9201) are
+modeled on :class:`ModelContractWiringResult` so the wiring report can cite
+which handler the resolver skipped and why, without expanding the error
+surface. See
+``docs/plans/2026-04-18-handler-resolver-architecture.md`` Task 5 §Report
+schema ownership.
 """
 
 from __future__ import annotations
@@ -11,6 +18,10 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.enums.enum_handler_resolution_outcome import (
+    EnumHandlerResolutionOutcome,
+)
+
 
 class EnumWiringOutcome(str, Enum):
     """Outcome of wiring a single discovered contract."""
@@ -18,6 +29,48 @@ class EnumWiringOutcome(str, Enum):
     WIRED = "wired"
     SKIPPED = "skipped"
     FAILED = "failed"
+
+
+class ModelWiringOutcome(BaseModel):
+    """Per-handler resolver outcome row within a contract-level wiring result.
+
+    Populated from :class:`omnibase_core.models.resolver.ModelHandlerResolution`
+    returned by ``ServiceHandlerResolver.resolve(...)`` at wiring time.
+
+    See ``docs/plans/2026-04-18-handler-resolver-architecture.md`` §Known Types
+    Inventory for why this is not reused from :class:`ModelContractWiringResult`
+    (different granularity) or :class:`ModelHandlerResolution` (that is the
+    core-layer resolver return; this is the infra-layer report projection
+    used for observability / determinism asserts).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
+
+    handler_name: str = Field(
+        ..., description="Handler class name (from contract.handler_routing)"
+    )
+    resolution_outcome: EnumHandlerResolutionOutcome = Field(
+        ..., description="Which resolver precedence path produced this handler"
+    )
+    skipped_reason: str = Field(
+        default="",
+        description="Skip reason (empty string on successful resolution)",
+    )
+
+
+class ModelSkippedEntry(BaseModel):
+    """Skip-only record surfaced at the contract level.
+
+    See ``docs/plans/2026-04-18-handler-resolver-architecture.md`` §Known Types
+    Inventory: this is narrower than :class:`ModelWiringOutcome`
+    because the outcomes list records every resolved handler, while this list
+    is the filtered skip subset surfaced at the contract level.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
+
+    handler_name: str = Field(..., description="Handler class name skipped")
+    reason: str = Field(..., description="Skip reason (human-readable)")
 
 
 class ModelContractWiringResult(BaseModel):
@@ -37,6 +90,22 @@ class ModelContractWiringResult(BaseModel):
     )
     topics_subscribed: tuple[str, ...] = Field(
         default_factory=tuple, description="Kafka topics subscribed"
+    )
+    wirings: tuple[ModelWiringOutcome, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Per-handler resolver outcomes recorded by "
+            "ServiceHandlerResolver (OMN-9201). Order mirrors the contract's "
+            "handler_routing entries."
+        ),
+    )
+    skipped_handlers: tuple[ModelSkippedEntry, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Handlers skipped by the resolver's "
+            "RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP outcome (OMN-9201). "
+            "Not errors."
+        ),
     )
 
 

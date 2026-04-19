@@ -166,6 +166,12 @@ override-dependencies = [
 [tool.uv.sources]
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 omnimarket = { git = "https://github.com/OmniNode-ai/omnimarket.git", branch = "main" }
+# Pinned to core main post-OMN-9196 (resolver models + enum_handler_resolution_outcome).
+# PyPI release v0.39.0 (2026-04-06) predates PR 846 — switch back after v0.40.0 ships.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "9d64d5a3944477093824a53ca931fd17a4b6a8e1" }
+# Pinned to spi main post-OMN-9197 (ProtocolHandlerResolver + ProtocolHandlerOwnershipQuery).
+# PyPI release v0.20.4 (2026-04-03) predates PR 186 — switch back after v0.20.5 ships.
+omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", rev = "a9380008fb4a2f2a784d374389260d896455c3b2" }
 
 
 [tool.ruff]
