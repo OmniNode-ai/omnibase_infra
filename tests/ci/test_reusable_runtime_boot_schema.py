@@ -7,13 +7,20 @@ Tier-2 regression (OMN-9252) can safely call it via `workflow_call`. Asserts:
 
 * `on.workflow_call.inputs.mode` is required + string + constrained to real|compose
 * `on.workflow_call.inputs.runtime_host` default == 'localhost'
-* `on.workflow_call.inputs.pg_port` default == '5436'
+* `on.workflow_call.inputs.pg_port` default == '5436' (real mode)
+* `on.workflow_call.inputs.compose_pg_port` default == '5433' (compose mode,
+  matches POSTGRES_PORT in docker/docker-compose.e2e.yml)
+* `on.workflow_call.inputs.real_ssh_user` present (empty default, falls back to
+  `whoami` on the runner — avoids hardcoded operator identity)
 * `jobs.boot.runs-on` uses the exact USE_SELF_HOSTED_RUNNERS conditional from
   ci-baseline.md §B (shared with ci.yml)
 * `jobs.boot.steps` contains checkout, uv setup, conditional compose bring-up,
-  health-wait with jq `.data.status == "healthy" and .is_running == true`,
-  60s hold + RestartCount check, psql registration_projections liveness query,
-  rpk group list check, and smoke-result.json artifact upload.
+  health-wait with jq `.status == "healthy" and .details.is_running == true`
+  (matches service_health.py::_handle_health response shape), 60s hold with
+  runtime PID-alive + health check (compose) / flapping tolerance (real),
+  psql registration_projections liveness query, rpk group list check, and
+  smoke-result.json artifact upload guarded against missing intermediate
+  files.
 """
 
 from __future__ import annotations
@@ -115,10 +122,34 @@ def test_runtime_host_input_defaults_localhost(workflow: Workflow) -> None:
 
 
 def test_pg_port_input_defaults_5436(workflow: Workflow) -> None:
+    """Real-mode default — matches CLAUDE.md infra topology for .201."""
     inputs = _inputs(workflow)
     assert "pg_port" in inputs
     assert inputs["pg_port"].get("type") == "string"
     assert inputs["pg_port"].get("default") == "5436"
+
+
+def test_compose_pg_port_input_defaults_5433(workflow: Workflow) -> None:
+    """Compose-mode default — matches POSTGRES_PORT in docker/docker-compose.e2e.yml."""
+    inputs = _inputs(workflow)
+    assert "compose_pg_port" in inputs, (
+        "compose_pg_port input missing — needed to avoid port collision with real mode"
+    )
+    assert inputs["compose_pg_port"].get("type") == "string"
+    assert inputs["compose_pg_port"].get("default") == "5433"
+
+
+def test_real_ssh_user_input_has_empty_default(workflow: Workflow) -> None:
+    """SSH user must be parameterized, not hardcoded to `jonah`."""
+    inputs = _inputs(workflow)
+    assert "real_ssh_user" in inputs, (
+        "real_ssh_user input missing — avoids hardcoded operator identity"
+    )
+    assert inputs["real_ssh_user"].get("type") == "string"
+    # Empty default → caller opts into a specific user or the runner falls
+    # back to its own `whoami`. Not an assertion on portability — it's the
+    # absence of a hardcoded operator name.
+    assert inputs["real_ssh_user"].get("default", "") == ""
 
 
 def test_boot_job_runs_on_uses_self_hosted_conditional(workflow: Workflow) -> None:
@@ -192,14 +223,21 @@ def test_boot_has_conditional_compose_bringup(workflow: Workflow) -> None:
 
 
 def test_boot_health_wait_uses_jq_hard_gate(workflow: Workflow) -> None:
-    """Health-wait step must assert jq `.data.status == "healthy" and .is_running == true`."""
+    """Health-wait step must assert the actual shape from service_health.py:
+    top-level `.status == "healthy"` AND `.details.is_running == true`.
+    """
     steps = _boot_steps(workflow)
     matched = [s for s in steps if "8085/health" in _step_text(s)]
     assert matched, "health-wait step missing"
     step_texts = "\n".join(_step_text(s) for s in matched)
-    assert ".data.status" in step_texts
+    # Probe the real JSON shape emitted by service_health.py::_handle_health.
+    assert ".status ==" in step_texts, (
+        "must assert top-level .status field (see service_health.py)"
+    )
     assert '"healthy"' in step_texts or "'healthy'" in step_texts
-    assert ".is_running" in step_texts
+    assert ".details.is_running" in step_texts, (
+        "is_running lives under .details, not top-level (see service_health.py)"
+    )
     assert "true" in step_texts
 
 
@@ -211,14 +249,25 @@ def test_boot_emits_subscriber_warning_not_hard_gate(workflow: Workflow) -> None
     assert "::warning::" in all_text, "subscriber_count must emit ::warning:: not fail"
 
 
-def test_boot_holds_60s_and_checks_restart_count(workflow: Workflow) -> None:
+def test_boot_holds_60s_with_stability_check(workflow: Workflow) -> None:
+    """60s hold step must assert runtime liveness.
+
+    In compose mode the runtime is a background Python process launched via
+    `uv run`, not a container — so `docker inspect RestartCount` is
+    inapplicable. The step must instead assert the PID is still alive +
+    /health still healthy. In real mode we fall back to a flapping-tolerance
+    check over /health.
+    """
     steps = _boot_steps(workflow)
     matched = [
-        s
-        for s in steps
-        if "restartcount" in _step_text(s) or "docker inspect" in _step_text(s)
+        s for s in steps if "sleep 60" in _step_text(s) or "60s hold" in _step_text(s)
     ]
-    assert matched, "60s-hold RestartCount check missing (compose hard gate)"
+    assert matched, "60s-hold stability step missing"
+    step_texts = "\n".join(_step_text(s) for s in matched)
+    assert "kill -0" in step_texts or "runtime_pid" in step_texts, (
+        "compose-mode branch must assert runtime PID is alive (kill -0) — "
+        "RestartCount on a host Python process is meaningless"
+    )
 
 
 def test_boot_has_psql_registration_projections_query(workflow: Workflow) -> None:

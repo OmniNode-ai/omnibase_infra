@@ -6,9 +6,16 @@
 #   - `real`:    probe live services on a caller-supplied host (runtime_host,
 #     pg_port). Used on self-hosted runners targeting the .201 stack.
 #
+# Health response shape comes from
+# src/omnibase_infra/services/service_health.py::_handle_health:
+#     { "status": "healthy|degraded|unhealthy",
+#       "version": "x.y.z",
+#       "details": { "is_running": bool, "is_draining": bool, ... } }
+#
 # Hard gates (must pass):
-#   * /health returns .data.status == "healthy" AND .is_running == true
-#   * 60s hold: compose -> RestartCount constant; real -> /health stays healthy
+#   * /health returns .status == "healthy" AND .details.is_running == true
+#   * 60s hold: compose -> background runtime PID alive + /health stable;
+#                real    -> /health stable (no flapping beyond tolerance)
 #   * registration_projections row count > 0 (active + fresh heartbeat)
 #   * rpk group list contains `onex-runtime` with >= 1 member
 #
@@ -32,10 +39,20 @@ on:
         type: string
         default: "localhost"
       pg_port:
-        description: "External postgres port. Defaults to 5436 per CLAUDE.md infra topology."
+        description: "External postgres port for `real` mode. Defaults to 5436 per CLAUDE.md infra topology. (Compose mode ignores this and uses the port published by docker/docker-compose.e2e.yml, currently 5433.)"
         required: false
         type: string
         default: "5436"
+      compose_pg_port:
+        description: "External postgres port published by docker/docker-compose.e2e.yml. Overrides pg_port when mode='compose'. Keep in sync with POSTGRES_PORT default in that compose file."
+        required: false
+        type: string
+        default: "5433"
+      real_ssh_user:
+        description: "SSH username for `real` mode rpk-group-list probe. If blank, uses the runner's whoami."
+        required: false
+        type: string
+        default: ""
 
 jobs:
   boot:
@@ -54,7 +71,8 @@ jobs:
     env:
       RUNTIME_HOST: ${{ inputs.runtime_host }}
       PG_PORT: ${{ inputs.pg_port }}
-      # Force inmemory event bus for any in-process startup during compose mode.
+      # Use Kafka-backed event bus so registration flow + rpk group membership
+      # assertions reflect real topic wiring. Compose mode runs redpanda.
       ONEX_EVENT_BUS_TYPE: "kafka"
       POSTGRES_DATABASE: "omnibase_infra"
       LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
@@ -70,6 +88,19 @@ jobs:
               exit 1
               ;;
           esac
+
+      - name: Resolve mode-specific postgres port
+        id: resolve_pg
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.mode }}" == "compose" ]]; then
+            effective="${{ inputs.compose_pg_port }}"
+          else
+            effective="${{ inputs.pg_port }}"
+          fi
+          echo "PG_PORT=${effective}" >> "$GITHUB_ENV"
+          echo "effective_pg_port=${effective}" >> "$GITHUB_OUTPUT"
+          echo "effective pg_port for mode=${{ inputs.mode }} -> ${effective}"
 
       - name: Checkout code
         uses: actions/checkout@v6
@@ -124,7 +155,7 @@ jobs:
           deadline=$((SECONDS + 90))
           while (( SECONDS < deadline )); do
             if body=$(curl -fsS "$url" 2>/dev/null); then
-              if echo "$body" | jq -e '.data.status == "healthy" and .is_running == true' >/dev/null; then
+              if echo "$body" | jq -e '.status == "healthy" and .details.is_running == true' >/dev/null; then
                 echo "$body" > health_initial.json
                 echo "runtime healthy after $SECONDS seconds"
                 break
@@ -133,37 +164,46 @@ jobs:
             sleep 2
           done
           if [[ ! -f health_initial.json ]]; then
-            echo "::error::runtime /health never reported status=healthy AND is_running=true within 90s"
+            echo "::error::runtime /health never reported status=healthy AND .details.is_running=true within 90s"
             exit 1
           fi
           # Warn-only observation — subscriber_count<300 is a regression SIGNAL,
           # not a contract gate. See plan §Rewritten Inventory §E.
-          sub_count=$(jq -r '.data.subscriber_count // 0' health_initial.json)
+          sub_count=$(jq -r '.details.subscriber_count // 0' health_initial.json)
           echo "subscriber_count=$sub_count"
           if [[ "$sub_count" -lt 300 ]]; then
             echo "::warning::subscriber_count=$sub_count below empirical .201 threshold of 300 — investigate possible regression"
           fi
 
-      - name: Hold 60s — RestartCount / health stability
+      - name: Hold 60s — runtime process + health stability
         run: |
           set -euo pipefail
+          url="http://${RUNTIME_HOST}:8085/health"
           if [[ "${{ inputs.mode }}" == "compose" ]]; then
-            start_count=$(docker inspect omninode-runtime --format '{{.RestartCount}}' 2>/dev/null || echo "0")
-            sleep 60
-            end_count=$(docker inspect omninode-runtime --format '{{.RestartCount}}' 2>/dev/null || echo "0")
-            if [[ "$start_count" != "$end_count" ]]; then
-              echo "::error::omninode-runtime RestartCount changed ${start_count} -> ${end_count} during 60s hold (crash-loop)"
+            # Runtime is a background Python process launched via uv (not a
+            # container), so `docker inspect RestartCount` is inapplicable.
+            # Assert the PID is still alive AND /health remains healthy.
+            if [[ -z "${RUNTIME_PID:-}" ]]; then
+              echo "::error::RUNTIME_PID not set — compose-mode launch step did not run"
               exit 1
             fi
-            echo "RestartCount stable at ${end_count} over 60s"
+            sleep 60
+            if ! kill -0 "${RUNTIME_PID}" 2>/dev/null; then
+              echo "::error::runtime PID ${RUNTIME_PID} died during 60s hold (crash)"
+              exit 1
+            fi
+            if ! curl -fsS "$url" | jq -e '.status == "healthy" and .details.is_running == true' >/dev/null; then
+              echo "::error::runtime /health degraded after 60s hold"
+              exit 1
+            fi
+            echo "runtime PID ${RUNTIME_PID} alive + /health healthy after 60s"
           else
             # Real mode: we don't control the remote container. Advisory-only
             # stability check on /health over a 60s window.
-            url="http://${RUNTIME_HOST}:8085/health"
             deadline=$((SECONDS + 60))
             failures=0
             while (( SECONDS < deadline )); do
-              if ! curl -fsS "$url" | jq -e '.data.status == "healthy"' >/dev/null; then
+              if ! curl -fsS "$url" | jq -e '.status == "healthy"' >/dev/null; then
                 failures=$((failures + 1))
               fi
               sleep 5
@@ -197,7 +237,11 @@ jobs:
           if [[ "${{ inputs.mode }}" == "compose" ]]; then
             raw=$(docker exec omnibase-infra-redpanda rpk group list)
           else
-            raw=$(ssh -o StrictHostKeyChecking=no "jonah@${RUNTIME_HOST}" "docker exec omnibase-infra-redpanda rpk group list")
+            user="${{ inputs.real_ssh_user }}"
+            if [[ -z "$user" ]]; then
+              user="$(whoami)"
+            fi
+            raw=$(ssh -o StrictHostKeyChecking=no "${user}@${RUNTIME_HOST}" "docker exec omnibase-infra-redpanda rpk group list")
           fi
           echo "$raw" > rpk_groups.txt
           if ! grep -qE '(^|[[:space:]])onex-runtime([[:space:]]|$)' rpk_groups.txt; then
@@ -210,12 +254,27 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
+          # Make artifact emission robust to partial failure — health_initial.json
+          # and rpk_groups.txt may be absent if an earlier step exited. Fall back
+          # to empty-JSON / empty-string placeholders so the artifact always
+          # uploads and downstream tooling can discriminate "ran but failed
+          # early" from "never uploaded".
+          if [[ ! -f health_initial.json ]]; then
+            echo '{}' > health_initial.json
+          fi
+          if [[ ! -f rpk_groups.txt ]]; then
+            : > rpk_groups.txt
+          fi
+          active_fresh_raw='${{ steps.pg_liveness.outputs.active_fresh_registrations }}'
+          if [[ -z "$active_fresh_raw" ]]; then
+            active_fresh_raw='0'
+          fi
           jq -n \
             --arg mode "${{ inputs.mode }}" \
             --arg runtime_host "${RUNTIME_HOST}" \
             --arg pg_port "${PG_PORT}" \
             --slurpfile health health_initial.json \
-            --arg active_fresh "${{ steps.pg_liveness.outputs.active_fresh_registrations }}" \
+            --arg active_fresh "${active_fresh_raw}" \
             --rawfile rpk_groups rpk_groups.txt \
             '{
               mode: $mode,
