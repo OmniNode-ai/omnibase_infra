@@ -1393,6 +1393,34 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
     ticket: OMN-7655
+  # ==========================================================================
+  # Auto-Wiring Report Exemptions (OMN-9201)
+  # ==========================================================================
+  # ModelHandlerWiringOutcome and ModelSkippedHandlerEntry describe the
+  # *outcome* of the handler auto-wiring pipeline, not a handler implementation
+  # class. The "Handler" in the names refers to the ONEX handler concept being
+  # wired (consistent with ModelLoadedHandler, ModelHandlerContract, etc.),
+  # not an anti-pattern. Introduced by Task 5 of epic OMN-9195.
+  - file_pattern: 'runtime/auto_wiring/report\.py'
+    class_pattern: "Class name 'ModelHandlerWiringOutcome'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ModelHandlerWiringOutcome is the Pydantic model describing a single handler's wiring outcome (resolved / skipped / failed) in the auto-wiring report. The "Handler" refers to the ONEX handler being wired, consistent with ModelLoadedHandler and ModelHandlerContract.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - docs/plans/2026-04-18-handler-resolver-architecture.md
+    ticket: OMN-9201
+  - file_pattern: 'runtime/auto_wiring/report\.py'
+    class_pattern: "Class name 'ModelSkippedHandlerEntry'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ModelSkippedHandlerEntry is the Pydantic model describing a handler that was deliberately skipped during auto-wiring (e.g., local ownership skip). The "Handler" refers to the ONEX handler being skipped, consistent with ModelLoadedHandler and ModelHandlerContract.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - docs/plans/2026-04-18-handler-resolver-architecture.md
+    ticket: OMN-9201
   - file_pattern: 'model_handler_security_policy\.py'
     violation_pattern: "contains anti-pattern 'Handler'"
     reason: >
