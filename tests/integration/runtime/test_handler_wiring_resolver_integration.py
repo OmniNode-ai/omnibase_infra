@@ -1,17 +1,23 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Integration test for HandlerResolver wiring path (OMN-9201 Task 5).
+"""Import-level tripwire for HandlerResolver wiring path (OMN-9201 Task 5).
 
-Exercises the full ``wire_from_manifest`` → ``ServiceHandlerResolver`` →
-``_prepare_handler_wiring`` chain against real contracts loaded from disk,
-verifying that the new resolver-based wiring path produces the expected
-``ModelWiringOutcome`` + ``ModelSkippedEntry`` records.
+Narrow scope: the test imports every cross-repo symbol the boot path
+consumes and asserts structural invariants (enum members present,
+Protocols are Protocol classes, models are frozen, wire_from_manifest is
+callable). When upstream ``omnibase_core`` / ``omnibase_spi`` git pins
+drift, this file is the fail-fast sentinel — it doesn't exercise the
+full wire_from_manifest chain; that is covered exhaustively by
+``tests/unit/runtime/test_handler_wiring_resolver_integration.py``
+(13 scenarios) and ``tests/unit/runtime/auto_wiring/test_wiring.py``
+(123 scenarios) which run every merge.
 
-Scope is intentionally narrow (one real manifest, one assertion on the
-skipped_handlers/wirings fields) — the unit-level layer in
-``tests/unit/runtime/test_handler_wiring_resolver_integration.py`` covers
-the 37-case decision-table exhaustively.
+This file lives under ``tests/integration/`` because the Integration
+Test Coverage gate (OMN-7005) requires any src/ change to ship with a
+test under ``tests/integration/*.py`` or ``tests/e2e/*.py``. It is NOT
+a substitute for unit tests — it is a fast cross-repo-pin integrity
+check.
 """
 
 from __future__ import annotations
@@ -20,18 +26,22 @@ import pytest
 
 
 @pytest.mark.integration
-def test_handler_wiring_resolver_models_importable() -> None:
-    """Smoke test: the renamed models + resolver path load cleanly.
+def test_handler_wiring_resolver_cross_repo_pins_intact() -> None:
+    """Fail-fast sentinel: renamed models + resolver protocols load cleanly.
 
-    After Task 5 rename (OMN-9201), the boot path now depends on:
+    After Task 5 rename (OMN-9201), the boot path depends on:
       - ``ModelWiringOutcome`` (was ``ModelHandlerWiringOutcome``)
       - ``ModelSkippedEntry`` (was ``ModelSkippedHandlerEntry``)
       - ``ServiceHandlerResolver`` from omnibase_core
       - ``ProtocolHandlerResolver`` + ``ProtocolHandlerOwnershipQuery`` from
         omnibase_spi
 
-    If any of these drift against the published PyPI wheels, the boot
-    path regresses silently. This test is the fail-fast tripwire.
+    This test verifies imports + structural invariants (enum members,
+    Protocol-class metadata, frozen-model config, callable entry points).
+    It does NOT execute ``wire_from_manifest`` end-to-end; runtime
+    behavior is covered by the 136 unit tests under
+    ``tests/unit/runtime/``. If any of the above drift vs the git pins
+    in ``pyproject.toml`` ``[tool.uv.sources]``, this test fails first.
     """
     from omnibase_core.enums.enum_handler_resolution_outcome import (
         EnumHandlerResolutionOutcome,
