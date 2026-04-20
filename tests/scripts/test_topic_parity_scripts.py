@@ -11,6 +11,7 @@ omni_home) where the scripts run against a real omni_home checkout.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -237,14 +238,24 @@ def test_sync_topic_registry_escapes_jsdoc_in_descriptions(tmp_path: Path) -> No
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    # The only `/** ... */` JSDoc block in the output is the description we
-    # just provided. Assert it contains the escaped form, not the raw one.
-    jsdoc_lines = [
-        line for line in result.stdout.splitlines() if line.startswith("/**")
-    ]
-    assert jsdoc_lines, "expected at least one JSDoc line"
-    assert all("*/" not in line[:-2] for line in jsdoc_lines), jsdoc_lines
-    assert any("*\\/" in line for line in jsdoc_lines), jsdoc_lines
+    # Parse the full JSDoc block(s): "/**" to "*/" on the same line (single-line)
+    # or spanning multiple lines. For the description block specifically, there
+    # is exactly one, and it must contain the escaped "*\\/" and no raw "*/"
+    # inside the payload (the trailing terminator "*/" is excluded by slicing).
+    jsdoc_blocks: list[str] = []
+    jsdoc_re = re.compile(r"/\*\*(.*?)\*/", re.DOTALL)
+    for match in jsdoc_re.finditer(result.stdout):
+        jsdoc_blocks.append(match.group(1))
+
+    # Filter to only description blocks — marker blocks like
+    # "--- BEGIN GENERATED ... ---" are line comments, not JSDoc, so they
+    # never match /** ... */. All matches are description blocks.
+    assert jsdoc_blocks, "expected at least one JSDoc description block"
+    combined = "\n".join(jsdoc_blocks)
+    assert "*\\/" in combined, combined
+    assert "*/" not in combined, combined
+    # Newlines must be collapsed so the block stays single-line.
+    assert "\n" not in combined.strip(), combined
 
 
 @pytest.mark.unit
