@@ -75,6 +75,8 @@ class HandlerAutoMerge:
             try:
                 await proc.wait()
             except (ProcessLookupError, OSError):
+                # Process already reaped or vanished (PID reused, kernel raced the kill).
+                # Nothing to wait on — safe to swallow and re-raise the original TimeoutError.
                 pass
             raise
         assert proc.returncode is not None
