@@ -133,6 +133,69 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
         assert prepared.message_types == {"ModelFooCommand", "platform.foo-start"}
 
     @pytest.mark.unit
+    def test_message_types_strips_whitespace_from_event_type_alias(self) -> None:
+        """Alias whitespace is stripped before indexing.
+
+        The dispatch engine normalizes envelope ``event_type`` via ``.strip()``
+        before lookup (service_message_dispatch_engine.py). If a contract accidentally
+        carries surrounding whitespace in ``event_type``, registering the alias
+        verbatim produces a key mismatch and routes every command to DLQ.
+        Normalize on registration to keep both sides symmetric.
+        """
+        contract = _make_contract_with_event_type_alias(
+            event_model_name="ModelFooCommand",
+            event_type_alias="  platform.foo-start  ",
+        )
+        entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
+        handler_cls = _make_zero_arg_handler_cls()
+        ownership = ServiceLocalHandlerOwnershipQuery(
+            local_node_names=frozenset({contract.name})
+        )
+        resolver = ServiceHandlerResolver()
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=handler_cls,
+        ):
+            prepared = _prepare_handler_wiring(
+                contract=contract,
+                entry=entry,
+                dispatch_engine=None,
+                resolver=resolver,
+                ownership_query=ownership,
+                event_bus=None,
+                container=None,
+            )
+        assert prepared.message_types == {"ModelFooCommand", "platform.foo-start"}
+
+    @pytest.mark.unit
+    def test_message_types_omits_alias_when_only_whitespace(self) -> None:
+        """A whitespace-only alias reduces to empty and is not registered."""
+        contract = _make_contract_with_event_type_alias(
+            event_model_name="ModelFooCommand",
+            event_type_alias="   ",
+        )
+        entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
+        handler_cls = _make_zero_arg_handler_cls()
+        ownership = ServiceLocalHandlerOwnershipQuery(
+            local_node_names=frozenset({contract.name})
+        )
+        resolver = ServiceHandlerResolver()
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=handler_cls,
+        ):
+            prepared = _prepare_handler_wiring(
+                contract=contract,
+                entry=entry,
+                dispatch_engine=None,
+                resolver=resolver,
+                ownership_query=ownership,
+                event_bus=None,
+                container=None,
+            )
+        assert prepared.message_types == {"ModelFooCommand"}
+
+    @pytest.mark.unit
     def test_message_types_only_class_name_when_no_alias(self) -> None:
         """Absent event_type alias: message_types == {event_model.name} — unchanged."""
         contract = _make_contract_with_event_type_alias(

@@ -947,8 +947,11 @@ def _prepare_handler_wiring(
     # ModelEventEnvelope.event_type to the dot-path string; without this alias,
     # the dispatcher lookup falls back to type(payload).__name__ which resolves
     # to "dict" on object-erased envelopes and never matches the class-name key.
-    if entry.event_type:
-        message_types = (message_types or set()) | {entry.event_type}
+    # Strip surrounding whitespace so registration matches the dispatch-engine
+    # normalization (service_message_dispatch_engine.py normalizes via .strip()).
+    event_type_alias = entry.event_type.strip() if entry.event_type else ""
+    if event_type_alias:
+        message_types = (message_types or set()) | {event_type_alias}
 
     if (
         resolution.outcome
