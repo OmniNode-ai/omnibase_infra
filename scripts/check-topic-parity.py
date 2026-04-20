@@ -117,6 +117,13 @@ def load_registry_topics(path: Path) -> set[str]:
     with open(path) as f:
         data = yaml.safe_load(f)
 
+    if not isinstance(data, dict):
+        print(
+            f"ERROR: Registry root must be a mapping, got {type(data).__name__}: {path}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     topics = data.get("topics", [])
     if not topics:
         print(f"ERROR: No topics found in {path}", file=sys.stderr)
@@ -155,6 +162,8 @@ def extract_topics_from_array(
     array_name: str,
     const_map: dict[str, str],
     topics_ts: Path,
+    *,
+    required: bool = False,
 ) -> set[str]:
     """Extract topic strings from a named TypeScript array in a source file.
 
@@ -162,6 +171,11 @@ def extract_topics_from_array(
     - Literal topic strings: 'onex.evt.omniclaude.foo.v1'
     - Constant references: SUFFIX_FOO, TOPIC_BAR
     - Spread expressions: ...OMNICLAUDE_AGENT_TOPICS (resolved recursively)
+
+    When ``required=True`` (top-level subscription arrays), a missing array
+    is fatal — a silent rename would otherwise mask the exact breakage this
+    gate exists to catch. Recursive spread lookups pass ``required=False``
+    and fall back to searching ``topics.ts``.
     """
     if not file_path.exists():
         print(f"ERROR: Source file not found: {file_path}", file=sys.stderr)
@@ -177,10 +191,18 @@ def extract_topics_from_array(
     )
     match = pattern.search(content)
     if not match:
+        level = "ERROR" if required else "WARNING"
         print(
-            f"WARNING: Array '{array_name}' not found in {file_path}",
+            f"{level}: Array '{array_name}' not found in {file_path}",
             file=sys.stderr,
         )
+        if required:
+            print(
+                "  A required subscription array is missing or renamed. Topic "
+                "parity cannot be verified; failing closed.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
         return set()
 
     block = match.group(1)
@@ -229,10 +251,18 @@ def check_parity(paths: ModelTopicParityPaths, verbose: bool = False) -> int:
     const_map = resolve_topic_constants(paths.topics_ts)
 
     read_model_topics = extract_topics_from_array(
-        paths.read_model_consumer, "READ_MODEL_TOPICS", const_map, paths.topics_ts
+        paths.read_model_consumer,
+        "READ_MODEL_TOPICS",
+        const_map,
+        paths.topics_ts,
+        required=True,
     )
     expected_topics = extract_topics_from_array(
-        paths.event_bus_health_poller, "EXPECTED_TOPICS", const_map, paths.topics_ts
+        paths.event_bus_health_poller,
+        "EXPECTED_TOPICS",
+        const_map,
+        paths.topics_ts,
+        required=True,
     )
 
     if verbose:
@@ -279,9 +309,32 @@ def check_parity(paths: ModelTopicParityPaths, verbose: bool = False) -> int:
         for t in sorted(omniclaude_read_model_not_in_registry):
             errors.append(f"  + {t}")
 
-    # Check 3: Registry omniclaude evt topics that are in READ_MODEL_TOPICS should
-    # ideally also be in EXPECTED_TOPICS (so the health poller can detect missing
-    # topics on the broker). This is advisory, not blocking.
+    # Check 3: Reverse coverage — every omniclaude evt topic declared in the
+    # registry must be covered by both READ_MODEL_TOPICS and EXPECTED_TOPICS.
+    # Without this, a newly-declared producer topic can be registered but never
+    # wired into the consumer, and the original gate (consumer -> registry)
+    # exits 0. This is the exact failure mode OMN-4963 was meant to catch.
+    registry_omniclaude_evt = {
+        t for t in registry_topics if ".omniclaude." in t and ".evt." in t
+    }
+    missing_from_read_model = registry_omniclaude_evt - read_model_topics
+    missing_from_expected = registry_omniclaude_evt - expected_topics
+
+    if missing_from_read_model:
+        errors.append(
+            "Registry omniclaude evt topics NOT subscribed in READ_MODEL_TOPICS:"
+        )
+        for t in sorted(missing_from_read_model):
+            errors.append(f"  + {t}")
+
+    if missing_from_expected:
+        errors.append("Registry omniclaude evt topics NOT listed in EXPECTED_TOPICS:")
+        for t in sorted(missing_from_expected):
+            errors.append(f"  + {t}")
+
+    # Check 4: READ_MODEL_TOPICS subscribed omniclaude evt topics should also be
+    # in EXPECTED_TOPICS so the health poller can detect missing topics on the
+    # broker. Advisory only — not blocking.
     read_model_omniclaude = {
         t for t in read_model_topics if ".omniclaude." in t and ".evt." in t
     }

@@ -75,6 +75,13 @@ def load_registry(path: Path) -> list[dict[str, str]]:
     with open(path) as f:
         data = yaml.safe_load(f)
 
+    if not isinstance(data, dict):
+        print(
+            f"ERROR: Registry root must be a mapping, got {type(data).__name__}: {path}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     topics: list[dict[str, str]] = data.get("topics", [])
     if not topics:
         print(f"ERROR: No topics found in {path}", file=sys.stderr)
