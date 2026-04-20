@@ -28,6 +28,8 @@ runtime-core:
     - omninode-contract-resolver
     - intelligence-api
   includes: []
+  inject_env: {}
+  inject_required_env: []
 runtime-integrations:
   description: "Runtime external-integration services — Linear, CI, Slack webhooks (OMN-9332)"
   services:
@@ -35,6 +37,12 @@ runtime-integrations:
     - linear-relay
     - waitlist-signup-notifier
   includes: []
+  inject_env: {}
+  inject_required_env:
+    - CI_CALLBACK_TOKEN
+    - LINEAR_WEBHOOK_SECRET
+    - WAITLIST_NOTIFIER_SLACK_BOT_TOKEN
+    - WAITLIST_NOTIFIER_SLACK_CHANNEL_ID
 runtime-observability-projections:
   description: "Runtime projection/observability consumers — postgres projections, cost aggregation, health projection, decision store (OMN-9332)"
   services:
@@ -44,6 +52,9 @@ runtime-observability-projections:
     - consumer-health-projection
     - decision-store-consumer
   includes: []
+  inject_env: {}
+  inject_required_env:
+    - OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_POSTGRES_DSN
 runtime-infrastructure:
   description: "Runtime infrastructure glue — migrations, workers, autoheal (OMN-9332)"
   services:
@@ -54,6 +65,8 @@ runtime-infrastructure:
     - retry-worker
     - autoheal
   includes: []
+  inject_env: {}
+  inject_required_env: []
 runtime:
   description: "ONEX runtime platform — composed of runtime-core, runtime-integrations, runtime-observability-projections, runtime-infrastructure (OMN-9332). Preserves the `onex up runtime` operator contract."
   services: []
