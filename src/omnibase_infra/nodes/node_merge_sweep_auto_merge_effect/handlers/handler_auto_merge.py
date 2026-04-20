@@ -1,6 +1,12 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Handler that enables GitHub auto-merge on PRs via gh CLI.
+"""Handler that enables GitHub auto-merge and enqueues PRs via gh CLI.
+
+On merge-queue repos, ``gh pr merge --auto`` arms auto-merge but does NOT cause
+the PR to be enqueued into the merge queue. The PR must additionally be
+enqueued via the ``enqueuePullRequest`` GraphQL mutation. Without this second
+step, CLEAN auto-merge-enabled PRs sit idle forever while the merge-sweep loop
+reports "success" (OMN-9276).
 
 This is an EFFECT handler - it performs external I/O (GitHub API).
 """
@@ -8,6 +14,7 @@ This is an EFFECT handler - it performs external I/O (GitHub API).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Literal
 from uuid import UUID
@@ -22,9 +29,20 @@ from omnibase_infra.nodes.node_merge_sweep_auto_merge_effect.models.model_auto_m
 
 logger = logging.getLogger(__name__)
 
+_ENQUEUE_MUTATION = (
+    "mutation($id: ID!) { enqueuePullRequest(input: {pullRequestId: $id}) "
+    "{ mergeQueueEntry { position } } }"
+)
+
+_NO_MERGE_QUEUE_MARKERS = (
+    "does not have a merge queue",
+    "merge queue is not enabled",
+    "merge_queue_not_enabled",
+)
+
 
 class HandlerAutoMerge:
-    """Enables GitHub auto-merge on Track A PRs using gh CLI."""
+    """Enables GitHub auto-merge AND enqueues PRs on merge-queue repos."""
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -34,21 +52,137 @@ class HandlerAutoMerge:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.EFFECT
 
-    async def _enable_auto_merge(
+    async def _run_gh(
+        self,
+        cmd: list[str],
+        timeout: float = 30.0,
+    ) -> tuple[int, bytes, bytes]:
+        """Run a gh CLI command, returning (returncode, stdout, stderr)."""
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        assert proc.returncode is not None
+        return proc.returncode, stdout, stderr
+
+    async def _fetch_pr_node_id(self, repo: str, pr_number: int) -> tuple[str, str]:
+        """Return (node_id, error). One of the two is always empty."""
+        try:
+            rc, stdout, stderr = await self._run_gh(
+                [
+                    "gh",
+                    "pr",
+                    "view",
+                    str(pr_number),
+                    "--repo",
+                    repo,
+                    "--json",
+                    "id",
+                ],
+            )
+        except TimeoutError:
+            return "", f"Timeout fetching node_id for {repo}#{pr_number}"
+        except OSError as e:
+            return "", f"OS error fetching node_id: {e}"
+
+        if rc != 0:
+            return "", f"gh pr view failed: {stderr.decode(errors='replace').strip()}"
+
+        try:
+            payload = json.loads(stdout.decode(errors="replace"))
+        except json.JSONDecodeError as e:
+            return "", f"failed to parse gh pr view JSON: {e}"
+
+        node_id = payload.get("id", "")
+        if not node_id:
+            return "", "gh pr view returned empty id"
+        return node_id, ""
+
+    async def _enqueue_pr(self, node_id: str) -> tuple[bool, int | None, str, bool]:
+        """Call enqueuePullRequest GraphQL mutation.
+
+        Returns (enqueued, position, error, skipped_no_queue).
+        ``skipped_no_queue`` is True when the repo has no merge queue configured —
+        this is an expected outcome for legacy repos, not an error.
+        """
+        try:
+            rc, stdout, stderr = await self._run_gh(
+                [
+                    "gh",
+                    "api",
+                    "graphql",
+                    "-f",
+                    f"query={_ENQUEUE_MUTATION}",
+                    "-F",
+                    f"id={node_id}",
+                ],
+            )
+        except TimeoutError:
+            return False, None, "Timeout enqueuing PR", False
+        except OSError as e:
+            return False, None, f"OS error enqueuing: {e}", False
+
+        stderr_text = stderr.decode(errors="replace").strip()
+        stdout_text = stdout.decode(errors="replace").strip()
+
+        if rc != 0:
+            lowered = (stderr_text + " " + stdout_text).lower()
+            if any(marker in lowered for marker in _NO_MERGE_QUEUE_MARKERS):
+                return False, None, "", True
+            return (
+                False,
+                None,
+                f"enqueuePullRequest failed: {stderr_text or stdout_text}",
+                False,
+            )
+
+        try:
+            payload = json.loads(stdout_text or "{}")
+        except json.JSONDecodeError as e:
+            return False, None, f"failed to parse enqueue response: {e}", False
+
+        entry = (
+            payload.get("data", {}).get("enqueuePullRequest", {}).get("mergeQueueEntry")
+        )
+        if entry is None:
+            return (
+                False,
+                None,
+                "enqueuePullRequest returned null mergeQueueEntry",
+                False,
+            )
+
+        position = entry.get("position")
+        if not isinstance(position, int):
+            return (
+                False,
+                None,
+                "enqueuePullRequest returned non-integer position",
+                False,
+            )
+
+        return True, position, "", False
+
+    async def _enable_and_enqueue(
         self,
         repo: str,
         pr_number: int,
         merge_method: str,
         dry_run: bool,
     ) -> ModelAutoMergeOutcome:
-        """Enable auto-merge on a single PR."""
+        """Enable auto-merge and enqueue a single PR."""
         if dry_run:
-            logger.info("[DRY RUN] Would enable auto-merge on %s#%d", repo, pr_number)
+            logger.info(
+                "[DRY RUN] Would enable auto-merge + enqueue %s#%d", repo, pr_number
+            )
             return ModelAutoMergeOutcome(
                 repo=repo,
                 pr_number=pr_number,
                 success=True,
                 dry_run=True,
+                enqueue_skipped=True,
             )
 
         cmd = [
@@ -63,18 +197,14 @@ class HandlerAutoMerge:
         ]
 
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+            rc, _, stderr = await self._run_gh(cmd)
         except TimeoutError:
             return ModelAutoMergeOutcome(
                 repo=repo,
                 pr_number=pr_number,
                 success=False,
                 error_message=f"Timeout enabling auto-merge on {repo}#{pr_number}",
+                enqueue_skipped=True,
             )
         except OSError as e:
             return ModelAutoMergeOutcome(
@@ -82,22 +212,76 @@ class HandlerAutoMerge:
                 pr_number=pr_number,
                 success=False,
                 error_message=f"OS error: {e}",
+                enqueue_skipped=True,
             )
 
-        if proc.returncode != 0:
-            err = stderr.decode(errors="replace").strip()
+        if rc != 0:
             return ModelAutoMergeOutcome(
                 repo=repo,
                 pr_number=pr_number,
                 success=False,
-                error_message=f"gh pr merge --auto failed: {err}",
+                error_message=(
+                    "gh pr merge --auto failed: "
+                    f"{stderr.decode(errors='replace').strip()}"
+                ),
+                enqueue_skipped=True,
             )
 
         logger.info("Auto-merge enabled on %s#%d (%s)", repo, pr_number, merge_method)
+
+        node_id, node_err = await self._fetch_pr_node_id(repo, pr_number)
+        if node_err:
+            logger.warning(
+                "Auto-merge armed but node_id fetch failed for %s#%d: %s",
+                repo,
+                pr_number,
+                node_err,
+            )
+            return ModelAutoMergeOutcome(
+                repo=repo,
+                pr_number=pr_number,
+                success=True,
+                enqueue_error=node_err,
+            )
+
+        enqueued, position, enqueue_err, skipped_no_queue = await self._enqueue_pr(
+            node_id
+        )
+
+        if skipped_no_queue:
+            logger.info(
+                "%s#%d: repo has no merge queue — auto-merge will handle merge",
+                repo,
+                pr_number,
+            )
+            return ModelAutoMergeOutcome(
+                repo=repo,
+                pr_number=pr_number,
+                success=True,
+                enqueue_skipped=True,
+            )
+
+        if enqueued:
+            logger.info("Enqueued %s#%d at position %s", repo, pr_number, position)
+            return ModelAutoMergeOutcome(
+                repo=repo,
+                pr_number=pr_number,
+                success=True,
+                enqueued=True,
+                queue_position=position,
+            )
+
+        logger.warning(
+            "Auto-merge armed but enqueuePullRequest failed for %s#%d: %s",
+            repo,
+            pr_number,
+            enqueue_err,
+        )
         return ModelAutoMergeOutcome(
             repo=repo,
             pr_number=pr_number,
             success=True,
+            enqueue_error=enqueue_err,
         )
 
     async def handle(
@@ -107,7 +291,7 @@ class HandlerAutoMerge:
         merge_method: Literal["squash", "merge", "rebase"] = "squash",
         dry_run: bool = False,
     ) -> ModelAutoMergeResult:
-        """Enable auto-merge on all specified PRs.
+        """Enable auto-merge and enqueue all specified PRs.
 
         Args:
             prs: Tuples of (repo, pr_number).
@@ -119,7 +303,8 @@ class HandlerAutoMerge:
             ModelAutoMergeResult with per-PR outcomes.
         """
         logger.info(
-            "Enabling auto-merge on %d PRs (method=%s, dry_run=%s, correlation_id=%s)",
+            "Enabling auto-merge + enqueue on %d PRs "
+            "(method=%s, dry_run=%s, correlation_id=%s)",
             len(prs),
             merge_method,
             dry_run,
@@ -127,18 +312,20 @@ class HandlerAutoMerge:
         )
 
         tasks = [
-            self._enable_auto_merge(repo, pr_num, merge_method, dry_run)
+            self._enable_and_enqueue(repo, pr_num, merge_method, dry_run)
             for repo, pr_num in prs
         ]
         outcomes = await asyncio.gather(*tasks)
 
         enabled = sum(1 for o in outcomes if o.success and not o.dry_run)
+        enqueued = sum(1 for o in outcomes if o.enqueued)
         failed = sum(1 for o in outcomes if not o.success)
 
         return ModelAutoMergeResult(
             correlation_id=correlation_id,
             outcomes=tuple(outcomes),
             total_enabled=enabled,
+            total_enqueued=enqueued,
             total_failed=failed,
             success=failed == 0,
         )

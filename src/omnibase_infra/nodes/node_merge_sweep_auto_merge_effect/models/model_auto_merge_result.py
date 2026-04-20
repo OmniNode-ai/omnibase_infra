@@ -23,5 +23,13 @@ class ModelAutoMergeResult(BaseModel):
         default_factory=tuple, description="Per-PR outcomes."
     )
     total_enabled: int = Field(default=0, description="PRs with auto-merge enabled.")
+    total_enqueued: int = Field(
+        default=0,
+        description=(
+            "PRs successfully enqueued into the merge queue. For merge-queue repos "
+            "this is the meaningful success metric — enabling auto-merge alone "
+            "does not cause a PR to merge."
+        ),
+    )
     total_failed: int = Field(default=0, description="PRs that failed.")
     success: bool = Field(default=True, description="Overall success.")
