@@ -23,3 +23,14 @@ class ModelHandlerRoutingEntry(BaseModel):
         default=None,
         description="Operation name (operation_match strategy)",
     )
+    event_type: str | None = Field(
+        default=None,
+        description=(
+            "Optional contract-declared event_type alias (e.g., "
+            "'omnimarket.pr-lifecycle-orchestrator-start'). When present, the "
+            "dispatcher is indexed under this wire-level string in addition to "
+            "event_model.name, so publishers that set ModelEventEnvelope.event_type "
+            "to the dot-path string resolve to the handler without needing the "
+            "Python class name on the wire (OMN-9215)."
+        ),
+    )
