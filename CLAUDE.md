@@ -154,15 +154,21 @@ Every deployable unit is a typed YAML manifest; the compose file is generated, n
 
 | Bundle | Contents | Purpose |
 |--------|----------|---------|
-| `core` | postgres, redpanda | Always-on infrastructure |
-| `runtime` | valkey, migration-gate, forward-migration, omninode-runtime, runtime-effects, runtime-worker, agent-actions-consumer, skill-lifecycle-consumer, context-audit-consumer, intelligence-migration, intelligence-api, omninode-contract-resolver, autoheal + core | Full ONEX runtime stack |
+| `core` | postgres, redpanda, valkey, infisical | Always-on infrastructure |
+| `runtime` | (composed) | Full ONEX runtime stack — includes `core`, `tracing`, and the four sub-bundles below |
+| `runtime-core` | omninode-runtime, runtime-effects, agent-actions-consumer, skill-lifecycle-consumer, context-audit-consumer, omninode-contract-resolver, intelligence-api | 7 services with no env requirements beyond the 0.34.0 baseline — deploy correctness fixes without needing new secrets (OMN-9332) |
+| `runtime-integrations` | ci-relay, linear-relay, waitlist-signup-notifier | External-integration services; needs `CI_CALLBACK_TOKEN`, `LINEAR_WEBHOOK_SECRET`, `WAITLIST_NOTIFIER_SLACK_*` |
+| `runtime-observability-projections` | injection-effectiveness-consumer, savings-estimation-consumer, llm-cost-aggregation-consumer, consumer-health-projection, decision-store-consumer | Postgres projection consumers; needs `OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_POSTGRES_DSN` |
+| `runtime-infrastructure` | forward-migration, migration-gate, intelligence-migration, runtime-worker, retry-worker, autoheal | Migrations, workers, container autoheal |
 | `memgraph` | omnibase-infra-memgraph | Graph memory — injects `OMNIMEMORY_*` env vars |
 | `observability` | phoenix | LLM observability (Phoenix traces/evals) |
 | `tracing` | (none) + observability | Injects OTEL env vars; phoenix pulled in transitively |
 | `secrets` | infisical | Secrets management — injects `INFISICAL_ADDR` |
 | `auth` | keycloak | Local OIDC/auth |
 
-**Transitive resolution**: `runtime` includes `core`; `tracing` includes `observability`. The resolver expands all `includes` before collecting services.
+**Transitive resolution**: `runtime` includes `core`, `tracing`, and the four runtime sub-bundles; `tracing` includes `observability`. The resolver expands all `includes` before collecting services.
+
+**Incremental rollout (OMN-9332)**: when new runtime services land with new secret requirements, operators can deploy `onex up runtime-core` to pick up correctness fixes without also needing those secrets. Once the secrets are seeded (Infisical or `~/.omnibase/.env`), bring up the remaining sub-bundles with `onex up runtime-integrations`, `onex up runtime-observability-projections`, or `onex up runtime-infrastructure`.
 
 **Env injection**: Each bundle may declare `inject_env` (hardcoded values injected into generated compose) and `inject_required_env` (vars that must be present in the operator environment at start time).
 

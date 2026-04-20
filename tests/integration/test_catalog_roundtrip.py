@@ -119,11 +119,16 @@ def test_catalog_generates_and_starts_core_bundle() -> None:
 
 @pytest.mark.integration
 @pytest.mark.slow
-def test_catalog_validator_rejects_missing_env() -> None:
-    """Validator must fail before starting if required vars are missing."""
-    # Build env dict without POSTGRES_PASSWORD — must pass explicit env to
-    # subprocess since monkeypatch.delenv only affects the current process.
+def test_catalog_validator_rejects_missing_env(tmp_path: Path) -> None:
+    """Validator must fail before starting if required vars are missing.
+
+    The CLI auto-loads ``$HOME/.omnibase/.env`` at startup, so removing the
+    var from the subprocess env is not sufficient on operator machines that
+    have a populated .env. Redirect HOME to an empty tmpdir so the autoload
+    finds nothing.
+    """
     env = {k: v for k, v in os.environ.items() if k != "POSTGRES_PASSWORD"}
+    env["HOME"] = str(tmp_path)
     result = subprocess.run(
         [
             "uv",
