@@ -110,9 +110,12 @@ class HandlerAutoMerge:
         except json.JSONDecodeError as e:
             return "", f"failed to parse gh pr view JSON: {e}"
 
+        if not isinstance(payload, dict):
+            return "", "gh pr view returned non-object JSON"
+
         node_id = payload.get("id", "")
-        if not node_id:
-            return "", "gh pr view returned empty id"
+        if not isinstance(node_id, str) or not node_id:
+            return "", "gh pr view returned empty or non-string id"
         return node_id, ""
 
     async def _enqueue_pr(self, node_id: str) -> tuple[bool, int | None, str, bool]:
@@ -158,14 +161,35 @@ class HandlerAutoMerge:
         except json.JSONDecodeError as e:
             return False, None, f"failed to parse enqueue response: {e}", False
 
-        entry = (
-            payload.get("data", {}).get("enqueuePullRequest", {}).get("mergeQueueEntry")
-        )
+        if not isinstance(payload, dict):
+            return False, None, "enqueue response was not a JSON object", False
+
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            return False, None, "enqueue response missing data object", False
+
+        enqueue_result = data.get("enqueuePullRequest")
+        if not isinstance(enqueue_result, dict):
+            return (
+                False,
+                None,
+                "enqueue response missing enqueuePullRequest object",
+                False,
+            )
+
+        entry = enqueue_result.get("mergeQueueEntry")
         if entry is None:
             return (
                 False,
                 None,
                 "enqueuePullRequest returned null mergeQueueEntry",
+                False,
+            )
+        if not isinstance(entry, dict):
+            return (
+                False,
+                None,
+                "enqueuePullRequest returned non-object mergeQueueEntry",
                 False,
             )
 

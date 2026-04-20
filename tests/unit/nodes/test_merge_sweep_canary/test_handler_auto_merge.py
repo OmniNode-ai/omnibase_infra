@@ -196,6 +196,58 @@ class TestHandlerAutoMerge:
         assert "PR not found" in outcome.enqueue_error
 
     @pytest.mark.asyncio
+    async def test_pr_view_non_object_json_rejected(
+        self, handler: HandlerAutoMerge
+    ) -> None:
+        """If gh pr view returns a JSON array/string (not an object), we reject it.
+
+        Defensive guard — without the isinstance(dict) check, ``.get`` on a list
+        raises AttributeError mid-asyncio.gather and crashes the whole batch.
+        """
+        responses = [
+            _mk_proc(0),  # gh pr merge --auto
+            _mk_proc(0, stdout=b"[]"),  # gh pr view --json id returned an array
+        ]
+        with patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_subprocess_side_effect(responses),
+        ):
+            result = await handler.handle(
+                prs=(("OmniNode-ai/test", 42),),
+                correlation_id=uuid4(),
+            )
+
+        assert result.total_enabled == 1
+        assert result.total_enqueued == 0
+        outcome = result.outcomes[0]
+        assert outcome.success is True  # auto-merge still armed
+        assert "non-object" in outcome.enqueue_error.lower()
+
+    @pytest.mark.asyncio
+    async def test_enqueue_response_missing_data_rejected(
+        self, handler: HandlerAutoMerge
+    ) -> None:
+        """GraphQL response without a ``data`` object is reported, not crashed on."""
+        responses = [
+            _mk_proc(0),  # merge
+            _mk_proc(0, stdout=_PR_VIEW_ID_JSON),  # view
+            _mk_proc(0, stdout=b'{"errors":[{"message":"boom"}]}'),  # enqueue
+        ]
+        with patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_subprocess_side_effect(responses),
+        ):
+            result = await handler.handle(
+                prs=(("OmniNode-ai/test", 42),),
+                correlation_id=uuid4(),
+            )
+
+        assert result.total_enqueued == 0
+        outcome = result.outcomes[0]
+        assert outcome.success is True
+        assert "missing data" in outcome.enqueue_error.lower()
+
+    @pytest.mark.asyncio
     async def test_multiple_prs(self, handler: HandlerAutoMerge) -> None:
         """Multiple PRs processed in parallel — all enqueued."""
         responses = [
