@@ -3,16 +3,19 @@
 # ONEX Node Contract - Merge Sweep Auto-Merge Effect
 #
 # Canary: skill-to-node migration — merge-sweep.
-# Enables GitHub auto-merge on Track A PRs via gh CLI.
+# Arms GitHub auto-merge AND enqueues Track A PRs into the merge queue
+# via gh CLI + enqueuePullRequest GraphQL mutation (OMN-9276). On
+# merge-queue repos, arming auto-merge alone is insufficient — PRs must
+# additionally be enqueued or they sit idle forever.
 #
 name: "node_merge_sweep_auto_merge_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
-  minor: 0
+  minor: 1
   patch: 0
-node_version: "1.0.0"
-description: "Enables GitHub auto-merge on merge-ready PRs."
+node_version: "1.1.0"
+description: "Arms GitHub auto-merge and enqueues PRs into the merge queue."
 input_model:
   name: "ModelAutoMergeRequest"
   module: "omnibase_infra.nodes.node_merge_sweep_auto_merge_effect.models.model_auto_merge_request"
@@ -29,13 +32,15 @@ handler_routing:
         name: "HandlerAutoMerge"
         module: "omnibase_infra.nodes.node_merge_sweep_auto_merge_effect.handlers.handler_auto_merge"
 metadata:
-  description: "GitHub auto-merge effect for merge-sweep workflow"
+  description: "GitHub auto-merge + merge-queue enqueue effect for merge-sweep workflow"
   author: "OmniNode Team"
   created: "2026-04-01"
   tags:
     - "effect"
     - "github"
     - "auto-merge"
+    - "merge-queue"
+    - "enqueue"
     - "merge-sweep"
     - "canary"
     - "skill-migration"
