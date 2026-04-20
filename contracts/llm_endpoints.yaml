@@ -9,16 +9,21 @@
 #
 # Two field groups per entry:
 #
-# STABLE-CANONICAL (never null; downstream code/tests may key on these):
-#   slot_id         canonical identifier
-#   host            IP address (never hostname)
-#   port            integer port
-#   endpoint_url    resolved URL, convenience field
-#   url_env_var     model-named env var (legacy, canonical read path today)
-#   role_env_alias  role-named env var (new alias, not yet read by consumers)
-#   model_hf_id     exact HuggingFace id
-#   role            role taxonomy value (see below)
-#   status          running | disabled | on_demand | planned
+# STABLE-CANONICAL (downstream code/tests may key on these):
+#   slot_id         canonical identifier                          always non-null
+#   host            IP address (never hostname)                   non-null when status=running
+#   port            integer port                                  non-null when status=running
+#   endpoint_url    resolved URL, convenience field               non-null when status=running
+#   url_env_var     model-named env var (legacy, canonical read)  non-null when status=running *if the slot exposes an env var*; null for Docker-internal slots
+#   role_env_alias  role-named env var (new alias)                non-null when status=running *if a role alias is defined*; null when not yet assigned
+#   model_hf_id     exact HuggingFace id                         non-null when status=running
+#   role            role taxonomy value (see below)               always non-null
+#   status          running | disabled | on_demand | planned      always non-null
+#
+# url_env_var and role_env_alias may be null on running slots (e.g. Docker-internal
+# embeddings with no external env-var exposure, or slots where the role alias has
+# not yet been assigned). They may also be null on disabled, on_demand, and planned
+# slots. Runtime consumers (service_kernel.py:1224-1260) must null-guard these fields.
 #
 # OPERATOR-ANNOTATION (may be null):
 #   hardware                  human host description
