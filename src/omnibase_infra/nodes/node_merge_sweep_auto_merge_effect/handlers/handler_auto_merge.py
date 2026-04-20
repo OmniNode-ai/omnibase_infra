@@ -57,13 +57,26 @@ class HandlerAutoMerge:
         cmd: list[str],
         timeout: float = 30.0,
     ) -> tuple[int, bytes, bytes]:
-        """Run a gh CLI command, returning (returncode, stdout, stderr)."""
+        """Run a gh CLI command, returning (returncode, stdout, stderr).
+
+        On timeout, kills and reaps the subprocess before re-raising so we
+        never leak gh processes — under long-running runtimes a stuck gh on
+        a flaky network would otherwise accumulate zombie children.
+        """
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except TimeoutError:
+            proc.kill()
+            try:
+                await proc.wait()
+            except (ProcessLookupError, OSError):
+                pass
+            raise
         assert proc.returncode is not None
         return proc.returncode, stdout, stderr
 

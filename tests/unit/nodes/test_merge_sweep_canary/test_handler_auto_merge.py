@@ -9,7 +9,7 @@ and the fall-back paths (no merge queue, enqueue failure, node_id lookup fail).
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -268,6 +268,29 @@ class TestHandlerAutoMerge:
         cid = uuid4()
         result = await handler.handle(prs=(), correlation_id=cid, dry_run=True)
         assert result.correlation_id == cid
+
+    @pytest.mark.asyncio
+    async def test_timeout_kills_subprocess(self, handler: HandlerAutoMerge) -> None:
+        """On TimeoutError from wait_for, _run_gh must kill+reap the child."""
+        proc = AsyncMock()
+
+        async def _never_returns() -> tuple[bytes, bytes]:
+            raise TimeoutError
+
+        proc.communicate = AsyncMock(side_effect=_never_returns)
+        proc.kill = MagicMock(return_value=None)
+        proc.wait = AsyncMock(return_value=-9)
+
+        with patch("asyncio.create_subprocess_exec", return_value=proc):
+            result = await handler.handle(
+                prs=(("OmniNode-ai/test", 42),),
+                correlation_id=uuid4(),
+            )
+
+        proc.kill.assert_called_once()
+        proc.wait.assert_called_once()
+        assert result.total_failed == 1
+        assert "Timeout" in result.outcomes[0].error_message
 
     @pytest.mark.asyncio
     async def test_enqueue_mutation_passed_correctly(
