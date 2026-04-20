@@ -191,6 +191,63 @@ def test_sync_topic_registry_rejects_non_mapping_registry(tmp_path: Path) -> Non
 
 
 @pytest.mark.unit
+def test_sync_topic_registry_rejects_malformed_topic_entry(tmp_path: Path) -> None:
+    """A topics entry missing 'topic' must fail fast, not raise a raw KeyError."""
+    home = tmp_path / "home"
+    registry_dir = home / "omniclaude" / "src" / "omniclaude" / "hooks"
+    registry_dir.mkdir(parents=True)
+    (registry_dir / "topic_registry.yaml").write_text(
+        "topics:\n  - event_type: foo.bar\n    description: missing topic field\n"
+    )
+    (home / "omnidash" / "shared").mkdir(parents=True)
+    (home / "omnidash" / "shared" / "topics.ts").write_text("")
+
+    result = subprocess.run(
+        [sys.executable, str(SYNC_SCRIPT), "--check"],
+        env={"OMNI_HOME": str(home), "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "missing required 'topic'" in result.stderr
+
+
+@pytest.mark.unit
+def test_sync_topic_registry_escapes_jsdoc_in_descriptions(tmp_path: Path) -> None:
+    """Descriptions containing */ or newlines must not break generated JSDoc."""
+    home = tmp_path / "home"
+    registry_dir = home / "omniclaude" / "src" / "omniclaude" / "hooks"
+    registry_dir.mkdir(parents=True)
+    (registry_dir / "topic_registry.yaml").write_text(
+        "topics:\n"
+        "  - topic: onex.evt.omniclaude.foo.v1\n"
+        "    event_type: foo.evt\n"
+        "    description: 'ends with */ oops and\\nhas a newline'\n"
+    )
+    shared = home / "omnidash" / "shared"
+    shared.mkdir(parents=True)
+    (shared / "topics.ts").write_text("")
+
+    result = subprocess.run(
+        [sys.executable, str(SYNC_SCRIPT), "--dry-run"],
+        env={"OMNI_HOME": str(home), "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    # The only `/** ... */` JSDoc block in the output is the description we
+    # just provided. Assert it contains the escaped form, not the raw one.
+    jsdoc_lines = [
+        line for line in result.stdout.splitlines() if line.startswith("/**")
+    ]
+    assert jsdoc_lines, "expected at least one JSDoc line"
+    assert all("*/" not in line[:-2] for line in jsdoc_lines), jsdoc_lines
+    assert any("*\\/" in line for line in jsdoc_lines), jsdoc_lines
+
+
+@pytest.mark.unit
 def test_check_topic_parity_flags_registry_topic_missing_from_consumer(
     tmp_path: Path,
 ) -> None:

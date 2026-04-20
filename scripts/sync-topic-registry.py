@@ -82,11 +82,32 @@ def load_registry(path: Path) -> list[dict[str, str]]:
         )
         sys.exit(2)
 
-    topics: list[dict[str, str]] = data.get("topics", [])
-    if not topics:
+    topics_obj = data.get("topics", [])
+    if not isinstance(topics_obj, list) or not topics_obj:
         print(f"ERROR: No topics found in {path}", file=sys.stderr)
         sys.exit(2)
 
+    for idx, entry in enumerate(topics_obj):
+        if not isinstance(entry, dict):
+            print(
+                f"ERROR: topics[{idx}] must be a mapping, got {type(entry).__name__}: {path}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        if "topic" not in entry:
+            print(
+                f"ERROR: topics[{idx}] missing required 'topic' field: {path}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        if "event_type" not in entry and "topic_base_constant" not in entry:
+            print(
+                f"ERROR: topics[{idx}] missing 'event_type' or 'topic_base_constant': {path}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+    topics: list[dict[str, str]] = topics_obj
     return topics
 
 
@@ -138,7 +159,10 @@ def generate_constants_block(topics: list[dict[str, str]]) -> str:
         prev_prefix = current_prefix
 
         if description:
-            lines.append(f"/** {description} */")
+            # Escape */ and collapse newlines so a malformed description can't
+            # break the generated JSDoc block.
+            safe_description = description.replace("*/", "*\\/").replace("\n", " ")
+            lines.append(f"/** {safe_description} */")
         lines.append(f"export const {const_name} = '{topic}';")
 
     lines.append(END_MARKER)
