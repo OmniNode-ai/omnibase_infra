@@ -942,6 +942,13 @@ def _prepare_handler_wiring(
     message_types: set[str] | None = None
     if entry.event_model is not None:
         message_types = {entry.event_model.name}
+    # OMN-9215: index the dispatcher under the contract-declared event_type alias
+    # in addition to the Pydantic class name. Publishers set
+    # ModelEventEnvelope.event_type to the dot-path string; without this alias,
+    # the dispatcher lookup falls back to type(payload).__name__ which resolves
+    # to "dict" on object-erased envelopes and never matches the class-name key.
+    if entry.event_type:
+        message_types = (message_types or set()) | {entry.event_type}
 
     if (
         resolution.outcome
