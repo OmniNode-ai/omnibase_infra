@@ -1,0 +1,189 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Canonical topology contract for LLM inference endpoints.
+# OMN-6931: contract-first. This contract is the convergence target for
+# future consumer migration; current runtime consumers still read from
+# .env / Infisical / adapter-local registries / docker/catalog/model_registry.yaml.
+# See docs/plans/2026-04-18-llm-topology-sync.md Truth Boundary.
+#
+# Two field groups per entry:
+#
+# STABLE-CANONICAL (never null; downstream code/tests may key on these):
+#   slot_id         canonical identifier
+#   host            IP address (never hostname)
+#   port            integer port
+#   endpoint_url    resolved URL, convenience field
+#   url_env_var     model-named env var (legacy, canonical read path today)
+#   role_env_alias  role-named env var (new alias, not yet read by consumers)
+#   model_hf_id     exact HuggingFace id
+#   role            role taxonomy value (see below)
+#   status          running | disabled | on_demand | planned
+#
+# OPERATOR-ANNOTATION (may be null):
+#   hardware                  human host description
+#   context_window_budgeted   current max-tokens cap
+#   launchd_unit_or_none      launchd label or null
+#   notes                     free text
+#
+# Role taxonomy (closed set):
+#   coder_slow, coder_fast, embedding, reasoning, reasoning_fast,
+#   reasoning_lightweight, reasoning_transient, vision, stt, tts, reranker
+endpoints:
+  - slot_id: coder-5090
+    host: 192.168.86.201
+    port: 8000
+    endpoint_url: http://192.168.86.201:8000
+    url_env_var: LLM_CODER_URL
+    role_env_alias: LLM_CODER_SLOW_URL
+    model_hf_id: cyankiwi/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit
+    role: coder_slow
+    status: running
+    hardware: RTX 5090 (.201)
+    context_window_budgeted: 114688
+    launchd_unit_or_none: null
+    notes: Primary code generation, 112K context via TurboQuant aither-kvcache.
+  - slot_id: coder-fast-4090
+    host: 192.168.86.201
+    port: 8001
+    endpoint_url: http://192.168.86.201:8001
+    url_env_var: LLM_CODER_FAST_URL
+    role_env_alias: null
+    model_hf_id: Corianas/DeepSeek-R1-Distill-Qwen-14B-AWQ
+    role: coder_fast
+    status: running
+    hardware: RTX 4090 (.201)
+    context_window_budgeted: 24576
+    launchd_unit_or_none: null
+    notes: |
+      Model is historically misaligned (reasoning model under coder-fast env var).
+      Also serves the reasoning_lightweight role via LLM_REASONING_LIGHTWEIGHT_URL
+      alias (same URL, different role). Rename deferred — see Task 29.
+  - slot_id: embeddings-201
+    host: 192.168.86.201
+    port: 8100
+    endpoint_url: http://192.168.86.201:8100
+    url_env_var: null
+    role_env_alias: null
+    model_hf_id: Alibaba-NLP/gte-Qwen2-1.5B-instruct
+    role: embedding
+    status: running
+    hardware: RTX 4090 (.201)
+    context_window_budgeted: 8192
+    launchd_unit_or_none: null
+    notes: Docker-internal embeddings; no env-var exposure outside Docker network.
+  - slot_id: reasoning-deepseek-32b
+    host: 192.168.86.200
+    port: 8101
+    endpoint_url: http://192.168.86.200:8101
+    url_env_var: LLM_DEEPSEEK_R1_URL
+    role_env_alias: LLM_REASONING_URL
+    model_hf_id: mlx-community/DeepSeek-R1-Distill-Qwen-32B-bf16
+    role: reasoning
+    status: running
+    hardware: M2 Ultra (.200)
+    context_window_budgeted: 8192
+    launchd_unit_or_none: com.mlx.deepseek-reasoning
+    notes: |
+      Architecturally-different second opinion for math/algorithmic code.
+      KNOWN DRIFT: .env and Infisical LLM_DEEPSEEK_R1_URL both point at
+      .201:8001 (14B) instead of this slot. Out of plan scope; see
+      "Discovered Drifts Beyond Plan Scope".
+  - slot_id: reasoning-moe-35b
+    host: 192.168.86.200
+    port: 8102
+    endpoint_url: http://192.168.86.200:8102
+    url_env_var: LLM_QWEN3_NEXT_URL
+    role_env_alias: LLM_REASONING_FAST_URL
+    model_hf_id: mlx-community/Qwen3.6-35B-A3B-8bit
+    role: reasoning_fast
+    status: running
+    hardware: M2 Ultra (.200)
+    context_window_budgeted: 8192
+    launchd_unit_or_none: com.mlx.qwen36-reasoning
+    notes: |
+      Replaced Qwen3-Next-80B-A3B 2026-04-18 after PR-review benchmark win
+      (3.6x faster, unique blocking bugs caught). Env-var name retained for
+      backward compat; role alias LLM_REASONING_FAST_URL seeded but unread.
+  - slot_id: embeddings-200
+    host: 192.168.86.200
+    port: 8100
+    endpoint_url: http://192.168.86.200:8100
+    url_env_var: LLM_EMBEDDING_URL
+    role_env_alias: null
+    model_hf_id: mlx-community/Qwen3-Embedding-8B-4bit-DWQ
+    role: embedding
+    status: disabled
+    hardware: M2 Ultra (.200)
+    context_window_budgeted: null
+    launchd_unit_or_none: com.mlx.embeddings
+    notes: |
+      Stopped 2026-04-18 to free RAM. Restart:
+      `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.mlx.embeddings.plist`.
+  - slot_id: second-opinion-gemma
+    host: 192.168.86.200
+    port: 8103
+    endpoint_url: http://192.168.86.200:8103
+    url_env_var: null
+    role_env_alias: LLM_REASONING_TRANSIENT_URL
+    model_hf_id: mlx-community/gemma-4-31b-it-8bit
+    role: reasoning_transient
+    status: on_demand
+    hardware: M2 Ultra (.200)
+    context_window_budgeted: null
+    launchd_unit_or_none: null
+    notes: |
+      Weights cached; booted via mlx_lm.server for high-stakes second opinions.
+      LLM_REASONING_TRANSIENT_URL seeded empty; set when process boots.
+  - slot_id: vision-planned
+    host: null
+    port: null
+    endpoint_url: null
+    url_env_var: null
+    role_env_alias: LLM_VISION_URL
+    model_hf_id: null
+    role: vision
+    status: planned
+    hardware: null
+    context_window_budgeted: null
+    launchd_unit_or_none: null
+    notes: Placeholder per OmniVoice router plan; model/host TBD.
+  - slot_id: stt-planned
+    host: null
+    port: null
+    endpoint_url: null
+    url_env_var: null
+    role_env_alias: LLM_STT_URL
+    model_hf_id: null
+    role: stt
+    status: planned
+    hardware: null
+    context_window_budgeted: null
+    launchd_unit_or_none: null
+    notes: Placeholder per OmniVoice design.
+  - slot_id: tts-planned
+    host: null
+    port: null
+    endpoint_url: null
+    url_env_var: null
+    role_env_alias: LLM_TTS_URL
+    model_hf_id: null
+    role: tts
+    status: planned
+    hardware: null
+    context_window_budgeted: null
+    launchd_unit_or_none: null
+    notes: Placeholder per OmniVoice design.
+  - slot_id: reranker-planned
+    host: null
+    port: null
+    endpoint_url: null
+    url_env_var: null
+    role_env_alias: LLM_RERANKER_URL
+    model_hf_id: null
+    role: reranker
+    status: planned
+    hardware: null
+    context_window_budgeted: null
+    launchd_unit_or_none: null
+    notes: Placeholder for future vector-rerank slot.
