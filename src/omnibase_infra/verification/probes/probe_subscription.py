@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import subprocess
 from collections.abc import Callable
+from typing import Literal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -34,6 +35,59 @@ logger = logging.getLogger(__name__)
 # Type alias: given a consumer group ID, return the set of topics it subscribes to.
 # Raises on infrastructure failure.
 KafkaAdminFn = Callable[[str], set[str]]
+GroundingTag = Literal["EXACT", "DISCOVERED", "FABRICATED"]
+
+
+def _parse_topics_from_rpk_describe_json(stdout: str) -> set[str]:
+    """Extract subscribed topic names from ``rpk group describe --format json``."""
+    import json
+
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"rpk returned invalid JSON: {stdout[:200]}") from exc
+
+    topics: set[str] = set()
+    members = data.get("members", [])
+    for member in members:
+        assignments = member.get("assignments", [])
+        for assignment in assignments:
+            topic = assignment.get("topic", "")
+            if topic:
+                topics.add(topic)
+    return topics
+
+
+def _list_topic_scoped_groups(base_group_id: str) -> list[str]:
+    """List topic-scoped consumer groups derived from a base group ID."""
+    try:
+        result = subprocess.run(
+            ["rpk", "group", "list", "--format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("rpk not found on PATH") from exc
+
+    if result.returncode != 0:
+        raise RuntimeError(f"rpk group list failed: {result.stderr.strip()}")
+
+    import json
+
+    try:
+        groups = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"rpk returned invalid JSON: {result.stdout[:200]}") from exc
+
+    prefix = f"{base_group_id}.__t."
+    scoped_groups: list[str] = []
+    for group in groups if isinstance(groups, list) else []:
+        group_name = group.get("name", "") if isinstance(group, dict) else ""
+        if isinstance(group_name, str) and group_name.startswith(prefix):
+            scoped_groups.append(group_name)
+    return scoped_groups
 
 
 def _rpk_fallback(group_id: str) -> set[str]:
@@ -62,31 +116,33 @@ def _rpk_fallback(group_id: str) -> set[str]:
     if result.returncode != 0:
         raise RuntimeError(f"rpk group describe failed: {result.stderr.strip()}")
 
-    # Parse rpk JSON output for topic names
-    import json
+    topics = _parse_topics_from_rpk_describe_json(result.stdout)
+    if topics:
+        return topics
 
-    try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"rpk returned invalid JSON: {result.stdout[:200]}") from exc
-
-    topics: set[str] = set()
-    # rpk group describe --format json returns members with topic assignments
-    members = data.get("members", [])
-    for member in members:
-        assignments = member.get("assignments", [])
-        for assignment in assignments:
-            topic = assignment.get("topic", "")
-            if topic:
-                topics.add(topic)
-    return topics
+    # The Kafka event bus scopes consumer groups per topic as
+    # "{base_group_id}.__t.{topic}". Aggregate those groups when the base
+    # group is empty or dead so verification matches the live runtime shape.
+    scoped_topics: set[str] = set()
+    for scoped_group_id in _list_topic_scoped_groups(group_id):
+        scoped_result = subprocess.run(
+            ["rpk", "group", "describe", scoped_group_id, "--format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if scoped_result.returncode != 0:
+            continue
+        scoped_topics.update(_parse_topics_from_rpk_describe_json(scoped_result.stdout))
+    return scoped_topics
 
 
 def _derive_consumer_group_id(
     contract_name: str,
     *,
     identity: ModelNodeIdentity | None = None,
-) -> str:
+) -> tuple[str, GroundingTag]:
     """Derive the consumer group ID from a contract name.
 
     Uses compute_consumer_group_id with a ModelNodeIdentity. When identity is
@@ -100,20 +156,26 @@ def _derive_consumer_group_id(
             then falls back to unknown markers.
 
     Returns:
-        The canonical consumer group ID.
+        Tuple of canonical consumer group ID and how it was grounded.
     """
     from omnibase_infra.enums import EnumConsumerGroupPurpose
     from omnibase_infra.models import ModelNodeIdentity
     from omnibase_infra.utils.util_consumer_group import compute_consumer_group_id
 
     if identity is not None:
-        return compute_consumer_group_id(identity, EnumConsumerGroupPurpose.CONSUME)
+        return (
+            compute_consumer_group_id(identity, EnumConsumerGroupPurpose.CONSUME),
+            "EXACT",
+        )
 
     # Attempt rpk discovery for runtime identity
     discovered_identity = _discover_identity_via_rpk(contract_name)
     if discovered_identity is not None:
-        return compute_consumer_group_id(
-            discovered_identity, EnumConsumerGroupPurpose.CONSUME
+        return (
+            compute_consumer_group_id(
+                discovered_identity, EnumConsumerGroupPurpose.CONSUME
+            ),
+            "DISCOVERED",
         )
 
     # Fallback: fabricated identity with unknown markers
@@ -123,9 +185,19 @@ def _derive_consumer_group_id(
         node_name=contract_name,
         version="v0",
     )
-    return compute_consumer_group_id(
-        fallback_identity, EnumConsumerGroupPurpose.CONSUME
+    return (
+        compute_consumer_group_id(fallback_identity, EnumConsumerGroupPurpose.CONSUME),
+        "FABRICATED",
     )
+
+
+def _subscription_verdict_for_grounding(
+    grounding: GroundingTag,
+) -> EnumValidationVerdict:
+    """Return the verdict class appropriate for the consumer-group grounding."""
+    if grounding == "FABRICATED":
+        return EnumValidationVerdict.QUARANTINE
+    return EnumValidationVerdict.FAIL
 
 
 def _discover_identity_via_rpk(contract_name: str) -> ModelNodeIdentity | None:
@@ -172,6 +244,8 @@ def _discover_identity_via_rpk(contract_name: str) -> ModelNodeIdentity | None:
 def check_subscriptions(
     parsed_contract: ModelParsedContractForVerification,
     kafka_admin_fn: KafkaAdminFn | None = None,
+    *,
+    identity: ModelNodeIdentity | None = None,
 ) -> list[ModelContractCheckResult]:
     """Verify a contract's declared subscribe_topics are actually subscribed.
 
@@ -179,6 +253,7 @@ def check_subscriptions(
         parsed_contract: Parsed contract with subscribe_topics.
         kafka_admin_fn: Injectable callable(group_id) -> set[str] of subscribed
             topics. If None, uses rpk fallback.
+        identity: Optional exact runtime identity to use for group derivation.
 
     Returns:
         One ModelContractCheckResult per subscribe_topic.
@@ -195,7 +270,10 @@ def check_subscriptions(
             )
         ]
 
-    group_id = _derive_consumer_group_id(parsed_contract.name)
+    group_id, grounding = _derive_consumer_group_id(
+        parsed_contract.name,
+        identity=identity,
+    )
 
     # Resolve the admin function
     admin_fn: KafkaAdminFn = kafka_admin_fn or _rpk_fallback
@@ -211,12 +289,20 @@ def check_subscriptions(
                 check_type=EnumContractCheckType.SUBSCRIPTION,
                 severity=EnumCheckSeverity.REQUIRED,
                 verdict=EnumValidationVerdict.QUARANTINE,
-                evidence=(f"Kafka admin API unavailable for group '{group_id}': {exc}"),
+                evidence=(
+                    f"Kafka admin API unavailable for group '{group_id}' "
+                    f"(grounding={grounding}): {exc}"
+                ),
                 contract_name=parsed_contract.name,
                 message="Subscription check quarantined: admin API unavailable.",
             )
             for _ in parsed_contract.subscribe_topics
         ]
+
+    verdict = _subscription_verdict_for_grounding(grounding)
+    message = "failed"
+    if verdict == EnumValidationVerdict.QUARANTINE:
+        message = "quarantined"
 
     # If the admin call succeeded but returned no topics at all, the consumer
     # group either doesn't exist or has zero members.
@@ -225,14 +311,15 @@ def check_subscriptions(
             ModelContractCheckResult(
                 check_type=EnumContractCheckType.SUBSCRIPTION,
                 severity=EnumCheckSeverity.REQUIRED,
-                verdict=EnumValidationVerdict.FAIL,
+                verdict=verdict,
                 evidence=(
                     f"Consumer group '{group_id}' has no subscribed topics. "
-                    f"Group may not exist or has zero active members."
+                    f"Group may not exist or has zero active members. "
+                    f"grounding={grounding}."
                 ),
                 contract_name=parsed_contract.name,
                 message=(
-                    f"Subscription check failed for '{topic}': "
+                    f"Subscription check {message} for '{topic}': "
                     f"consumer group has no subscriptions."
                 ),
             )
@@ -248,7 +335,10 @@ def check_subscriptions(
                     check_type=EnumContractCheckType.SUBSCRIPTION,
                     severity=EnumCheckSeverity.REQUIRED,
                     verdict=EnumValidationVerdict.PASS,
-                    evidence=(f"Topic '{topic}' is subscribed by group '{group_id}'."),
+                    evidence=(
+                        f"Topic '{topic}' is subscribed by group '{group_id}' "
+                        f"(grounding={grounding})."
+                    ),
                     contract_name=parsed_contract.name,
                     message=f"Subscription check passed for '{topic}'.",
                 )
@@ -258,13 +348,14 @@ def check_subscriptions(
                 ModelContractCheckResult(
                     check_type=EnumContractCheckType.SUBSCRIPTION,
                     severity=EnumCheckSeverity.REQUIRED,
-                    verdict=EnumValidationVerdict.FAIL,
+                    verdict=verdict,
                     evidence=(
                         f"Topic '{topic}' is NOT subscribed by group '{group_id}'. "
-                        f"Subscribed topics: {sorted(subscribed_topics)}"
+                        f"Subscribed topics: {sorted(subscribed_topics)}. "
+                        f"grounding={grounding}."
                     ),
                     contract_name=parsed_contract.name,
-                    message=f"Subscription check failed for '{topic}'.",
+                    message=f"Subscription check {message} for '{topic}'.",
                 )
             )
 
@@ -272,6 +363,7 @@ def check_subscriptions(
 
 
 __all__: list[str] = [
+    "GroundingTag",
     "KafkaAdminFn",
     "check_subscriptions",
 ]

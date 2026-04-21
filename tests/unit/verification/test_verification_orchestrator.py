@@ -81,8 +81,8 @@ class TestVerificationOrchestrator:
         assert report.report_fingerprint != ""
         assert len(report.checks) > 0
 
-    def test_required_subscription_fail(self, tmp_path: Path) -> None:
-        """A REQUIRED subscription check failing -> overall FAIL."""
+    def test_required_subscription_without_grounding_quarantines(self, tmp_path: Path) -> None:
+        """A fabricated subscription identity yields overall QUARANTINE, not FAIL."""
         contract = _make_contract(
             subscribe_topics=["topic.missing"],
             publish_topics=["topic.b"],
@@ -99,12 +99,14 @@ class TestVerificationOrchestrator:
 
         report = run_contract_verification(path, config)
 
-        assert report.overall_verdict == EnumValidationVerdict.FAIL
-        # At least one check should be FAIL
-        fail_checks = [
-            c for c in report.checks if c.verdict == EnumValidationVerdict.FAIL
+        assert report.overall_verdict == EnumValidationVerdict.QUARANTINE
+        sub_checks = [
+            c
+            for c in report.checks
+            if c.check_type == EnumContractCheckType.SUBSCRIPTION
         ]
-        assert len(fail_checks) >= 1
+        assert all(c.verdict == EnumValidationVerdict.QUARANTINE for c in sub_checks)
+        assert all("grounding=FABRICATED" in c.evidence for c in sub_checks)
 
     def test_recommended_only_fail_produces_quarantine(self, tmp_path: Path) -> None:
         """Only RECOMMENDED checks failing -> overall QUARANTINE, not FAIL."""
@@ -238,7 +240,7 @@ class TestVerificationOrchestrator:
         assert report.overall_verdict == EnumValidationVerdict.PASS
 
     def test_multiple_probes_mixed_verdicts(self, tmp_path: Path) -> None:
-        """Mixed probe results: REQUIRED FAIL overrides PASS elsewhere."""
+        """Mixed probe results with fabricated subscription grounding stay QUARANTINE."""
         contract = _make_contract(
             subscribe_topics=["topic.a"],
             publish_topics=["topic.b"],
@@ -246,7 +248,7 @@ class TestVerificationOrchestrator:
         path = _write_contract(tmp_path, contract)
 
         config = VerificationConfig(
-            kafka_admin_fn=lambda group_id: set(),  # subscription FAIL
+            kafka_admin_fn=lambda group_id: set(),  # subscription QUARANTINE
             watermark_fn=lambda topic: (0, 100),  # publication PASS
             db_query_fn=lambda sql: [
                 {"node_name": "test_node", "current_state": "active"}
@@ -255,4 +257,4 @@ class TestVerificationOrchestrator:
 
         report = run_contract_verification(path, config)
 
-        assert report.overall_verdict == EnumValidationVerdict.FAIL
+        assert report.overall_verdict == EnumValidationVerdict.QUARANTINE

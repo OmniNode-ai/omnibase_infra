@@ -430,6 +430,66 @@ class TestKafkaEventBusSubscribe:
         assert len(kafka_event_bus_basic._subscribers["test-topic"]) == 2
 
     @pytest.mark.asyncio
+    async def test_same_topic_different_groups_start_distinct_consumers(
+        self, kafka_event_bus_basic: EventBusKafka, mock_producer_basic: AsyncMock
+    ) -> None:
+        """Different consumer groups on the same topic should each start a consumer."""
+
+        async def handler1(msg: ModelEventMessage) -> None:
+            pass
+
+        async def handler2(msg: ModelEventMessage) -> None:
+            pass
+
+        kafka_event_bus_basic._started = True
+        kafka_event_bus_basic._validate_topic_name = MagicMock()  # type: ignore[method-assign]
+
+        async def fake_start(topic: str, group_id: str) -> None:
+            kafka_event_bus_basic._group_consumers[(topic, group_id)] = AsyncMock()
+
+        kafka_event_bus_basic._start_consumer_for_topic = AsyncMock(  # type: ignore[method-assign]
+            side_effect=fake_start
+        )
+
+        await kafka_event_bus_basic.subscribe(
+            "test-topic", make_test_node_identity("1"), handler1
+        )
+        await kafka_event_bus_basic.subscribe(
+            "test-topic", make_test_node_identity("2"), handler2
+        )
+
+        assert kafka_event_bus_basic._start_consumer_for_topic.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_same_topic_same_group_reuses_consumer(
+        self, kafka_event_bus_basic: EventBusKafka, mock_producer_basic: AsyncMock
+    ) -> None:
+        """Callbacks sharing the same group should reuse one consumer."""
+
+        async def handler1(msg: ModelEventMessage) -> None:
+            pass
+
+        async def handler2(msg: ModelEventMessage) -> None:
+            pass
+
+        kafka_event_bus_basic._started = True
+        kafka_event_bus_basic._validate_topic_name = MagicMock()  # type: ignore[method-assign]
+
+        identity = make_test_node_identity("shared")
+
+        async def fake_start(topic: str, group_id: str) -> None:
+            kafka_event_bus_basic._group_consumers[(topic, group_id)] = AsyncMock()
+
+        kafka_event_bus_basic._start_consumer_for_topic = AsyncMock(  # type: ignore[method-assign]
+            side_effect=fake_start
+        )
+
+        await kafka_event_bus_basic.subscribe("test-topic", identity, handler1)
+        await kafka_event_bus_basic.subscribe("test-topic", identity, handler2)
+
+        assert kafka_event_bus_basic._start_consumer_for_topic.await_count == 1
+
+    @pytest.mark.asyncio
     async def test_double_unsubscribe_safe(
         self, kafka_event_bus_basic: EventBusKafka, mock_producer_basic: AsyncMock
     ) -> None:

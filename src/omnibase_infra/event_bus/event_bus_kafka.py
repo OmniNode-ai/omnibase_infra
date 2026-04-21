@@ -433,6 +433,7 @@ class EventBusKafka(
         # Kafka producer and consumer
         self._producer: AIOKafkaProducer | None = None
         self._consumers: dict[str, AIOKafkaConsumer] = {}
+        self._group_consumers: dict[tuple[str, str], AIOKafkaConsumer] = {}
 
         # Subscriber registry: topic -> list of (group_id, subscription_id, callback) tuples
         self._subscribers: dict[
@@ -449,6 +450,7 @@ class EventBusKafka(
 
         # Background consumer tasks
         self._consumer_tasks: dict[str, asyncio.Task[None]] = {}
+        self._group_consumer_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
 
         # Topics marked as required for readiness (OMN-1931)
         # Readiness is blocked until all required topics have active consumers
@@ -832,7 +834,11 @@ class EventBusKafka(
             self._closing = True
             self._shutdown = True
             self._started = False
-            tasks_to_cancel = list(self._consumer_tasks.values())
+            tasks_to_cancel = list(
+                {
+                    id(task): task for task in self._group_consumer_tasks.values()
+                }.values()
+            )
 
         # Cancel circuit breaker active recovery timer to prevent it from
         # outliving the EventBusKafka instance (inherited from MixinAsyncCircuitBreaker)
@@ -849,12 +855,19 @@ class EventBusKafka(
         # Clear task registry
         async with self._lock:
             self._consumer_tasks.clear()
+            self._group_consumer_tasks.clear()
 
         # Close all consumers
         consumers_to_close = []
         async with self._lock:
-            consumers_to_close = list(self._consumers.values())
+            consumers_to_close = list(
+                {
+                    id(consumer): consumer
+                    for consumer in self._group_consumers.values()
+                }.values()
+            )
             self._consumers.clear()
+            self._group_consumers.clear()
 
         for consumer in consumers_to_close:
             try:
@@ -1382,8 +1395,10 @@ class EventBusKafka(
                 (effective_group_id, subscription_id, on_message)
             )
 
-            # Start consumer for this topic if not already running
-            if topic not in self._consumers and self._started:
+            # Start a distinct Kafka consumer for each (topic, group_id) pair.
+            # Multiple callbacks may still fan out behind the same exact group.
+            consumer_key = (topic, effective_group_id)
+            if consumer_key not in self._group_consumers and self._started:
                 await self._start_consumer_for_topic(topic, effective_group_id)
 
             logger.debug(
@@ -1417,8 +1432,12 @@ class EventBusKafka(
                     )
 
                     # Stop consumer if no more subscribers for this topic
-                    if not self._subscribers.get(topic):
-                        await self._stop_consumer_for_topic(topic)
+                    remaining = self._subscribers.get(topic, [])
+                    if not any(
+                        sub_group_id == effective_group_id
+                        for sub_group_id, _, _ in remaining
+                    ):
+                        await self._stop_consumer_for_topic(topic, effective_group_id)
 
                 except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                     logger.warning(f"Error during unsubscribe: {e}")
@@ -1452,7 +1471,8 @@ class EventBusKafka(
             InfraTimeoutError: If consumer startup times out after timeout_seconds
             InfraConnectionError: If consumer fails to connect to Kafka brokers
         """
-        if topic in self._consumers:
+        consumer_key = (topic, group_id)
+        if consumer_key in self._group_consumers:
             return
 
         correlation_id = uuid4()
@@ -1604,11 +1624,15 @@ class EventBusKafka(
                 timeout=self._timeout_seconds,
             )
 
-            self._consumers[topic] = consumer
+            self._group_consumers[consumer_key] = consumer
+            self._refresh_topic_consumer_views(topic)
 
             # Start background task to consume messages with correlation tracking
-            task = asyncio.create_task(self._consume_loop(topic, correlation_id))
-            self._consumer_tasks[topic] = task
+            task = asyncio.create_task(
+                self._consume_loop(topic, group_id, correlation_id)
+            )
+            self._group_consumer_tasks[consumer_key] = task
+            self._refresh_topic_consumer_views(topic)
 
             logger.info(
                 f"Started consumer for topic {topic}",
@@ -1712,31 +1736,76 @@ class EventBusKafka(
                 servers=sanitized_servers,
             ) from e
 
-    async def _stop_consumer_for_topic(self, topic: str) -> None:
-        """Stop the consumer for a specific topic.
+    def _refresh_topic_consumer_views(self, topic: str) -> None:
+        """Refresh compatibility maps keyed only by topic.
+
+        ``_group_consumers`` and ``_group_consumer_tasks`` are the authoritative
+        registries. ``_consumers`` and ``_consumer_tasks`` are retained as
+        topic-keyed compatibility views for readiness and older tests.
+        """
+        group_keys = [key for key in self._group_consumers if key[0] == topic]
+        if not group_keys:
+            self._consumers.pop(topic, None)
+            self._consumer_tasks.pop(topic, None)
+            return
+
+        primary_key = sorted(group_keys)[0]
+        self._consumers[topic] = self._group_consumers[primary_key]
+        task = self._group_consumer_tasks.get(primary_key)
+        if task is not None:
+            self._consumer_tasks[topic] = task
+        else:
+            self._consumer_tasks.pop(topic, None)
+
+    async def _stop_consumer_for_topic(
+        self,
+        topic: str,
+        group_id: str | None = None,
+    ) -> None:
+        """Stop the consumer for a specific topic or topic/group pair.
 
         Args:
-            topic: Topic to stop consuming from
+            topic: Topic to stop consuming from.
+            group_id: Optional consumer group ID. When provided, only the
+                matching topic/group consumer is stopped.
         """
-        # Cancel consumer task
-        if topic in self._consumer_tasks:
-            task = self._consumer_tasks.pop(topic)
-            if not task.done():
+        group_keys = (
+            [(topic, group_id)]
+            if group_id is not None
+            else [key for key in self._group_consumers if key[0] == topic]
+        )
+
+        for consumer_key in group_keys:
+            topic_name, group_name = consumer_key
+
+            task = self._group_consumer_tasks.pop(consumer_key, None)
+            if task is not None and not task.done():
                 task.cancel()
                 try:
                     await task
                 except asyncio.CancelledError:
                     pass
 
-        # Stop consumer
-        if topic in self._consumers:
-            consumer = self._consumers.pop(topic)
-            try:
-                await consumer.stop()
-            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
-                logger.warning(f"Error stopping consumer for topic {topic}: {e}")
+            consumer = self._group_consumers.pop(consumer_key, None)
+            if consumer is not None:
+                try:
+                    await consumer.stop()
+                except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
+                    logger.warning(
+                        "Error stopping consumer for topic %s group %s: %s",
+                        topic_name,
+                        group_name,
+                        e,
+                    )
 
-    async def _consume_loop(self, topic: str, correlation_id: UUID) -> None:
+        self._refresh_topic_consumer_views(topic)
+
+    async def _consume_loop(
+        self,
+        topic: str,
+        group_id: str,
+        correlation_id: UUID,
+    ) -> None:
         """Background loop to consume messages and dispatch to subscribers.
 
         This method runs in a background task and continuously polls the Kafka consumer
@@ -1744,15 +1813,17 @@ class EventBusKafka(
         registered subscribers, and logs all errors without terminating the loop.
 
         Args:
-            topic: Topic being consumed
-            correlation_id: Correlation ID for tracking this consumer task
+            topic: Topic being consumed.
+            group_id: Consumer group ID for this loop.
+            correlation_id: Correlation ID for tracking this consumer task.
         """
-        consumer = self._consumers.get(topic)
+        consumer = self._group_consumers.get((topic, group_id))
         if consumer is None:
             logger.warning(
-                f"Consumer not found for topic {topic} in consume loop",
+                f"Consumer not found for topic {topic} group {group_id} in consume loop",
                 extra={
                     "topic": topic,
+                    "group_id": group_id,
                     "correlation_id": str(correlation_id),
                 },
             )
@@ -1780,12 +1851,13 @@ class EventBusKafka(
 
                 # Get subscribers snapshot early - needed for consumer group in DLQ
                 async with self._lock:
-                    subscribers = list(self._subscribers.get(topic, []))
+                    subscribers = [
+                        subscriber
+                        for subscriber in self._subscribers.get(topic, [])
+                        if subscriber[0] == group_id
+                    ]
 
-                # Extract consumer group for DLQ traceability (all subscribers share the same consumer)
-                effective_consumer_group = (
-                    subscribers[0][0] if subscribers else "unknown"
-                )
+                effective_consumer_group = group_id if subscribers else "unknown"
 
                 # Warn when a message arrives but no subscribers are registered.
                 # The message will be silently dropped (no DLQ entry) since there
@@ -1803,11 +1875,14 @@ class EventBusKafka(
                         pass
                     logger.warning(
                         "Message received on topic '%s' with event_type='%s' "
-                        "but no subscribers are registered; message will be dropped",
+                        "for consumer_group='%s' but no subscribers are registered; "
+                        "message will be dropped",
                         topic,
                         event_type,
+                        group_id,
                         extra={
                             "topic": topic,
+                            "group_id": group_id,
                             "event_type": event_type,
                             "correlation_id": str(correlation_id),
                         },
@@ -1930,7 +2005,7 @@ class EventBusKafka(
                 try:
                     # Derive consumer group from subscriber registry
                     _subs = self._subscribers.get(topic, [])
-                    _consumer_group = _subs[0][0] if _subs else "unknown"
+                    _consumer_group = group_id if _subs else "unknown"
                     await self._health_emitter.emit_event(
                         consumer_identity=f"eventbus.{topic}",
                         consumer_group=_consumer_group,
@@ -1973,10 +2048,12 @@ class EventBusKafka(
         topics_to_start: list[tuple[str, str]] = []
         async with self._lock:
             for topic in self._subscribers:
-                if topic not in self._consumers:
-                    subs = self._subscribers[topic]
-                    if subs:
-                        group_id = subs[0][0]
+                seen_group_ids: set[str] = set()
+                for group_id, _, _ in self._subscribers[topic]:
+                    if group_id in seen_group_ids:
+                        continue
+                    seen_group_ids.add(group_id)
+                    if (topic, group_id) not in self._group_consumers:
                         topics_to_start.append((topic, group_id))
 
         # Start consumers outside the lock to avoid blocking
@@ -2006,7 +2083,7 @@ class EventBusKafka(
         async with self._lock:
             subscriber_count = sum(len(subs) for subs in self._subscribers.values())
             topic_count = len(self._subscribers)
-            consumer_count = len(self._consumers)
+            consumer_count = max(len(self._consumers), len(self._group_consumers))
             started = self._started
 
         # Get circuit breaker state (thread-safe access)
@@ -2062,17 +2139,41 @@ class EventBusKafka(
                 assignments: dict[str, list[int]] = {}
                 consume_tasks_alive: dict[str, bool] = {}
 
-                for topic, consumer in self._consumers.items():
+                consumer_views: list[tuple[str, AIOKafkaConsumer]] = list(
+                    self._group_consumers.items()
+                )
+                if not consumer_views:
+                    consumer_views = [
+                        ((topic, "compat"), consumer)
+                        for topic, consumer in self._consumers.items()
+                    ]
+
+                for (topic, _group_id), consumer in consumer_views:
                     try:
                         topic_partitions = consumer.assignment()
-                        assignments[topic] = sorted(
+                        topic_assignment = sorted(
                             tp.partition for tp in topic_partitions
                         )
                     except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
-                        assignments[topic] = []
+                        topic_assignment = []
+                    prior_assignment = assignments.get(topic, [])
+                    assignments[topic] = sorted(
+                        set(prior_assignment) | set(topic_assignment)
+                    )
 
-                for topic, task in self._consumer_tasks.items():
-                    consume_tasks_alive[topic] = not task.done()
+                task_views: list[tuple[str, asyncio.Task[None]]] = list(
+                    self._group_consumer_tasks.items()
+                )
+                if not task_views:
+                    task_views = [
+                        ((topic, "compat"), task)
+                        for topic, task in self._consumer_tasks.items()
+                    ]
+
+                for (topic, _group_id), task in task_views:
+                    consume_tasks_alive[topic] = consume_tasks_alive.get(
+                        topic, False
+                    ) or (not task.done())
 
             # Determine required topics readiness
             required_topics_ready = consumers_started and all(
