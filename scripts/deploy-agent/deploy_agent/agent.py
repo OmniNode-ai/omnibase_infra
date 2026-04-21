@@ -41,23 +41,22 @@ HEALTH_PORT = int(os.environ.get("DEPLOY_AGENT_PORT", "8099"))
 PUBLISH_RETRY_INTERVAL = 30
 
 # Guard: sd_notify is only available on Linux with systemd-python installed.
-# Fall back to a no-op so the agent runs correctly in dev/test/macOS.
+# Falls back to a no-op so the agent runs correctly on dev/macOS/CI.
+# We use Type=simple (not Type=notify) to avoid a startup deadlock when the
+# library is absent — the watchdog ping still works regardless.
 try:
     from systemd.daemon import notify as _sd_notify  # type: ignore[import-not-found]
 
     def _watchdog_ping() -> None:
         _sd_notify("WATCHDOG=1")
 
-    def _sd_ready() -> None:
-        _sd_notify("READY=1")
-
 except ImportError:  # pragma: no cover
 
     def _watchdog_ping() -> None:  # type: ignore[misc]  # stub-ok: no-op fallback on non-Linux
         pass
 
-    def _sd_ready() -> None:  # type: ignore[misc]  # stub-ok: no-op fallback on non-Linux
-        pass
+
+WATCHDOG_INTERVAL = 10  # seconds — well under WatchdogSec=30 in the unit file
 
 
 class DeployAgent:
@@ -113,7 +112,6 @@ class DeployAgent:
         )
         await site.start()
         logger.info("Health endpoint listening on port %d", HEALTH_PORT)
-        _sd_ready()
 
         # Step 5+6: Main loop
         consumer = DeployConsumer(
@@ -127,10 +125,11 @@ class DeployAgent:
             loop.add_signal_handler(sig, self._handle_shutdown)
 
         publish_retry_task = asyncio.create_task(self._publish_retry_loop())
+        # Watchdog runs in its own task so long-running deploys don't miss the deadline.
+        watchdog_task = asyncio.create_task(self._watchdog_loop())
 
         try:
             while not self._shutdown:
-                _watchdog_ping()
                 cmd, reason = consumer.poll_and_accept()
                 if cmd is not None:
                     await self._execute_command(cmd)
@@ -140,6 +139,7 @@ class DeployAgent:
                     await asyncio.sleep(1)
         finally:
             publish_retry_task.cancel()
+            watchdog_task.cancel()
             consumer.close()
             await runner.cleanup()
             logger.info("Deploy agent stopped")
@@ -271,6 +271,11 @@ class DeployAgent:
             else:
                 self._publish_cb.record_failure(cid_str)
                 logger.warning("Retried publish for %s: still failing", cid_str)
+
+    async def _watchdog_loop(self) -> None:
+        while True:
+            _watchdog_ping()
+            await asyncio.sleep(WATCHDOG_INTERVAL)
 
     async def _publish_retry_loop(self) -> None:
         while True:

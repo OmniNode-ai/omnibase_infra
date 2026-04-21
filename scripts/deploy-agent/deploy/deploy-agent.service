@@ -6,8 +6,11 @@
 #          systemctl --user daemon-reload
 #          systemctl --user enable --now deploy-agent.service
 #
-# WatchdogSec: agent must call sd_notify("WATCHDOG=1") at least once per 60s.
-# Type=notify: systemd waits for READY=1 before considering startup complete.
+# WatchdogSec: agent must call sd_notify("WATCHDOG=1") at least once per 30s.
+# Type=simple: startup is considered complete immediately after ExecStart forks.
+#   We do NOT use Type=notify because systemd-python may not be installed in the
+#   venv, which would cause a Type=notify deadlock (READY=1 never sent → killed
+#   after TimeoutStartSec). The watchdog ping still works with Type=simple.
 # Restart=on-failure: restart on non-zero exit; not on clean SIGTERM.
 
 [Unit]
@@ -16,7 +19,7 @@ After=network-online.target docker.service
 Wants=network-online.target
 
 [Service]
-Type=notify
+Type=simple
 WorkingDirectory=/data/omninode/deploy-agent
 EnvironmentFile=/home/jonah/.omnibase/.env
 Environment=DEPLOY_AGENT_STATE_DIR=/data/omninode/deploy-agent/state/jobs
@@ -25,7 +28,7 @@ ExecStartPre=/bin/sh -c 'fuser -k 8099/tcp || true'
 ExecStart=/data/omninode/deploy-agent/venv/bin/python -m deploy_agent
 Restart=on-failure
 RestartSec=5
-WatchdogSec=60
+WatchdogSec=30
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=deploy-agent
