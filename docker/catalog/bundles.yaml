@@ -17,33 +17,66 @@ core:
     - INFISICAL_PROJECT_ID
     - INFISICAL_ENCRYPTION_KEY
     - INFISICAL_AUTH_SECRET
-runtime:
-  description: "ONEX runtime platform — kernel, effects, workers, consumers"
+runtime-core:
+  description: "ONEX runtime core — 7 services with no env requirements beyond the 0.34.0 baseline (OMN-9332). Use `onex up runtime-core` to redeploy correctness fixes without also enabling integrations that need new secrets."
   services:
-    - forward-migration
-    - migration-gate
     - omninode-runtime
     - runtime-effects
-    - runtime-worker
     - agent-actions-consumer
     - skill-lifecycle-consumer
     - context-audit-consumer
-    - intelligence-migration
-    - intelligence-api
     - omninode-contract-resolver
-    - injection-effectiveness-consumer
+    - intelligence-api
+  includes: []
+  inject_env: {}
+  inject_required_env: []
+runtime-integrations:
+  description: "Runtime external-integration services — Linear, CI, Slack webhooks (OMN-9332)"
+  services:
     - ci-relay
     - linear-relay
-    - decision-store-consumer
     - waitlist-signup-notifier
+  includes: []
+  inject_env: {}
+  inject_required_env:
+    - CI_CALLBACK_TOKEN
+    - LINEAR_WEBHOOK_SECRET
+    - WAITLIST_NOTIFIER_SLACK_BOT_TOKEN
+    - WAITLIST_NOTIFIER_SLACK_CHANNEL_ID
+runtime-observability-projections:
+  description: "Runtime projection/observability consumers — postgres projections, cost aggregation, health projection, decision store (OMN-9332)"
+  services:
+    - injection-effectiveness-consumer
     - savings-estimation-consumer
     - llm-cost-aggregation-consumer
     - consumer-health-projection
+    - decision-store-consumer
+  includes: []
+  inject_env: {}
+  inject_required_env:
+    - OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_POSTGRES_DSN
+runtime-infrastructure:
+  description: "Runtime infrastructure glue — migrations, workers, autoheal (OMN-9332)"
+  services:
+    - forward-migration
+    - migration-gate
+    - intelligence-migration
+    - runtime-worker
     - retry-worker
     - autoheal
+  includes: []
+  inject_env: {}
+  inject_required_env: []
+runtime:
+  description: "ONEX runtime platform — composed of runtime-core, runtime-integrations, runtime-observability-projections, runtime-infrastructure (OMN-9332). Preserves the `onex up runtime` operator contract."
+  services: []
   includes:
     - core
     - tracing # OMN-8697: always wire Phoenix OTLP tracing with the runtime
+    - runtime-core
+    - runtime-integrations
+    - runtime-observability-projections
+    - runtime-infrastructure
 observability:
   description: "LLM observability — Phoenix traces and evals"
   services:

@@ -268,8 +268,11 @@ class TestWireFromManifest:
         assert len(report.results[0].routes_registered) >= 1
 
     @pytest.mark.asyncio
-    async def test_wire_failure_import_error_raises(self) -> None:
-        """OMN-8735: import errors must raise, not be silently captured."""
+    async def test_wire_failure_import_error_strict_mode_raises(self) -> None:
+        """OMN-9126: import errors raise in strict mode (ONEX_WIRING_STRICT_MODE=1)."""
+        import os
+        from unittest.mock import patch as _patch
+
         from omnibase_core.models.errors import ModelOnexError
 
         handler_routing = _make_handler_routing(
@@ -280,8 +283,30 @@ class TestWireFromManifest:
         manifest = ModelAutoWiringManifest(contracts=(contract,))
 
         engine = MagicMock()
-        with pytest.raises(ModelOnexError):
-            await wire_from_manifest(manifest, engine)
+        with _patch.dict(os.environ, {"ONEX_WIRING_STRICT_MODE": "1"}):
+            with pytest.raises(ModelOnexError):
+                await wire_from_manifest(manifest, engine)
+
+    @pytest.mark.asyncio
+    async def test_wire_failure_import_error_non_strict_warns(self) -> None:
+        """OMN-9126: import errors warn (not raise) in non-strict mode (default)."""
+        import os
+        from unittest.mock import patch as _patch
+
+        handler_routing = _make_handler_routing(
+            handler_name="MissingHandler",
+            handler_module="nonexistent.module",
+        )
+        contract = _make_contract(handler_routing=handler_routing)
+        manifest = ModelAutoWiringManifest(contracts=(contract,))
+
+        engine = MagicMock()
+        with _patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ONEX_WIRING_STRICT_MODE", None)
+            report = await wire_from_manifest(manifest, engine)
+        # OMN-9126: failures included in report so total_failed is accurate.
+        assert report.total_failed == 1
+        assert report.total_wired == 0
 
     @pytest.mark.asyncio
     async def test_unsatisfiable_di_raises_on_startup(self) -> None:

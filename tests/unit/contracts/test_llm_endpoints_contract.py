@@ -67,13 +67,6 @@ _ROLE_TAXONOMY: frozenset[str] = frozenset(
 _PLANNED_NULLABLE_FIELDS: frozenset[str] = frozenset(
     ["host", "port", "endpoint_url", "model_hf_id"]
 )
-# url_env_var and role_env_alias are conditionally null even on running slots
-# (e.g. Docker-internal slots, aliases not yet assigned).  We do NOT assert
-# non-null for these unconditionally; disabled/on_demand/planned slots are
-# explicitly allowed to carry null for any stable-canonical field.
-_CONDITIONALLY_NULLABLE_RUNNING: frozenset[str] = frozenset(
-    ["url_env_var", "role_env_alias"]
-)
 
 
 def _load_endpoints() -> list[dict[str, Any]]:
@@ -97,11 +90,6 @@ class TestLlmEndpointsContract:
             )
             for key in ("slot_id", "role", "status"):
                 assert ep.get(key), f"Entry {ep.get('slot_id')!r} has empty {key}"
-            if ep["status"] != "planned":
-                for key in _PLANNED_NULLABLE_FIELDS:
-                    assert ep.get(key) is not None, (
-                        f"Non-planned slot {ep['slot_id']!r} needs non-null {key}"
-                    )
 
     def test_running_slots_have_core_fields_non_null(self) -> None:
         """Running slots must have host/port/endpoint_url/model_hf_id non-null.
