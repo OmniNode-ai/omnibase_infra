@@ -174,9 +174,16 @@ if [[ "$_publish_tool" == "kcat" ]]; then
     echo "manual-${CORRELATION_ID}/${SIGNED_JSON}" | kcat "${KCAT_ARGS[@]}"
 else
     # rpk fallback — used on .201 where rpk is available inside/outside containers
-    rpk topic produce "${TOPIC}" \
-        --brokers "${KAFKA_BOOTSTRAP_SERVERS}" \
-        <<< "${SIGNED_JSON}"
+    RPK_ARGS=(--brokers "${KAFKA_BOOTSTRAP_SERVERS}" --key "manual-${CORRELATION_ID}")
+    if [[ -n "${KAFKA_SASL_USERNAME:-}" && -n "${KAFKA_SASL_PASSWORD:-}" ]]; then
+        RPK_ARGS+=(
+            --tls-enabled
+            --sasl-mechanism PLAIN
+            --sasl-username "${KAFKA_SASL_USERNAME}"
+            --sasl-password "${KAFKA_SASL_PASSWORD}"
+        )
+    fi
+    rpk topic produce "${TOPIC}" "${RPK_ARGS[@]}" <<< "${SIGNED_JSON}"
 fi
 
 echo "Published. correlation_id=${CORRELATION_ID}"
