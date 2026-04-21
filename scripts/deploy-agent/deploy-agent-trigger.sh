@@ -93,19 +93,33 @@ if [[ -z "$CORRELATION_ID" ]]; then
     CORRELATION_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
 fi
 
-REQUESTED_AT="$(python3 -c 'from datetime import datetime, timezone; print(datetime.now(timezone.utc).isoformat())')"
+# All user-supplied values are passed via environment variables — never
+# interpolated into Python source — so special characters cannot break
+# JSON structure or inject code.
+SIGNED_JSON="$(
+    _TRIGGER_GIT_REF="$GIT_REF" \
+    _TRIGGER_REASON="$REASON" \
+    _TRIGGER_REQUESTED_BY="$REQUESTED_BY" \
+    _TRIGGER_CORRELATION_ID="$CORRELATION_ID" \
+    python3 - <<'PYEOF'
+import hashlib
+import hmac
+import json
+import os
+from datetime import UTC, datetime
 
-# Python handles sort_keys + compact separators to match auth.py exactly.
-read -r SIGNED_JSON < <(python3 - <<PYEOF
-import hashlib, hmac, json, sys
+secret         = os.environ["DEPLOY_AGENT_HMAC_SECRET"]
+correlation_id = os.environ["_TRIGGER_CORRELATION_ID"]
+git_ref        = os.environ["_TRIGGER_GIT_REF"]
+reason         = os.environ["_TRIGGER_REASON"]
+requested_by   = os.environ["_TRIGGER_REQUESTED_BY"]
 
-secret = """${DEPLOY_AGENT_HMAC_SECRET}"""
 envelope = {
-    "correlation_id": "${CORRELATION_ID}",
-    "git_ref":        "${GIT_REF}",
-    "reason":         "${REASON}",
-    "requested_at":   "${REQUESTED_AT}",
-    "requested_by":   "${REQUESTED_BY}",
+    "correlation_id": correlation_id,
+    "git_ref":        git_ref,
+    "reason":         reason,
+    "requested_at":   datetime.now(UTC).isoformat(),
+    "requested_by":   requested_by,
     "scope":          "runtime",
     "services":       [],
 }
@@ -114,15 +128,19 @@ sig  = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 signed = {**envelope, "_signature": sig}
 print(json.dumps(signed, separators=(",", ":")))
 PYEOF
-)
+)"
 
 # ── audit log (signature masked) ─────────────────────────────────────────────
-MASKED_JSON="$(python3 -c "
-import json, sys
-d = json.loads('${SIGNED_JSON//\'/\\\'}')
-d['_signature'] = d['_signature'][:8] + '...<masked>'
+# SIGNED_JSON is passed via environment variable — never interpolated into
+# Python source — so embedded quotes or special characters cannot break syntax.
+MASKED_JSON="$(
+    _TRIGGER_SIGNED_JSON="${SIGNED_JSON}" python3 - <<'PYEOF'
+import json, os
+d = json.loads(os.environ["_TRIGGER_SIGNED_JSON"])
+d["_signature"] = d["_signature"][:8] + "...<masked>"
 print(json.dumps(d, indent=2))
-" 2>/dev/null || echo "${SIGNED_JSON//_signature\":"*"/_signature\":\"<masked>\"}")"
+PYEOF
+)"
 
 echo "=== deploy-agent-trigger ==="
 echo "topic:          ${TOPIC}"
@@ -152,6 +170,7 @@ if [[ "$_publish_tool" == "kcat" ]]; then
             -X "sasl.password=${KAFKA_SASL_PASSWORD}"
         )
     fi
+    # SIGNED_JSON piped via stdin — not passed as a shell argument
     echo "manual-${CORRELATION_ID}/${SIGNED_JSON}" | kcat "${KCAT_ARGS[@]}"
 else
     # rpk fallback — used on .201 where rpk is available inside/outside containers
