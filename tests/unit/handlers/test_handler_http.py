@@ -31,7 +31,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
-from omnibase_infra.handlers.handler_http import HandlerHttpRest
+from omnibase_infra.handlers.handler_http import HandlerHttpRest, _validate_url
 from omnibase_infra.handlers.models.http import ModelHttpBodyContent
 from tests.helpers import (
     DeterministicClock,
@@ -3061,6 +3061,145 @@ class TestHandlerHttpRestEnvVarRangeValidation:
             os.environ.pop("TEST_RANGE_INT", None)
 
 
+class TestHandlerHttpRestUrlSchemeValidation:
+    """Test suite for SSRF URL scheme validation (OMN-435).
+
+    Verifies that the module-level ``_validate_url`` helper rejects non-http(s)
+    schemes before any network activity and that the reject path uses the
+    canonical ``ModelInfraErrorContext`` pattern.
+    """
+
+    @pytest.fixture
+    def handler(self, mock_container: MagicMock) -> HandlerHttpRest:
+        """Create HandlerHttpRest fixture for execute() integration tests."""
+        return HandlerHttpRest(container=mock_container)
+
+    def test_http_scheme_allowed(self) -> None:
+        """http:// URLs pass scheme validation."""
+        _validate_url(
+            "http://example.com/api",
+            operation="http.get",
+            correlation_id=uuid4(),
+        )
+
+    def test_https_scheme_allowed(self) -> None:
+        """https:// URLs pass scheme validation."""
+        _validate_url(
+            "https://example.com/api",
+            operation="http.get",
+            correlation_id=uuid4(),
+        )
+
+    def test_scheme_case_insensitive(self) -> None:
+        """Uppercase HTTP/HTTPS schemes are accepted (RFC 3986 case-insensitive)."""
+        _validate_url(
+            "HTTP://example.com/api",
+            operation="http.get",
+            correlation_id=uuid4(),
+        )
+        _validate_url(
+            "HTTPS://example.com/api",
+            operation="http.get",
+            correlation_id=uuid4(),
+        )
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "file:///etc/passwd",
+            "gopher://internal.example.com/path",
+            "ftp://files.example.com/data",
+            "data:text/plain,payload",
+            "javascript:alert(1)",
+            "ldap://internal.example.com/dc=example",
+        ],
+    )
+    def test_disallowed_schemes_rejected(self, url: str) -> None:
+        """SSRF attack vector schemes are rejected with ProtocolConfigurationError."""
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            _validate_url(
+                url,
+                operation="http.get",
+                correlation_id=uuid4(),
+            )
+
+        assert "Invalid URL scheme" in str(exc_info.value)
+        assert "http, https" in str(exc_info.value)
+        assert "SSRF" in str(exc_info.value)
+
+    def test_empty_scheme_rejected(self) -> None:
+        """URLs without a scheme are rejected."""
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            _validate_url(
+                "example.com/api",
+                operation="http.get",
+                correlation_id=uuid4(),
+            )
+
+        assert "Invalid URL scheme" in str(exc_info.value)
+
+    def test_error_context_propagates_correlation_id(self) -> None:
+        """Raised error carries the caller-provided metadata on its context."""
+        correlation_id = uuid4()
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            _validate_url(
+                "file:///etc/passwd",
+                operation="http.get",
+                correlation_id=correlation_id,
+            )
+
+        additional = exc_info.value.context["additional_context"]
+        assert additional["operation"] == "http.get"
+        assert additional["transport_type"] == EnumInfraTransportType.HTTP
+        assert additional["target_name"] == "http_handler"
+
+    @pytest.mark.asyncio
+    async def test_execute_rejects_ssrf_url_before_network_call(
+        self, handler: HandlerHttpRest
+    ) -> None:
+        """execute() rejects disallowed schemes without invoking the HTTP client."""
+        await handler.initialize({})
+        assert handler._client is not None
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            envelope: dict[str, object] = {
+                "operation": "http.get",
+                "payload": {"url": "file:///etc/passwd"},
+            }
+
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "Invalid URL scheme" in str(exc_info.value)
+            mock_stream.assert_not_called()
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_rejects_gopher_scheme(
+        self, handler: HandlerHttpRest
+    ) -> None:
+        """execute() rejects gopher:// — a classic SSRF pivot scheme."""
+        await handler.initialize({})
+        assert handler._client is not None
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            envelope: dict[str, object] = {
+                "operation": "http.post",
+                "payload": {
+                    "url": "gopher://internal.local:6379/_SET%20foo%20bar",
+                    "body": {"k": "v"},
+                },
+            }
+
+            with pytest.raises(ProtocolConfigurationError):
+                await handler.execute(envelope)
+
+            mock_stream.assert_not_called()
+
+        await handler.shutdown()
+
+
 __all__: list[str] = [
     "TestHandlerHttpRestInitialization",
     "TestHandlerHttpRestGetOperations",
@@ -3076,4 +3215,5 @@ __all__: list[str] = [
     "TestHandlerHttpRestDeterministicIntegration",
     "TestHandlerHttpRestEnvVarParsing",
     "TestHandlerHttpRestEnvVarRangeValidation",
+    "TestHandlerHttpRestUrlSchemeValidation",
 ]
