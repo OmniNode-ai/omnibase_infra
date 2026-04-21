@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# deploy-agent-trigger.sh — publish a signed rebuild-requested command to the
+# deploy-agent Kafka topic (onex.cmd.deploy.rebuild-requested.v1).
+#
+# USAGE:
+#   DEPLOY_AGENT_HMAC_SECRET=<secret> \
+#   KAFKA_BOOTSTRAP_SERVERS=<host:port> \
+#     ./deploy-agent-trigger.sh \
+#       --git-ref origin/main \
+#       --reason "manual trigger by operator" \
+#       [--requested-by claude] \
+#       [--correlation-id <uuid>] \
+#       [--dry-run]
+#
+# REQUIRED ENV VARS:
+#   DEPLOY_AGENT_HMAC_SECRET   HMAC-SHA256 key — from ~/.omnibase/.env on .201
+#   KAFKA_BOOTSTRAP_SERVERS    e.g. 192.168.86.201:19092 (local) or localhost:29092 (tunnel)  # onex-allow-internal-ip # cloud-bus-ok OMN-9411
+#
+# OPTIONAL ENV VARS:
+#   KAFKA_SASL_USERNAME        SASL username (omit for PLAINTEXT connections)
+#   KAFKA_SASL_PASSWORD        SASL password
+#
+# WARNING: Unsigned triggers are silently dropped by auth.py.
+# NEVER construct the command JSON manually — always use this script so the
+# HMAC-SHA256 _signature field is computed correctly.
+#
+# The signature is HMAC-SHA256 over the JSON-serialised envelope (sort_keys,
+# no spaces) with the _signature field itself excluded — matching
+# deploy_agent/auth.py::verify_command() byte-for-byte.
+
+set -euo pipefail
+
+TOPIC="onex.cmd.deploy.rebuild-requested.v1"
+
+# ── defaults ─────────────────────────────────────────────────────────────────
+GIT_REF="origin/main"
+REASON=""
+REQUESTED_BY="operator-manual"
+CORRELATION_ID=""
+DRY_RUN=0
+
+usage() {
+    grep '^# ' "$0" | sed 's/^# //'
+    exit 1
+}
+
+# ── arg parsing ──────────────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --git-ref)         GIT_REF="$2";         shift 2 ;;
+        --reason)          REASON="$2";           shift 2 ;;
+        --requested-by)    REQUESTED_BY="$2";     shift 2 ;;
+        --correlation-id)  CORRELATION_ID="$2";   shift 2 ;;
+        --dry-run)         DRY_RUN=1;             shift   ;;
+        -h|--help)         usage ;;
+        *) echo "Unknown arg: $1" >&2; usage ;;
+    esac
+done
+
+# ── pre-flight ───────────────────────────────────────────────────────────────
+if [[ -z "${DEPLOY_AGENT_HMAC_SECRET:-}" ]]; then
+    echo "ERROR: DEPLOY_AGENT_HMAC_SECRET is not set." >&2
+    echo "       Source it with: source ~/.omnibase/.env" >&2
+    exit 1
+fi
+
+if [[ $DRY_RUN -eq 0 && -z "${KAFKA_BOOTSTRAP_SERVERS:-}" ]]; then
+    echo "ERROR: KAFKA_BOOTSTRAP_SERVERS is not set." >&2
+    exit 1
+fi
+
+if ! command -v python3 &>/dev/null; then
+    echo "ERROR: python3 is required to compute the HMAC signature." >&2
+    exit 1
+fi
+
+# kcat is used for publish; rpk is accepted as fallback on .201
+_publish_tool=""
+if command -v kcat &>/dev/null; then
+    _publish_tool="kcat"
+elif command -v rpk &>/dev/null; then
+    _publish_tool="rpk"
+elif [[ $DRY_RUN -eq 0 ]]; then
+    echo "ERROR: kcat (or rpk) not found. Install kcat: brew install kcat" >&2
+    exit 1
+fi
+
+# ── build envelope + compute signature ───────────────────────────────────────
+if [[ -z "$CORRELATION_ID" ]]; then
+    CORRELATION_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+fi
+
+REQUESTED_AT="$(python3 -c 'from datetime import datetime, timezone; print(datetime.now(timezone.utc).isoformat())')"
+
+# Python handles sort_keys + compact separators to match auth.py exactly.
+read -r SIGNED_JSON < <(python3 - <<PYEOF
+import hashlib, hmac, json, sys
+
+secret = """${DEPLOY_AGENT_HMAC_SECRET}"""
+envelope = {
+    "correlation_id": "${CORRELATION_ID}",
+    "git_ref":        "${GIT_REF}",
+    "reason":         "${REASON}",
+    "requested_at":   "${REQUESTED_AT}",
+    "requested_by":   "${REQUESTED_BY}",
+    "scope":          "runtime",
+    "services":       [],
+}
+body = json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode()
+sig  = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+signed = {**envelope, "_signature": sig}
+print(json.dumps(signed, separators=(",", ":")))
+PYEOF
+)
+
+# ── audit log (signature masked) ─────────────────────────────────────────────
+MASKED_JSON="$(python3 -c "
+import json, sys
+d = json.loads('${SIGNED_JSON//\'/\\\'}')
+d['_signature'] = d['_signature'][:8] + '...<masked>'
+print(json.dumps(d, indent=2))
+" 2>/dev/null || echo "${SIGNED_JSON//_signature\":"*"/_signature\":\"<masked>\"}")"
+
+echo "=== deploy-agent-trigger ==="
+echo "topic:          ${TOPIC}"
+echo "git_ref:        ${GIT_REF}"
+echo "correlation_id: ${CORRELATION_ID}"
+echo "requested_by:   ${REQUESTED_BY}"
+echo "payload (sig masked):"
+echo "${MASKED_JSON}"
+
+if [[ $DRY_RUN -eq 1 ]]; then
+    echo ""
+    echo "(dry-run: skipping Kafka publish)"
+    exit 0
+fi
+
+# ── publish ──────────────────────────────────────────────────────────────────
+echo ""
+echo "Publishing to ${KAFKA_BOOTSTRAP_SERVERS} ..."
+
+if [[ "$_publish_tool" == "kcat" ]]; then
+    KCAT_ARGS=(-P -b "${KAFKA_BOOTSTRAP_SERVERS}" -t "${TOPIC}" -K /)
+    if [[ -n "${KAFKA_SASL_USERNAME:-}" && -n "${KAFKA_SASL_PASSWORD:-}" ]]; then
+        KCAT_ARGS+=(
+            -X security.protocol=SASL_SSL
+            -X sasl.mechanisms=PLAIN
+            -X "sasl.username=${KAFKA_SASL_USERNAME}"
+            -X "sasl.password=${KAFKA_SASL_PASSWORD}"
+        )
+    fi
+    echo "manual-${CORRELATION_ID}/${SIGNED_JSON}" | kcat "${KCAT_ARGS[@]}"
+else
+    # rpk fallback — used on .201 where rpk is available inside/outside containers
+    rpk topic produce "${TOPIC}" \
+        --brokers "${KAFKA_BOOTSTRAP_SERVERS}" \
+        <<< "${SIGNED_JSON}"
+fi
+
+echo "Published. correlation_id=${CORRELATION_ID}"
