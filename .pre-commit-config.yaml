@@ -410,6 +410,12 @@ repos:
         pass_filenames: false
         files: ^src/omnibase_infra/runtime/(auto_wiring/handler_wiring|service_kernel)\.py$
         stages: [pre-commit]
+      - id: normalization-symmetry
+        name: normalization-symmetry
+        entry: uv run python -m omnibase_core.validators.normalization-symmetry
+        language: system
+        pass_filenames: false
+        stages: [manual]
 # Configuration
 default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit]
@@ -427,12 +433,4 @@ ci:
   # Note: onex-validate-clean-root is NOT skipped (standalone script, no omnibase_core dependency)
   # Also skip migration freeze (checks staged files via git diff --cached, which is empty in CI;
   # CI should run: uv run python scripts/validation/validate_migration_freeze.py --check-committed)
-  skip: [no-env-file, onex-validate-architecture, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze]
-
-  - repo: local
-    hooks:
-      - id: normalization-symmetry
-        name: normalization-symmetry
-        entry: uv run python -m omnibase_core.validators.normalization-symmetry
-        language: system
-        pass_filenames: false
+  skip: [no-env-file, onex-validate-architecture, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze, normalization-symmetry]
