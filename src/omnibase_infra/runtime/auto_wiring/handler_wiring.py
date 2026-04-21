@@ -649,9 +649,9 @@ async def wire_from_manifest(
         )
 
     # Phase 2: All contracts validated — commit registrations and subscriptions.
-    # In non-strict mode, failures are logged above but excluded from results so
-    # the service_kernel postcondition (total_failed == 0) remains valid.
-    results: list[ModelContractWiringResult] = []
+    # Failed contracts are included in results so total_failed is accurate.
+    # service_kernel respects the flag before asserting total_failed == 0.
+    results: list[ModelContractWiringResult] = list(failed_results)
     for pcw in prepared_contracts:
         result = await _commit_contract_wiring(pcw, dispatch_engine, event_bus)
         results.append(result)

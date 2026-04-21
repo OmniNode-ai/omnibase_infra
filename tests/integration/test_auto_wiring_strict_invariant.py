@@ -1,10 +1,14 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Integration tests for strict auto-wiring startup invariant [OMN-8735].
+"""Integration tests for strict auto-wiring startup invariant [OMN-8735, OMN-9126].
 
-Verifies that wire_from_manifest raises ModelOnexError when any contract fails
-to wire, instead of silently continuing. This is the hard startup gate added
-in OMN-8735.
+OMN-8735 introduced raise-on-failure as a hard startup gate.
+OMN-9126 gates the raise behind ONEX_WIRING_STRICT_MODE (default OFF) so that
+the runtime can start with non-compliant handlers while compliance is being
+resolved, without requiring a full pre-strict rollback.
+
+Non-strict mode (default): failures logged as WARNING, included in report.
+Strict mode (ONEX_WIRING_STRICT_MODE=1): raises ModelOnexError as before.
 """
 
 from __future__ import annotations
@@ -55,12 +59,16 @@ def _make_contract(name: str, handler_module: str) -> ModelDiscoveredContract:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_wire_from_manifest_raises_on_bad_contract() -> None:
-    """wire_from_manifest must raise ModelOnexError when a contract fails to wire.
+async def test_wire_from_manifest_raises_in_strict_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In strict mode, wire_from_manifest raises ModelOnexError on bad contract.
 
-    OMN-8735 strict invariant: failures abort startup, no swallow-and-continue.
+    ONEX_WIRING_STRICT_MODE=1 restores the OMN-8735 hard startup gate.
     """
     from omnibase_core.models.errors import ModelOnexError
+
+    monkeypatch.setenv("ONEX_WIRING_STRICT_MODE", "1")
 
     contract = _make_contract(
         name="node_bad",
@@ -81,12 +89,16 @@ async def test_wire_from_manifest_raises_on_bad_contract() -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_wire_from_manifest_collects_all_failures_before_raising() -> None:
-    """All failing contracts are reported together in the raised ModelOnexError.
+async def test_wire_from_manifest_collects_all_failures_in_strict_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In strict mode, all failing contracts are reported together in the raised error.
 
     Ensures the error message lists all contract names, not just the first.
     """
     from omnibase_core.models.errors import ModelOnexError
+
+    monkeypatch.setenv("ONEX_WIRING_STRICT_MODE", "1")
 
     contracts = [
         _make_contract(
@@ -115,3 +127,35 @@ async def test_wire_from_manifest_collects_all_failures_before_raising() -> None
         assert f"node_bad_{i}" in error_msg, (
             f"Expected contract name 'node_bad_{i}' in error message: {error_msg!r}"
         )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_wire_from_manifest_non_strict_does_not_raise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In non-strict mode (default), wire_from_manifest returns report without raising.
+
+    OMN-9126: failures are included in report.total_failed; runtime continues.
+    """
+    monkeypatch.delenv("ONEX_WIRING_STRICT_MODE", raising=False)
+
+    contract = _make_contract(
+        name="node_bad",
+        handler_module="nonexistent.module.that.does.not.exist",
+    )
+    manifest = ModelAutoWiringManifest(contracts=[contract])
+
+    dispatch_engine = MagicMock()
+    event_bus = AsyncMock()
+
+    report = await wire_from_manifest(
+        manifest=manifest,
+        dispatch_engine=dispatch_engine,
+        event_bus=event_bus,
+    )
+
+    assert report.total_failed == 1, (
+        f"Expected 1 failure in non-strict report, got {report.total_failed}"
+    )
+    assert report.total_wired == 0
