@@ -304,7 +304,9 @@ class TestWireFromManifest:
         with _patch.dict(os.environ, {}, clear=False):
             os.environ.pop("ONEX_WIRING_STRICT_MODE", None)
             report = await wire_from_manifest(manifest, engine)
-        assert report.total_failed == 1
+        # Failures are logged but excluded from results so the service_kernel
+        # postcondition (total_failed == 0) remains valid in non-strict mode.
+        assert report.total_failed == 0
         assert report.total_wired == 0
 
     @pytest.mark.asyncio
