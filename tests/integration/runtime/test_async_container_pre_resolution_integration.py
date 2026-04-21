@@ -154,6 +154,7 @@ async def test_async_pre_resolution_miss_falls_through_to_zero_arg() -> None:
     manifest = ModelAutoWiringManifest(contracts=(contract,), errors=())
 
     container = MagicMock()
+    container.get_service = MagicMock(side_effect=ServiceResolutionError("sync miss"))
     container.get_service_async = AsyncMock(side_effect=ServiceResolutionError("miss"))
 
     event_bus = MagicMock()
@@ -175,3 +176,5 @@ async def test_async_pre_resolution_miss_falls_through_to_zero_arg() -> None:
 
     assert report.total_failed == 0
     assert report.total_wired == 1
+    container.get_service_async.assert_called_once_with(_HandlerZeroArg)
+    container.get_service.assert_called_once_with(_HandlerZeroArg)

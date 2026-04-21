@@ -18,7 +18,6 @@ This test proves:
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -37,7 +36,6 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelHandlerRouting,
     ModelHandlerRoutingEntry,
 )
-from omnibase_infra.runtime.auto_wiring.report import EnumWiringOutcome
 
 # ---------------------------------------------------------------------------
 # Helpers
