@@ -77,6 +77,8 @@ runtime:
     - runtime-integrations
     - runtime-observability-projections
     - runtime-infrastructure
+  inject_env: {}
+  inject_required_env: []
 observability:
   description: "LLM observability — Phoenix traces and evals"
   services:
