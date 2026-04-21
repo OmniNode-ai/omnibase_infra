@@ -25,7 +25,11 @@ from deploy_agent.executor import SCOPE_BUNDLES, DeployExecutor
 from deploy_agent.health import create_health_app
 from deploy_agent.job_state import JobStore
 from deploy_agent.lock import single_flight_lock
-from deploy_agent.publisher import build_completion_payload, publish_result
+from deploy_agent.publisher import (
+    PublishCircuitBreaker,
+    build_completion_payload,
+    publish_result,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +40,24 @@ BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 HEALTH_PORT = int(os.environ.get("DEPLOY_AGENT_PORT", "8099"))
 PUBLISH_RETRY_INTERVAL = 30
 
+# Guard: sd_notify is only available on Linux with systemd-python installed.
+# Falls back to a no-op so the agent runs correctly on dev/macOS/CI.
+# We use Type=simple (not Type=notify) to avoid a startup deadlock when the
+# library is absent — the watchdog ping still works regardless.
+try:
+    from systemd.daemon import notify as _sd_notify  # type: ignore[import-not-found]
+
+    def _watchdog_ping() -> None:
+        _sd_notify("WATCHDOG=1")
+
+except ImportError:  # pragma: no cover
+
+    def _watchdog_ping() -> None:  # type: ignore[misc]  # stub-ok: no-op fallback on non-Linux
+        pass
+
+
+WATCHDOG_INTERVAL = 10  # seconds — well under WatchdogSec=30 in the unit file
+
 
 class DeployAgent:
     def __init__(self, *, skip_self_update: bool = False):
@@ -45,6 +67,7 @@ class DeployAgent:
         self._shutdown = False
         self._current_git_sha = ""
         self._skip_self_update = skip_self_update
+        self._publish_cb = PublishCircuitBreaker()
 
     def _get_state(self) -> str:
         return self._state
@@ -102,6 +125,8 @@ class DeployAgent:
             loop.add_signal_handler(sig, self._handle_shutdown)
 
         publish_retry_task = asyncio.create_task(self._publish_retry_loop())
+        # Watchdog runs in its own task so long-running deploys don't miss the deadline.
+        watchdog_task = asyncio.create_task(self._watchdog_loop())
 
         try:
             while not self._shutdown:
@@ -114,6 +139,7 @@ class DeployAgent:
                     await asyncio.sleep(1)
         finally:
             publish_retry_task.cancel()
+            watchdog_task.cancel()
             consumer.close()
             await runner.cleanup()
             logger.info("Deploy agent stopped")
@@ -192,6 +218,7 @@ class DeployAgent:
             if publish_result(payload):
                 job.phase_results[Phase.PUBLISH] = PhaseStatus.SUCCESS
                 self.job_store._save(job)
+                self._publish_cb.record_success(str(cid))
             else:
                 job.phase_results[Phase.PUBLISH] = PhaseStatus.FAILED
                 job.result_publish_pending = True
@@ -223,14 +250,32 @@ class DeployAgent:
     async def _retry_pending_publishes(self) -> None:
         pending = self.job_store.get_pending_publish()
         for job in pending:
+            cid_str = str(job.correlation_id)
+            if self._publish_cb.is_tripped(cid_str):
+                logger.critical(
+                    "Publish circuit breaker tripped for job %s — "
+                    "dropping from pending queue after repeated failures. "
+                    "Manual investigation required. "
+                    "friction_type=publish_circuit_breaker_tripped",
+                    cid_str,
+                )
+                self.job_store.mark_published(job.correlation_id)
+                self._publish_cb.clear(cid_str)
+                continue
+
             payload = build_completion_payload(job, "")
             if publish_result(payload):
                 self.job_store.mark_published(job.correlation_id)
-                logger.info("Retried publish for %s: success", job.correlation_id)
+                self._publish_cb.record_success(cid_str)
+                logger.info("Retried publish for %s: success", cid_str)
             else:
-                logger.warning(
-                    "Retried publish for %s: still failing", job.correlation_id
-                )
+                self._publish_cb.record_failure(cid_str)
+                logger.warning("Retried publish for %s: still failing", cid_str)
+
+    async def _watchdog_loop(self) -> None:
+        while True:
+            _watchdog_ping()
+            await asyncio.sleep(WATCHDOG_INTERVAL)
 
     async def _publish_retry_loop(self) -> None:
         while True:
