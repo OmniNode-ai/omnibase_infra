@@ -50,7 +50,7 @@ dependencies = [
     #   - SHAs provide audit trail and tamper-evidence
     # Core dependencies
     "pydantic>=2.11.7,<3.0.0",
-    "fastapi>=0.120.1,<0.136.0",
+    "fastapi>=0.120.1,<0.137.0",
     "uvicorn>=0.32.0,<0.45.0",
     "pyyaml>=6.0.2,<7.0.0",
     "aiohttp>=3.9.0,<4.0.0",
