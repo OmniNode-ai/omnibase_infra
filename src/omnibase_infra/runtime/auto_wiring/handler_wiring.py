@@ -632,16 +632,26 @@ async def wire_from_manifest(
             )
 
     # Check for failures before committing any side effects.
+    # ONEX_WIRING_STRICT_MODE=1 raises on any failure (default OFF per OMN-9126:
+    # strict gate ships after all downstream consumers are compliant).
     failures = failed_results
     if failures:
         failed_reasons = [f"{r.contract_name}: {r.reason}" for r in failures]
-        raise ModelOnexError(
-            f"Auto-wiring failed for {len(failures)} contract(s): "
-            + "; ".join(failed_reasons)
+        if os.environ.get("ONEX_WIRING_STRICT_MODE", "").lower() in ("1", "true"):
+            raise ModelOnexError(
+                f"Auto-wiring failed for {len(failures)} contract(s): "
+                + "; ".join(failed_reasons)
+            )
+        logger.warning(
+            "Auto-wiring failed for %d contract(s) (non-strict — set ONEX_WIRING_STRICT_MODE=1 to enforce): %s",
+            len(failures),
+            "; ".join(failed_reasons),
         )
 
     # Phase 2: All contracts validated — commit registrations and subscriptions.
-    results: list[ModelContractWiringResult] = []
+    # Failed contracts are included in results so total_failed is accurate.
+    # service_kernel respects the flag before asserting total_failed == 0.
+    results: list[ModelContractWiringResult] = list(failed_results)
     for pcw in prepared_contracts:
         result = await _commit_contract_wiring(pcw, dispatch_engine, event_bus)
         results.append(result)

@@ -2230,12 +2230,29 @@ async def bootstrap() -> int:
 
                 auto_wiring_duration = time.time() - auto_wiring_start
 
-                # Strict invariant (OMN-8735): wire_from_manifest raises on any
-                # failure, so reaching here guarantees total_failed == 0.
-                assert auto_wiring_report.total_failed == 0, (
-                    f"Auto-wiring postcondition violated: "
-                    f"total_failed={auto_wiring_report.total_failed}"
-                )
+                # OMN-9126: in strict mode wire_from_manifest raises, so
+                # total_failed == 0 is guaranteed. In non-strict mode failures
+                # are logged-only; assert only when strict mode is active.
+                if os.environ.get("ONEX_WIRING_STRICT_MODE", "").lower() in (
+                    "1",
+                    "true",
+                ):
+                    assert auto_wiring_report.total_failed == 0, (
+                        f"Auto-wiring postcondition violated: "
+                        f"total_failed={auto_wiring_report.total_failed}"
+                    )
+                elif auto_wiring_report.total_failed > 0:
+                    logger.warning(
+                        "Auto-wiring completed with %d failure(s) "
+                        "(non-strict mode — set ONEX_WIRING_STRICT_MODE=1 to enforce): "
+                        "%s",
+                        auto_wiring_report.total_failed,
+                        [
+                            r.contract_name
+                            for r in auto_wiring_report.results
+                            if r.outcome.value == "failed"
+                        ],
+                    )
 
                 logger.info(
                     "Auto-wiring completed in %.3fs: wired=%d skipped=%d "
