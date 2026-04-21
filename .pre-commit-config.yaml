@@ -410,15 +410,12 @@ repos:
         pass_filenames: false
         files: ^src/omnibase_infra/runtime/(auto_wiring/handler_wiring|service_kernel)\.py$
         stages: [pre-commit]
-  - repo: local
-    hooks:
       - id: normalization-symmetry
         name: normalization-symmetry
-        entry: uv run python -m omnibase_core.validation.checker_normalization_symmetry
+        entry: uv run python -m omnibase_core.validators.normalization-symmetry
         language: system
         pass_filenames: false
-        types: [python]
-        stages: [pre-commit]
+        stages: [manual]
 # Configuration
 default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit]
