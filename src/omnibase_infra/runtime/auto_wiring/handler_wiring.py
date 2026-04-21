@@ -632,16 +632,26 @@ async def wire_from_manifest(
             )
 
     # Check for failures before committing any side effects.
+    # ONEX_WIRING_STRICT_MODE=1 raises on any failure (default OFF per OMN-9126:
+    # strict gate ships after all downstream consumers are compliant).
     failures = failed_results
     if failures:
         failed_reasons = [f"{r.contract_name}: {r.reason}" for r in failures]
-        raise ModelOnexError(
-            f"Auto-wiring failed for {len(failures)} contract(s): "
-            + "; ".join(failed_reasons)
+        if os.environ.get("ONEX_WIRING_STRICT_MODE", "").lower() in ("1", "true"):
+            raise ModelOnexError(
+                f"Auto-wiring failed for {len(failures)} contract(s): "
+                + "; ".join(failed_reasons)
+            )
+        logger.warning(
+            "Auto-wiring failed for %d contract(s) (non-strict — set ONEX_WIRING_STRICT_MODE=1 to enforce): %s",
+            len(failures),
+            "; ".join(failed_reasons),
         )
 
     # Phase 2: All contracts validated — commit registrations and subscriptions.
-    results: list[ModelContractWiringResult] = []
+    # Failed contracts are included in results so total_failed is accurate.
+    # service_kernel respects the flag before asserting total_failed == 0.
+    results: list[ModelContractWiringResult] = list(failed_results)
     for pcw in prepared_contracts:
         result = await _commit_contract_wiring(pcw, dispatch_engine, event_bus)
         results.append(result)
@@ -942,6 +952,16 @@ def _prepare_handler_wiring(
     message_types: set[str] | None = None
     if entry.event_model is not None:
         message_types = {entry.event_model.name}
+    # OMN-9215: index the dispatcher under the contract-declared event_type alias
+    # in addition to the Pydantic class name. Publishers set
+    # ModelEventEnvelope.event_type to the dot-path string; without this alias,
+    # the dispatcher lookup falls back to type(payload).__name__ which resolves
+    # to "dict" on object-erased envelopes and never matches the class-name key.
+    # Strip surrounding whitespace so registration matches the dispatch-engine
+    # normalization (service_message_dispatch_engine.py normalizes via .strip()).
+    event_type_alias = entry.event_type.strip() if entry.event_type else ""
+    if event_type_alias:
+        message_types = (message_types or set()) | {event_type_alias}
 
     if (
         resolution.outcome
