@@ -94,6 +94,29 @@ def _sanitize_exc(exc: BaseException) -> str:
     return sanitized[:200]
 
 
+async def _async_resolve_from_container(
+    container: object,
+    handler_cls: type,
+) -> object | None:
+    """Try to resolve handler_cls from container using get_service_async.
+
+    Returns the resolved instance on success, None on ServiceResolutionError
+    (service not registered), and re-raises any other exception.
+
+    This avoids calling container.get_service() (sync) from inside a running
+    event loop where asyncio.run() would raise RuntimeError (OMN-9410).
+    """
+    from omnibase_core.errors.error_service_resolution import ServiceResolutionError
+
+    get_service_async = getattr(container, "get_service_async", None)
+    if get_service_async is None:
+        return None
+    try:
+        return await get_service_async(handler_cls)
+    except ServiceResolutionError:
+        return None
+
+
 # Type alias matching MessageDispatchEngine.DispatcherFunc
 DispatcherFunc = Callable[
     ["ModelEventEnvelope[object]"],
@@ -593,6 +616,38 @@ async def wire_from_manifest(
     # core+spi types meet via isinstance; see plan §Layering Invariants.
     _assert_is_ownership_query(ownership_query)
 
+    # Phase 0: Async pre-resolution — resolve handler instances from container via
+    # get_service_async before entering the sync _prepare_contract_wiring loop.
+    # This avoids calling container.get_service() (sync) from inside a running event
+    # loop where the underlying asyncio.run() raises RuntimeError (OMN-9410).
+    # Pre-resolved instances are threaded as pre_resolved_handlers so the sync resolver
+    # can skip its container Step 3 entirely for these handlers.
+    pre_resolved_handlers: dict[str, object] = {}
+    if container is not None:
+        for contract in manifest.contracts:
+            if contract.handler_routing is None:
+                continue
+            for entry in contract.handler_routing.handlers:
+                handler_name = entry.handler.name
+                if handler_name in pre_resolved_handlers:
+                    continue
+                try:
+                    handler_cls = _import_handler_class(
+                        entry.handler.module, handler_name
+                    )
+                    instance = await _async_resolve_from_container(
+                        container, handler_cls
+                    )
+                    if instance is not None:
+                        pre_resolved_handlers[handler_name] = instance
+                        logger.debug(
+                            "Auto-wiring: pre-resolved %s.%s via container (async)",
+                            entry.handler.module,
+                            handler_name,
+                        )
+                except Exception:  # noqa: BLE001 — import errors are caught per-contract in Phase 1
+                    pass
+
     # Phase 1: Validate and prepare ALL contracts — no engine/bus side effects yet.
     # Failures are collected; if any exist, we raise before touching anything (OMN-8735).
     prepared_contracts: list[PreparedContractWiring] = []
@@ -607,6 +662,9 @@ async def wire_from_manifest(
                 event_bus=event_bus,
                 environment=environment,
                 container=container,
+                pre_resolved_handlers=pre_resolved_handlers
+                if pre_resolved_handlers
+                else None,
             )
             prepared_contracts.append(prepared)
         except TypeError:
@@ -692,6 +750,7 @@ def _prepare_contract_wiring(
     environment: str,
     container: object | None = None,
     materialized_explicit_dependencies: (dict[str, dict[str, object]] | None) = None,
+    pre_resolved_handlers: dict[str, object] | None = None,
 ) -> PreparedContractWiring:
     """Prepare one contract for wiring — NO side effects.
 
@@ -740,6 +799,7 @@ def _prepare_contract_wiring(
                 event_bus=event_bus,
                 container=container,
                 materialized_explicit_dependencies=materialized_explicit_dependencies,
+                pre_resolved_handlers=pre_resolved_handlers,
             )
             prepared_wirings.append(prepared)
         except TypeError:
@@ -901,6 +961,7 @@ def _prepare_handler_wiring(
     event_bus: object | None = None,
     container: object | None = None,
     materialized_explicit_dependencies: (dict[str, dict[str, object]] | None) = None,
+    pre_resolved_handlers: dict[str, object] | None = None,
 ) -> PreparedWiring:
     """Prepare one handler entry — delegates construction to the resolver.
 
@@ -913,7 +974,18 @@ def _prepare_handler_wiring(
     OMN-8735 fail-fast is preserved: the resolver's Step 6 ``TypeError`` is
     NOT caught here; it propagates unchanged to the caller. ``is_skip``
     entries returned from this function MUST NOT be committed.
+
+    pre_resolved_handlers: Instances already resolved via get_service_async in
+    Phase 0 of wire_from_manifest (OMN-9410). When present for a handler, the
+    resolver's container Step 3 is bypassed — the pre-resolved instance is used
+    directly. This avoids asyncio.run() inside a running event loop.
     """
+    from omnibase_core.enums.enum_handler_resolution_outcome import (
+        EnumHandlerResolutionOutcome,
+    )
+    from omnibase_core.models.resolver.model_handler_resolution import (
+        ModelHandlerResolution,
+    )
     from omnibase_infra.enums import EnumMessageCategory
     from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
 
@@ -926,21 +998,38 @@ def _prepare_handler_wiring(
         else None
     )
 
-    # node_name=contract.name: established ONEX naming convention — see
-    # ModelNodeIdentity construction at _commit_contract_wiring below.
-    ctx = ModelHandlerResolverContext(
-        handler_cls=handler_cls,
-        handler_module=handler_ref.module,
-        handler_name=handler_ref.name,
-        contract_name=contract.name,
-        node_name=contract.name,
-        explicit_dependency_shape=None,
-        materialized_explicit_dependencies=materialized_explicit_dependencies,
-        event_bus=event_bus,
-        container=_effective_container,
-        ownership_query=ownership_query,
+    # Fast path: if Phase 0 pre-resolved this handler via get_service_async,
+    # skip the sync resolver's container Step 3 entirely (OMN-9410).
+    pre_resolved_instance = (
+        pre_resolved_handlers.get(handler_ref.name) if pre_resolved_handlers else None
     )
-    resolution = resolver.resolve(ctx)
+
+    if pre_resolved_instance is not None:
+        resolution = ModelHandlerResolution(
+            outcome=EnumHandlerResolutionOutcome.RESOLVED_VIA_CONTAINER,
+            handler_instance=pre_resolved_instance,
+        )
+        logger.debug(
+            "Auto-wiring: using pre-resolved instance for %s.%s",
+            handler_ref.module,
+            handler_ref.name,
+        )
+    else:
+        # node_name=contract.name: established ONEX naming convention — see
+        # ModelNodeIdentity construction at _commit_contract_wiring below.
+        ctx = ModelHandlerResolverContext(
+            handler_cls=handler_cls,
+            handler_module=handler_ref.module,
+            handler_name=handler_ref.name,
+            contract_name=contract.name,
+            node_name=contract.name,
+            explicit_dependency_shape=None,
+            materialized_explicit_dependencies=materialized_explicit_dependencies,
+            event_bus=event_bus,
+            container=_effective_container,
+            ownership_query=ownership_query,
+        )
+        resolution = resolver.resolve(ctx)
 
     # Determine category + message types up-front; both skip and non-skip
     # paths carry them on PreparedWiring for deterministic reporting.
