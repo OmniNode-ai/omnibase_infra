@@ -70,7 +70,7 @@ class GitHubHttpClient:
     def _graphql(self, query: str, variables: dict[str, object]) -> dict[str, Any]:
         """Execute a GraphQL query. Returns the ``data`` dict. Never raises."""
         payload = json.dumps({"query": query, "variables": variables}).encode()
-        req = urllib.request.Request(
+        req = urllib.request.Request(  # noqa: S310
             _GITHUB_GRAPHQL,
             data=payload,
             headers={
@@ -79,7 +79,7 @@ class GitHubHttpClient:
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=_DEFAULT_TIMEOUT) as resp:
+            with urllib.request.urlopen(req, timeout=_DEFAULT_TIMEOUT) as resp:  # noqa: S310
                 body = json.loads(resp.read())
             if "errors" in body:
                 _log.warning("GraphQL errors: %s", body["errors"])
@@ -90,15 +90,29 @@ class GitHubHttpClient:
             _log.warning("GraphQL request failed: %s", exc)
             return {}
 
-    def _rest_get(self, path: str, *, timeout: int = _DEFAULT_TIMEOUT) -> dict[str, Any] | None:
+    def _rest_get(
+        self, path: str, *, timeout: int = _DEFAULT_TIMEOUT
+    ) -> dict[str, Any] | None:
         """REST GET. Returns parsed JSON or None. Never raises."""
         return self._rest_request("GET", path, timeout=timeout)
 
-    def _rest_post(self, path: str, body: dict[str, Any] | None = None, *, timeout: int = _DEFAULT_TIMEOUT) -> dict[str, Any] | None:
+    def _rest_post(
+        self,
+        path: str,
+        body: dict[str, Any] | None = None,
+        *,
+        timeout: int = _DEFAULT_TIMEOUT,
+    ) -> dict[str, Any] | None:
         """REST POST. Returns parsed JSON or None. Never raises."""
         return self._rest_request("POST", path, json_body=body, timeout=timeout)
 
-    def _rest_put(self, path: str, body: dict[str, Any] | None = None, *, timeout: int = _DEFAULT_TIMEOUT) -> dict[str, Any] | None:
+    def _rest_put(
+        self,
+        path: str,
+        body: dict[str, Any] | None = None,
+        *,
+        timeout: int = _DEFAULT_TIMEOUT,
+    ) -> dict[str, Any] | None:
         """REST PUT. Returns parsed JSON or None. Never raises."""
         return self._rest_request("PUT", path, json_body=body, timeout=timeout)
 
@@ -113,7 +127,7 @@ class GitHubHttpClient:
         """Generic REST request. Returns parsed JSON or None. Never raises."""
         url = f"{_GITHUB_REST}{path}"
         data = json.dumps(json_body).encode() if json_body else None
-        req = urllib.request.Request(
+        req = urllib.request.Request(  # noqa: S310
             url,
             data=data,
             method=method,
@@ -124,7 +138,7 @@ class GitHubHttpClient:
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
                 raw = resp.read()
                 return json.loads(raw) if raw else None
         except urllib.error.HTTPError as exc:
@@ -185,7 +199,9 @@ query($owner: String!, $name: String!, $after: String) {
 
                 # CI checks fetched separately via REST (GraphQL inline fragments
                 # on StatusCheckRollupContextConnection are not supported).
-                node["statusCheckRollup"] = self._fetch_pr_checks_rest(repo, node["number"])
+                node["statusCheckRollup"] = self._fetch_pr_checks_rest(
+                    repo, node["number"]
+                )
                 all_prs.append(node)
 
             page_info = pr_conn.get("pageInfo", {})
@@ -205,16 +221,20 @@ query($owner: String!, $name: String!, $after: String) {
         if detail:
             head_oid = detail.get("headRefOid", "")
             if head_oid:
-                data = self._rest_get(f"/repos/{repo}/commits/{head_oid}/check-runs", timeout=15)
+                data = self._rest_get(
+                    f"/repos/{repo}/commits/{head_oid}/check-runs", timeout=15
+                )
                 if isinstance(data, dict):
                     for run in data.get("check_runs", []):
                         conclusion = (run.get("conclusion") or "").upper()
-                        results.append({
-                            "name": run.get("name", ""),
-                            "conclusion": conclusion,
-                            "status": run.get("status", ""),
-                            "isRequired": True,
-                        })
+                        results.append(
+                            {
+                                "name": run.get("name", ""),
+                                "conclusion": conclusion,
+                                "status": run.get("status", ""),
+                                "isRequired": True,
+                            }
+                        )
 
         return results
 
@@ -222,18 +242,24 @@ query($owner: String!, $name: String!, $after: String) {
     # PR detail resolution
     # ------------------------------------------------------------------
 
-    def fetch_pr_detail(self, repo: str, pr_number: int, fields: str = "id,headRefName") -> dict[str, Any] | None:
+    def fetch_pr_detail(
+        self, repo: str, pr_number: int, fields: str = "id,headRefName"
+    ) -> dict[str, Any] | None:
         """Fetch specific fields for a single PR via GraphQL.
 
         Returns dict with requested fields, or None on failure.
         """
-        query = """
+        query = (
+            """
 query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) { """ + fields + """ }
+    pullRequest(number: $number) { """
+            + fields
+            + """ }
   }
 }
 """
+        )
         owner, name = _split_repo(repo)
         data = self._graphql(query, {"owner": owner, "name": name, "number": pr_number})
         repo_data = data.get("repository")
@@ -242,7 +268,9 @@ query($owner: String!, $name: String!, $number: Int!) {
         pr = repo_data.get("pullRequest")
         return pr if isinstance(pr, dict) else None
 
-    def resolve_pr_graphql_id(self, repo: str, pr_number: int) -> tuple[str | None, str | None]:
+    def resolve_pr_graphql_id(
+        self, repo: str, pr_number: int
+    ) -> tuple[str | None, str | None]:
         """Resolve (node_id, head_ref_name) for a PR. Returns (None, None) on failure."""
         detail = self.fetch_pr_detail(repo, pr_number, "id,headRefName")
         if not detail:
@@ -251,7 +279,9 @@ query($owner: String!, $name: String!, $number: Int!) {
 
     def resolve_pr_refs(self, repo: str, pr_number: int) -> tuple[str, str, str] | None:
         """Resolve (head_ref, base_ref, head_oid) for a PR. Returns None on failure."""
-        detail = self.fetch_pr_detail(repo, pr_number, "headRefName,baseRefName,headRefOid")
+        detail = self.fetch_pr_detail(
+            repo, pr_number, "headRefName,baseRefName,headRefOid"
+        )
         if not detail:
             return None
         head = detail.get("headRefName", "")
@@ -276,12 +306,20 @@ query($owner: String!, $name: String!, $number: Int!) {
                 if detail:
                     head_oid = detail.get("headRefOid", "")
                     if head_oid:
-                        data = self._rest_get(f"/repos/{repo}/commits/{head_oid}/check-runs")
+                        data = self._rest_get(
+                            f"/repos/{repo}/commits/{head_oid}/check-runs"
+                        )
                         if isinstance(data, dict):
                             for run in data.get("check_runs", []):
                                 if (run.get("conclusion") or "").upper() == "FAILURE":
-                                    url = str(run.get("details_url") or run.get("html_url") or "")
-                                    run_id = url.rstrip("/").split("/")[-1] if url else None
+                                    url = str(
+                                        run.get("details_url")
+                                        or run.get("html_url")
+                                        or ""
+                                    )
+                                    run_id = (
+                                        url.rstrip("/").split("/")[-1] if url else None
+                                    )
                                     if run_id:
                                         return str(run_id)
         return None
@@ -318,8 +356,8 @@ query($owner: String!, $name: String!, $number: Int!) {
         owner, name = _split_repo(repo)
         data = self._graphql(query, {"owner": owner, "name": name, "number": pr_number})
         pr_data = (data.get("repository") or {}).get("pullRequest", {})
-        threads: list[dict[str, Any]] = (
-            (pr_data.get("reviewThreads") or {}).get("nodes", [])
+        threads: list[dict[str, Any]] = (pr_data.get("reviewThreads") or {}).get(
+            "nodes", []
         )
         ids: list[str] = []
         for thread in threads:
@@ -373,15 +411,20 @@ mutation($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod) {
   }
 }
 """
-        data = self._graphql(mutation, {
-            "pullRequestId": pr_node_id,
-            "mergeMethod": merge_method,
-        })
+        data = self._graphql(
+            mutation,
+            {
+                "pullRequestId": pr_node_id,
+                "mergeMethod": merge_method,
+            },
+        )
         return "enablePullRequestAutoMerge" in data
 
     def rerun_check_suite(self, repo: str, check_suite_id: str) -> bool:
         """Rerun a check suite via REST API. Returns True on success."""
-        result = self._rest_post(f"/repos/{repo}/check-suites/{check_suite_id}/rerequest")
+        result = self._rest_post(
+            f"/repos/{repo}/check-suites/{check_suite_id}/rerequest"
+        )
         return result is not None
 
     def post_review_thread_reply(self, thread_comment_id: str, body: str) -> bool:
@@ -393,10 +436,13 @@ mutation($pullRequestReviewThreadId: ID!, $body: String!) {
   }
 }
 """
-        data = self._graphql(mutation, {
-            "pullRequestReviewThreadId": thread_comment_id,
-            "body": body,
-        })
+        data = self._graphql(
+            mutation,
+            {
+                "pullRequestReviewThreadId": thread_comment_id,
+                "body": body,
+            },
+        )
         return "addPullRequestReviewThreadReply" in data
 
 
