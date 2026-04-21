@@ -127,7 +127,8 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          docker compose -f docker/docker-compose.e2e.yml up -d postgres redpanda
+          POSTGRES_PORT="${{ inputs.compose_pg_port }}" \
+            docker compose -f docker/docker-compose.e2e.yml up -d postgres redpanda
           # Wait for redpanda admin API + postgres to become responsive.
           for i in $(seq 1 60); do
             if docker exec omnibase-infra-redpanda rpk cluster health >/dev/null 2>&1 \
@@ -218,9 +219,18 @@ jobs:
       - name: Query registration_projections for active/fresh rows
         id: pg_liveness
         env:
-          PGPASSWORD: postgres
+          REAL_PG_PASSWORD: ${{ secrets.RUNTIME_PG_PASSWORD }}
         run: |
           set -euo pipefail
+          if [[ "${{ inputs.mode }}" == "compose" ]]; then
+            export PGPASSWORD="test-password"
+          else
+            if [[ -z "${REAL_PG_PASSWORD:-}" ]]; then
+              echo "::error::Missing secret: RUNTIME_PG_PASSWORD (required in real mode)"
+              exit 1
+            fi
+            export PGPASSWORD="${REAL_PG_PASSWORD}"
+          fi
           count=$(psql -h "${RUNTIME_HOST}" -p "${PG_PORT}" -U postgres -d "${POSTGRES_DATABASE}" \
             -tAc "SELECT count(*) FROM registration_projections WHERE current_state='active' AND last_heartbeat_at > NOW() - INTERVAL '60 seconds'")
           echo "active_fresh_registrations=${count}"
@@ -249,6 +259,14 @@ jobs:
             cat rpk_groups.txt
             exit 1
           fi
+          # Assert the group has at least one member — presence alone is not enough.
+          member_count=$(echo "$raw" | awk '/onex-runtime/{print $NF}' | grep -E '^[0-9]+$' | head -1 || echo "0")
+          if [[ -z "$member_count" ]] || [[ "$member_count" -lt 1 ]]; then
+            echo "::error::onex-runtime consumer group has 0 members (got '${member_count}')"
+            cat rpk_groups.txt
+            exit 1
+          fi
+          echo "onex-runtime group member_count=${member_count}"
 
       - name: Emit smoke-result.json artifact
         if: always()
