@@ -107,6 +107,7 @@ class TestVerificationOrchestrator:
             for c in report.checks
             if c.check_type == EnumContractCheckType.SUBSCRIPTION
         ]
+        assert sub_checks, "Expected at least one SUBSCRIPTION check"
         assert all(c.verdict == EnumValidationVerdict.QUARANTINE for c in sub_checks)
         assert all("grounding=FABRICATED" in c.evidence for c in sub_checks)
 

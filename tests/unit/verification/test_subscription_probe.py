@@ -110,6 +110,7 @@ class TestCheckSubscriptionsFail:
         results = check_subscriptions(
             contract, kafka_admin_fn=_make_admin_fn(subscribed=set())
         )
+        assert len(results) == len(SAMPLE_TOPICS)
         assert all(r.verdict == EnumValidationVerdict.FAIL for r in results)
         assert all("grounding=DISCOVERED" in r.evidence for r in results)
 
@@ -184,6 +185,7 @@ class TestCheckSubscriptionsQuarantine:
         results = check_subscriptions(
             contract, kafka_admin_fn=_make_admin_fn(subscribed=set())
         )
+        assert len(results) == len(SAMPLE_TOPICS)
         assert all(r.verdict == EnumValidationVerdict.QUARANTINE for r in results)
         assert all("grounding=FABRICATED" in r.evidence for r in results)
         assert all("quarantined" in r.message.lower() for r in results)

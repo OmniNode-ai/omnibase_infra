@@ -105,9 +105,8 @@ def _list_topic_scoped_groups(base_group_id: str) -> list[str]:
     scoped_groups: list[str] = []
     for group in groups if isinstance(groups, list) else []:
         group_name = group.get("name", "") if isinstance(group, dict) else ""
-        if isinstance(group_name, str) and (
-            group_name.startswith(direct_prefix)
-            or group_name.startswith(instance_prefix)
+        if isinstance(group_name, str) and group_name.startswith(
+            (direct_prefix, instance_prefix)
         ):
             scoped_groups.append(group_name)
     return scoped_groups

@@ -58,9 +58,17 @@ def test_derive_consumer_group_id_without_identity_does_not_crash() -> None:
 
 
 @pytest.mark.unit
-def test_derive_consumer_group_id_without_identity_uses_unknown_markers() -> None:
-    """Without identity or rpk, fabricated ID uses 'unknown' env/service."""
+def test_derive_consumer_group_id_without_identity_uses_unknown_markers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without identity, fabricated ID uses 'unknown' env/service markers."""
+    from omnibase_infra.verification.probes import probe_subscription
+
+    monkeypatch.setattr(
+        probe_subscription,
+        "_discover_identity_via_rpk",
+        lambda _contract_name: None,
+    )
     group_id, grounding = _derive_consumer_group_id("node_registration_orchestrator")
-    # Should contain 'unknown' markers since rpk won't be available in unit tests
     assert "unknown" in group_id
     assert grounding == "FABRICATED"
