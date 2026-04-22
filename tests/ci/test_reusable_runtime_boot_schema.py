@@ -15,10 +15,12 @@ Tier-2 regression (OMN-9252) can safely call it via `workflow_call`. Asserts:
 * `jobs.boot.runs-on` uses the exact USE_SELF_HOSTED_RUNNERS conditional from
   ci-baseline.md §B (shared with ci.yml)
 * `jobs.boot.steps` contains checkout, uv setup, conditional compose bring-up,
-  health-wait with jq `.status == "healthy" and .details.is_running == true`
-  (matches service_health.py::_handle_health response shape), 60s hold with
-  runtime PID-alive + health check (compose) / flapping tolerance (real),
-  psql registration_projections liveness query, rpk group list check, and
+  launch + hard-gate checks for both runtime (`:8085`) and runtime-effects
+  (`:8086`) health (matches service_health.py::_handle_health response shape),
+  60s hold with both PIDs alive + both health checks (compose) / flapping
+  tolerance (real), startup log gating for duplicate dispatcher /
+  auto-wiring / service-resolution failures (OMN-9458), psql
+  registration_projections liveness query, rpk group list check, and
   smoke-result.json artifact upload guarded against missing intermediate
   files.
 """
@@ -224,7 +226,8 @@ def test_boot_has_conditional_compose_bringup(workflow: Workflow) -> None:
 
 def test_boot_health_wait_uses_jq_hard_gate(workflow: Workflow) -> None:
     """Health-wait step must assert the actual shape from service_health.py:
-    top-level `.status == "healthy"` AND `.details.is_running == true`.
+    top-level `.status == "healthy"` AND `.details.is_running == true`, AND
+    must probe runtime-effects on :8086 as a hard gate (OMN-9458).
     """
     steps = _boot_steps(workflow)
     matched = [s for s in steps if "8085/health" in _step_text(s)]
@@ -239,6 +242,23 @@ def test_boot_health_wait_uses_jq_hard_gate(workflow: Workflow) -> None:
         "is_running lives under .details, not top-level (see service_health.py)"
     )
     assert "true" in step_texts
+    assert "8086/health" in step_texts, "runtime-effects health gate missing (OMN-9458)"
+
+
+def test_boot_health_wait_distinguishes_degraded_from_never_responded(
+    workflow: Workflow,
+) -> None:
+    """OMN-9458: degraded /health must emit a distinct error message from the
+    generic "never reported healthy" timeout — degraded = reachable but
+    reporting a startup regression.
+    """
+    steps = _boot_steps(workflow)
+    matched = [s for s in steps if "8085/health" in _step_text(s)]
+    assert matched, "health-wait step missing"
+    step_texts = "\n".join(_step_text(s) for s in matched)
+    assert "degraded" in step_texts, (
+        "health-wait must explicitly handle status=degraded (OMN-9458)"
+    )
 
 
 def test_boot_emits_subscriber_warning_not_hard_gate(workflow: Workflow) -> None:
@@ -250,13 +270,13 @@ def test_boot_emits_subscriber_warning_not_hard_gate(workflow: Workflow) -> None
 
 
 def test_boot_holds_60s_with_stability_check(workflow: Workflow) -> None:
-    """60s hold step must assert runtime liveness.
+    """60s hold step must assert runtime and runtime-effects liveness.
 
-    In compose mode the runtime is a background Python process launched via
-    `uv run`, not a container — so `docker inspect RestartCount` is
-    inapplicable. The step must instead assert the PID is still alive +
-    /health still healthy. In real mode we fall back to a flapping-tolerance
-    check over /health.
+    In compose mode both runtimes are background Python processes launched via
+    `uv run`, not containers — so `docker inspect RestartCount` is
+    inapplicable. The step must instead assert both PIDs are still alive and
+    both /health endpoints still healthy. In real mode we fall back to a
+    flapping-tolerance check over both /health endpoints (OMN-9458).
     """
     steps = _boot_steps(workflow)
     matched = [
@@ -268,6 +288,30 @@ def test_boot_holds_60s_with_stability_check(workflow: Workflow) -> None:
         "compose-mode branch must assert runtime PID is alive (kill -0) — "
         "RestartCount on a host Python process is meaningless"
     )
+    assert "runtime_effects_pid" in step_texts, (
+        "compose-mode branch must assert runtime-effects PID is alive too (OMN-9458)"
+    )
+
+
+def test_boot_fails_on_startup_auto_wiring_errors(workflow: Workflow) -> None:
+    """OMN-9458: hard-fail step must scan startup logs for the five regression
+    patterns that the 2026-04-22 .201 refresh surfaced as currently
+    warn-only or indirect signals.
+    """
+    steps = _boot_steps(workflow)
+    matched = [
+        s for s in steps if "startup auto-wiring" in _step_text(s).replace("_", " ")
+    ]
+    assert matched, "startup log gating step missing (OMN-9458)"
+    step_texts = "\n".join(_step_text(s) for s in matched)
+    assert "cannot register duplicate dispatcher id" in step_texts
+    assert "auto-wiring failed for" in step_texts
+    assert (
+        "asyncio\\.run\\(\\) cannot be called from a running event loop" in step_texts
+    )
+    assert "runtimehosterror" in step_texts
+    assert "serviceresolutionerror" in step_texts
+    assert "load_runtime_config" in step_texts
 
 
 def test_boot_has_psql_registration_projections_query(workflow: Workflow) -> None:
@@ -299,6 +343,9 @@ def test_boot_uploads_smoke_result_artifact(workflow: Workflow) -> None:
         or "smoke-result" in _step_text(s)
     ]
     assert matched, "smoke-result.json artifact output missing"
+    # OMN-9458: artifact payload must include effects_health so downstream
+    # tooling can discriminate runtime vs runtime-effects startup regressions.
+    assert "effects_health" in WORKFLOW_PATH.read_text()
 
 
 def test_boot_has_nine_steps_minimum(workflow: Workflow) -> None:
