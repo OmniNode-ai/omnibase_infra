@@ -987,85 +987,44 @@ class ServiceRegistration:
         self,
         config: ModelDomainPluginConfig,
     ) -> ModelDomainPluginResult:
-        """Wire registration dispatchers into the MessageDispatchEngine.
+        """Defer registration dispatcher wiring to generic contract auto-wiring.
 
-        Calls wire_registration_dispatchers() to register 4 dispatchers + 4 routes
-        with the dispatch engine. The engine is frozen by the kernel after all
-        plugins have completed wire_dispatchers().
+        OMN-9456: Establish a single authority for registration dispatcher and
+        route wiring. The generic contract-driven auto-wiring pipeline
+        (``wire_from_manifest``) owns dispatcher and route registration because
+        ``node_registration_orchestrator/contract.yaml`` fully declares the
+        subscribed topics and handler routing.
+
+        Invoking the legacy explicit wiring helper here alongside the generic
+        path caused duplicate dispatcher registrations
+        (``ONEX_CORE_064_DUPLICATE_REGISTRATION`` for
+        ``dispatcher.registration.node-introspected``) on fresh runtime-effects
+        boots. Returning a skipped result keeps the plugin responsible for
+        domain initialization (pools, projectors, schemas, handlers, consumers)
+        while leaving dispatcher and route wiring to the single authoritative
+        contract-driven path.
 
         Args:
-            config: Plugin configuration with container and dispatch_engine.
+            config: Plugin configuration (unused apart from correlation_id).
 
         Returns:
-            Result indicating success/failure.
+            ``ModelDomainPluginResult.skipped`` indicating that generic
+            contract auto-wiring owns dispatcher and route registration.
         """
-        start_time = time.time()
         correlation_id = config.correlation_id
 
-        # Check if service_registry is available
-        if config.container.service_registry is None:
-            logger.warning(
-                "DEGRADED_MODE: ServiceRegistry not available, skipping "
-                "dispatcher wiring (correlation_id=%s)",
-                correlation_id,
-            )
-            return ModelDomainPluginResult.skipped(
-                plugin_id=self.plugin_id,
-                reason="ServiceRegistry not available",
-            )
-
-        if config.dispatch_engine is None:
-            logger.warning(
-                "DEGRADED_MODE: dispatch_engine not available, skipping "
-                "dispatcher wiring (correlation_id=%s)",
-                correlation_id,
-            )
-            return ModelDomainPluginResult.skipped(
-                plugin_id=self.plugin_id,
-                reason="dispatch_engine not available",
-            )
-
-        try:
-            from omnibase_infra.nodes.node_registration_orchestrator.wiring import (
-                wire_registration_dispatchers,
-            )
-
-            dispatch_summary = await wire_registration_dispatchers(
-                container=config.container,
-                engine=config.dispatch_engine,
-                correlation_id=correlation_id,
-                event_bus=config.event_bus,
-            )
-
-            duration = time.time() - start_time
-            logger.info(
-                "Registration dispatchers wired into engine (correlation_id=%s)",
-                correlation_id,
-                extra={
-                    "dispatchers": dispatch_summary.get("dispatchers", []),
-                    "routes": dispatch_summary.get("routes", []),
-                },
-            )
-
-            return ModelDomainPluginResult(
-                plugin_id=self.plugin_id,
-                success=True,
-                message="Registration dispatchers wired into engine",
-                resources_created=list(dispatch_summary.get("dispatchers", [])),
-                duration_seconds=duration,
-            )
-
-        except Exception as e:
-            duration = time.time() - start_time
-            logger.exception(
-                "Failed to wire registration dispatchers (correlation_id=%s)",
-                correlation_id,
-            )
-            return ModelDomainPluginResult.failed(
-                plugin_id=self.plugin_id,
-                error_message=sanitize_error_message(e),
-                duration_seconds=duration,
-            )
+        logger.info(
+            "Registration dispatcher wiring deferred to generic contract "
+            "auto-wiring (OMN-9456) (correlation_id=%s)",
+            correlation_id,
+        )
+        return ModelDomainPluginResult.skipped(
+            plugin_id=self.plugin_id,
+            reason=(
+                "generic contract auto-wiring owns registration dispatchers "
+                "and routes (OMN-9456)"
+            ),
+        )
 
     async def start_consumers(
         self,
