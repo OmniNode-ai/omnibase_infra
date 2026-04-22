@@ -15,7 +15,6 @@ import hmac
 import json
 from unittest.mock import patch
 
-import pytest
 from deploy_agent.auth import verify_command
 
 _SECRET = "test-trigger-helper-secret-abc123"
