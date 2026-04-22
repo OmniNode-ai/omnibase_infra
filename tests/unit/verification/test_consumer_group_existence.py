@@ -24,15 +24,17 @@ def test_derived_group_follows_canonical_format() -> None:
         node_name="runtime_config",
         version="1.0.0",
     )
-    group_id = _derive_consumer_group_id(
+    group_id, grounding = _derive_consumer_group_id(
         "node_registration_orchestrator", identity=identity
     )
     assert group_id == "local.runtime_config.runtime_config.consume.1.0.0"
+    assert grounding == "EXACT"
 
 
 @pytest.mark.unit
 def test_derived_group_without_identity_does_not_crash() -> None:
     """Without identity, derivation should fall back gracefully."""
-    group_id = _derive_consumer_group_id("node_registration_orchestrator")
+    group_id, grounding = _derive_consumer_group_id("node_registration_orchestrator")
     assert isinstance(group_id, str)
     assert len(group_id) > 0
+    assert grounding in {"DISCOVERED", "FABRICATED"}

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from omnibase_infra.enums.enum_contract_check_type import EnumContractCheckType
 from omnibase_infra.enums.enum_validation_verdict import EnumValidationVerdict
@@ -26,6 +27,26 @@ _CONTRACT_PATH = (
     / "node_registration_orchestrator"
     / "contract.yaml"
 )
+
+
+def _write_runtime_config(
+    tmp_path: Path,
+    *,
+    name: str = "runtime_config",
+    environment: str = "local",
+    contract_version: str = "1.0.0",
+) -> Path:
+    path = tmp_path / "runtime_config.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "name": name,
+                "contract_version": contract_version,
+                "event_bus": {"environment": environment},
+            }
+        )
+    )
+    return path
 
 
 def _make_db_query_fn(
@@ -88,7 +109,7 @@ def _make_kafka_admin_fn(
             "onex.cmd.platform.request-introspection.v1",
         }
 
-    def kafka_admin_fn() -> set[str]:
+    def kafka_admin_fn(_group_id: str) -> set[str]:
         return subscribed_topics
 
     return kafka_admin_fn
@@ -224,6 +245,42 @@ class TestVerifyRegistrationFails:
         )
         assert sub_check.verdict == EnumValidationVerdict.FAIL
 
+    def test_quarantine_when_runtime_identity_unavailable(self, tmp_path: Path) -> None:
+        report = verify_registration_contract(
+            db_query_fn=_make_db_query_fn(),
+            kafka_admin_fn=_make_kafka_admin_fn(subscribed_topics=set()),
+            watermark_fn=_make_watermark_fn(),
+            contract_path=_CONTRACT_PATH,
+            runtime_config_path=tmp_path / "missing-runtime-config.yaml",
+        )
+        sub_check = next(
+            c
+            for c in report.checks
+            if c.check_type == EnumContractCheckType.SUBSCRIPTION
+        )
+        assert sub_check.verdict == EnumValidationVerdict.QUARANTINE
+        assert "grounding=FABRICATED" in sub_check.evidence
+
+    def test_exact_runtime_identity_preserves_fail_semantics(
+        self, tmp_path: Path
+    ) -> None:
+        runtime_config_path = _write_runtime_config(tmp_path)
+        report = verify_registration_contract(
+            db_query_fn=_make_db_query_fn(),
+            kafka_admin_fn=_make_kafka_admin_fn(subscribed_topics=set()),
+            watermark_fn=_make_watermark_fn(),
+            contract_path=_CONTRACT_PATH,
+            runtime_config_path=runtime_config_path,
+        )
+        sub_check = next(
+            c
+            for c in report.checks
+            if c.check_type == EnumContractCheckType.SUBSCRIPTION
+        )
+        assert sub_check.verdict == EnumValidationVerdict.FAIL
+        assert "registration-orchestrator" in sub_check.evidence
+        assert "grounding=EXACT" in sub_check.evidence
+
     def test_fail_when_partial_subscriptions(self) -> None:
         report = verify_registration_contract(
             db_query_fn=_make_db_query_fn(),
@@ -282,7 +339,7 @@ class TestVerifyRegistrationFails:
         assert report.overall_verdict == EnumValidationVerdict.FAIL
 
     def test_fail_when_kafka_admin_raises(self) -> None:
-        def failing_kafka() -> set[str]:
+        def failing_kafka(_group_id: str) -> set[str]:
             raise ConnectionError("Kafka unavailable")
 
         report = verify_registration_contract(
@@ -296,7 +353,8 @@ class TestVerifyRegistrationFails:
             for c in report.checks
             if c.check_type == EnumContractCheckType.SUBSCRIPTION
         )
-        assert sub_check.verdict == EnumValidationVerdict.FAIL
+        assert sub_check.verdict == EnumValidationVerdict.QUARANTINE
+        assert "Kafka unavailable" in sub_check.evidence
 
     def test_fail_when_watermark_raises(self) -> None:
         def failing_watermark(topic: str) -> tuple[int, int]:

@@ -18,10 +18,14 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+import yaml
+
 from omnibase_infra.enums.enum_check_severity import EnumCheckSeverity
 from omnibase_infra.enums.enum_contract_check_type import EnumContractCheckType
 from omnibase_infra.enums.enum_validation_verdict import EnumValidationVerdict
+from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.verification.contract_parser import (
+    ModelParsedContractForVerification,
     parse_contract_for_verification,
 )
 from omnibase_infra.verification.models import (
@@ -31,12 +35,15 @@ from omnibase_infra.verification.models import (
 from omnibase_infra.verification.probes.probe_projection import (
     check_projection_state,
 )
+from omnibase_infra.verification.probes.probe_subscription import (
+    check_subscriptions,
+)
 
 logger = logging.getLogger(__name__)
 
 # Type aliases for the injectable dependencies
 DbQueryFn = Callable[[str], list[dict[str, str]]]
-KafkaAdminFn = Callable[[], set[str]]
+KafkaAdminFn = Callable[[str], set[str]]
 WatermarkFn = Callable[[str], tuple[int, int]]
 
 # Path to the registration orchestrator contract
@@ -45,6 +52,12 @@ _CONTRACT_PATH = (
     / "nodes"
     / "node_registration_orchestrator"
     / "contract.yaml"
+)
+_RUNTIME_CONFIG_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "contracts"
+    / "runtime"
+    / "runtime_config.yaml"
 )
 
 
@@ -149,6 +162,8 @@ def _check_subscription(
     contract_name: str,
     subscribe_topics: tuple[str, ...],
     kafka_admin_fn: KafkaAdminFn,
+    *,
+    identity: ModelNodeIdentity | None = None,
 ) -> ModelContractCheckResult:
     """Check 2: Verify consumer group subscribes to declared topics.
 
@@ -158,53 +173,93 @@ def _check_subscription(
         kafka_admin_fn: Callable that returns a set of subscribed topics for
             the consumer group, or raises on failure.
     """
-    if not subscribe_topics:
+    parsed = ModelParsedContractForVerification(
+        name=contract_name,
+        node_type="ORCHESTRATOR_GENERIC",
+        subscribe_topics=subscribe_topics,
+    )
+    per_topic_results = check_subscriptions(
+        parsed,
+        kafka_admin_fn=kafka_admin_fn,
+        identity=identity,
+    )
+
+    if all(r.verdict == EnumValidationVerdict.PASS for r in per_topic_results):
         return ModelContractCheckResult(
             check_type=EnumContractCheckType.SUBSCRIPTION,
             severity=EnumCheckSeverity.REQUIRED,
             verdict=EnumValidationVerdict.PASS,
-            evidence="No subscribe_topics declared; nothing to verify.",
+            evidence=per_topic_results[0].evidence,
             contract_name=contract_name,
-            message="Subscription check passed: no topics declared.",
+            message="Subscription check passed.",
         )
 
-    try:
-        subscribed: set[str] = kafka_admin_fn()
-    # ONEX_EXCLUDE: blind_except - boundary probe must not crash on infra errors
-    except Exception as exc:  # noqa: BLE001
+    fail_results = [
+        r for r in per_topic_results if r.verdict == EnumValidationVerdict.FAIL
+    ]
+    if fail_results:
+        missing_count = len(fail_results)
+        total_count = len(subscribe_topics)
         return ModelContractCheckResult(
             check_type=EnumContractCheckType.SUBSCRIPTION,
             severity=EnumCheckSeverity.REQUIRED,
             verdict=EnumValidationVerdict.FAIL,
-            evidence=f"Kafka admin query failed: {exc}",
-            contract_name=contract_name,
-            message="Subscription check failed: could not query Kafka.",
-        )
-
-    missing = set(subscribe_topics) - subscribed
-    if not missing:
-        return ModelContractCheckResult(
-            check_type=EnumContractCheckType.SUBSCRIPTION,
-            severity=EnumCheckSeverity.REQUIRED,
-            verdict=EnumValidationVerdict.PASS,
             evidence=(
-                f"Consumer group subscribed to all {len(subscribe_topics)} "
-                f"declared topics."
+                f"Missing {missing_count}/{total_count} subscriptions: "
+                f"{' | '.join(r.evidence for r in fail_results)}"
             ),
             contract_name=contract_name,
-            message="Subscription check passed.",
+            message=f"Subscription check failed: {missing_count} topics not subscribed.",
         )
 
     return ModelContractCheckResult(
         check_type=EnumContractCheckType.SUBSCRIPTION,
         severity=EnumCheckSeverity.REQUIRED,
-        verdict=EnumValidationVerdict.FAIL,
-        evidence=(
-            f"Missing {len(missing)}/{len(subscribe_topics)} subscriptions: "
-            f"{sorted(missing)}"
-        ),
+        verdict=EnumValidationVerdict.QUARANTINE,
+        evidence=" | ".join(r.evidence for r in per_topic_results),
         contract_name=contract_name,
-        message=f"Subscription check failed: {len(missing)} topics not subscribed.",
+        message="Subscription check quarantined: consumer group not authoritatively grounded.",
+    )
+
+
+def _load_registration_runtime_identity(
+    runtime_config_path: Path | None = None,
+) -> ModelNodeIdentity | None:
+    """Load the runtime identity used by the registration plugin, if available."""
+    path = runtime_config_path or _RUNTIME_CONFIG_PATH
+    if not path.is_file():
+        return None
+
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return None
+
+    if not isinstance(raw, dict):
+        return None
+
+    event_bus = raw.get("event_bus", {})
+    if not isinstance(event_bus, dict):
+        event_bus = {}
+
+    environment = event_bus.get("environment")
+    service = raw.get("name")
+    version = raw.get("contract_version")
+    if not (
+        isinstance(environment, str)
+        and environment.strip()
+        and isinstance(service, str)
+        and service.strip()
+        and isinstance(version, str)
+        and version.strip()
+    ):
+        return None
+
+    return ModelNodeIdentity(
+        env=environment,
+        service=service,
+        node_name="registration-orchestrator",
+        version=version,
     )
 
 
@@ -364,6 +419,7 @@ def verify_registration_contract(
     kafka_admin_fn: KafkaAdminFn,
     watermark_fn: WatermarkFn,
     contract_path: Path | None = None,
+    runtime_config_path: Path | None = None,
 ) -> ModelContractVerificationReport:
     """Run all four verification checks against the registration orchestrator.
 
@@ -373,6 +429,8 @@ def verify_registration_contract(
         watermark_fn: Callable(topic: str) -> tuple[int, int] returning
             (low, high) watermark offsets for a topic.
         contract_path: Optional override for the contract.yaml path.
+        runtime_config_path: Optional override for runtime_config.yaml used to
+            derive the exact registration runtime identity.
 
     Returns:
         A ModelContractVerificationReport with all check results.
@@ -380,10 +438,14 @@ def verify_registration_contract(
     start_ms = time.monotonic_ns() // 1_000_000
     path = contract_path or _CONTRACT_PATH
     parsed = parse_contract_for_verification(path)
+    runtime_identity = _load_registration_runtime_identity(runtime_config_path)
 
     check_registration = _check_registration(parsed.name, db_query_fn)
     check_subscription = _check_subscription(
-        parsed.name, parsed.subscribe_topics, kafka_admin_fn
+        parsed.name,
+        parsed.subscribe_topics,
+        kafka_admin_fn,
+        identity=runtime_identity,
     )
     check_publication = _check_publication(
         parsed.name, parsed.publish_topics, watermark_fn

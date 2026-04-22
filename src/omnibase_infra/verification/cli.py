@@ -109,7 +109,7 @@ def _run_registration_only(
     def _noop_db(sql: str) -> list[dict[str, str]]:
         return []
 
-    def _noop_kafka() -> set[str]:
+    def _noop_kafka(_group_id: str) -> set[str]:
         return set()
 
     def _noop_watermark(topic: str) -> tuple[int, int]:

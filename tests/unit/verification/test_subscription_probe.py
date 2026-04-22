@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from omnibase_infra.enums.enum_check_severity import EnumCheckSeverity
@@ -15,6 +17,7 @@ from omnibase_infra.verification.contract_parser import (
     ModelParsedContractForVerification,
 )
 from omnibase_infra.verification.probes.probe_subscription import (
+    _rpk_fallback,
     check_subscriptions,
 )
 
@@ -86,14 +89,40 @@ class TestCheckSubscriptionsPass:
 class TestCheckSubscriptionsFail:
     """Failure-path subscription checks."""
 
-    def test_consumer_group_empty(self) -> None:
+    def test_grounded_consumer_group_empty_is_fail(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from omnibase_infra.models import ModelNodeIdentity
+        from omnibase_infra.verification.probes import probe_subscription
+
+        monkeypatch.setattr(
+            probe_subscription,
+            "_discover_identity_via_rpk",
+            lambda contract_name: ModelNodeIdentity(
+                env="dev",
+                service="omnibase_infra",
+                node_name="registration-orchestrator",
+                version="1.0.0",
+            ),
+        )
+
         contract = _make_contract()
         results = check_subscriptions(
             contract, kafka_admin_fn=_make_admin_fn(subscribed=set())
         )
         assert len(results) == len(SAMPLE_TOPICS)
         assert all(r.verdict == EnumValidationVerdict.FAIL for r in results)
+        assert all("grounding=DISCOVERED" in r.evidence for r in results)
+
+    def test_consumer_group_empty(self) -> None:
+        contract = _make_contract()
+        results = check_subscriptions(
+            contract, kafka_admin_fn=_make_admin_fn(subscribed=set())
+        )
+        assert len(results) == len(SAMPLE_TOPICS)
+        assert all(r.verdict == EnumValidationVerdict.QUARANTINE for r in results)
         assert all("no subscribed topics" in r.evidence.lower() for r in results)
+        assert all("grounding=fabricated" in r.evidence.lower() for r in results)
 
     def test_partial_subscriptions(self) -> None:
         subscribed = {SAMPLE_TOPICS[0]}
@@ -102,9 +131,11 @@ class TestCheckSubscriptionsFail:
             contract, kafka_admin_fn=_make_admin_fn(subscribed=subscribed)
         )
         pass_count = sum(1 for r in results if r.verdict == EnumValidationVerdict.PASS)
-        fail_count = sum(1 for r in results if r.verdict == EnumValidationVerdict.FAIL)
+        quarantine_count = sum(
+            1 for r in results if r.verdict == EnumValidationVerdict.QUARANTINE
+        )
         assert pass_count == 1
-        assert fail_count == 2
+        assert quarantine_count == 2
 
     def test_missing_topic_evidence(self) -> None:
         subscribed = {SAMPLE_TOPICS[0]}
@@ -112,9 +143,12 @@ class TestCheckSubscriptionsFail:
         results = check_subscriptions(
             contract, kafka_admin_fn=_make_admin_fn(subscribed=subscribed)
         )
-        fail_results = [r for r in results if r.verdict == EnumValidationVerdict.FAIL]
-        for r in fail_results:
+        degraded_results = [
+            r for r in results if r.verdict == EnumValidationVerdict.QUARANTINE
+        ]
+        for r in degraded_results:
             assert "NOT subscribed" in r.evidence
+            assert "grounding=FABRICATED" in r.evidence
 
 
 @pytest.mark.unit
@@ -146,6 +180,16 @@ class TestCheckSubscriptionsQuarantine:
         )
         assert all(r.severity == EnumCheckSeverity.REQUIRED for r in results)
 
+    def test_fabricated_grounding_marks_result_non_authoritative(self) -> None:
+        contract = _make_contract()
+        results = check_subscriptions(
+            contract, kafka_admin_fn=_make_admin_fn(subscribed=set())
+        )
+        assert len(results) == len(SAMPLE_TOPICS)
+        assert all(r.verdict == EnumValidationVerdict.QUARANTINE for r in results)
+        assert all("grounding=FABRICATED" in r.evidence for r in results)
+        assert all("quarantined" in r.message.lower() for r in results)
+
 
 @pytest.mark.unit
 class TestCheckSubscriptionsOnePerTopic:
@@ -172,3 +216,75 @@ class TestCheckSubscriptionsOnePerTopic:
         )
         assert len(results) == 1
         assert results[0].verdict == EnumValidationVerdict.PASS
+
+
+@pytest.mark.unit
+class TestRpkFallback:
+    """rpk fallback should honor topic-scoped consumer groups."""
+
+    def test_topic_scoped_groups_are_aggregated(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        base_group = "local.runtime_config.registration-orchestrator.consume.1.0.0"
+
+        class CompletedProcessStub:
+            def __init__(
+                self, stdout: str, returncode: int = 0, stderr: str = ""
+            ) -> None:
+                self.stdout = stdout
+                self.returncode = returncode
+                self.stderr = stderr
+
+        def fake_run(
+            args: list[str],
+            capture_output: bool,
+            text: bool,
+            timeout: int,
+            check: bool,
+            env: dict | None = None,
+        ) -> CompletedProcessStub:
+            assert capture_output is True
+            assert text is True
+            assert check is False
+            if args == ["rpk", "group", "describe", base_group, "--format", "json"]:
+                return CompletedProcessStub(stdout=json.dumps({"members": []}))
+            if args == ["rpk", "group", "list", "--format", "json"]:
+                return CompletedProcessStub(
+                    stdout=json.dumps(
+                        [
+                            {
+                                "name": f"{base_group}.__t.onex.evt.platform.node-heartbeat.v1"
+                            },
+                            {
+                                "name": f"{base_group}.__t.onex.intent.platform.runtime-tick.v1"
+                            },
+                        ]
+                    )
+                )
+            if (
+                len(args) == 6
+                and args[:3] == ["rpk", "group", "describe"]
+                and args[-2:] == ["--format", "json"]
+            ):
+                scoped_group = args[3]
+                topic = scoped_group.split(".__t.", 1)[1]
+                return CompletedProcessStub(
+                    stdout=json.dumps(
+                        {
+                            "members": [
+                                {"assignments": [{"topic": topic}]},
+                            ]
+                        }
+                    )
+                )
+            raise AssertionError(f"Unexpected subprocess invocation: {args}")
+
+        monkeypatch.setattr(
+            "omnibase_infra.verification.probes.probe_subscription.subprocess.run",
+            fake_run,
+        )
+
+        assert _rpk_fallback(base_group) == {
+            "onex.evt.platform.node-heartbeat.v1",
+            "onex.intent.platform.runtime-tick.v1",
+        }
