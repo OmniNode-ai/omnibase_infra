@@ -95,7 +95,7 @@ If a runtime rebuild was performed without `--no-deps` and broke core infra:
    ```bash
    docker compose -f docker/docker-compose.infra.yml -p omnibase-infra \
      --profile core up -d --force-recreate \
-     postgres redpanda valkey infisical
+     postgres redpanda valkey infisical phoenix
    ```
 3. Re-run the runtime refresh procedure above.
 4. File a Linear ticket citing OMN-9455 with the compose command that was
