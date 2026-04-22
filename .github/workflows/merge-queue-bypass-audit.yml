@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Periodic audit that the merge queue cannot be bypassed.
+#
+# Runs two checks across all OmniNode-ai repos:
+#   A) verify-merge-queue-no-bypass.sh — fails if any Merge Queue ruleset
+#      has bypass_actors set (admin-bypass would let direct merges skip
+#      the SQUASH ruleset).
+#   B) audit-merge-method-on-main.sh — fails if any 2-parent merge commit
+#      lands on main outside the merge-queue path. PRs merged via the
+#      queue produce single-parent squash commits; 2-parent commits
+#      indicate a direct/admin merge that skipped the queue.
+#
+# OMN-8843 — proposed-fix item 3 (post-merge validator). Pairs with the
+# already-shipped fix to remove bypass_actors from every ruleset.
+#
+# Token: uses CROSS_REPO_PAT for cross-repo audit. Falls back to
+# GITHUB_TOKEN with a warning, in which case sibling repos are skipped.
+
+name: Merge Queue Bypass Audit
+
+on:
+  schedule:
+    # Every 6 hours at minute 41 (offset to avoid thundering herd with the
+    # branch-protection-audit workflow which runs at minute 23).
+    - cron: "41 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    name: Audit Merge Queue Bypass
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check CROSS_REPO_PAT is configured
+        id: pat_check
+        env:
+          CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+        run: |
+          if [ -z "$CROSS_REPO_PAT" ]; then
+            echo "::warning::CROSS_REPO_PAT is not set — audit will SKIP sibling repos."
+            echo "To audit across the org, set CROSS_REPO_PAT to a PAT with repo scope."
+          fi
+
+      - name: Verify no admin bypass on Merge Queue rulesets
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || secrets.GITHUB_TOKEN }}
+        run: bash scripts/verify-merge-queue-no-bypass.sh
+
+      - name: Detect 2-parent merge commits on main (post-merge bypass evidence)
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || secrets.GITHUB_TOKEN }}
+        run: bash scripts/audit-merge-method-on-main.sh --depth 50
