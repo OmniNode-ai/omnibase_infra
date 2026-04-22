@@ -21,7 +21,6 @@ invoke the explicit wiring helper.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -34,7 +33,6 @@ from omnibase_infra.runtime.models.model_domain_plugin_config import (
     ModelDomainPluginConfig,
 )
 
-_PLUGIN_MOD = "omnibase_infra.nodes.node_registration_orchestrator.plugin"
 _WIRING_MOD = "omnibase_infra.nodes.node_registration_orchestrator.wiring"
 
 
