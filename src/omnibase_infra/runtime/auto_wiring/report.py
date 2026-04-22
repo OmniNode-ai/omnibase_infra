@@ -21,6 +21,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from omnibase_core.enums.enum_handler_resolution_outcome import (
     EnumHandlerResolutionOutcome,
 )
+from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
+    EnumQuarantineReason,
+)
 
 
 class EnumWiringOutcome(str, Enum):
@@ -73,6 +76,40 @@ class ModelSkippedEntry(BaseModel):
     reason: str = Field(..., description="Skip reason (human-readable)")
 
 
+class ModelQuarantinedWiring(BaseModel):
+    """Deterministically quarantined handler surfaced at the contract level.
+
+    Produced by the auto-wiring engine when handler construction raises a
+    known containment-worthy error (e.g. ``asyncio.run()`` called from a
+    running event loop — see :class:`EnumQuarantineReason` for the closed
+    set of categories).
+
+    Quarantined handlers are reported visibly (not silently skipped) so
+    follow-up migration tickets are obvious (OMN-9457). They do NOT poison
+    runtime boot: the containing contract still reports ``WIRED`` if its
+    remaining handlers resolve, and ``SKIPPED`` only if every handler is
+    quarantined.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
+
+    contract_name: str = Field(..., description="Contract name owning the handler")
+    package_name: str = Field(..., description="Package name owning the handler")
+    handler_module: str = Field(..., description="Fully-qualified handler module path")
+    handler_name: str = Field(..., description="Handler class name")
+    reason: EnumQuarantineReason = Field(
+        ..., description="Structured quarantine reason (closed set)"
+    )
+    detail: str = Field(
+        default="",
+        description=(
+            "Sanitized one-line error detail. Safe for logging and reporting — "
+            "URLs / DSNs are redacted. Empty when no additional detail is "
+            "available."
+        ),
+    )
+
+
 class ModelContractWiringResult(BaseModel):
     """Wiring result for a single discovered contract."""
 
@@ -107,6 +144,18 @@ class ModelContractWiringResult(BaseModel):
             "Not errors."
         ),
     )
+    quarantined_handlers: tuple[ModelQuarantinedWiring, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Handlers deterministically contained during construction "
+            "(OMN-9457). Most common cause: async-incompatible handlers that "
+            "call asyncio.run() inside runtime-managed async boot. Quarantined "
+            "handlers do not poison startup but require follow-up migration. "
+            "A contract whose remaining handlers resolve cleanly still "
+            "reports WIRED; a contract whose every handler is quarantined "
+            "reports SKIPPED with reason='all handlers quarantined'."
+        ),
+    )
 
 
 class ModelDuplicateTopicOwnership(BaseModel):
@@ -139,6 +188,16 @@ class ModelAutoWiringReport(BaseModel):
     duplicates: tuple[ModelDuplicateTopicOwnership, ...] = Field(
         default_factory=tuple, description="Duplicate topic ownership warnings"
     )
+    quarantined_handlers: tuple[ModelQuarantinedWiring, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Flat list of every quarantined handler across all contracts "
+            "(OMN-9457). Mirrors the per-contract "
+            "ModelContractWiringResult.quarantined_handlers collections so "
+            "follow-up migration tickets can enumerate the full set without "
+            "walking every result."
+        ),
+    )
 
     @property
     def total_wired(self) -> int:
@@ -151,6 +210,11 @@ class ModelAutoWiringReport(BaseModel):
     @property
     def total_failed(self) -> int:
         return sum(1 for r in self.results if r.outcome == EnumWiringOutcome.FAILED)
+
+    @property
+    def total_quarantined(self) -> int:
+        """Count of handlers quarantined during wiring (OMN-9457)."""
+        return len(self.quarantined_handlers)
 
     def __bool__(self) -> bool:
         """True when all contracts wired or skipped (no failures).

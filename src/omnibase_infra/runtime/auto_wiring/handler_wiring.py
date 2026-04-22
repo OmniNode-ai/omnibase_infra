@@ -46,6 +46,9 @@ from omnibase_core.services.service_handler_resolver import ServiceHandlerResolv
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
 )
+from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
+    EnumQuarantineReason,
+)
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
     ModelDiscoveredContract,
@@ -56,6 +59,7 @@ from omnibase_infra.runtime.auto_wiring.report import (
     ModelAutoWiringReport,
     ModelContractWiringResult,
     ModelDuplicateTopicOwnership,
+    ModelQuarantinedWiring,
     ModelSkippedEntry,
     ModelWiringOutcome,
 )
@@ -92,6 +96,43 @@ def _sanitize_exc(exc: BaseException) -> str:
     raw = str(exc) or type(exc).__name__
     sanitized = _SENSITIVE_PATTERN.sub("<redacted>", raw)
     return sanitized[:200]
+
+
+# Deterministic signature matching ``asyncio.run() cannot be called from a
+# running event loop`` (raised by asyncio.run when invoked from within a
+# thread that already has an active loop). OMN-9457: containment keys on the
+# exact CPython message so best-effort string heuristics are avoided.
+_ASYNC_INCOMPAT_MESSAGES: tuple[str, ...] = (
+    "asyncio.run() cannot be called from a running event loop",
+)
+
+
+def _is_async_incompat_runtime_error(exc: BaseException) -> bool:
+    """Return True if ``exc`` is the deterministic async-incompat signature.
+
+    Matches ``RuntimeError`` raised by CPython's ``asyncio.run()`` when a
+    synchronous handler constructor (or a dependency it resolves) calls
+    ``asyncio.run()`` from within runtime-managed async boot. The signature
+    is an exact substring match against the message emitted by
+    ``asyncio.runners.run`` — the call site that triggers the poisoning
+    behavior described in OMN-9457. Wrapped ``RuntimeError``s raised via
+    ``raise X from original`` are also recognised by walking ``__cause__``
+    and ``__context__``.
+    """
+    visited: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        if isinstance(current, RuntimeError):
+            message = str(current)
+            if any(needle in message for needle in _ASYNC_INCOMPAT_MESSAGES):
+                return True
+        # Walk __cause__ first (explicit `raise X from Y`), then
+        # __context__ (implicit propagation during handling). Either can
+        # carry the original asyncio.run() failure when the handler's
+        # constructor wraps it in a RuntimeError of its own.
+        current = current.__cause__ or current.__context__
+    return False
 
 
 async def _async_resolve_from_container(
@@ -143,6 +184,9 @@ class PreparedWiring:
     wiring never reaches the engine on later failure (OMN-8735).
     ``resolution_outcome`` / ``handler_name`` / ``skip_reason`` carry the
     resolver's per-handler outcome into the wiring report (OMN-9201).
+    ``quarantine_reason`` / ``quarantine_detail`` / ``handler_module`` carry
+    OMN-9457 containment state when handler construction deterministically
+    failed with an async-incompatible signature.
     """
 
     dispatcher_id: str
@@ -150,10 +194,13 @@ class PreparedWiring:
     category: EnumMessageCategory
     message_types: set[str] | None
     handler_name: str = ""
+    handler_module: str = ""
     resolution_outcome: EnumHandlerResolutionOutcome = (
         EnumHandlerResolutionOutcome.UNRESOLVABLE
     )
     skip_reason: str = ""
+    quarantine_reason: EnumQuarantineReason | None = None
+    quarantine_detail: str = ""
     route_ids: list[str] = field(default_factory=list)
     routes: list[ModelDispatchRoute] = field(default_factory=list)
 
@@ -163,6 +210,11 @@ class PreparedWiring:
             self.resolution_outcome
             is EnumHandlerResolutionOutcome.RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP
         )
+
+    @property
+    def is_quarantined(self) -> bool:
+        """True when OMN-9457 containment fired for this handler."""
+        return self.quarantine_reason is not None
 
 
 @dataclass
@@ -724,16 +776,42 @@ async def wire_from_manifest(
             dup.level,
         )
 
+    # OMN-9457: flatten per-contract quarantines into a report-level list so
+    # callers can enumerate every contained handler without walking every
+    # result. Order mirrors the per-contract scan so the flat list is
+    # deterministic across runs.
+    all_quarantined: list[ModelQuarantinedWiring] = []
+    for result in results:
+        all_quarantined.extend(result.quarantined_handlers)
+
     report = ModelAutoWiringReport(
         results=tuple(results),
         duplicates=tuple(duplicates),
+        quarantined_handlers=tuple(all_quarantined),
     )
 
+    if all_quarantined:
+        # High-visibility summary: operators tailing runtime-effects logs
+        # on first boot need to see the quarantined set without digging
+        # through per-contract DEBUG lines.
+        summary = ", ".join(
+            f"{q.contract_name}:{q.handler_name}={q.reason.value}"
+            for q in all_quarantined
+        )
+        logger.warning(
+            "Auto-wiring quarantined %d handler(s) — runtime will continue "
+            "without them. Follow-up migration required: %s",
+            len(all_quarantined),
+            summary,
+        )
+
     logger.info(
-        "Auto-wiring complete: wired=%d skipped=%d failed=%d duplicates=%d",
+        "Auto-wiring complete: wired=%d skipped=%d failed=%d "
+        "quarantined=%d duplicates=%d",
         report.total_wired,
         report.total_skipped,
         report.total_failed,
+        report.total_quarantined,
         len(report.duplicates),
     )
 
@@ -850,10 +928,23 @@ async def _commit_contract_wiring(
     topics_subscribed: list[str] = []
     wirings: list[ModelWiringOutcome] = []
     skipped_handlers: list[ModelSkippedEntry] = []
+    quarantined: list[ModelQuarantinedWiring] = []
 
     for prepared in pcw.prepared_wirings:
         dispatcher_id, route_ids = _commit_handler_wiring(prepared, dispatch_engine)
-        if prepared.is_skip:
+        if prepared.is_quarantined:
+            assert prepared.quarantine_reason is not None  # narrow for mypy
+            quarantined.append(
+                ModelQuarantinedWiring(
+                    contract_name=contract.name,
+                    package_name=contract.package_name,
+                    handler_module=prepared.handler_module,
+                    handler_name=prepared.handler_name,
+                    reason=prepared.quarantine_reason,
+                    detail=prepared.quarantine_detail,
+                )
+            )
+        elif prepared.is_skip:
             skipped_handlers.append(
                 ModelSkippedEntry(
                     handler_name=prepared.handler_name,
@@ -904,6 +995,24 @@ async def _commit_contract_wiring(
                 contract.name,
             )
 
+    # OMN-9457: when every handler was quarantined, report SKIPPED — there
+    # is nothing wired on the dispatch engine. Otherwise the contract is
+    # WIRED and quarantined handlers travel alongside the success in the
+    # dedicated report field so they remain visible for follow-up migration.
+    has_live_handler = any(
+        not (p.is_quarantined or p.is_skip) for p in pcw.prepared_wirings
+    )
+    if pcw.prepared_wirings and not has_live_handler and quarantined:
+        return ModelContractWiringResult(
+            contract_name=contract.name,
+            package_name=contract.package_name,
+            outcome=EnumWiringOutcome.SKIPPED,
+            reason="all handlers quarantined",
+            wirings=tuple(wirings),
+            skipped_handlers=tuple(skipped_handlers),
+            quarantined_handlers=tuple(quarantined),
+        )
+
     return ModelContractWiringResult(
         contract_name=contract.name,
         package_name=contract.package_name,
@@ -913,6 +1022,7 @@ async def _commit_contract_wiring(
         topics_subscribed=tuple(topics_subscribed),
         wirings=tuple(wirings),
         skipped_handlers=tuple(skipped_handlers),
+        quarantined_handlers=tuple(quarantined),
     )
 
 
@@ -1004,6 +1114,50 @@ def _prepare_handler_wiring(
         pre_resolved_handlers.get(handler_ref.name) if pre_resolved_handlers else None
     )
 
+    # Determine category up-front so the quarantine sentinel below (which
+    # bypasses the regular resolve/construct path) can still carry consistent
+    # reporting metadata.
+    _category_str_early = "EVENT"
+    if contract.event_bus and contract.event_bus.subscribe_topics:
+        _category_str_early = _derive_message_category(
+            contract.event_bus.subscribe_topics[0]
+        )
+    _early_category = EnumMessageCategory(_category_str_early)
+
+    def _quarantine_prepared(exc: BaseException) -> PreparedWiring:
+        """Return a containment-only PreparedWiring for an async-incompat handler.
+
+        OMN-9457: the handler's constructor raised ``RuntimeError: asyncio.run()
+        cannot be called from a running event loop``. We deterministically
+        contain it — no dispatcher / route registration — and surface it on the
+        wiring report so follow-up migration is visible rather than
+        partially-broken runtime state.
+        """
+        detail = _sanitize_exc(exc)
+        logger.warning(
+            "Auto-wiring: quarantining async-incompatible handler %s.%s "
+            "(contract=%s, package=%s): %s. Runtime-effects boot will "
+            "continue; convert the handler to async-safe construction to "
+            "re-enable it.",
+            handler_ref.module,
+            handler_ref.name,
+            contract.name,
+            contract.package_name,
+            detail,
+        )
+        return PreparedWiring(
+            dispatcher_id="",
+            dispatcher=_skip_dispatcher,
+            category=_early_category,
+            message_types=None,
+            handler_name=handler_ref.name,
+            handler_module=handler_ref.module,
+            resolution_outcome=EnumHandlerResolutionOutcome.UNRESOLVABLE,
+            skip_reason=f"quarantined:{EnumQuarantineReason.ASYNC_INCOMPATIBLE.value}",
+            quarantine_reason=EnumQuarantineReason.ASYNC_INCOMPATIBLE,
+            quarantine_detail=detail,
+        )
+
     if pre_resolved_instance is not None:
         resolution = ModelHandlerResolution(
             outcome=EnumHandlerResolutionOutcome.RESOLVED_VIA_CONTAINER,
@@ -1029,14 +1183,19 @@ def _prepare_handler_wiring(
             container=_effective_container,
             ownership_query=ownership_query,
         )
-        resolution = resolver.resolve(ctx)
+        try:
+            resolution = resolver.resolve(ctx)
+        except RuntimeError as exc:
+            # OMN-9457: deterministic containment for handlers whose
+            # construction path calls asyncio.run() inside runtime-managed
+            # async boot. Any other RuntimeError propagates unchanged.
+            if _is_async_incompat_runtime_error(exc):
+                return _quarantine_prepared(exc)
+            raise
 
-    # Determine category + message types up-front; both skip and non-skip
-    # paths carry them on PreparedWiring for deterministic reporting.
-    category_str = "EVENT"
-    if contract.event_bus and contract.event_bus.subscribe_topics:
-        category_str = _derive_message_category(contract.event_bus.subscribe_topics[0])
-    category = EnumMessageCategory(category_str)
+    # _early_category was computed up-front so the quarantine sentinel could
+    # carry consistent reporting metadata; reuse it here for the live path.
+    category = _early_category
 
     message_types: set[str] | None = None
     if entry.event_model is not None:
@@ -1064,6 +1223,7 @@ def _prepare_handler_wiring(
             category=category,
             message_types=message_types,
             handler_name=handler_ref.name,
+            handler_module=handler_ref.module,
             resolution_outcome=resolution.outcome,
             skip_reason=resolution.skipped_reason,
         )
@@ -1118,6 +1278,7 @@ def _prepare_handler_wiring(
         category=category,
         message_types=message_types,
         handler_name=handler_ref.name,
+        handler_module=handler_ref.module,
         resolution_outcome=resolution.outcome,
         route_ids=route_ids,
         routes=routes,
@@ -1136,13 +1297,16 @@ def _commit_handler_wiring(
 
     Skip entries (``prepared.is_skip``) are no-ops — the resolver emitted
     ``RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP`` for this handler, so nothing is
-    registered on the dispatch engine (OMN-9201).
+    registered on the dispatch engine (OMN-9201). Quarantined entries
+    (``prepared.is_quarantined``) are also no-ops — OMN-9457 containment
+    keeps async-incompatible handlers off the dispatch engine so they
+    cannot poison runtime-effects boot.
 
     Returns:
         Tuple of (dispatcher_id, list of route_ids registered). Returns
-        ``("", [])`` for skip entries.
+        ``("", [])`` for skip / quarantined entries.
     """
-    if prepared.is_skip:
+    if prepared.is_skip or prepared.is_quarantined:
         return "", []
 
     from omnibase_infra.runtime.service_message_dispatch_engine import (
