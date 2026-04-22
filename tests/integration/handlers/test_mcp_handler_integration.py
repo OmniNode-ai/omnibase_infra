@@ -870,3 +870,99 @@ class TestMcpMultipleToolCalls:
         )
         assert result3["isError"] is False
         assert isinstance(result3["content"], list)
+
+
+@requires_mcp
+class TestMcpMultiKeyAuthIntegration:
+    """Integration tests for OMN-1419 multi-key auth middleware.
+
+    These tests exercise ``MCPAuthMiddleware`` wrapping a real Starlette
+    application via ``httpx.ASGITransport`` — i.e. a live request/response
+    cycle, not a direct middleware call. This proves that:
+
+    - The canonical ``X-MCP-API-Key`` header is honoured end-to-end.
+    - Multiple configured keys all grant access to the same server instance.
+    - Unknown keys are rejected with HTTP 401.
+    - ``/health`` remains exempt even with auth enabled.
+    """
+
+    @staticmethod
+    def _build_app(api_keys: tuple[str, ...]) -> Starlette:
+        from starlette.applications import Starlette
+        from starlette.responses import JSONResponse
+        from starlette.routing import Route
+
+        from omnibase_infra.handlers.mcp.transport_streamable_http import (
+            MCPAuthMiddleware,
+        )
+
+        async def _tool_endpoint(_request: object) -> JSONResponse:
+            return JSONResponse({"ok": True})
+
+        async def _health_endpoint(_request: object) -> JSONResponse:
+            return JSONResponse({"status": "healthy"})
+
+        base_app = Starlette(
+            routes=[
+                Route("/mcp/tools", _tool_endpoint, methods=["GET"]),
+                Route("/health", _health_endpoint, methods=["GET"]),
+            ],
+        )
+        # Cast through object to avoid the mypy assignment-from-ASGIApp warning
+        # that the production code also suppresses at the middleware boundary.
+        return MCPAuthMiddleware(base_app, api_keys=api_keys)  # type: ignore[return-value]
+
+    async def test_canonical_x_mcp_api_key_accepted_end_to_end(self) -> None:
+        """A request authenticated via X-MCP-API-Key reaches the inner route."""
+        import httpx
+
+        app = self._build_app(api_keys=("alpha", "beta"))
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            resp = await client.get("/mcp/tools", headers={"X-MCP-API-Key": "alpha"})
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+
+    async def test_second_configured_key_also_accepted(self) -> None:
+        """The second key in the configured tuple authenticates an independent client."""
+        import httpx
+
+        app = self._build_app(api_keys=("alpha", "beta"))
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            resp = await client.get("/mcp/tools", headers={"X-MCP-API-Key": "beta"})
+        assert resp.status_code == 200
+
+    async def test_unknown_key_rejected_with_401(self) -> None:
+        """An unknown token yields HTTP 401 with a JSON error body."""
+        import httpx
+
+        app = self._build_app(api_keys=("alpha", "beta"))
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            resp = await client.get(
+                "/mcp/tools", headers={"X-MCP-API-Key": "not-in-allowlist"}
+            )
+        assert resp.status_code == 401
+        body = resp.json()
+        assert body.get("error") == "Unauthorized"
+        assert "X-MCP-API-Key" in body.get("detail", "")
+
+    async def test_health_endpoint_exempt_end_to_end(self) -> None:
+        """/health is reachable without credentials even with auth enabled."""
+        import httpx
+
+        app = self._build_app(api_keys=("alpha",))
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            resp = await client.get("/health")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "healthy"}
