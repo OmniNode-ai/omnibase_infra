@@ -84,11 +84,7 @@ full_topic = compose_full_topic(tenant="dev", namespace="myservice", suffix=suff
 # -> "dev.myservice.onex.evt.platform.node-registration.v1"
 ```
 
-**E2E tests use suffixes directly** (no prefix) when interacting with the local Docker infrastructure. The topic `onex.evt.platform.node-introspection.v1` is used as-is in `.env.docker`:
-
-```bash
-ONEX_INPUT_TOPIC=onex.evt.platform.node-introspection.v1
-```
+**E2E tests use suffixes directly** (no prefix) when interacting with the local Docker infrastructure. The topic `onex.evt.platform.node-introspection.v1` is used as-is. Note that as of OMN-8784 the runtime kernel no longer reads `ONEX_INPUT_TOPIC` / `ONEX_OUTPUT_TOPIC` — topics are derived from each node's `contract.yaml` `event_bus` declaration and setting those env vars raises `ProtocolConfigurationError` at bootstrap.
 
 **`TopicProvisioner`** at runtime startup creates topics from `ALL_PROVISIONED_TOPIC_SPECS`, using the suffix as the full Kafka topic name (no additional prefix in the current deployment model).
 

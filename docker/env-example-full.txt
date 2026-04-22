@@ -160,9 +160,9 @@ POSTGRES_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
 # Host port mapping for the main runtime service
 # RUNTIME_MAIN_PORT=8085
 
-# Kafka topics for main runtime
-# ONEX_INPUT_TOPIC=requests
-# ONEX_OUTPUT_TOPIC=responses
+# OMN-8784: ONEX_INPUT_TOPIC and ONEX_OUTPUT_TOPIC were removed. Topics are
+# derived from each node's contract.yaml event_bus declaration; setting
+# either env var now raises ProtocolConfigurationError at kernel bootstrap.
 
 # Consumer group ID for main runtime
 # ONEX_GROUP_ID=onex-runtime-main

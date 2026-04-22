@@ -80,11 +80,11 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # Topic Configuration
 # =============================================================================
-# Get topic from environment or use docker-compose default
-# The runtime container subscribes to the ONEX 5-segment topic from contract.yaml
-RUNTIME_INPUT_TOPIC = os.getenv(
-    "ONEX_INPUT_TOPIC", "onex.evt.platform.node-introspection.v1"
-)
+# The runtime container subscribes to the topic declared in the node's
+# contract.yaml event_bus.subscribe_topics. OMN-8784 removed the
+# ONEX_INPUT_TOPIC env-var override, so the test hardcodes the same
+# contract-declared topic here.
+RUNTIME_INPUT_TOPIC = "onex.evt.platform.node-introspection.v1"
 
 # =============================================================================
 # CI Environment Timing Configuration
@@ -174,7 +174,8 @@ SKIP_PROCESSING_REASON = (
     "Runtime event processing tests require explicit opt-in. "
     "The runtime health check passed, but event processing verification is disabled. "
     "Set RUNTIME_E2E_PROCESSING_ENABLED=true to enable these tests after verifying: "
-    "1) Runtime is consuming from Kafka topic (ONEX_INPUT_TOPIC), "
+    "1) Runtime is consuming from the Kafka topic declared in the node "
+    "contract's event_bus.subscribe_topics (OMN-8784 removed ONEX_INPUT_TOPIC), "
     "2) Runtime is writing projections to PostgreSQL, "
     "3) Full E2E pipeline is operational. "
     "Without this, tests would wait 60-120s before timing out."
@@ -193,7 +194,8 @@ RUNTIME_OUTPUT_EVENTS_ENABLED = os.getenv(
 SKIP_OUTPUT_EVENTS_REASON = (
     "Runtime output event tests require explicit opt-in. "
     "Set RUNTIME_E2E_OUTPUT_EVENTS_ENABLED=true to enable these tests after verifying: "
-    "1) Runtime is configured to publish completion events to ONEX_OUTPUT_TOPIC, "
+    "1) Runtime publishes completion events to the topic declared in the node "
+    "contract's event_bus.publish_topics (OMN-8784 removed ONEX_OUTPUT_TOPIC), "
     "2) The output topic exists and is accessible. "
     "Without this flag, tests would wait and timeout."
 )
@@ -455,10 +457,11 @@ class TestRuntimeE2EFlow:
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     pass
 
-        # Subscribe to completion topic (matches docker-compose.e2e.yml ONEX_OUTPUT_TOPIC)
-        output_topic = os.getenv(
-            "ONEX_OUTPUT_TOPIC", "onex.evt.registration-completed.v1"
-        )
+        # Subscribe to the registration-completed topic. OMN-8784 removed
+        # ONEX_OUTPUT_TOPIC; the runtime derives its publish topic from the
+        # node contract's event_bus.publish_topics, so the test uses the
+        # contract-declared topic name directly.
+        output_topic = "onex.evt.registration-completed.v1"
         group_id = f"e2e-runtime-{unique_node_id.hex[:8]}"
 
         unsub = await real_kafka_event_bus.subscribe(
