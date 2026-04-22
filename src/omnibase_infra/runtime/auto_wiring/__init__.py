@@ -15,6 +15,9 @@ from omnibase_infra.runtime.auto_wiring.discovery import (
     discover_contracts,
     discover_contracts_from_paths,
 )
+from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
+    EnumQuarantineReason,
+)
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     wire_from_manifest,
 )
@@ -40,9 +43,11 @@ from omnibase_infra.runtime.auto_wiring.report import (
     ModelAutoWiringReport,
     ModelContractWiringResult,
     ModelDuplicateTopicOwnership,
+    ModelQuarantinedWiring,
 )
 
 __all__ = [
+    "EnumQuarantineReason",
     "EnumWiringOutcome",
     "HandshakeFailureReason",
     "LifecycleHookExecutor",
@@ -63,6 +68,7 @@ __all__ = [
     "ModelLifecycleHookResult",
     "ModelLifecycleHooks",
     "ModelQuarantineRecord",
+    "ModelQuarantinedWiring",
     "discover_contracts",
     "discover_contracts_from_paths",
     "wire_from_manifest",
