@@ -38,4 +38,4 @@ dod_evidence:
     source: generated
     checks:
       - check_type: command
-        check_value: 'docker exec omninode-runtime python -c "from omnibase_infra.handlers.mcp.transport_streamable_http import MCPAuthMiddleware; assert hasattr(MCPAuthMiddleware, ''_api_keys'')"'
+        check_value: 'docker exec omninode-runtime python -c "from omnibase_infra.handlers.mcp.transport_streamable_http import MCPAuthMiddleware; app = lambda *args, **kwargs: None; middleware = MCPAuthMiddleware(app, (''probe'',)); assert hasattr(middleware, ''_api_keys'')"'

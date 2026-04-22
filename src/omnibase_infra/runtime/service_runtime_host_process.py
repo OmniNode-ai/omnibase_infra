@@ -122,6 +122,7 @@ from omnibase_infra.runtime.protocol_lifecycle_executor import (
 from omnibase_infra.runtime.runtime_contract_config_loader import (
     RuntimeContractConfigLoader,
 )
+from omnibase_infra.runtime.util_mcp_auth import inject_mcp_api_keys
 from omnibase_infra.runtime.util_wiring import wire_default_handlers
 from omnibase_infra.utils.util_consumer_group import compute_consumer_group_id
 from omnibase_infra.utils.util_env_parsing import parse_env_float
@@ -2551,53 +2552,9 @@ class RuntimeHostProcess:
 
                     if handler_type == "mcp":
                         # Inject MCP API keys from env if available (OMN-1419).
-                        # Supports either a single token (MCP_API_KEY /
-                        # ONEX_MCP_API_KEY) or multiple comma-separated tokens
-                        # (MCP_API_KEYS / ONEX_MCP_API_KEYS) so distinct clients
-                        # can hold distinct credentials.
-                        #
-                        # When no keys are configured and auth is not explicitly
-                        # disabled, auth is disabled to allow local dev startup
-                        # without requiring Infisical/secret configuration.
-                        mcp_api_keys_csv = os.environ.get(
-                            "MCP_API_KEYS"
-                        ) or os.environ.get("ONEX_MCP_API_KEYS")
-                        mcp_api_key_single = os.environ.get(
-                            "MCP_API_KEY"
-                        ) or os.environ.get("ONEX_MCP_API_KEY")
-
-                        # parsed_keys=None means the env var was absent.
-                        # parsed_keys=() means the env var was set but empty/whitespace.
-                        parsed_keys: tuple[str, ...] | None = None
-                        if mcp_api_keys_csv is not None:
-                            parsed_keys = tuple(
-                                k.strip()
-                                for k in mcp_api_keys_csv.split(",")
-                                if k.strip()
-                            )
-                        elif mcp_api_key_single is not None:
-                            parsed_keys = (
-                                (mcp_api_key_single.strip(),)
-                                if mcp_api_key_single.strip()
-                                else ()
-                            )
-
-                        # Only inject env-derived keys if the contract/runtime config
-                        # hasn't already populated api_keys; defer to existing config.
-                        if (
-                            parsed_keys is not None
-                            and "api_keys" not in effective_config
-                        ):
-                            effective_config["api_keys"] = parsed_keys
-                        elif (
-                            "auth_enabled" not in effective_config
-                            and not effective_config.get("api_keys")
-                            and parsed_keys is None
-                        ):
-                            # No explicit auth config from any source — default to
-                            # auth-disabled to allow local dev startup without
-                            # requiring Infisical/secret configuration.
-                            effective_config["auth_enabled"] = False
+                        # Logic lives in util_mcp_auth.inject_mcp_api_keys so
+                        # unit tests can exercise the real production path.
+                        inject_mcp_api_keys(effective_config)
 
                         # Skip the uvicorn server when running in-memory event bus
                         # mode (e.g., tests). This prevents port-binding conflicts
