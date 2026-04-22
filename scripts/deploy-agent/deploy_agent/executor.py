@@ -47,6 +47,29 @@ PHASE_TIMEOUTS = {
 PhaseCallback = Callable[[Phase, PhaseStatus], None]
 
 
+def _requested_services_for_up(scope: Scope, services: list[str]) -> list[str]:
+    """Return the explicit service list compose should recreate for this scope.
+
+    Runtime scope must always target the runtime service list directly so a
+    runtime-only rebuild cannot recreate core infra dependencies via compose's
+    dependency graph. Core and full scopes retain the historical behavior
+    (compose chooses services from the active profile) by returning an empty
+    list when no explicit service selection was provided.
+
+    OMN-9455: a runtime rebuild on 2026-04-22 invoked ``docker compose
+    --profile runtime up -d --force-recreate --pull always`` without a service
+    list or ``--no-deps``. Compose recreated dependency graph services and
+    collided with the live ``omnibase-infra-infisical`` container, breaking
+    Redpanda/Postgres/Valkey/Phoenix. Forcing an explicit runtime service list
+    combined with ``--no-deps`` in ``_compose_up`` prevents that regression.
+    """
+    if services:
+        return services
+    if scope == Scope.RUNTIME:
+        return services_for_scope(scope)
+    return []
+
+
 def _run(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(
         cmd,
@@ -449,6 +472,7 @@ class DeployExecutor:
         timeout = PHASE_TIMEOUTS.get(phase, 300)
 
         profile = "core" if scope == Scope.CORE else "runtime"
+        requested_services = _requested_services_for_up(scope, services)
         cmd = [
             "docker",
             "compose",
@@ -464,8 +488,13 @@ class DeployExecutor:
             "--pull",
             "always",
         ]
-        if services:
-            cmd.extend(services)
+        # OMN-9455: runtime scope must pass --no-deps so compose cannot recreate
+        # the core infra services (postgres/redpanda/valkey/infisical) declared
+        # as depends_on targets of the runtime services.
+        if scope == Scope.RUNTIME:
+            cmd.append("--no-deps")
+        if requested_services:
+            cmd.extend(requested_services)
 
         result = _run(cmd, timeout=timeout)
         if result.returncode != 0:
@@ -473,7 +502,12 @@ class DeployExecutor:
 
         # Verify containers actually reached running state — docker compose up exits 0
         # even when containers land in Created state (hit twice in production, 01:33 + 04:48).
-        expected = services if services else services_for_scope(scope)
+        # For runtime scope, verification MUST be bounded by the requested runtime
+        # service list so the runtime-only rebuild never implicitly waits on core
+        # infra containers (OMN-9455).
+        expected = (
+            requested_services if requested_services else services_for_scope(scope)
+        )
         logger.info(
             "Verifying %d container(s) reached running state: %s",
             len(expected),
