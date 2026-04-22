@@ -46,8 +46,9 @@ jobs:
           CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
         run: |
           if [ -z "$CROSS_REPO_PAT" ]; then
-            echo "::warning::CROSS_REPO_PAT is not set — audit will SKIP sibling repos."
-            echo "To audit across the org, set CROSS_REPO_PAT to a PAT with repo scope."
+            echo "::error::CROSS_REPO_PAT is required for org-wide merge-queue bypass auditing."
+            echo "Set CROSS_REPO_PAT with appropriate repo/org read scope, then re-run."
+            exit 1
           fi
 
       - name: Verify no admin bypass on Merge Queue rulesets

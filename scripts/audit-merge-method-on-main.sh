@@ -111,11 +111,21 @@ for repo in "${REPOS[@]}"; do
     continue
   fi
 
-  # Extract 2-parent commits.
-  two_parent=$(echo "$response" \
-    | jq -r '.data.repository.defaultBranchRef.target.history.nodes[]
-             | select(.parents.totalCount > 1)
-             | "\(.oid[0:8])  \(.committedDate)  \(.author.user.login // "unknown")  \(.messageHeadline)"')
+  # GraphQL may return HTTP 200 with an `errors` array; skip such repos.
+  if jq -e '(.errors // []) | length > 0' >/dev/null <<<"$response"; then
+    echo "SKIP  $repo: GraphQL returned errors (token scope or repo access)" >&2
+    continue
+  fi
+
+  # Extract 2-parent commits safely even when nested objects are null/missing.
+  if ! two_parent=$(jq -r '
+      (.data.repository.defaultBranchRef.target.history.nodes // [])[]
+      | select((.parents.totalCount // 0) > 1)
+      | "\(.oid[0:8])  \(.committedDate // "unknown-date")  \(.author.user.login // "unknown")  \(.messageHeadline // "")"
+    ' <<<"$response"); then
+    echo "SKIP  $repo: malformed GraphQL payload" >&2
+    continue
+  fi
 
   if [[ -z "$two_parent" ]]; then
     echo "OK    $repo: no 2-parent commits in last $DEPTH on main"
