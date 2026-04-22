@@ -99,17 +99,30 @@ metadata:
     # =========================================================================
 
     # -------------------------------------------------------------------------
-    # AUTHENTICATION
+    # AUTHENTICATION (OMN-2701 single-key, OMN-1419 multi-key)
     # -------------------------------------------------------------------------
-    # MCP protocol supports API key authentication.
+    # MCP protocol supports API key authentication. Multiple keys may be
+    # configured so distinct clients / services can hold distinct credentials;
+    # any listed key grants access. Keys are loaded from Infisical / env vars
+    # (typically comma-separated and split by the loader into a tuple).
     authentication:
-      # Whether authentication is required for tool access
-      required: false
-      # Authentication methods supported
+      # Whether authentication is required for tool access.
+      # OMN-1419: flipped to true — MCP now rejects unauthenticated requests.
+      required: true
+      # Authentication methods supported. Any one of the listed headers is
+      # sufficient to authenticate a request.
       methods:
         - api_key_header
-      # Header name for API key authentication
+        - bearer_token
+      # Canonical header for MCP API key authentication.
       api_key_header: "X-MCP-API-Key"
+      # Legacy / compatibility header names that are also accepted.
+      additional_headers:
+        - "X-API-Key"
+        - "Authorization" # "Bearer <token>" scheme
+      # Whether the server accepts multiple configured API keys
+      # (OMN-1419 — per-client/per-service credentials).
+      multi_key_support: true
     # -------------------------------------------------------------------------
     # TOOL ACCESS CONTROL
     # -------------------------------------------------------------------------

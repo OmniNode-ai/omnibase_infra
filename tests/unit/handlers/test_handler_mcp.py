@@ -66,6 +66,9 @@ def mcp_test_config() -> dict[str, object]:
         "skip_server": True,
         "kafka_enabled": False,
         "dev_mode": True,
+        # auth disabled in unit tests — auth behavior is covered by
+        # tests/unit/handlers/mcp/test_transport_streamable_http.py
+        "auth_enabled": False,
     }
 
 
@@ -88,6 +91,7 @@ def mcp_custom_config() -> dict[str, object]:
         "skip_server": True,
         "kafka_enabled": False,
         "dev_mode": True,
+        "auth_enabled": False,
     }
 
 
@@ -448,8 +452,9 @@ class TestMcpHandlerConfig:
     """Test suite for ModelMcpHandlerConfig."""
 
     def test_config_defaults(self) -> None:
-        """Test config has correct defaults."""
-        config = ModelMcpHandlerConfig()
+        """Non-auth defaults are preserved (OMN-1419 uses auth_enabled=False to
+        avoid tripping the api_keys validator in this narrow-scope test)."""
+        config = ModelMcpHandlerConfig(auth_enabled=False)
 
         assert config.host == "0.0.0.0"
         assert config.port == 8090
@@ -469,6 +474,7 @@ class TestMcpHandlerConfig:
             json_response=False,
             timeout_seconds=60.0,
             max_tools=50,
+            auth_enabled=False,
         )
 
         assert config.host == "localhost"
@@ -481,7 +487,7 @@ class TestMcpHandlerConfig:
 
     def test_config_is_frozen(self) -> None:
         """Test config is immutable (frozen)."""
-        config = ModelMcpHandlerConfig()
+        config = ModelMcpHandlerConfig(auth_enabled=False)
 
         with pytest.raises(ValidationError):
             config.host = "changed"
@@ -639,7 +645,8 @@ class TestHandlerMCPConfigValidation:
         This test verifies the skip_server path works correctly for unit tests.
         """
         # skip_server=True bypasses the code path that needs kafka_enabled etc.
-        await handler.initialize({"skip_server": True})
+        # auth_enabled=False avoids the OMN-1419 api_keys validator.
+        await handler.initialize({"skip_server": True, "auth_enabled": False})
 
         assert handler._initialized is True
         assert handler._config is not None

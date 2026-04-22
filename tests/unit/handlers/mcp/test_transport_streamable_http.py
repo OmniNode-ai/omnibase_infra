@@ -7,12 +7,17 @@ Tests cover:
 - Request with invalid token is rejected with HTTP 401
 - Request with valid Bearer token is passed through (200 from inner app)
 - Request with valid X-API-Key header is passed through (200 from inner app)
+- Request with valid X-MCP-API-Key header is passed through (OMN-1419)
+- Multiple API keys: any listed key is accepted (OMN-1419)
+- Unknown key is rejected even when other valid keys are configured (OMN-1419)
 - /health endpoint is exempt from auth (200 without credentials)
 - When auth_enabled=False, all requests pass through (no auth check)
 - 401 response body is valid JSON with error key
 - Auth rejection logs include remote_ip and reason
-- Successful auth logs include masked token (last 4 chars)
-- Empty api_key configured on server causes 401 (misconfiguration guard)
+- Successful auth logs include path + correlation_id (no token derivative)
+- Empty api_keys configured on server causes 401 (misconfiguration guard)
+- ModelMcpHandlerConfig / ModelMCPServerConfig validators enforce non-empty
+  api_keys when auth_enabled=True (OMN-1419).
 """
 
 from __future__ import annotations
@@ -36,6 +41,7 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 
 _VALID_KEY = "test-secret-token-abc"
+_VALID_KEY_B = "second-client-token-xyz"
 
 
 def _make_http_scope(
@@ -87,17 +93,13 @@ def _collect_sends() -> tuple[list[dict[str, object]], Send]:
 
 @pytest.mark.asyncio
 async def test_missing_token_returns_401() -> None:
-    """Unauthenticated request to /mcp → 401."""
+    """Unauthenticated request to /mcp -> 401."""
     inner = _RecordingApp()
-    middleware = MCPAuthMiddleware(inner, api_key=_VALID_KEY)
+    middleware = MCPAuthMiddleware(inner, api_keys=(_VALID_KEY,))
     msgs, send = _collect_sends()
     receive = AsyncMock()
 
-    await middleware(
-        _make_http_scope(path="/mcp"),
-        receive,
-        send,
-    )
+    await middleware(_make_http_scope(path="/mcp"), receive, send)
 
     assert not inner.called
     assert msgs[0]["status"] == 401
@@ -105,9 +107,9 @@ async def test_missing_token_returns_401() -> None:
 
 @pytest.mark.asyncio
 async def test_invalid_bearer_token_returns_401() -> None:
-    """Wrong Bearer token → 401."""
+    """Wrong Bearer token -> 401."""
     inner = _RecordingApp()
-    middleware = MCPAuthMiddleware(inner, api_key=_VALID_KEY)
+    middleware = MCPAuthMiddleware(inner, api_keys=(_VALID_KEY,))
     msgs, send = _collect_sends()
     receive = AsyncMock()
 
@@ -120,9 +122,9 @@ async def test_invalid_bearer_token_returns_401() -> None:
 
 @pytest.mark.asyncio
 async def test_invalid_api_key_header_returns_401() -> None:
-    """Wrong X-API-Key → 401."""
+    """Wrong X-API-Key -> 401."""
     inner = _RecordingApp()
-    middleware = MCPAuthMiddleware(inner, api_key=_VALID_KEY)
+    middleware = MCPAuthMiddleware(inner, api_keys=(_VALID_KEY,))
     msgs, send = _collect_sends()
     receive = AsyncMock()
 
@@ -134,10 +136,25 @@ async def test_invalid_api_key_header_returns_401() -> None:
 
 
 @pytest.mark.asyncio
-async def test_empty_server_api_key_returns_401() -> None:
-    """Server configured with empty api_key is a misconfiguration — reject all."""
+async def test_invalid_mcp_api_key_header_returns_401() -> None:
+    """Wrong X-MCP-API-Key -> 401 (OMN-1419)."""
     inner = _RecordingApp()
-    middleware = MCPAuthMiddleware(inner, api_key="")
+    middleware = MCPAuthMiddleware(inner, api_keys=(_VALID_KEY,))
+    msgs, send = _collect_sends()
+    receive = AsyncMock()
+
+    scope = _make_http_scope(headers=[(b"x-mcp-api-key", b"bad-key")])
+    await middleware(scope, receive, send)
+
+    assert not inner.called
+    assert msgs[0]["status"] == 401
+
+
+@pytest.mark.asyncio
+async def test_empty_server_api_keys_returns_401() -> None:
+    """Server configured with empty api_keys is a misconfiguration — reject all."""
+    inner = _RecordingApp()
+    middleware = MCPAuthMiddleware(inner, api_keys=())
     msgs, send = _collect_sends()
     receive = AsyncMock()
 
@@ -149,15 +166,15 @@ async def test_empty_server_api_key_returns_401() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tests: valid auth
+# Tests: valid auth - single key
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_valid_bearer_token_passes_through() -> None:
-    """Valid Bearer token → inner app called, 200 returned."""
+    """Valid Bearer token -> inner app called, 200 returned."""
     inner = _RecordingApp()
-    middleware = MCPAuthMiddleware(inner, api_key=_VALID_KEY)
+    middleware = MCPAuthMiddleware(inner, api_keys=(_VALID_KEY,))
     msgs, send = _collect_sends()
     receive = AsyncMock()
 
@@ -172,9 +189,9 @@ async def test_valid_bearer_token_passes_through() -> None:
 
 @pytest.mark.asyncio
 async def test_valid_x_api_key_passes_through() -> None:
-    """Valid X-API-Key → inner app called, 200 returned."""
+    """Valid X-API-Key (legacy header) -> inner app called, 200 returned."""
     inner = _RecordingApp()
-    middleware = MCPAuthMiddleware(inner, api_key=_VALID_KEY)
+    middleware = MCPAuthMiddleware(inner, api_keys=(_VALID_KEY,))
     msgs, send = _collect_sends()
     receive = AsyncMock()
 
@@ -183,6 +200,74 @@ async def test_valid_x_api_key_passes_through() -> None:
 
     assert inner.called
     assert msgs[0]["status"] == 200
+
+
+@pytest.mark.asyncio
+async def test_valid_x_mcp_api_key_passes_through() -> None:
+    """Valid X-MCP-API-Key -> inner app called, 200 returned (OMN-1419).
+
+    Covers the canonical MCP header required by the ticket contract.
+    """
+    inner = _RecordingApp()
+    middleware = MCPAuthMiddleware(inner, api_keys=(_VALID_KEY,))
+    msgs, send = _collect_sends()
+    receive = AsyncMock()
+
+    scope = _make_http_scope(headers=[(b"x-mcp-api-key", _VALID_KEY.encode())])
+    await middleware(scope, receive, send)
+
+    assert inner.called
+    assert msgs[0]["status"] == 200
+
+
+# ---------------------------------------------------------------------------
+# Tests: multi-key support (OMN-1419)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_multi_key_first_key_accepted() -> None:
+    """Multiple configured keys: first key authenticates (OMN-1419)."""
+    inner = _RecordingApp()
+    middleware = MCPAuthMiddleware(inner, api_keys=(_VALID_KEY, _VALID_KEY_B))
+    msgs, send = _collect_sends()
+    receive = AsyncMock()
+
+    scope = _make_http_scope(headers=[(b"x-mcp-api-key", _VALID_KEY.encode())])
+    await middleware(scope, receive, send)
+
+    assert inner.called
+    assert msgs[0]["status"] == 200
+
+
+@pytest.mark.asyncio
+async def test_multi_key_second_key_accepted() -> None:
+    """Multiple configured keys: second key also authenticates (OMN-1419)."""
+    inner = _RecordingApp()
+    middleware = MCPAuthMiddleware(inner, api_keys=(_VALID_KEY, _VALID_KEY_B))
+    msgs, send = _collect_sends()
+    receive = AsyncMock()
+
+    scope = _make_http_scope(headers=[(b"x-mcp-api-key", _VALID_KEY_B.encode())])
+    await middleware(scope, receive, send)
+
+    assert inner.called
+    assert msgs[0]["status"] == 200
+
+
+@pytest.mark.asyncio
+async def test_multi_key_unknown_key_rejected() -> None:
+    """Multi-key config rejects an unknown token even with valid keys present."""
+    inner = _RecordingApp()
+    middleware = MCPAuthMiddleware(inner, api_keys=(_VALID_KEY, _VALID_KEY_B))
+    msgs, send = _collect_sends()
+    receive = AsyncMock()
+
+    scope = _make_http_scope(headers=[(b"x-mcp-api-key", b"not-in-allowlist")])
+    await middleware(scope, receive, send)
+
+    assert not inner.called
+    assert msgs[0]["status"] == 401
 
 
 # ---------------------------------------------------------------------------
@@ -194,15 +279,11 @@ async def test_valid_x_api_key_passes_through() -> None:
 async def test_health_endpoint_exempt_no_credentials() -> None:
     """/health passes through without any auth headers."""
     inner = _RecordingApp()
-    middleware = MCPAuthMiddleware(inner, api_key=_VALID_KEY)
+    middleware = MCPAuthMiddleware(inner, api_keys=(_VALID_KEY,))
     msgs, send = _collect_sends()
     receive = AsyncMock()
 
-    await middleware(
-        _make_http_scope(path="/health"),
-        receive,
-        send,
-    )
+    await middleware(_make_http_scope(path="/health"), receive, send)
 
     assert inner.called
     assert msgs[0]["status"] == 200
@@ -217,7 +298,7 @@ async def test_health_endpoint_exempt_no_credentials() -> None:
 async def test_non_http_scope_passes_through() -> None:
     """Lifespan and other non-http scope types are forwarded without auth check."""
     inner = _RecordingApp()
-    middleware = MCPAuthMiddleware(inner, api_key=_VALID_KEY)
+    middleware = MCPAuthMiddleware(inner, api_keys=(_VALID_KEY,))
     _, send = _collect_sends()
     receive = AsyncMock()
 
@@ -231,7 +312,7 @@ async def test_non_http_scope_passes_through() -> None:
 async def test_websocket_scope_passes_through() -> None:
     """WebSocket scopes are forwarded without auth — only HTTP is auth-gated."""
     inner = _RecordingApp()
-    middleware = MCPAuthMiddleware(inner, api_key=_VALID_KEY)
+    middleware = MCPAuthMiddleware(inner, api_keys=(_VALID_KEY,))
     _, send = _collect_sends()
     receive = AsyncMock()
 
@@ -255,7 +336,7 @@ async def test_websocket_scope_passes_through() -> None:
 async def test_401_body_is_valid_json() -> None:
     """401 response body must be valid JSON with an 'error' key."""
     inner = _RecordingApp()
-    middleware = MCPAuthMiddleware(inner, api_key=_VALID_KEY)
+    middleware = MCPAuthMiddleware(inner, api_keys=(_VALID_KEY,))
     msgs, send = _collect_sends()
     receive = AsyncMock()
 
@@ -264,6 +345,8 @@ async def test_401_body_is_valid_json() -> None:
     body_msg = next(m for m in msgs if m.get("type") == "http.response.body")
     body = json.loads(body_msg["body"])
     assert "error" in body
+    # OMN-1419: detail must mention the X-MCP-API-Key header as an option
+    assert "X-MCP-API-Key" in body.get("detail", "")
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +358,7 @@ async def test_401_body_is_valid_json() -> None:
 async def test_auth_failure_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
     """Auth rejections must produce a WARNING log with remote_ip and reason."""
     inner = _RecordingApp()
-    middleware = MCPAuthMiddleware(inner, api_key=_VALID_KEY)
+    middleware = MCPAuthMiddleware(inner, api_keys=(_VALID_KEY,))
     receive = AsyncMock()
     _, send = _collect_sends()
 
@@ -285,13 +368,11 @@ async def test_auth_failure_logs_warning(caplog: pytest.LogCaptureFixture) -> No
         await middleware(_make_http_scope(client=("10.0.0.1", 9999)), receive, send)
 
     assert any("MCP auth rejected" in r.message for r in caplog.records)
-    # Check extra fields are present in the log record
     rejection_record = next(
         r for r in caplog.records if "MCP auth rejected" in r.message
     )
     assert hasattr(rejection_record, "remote_ip")
     assert rejection_record.remote_ip == "10.0.0.1"  # type: ignore[attr-defined]
-    # correlation_id must always be present (generated if not supplied by client)
     assert hasattr(rejection_record, "correlation_id")
     assert rejection_record.correlation_id  # type: ignore[attr-defined]
 
@@ -302,7 +383,7 @@ async def test_auth_rejection_includes_client_correlation_id(
 ) -> None:
     """When X-Correlation-ID is supplied, it is propagated in rejection logs."""
     inner = _RecordingApp()
-    middleware = MCPAuthMiddleware(inner, api_key=_VALID_KEY)
+    middleware = MCPAuthMiddleware(inner, api_keys=(_VALID_KEY,))
     receive = AsyncMock()
     _, send = _collect_sends()
 
@@ -320,10 +401,15 @@ async def test_auth_rejection_includes_client_correlation_id(
 
 
 @pytest.mark.asyncio
-async def test_auth_success_logs_masked_token(caplog: pytest.LogCaptureFixture) -> None:
-    """Successful auth must log the last 4 chars of the token (masked)."""
+async def test_auth_success_logs_accepted(caplog: pytest.LogCaptureFixture) -> None:
+    """Successful auth must log 'MCP auth accepted' with path and correlation_id.
+
+    No token derivative (even masked) is included in the success log; CodeQL
+    py/clear-text-logging-sensitive-data flags any expression derived from the
+    bearer token value flowing into a logger call.
+    """
     inner = _RecordingApp()
-    middleware = MCPAuthMiddleware(inner, api_key=_VALID_KEY)
+    middleware = MCPAuthMiddleware(inner, api_keys=(_VALID_KEY,))
     receive = AsyncMock()
     _, send = _collect_sends()
 
@@ -340,100 +426,122 @@ async def test_auth_success_logs_masked_token(caplog: pytest.LogCaptureFixture) 
     accepted_record = next(
         r for r in caplog.records if "MCP auth accepted" in r.message
     )
-    assert hasattr(accepted_record, "masked_token")
-    # Last 4 chars of _VALID_KEY = "-abc"
-    assert accepted_record.masked_token.endswith(_VALID_KEY[-4:])  # type: ignore[attr-defined]
+    # Verify path is logged for audit trail
+    assert hasattr(accepted_record, "path")  # type: ignore[attr-defined]
+    # Verify no token derivative leaks into the log record
+    assert not hasattr(accepted_record, "masked_token"), (
+        "masked_token must not appear in success log (CodeQL clear-text-logging)"
+    )
 
 
 # ---------------------------------------------------------------------------
-# Tests: ModelMcpHandlerConfig auth fields
+# Tests: ModelMcpHandlerConfig auth fields (OMN-1419 multi-key)
 # ---------------------------------------------------------------------------
 
 
-def test_model_mcp_handler_config_auth_defaults() -> None:
-    """ModelMcpHandlerConfig: auth_enabled defaults True, api_key defaults None."""
+def test_model_mcp_handler_config_auth_defaults_rejects_empty_keys() -> None:
+    """auth_enabled defaults True; empty api_keys must now fail validation."""
+    from pydantic import ValidationError
+
     from omnibase_infra.handlers.models.mcp import ModelMcpHandlerConfig
 
-    cfg = ModelMcpHandlerConfig()
-    assert cfg.auth_enabled is True
-    assert cfg.api_key is None
+    with pytest.raises(ValidationError):
+        ModelMcpHandlerConfig()
 
 
-def test_model_mcp_handler_config_auth_disabled() -> None:
-    """ModelMcpHandlerConfig: auth_enabled=False, api_key=None is valid."""
+def test_model_mcp_handler_config_auth_disabled_allows_empty_keys() -> None:
+    """auth_enabled=False keeps empty api_keys valid (local dev)."""
     from omnibase_infra.handlers.models.mcp import ModelMcpHandlerConfig
 
     cfg = ModelMcpHandlerConfig(auth_enabled=False)
     assert cfg.auth_enabled is False
+    assert cfg.api_keys == ()
 
 
-def test_model_mcp_handler_config_api_key_set() -> None:
-    """ModelMcpHandlerConfig: api_key can be set."""
+def test_model_mcp_handler_config_multi_key_set() -> None:
+    """api_keys accepts multiple distinct tokens (OMN-1419)."""
     from omnibase_infra.handlers.models.mcp import ModelMcpHandlerConfig
 
-    cfg = ModelMcpHandlerConfig(auth_enabled=True, api_key="my-secret")
-    assert cfg.api_key == "my-secret"
-
-
-# ---------------------------------------------------------------------------
-# Tests: ModelMCPServerConfig auth fields
-# ---------------------------------------------------------------------------
-
-
-def test_model_mcp_server_config_auth_defaults() -> None:
-    """ModelMCPServerConfig: auth_enabled defaults True, api_key defaults None."""
-    from omnibase_infra.models.mcp.model_mcp_server_config import ModelMCPServerConfig
-
-    cfg = ModelMCPServerConfig(consul_host="localhost", consul_port=8500)
-    assert cfg.auth_enabled is True
-    assert cfg.api_key is None
-
-
-def test_model_mcp_server_config_auth_disabled() -> None:
-    """ModelMCPServerConfig: auth_enabled=False is accepted."""
-    from omnibase_infra.models.mcp.model_mcp_server_config import ModelMCPServerConfig
-
-    cfg = ModelMCPServerConfig(
-        consul_host="localhost", consul_port=8500, auth_enabled=False
+    cfg = ModelMcpHandlerConfig(
+        auth_enabled=True, api_keys=("alpha-token", "beta-token", "gamma-token")
     )
-    assert cfg.auth_enabled is False
+    assert cfg.api_keys == ("alpha-token", "beta-token", "gamma-token")
+
+
+def test_model_mcp_handler_config_rejects_whitespace_key() -> None:
+    """Whitespace-only keys are rejected at validation time."""
+    from pydantic import ValidationError
+
+    from omnibase_infra.handlers.models.mcp import ModelMcpHandlerConfig
+
+    with pytest.raises(ValidationError):
+        ModelMcpHandlerConfig(auth_enabled=True, api_keys=("valid", "   "))
 
 
 # ---------------------------------------------------------------------------
-# Tests: HandlerMCP api_key validation
+# Tests: ModelMCPServerConfig auth fields (OMN-1419 multi-key)
+# ---------------------------------------------------------------------------
+
+
+def test_model_mcp_server_config_auth_disabled_allows_empty_keys() -> None:
+    """Server config: auth_enabled=False + empty api_keys is valid."""
+    from omnibase_infra.models.mcp.model_mcp_server_config import ModelMCPServerConfig
+
+    cfg = ModelMCPServerConfig(auth_enabled=False)
+    assert cfg.auth_enabled is False
+    assert cfg.api_keys == ()
+
+
+def test_model_mcp_server_config_auth_enabled_requires_keys() -> None:
+    """Server config: auth_enabled=True with no keys raises ValidationError."""
+    from pydantic import ValidationError
+
+    from omnibase_infra.models.mcp.model_mcp_server_config import ModelMCPServerConfig
+
+    with pytest.raises(ValidationError):
+        ModelMCPServerConfig(auth_enabled=True)
+
+
+def test_model_mcp_server_config_accepts_multi_key_tuple() -> None:
+    """Server config: api_keys tuple is propagated end-to-end (OMN-1419)."""
+    from omnibase_infra.models.mcp.model_mcp_server_config import ModelMCPServerConfig
+
+    cfg = ModelMCPServerConfig(auth_enabled=True, api_keys=("svc-a", "svc-b"))
+    assert cfg.api_keys == ("svc-a", "svc-b")
+
+
+# ---------------------------------------------------------------------------
+# Tests: MCPAuthMiddleware whitespace-only key filtering (CR thread fix)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_handler_mcp_raises_when_auth_enabled_no_api_key() -> None:
-    """HandlerMCP.initialize raises ProtocolConfigurationError when auth_enabled=True
-    but api_key is not set (prevents silent misconfiguration)."""
+async def test_whitespace_only_key_is_rejected_by_middleware() -> None:
+    """MCPAuthMiddleware.__init__ must strip whitespace-only keys.
 
-    from omnibase_infra.handlers.handler_mcp import HandlerMCP
+    Validates the CR-thread fix: even when constructed directly (bypassing
+    Pydantic validators), a whitespace-only key must not grant access.
+    """
+    inner = _RecordingApp()
+    # Construct with a whitespace-only key directly (no Pydantic validation)
+    middleware = MCPAuthMiddleware(inner, api_keys=("   ",))
+    msgs, send = _collect_sends()
+    receive = AsyncMock()
 
-    handler = HandlerMCP()
-    config: dict[str, object] = {
-        "skip_server": True,
-        "consul_host": "localhost",
-        "consul_port": 8500,
-        "kafka_enabled": False,
-        "dev_mode": True,
-        # auth_enabled defaults to True, api_key not set
-    }
+    # A request with the whitespace string as a bearer token must be rejected
+    scope = _make_http_scope(headers=[(b"authorization", b"Bearer    ")])
+    await middleware(scope, receive, send)
 
-    # skip_server=True skips server startup, so auth validation runs in the
-    # server branch which is bypassed. Use skip_server=False path simulation
-    # via the model-level check. The handler raises when auth_enabled and no key.
-    # Since skip_server=True bypasses the server block, test via auth_enabled=True
-    # without skip_server — but that requires consul which is not available in CI.
-    # Instead test the config model validation directly.
-    from omnibase_infra.handlers.models.mcp import ModelMcpHandlerConfig
+    assert not inner.called
+    assert msgs[0]["status"] == 401
 
-    cfg = ModelMcpHandlerConfig(auth_enabled=True, api_key=None)
-    assert cfg.auth_enabled is True
-    assert cfg.api_key is None
-    # The api_key=None/empty validation fires during server startup (not skip_server).
-    # Verify the config field accepts None (validation is in initialize()).
-    # A separate integration test with a real server would cover the full path;
-    # the raise is tested by checking the condition in the config.
-    assert not cfg.api_key  # confirms condition that triggers the raise
+
+def test_middleware_filters_whitespace_keys_from_mixed_tuple() -> None:
+    """MCPAuthMiddleware must drop whitespace-only entries from a mixed tuple.
+
+    Ensures that ("real-key", "   ") results in only ("real-key",) being stored.
+    """
+    inner = _RecordingApp()
+    middleware = MCPAuthMiddleware(inner, api_keys=("real-key", "   ", "\t"))
+    # Only the non-whitespace key should remain
+    assert middleware._api_keys == ("real-key",)

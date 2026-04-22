@@ -1,0 +1,204 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""Unit tests for MCP API key injection logic in RuntimeHostProcess.
+
+Tests the key-injection branch at the point where the runtime merges env-var
+derived keys into effective_config for MCP handlers (OMN-1419).
+
+Exercises the REAL production code path via
+``omnibase_infra.runtime.util_mcp_auth.inject_mcp_api_keys`` (CR thread fix —
+"tests don't execute the production injection path").
+
+CR-thread fixes verified here:
+- Critical: existing api_keys in effective_config must NOT be overwritten by
+  env-derived keys, and must NOT trigger auth_enabled=False fallback.
+- Critical: malformed MCP_API_KEYS (only whitespace/commas) must not silently
+  disable auth.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from omnibase_infra.runtime.util_mcp_auth import inject_mcp_api_keys, parse_mcp_api_keys
+
+pytestmark = pytest.mark.unit
+
+
+# ---------------------------------------------------------------------------
+# Tests: env-derived keys injected when config has no api_keys
+# ---------------------------------------------------------------------------
+
+
+def test_csv_env_injects_keys() -> None:
+    """MCP_API_KEYS CSV injects parsed tuple into effective_config."""
+    cfg: dict[str, Any] = {}
+    result = inject_mcp_api_keys(cfg, {"MCP_API_KEYS": "alpha,beta,gamma"})
+    assert result["api_keys"] == ("alpha", "beta", "gamma")
+    assert "auth_enabled" not in result
+
+
+def test_single_env_injects_single_key() -> None:
+    """MCP_API_KEY (single) injects a one-element tuple."""
+    cfg: dict[str, Any] = {}
+    result = inject_mcp_api_keys(cfg, {"MCP_API_KEY": "solo-token"})
+    assert result["api_keys"] == ("solo-token",)
+
+
+def test_no_env_no_config_disables_auth() -> None:
+    """With no env vars and no existing config, auth defaults to disabled (local dev)."""
+    cfg: dict[str, Any] = {}
+    result = inject_mcp_api_keys(cfg, {})
+    assert result.get("auth_enabled") is False
+    assert "api_keys" not in result
+
+
+# ---------------------------------------------------------------------------
+# Tests: existing api_keys in effective_config are preserved (CR thread fix)
+# ---------------------------------------------------------------------------
+
+
+def test_existing_contract_api_keys_not_overwritten_by_env() -> None:
+    """If effective_config already has api_keys, env vars must not override them.
+
+    Covers the critical CR-thread finding: a config pre-populated with api_keys
+    (from contract/runtime config) must not be silently replaced by env-derived keys.
+    """
+    cfg: dict[str, Any] = {"api_keys": ("contract-key-a", "contract-key-b")}
+    result = inject_mcp_api_keys(cfg, {"MCP_API_KEYS": "injected-key"})
+    # Contract keys must remain intact
+    assert result["api_keys"] == ("contract-key-a", "contract-key-b")
+    # auth_enabled must not have been set to False either
+    assert "auth_enabled" not in result
+
+
+def test_existing_api_keys_prevent_auth_disabled_fallback() -> None:
+    """Existing api_keys in config must block the auth_enabled=False fallback.
+
+    The fail-open path (auth_enabled=False) must only trigger when both
+    env vars are absent AND effective_config has no api_keys.
+    """
+    cfg: dict[str, Any] = {"api_keys": ("existing-key",)}
+    result = inject_mcp_api_keys(cfg, {})  # no env vars
+    # auth_enabled must NOT be set to False since api_keys already present
+    assert "auth_enabled" not in result
+    assert result["api_keys"] == ("existing-key",)
+
+
+# ---------------------------------------------------------------------------
+# Tests: malformed MCP_API_KEYS values (CR thread fix — fail-safe, not fail-open)
+# ---------------------------------------------------------------------------
+
+
+def test_whitespace_only_csv_yields_empty_tuple() -> None:
+    """MCP_API_KEYS with only whitespace/commas yields an empty parsed_keys tuple.
+
+    The var is set (not None), so parsed_keys != None, but contains no usable tokens.
+    This must NOT trigger the auth_enabled=False fallback.
+    """
+    cfg: dict[str, Any] = {}
+    result = inject_mcp_api_keys(cfg, {"MCP_API_KEYS": " , , "})
+    # api_keys set to empty tuple — the Pydantic validator on ModelMcpHandlerConfig
+    # will reject this at initialization time (validator enforces non-empty when
+    # auth_enabled=True), which is the correct fail-fast behavior.
+    assert result.get("api_keys") == ()
+    # auth_enabled must NOT be set to False (env var was present, just malformed)
+    assert "auth_enabled" not in result
+
+
+def test_whitespace_only_single_key_yields_empty_tuple() -> None:
+    """MCP_API_KEY set to whitespace-only yields empty parsed_keys, not auth bypass."""
+    cfg: dict[str, Any] = {}
+    result = inject_mcp_api_keys(cfg, {"MCP_API_KEY": "   "})
+    assert result.get("api_keys") == ()
+    assert "auth_enabled" not in result
+
+
+# ---------------------------------------------------------------------------
+# Tests: onex alias env vars
+# ---------------------------------------------------------------------------
+
+
+def test_onex_prefix_csv_alias_works() -> None:
+    """ONEX_MCP_API_KEYS (alias) is accepted when MCP_API_KEYS is absent."""
+    cfg: dict[str, Any] = {}
+    result = inject_mcp_api_keys(cfg, {"ONEX_MCP_API_KEYS": "x,y"})
+    assert result["api_keys"] == ("x", "y")
+
+
+def test_onex_prefix_single_alias_works() -> None:
+    """ONEX_MCP_API_KEY (alias) is accepted when MCP_API_KEY is absent."""
+    cfg: dict[str, Any] = {}
+    result = inject_mcp_api_keys(cfg, {"ONEX_MCP_API_KEY": "z-token"})
+    assert result["api_keys"] == ("z-token",)
+
+
+def test_csv_takes_precedence_over_single() -> None:
+    """When both MCP_API_KEYS and MCP_API_KEY are set, CSV wins (it's checked first)."""
+    cfg: dict[str, Any] = {}
+    result = inject_mcp_api_keys(
+        cfg, {"MCP_API_KEYS": "key-a,key-b", "MCP_API_KEY": "single"}
+    )
+    assert result["api_keys"] == ("key-a", "key-b")
+
+
+# ---------------------------------------------------------------------------
+# Tests: parse_mcp_api_keys directly (parser unit coverage)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_returns_none_when_no_env() -> None:
+    """parse_mcp_api_keys returns None when neither env var is present."""
+    assert parse_mcp_api_keys({}) is None
+
+
+def test_parse_returns_empty_tuple_for_whitespace_csv() -> None:
+    """parse_mcp_api_keys returns () for whitespace-only CSV."""
+    assert parse_mcp_api_keys({"MCP_API_KEYS": "  ,  "}) == ()
+
+
+def test_parse_returns_keys_from_csv() -> None:
+    """parse_mcp_api_keys returns stripped keys from CSV."""
+    assert parse_mcp_api_keys({"MCP_API_KEYS": " a , b "}) == ("a", "b")
+
+
+# ---------------------------------------------------------------------------
+# Tests: empty-string env vars must NOT collapse to None (CR thread fix)
+# ---------------------------------------------------------------------------
+
+
+def test_empty_string_mcp_api_keys_yields_empty_tuple_not_none() -> None:
+    """MCP_API_KEYS='' must be treated as 'set but empty', NOT as absent.
+
+    Using `or` chaining collapses '' to None, which causes inject_mcp_api_keys
+    to hit the auth_enabled=False fallback (fail-open).  The fix uses explicit
+    'in lookup' checks to preserve the distinction.
+    """
+    result = parse_mcp_api_keys({"MCP_API_KEYS": ""})
+    # Must be () (set but malformed), not None (absent)
+    assert result == (), f"Expected () for empty MCP_API_KEYS, got {result!r}"
+
+
+def test_empty_string_mcp_api_key_yields_empty_tuple_not_none() -> None:
+    """MCP_API_KEY='' must be treated as 'set but empty', NOT as absent."""
+    result = parse_mcp_api_keys({"MCP_API_KEY": ""})
+    assert result == (), f"Expected () for empty MCP_API_KEY, got {result!r}"
+
+
+def test_empty_string_does_not_trigger_auth_disabled() -> None:
+    """inject_mcp_api_keys with MCP_API_KEYS='' must NOT set auth_enabled=False.
+
+    The fail-open path must only trigger when the env var is truly absent.
+    An empty string means the operator set the var, so auth_enabled=False
+    would be a silent security regression.
+    """
+    cfg: dict[str, Any] = {}
+    result = inject_mcp_api_keys(cfg, {"MCP_API_KEYS": ""})
+    # api_keys is set to empty tuple — Pydantic validator catches this at init
+    assert result.get("api_keys") == ()
+    # Must NOT have fallen through to auth_enabled=False
+    assert "auth_enabled" not in result, (
+        "auth_enabled=False must not be set when MCP_API_KEYS is present (even if empty)"
+    )

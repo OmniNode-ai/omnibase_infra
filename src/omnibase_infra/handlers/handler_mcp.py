@@ -113,18 +113,21 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         - Correlation ID propagation for tracing
         - Circuit breaker protection against cascading failures
 
-    Authentication (OMN-2701):
+    Authentication (OMN-2701 single-key, OMN-1419 multi-key):
         Bearer token / API-key authentication is enforced via ``MCPAuthMiddleware``
         on all MCP endpoints. The ``/health`` endpoint is explicitly exempted.
 
         Configure via ModelMcpHandlerConfig:
         - ``auth_enabled=True`` (default): auth is active
         - ``auth_enabled=False``: auth is bypassed; WARNING logged at startup
-        - ``api_key``: token value loaded from Infisical/env
+        - ``api_keys``: tuple of accepted tokens loaded from Infisical/env.
+          Any key listed grants access — supports distinct credentials per
+          client/service.
 
-        Accepted header schemes (either is valid):
+        Accepted header schemes (any one is valid):
         - ``Authorization: Bearer <token>``
-        - ``X-API-Key: <token>``
+        - ``X-MCP-API-Key: <token>`` (canonical MCP header, OMN-1419)
+        - ``X-API-Key: <token>`` (legacy/compatibility)
 
         Unauthenticated requests receive HTTP 401 with JSON error body.
         Auth failures and successes are audit-logged (see MCPAuthMiddleware).
@@ -509,7 +512,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                     "dev_mode": dev_mode,
                     "contracts_dir": contracts_dir,
                     "auth_enabled": self._config.auth_enabled,
-                    "api_key": self._config.api_key,
+                    "api_keys": self._config.api_keys,
                 }
                 if registry_query_limit is not None:
                     server_config_kwargs["registry_query_limit"] = registry_query_limit
@@ -565,16 +568,16 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                         ],
                     )
 
-                    # Apply auth middleware (R1, R3 — OMN-2701).
+                    # Apply auth middleware (R1, R3 — OMN-2701; multi-key OMN-1419).
                     # /health is exempted by MCPAuthMiddleware._AUTH_EXEMPT_PATHS.
                     if self._config.auth_enabled:
-                        # Validate api_key is non-empty before constructing the
-                        # middleware; fail fast rather than silently coercing to ""
+                        # Validate api_keys is non-empty before constructing the
+                        # middleware; fail fast rather than silently coercing to ()
                         # (which would reject every request with "server misconfiguration").
-                        if not self._config.api_key:
+                        if not self._config.api_keys:
                             raise ProtocolConfigurationError(
-                                "auth_enabled=True but api_key is not set. "
-                                "Set MCPServerConfig.api_key (loaded from Infisical/env) "
+                                "auth_enabled=True but api_keys is empty. "
+                                "Set MCPServerConfig.api_keys (loaded from Infisical/env) "
                                 "or disable auth with auth_enabled=False for local dev.",
                                 context=ModelInfraErrorContext.with_correlation(
                                     correlation_id=init_correlation_id,
@@ -585,7 +588,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                             )
                         app: Starlette = MCPAuthMiddleware(  # type: ignore[assignment]
                             base_app,
-                            api_key=self._config.api_key,
+                            api_keys=self._config.api_keys,
                         )
                     else:
                         app = base_app

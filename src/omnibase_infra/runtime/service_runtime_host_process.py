@@ -122,6 +122,7 @@ from omnibase_infra.runtime.protocol_lifecycle_executor import (
 from omnibase_infra.runtime.runtime_contract_config_loader import (
     RuntimeContractConfigLoader,
 )
+from omnibase_infra.runtime.util_mcp_auth import inject_mcp_api_keys
 from omnibase_infra.runtime.util_wiring import wire_default_handlers
 from omnibase_infra.utils.util_consumer_group import compute_consumer_group_id
 from omnibase_infra.utils.util_env_parsing import parse_env_float
@@ -2550,17 +2551,10 @@ class RuntimeHostProcess:
                             effective_config["dsn"] = db_url
 
                     if handler_type == "mcp":
-                        # Inject MCP API key from env if available.
-                        # When no api_key is configured and auth is not explicitly
-                        # disabled, disable auth to allow local dev startup without
-                        # requiring Infisical/secret configuration.
-                        mcp_api_key = os.environ.get("MCP_API_KEY") or os.environ.get(
-                            "ONEX_MCP_API_KEY"
-                        )
-                        if mcp_api_key and "api_key" not in effective_config:
-                            effective_config["api_key"] = mcp_api_key
-                        elif "auth_enabled" not in effective_config and not mcp_api_key:
-                            effective_config["auth_enabled"] = False
+                        # Inject MCP API keys from env if available (OMN-1419).
+                        # Logic lives in util_mcp_auth.inject_mcp_api_keys so
+                        # unit tests can exercise the real production path.
+                        inject_mcp_api_keys(effective_config)
 
                         # Skip the uvicorn server when running in-memory event bus
                         # mode (e.g., tests). This prevents port-binding conflicts

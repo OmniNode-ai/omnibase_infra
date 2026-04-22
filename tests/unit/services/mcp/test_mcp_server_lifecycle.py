@@ -157,6 +157,7 @@ def dev_mode_config(tmp_contracts_dir: Path) -> ModelMCPServerConfig:
         dev_mode=True,
         contracts_dir=str(tmp_contracts_dir),
         kafka_enabled=False,  # Disable Kafka for unit tests
+        auth_enabled=False,  # OMN-1419: unit tests don't exercise auth middleware
     )
 
 
@@ -170,6 +171,7 @@ def production_config() -> ModelMCPServerConfig:
     return ModelMCPServerConfig(
         dev_mode=False,
         kafka_enabled=False,
+        auth_enabled=False,  # OMN-1419: unit tests don't exercise auth middleware
     )
 
 
@@ -664,6 +666,7 @@ class TestDiscoverFromContracts:
             dev_mode=True,
             contracts_dir=str(tmp_path / "nonexistent"),
             kafka_enabled=False,
+            auth_enabled=False,
         )
         lifecycle = MCPServerLifecycle(mock_container, config)
 
@@ -691,6 +694,7 @@ class TestDiscoverFromContracts:
             dev_mode=True,
             contracts_dir=None,
             kafka_enabled=False,
+            auth_enabled=False,
         )
         lifecycle = MCPServerLifecycle(mock_container, config)
 
@@ -1030,11 +1034,11 @@ class TestModelMCPServerConfig:
     def test_default_values(self) -> None:
         """Should have sensible default values with no Consul fields.
 
-        Given: No constructor arguments
-        When: ModelMCPServerConfig is created
-        Then: Default values are set correctly (no consul_host/port/scheme/token)
+        OMN-1419: auth_enabled=False is required here so the model validator
+        (which requires api_keys when auth_enabled=True) does not trip during
+        a defaults-only test.
         """
-        config = ModelMCPServerConfig()
+        config = ModelMCPServerConfig(auth_enabled=False)
 
         assert config.registry_query_limit == 100
         assert config.kafka_enabled is True
@@ -1050,27 +1054,18 @@ class TestModelMCPServerConfig:
         assert not hasattr(config, "consul_token")
 
     def test_dev_mode_config(self) -> None:
-        """Should accept dev_mode and contracts_dir.
-
-        Given: dev_mode=True and contracts_dir specified
-        When: ModelMCPServerConfig is created
-        Then: Values are set correctly
-        """
+        """Should accept dev_mode and contracts_dir."""
         config = ModelMCPServerConfig(
             dev_mode=True,
             contracts_dir="/path/to/contracts",
+            auth_enabled=False,
         )
 
         assert config.dev_mode is True
         assert config.contracts_dir == "/path/to/contracts"
 
     def test_registry_query_limit_config(self) -> None:
-        """Should accept registry_query_limit.
-
-        Given: registry_query_limit=200
-        When: ModelMCPServerConfig is created
-        Then: Value is set correctly
-        """
-        config = ModelMCPServerConfig(registry_query_limit=200)
+        """Should accept registry_query_limit."""
+        config = ModelMCPServerConfig(registry_query_limit=200, auth_enabled=False)
 
         assert config.registry_query_limit == 200
