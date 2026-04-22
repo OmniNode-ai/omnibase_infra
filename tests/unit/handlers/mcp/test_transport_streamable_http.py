@@ -499,3 +499,40 @@ def test_model_mcp_server_config_accepts_multi_key_tuple() -> None:
 
     cfg = ModelMCPServerConfig(auth_enabled=True, api_keys=("svc-a", "svc-b"))
     assert cfg.api_keys == ("svc-a", "svc-b")
+
+
+# ---------------------------------------------------------------------------
+# Tests: MCPAuthMiddleware whitespace-only key filtering (CR thread fix)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_whitespace_only_key_is_rejected_by_middleware() -> None:
+    """MCPAuthMiddleware.__init__ must strip whitespace-only keys.
+
+    Validates the CR-thread fix: even when constructed directly (bypassing
+    Pydantic validators), a whitespace-only key must not grant access.
+    """
+    inner = _RecordingApp()
+    # Construct with a whitespace-only key directly (no Pydantic validation)
+    middleware = MCPAuthMiddleware(inner, api_keys=("   ",))
+    msgs, send = _collect_sends()
+    receive = AsyncMock()
+
+    # A request with the whitespace string as a bearer token must be rejected
+    scope = _make_http_scope(headers=[(b"authorization", b"Bearer    ")])
+    await middleware(scope, receive, send)
+
+    assert not inner.called
+    assert msgs[0]["status"] == 401
+
+
+def test_middleware_filters_whitespace_keys_from_mixed_tuple() -> None:
+    """MCPAuthMiddleware must drop whitespace-only entries from a mixed tuple.
+
+    Ensures that ("real-key", "   ") results in only ("real-key",) being stored.
+    """
+    inner = _RecordingApp()
+    middleware = MCPAuthMiddleware(inner, api_keys=("real-key", "   ", "\t"))
+    # Only the non-whitespace key should remain
+    assert middleware._api_keys == ("real-key",)

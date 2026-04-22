@@ -102,8 +102,11 @@ class MCPAuthMiddleware:
 
     def __init__(self, app: ASGIApp, api_keys: Iterable[str]) -> None:
         self._app = app
-        # Store as tuple to prevent accidental mutation; filter empties defensively.
-        self._api_keys: tuple[str, ...] = tuple(k for k in api_keys if k)
+        # Store as tuple to prevent accidental mutation; filter empties and
+        # whitespace-only keys defensively so that MCPAuthMiddleware constructed
+        # directly (bypassing Pydantic validators) cannot admit blank-looking
+        # tokens.
+        self._api_keys: tuple[str, ...] = tuple(k for k in api_keys if k and k.strip())
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         # Only enforce auth on HTTP requests; forward all other scope types

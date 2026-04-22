@@ -2566,19 +2566,37 @@ class RuntimeHostProcess:
                             "MCP_API_KEY"
                         ) or os.environ.get("ONEX_MCP_API_KEY")
 
-                        parsed_keys: tuple[str, ...] = ()
-                        if mcp_api_keys_csv:
+                        # parsed_keys=None means the env var was absent.
+                        # parsed_keys=() means the env var was set but empty/whitespace.
+                        parsed_keys: tuple[str, ...] | None = None
+                        if mcp_api_keys_csv is not None:
                             parsed_keys = tuple(
                                 k.strip()
                                 for k in mcp_api_keys_csv.split(",")
                                 if k.strip()
                             )
-                        elif mcp_api_key_single:
-                            parsed_keys = (mcp_api_key_single,)
+                        elif mcp_api_key_single is not None:
+                            parsed_keys = (
+                                (mcp_api_key_single.strip(),)
+                                if mcp_api_key_single.strip()
+                                else ()
+                            )
 
-                        if parsed_keys and "api_keys" not in effective_config:
+                        # Only inject env-derived keys if the contract/runtime config
+                        # hasn't already populated api_keys; defer to existing config.
+                        if (
+                            parsed_keys is not None
+                            and "api_keys" not in effective_config
+                        ):
                             effective_config["api_keys"] = parsed_keys
-                        elif "auth_enabled" not in effective_config and not parsed_keys:
+                        elif (
+                            "auth_enabled" not in effective_config
+                            and not effective_config.get("api_keys")
+                            and parsed_keys is None
+                        ):
+                            # No explicit auth config from any source — default to
+                            # auth-disabled to allow local dev startup without
+                            # requiring Infisical/secret configuration.
                             effective_config["auth_enabled"] = False
 
                         # Skip the uvicorn server when running in-memory event bus
