@@ -153,27 +153,34 @@ class MCPAuthMiddleware:
 
         timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-        if not token or not self._api_keys or not self._token_matches(token):
-            if not token:
-                reason = "missing token"
-            elif not self._api_keys:
-                reason = "server misconfiguration"
-            else:
-                reason = "invalid token"
+        # Determine rejection reason before referencing token in any log call,
+        # so that the token value never flows into the logger (CodeQL taint-safe).
+        if not token:
+            rejection_reason: str | None = "missing token"
+        elif not self._api_keys:
+            rejection_reason = "server misconfiguration"
+        elif not self._token_matches(token):
+            rejection_reason = "invalid token"
+        else:
+            rejection_reason = None  # auth passes
+
+        if rejection_reason is not None:
+            # Token value is never referenced below — only the reason literal is logged.
             logger.warning(
                 "MCP auth rejected",
                 extra={
                     "timestamp": timestamp,
                     "remote_ip": remote_ip,
                     "path": path,
-                    "reason": reason,
+                    "reason": rejection_reason,
                     "correlation_id": correlation_id,
                 },
             )
             await self._send_401(send)
             return
 
-        # Auth passed — log masked token (last 4 chars) for audit trail
+        # Auth passed — token is guaranteed non-None and valid here.
+        assert token is not None  # narrow for mypy after early-return block above
         masked = f"****{token[-4:]}" if len(token) >= 4 else "****"
         logger.info(
             "MCP auth accepted",
