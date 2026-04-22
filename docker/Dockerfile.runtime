@@ -244,6 +244,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install "protobuf>=5.29.6"
 
+# Security: upgrade setuptools to clear CVE-2025-47273 (HIGH, path traversal, fixed in >=78.1.1).
+# setuptools ships with python:3.12-slim base image at an older version flagged by Trivy.
+# Force upgrade here after all other installs to ensure the patched version is present.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install "setuptools>=78.1.1"
+
 # Verify torch is CPU-only (torch.version.cuda must be None, no nvidia packages)
 RUN /app/.venv/bin/python -c "\
 import torch, pkgutil; \
