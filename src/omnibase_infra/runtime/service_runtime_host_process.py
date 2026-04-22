@@ -2550,16 +2550,35 @@ class RuntimeHostProcess:
                             effective_config["dsn"] = db_url
 
                     if handler_type == "mcp":
-                        # Inject MCP API key from env if available.
-                        # When no api_key is configured and auth is not explicitly
-                        # disabled, disable auth to allow local dev startup without
-                        # requiring Infisical/secret configuration.
-                        mcp_api_key = os.environ.get("MCP_API_KEY") or os.environ.get(
-                            "ONEX_MCP_API_KEY"
-                        )
-                        if mcp_api_key and "api_key" not in effective_config:
-                            effective_config["api_key"] = mcp_api_key
-                        elif "auth_enabled" not in effective_config and not mcp_api_key:
+                        # Inject MCP API keys from env if available (OMN-1419).
+                        # Supports either a single token (MCP_API_KEY /
+                        # ONEX_MCP_API_KEY) or multiple comma-separated tokens
+                        # (MCP_API_KEYS / ONEX_MCP_API_KEYS) so distinct clients
+                        # can hold distinct credentials.
+                        #
+                        # When no keys are configured and auth is not explicitly
+                        # disabled, auth is disabled to allow local dev startup
+                        # without requiring Infisical/secret configuration.
+                        mcp_api_keys_csv = os.environ.get(
+                            "MCP_API_KEYS"
+                        ) or os.environ.get("ONEX_MCP_API_KEYS")
+                        mcp_api_key_single = os.environ.get(
+                            "MCP_API_KEY"
+                        ) or os.environ.get("ONEX_MCP_API_KEY")
+
+                        parsed_keys: tuple[str, ...] = ()
+                        if mcp_api_keys_csv:
+                            parsed_keys = tuple(
+                                k.strip()
+                                for k in mcp_api_keys_csv.split(",")
+                                if k.strip()
+                            )
+                        elif mcp_api_key_single:
+                            parsed_keys = (mcp_api_key_single,)
+
+                        if parsed_keys and "api_keys" not in effective_config:
+                            effective_config["api_keys"] = parsed_keys
+                        elif "auth_enabled" not in effective_config and not parsed_keys:
                             effective_config["auth_enabled"] = False
 
                         # Skip the uvicorn server when running in-memory event bus

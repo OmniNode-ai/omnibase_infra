@@ -4,7 +4,7 @@
 # S104 disabled: Binding to 0.0.0.0 is intentional for container networking
 """MCP handler configuration model."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ModelMcpHandlerConfig(BaseModel):
@@ -20,8 +20,11 @@ class ModelMcpHandlerConfig(BaseModel):
         max_tools: Maximum number of tools to expose.
         auth_enabled: Whether bearer token / API-key auth middleware is active.
             When False, a WARNING is logged at startup. Default True.
-        api_key: Bearer token / API key value required for authenticated requests.
-            Loaded from Infisical or env. Required when auth_enabled=True.
+        api_keys: Tuple of accepted API keys / bearer tokens. Every key listed is
+            equally valid — this supports issuing separate credentials per client
+            or service (OMN-1419). Loaded from Infisical or env (typically
+            comma-separated and split by the caller). At least one non-empty
+            key is required when ``auth_enabled`` is True.
     """
 
     host: str = Field(default="0.0.0.0", description="Host to bind MCP server to")
@@ -44,15 +47,31 @@ class ModelMcpHandlerConfig(BaseModel):
             "When False, a WARNING is logged at startup."
         ),
     )
-    api_key: str | None = Field(
-        default=None,
+    api_keys: tuple[str, ...] = Field(
+        default_factory=tuple,
         description=(
-            "Bearer token / API key required for authenticated requests. "
-            "Loaded from Infisical or env. Required when auth_enabled=True."
+            "Accepted bearer tokens / API keys. Every listed key grants access. "
+            "Supports multiple clients/services holding distinct credentials. "
+            "At least one non-empty key is required when auth_enabled=True."
         ),
     )
 
     model_config = {"frozen": True}
+
+    @model_validator(mode="after")
+    def _validate_keys_when_auth_enabled(self) -> "ModelMcpHandlerConfig":
+        """Reject empty/whitespace keys and enforce the auth_enabled contract."""
+        if any((not k) or (not k.strip()) for k in self.api_keys):
+            raise ValueError(
+                "api_keys contains empty or whitespace-only entries; "
+                "remove them before constructing the config"
+            )
+        if self.auth_enabled and not self.api_keys:
+            raise ValueError(
+                "auth_enabled=True but api_keys is empty. "
+                "Provide at least one API key or set auth_enabled=False."
+            )
+        return self
 
 
 __all__ = ["ModelMcpHandlerConfig"]

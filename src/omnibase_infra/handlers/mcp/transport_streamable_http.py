@@ -18,11 +18,14 @@ Security:
     Configure via ModelMcpHandlerConfig:
     - ``auth_enabled=True`` (default): auth middleware is active
     - ``auth_enabled=False``: middleware is bypassed; WARNING logged at startup
-    - ``api_key``: the secret token value (from Infisical/env)
+    - ``api_keys``: tuple of accepted tokens (OMN-1419 multi-key support).
+      Any key in the tuple grants access, supporting distinct credentials per
+      client/service.
 
-    Supported auth schemes (either accepted):
+    Supported auth schemes (any one accepted):
     - ``Authorization: Bearer <token>``
     - ``X-API-Key: <token>``
+    - ``X-MCP-API-Key: <token>`` (canonical MCP header, OMN-1419)
 
     Unauthenticated requests receive HTTP 401 with a JSON error body.
     Auth failures are logged with: timestamp, remote IP, rejection reason.
@@ -34,7 +37,7 @@ Usage:
 
     config = ModelMcpHandlerConfig(
         host="0.0.0.0", port=8090, path="/mcp",
-        auth_enabled=True, api_key="secret-token",
+        auth_enabled=True, api_keys=("client-a-token", "client-b-token"),
     )
     transport = TransportMCPStreamableHttp(config)
     await transport.start(tool_registry)
@@ -42,10 +45,12 @@ Usage:
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import time
 import uuid
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -74,8 +79,15 @@ class MCPAuthMiddleware:
     """ASGI middleware that enforces bearer token / API-key authentication.
 
     Exempts ``/health`` (and any path in ``_AUTH_EXEMPT_PATHS``) from auth.
-    All other paths require a valid ``Authorization: Bearer <token>`` or
-    ``X-API-Key: <token>`` header.
+    All other paths require a valid token presented via one of:
+
+    - ``Authorization: Bearer <token>``
+    - ``X-API-Key: <token>``
+    - ``X-MCP-API-Key: <token>`` (OMN-1419 canonical MCP header)
+
+    The presented token must match (constant-time compare) at least one of
+    the configured ``api_keys``. This supports issuing distinct credentials
+    per client or service without requiring separate middleware instances.
 
     Audit logging:
         - Auth failures: WARNING with timestamp, remote IP, rejection reason.
@@ -84,13 +96,14 @@ class MCPAuthMiddleware:
 
     Args:
         app: The inner ASGI application to wrap.
-        api_key: The expected token value. If empty or None, every request is
+        api_keys: Iterable of valid token values. If empty, every request is
             rejected with 401 (misconfiguration guard).
     """
 
-    def __init__(self, app: ASGIApp, api_key: str) -> None:
+    def __init__(self, app: ASGIApp, api_keys: Iterable[str]) -> None:
         self._app = app
-        self._api_key = api_key
+        # Store as tuple to prevent accidental mutation; filter empties defensively.
+        self._api_keys: tuple[str, ...] = tuple(k for k in api_keys if k)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         # Only enforce auth on HTTP requests; forward all other scope types
@@ -127,20 +140,23 @@ class MCPAuthMiddleware:
         if auth_header.lower().startswith("bearer "):
             token = auth_header[len("bearer ") :]
 
-        # Accept X-API-Key: <token>
+        # Accept X-MCP-API-Key (canonical MCP header, OMN-1419)
+        if token is None:
+            token = headers.get("x-mcp-api-key")
+
+        # Accept X-API-Key (legacy/compatibility header, OMN-2701)
         if token is None:
             token = headers.get("x-api-key")
 
         timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-        if not token or not self._api_key or token != self._api_key:
-            reason = (
-                "missing token"
-                if not token
-                else (
-                    "server misconfiguration" if not self._api_key else "invalid token"
-                )
-            )
+        if not token or not self._api_keys or not self._token_matches(token):
+            if not token:
+                reason = "missing token"
+            elif not self._api_keys:
+                reason = "server misconfiguration"
+            else:
+                reason = "invalid token"
             logger.warning(
                 "MCP auth rejected",
                 extra={
@@ -168,13 +184,25 @@ class MCPAuthMiddleware:
 
         await self._app(scope, receive, send)
 
+    def _token_matches(self, token: str) -> bool:
+        """Return True if token matches any configured key (constant-time compare).
+
+        Iterates the full list of keys regardless of early matches to avoid
+        leaking which key matched via timing side channels.
+        """
+        matched = False
+        for candidate in self._api_keys:
+            if hmac.compare_digest(token, candidate):
+                matched = True
+        return matched
+
     @staticmethod
     async def _send_401(send: Send) -> None:
         """Send an HTTP 401 response with a JSON error body."""
         body = json.dumps(
             {
                 "error": "Unauthorized",
-                "detail": "Valid bearer token or X-API-Key required",
+                "detail": ("Valid bearer token, X-API-Key, or X-MCP-API-Key required"),
             }
         ).encode()
         await send(
@@ -226,7 +254,7 @@ class TransportMCPStreamableHttp:
                       Provides access to shared services and configuration
                       when integrating with the ONEX runtime.
         """
-        self._config = config or ModelMcpHandlerConfig()
+        self._config = config or ModelMcpHandlerConfig(auth_enabled=False)
         self._container = container
         self._app: Starlette | None = None
         self._server: uvicorn.Server | None = None
@@ -295,10 +323,21 @@ class TransportMCPStreamableHttp:
             ],
         )
 
-        # Apply authentication middleware (R1, R3 — OMN-2701)
+        # Apply authentication middleware (R1, R3 — OMN-2701; multi-key — OMN-1419)
         if self._config.auth_enabled:
-            api_key = self._config.api_key or ""
-            self._app = MCPAuthMiddleware(self._app, api_key=api_key)  # type: ignore[assignment]
+            if not self._config.api_keys:
+                # Defensive — Pydantic validator should already guarantee this,
+                # but fail loudly rather than silently rejecting every request.
+                raise ProtocolConfigurationError(
+                    "auth_enabled=True but api_keys is empty",
+                    context=ModelInfraErrorContext(
+                        transport_type=EnumInfraTransportType.MCP,
+                        operation="create_app",
+                    ),
+                )
+            self._app = MCPAuthMiddleware(  # type: ignore[assignment]
+                self._app, api_keys=self._config.api_keys
+            )
         else:
             logger.warning(
                 "MCP auth disabled — do not use in production",
@@ -313,6 +352,7 @@ class TransportMCPStreamableHttp:
                 "stateless": self._config.stateless,
                 "json_response": self._config.json_response,
                 "auth_enabled": self._config.auth_enabled,
+                "api_key_count": len(self._config.api_keys),
             },
         )
 

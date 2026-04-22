@@ -8,7 +8,7 @@ including event bus registry discovery, Kafka hot reload, and HTTP server settin
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ModelMCPServerConfig(BaseModel):
@@ -19,7 +19,7 @@ class ModelMCPServerConfig(BaseModel):
     - Kafka settings for hot reload
     - HTTP server binding
     - Execution defaults
-    - Authentication settings (OMN-2701)
+    - Authentication settings (OMN-2701 single-key, OMN-1419 multi-key)
 
     Attributes:
         registry_query_limit: Maximum nodes fetched per cold-start discovery query.
@@ -30,7 +30,9 @@ class ModelMCPServerConfig(BaseModel):
         dev_mode: Whether to run in development mode (local contracts).
         contracts_dir: Directory for contract scanning in dev mode.
         auth_enabled: Whether bearer token / API-key auth middleware is active.
-        api_key: API key / bearer token value for authenticated requests.
+        api_keys: Tuple of accepted API keys / bearer tokens. Multiple keys
+            supported so distinct clients/services can hold distinct credentials
+            (OMN-1419). At least one non-empty key required when auth_enabled=True.
     """
 
     registry_query_limit: int = Field(
@@ -65,13 +67,30 @@ class ModelMCPServerConfig(BaseModel):
             "When False, a WARNING is logged at startup. Default True."
         ),
     )
-    api_key: str | None = Field(
-        default=None,
+    api_keys: tuple[str, ...] = Field(
+        default_factory=tuple,
         description=(
-            "Bearer token / API key required for authenticated MCP requests. "
-            "Loaded from Infisical or env. Required when auth_enabled=True."
+            "Accepted bearer tokens / API keys. Every listed key grants access. "
+            "Supports multiple clients/services holding distinct credentials. "
+            "Loaded from Infisical or env. At least one non-empty key required "
+            "when auth_enabled=True."
         ),
     )
+
+    @model_validator(mode="after")
+    def _validate_keys_when_auth_enabled(self) -> ModelMCPServerConfig:
+        """Reject empty/whitespace keys and enforce the auth_enabled contract."""
+        if any((not k) or (not k.strip()) for k in self.api_keys):
+            raise ValueError(
+                "api_keys contains empty or whitespace-only entries; "
+                "remove them before constructing the config"
+            )
+        if self.auth_enabled and not self.api_keys:
+            raise ValueError(
+                "auth_enabled=True but api_keys is empty. "
+                "Provide at least one API key or set auth_enabled=False."
+            )
+        return self
 
 
 __all__ = ["ModelMCPServerConfig"]
