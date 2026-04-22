@@ -124,10 +124,10 @@ def test_fails_with_multiple_two_parent_commits(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_skips_repo_when_gh_query_fails(tmp_path: Path) -> None:
-    """If `gh api` returns non-zero, the repo is skipped (no failure).
+    """If `gh api` returns non-zero, the repo is skipped; if all repos are
+    skipped (AUDITED == 0), exit 2 signals an inconclusive audit.
 
-    This protects against transient API errors and missing token scope —
-    the audit should not flap on infra issues.
+    This prevents a false-green when token scope blocks all API calls.
     """
     failing_shim = tmp_path / "gh"
     failing_shim.write_text("#!/usr/bin/env bash\nexit 1\n")
@@ -135,5 +135,6 @@ def test_skips_repo_when_gh_query_fails(tmp_path: Path) -> None:
         failing_shim.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH
     )
     result = _run_script(tmp_path)
-    assert result.returncode == 0
+    assert result.returncode == 2
     assert "SKIP  omniclaude" in result.stderr
+    assert "no repos were auditable" in result.stdout

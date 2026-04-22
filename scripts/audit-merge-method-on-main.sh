@@ -103,6 +103,7 @@ EOF
 
 FAILED=0
 TOTAL_BYPASS=0
+AUDITED=0
 
 for repo in "${REPOS[@]}"; do
   query=$(build_query "$repo")
@@ -127,6 +128,8 @@ for repo in "${REPOS[@]}"; do
     continue
   fi
 
+  AUDITED=$((AUDITED + 1))
+
   if [[ -z "$two_parent" ]]; then
     echo "OK    $repo: no 2-parent commits in last $DEPTH on main"
     continue
@@ -142,6 +145,15 @@ for repo in "${REPOS[@]}"; do
   echo "$two_parent" | sed 's/^/      /'
 done
 
+# Fail if zero repos were auditable — this indicates a token scope problem
+# that would produce a misleading green result.
+if [[ "$AUDITED" -eq 0 ]]; then
+  echo ""
+  echo "ERROR: no repos were auditable. Check CROSS_REPO_PAT has org-wide read scope."
+  echo "       CROSS_REPO_PAT is required for meaningful audit coverage (enforced at workflow level)."
+  exit 2
+fi
+
 if [[ "$FAILED" -ne 0 ]]; then
   echo ""
   echo "ERROR: $TOTAL_BYPASS 2-parent merge commit(s) on main bypassed the merge queue."
@@ -151,4 +163,4 @@ if [[ "$FAILED" -ne 0 ]]; then
 fi
 
 echo ""
-echo "All audited repos: no merge-queue bypass detected on main."
+echo "All audited repos ($AUDITED): no merge-queue bypass detected on main."
