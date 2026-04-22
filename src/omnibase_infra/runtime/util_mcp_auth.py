@@ -34,8 +34,24 @@ def parse_mcp_api_keys(
     """
     lookup: dict[str, str] = env if env is not None else dict(os.environ)
 
-    mcp_api_keys_csv = lookup.get("MCP_API_KEYS") or lookup.get("ONEX_MCP_API_KEYS")
-    mcp_api_key_single = lookup.get("MCP_API_KEY") or lookup.get("ONEX_MCP_API_KEY")
+    # Use explicit None-checking (not `or`) so that present-but-empty strings
+    # are distinguished from absent vars.  Empty string → key set but malformed;
+    # absent → key not configured at all.  Using `or` collapses "" into None,
+    # which would cause inject_mcp_api_keys() to hit the auth_enabled=False
+    # fallback path even when an operator explicitly set the var (fail-open).
+    if "MCP_API_KEYS" in lookup:
+        mcp_api_keys_csv: str | None = lookup["MCP_API_KEYS"]
+    elif "ONEX_MCP_API_KEYS" in lookup:
+        mcp_api_keys_csv = lookup["ONEX_MCP_API_KEYS"]
+    else:
+        mcp_api_keys_csv = None
+
+    if "MCP_API_KEY" in lookup:
+        mcp_api_key_single: str | None = lookup["MCP_API_KEY"]
+    elif "ONEX_MCP_API_KEY" in lookup:
+        mcp_api_key_single = lookup["ONEX_MCP_API_KEY"]
+    else:
+        mcp_api_key_single = None
 
     # parsed_keys=None  → env var absent (not set at all)
     # parsed_keys=()    → env var set but empty / whitespace-only

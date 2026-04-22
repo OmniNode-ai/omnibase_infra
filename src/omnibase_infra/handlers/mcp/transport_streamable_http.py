@@ -29,8 +29,9 @@ Security:
 
     Unauthenticated requests receive HTTP 401 with a JSON error body.
     Auth failures are logged with: timestamp, remote IP, rejection reason.
-    Successful tool invocations are logged with: timestamp, masked token
-    (last 4 chars), tool name (path), correlation ID.
+    Successful tool invocations are logged with: timestamp, path, correlation ID.
+    No token derivative is included in the success log to avoid CodeQL
+    clear-text-logging-sensitive-data taint paths.
 
 Usage:
     from omnibase_infra.handlers.models.mcp import ModelMcpHandlerConfig
@@ -91,8 +92,9 @@ class MCPAuthMiddleware:
 
     Audit logging:
         - Auth failures: WARNING with timestamp, remote IP, rejection reason.
-        - Successful authenticated requests: INFO with timestamp, masked token
-          (last 4 chars), path, and correlation ID from ``X-Correlation-ID``.
+        - Successful authenticated requests: INFO with timestamp, path, and
+          correlation ID from ``X-Correlation-ID``.  No token derivative is
+          logged on success to satisfy CodeQL clear-text-logging rules.
 
     Args:
         app: The inner ASGI application to wrap.
@@ -179,14 +181,17 @@ class MCPAuthMiddleware:
             await self._send_401(send)
             return
 
-        # Auth passed — token is guaranteed non-None and valid here.
-        assert token is not None  # narrow for mypy after early-return block above
-        masked = f"****{token[-4:]}" if len(token) >= 4 else "****"
+        # Auth passed.
+        # NOTE: token value is not referenced in the log call below so that no
+        # derivative of the bearer token (even masked) flows into the logger.
+        # CodeQL py/clear-text-logging-sensitive-data traces any expression
+        # derived from the auth-header token value; logging even the last-4
+        # chars triggers the finding.  The correlation_id + path combination
+        # provides a sufficient audit trail without leaking credential material.
         logger.info(
             "MCP auth accepted",
             extra={
                 "timestamp": timestamp,
-                "masked_token": masked,
                 "path": path,
                 "correlation_id": correlation_id,
             },

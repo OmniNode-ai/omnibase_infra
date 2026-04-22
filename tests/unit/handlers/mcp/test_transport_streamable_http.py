@@ -14,7 +14,7 @@ Tests cover:
 - When auth_enabled=False, all requests pass through (no auth check)
 - 401 response body is valid JSON with error key
 - Auth rejection logs include remote_ip and reason
-- Successful auth logs include masked token (last 4 chars)
+- Successful auth logs include path + correlation_id (no token derivative)
 - Empty api_keys configured on server causes 401 (misconfiguration guard)
 - ModelMcpHandlerConfig / ModelMCPServerConfig validators enforce non-empty
   api_keys when auth_enabled=True (OMN-1419).
@@ -401,8 +401,13 @@ async def test_auth_rejection_includes_client_correlation_id(
 
 
 @pytest.mark.asyncio
-async def test_auth_success_logs_masked_token(caplog: pytest.LogCaptureFixture) -> None:
-    """Successful auth must log the last 4 chars of the token (masked)."""
+async def test_auth_success_logs_accepted(caplog: pytest.LogCaptureFixture) -> None:
+    """Successful auth must log 'MCP auth accepted' with path and correlation_id.
+
+    No token derivative (even masked) is included in the success log; CodeQL
+    py/clear-text-logging-sensitive-data flags any expression derived from the
+    bearer token value flowing into a logger call.
+    """
     inner = _RecordingApp()
     middleware = MCPAuthMiddleware(inner, api_keys=(_VALID_KEY,))
     receive = AsyncMock()
@@ -421,8 +426,12 @@ async def test_auth_success_logs_masked_token(caplog: pytest.LogCaptureFixture) 
     accepted_record = next(
         r for r in caplog.records if "MCP auth accepted" in r.message
     )
-    assert hasattr(accepted_record, "masked_token")
-    assert accepted_record.masked_token.endswith(_VALID_KEY[-4:])  # type: ignore[attr-defined]
+    # Verify path is logged for audit trail
+    assert hasattr(accepted_record, "path")  # type: ignore[attr-defined]
+    # Verify no token derivative leaks into the log record
+    assert not hasattr(accepted_record, "masked_token"), (
+        "masked_token must not appear in success log (CodeQL clear-text-logging)"
+    )
 
 
 # ---------------------------------------------------------------------------

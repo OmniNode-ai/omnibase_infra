@@ -162,3 +162,43 @@ def test_parse_returns_empty_tuple_for_whitespace_csv() -> None:
 def test_parse_returns_keys_from_csv() -> None:
     """parse_mcp_api_keys returns stripped keys from CSV."""
     assert parse_mcp_api_keys({"MCP_API_KEYS": " a , b "}) == ("a", "b")
+
+
+# ---------------------------------------------------------------------------
+# Tests: empty-string env vars must NOT collapse to None (CR thread fix)
+# ---------------------------------------------------------------------------
+
+
+def test_empty_string_mcp_api_keys_yields_empty_tuple_not_none() -> None:
+    """MCP_API_KEYS='' must be treated as 'set but empty', NOT as absent.
+
+    Using `or` chaining collapses '' to None, which causes inject_mcp_api_keys
+    to hit the auth_enabled=False fallback (fail-open).  The fix uses explicit
+    'in lookup' checks to preserve the distinction.
+    """
+    result = parse_mcp_api_keys({"MCP_API_KEYS": ""})
+    # Must be () (set but malformed), not None (absent)
+    assert result == (), f"Expected () for empty MCP_API_KEYS, got {result!r}"
+
+
+def test_empty_string_mcp_api_key_yields_empty_tuple_not_none() -> None:
+    """MCP_API_KEY='' must be treated as 'set but empty', NOT as absent."""
+    result = parse_mcp_api_keys({"MCP_API_KEY": ""})
+    assert result == (), f"Expected () for empty MCP_API_KEY, got {result!r}"
+
+
+def test_empty_string_does_not_trigger_auth_disabled() -> None:
+    """inject_mcp_api_keys with MCP_API_KEYS='' must NOT set auth_enabled=False.
+
+    The fail-open path must only trigger when the env var is truly absent.
+    An empty string means the operator set the var, so auth_enabled=False
+    would be a silent security regression.
+    """
+    cfg: dict[str, Any] = {}
+    result = inject_mcp_api_keys(cfg, {"MCP_API_KEYS": ""})
+    # api_keys is set to empty tuple — Pydantic validator catches this at init
+    assert result.get("api_keys") == ()
+    # Must NOT have fallen through to auth_enabled=False
+    assert "auth_enabled" not in result, (
+        "auth_enabled=False must not be set when MCP_API_KEYS is present (even if empty)"
+    )
