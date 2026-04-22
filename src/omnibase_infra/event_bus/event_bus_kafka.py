@@ -434,6 +434,8 @@ class EventBusKafka(
         self._producer: AIOKafkaProducer | None = None
         self._consumers: dict[str, AIOKafkaConsumer] = {}
         self._group_consumers: dict[tuple[str, str], AIOKafkaConsumer] = {}
+        # Keys currently being started (reserved under lock before await consumer.start())
+        self._pending_consumer_keys: set[tuple[str, str]] = set()
 
         # Subscriber registry: topic -> list of (group_id, subscription_id, callback) tuples
         self._subscribers: dict[
@@ -1398,7 +1400,11 @@ class EventBusKafka(
             # Start a distinct Kafka consumer for each (topic, group_id) pair.
             # Multiple callbacks may still fan out behind the same exact group.
             consumer_key = (topic, effective_group_id)
-            if consumer_key not in self._group_consumers and self._started:
+            if (
+                consumer_key not in self._group_consumers
+                and consumer_key not in self._pending_consumer_keys
+                and self._started
+            ):
                 await self._start_consumer_for_topic(topic, effective_group_id)
 
             logger.debug(
@@ -1472,8 +1478,12 @@ class EventBusKafka(
             InfraConnectionError: If consumer fails to connect to Kafka brokers
         """
         consumer_key = (topic, group_id)
-        if consumer_key in self._group_consumers:
+        if (
+            consumer_key in self._group_consumers
+            or consumer_key in self._pending_consumer_keys
+        ):
             return
+        self._pending_consumer_keys.add(consumer_key)
 
         correlation_id = uuid4()
         sanitized_servers = self._sanitize_bootstrap_servers(self._bootstrap_servers)
@@ -1624,6 +1634,7 @@ class EventBusKafka(
                 timeout=self._timeout_seconds,
             )
 
+            self._pending_consumer_keys.discard(consumer_key)
             self._group_consumers[consumer_key] = consumer
             self._refresh_topic_consumer_views(topic)
 
@@ -1662,6 +1673,7 @@ class EventBusKafka(
                     )
 
         except TimeoutError as e:
+            self._pending_consumer_keys.discard(consumer_key)
             # Clean up consumer on failure to prevent resource leak
             try:
                 await consumer.stop()
@@ -1700,6 +1712,7 @@ class EventBusKafka(
             ) from e
 
         except Exception as e:
+            self._pending_consumer_keys.discard(consumer_key)
             # Clean up consumer on failure to prevent resource leak
             try:
                 await consumer.stop()
@@ -1914,7 +1927,7 @@ class EventBusKafka(
                     continue  # Skip this message but continue consuming
 
                 # Dispatch to all subscribers
-                for group_id, subscription_id, callback in subscribers:
+                for _sub_group_id, subscription_id, callback in subscribers:
                     try:
                         await callback(event_message)
                     except Exception as e:
@@ -2139,7 +2152,7 @@ class EventBusKafka(
                 assignments: dict[str, list[int]] = {}
                 consume_tasks_alive: dict[str, bool] = {}
 
-                consumer_views: list[tuple[str, AIOKafkaConsumer]] = list(
+                consumer_views: list[tuple[tuple[str, str], AIOKafkaConsumer]] = list(
                     self._group_consumers.items()
                 )
                 if not consumer_views:
@@ -2161,7 +2174,7 @@ class EventBusKafka(
                         set(prior_assignment) | set(topic_assignment)
                     )
 
-                task_views: list[tuple[str, asyncio.Task[None]]] = list(
+                task_views: list[tuple[tuple[str, str], asyncio.Task[None]]] = list(
                     self._group_consumer_tasks.items()
                 )
                 if not task_views:

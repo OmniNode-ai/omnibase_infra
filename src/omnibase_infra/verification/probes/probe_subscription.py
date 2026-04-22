@@ -12,10 +12,11 @@ compute_consumer_group_id() -- never hardcoded.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from collections.abc import Callable
-from typing import Literal
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from omnibase_infra.models import ModelNodeIdentity
@@ -31,6 +32,23 @@ from omnibase_infra.verification.models.model_contract_check_result import (
 )
 
 logger = logging.getLogger(__name__)
+
+_OMNIBASE_ENV = Path.home() / ".omnibase" / ".env"
+
+
+def _rpk_env() -> dict[str, str]:
+    """Return os.environ merged with ~/.omnibase/.env for rpk subprocess calls."""
+    env = dict(os.environ)
+    if _OMNIBASE_ENV.exists():
+        with open(_OMNIBASE_ENV) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                env.setdefault(key.strip(), value.strip())
+    return env
+
 
 # Type alias: given a consumer group ID, return the set of topics it subscribes to.
 # Raises on infrastructure failure.
@@ -67,6 +85,7 @@ def _list_topic_scoped_groups(base_group_id: str) -> list[str]:
             text=True,
             timeout=10,
             check=False,
+            env=_rpk_env(),
         )
     except FileNotFoundError as exc:
         raise RuntimeError("rpk not found on PATH") from exc
@@ -81,11 +100,15 @@ def _list_topic_scoped_groups(base_group_id: str) -> list[str]:
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"rpk returned invalid JSON: {result.stdout[:200]}") from exc
 
-    prefix = f"{base_group_id}.__t."
+    direct_prefix = f"{base_group_id}.__t."
+    instance_prefix = f"{base_group_id}.__i."
     scoped_groups: list[str] = []
     for group in groups if isinstance(groups, list) else []:
         group_name = group.get("name", "") if isinstance(group, dict) else ""
-        if isinstance(group_name, str) and group_name.startswith(prefix):
+        if isinstance(group_name, str) and (
+            group_name.startswith(direct_prefix)
+            or group_name.startswith(instance_prefix)
+        ):
             scoped_groups.append(group_name)
     return scoped_groups
 
@@ -109,6 +132,7 @@ def _rpk_fallback(group_id: str) -> set[str]:
             text=True,
             timeout=10,
             check=False,
+            env=_rpk_env(),
         )
     except FileNotFoundError as exc:
         raise RuntimeError("rpk not found on PATH") from exc
@@ -131,6 +155,7 @@ def _rpk_fallback(group_id: str) -> set[str]:
             text=True,
             timeout=10,
             check=False,
+            env=_rpk_env(),
         )
         if scoped_result.returncode != 0:
             continue

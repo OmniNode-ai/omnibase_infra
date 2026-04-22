@@ -81,7 +81,9 @@ class TestVerificationOrchestrator:
         assert report.report_fingerprint != ""
         assert len(report.checks) > 0
 
-    def test_required_subscription_without_grounding_quarantines(self, tmp_path: Path) -> None:
+    def test_required_subscription_without_grounding_quarantines(
+        self, tmp_path: Path
+    ) -> None:
         """A fabricated subscription identity yields overall QUARANTINE, not FAIL."""
         contract = _make_contract(
             subscribe_topics=["topic.missing"],

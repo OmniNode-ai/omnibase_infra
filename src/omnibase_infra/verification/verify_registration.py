@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 # Type aliases for the injectable dependencies
 DbQueryFn = Callable[[str], list[dict[str, str]]]
-KafkaAdminFn = Callable[[], set[str]]
+KafkaAdminFn = Callable[[str], set[str]]
 WatermarkFn = Callable[[str], tuple[int, int]]
 
 # Path to the registration orchestrator contract
@@ -180,7 +180,7 @@ def _check_subscription(
     )
     per_topic_results = check_subscriptions(
         parsed,
-        kafka_admin_fn=lambda group_id: kafka_admin_fn(),
+        kafka_admin_fn=kafka_admin_fn,
         identity=identity,
     )
 
@@ -245,7 +245,14 @@ def _load_registration_runtime_identity(
     environment = event_bus.get("environment")
     service = raw.get("name")
     version = raw.get("contract_version")
-    if not all(isinstance(value, str) and value.strip() for value in (environment, service, version)):
+    if not (
+        isinstance(environment, str)
+        and environment.strip()
+        and isinstance(service, str)
+        and service.strip()
+        and isinstance(version, str)
+        and version.strip()
+    ):
         return None
 
     return ModelNodeIdentity(

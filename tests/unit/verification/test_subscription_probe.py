@@ -89,7 +89,9 @@ class TestCheckSubscriptionsPass:
 class TestCheckSubscriptionsFail:
     """Failure-path subscription checks."""
 
-    def test_grounded_consumer_group_empty_is_fail(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_grounded_consumer_group_empty_is_fail(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from omnibase_infra.models import ModelNodeIdentity
         from omnibase_infra.verification.probes import probe_subscription
 
@@ -224,13 +226,20 @@ class TestRpkFallback:
         base_group = "local.runtime_config.registration-orchestrator.consume.1.0.0"
 
         class CompletedProcessStub:
-            def __init__(self, stdout: str, returncode: int = 0, stderr: str = "") -> None:
+            def __init__(
+                self, stdout: str, returncode: int = 0, stderr: str = ""
+            ) -> None:
                 self.stdout = stdout
                 self.returncode = returncode
                 self.stderr = stderr
 
         def fake_run(
-            args: list[str], capture_output: bool, text: bool, timeout: int, check: bool
+            args: list[str],
+            capture_output: bool,
+            text: bool,
+            timeout: int,
+            check: bool,
+            env: dict | None = None,
         ) -> CompletedProcessStub:
             assert capture_output is True
             assert text is True
@@ -241,8 +250,12 @@ class TestRpkFallback:
                 return CompletedProcessStub(
                     stdout=json.dumps(
                         [
-                            {"name": f"{base_group}.__t.onex.evt.platform.node-heartbeat.v1"},
-                            {"name": f"{base_group}.__t.onex.intent.platform.runtime-tick.v1"},
+                            {
+                                "name": f"{base_group}.__t.onex.evt.platform.node-heartbeat.v1"
+                            },
+                            {
+                                "name": f"{base_group}.__t.onex.intent.platform.runtime-tick.v1"
+                            },
                         ]
                     )
                 )

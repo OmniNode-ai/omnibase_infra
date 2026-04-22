@@ -109,7 +109,7 @@ def _make_kafka_admin_fn(
             "onex.cmd.platform.request-introspection.v1",
         }
 
-    def kafka_admin_fn() -> set[str]:
+    def kafka_admin_fn(_group_id: str) -> set[str]:
         return subscribed_topics
 
     return kafka_admin_fn
@@ -339,7 +339,7 @@ class TestVerifyRegistrationFails:
         assert report.overall_verdict == EnumValidationVerdict.FAIL
 
     def test_fail_when_kafka_admin_raises(self) -> None:
-        def failing_kafka() -> set[str]:
+        def failing_kafka(_group_id: str) -> set[str]:
             raise ConnectionError("Kafka unavailable")
 
         report = verify_registration_contract(
