@@ -98,40 +98,68 @@ def _sanitize_exc(exc: BaseException) -> str:
     return sanitized[:200]
 
 
-# Deterministic signature matching ``asyncio.run() cannot be called from a
-# running event loop`` (raised by asyncio.run when invoked from within a
-# thread that already has an active loop). OMN-9457: containment keys on the
-# exact CPython message so best-effort string heuristics are avoided.
+# Deterministic signatures raised by CPython when ``asyncio.run`` /
+# ``asyncio.Runner`` is invoked from inside an already-running event loop.
+# OMN-9457 keys containment on the exact messages so best-effort string
+# heuristics are avoided. Messages were verified empirically against CPython
+# 3.11 / 3.12 source (the runtime target) and confirmed by inspecting
+# ``asyncio.runners`` at runtime (asyncio/runners.py).
+#
+# CPython behaviour (3.11 / 3.12, verified from source):
+#   * ``asyncio.run(coro)``
+#     -> "asyncio.run() cannot be called from a running event loop"
+#     (raised at the if-running-loop guard in asyncio/runners.py::run().)
+#   * ``asyncio.Runner.run(coro)`` when another loop is active
+#     -> "Runner.run() cannot be called from a running event loop"
+#     (raised from asyncio/runners.py::Runner.run().)
+#   * ``BaseEventLoop.run_until_complete`` nested call
+#     -> "Cannot run the event loop while another loop is running"
+#     (raised from asyncio/base_events.py::run_until_complete().)
+#
+# All three variants are matched because handlers may call any of these entry
+# points, directly or transitively (e.g. a sync client that drives an async
+# call with ``asyncio.run`` or ``asyncio.Runner``).
 _ASYNC_INCOMPAT_MESSAGES: tuple[str, ...] = (
     "asyncio.run() cannot be called from a running event loop",
+    "Runner.run() cannot be called from a running event loop",
+    "Cannot run the event loop while another loop is running",
 )
 
 
 def _is_async_incompat_runtime_error(exc: BaseException) -> bool:
     """Return True if ``exc`` is the deterministic async-incompat signature.
 
-    Matches ``RuntimeError`` raised by CPython's ``asyncio.run()`` when a
-    synchronous handler constructor (or a dependency it resolves) calls
-    ``asyncio.run()`` from within runtime-managed async boot. The signature
-    is an exact substring match against the message emitted by
-    ``asyncio.runners.run`` — the call site that triggers the poisoning
-    behavior described in OMN-9457. Wrapped ``RuntimeError``s raised via
-    ``raise X from original`` are also recognised by walking ``__cause__``
-    and ``__context__``.
+    Matches ``RuntimeError`` raised by CPython's ``asyncio.run`` /
+    ``asyncio.Runner.run`` when a synchronous handler constructor (or a
+    dependency it resolves) calls ``asyncio.run()`` from within
+    runtime-managed async boot. The detector walks the full exception
+    chain — ``__cause__`` and ``__context__`` — because wrapped
+    ``RuntimeError``s raised via ``raise X from original`` or propagated
+    implicitly during handling may carry the original asyncio failure on
+    either attribute (and per PEP 3134 both can be set simultaneously).
+    Matching uses exact substring presence against the known CPython
+    messages only, so unrelated ``RuntimeError``s are never misclassified.
     """
     visited: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in visited:
+    stack: list[BaseException] = [exc]
+    while stack:
+        current = stack.pop()
+        if current is None or id(current) in visited:
+            continue
         visited.add(id(current))
         if isinstance(current, RuntimeError):
             message = str(current)
             if any(needle in message for needle in _ASYNC_INCOMPAT_MESSAGES):
                 return True
-        # Walk __cause__ first (explicit `raise X from Y`), then
-        # __context__ (implicit propagation during handling). Either can
-        # carry the original asyncio.run() failure when the handler's
-        # constructor wraps it in a RuntimeError of its own.
-        current = current.__cause__ or current.__context__
+        # Explore BOTH branches of the exception chain. Per PEP 3134 an
+        # exception may carry ``__cause__`` (explicit ``raise X from Y``)
+        # and ``__context__`` (implicit propagation during handling)
+        # simultaneously; skipping one branch can hide the original
+        # asyncio failure when the handler constructor wraps it.
+        if current.__cause__ is not None:
+            stack.append(current.__cause__)
+        if current.__context__ is not None:
+            stack.append(current.__context__)
     return False
 
 
@@ -995,14 +1023,20 @@ async def _commit_contract_wiring(
                 contract.name,
             )
 
-    # OMN-9457: when every handler was quarantined, report SKIPPED — there
-    # is nothing wired on the dispatch engine. Otherwise the contract is
-    # WIRED and quarantined handlers travel alongside the success in the
-    # dedicated report field so they remain visible for follow-up migration.
-    has_live_handler = any(
-        not (p.is_quarantined or p.is_skip) for p in pcw.prepared_wirings
+    # OMN-9457: when every prepared handler was quarantined, report SKIPPED
+    # with reason "all handlers quarantined" — there is nothing wired on
+    # the dispatch engine and the quarantine is the reason. A mixed
+    # contract where some handlers were resolver-skipped (not quarantined)
+    # and the rest quarantined does NOT take this path: "all handlers
+    # quarantined" must mean *every* handler quarantined, not "no live
+    # handlers and at least one quarantined". Mixed skip+quarantine
+    # contracts fall through to the normal WIRED return below so the
+    # existing resolver-skip reasoning remains authoritative for the
+    # skipped handlers.
+    all_handlers_quarantined = bool(pcw.prepared_wirings) and all(
+        p.is_quarantined for p in pcw.prepared_wirings
     )
-    if pcw.prepared_wirings and not has_live_handler and quarantined:
+    if all_handlers_quarantined:
         return ModelContractWiringResult(
             contract_name=contract.name,
             package_name=contract.package_name,
