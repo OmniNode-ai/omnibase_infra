@@ -12,10 +12,18 @@
 #       "version": "x.y.z",
 #       "details": { "is_running": bool, "is_draining": bool, ... } }
 #
-# Hard gates (must pass):
-#   * /health returns .status == "healthy" AND .details.is_running == true
-#   * 60s hold: compose -> background runtime PID alive + /health stable;
-#                real    -> /health stable (no flapping beyond tolerance)
+# Hard gates (must pass — OMN-9458 extends coverage to runtime-effects and
+# startup log regressions so degraded-but-alive states fail the merge):
+#   * runtime /health        == "healthy" AND .details.is_running == true
+#   * runtime-effects /health == "healthy" AND .details.is_running == true
+#   * 60s hold: compose -> both background PIDs alive + both /health stable;
+#                real    -> both /health stable (no flapping beyond tolerance)
+#   * startup logs contain NO match for:
+#       - `Cannot register duplicate dispatcher ID`
+#       - `Auto-wiring failed for`
+#       - `asyncio.run\(\) cannot be called from a running event loop`
+#       - `RuntimeHostError` / `ServiceResolutionError` raised at boot
+#       - `load_runtime_config` fatal errors (service_kernel.py config gate)
 #   * registration_projections row count > 0 (active + fresh heartbeat)
 #   * rpk group list contains `onex-runtime` with >= 1 member
 #
@@ -145,27 +153,84 @@ jobs:
         run: |
           set -euo pipefail
           # Background the runtime so subsequent health-wait steps can probe it.
-          uv run python -m omnibase_infra.runtime.main &
+          # `onex-runtime` is the console script declared in pyproject.toml:
+          #   onex-runtime = "omnibase_infra.runtime.kernel:main"
+          uv run onex-runtime > runtime.log 2>&1 &
           echo "RUNTIME_PID=$!" >> "$GITHUB_ENV"
 
-      - name: Wait for runtime health (hard gate)
+      - name: Launch runtime-effects (compose mode)
+        if: inputs.mode == 'compose'
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          # runtime-effects listens on :8086 and consumes under a distinct
+          # Kafka consumer group so the main runtime's registration flow is
+          # not disturbed. Matches docker/catalog/services/runtime-effects.yaml.
+          RUNTIME_PROFILE=effects \
+          ONEX_HTTP_PORT=8086 \
+          ONEX_GROUP_ID=onex-runtime-effects \
+          OTEL_SERVICE_NAME=omninode-runtime-effects \
+            uv run onex-runtime > runtime-effects.log 2>&1 &
+          echo "RUNTIME_EFFECTS_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for runtime and runtime-effects health (hard gate)
         id: health_wait
         run: |
           set -euo pipefail
-          url="http://${RUNTIME_HOST}:8085/health"
-          deadline=$((SECONDS + 90))
+          runtime_url="http://${RUNTIME_HOST}:8085/health"
+          effects_url="http://${RUNTIME_HOST}:8086/health"
+          deadline=$((SECONDS + 120))
+          # Track last observed body so we can distinguish "never responded"
+          # from "responded with status=degraded" — per OMN-9458, a degraded
+          # runtime-effects must fail the gate with a specific error message,
+          # not a generic timeout.
+          : > runtime_last_body.txt
+          : > effects_last_body.txt
           while (( SECONDS < deadline )); do
-            if body=$(curl -fsS "$url" 2>/dev/null); then
-              if echo "$body" | jq -e '.status == "healthy" and .details.is_running == true' >/dev/null; then
-                echo "$body" > health_initial.json
-                echo "runtime healthy after $SECONDS seconds"
-                break
+            runtime_ready=0
+            effects_ready=0
+
+            if runtime_body=$(curl -fsS "$runtime_url" 2>/dev/null); then
+              echo "$runtime_body" > runtime_last_body.txt
+              if echo "$runtime_body" | jq -e '.status == "healthy" and .details.is_running == true' >/dev/null; then
+                echo "$runtime_body" > health_initial.json
+                runtime_ready=1
               fi
+            fi
+
+            if effects_body=$(curl -fsS "$effects_url" 2>/dev/null); then
+              echo "$effects_body" > effects_last_body.txt
+              if echo "$effects_body" | jq -e '.status == "healthy" and .details.is_running == true' >/dev/null; then
+                echo "$effects_body" > effects_health_initial.json
+                effects_ready=1
+              fi
+            fi
+
+            if (( runtime_ready == 1 && effects_ready == 1 )); then
+              echo "runtime and runtime-effects healthy after $SECONDS seconds"
+              break
             fi
             sleep 2
           done
+          # Distinguish degraded vs never-responded for faster triage (OMN-9458).
           if [[ ! -f health_initial.json ]]; then
-            echo "::error::runtime /health never reported status=healthy AND .details.is_running=true within 90s"
+            if [[ -s runtime_last_body.txt ]] && \
+               jq -e '.status == "degraded"' runtime_last_body.txt >/dev/null 2>&1; then
+              echo "::error::runtime /health returned status=degraded during startup — service reachable but explicitly reporting degraded state"
+              jq -c '{status, details}' runtime_last_body.txt || true
+            else
+              echo "::error::runtime /health never reported status=healthy AND .details.is_running=true within 120s"
+            fi
+            exit 1
+          fi
+          if [[ ! -f effects_health_initial.json ]]; then
+            if [[ -s effects_last_body.txt ]] && \
+               jq -e '.status == "degraded"' effects_last_body.txt >/dev/null 2>&1; then
+              echo "::error::runtime-effects /health returned status=degraded during startup — service reachable but explicitly reporting degraded state"
+              jq -c '{status, details}' effects_last_body.txt || true
+            else
+              echo "::error::runtime-effects /health never reported status=healthy AND .details.is_running=true within 120s"
+            fi
             exit 1
           fi
           # Warn-only observation — subscriber_count<300 is a regression SIGNAL,
@@ -176,16 +241,22 @@ jobs:
             echo "::warning::subscriber_count=$sub_count below empirical .201 threshold of 300 — investigate possible regression"
           fi
 
-      - name: Hold 60s — runtime process + health stability
+      - name: Hold 60s — runtime and runtime-effects stability
         run: |
           set -euo pipefail
-          url="http://${RUNTIME_HOST}:8085/health"
+          runtime_url="http://${RUNTIME_HOST}:8085/health"
+          effects_url="http://${RUNTIME_HOST}:8086/health"
           if [[ "${{ inputs.mode }}" == "compose" ]]; then
-            # Runtime is a background Python process launched via uv (not a
-            # container), so `docker inspect RestartCount` is inapplicable.
-            # Assert the PID is still alive AND /health remains healthy.
+            # Both runtimes are background Python processes launched via uv
+            # (not containers), so `docker inspect RestartCount` is
+            # inapplicable. Assert both PIDs are still alive AND both /health
+            # endpoints remain healthy.
             if [[ -z "${RUNTIME_PID:-}" ]]; then
               echo "::error::RUNTIME_PID not set — compose-mode launch step did not run"
+              exit 1
+            fi
+            if [[ -z "${RUNTIME_EFFECTS_PID:-}" ]]; then
+              echo "::error::RUNTIME_EFFECTS_PID not set — compose-mode effects launch step did not run"
               exit 1
             fi
             sleep 60
@@ -193,27 +264,74 @@ jobs:
               echo "::error::runtime PID ${RUNTIME_PID} died during 60s hold (crash)"
               exit 1
             fi
-            if ! curl -fsS "$url" | jq -e '.status == "healthy" and .details.is_running == true' >/dev/null; then
+            if ! kill -0 "${RUNTIME_EFFECTS_PID}" 2>/dev/null; then
+              echo "::error::runtime-effects PID ${RUNTIME_EFFECTS_PID} died during 60s hold (crash)"
+              exit 1
+            fi
+            if ! curl -fsS "$runtime_url" | jq -e '.status == "healthy" and .details.is_running == true' >/dev/null; then
               echo "::error::runtime /health degraded after 60s hold"
               exit 1
             fi
-            echo "runtime PID ${RUNTIME_PID} alive + /health healthy after 60s"
+            if ! curl -fsS "$effects_url" | jq -e '.status == "healthy" and .details.is_running == true' >/dev/null; then
+              echo "::error::runtime-effects /health degraded after 60s hold"
+              exit 1
+            fi
+            echo "runtime and runtime-effects PIDs alive + /health healthy after 60s"
           else
-            # Real mode: we don't control the remote container. Advisory-only
-            # stability check on /health over a 60s window.
+            # Real mode: we don't control the remote containers. Assert both
+            # health endpoints remain stable over a 60s window.
             deadline=$((SECONDS + 60))
-            failures=0
+            runtime_failures=0
+            effects_failures=0
             while (( SECONDS < deadline )); do
-              if ! curl -fsS "$url" | jq -e '.status == "healthy"' >/dev/null; then
-                failures=$((failures + 1))
+              if ! curl -fsS "$runtime_url" | jq -e '.status == "healthy" and .details.is_running == true' >/dev/null; then
+                runtime_failures=$((runtime_failures + 1))
+              fi
+              if ! curl -fsS "$effects_url" | jq -e '.status == "healthy" and .details.is_running == true' >/dev/null; then
+                effects_failures=$((effects_failures + 1))
               fi
               sleep 5
             done
-            if (( failures > 2 )); then
-              echo "::error::runtime /health flapped ${failures} times during 60s hold"
+            if (( runtime_failures > 2 )); then
+              echo "::error::runtime /health flapped ${runtime_failures} times during 60s hold"
               exit 1
             fi
-            echo "runtime /health stable over 60s hold (failures=${failures})"
+            if (( effects_failures > 2 )); then
+              echo "::error::runtime-effects /health flapped ${effects_failures} times during 60s hold"
+              exit 1
+            fi
+            echo "runtime + runtime-effects /health stable over 60s hold (runtime_failures=${runtime_failures}, effects_failures=${effects_failures})"
+          fi
+
+      - name: Fail on startup auto-wiring or registration errors
+        run: |
+          set -euo pipefail
+          # OMN-9458: hard-fail on startup log regressions seen during the
+          # 2026-04-22 .201 refresh. Patterns target the runtime + runtime-effects
+          # boot sequences; anything matched here means the service reached
+          # /health but did so with a structural startup failure that would be
+          # caught by a human operator.
+          patterns='Cannot register duplicate dispatcher ID'
+          patterns+='|Auto-wiring failed for'
+          patterns+='|asyncio\.run\(\) cannot be called from a running event loop'
+          patterns+='|RuntimeHostError'
+          patterns+='|ServiceResolutionError'
+          patterns+='|load_runtime_config.*[Ee]rror'
+          if [[ "${{ inputs.mode }}" == "compose" ]]; then
+            cat runtime.log runtime-effects.log > startup_logs.txt
+          else
+            user="${{ inputs.real_ssh_user }}"
+            if [[ -z "$user" ]]; then
+              user="$(whoami)"
+            fi
+            ssh -o StrictHostKeyChecking=no "${user}@${RUNTIME_HOST}" \
+              "docker logs --since 10m omninode-runtime 2>&1; echo; docker logs --since 10m omninode-runtime-effects 2>&1" \
+              > startup_logs.txt
+          fi
+          if grep -E "$patterns" startup_logs.txt >/dev/null; then
+            echo "::error::startup logs contain auto-wiring / duplicate-dispatcher / service-resolution failures"
+            grep -En "$patterns" startup_logs.txt || true
+            exit 1
           fi
 
       - name: Query registration_projections for active/fresh rows
@@ -272,16 +390,23 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          # Make artifact emission robust to partial failure — health_initial.json
-          # and rpk_groups.txt may be absent if an earlier step exited. Fall back
-          # to empty-JSON / empty-string placeholders so the artifact always
-          # uploads and downstream tooling can discriminate "ran but failed
-          # early" from "never uploaded".
+          # Make artifact emission robust to partial failure —
+          # health_initial.json / effects_health_initial.json / rpk_groups.txt /
+          # startup_logs.txt may be absent if an earlier step exited. Fall back
+          # to empty placeholders so the artifact always uploads and downstream
+          # tooling can discriminate "ran but failed early" from "never
+          # uploaded".
           if [[ ! -f health_initial.json ]]; then
             echo '{}' > health_initial.json
           fi
+          if [[ ! -f effects_health_initial.json ]]; then
+            echo '{}' > effects_health_initial.json
+          fi
           if [[ ! -f rpk_groups.txt ]]; then
             : > rpk_groups.txt
+          fi
+          if [[ ! -f startup_logs.txt ]]; then
+            : > startup_logs.txt
           fi
           active_fresh_raw='${{ steps.pg_liveness.outputs.active_fresh_registrations }}'
           if [[ -z "$active_fresh_raw" ]]; then
@@ -292,15 +417,19 @@ jobs:
             --arg runtime_host "${RUNTIME_HOST}" \
             --arg pg_port "${PG_PORT}" \
             --slurpfile health health_initial.json \
+            --slurpfile effects_health effects_health_initial.json \
             --arg active_fresh "${active_fresh_raw}" \
             --rawfile rpk_groups rpk_groups.txt \
+            --rawfile startup_logs startup_logs.txt \
             '{
               mode: $mode,
               runtime_host: $runtime_host,
               pg_port: $pg_port,
               health: $health[0],
+              effects_health: $effects_health[0],
               active_fresh_registrations: ($active_fresh | tonumber),
-              rpk_groups: $rpk_groups
+              rpk_groups: $rpk_groups,
+              startup_logs: $startup_logs
             }' > smoke-result.json
 
       - name: Upload smoke-result.json
@@ -312,10 +441,24 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Upload runtime startup logs
+        if: always() && inputs.mode == 'compose'
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-startup-logs-${{ inputs.mode }}
+          path: |
+            runtime.log
+            runtime-effects.log
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Stop background runtime (compose mode)
         if: always() && inputs.mode == 'compose'
         run: |
           if [[ -n "${RUNTIME_PID:-}" ]]; then
             kill "${RUNTIME_PID}" 2>/dev/null || true
+          fi
+          if [[ -n "${RUNTIME_EFFECTS_PID:-}" ]]; then
+            kill "${RUNTIME_EFFECTS_PID}" 2>/dev/null || true
           fi
           docker compose -f docker/docker-compose.e2e.yml down -v || true
