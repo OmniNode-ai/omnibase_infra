@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal
 
@@ -82,6 +83,7 @@ def _get_kafka_admin_client(
 _HealthStatus = Literal["HEALTHY", "DEGRADED", "CRITICAL"]
 
 _DEFAULT_CHECK_INTERVAL: float = 300.0  # 5 minutes
+_DEFAULT_BOOT_GRACE: float = 120.0  # 2 minutes — covers typical topic provisioning time
 _KAFKA_ADMIN_TIMEOUT_MS: int = 5_000
 
 
@@ -115,6 +117,7 @@ class ServiceRuntimeHealthMonitor:
         bootstrap_servers: str | None = None,
         check_interval_seconds: float = _DEFAULT_CHECK_INTERVAL,
         topic_registry: ProtocolTopicRegistry | None = None,
+        boot_grace_seconds: float = _DEFAULT_BOOT_GRACE,
     ) -> None:
         """Initialize the health monitor.
 
@@ -148,6 +151,10 @@ class ServiceRuntimeHealthMonitor:
         self._check_interval = check_interval_seconds
         self._task: asyncio.Task[None] | None = None
         self._running = False
+        self._boot_grace_seconds = boot_grace_seconds
+        self._started_at: float = (
+            time.monotonic()
+        )  # grace window starts at construction
 
     async def start(self) -> None:
         """Start the background health check loop. Idempotent.
@@ -481,6 +488,18 @@ class ServiceRuntimeHealthMonitor:
     async def _emit(self, event: ModelRuntimeHealthCheckEvent) -> None:
         """Emit the health event to the event bus. Best-effort fire-and-forget."""
         if self._event_bus is None:
+            return
+
+        # Suppress emit during boot grace window — a not-yet-provisioned health-check
+        # topic must not trip the circuit breaker on first boot. (OMN-9552)
+        elapsed = time.monotonic() - self._started_at
+        if elapsed < self._boot_grace_seconds:
+            logger.debug(
+                "ServiceRuntimeHealthMonitor: suppressing emit during boot grace "
+                "(elapsed=%.1fs grace=%.1fs)",
+                elapsed,
+                self._boot_grace_seconds,
+            )
             return
 
         envelope: ModelEventEnvelope[ModelRuntimeHealthCheckEvent] = ModelEventEnvelope(
