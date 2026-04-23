@@ -168,6 +168,21 @@ def _run_seed() -> int:
     return 0
 
 
+def _current_git_sha() -> str:
+    """Return the current git SHA for the omnibase_infra repo (OMN-9330)."""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return proc.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "unknown"
+
+
 def cmd_seed(_args: list[str]) -> int:
     """Seed Infisical with config keys from contracts."""
     return _run_seed()
@@ -221,8 +236,17 @@ def cmd_up(args: list[str]) -> int:
     # Build if requested (OMN-7214)
     if force_build:
         print("Rebuilding images (--build)...")
+        git_sha = _current_git_sha()
         build_proc = subprocess.run(
-            ["docker", "compose", "-f", _DEFAULT_OUTPUT, "build"],
+            [
+                "docker",
+                "compose",
+                "-f",
+                _DEFAULT_OUTPUT,
+                "build",
+                "--build-arg",
+                f"GIT_SHA={git_sha}",
+            ],
             cwd=str(_REPO_ROOT),
             check=False,
         )
