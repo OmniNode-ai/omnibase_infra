@@ -9,6 +9,7 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -38,7 +39,9 @@ class ModelRegistryDiscoveryResponse(BaseModel):
         warnings: List of warnings for partial success scenarios
         summary: Aggregate statistics
         nodes: List of registered nodes
-        live_instances: List of live Consul instances
+        instance_discovery_status: Availability of legacy instance discovery
+        instance_discovery_message: Optional explanation for degraded instance discovery
+        live_instances: Compatibility list for legacy instance-oriented consumers
         pagination: Pagination info for nodes list
     """
 
@@ -60,9 +63,17 @@ class ModelRegistryDiscoveryResponse(BaseModel):
         default_factory=list,
         description="List of registered nodes",
     )
+    instance_discovery_status: Literal["available", "unavailable"] = Field(
+        default="unavailable",
+        description="Availability of legacy instance discovery in the current runtime",
+    )
+    instance_discovery_message: str | None = Field(
+        default=None,
+        description="Optional explanation when legacy instance discovery is unavailable",
+    )
     live_instances: list[ModelRegistryInstanceView] = Field(
         default_factory=list,
-        description="List of live Consul instances",
+        description="Compatibility list for legacy instance-oriented consumers",
     )
     pagination: ModelPaginationInfo = Field(
         ...,

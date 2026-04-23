@@ -45,6 +45,7 @@ from omnibase_infra.services.registry_api.models import (
     ModelRegistryDiscoveryResponse,
     ModelRegistryHealthResponse,
     ModelRegistryInstanceView,
+    ModelRegistryNodeDetailView,
     ModelRegistryNodeView,
     ModelRegistrySummary,
     ModelTopicSummary,
@@ -88,6 +89,83 @@ _default_widget_mapping_rel: str = str(
 DEFAULT_WIDGET_MAPPING_PATH: Path = (
     Path(__file__).parent.parent.parent / _default_widget_mapping_rel
 )
+
+
+def _build_node_display_name(proj: ModelRegistrationProjection) -> str:
+    """Return a human-friendly fallback label for a registry node."""
+    return f"onex-{proj.node_type.value}"
+
+
+def _build_capability_details(
+    proj: ModelRegistrationProjection,
+) -> dict[str, JsonType]:
+    """Return the approved phase-1 capability subset for API exposure."""
+    capabilities = proj.capabilities.model_dump(mode="json", exclude_none=True)
+    safe_keys = (
+        "postgres",
+        "read",
+        "write",
+        "database",
+        "transactions",
+        "processing",
+        "batch_size",
+        "max_batch",
+        "supported_types",
+        "routing",
+        "feature",
+    )
+    return {
+        key: capabilities[key]
+        for key in safe_keys
+        if key in capabilities and capabilities[key] not in (False, [], {}, None)
+    }
+
+
+def _build_registry_node_view_payload(
+    proj: ModelRegistrationProjection,
+) -> dict[str, object]:
+    """Build the shared projection-backed payload for registry node responses."""
+    node_type_str = proj.node_type.value.upper()
+    if node_type_str not in ("EFFECT", "COMPUTE", "REDUCER", "ORCHESTRATOR"):
+        node_type_str = "EFFECT"
+
+    return {
+        "node_id": proj.entity_id,
+        # Until registration_projections carry a canonical human-readable name,
+        # the stable registry label is the canonical entity identifier.
+        "name": str(proj.entity_id),
+        "service_name": None,
+        "namespace": proj.domain if proj.domain != "registration" else None,
+        "display_name": _build_node_display_name(proj),
+        "node_type": node_type_str,
+        "version": proj.node_version,
+        "state": proj.current_state.value,
+        "capabilities": proj.capability_tags,
+        "capability_details": _build_capability_details(proj),
+        "contract_type": proj.contract_type,
+        "contract_version": proj.contract_version,
+        "registered_at": proj.registered_at,
+        "last_heartbeat_at": proj.last_heartbeat_at,
+        "updated_at": proj.updated_at,
+    }
+
+
+def _build_registry_node_view(
+    proj: ModelRegistrationProjection,
+) -> ModelRegistryNodeView:
+    """Map a registration projection into the list/discovery node view."""
+    return ModelRegistryNodeView(**_build_registry_node_view_payload(proj))
+
+
+def _build_registry_node_detail_view(
+    proj: ModelRegistrationProjection,
+) -> ModelRegistryNodeDetailView:
+    """Map a registration projection into the detailed node view."""
+    return ModelRegistryNodeDetailView(
+        **_build_registry_node_view_payload(proj),
+        protocols=proj.protocols,
+        intent_types=proj.intent_types,
+    )
 
 
 class ServiceRegistryDiscovery:
@@ -310,33 +388,7 @@ class ServiceRegistryDiscovery:
 
                 # Convert to view models
                 for proj in projections_slice:
-                    # Map EnumNodeKind to API node_type string
-                    node_type_str = proj.node_type.value.upper()
-                    if node_type_str not in (
-                        "EFFECT",
-                        "COMPUTE",
-                        "REDUCER",
-                        "ORCHESTRATOR",
-                    ):
-                        node_type_str = "EFFECT"  # Fallback
-
-                    nodes.append(
-                        ModelRegistryNodeView(
-                            node_id=proj.entity_id,
-                            name=f"onex-{proj.node_type.value}",
-                            service_name=f"onex-{proj.node_type.value}-{str(proj.entity_id)[:8]}",
-                            namespace=proj.domain
-                            if proj.domain != "registration"
-                            else None,
-                            display_name=None,
-                            node_type=node_type_str,  # type: ignore[arg-type]
-                            version=proj.node_version,
-                            state=proj.current_state.value,
-                            capabilities=proj.capability_tags,
-                            registered_at=proj.registered_at,
-                            last_heartbeat_at=proj.last_heartbeat_at,
-                        )
-                    )
+                    nodes.append(_build_registry_node_view(proj))
 
             except Exception as e:
                 logger.exception(
@@ -365,7 +417,7 @@ class ServiceRegistryDiscovery:
         self,
         node_id: UUID,
         correlation_id: UUID | None = None,
-    ) -> tuple[ModelRegistryNodeView | None, list[ModelWarning]]:
+    ) -> tuple[ModelRegistryNodeDetailView | None, list[ModelWarning]]:
         """Get a single node by ID.
 
         Args:
@@ -398,23 +450,7 @@ class ServiceRegistryDiscovery:
             if proj is None:
                 return None, warnings
 
-            node_type_str = proj.node_type.value.upper()
-            if node_type_str not in ("EFFECT", "COMPUTE", "REDUCER", "ORCHESTRATOR"):
-                node_type_str = "EFFECT"
-
-            node = ModelRegistryNodeView(
-                node_id=proj.entity_id,
-                name=f"onex-{proj.node_type.value}",
-                service_name=f"onex-{proj.node_type.value}-{str(proj.entity_id)[:8]}",
-                namespace=proj.domain if proj.domain != "registration" else None,
-                display_name=None,
-                node_type=node_type_str,  # type: ignore[arg-type]
-                version=proj.node_version,
-                state=proj.current_state.value,
-                capabilities=proj.capability_tags,
-                registered_at=proj.registered_at,
-                last_heartbeat_at=proj.last_heartbeat_at,
-            )
+            node = _build_registry_node_detail_view(proj)
 
             return node, warnings
 
@@ -502,6 +538,15 @@ class ServiceRegistryDiscovery:
         )
         all_warnings.extend(instance_warnings)
 
+        instance_discovery_status = "available"
+        instance_discovery_message: str | None = None
+        if any(w.code == "NO_CONSUL_HANDLER" for w in instance_warnings):
+            instance_discovery_status = "unavailable"
+            instance_discovery_message = next(
+                (w.message for w in instance_warnings if w.code == "NO_CONSUL_HANDLER"),
+                None,
+            )
+
         # Build summary
         by_node_type: dict[str, int] = {}
         by_state: dict[str, int] = {}
@@ -530,6 +575,8 @@ class ServiceRegistryDiscovery:
             warnings=all_warnings,
             summary=summary,
             nodes=nodes,
+            instance_discovery_status=instance_discovery_status,  # type: ignore[arg-type]
+            instance_discovery_message=instance_discovery_message,
             live_instances=instances,
             pagination=pagination,
         )
