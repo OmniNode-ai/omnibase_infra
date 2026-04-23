@@ -762,6 +762,9 @@ async def wire_registration_handlers(
 
         # Register HandlerNodeHeartbeat (requires projector)
         # Uses ProtocolNodeHeartbeat for protocol-based DI resolution.
+        # Also registered under the concrete class so the auto-wiring engine's
+        # Phase 0 async pre-resolution (get_service_async) can find it by
+        # concrete class name (OMN-9463).
         if projector is not None:
             from omnibase_infra.protocols.protocol_node_heartbeat import (
                 ProtocolNodeHeartbeat,
@@ -777,6 +780,15 @@ async def wire_registration_handlers(
                 scope=EnumInjectionScope.GLOBAL,
                 metadata={
                     "description": "Handler for NodeHeartbeatEvent",
+                    "version": str(semver_default),
+                },
+            )
+            await container.service_registry.register_instance(
+                interface=HandlerNodeHeartbeat,
+                instance=handler_heartbeat,
+                scope=EnumInjectionScope.GLOBAL,
+                metadata={
+                    "description": "Handler for NodeHeartbeatEvent (concrete class registration for auto-wiring Phase 0)",
                     "version": str(semver_default),
                 },
             )
