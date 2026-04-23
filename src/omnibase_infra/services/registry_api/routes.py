@@ -36,6 +36,7 @@ from omnibase_infra.services.registry_api.models import (
     ModelFeatureFlagToggleResult,
     ModelRegistryDiscoveryResponse,
     ModelRegistryHealthResponse,
+    ModelRegistryNodeDetailView,
     ModelRegistryNodeView,
     ModelResponseListContracts,
     ModelResponseListInstances,
@@ -253,7 +254,7 @@ async def list_nodes(
 
 @router.get(
     "/nodes/{node_id}",
-    response_model=ModelRegistryNodeView,
+    response_model=ModelRegistryNodeDetailView,
     summary="Get Node Details",
     description="Returns detailed information for a single registered node by ID.",
     responses={
@@ -266,7 +267,7 @@ async def get_node(
     node_id: UUID,
     service: Annotated[ServiceRegistryDiscovery, Depends(get_service)],
     correlation_id: Annotated[UUID, Depends(get_correlation_id)],
-) -> ModelRegistryNodeView:
+) -> ModelRegistryNodeDetailView:
     """Get a single node by ID."""
 
     node, warnings = await service.get_node(
