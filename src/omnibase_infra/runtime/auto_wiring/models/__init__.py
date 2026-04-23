@@ -49,6 +49,9 @@ from omnibase_infra.runtime.auto_wiring.models.model_lifecycle_hooks import (
 from omnibase_infra.runtime.auto_wiring.models.model_quarantine_record import (
     ModelQuarantineRecord,
 )
+from omnibase_infra.runtime.auto_wiring.models.model_runtime_profile_policy import (
+    ModelRuntimeProfilePolicy,
+)
 
 __all__ = [
     "HandshakeFailureReason",
@@ -65,4 +68,5 @@ __all__ = [
     "ModelLifecycleHookResult",
     "ModelLifecycleHooks",
     "ModelQuarantineRecord",
+    "ModelRuntimeProfilePolicy",
 ]

@@ -17,6 +17,9 @@ from omnibase_infra.runtime.auto_wiring.models.model_event_bus_wiring import (
 from omnibase_infra.runtime.auto_wiring.models.model_handler_routing import (
     ModelHandlerRouting,
 )
+from omnibase_infra.runtime.auto_wiring.models.model_runtime_profile_policy import (
+    ModelRuntimeProfilePolicy,
+)
 
 
 class ModelDiscoveredContract(BaseModel):
@@ -48,4 +51,11 @@ class ModelDiscoveredContract(BaseModel):
     )
     handler_routing: ModelHandlerRouting | None = Field(
         default=None, description="Handler routing if declared"
+    )
+    runtime_profiles: dict[str, ModelRuntimeProfilePolicy] = Field(
+        default_factory=dict,
+        description=(
+            "Optional per-profile contract hints. Runtime policy remains "
+            "authoritative; contracts may narrow but not broaden eligibility."
+        ),
     )

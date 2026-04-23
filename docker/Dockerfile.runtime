@@ -74,6 +74,8 @@
 ARG PYTHON_VERSION=3.12
 # Pin uv version for reproducible builds (must match CI: .github/workflows/*.yml)
 ARG UV_VERSION=0.6.14
+ARG BUILD_SOURCE=release
+ARG RELEASE_MANIFEST_PATH=docker/runtime-release-manifest.json
 
 # ============================================================================
 # uv Binary Stage - Named stage so COPY --from can reference it
@@ -88,6 +90,9 @@ FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv-bin
 # Builder Stage - Install dependencies with uv
 # ============================================================================
 FROM python:${PYTHON_VERSION}-slim AS builder
+
+ARG BUILD_SOURCE=release
+ARG RELEASE_MANIFEST_PATH=docker/runtime-release-manifest.json
 
 # Build-time environment configuration
 ENV PYTHONUNBUFFERED=1 \
@@ -134,6 +139,7 @@ WORKDIR /app
 # pyproject.toml and uv.lock define all dependencies
 COPY pyproject.toml README.md ./
 COPY uv.lock ./
+COPY docker/runtime-release-manifest.json ./docker/runtime-release-manifest.json
 
 # Install dependencies with uv (BEFORE copying source code)
 # - Uses BuildKit cache mount for uv cache directory (shared across builds)
@@ -148,6 +154,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # COPY as a hit (root cause of PR #1231 silent stale-code bug, OMN-8489).
 ARG GIT_SHA=unknown
 LABEL org.opencontainers.image.revision="${GIT_SHA}"
+ENV BUILD_SOURCE=${BUILD_SOURCE}
 
 # Copy source code (required for local package install with uv)
 # This layer invalidates when source code changes, but dependency layer remains cached
@@ -188,27 +195,50 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "omninode-memory>=0.9.0,<2.0.0" \
     "omninode-intelligence>=0.15.0,<2.0.0"
 
-# Install omnibase_compat before omnimarket — omnimarket declares it as a
-# required dependency but we use --no-deps for the git install, so it must
-# be present first. Pinned to git main until PyPI publishing is automated.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --no-deps \
-    "git+https://github.com/OmniNode-ai/omnibase_compat.git@main#egg=omnibase-compat"
-
-# Install onex_change_control before omnimarket — omnimarket's node_overseer_verifier
-# imports it at module level but omnimarket is installed --no-deps, so it must
-# be present first. Pinned to git main until PyPI publishing is automated.
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --no-deps \
-    "git+https://github.com/OmniNode-ai/onex_change_control.git@main#egg=onex-change-control"
-
-# Install omnimarket from git main until PyPI releases are automated (OMN-7980).
-# Pinned to main so every image rebuild picks up the latest merged nodes.
-# Switch back to PyPI range pin once the auto-tag-on-merge release pipeline
-# is confirmed publishing on each merge: "omnimarket>=0.2.0,<2.0.0"
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --no-deps \
-    "git+https://github.com/OmniNode-ai/omnimarket.git@main#egg=omnimarket"
+    --mount=type=bind,from=omnibase_compat_src,target=/workspace/omnibase_compat,readonly \
+    --mount=type=bind,from=onex_change_control_src,target=/workspace/onex_change_control,readonly \
+    --mount=type=bind,from=omnimarket_src,target=/workspace/omnimarket,readonly \
+    bash -lc 'set -euo pipefail; \
+    install_local_repo() { \
+        local source_dir="$1"; \
+        local temp_dir; \
+        temp_dir="$(mktemp -d)"; \
+        cp -R "${source_dir}/." "${temp_dir}/"; \
+        rm -rf "${temp_dir}/.git"; \
+        uv pip install --no-cache --reinstall --no-deps "${temp_dir}"; \
+        rm -rf "${temp_dir}"; \
+    }; \
+    case "${BUILD_SOURCE}" in \
+        workspace) \
+            /app/.venv/bin/python -m omnibase_infra.docker.runtime_build \
+                write-workspace-manifest \
+                --workspace-root /workspace \
+                --output /app/runtime-build-provenance.json; \
+            install_local_repo /workspace/omnibase_compat; \
+            install_local_repo /workspace/onex_change_control; \
+            install_local_repo /workspace/omnimarket; \
+            /app/.venv/bin/python -m omnibase_infra.docker.runtime_build \
+                verify-workspace-install \
+                --manifest /app/runtime-build-provenance.json; \
+            ;; \
+        release) \
+            uv pip install --no-deps \
+                "$(/app/.venv/bin/python -m omnibase_infra.docker.runtime_build release-requirement --manifest "$RELEASE_MANIFEST_PATH" --repo omnibase_compat)"; \
+            uv pip install --no-deps \
+                "$(/app/.venv/bin/python -m omnibase_infra.docker.runtime_build release-requirement --manifest "$RELEASE_MANIFEST_PATH" --repo onex_change_control)"; \
+            uv pip install --no-deps \
+                "$(/app/.venv/bin/python -m omnibase_infra.docker.runtime_build release-requirement --manifest "$RELEASE_MANIFEST_PATH" --repo omnimarket)"; \
+            cp "${RELEASE_MANIFEST_PATH}" /app/runtime-build-provenance.json; \
+            /app/.venv/bin/python -m omnibase_infra.docker.runtime_build \
+                verify-release-install \
+                --manifest "${RELEASE_MANIFEST_PATH}"; \
+            ;; \
+        *) \
+            echo "Unsupported BUILD_SOURCE: ${BUILD_SOURCE}" >&2; \
+            exit 1; \
+            ;; \
+    esac'
 
 # Install CPU-only PyTorch (~2GB savings over CUDA wheels).
 # K8s runtime has no GPU; inference offloads to LLM servers via HTTP.
@@ -282,6 +312,7 @@ ARG RUNTIME_SOURCE_HASH=unknown
 # Docker Compose project name used for this deployment.
 # Lets operators confirm the container belongs to the expected compose stack.
 ARG COMPOSE_PROJECT=unknown
+ARG BUILD_SOURCE=release
 
 # OCI Image Labels (https://github.com/opencontainers/image-spec/blob/main/annotations.md)
 LABEL org.opencontainers.image.title="OmniBase Infra Runtime" \
@@ -292,7 +323,9 @@ LABEL org.opencontainers.image.title="OmniBase Infra Runtime" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${RUNTIME_VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
-      org.opencontainers.image.revision="${VCS_REF}"
+      org.opencontainers.image.revision="${VCS_REF}" \
+      io.omninode.runtime.build_source="${BUILD_SOURCE}" \
+      io.omninode.runtime.provenance_manifest="/app/runtime-build-provenance.json"
 
 # Runtime environment configuration
 ENV PYTHONUNBUFFERED=1 \
@@ -317,7 +350,9 @@ ENV PYTHONUNBUFFERED=1 \
 # Read by entrypoint-runtime.sh to emit the startup banner.
 # Operators can verify which code is running via: docker logs <container> | head -10
 ENV RUNTIME_SOURCE_HASH=${RUNTIME_SOURCE_HASH} \
-    COMPOSE_PROJECT=${COMPOSE_PROJECT}
+    COMPOSE_PROJECT=${COMPOSE_PROJECT} \
+    BUILD_SOURCE=${BUILD_SOURCE} \
+    ONEX_RUNTIME_BUILD_PROVENANCE=/app/runtime-build-provenance.json
 
 # Install minimal runtime dependencies only
 # No build tools needed - all Python packages are pre-compiled in builder stage.
@@ -354,6 +389,7 @@ WORKDIR /app
 # Copy virtual environment from builder stage
 # This contains all installed Python packages
 COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/runtime-build-provenance.json /app/runtime-build-provenance.json
 
 # Copy source code with proper ownership
 COPY --chown=omniinfra:omniinfra src/ /app/src/

@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import subprocess
@@ -13,6 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from deploy_agent.events import (
+    BuildSource,
     ModelHealthCheck,
     Phase,
     PhaseStatus,
@@ -34,6 +37,19 @@ REPO_DIR = "/data/omninode/omnibase_infra"
 DEPLOY_AGENT_DIR = "/data/omninode/deploy-agent"
 COMPOSE_FILE = f"{REPO_DIR}/docker/docker-compose.infra.yml"
 COMPOSE_PROJECT = "omnibase-infra"
+OMNI_HOME = os.environ.get("OMNI_HOME", "/data/omninode/omni_home")
+RELEASE_MANIFEST_PATH = "docker/runtime-release-manifest.json"
+TAINT_MARKER = Path(
+    os.environ.get(
+        "DEPLOY_AGENT_RUNTIME_TAINT_FILE",
+        f"{DEPLOY_AGENT_DIR}/state/runtime-taint.json",
+    )
+)
+SIBLING_SOURCE_SUBDIRS: dict[str, str] = {
+    "omnibase_compat": "src/omnibase_compat",
+    "onex_change_control": "src/onex_change_control",
+    "omnimarket": "src/omnimarket",
+}
 
 PHASE_TIMEOUTS = {
     Phase.PREFLIGHT: 30,
@@ -45,6 +61,73 @@ PHASE_TIMEOUTS = {
 }
 
 PhaseCallback = Callable[[Phase, PhaseStatus], None]
+
+
+def _resolved_repo_dir() -> Path:
+    configured = Path(REPO_DIR)
+    if configured.is_dir():
+        return configured
+    return Path(__file__).resolve().parents[3]
+
+
+def _digest_tree(root: Path) -> str:
+    if not root.is_dir():
+        msg = f"Missing source tree: {root}"
+        raise FileNotFoundError(msg)
+
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*")):
+        if ".git" in path.parts or "__pycache__" in path.parts:
+            continue
+        if not path.is_file() or path.suffix in {".pyc", ".pyo"}:
+            continue
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _workspace_source_roots(omni_home: str) -> dict[str, Path]:
+    roots: dict[str, Path] = {}
+    for repo, subdir in SIBLING_SOURCE_SUBDIRS.items():
+        source_root = Path(omni_home) / repo / subdir
+        if not source_root.is_dir():
+            msg = f"Workspace source root missing for {repo}: {source_root}"
+            raise FileNotFoundError(msg)
+        roots[repo] = source_root
+    return roots
+
+
+def _workspace_build_metadata(omni_home: str) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    for repo, source_root in _workspace_source_roots(omni_home).items():
+        metadata[f"{repo.upper()}_DIGEST"] = _digest_tree(source_root)
+    return metadata
+
+
+def _repo_dirty(repo_root: Path) -> bool:
+    result = _run(
+        ["git", "-C", str(repo_root), "status", "--porcelain"],
+        timeout=15,
+    )
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def _validate_release_manifest() -> None:
+    manifest_path = _resolved_repo_dir() / RELEASE_MANIFEST_PATH
+    if not manifest_path.is_file():
+        msg = f"Release manifest missing: {manifest_path}"
+        raise FileNotFoundError(msg)
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    deps = data.get("dependencies")
+    if not isinstance(deps, dict):
+        msg = f"Release manifest dependencies missing or invalid: {manifest_path}"
+        raise ValueError(msg)
+    for repo in SIBLING_SOURCE_SUBDIRS:
+        if repo not in deps:
+            msg = f"Release manifest missing dependency entry for {repo}"
+            raise ValueError(msg)
 
 
 def _requested_services_for_up(scope: Scope, services: list[str]) -> list[str]:
@@ -130,6 +213,84 @@ def verify_containers_up(
 
 
 class DeployExecutor:
+    def _load_runtime_taint(self) -> dict[str, str] | None:
+        if not TAINT_MARKER.is_file():
+            return None
+        try:
+            data = json.loads(TAINT_MARKER.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {"status": "tainted", "reason": "unparseable_taint_marker"}
+        if not isinstance(data, dict):
+            return {"status": "tainted", "reason": "invalid_taint_marker"}
+        return {str(k): str(v) for k, v in data.items()}
+
+    def mark_runtime_tainted(
+        self, *, reason: str, source: str = "manual_patch"
+    ) -> None:
+        TAINT_MARKER.parent.mkdir(parents=True, exist_ok=True)
+        TAINT_MARKER.write_text(
+            json.dumps(
+                {"status": "tainted", "reason": reason, "source": source},
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+    def _clear_runtime_taint(self) -> None:
+        if TAINT_MARKER.exists():
+            TAINT_MARKER.unlink()
+
+    def _provenance_summary(self, build_source: BuildSource) -> dict[str, object]:
+        taint = self._load_runtime_taint()
+        summary: dict[str, object] = {
+            "build_source": build_source.value,
+            "taint": taint or {"status": "clean"},
+        }
+        legacy_worktrees = Path(OMNI_HOME) / "worktrees"
+        if legacy_worktrees.exists() or legacy_worktrees.is_symlink():
+            summary["legacy_worktrees"] = {
+                "path": str(legacy_worktrees),
+                "kind": "symlink" if legacy_worktrees.is_symlink() else "path",
+            }
+
+        if build_source == BuildSource.WORKSPACE:
+            repos: list[dict[str, object]] = []
+            for repo, source_root in _workspace_source_roots(OMNI_HOME).items():
+                repo_root = Path(OMNI_HOME) / repo
+                repos.append(
+                    {
+                        "repo": repo,
+                        "source_root": str(source_root),
+                        "dirty": _repo_dirty(repo_root),
+                        "digest": _digest_tree(source_root),
+                    }
+                )
+            summary["repos"] = repos
+            return summary
+
+        manifest_path = _resolved_repo_dir() / RELEASE_MANIFEST_PATH
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        deps = manifest.get("dependencies", {})
+        summary["manifest_path"] = str(manifest_path)
+        summary["manifest_digest"] = hashlib.sha256(
+            manifest_path.read_bytes()
+        ).hexdigest()
+        summary["repos"] = [
+            {
+                "repo": repo,
+                "distribution": dep.get("distribution", ""),
+                "version": dep.get("version", ""),
+            }
+            for repo, dep in sorted(deps.items())
+            if isinstance(dep, dict)
+        ]
+        return summary
+
+    def _log_provenance_summary(self, build_source: BuildSource) -> None:
+        summary = self._provenance_summary(build_source)
+        logger.info("Runtime build provenance: %s", json.dumps(summary, sort_keys=True))
+
     def self_update(self, *, skip: bool = False) -> None:
         """Pull and re-exec deploy-agent itself if behind origin/main.
 
@@ -411,28 +572,36 @@ class DeployExecutor:
         on_phase_update: PhaseCallback,
         *,
         git_sha: str = "",
+        build_source: BuildSource = BuildSource.RELEASE,
         skip_self_update: bool = False,
     ) -> list[str]:
         self.self_update(skip=skip_self_update)
         phase = Phase.CORE if scope == Scope.CORE else Phase.RUNTIME
+        self._log_provenance_summary(build_source)
+        if build_source == BuildSource.WORKSPACE:
+            _workspace_source_roots(OMNI_HOME)
+        else:
+            _validate_release_manifest()
         if scope == Scope.FULL:
             # Build images first (both scopes), then bring them up.
             # _compose_build passes --build-arg GIT_SHA so Docker invalidates
             # the COPY src/ layer even when the file-system mtime is cached.
-            self._compose_build(Scope.CORE, git_sha, on_phase_update)
-            self._compose_build(Scope.RUNTIME, git_sha, on_phase_update)
+            self._compose_build(Scope.CORE, git_sha, build_source, on_phase_update)
+            self._compose_build(Scope.RUNTIME, git_sha, build_source, on_phase_update)
             self._compose_up(Phase.CORE, Scope.CORE, [], on_phase_update)
             self._compose_up(Phase.RUNTIME, Scope.RUNTIME, [], on_phase_update)
             return services_for_scope(Scope.FULL)
 
-        self._compose_build(scope, git_sha, on_phase_update)
+        self._compose_build(scope, git_sha, build_source, on_phase_update)
         self._compose_up(phase, scope, services, on_phase_update)
+        self._clear_runtime_taint()
         return services if services else services_for_scope(scope)
 
     def _compose_build(
         self,
         scope: Scope,
         git_sha: str,
+        build_source: BuildSource,
         on_phase_update: PhaseCallback,
     ) -> None:
         """Build images with --build-arg GIT_SHA to bust the COPY src/ layer cache.
@@ -456,7 +625,14 @@ class DeployExecutor:
             "build",
             "--build-arg",
             f"GIT_SHA={git_sha}",
+            "--build-arg",
+            f"BUILD_SOURCE={build_source.value}",
+            "--build-arg",
+            f"RELEASE_MANIFEST_PATH={RELEASE_MANIFEST_PATH}",
         ]
+        if build_source == BuildSource.WORKSPACE:
+            for key, value in _workspace_build_metadata(OMNI_HOME).items():
+                cmd.extend(["--build-arg", f"{key}={value}"])
         result = _run(cmd, timeout=timeout)
         if result.returncode != 0:
             raise RuntimeError(f"Docker compose build failed: {result.stderr}")

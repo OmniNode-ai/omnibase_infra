@@ -164,7 +164,7 @@ class TestSelfUpdateBehind:
 class TestSelfUpdateWiredIntoRebuildScope:
     def test_self_update_called_first_in_rebuild_scope(self) -> None:
         """self_update must be invoked before _compose_build inside rebuild_scope."""
-        from deploy_agent.events import Phase, PhaseStatus, Scope
+        from deploy_agent.events import BuildSource, Phase, PhaseStatus, Scope
 
         executor = DeployExecutor()
         call_order: list[str] = []
@@ -172,7 +172,7 @@ class TestSelfUpdateWiredIntoRebuildScope:
         def fake_self_update(*, skip: bool = False) -> None:
             call_order.append("self_update")
 
-        def fake_build(scope: Scope, sha: str, cb) -> None:
+        def fake_build(scope: Scope, sha: str, build_source: BuildSource, cb) -> None:
             call_order.append("build")
 
         def fake_up(phase: Phase, scope: Scope, services: list[str], cb) -> None:
@@ -197,7 +197,7 @@ class TestSelfUpdateWiredIntoRebuildScope:
         def fake_self_update(*, skip: bool = False) -> None:
             received_skip.append(skip)
 
-        def fake_build(scope, sha, cb) -> None:
+        def fake_build(scope, sha, build_source, cb) -> None:
             pass
 
         def fake_up(phase, scope, services, cb) -> None:

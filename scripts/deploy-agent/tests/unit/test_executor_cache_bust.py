@@ -11,7 +11,7 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import patch
 
-from deploy_agent.events import Phase, PhaseStatus, Scope
+from deploy_agent.events import BuildSource, Phase, PhaseStatus, Scope
 from deploy_agent.executor import DeployExecutor
 
 
@@ -40,7 +40,12 @@ class TestCacheBust:
             return _make_ok_result()
 
         with patch("deploy_agent.executor._run", side_effect=fake_run):
-            executor._compose_build(Scope.RUNTIME, git_sha, _noop_phase_update)
+            executor._compose_build(
+                Scope.RUNTIME,
+                git_sha,
+                BuildSource.RELEASE,
+                _noop_phase_update,
+            )
 
         build_cmds = [c for c in captured_cmds if "build" in c]
         assert build_cmds, "Expected at least one 'docker compose build' call"
@@ -54,6 +59,8 @@ class TestCacheBust:
         assert git_sha_arg == f"GIT_SHA={git_sha}", (
             f"Expected --build-arg GIT_SHA={git_sha}, got {git_sha_arg!r}"
         )
+        assert "BUILD_SOURCE=release" in build_cmd
+        assert "RELEASE_MANIFEST_PATH=docker/runtime-release-manifest.json" in build_cmd
 
     def test_compose_build_called_before_compose_up_in_rebuild_scope(self) -> None:
         """rebuild_scope must call _compose_build before _compose_up so images are fresh."""
@@ -61,7 +68,7 @@ class TestCacheBust:
         git_sha = "abc1234def56"
         call_order: list[str] = []
 
-        def fake_build(scope: Scope, sha: str, cb) -> None:
+        def fake_build(scope: Scope, sha: str, build_source: BuildSource, cb) -> None:
             call_order.append("build")
 
         def fake_up(phase: Phase, scope: Scope, services: list[str], cb) -> None:
@@ -82,7 +89,7 @@ class TestCacheBust:
         git_sha = "abc1234def56"
         build_scopes: list[Scope] = []
 
-        def fake_build(scope: Scope, sha: str, cb) -> None:
+        def fake_build(scope: Scope, sha: str, build_source: BuildSource, cb) -> None:
             build_scopes.append(scope)
 
         def fake_up(phase: Phase, scope: Scope, services: list[str], cb) -> None:
@@ -101,7 +108,7 @@ class TestCacheBust:
         executor = DeployExecutor()
         git_sha_seen_in_build: list[str] = []
 
-        def fake_build(scope: Scope, sha: str, cb) -> None:
+        def fake_build(scope: Scope, sha: str, build_source: BuildSource, cb) -> None:
             git_sha_seen_in_build.append(sha)
 
         def fake_up(phase: Phase, scope: Scope, services: list[str], cb) -> None:

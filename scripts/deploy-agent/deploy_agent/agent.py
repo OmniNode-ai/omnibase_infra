@@ -191,6 +191,7 @@ class DeployAgent:
                 cmd.services,
                 on_phase_update=on_phase_update,
                 git_sha=self._current_git_sha,
+                build_source=cmd.build_source,
                 skip_self_update=self._skip_self_update,
             )
 

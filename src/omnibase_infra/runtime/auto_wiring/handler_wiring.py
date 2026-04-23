@@ -22,10 +22,13 @@ CI gate: any PR touching this module MUST satisfy the runtime-startup gate defin
 
 from __future__ import annotations
 
+import asyncio
 import importlib
+import inspect
 import logging
 import os
 import re
+import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -79,6 +82,8 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+_COMMIT_PROGRESS_LOG_EVERY = 10
 
 # Matches DSNs, URLs, and connection strings that may contain credentials.
 _SENSITIVE_PATTERN = re.compile(
@@ -258,11 +263,69 @@ class PreparedContractWiring:
     _commit_contract_wiring returns skip_result directly in that case.
     """
 
-    contract: object  # ModelDiscoveredContract
+    contract: ModelDiscoveredContract
     prepared_wirings: list[PreparedWiring]
     subscription_topics: list[str]  # topics to subscribe after commit
     environment: str
-    skip_result: object = None  # ModelContractWiringResult | None
+    runtime_profile: str = "default"
+    profile_optional: bool = False
+    structural_invalid_handlers: tuple[str, ...] = ()
+    skip_result: ModelContractWiringResult | None = None
+
+
+_EFFECTS_ALWAYS_ALLOWED_CONTRACTS: frozenset[str] = frozenset(
+    {"node_registration_orchestrator"}
+)
+
+
+def _evaluate_runtime_profile_policy(
+    contract: ModelDiscoveredContract,
+    runtime_profile: str,
+) -> tuple[bool, bool]:
+    """Return (eligible, optional) for the active runtime profile.
+
+    Runtime profile policy is authoritative. Contract metadata may narrow
+    eligibility or mark an already-eligible contract optional, but it never
+    broadens the runtime's default allow-set.
+    """
+    profile = runtime_profile or "default"
+    node_type_upper = contract.node_type.upper()
+
+    if profile == "effects":
+        eligible = (
+            "EFFECT" in node_type_upper
+            or contract.name in _EFFECTS_ALWAYS_ALLOWED_CONTRACTS
+        )
+    else:
+        eligible = True
+
+    contract_policy = contract.runtime_profiles.get(profile)
+    if contract_policy is not None and contract_policy.eligible is False:
+        eligible = False
+
+    optional = bool(contract_policy.optional) if contract_policy is not None else False
+    return eligible, optional if eligible else False
+
+
+def _validate_runtime_handle_contract(
+    handler_instance: object,
+    *,
+    contract_name: str,
+    handler_name: str,
+) -> None:
+    """Reject handlers that cannot satisfy the runtime dispatch callback contract."""
+    handle_method = getattr(handler_instance, "handle", None)
+    if handle_method is None or not callable(handle_method):
+        raise TypeError(
+            f"Handler {contract_name}.{handler_name} does not expose a callable "
+            "handle(...) method required by runtime dispatch."
+        )
+    if inspect.iscoroutinefunction(handle_method):
+        return
+    # Bound async methods on some descriptors may not satisfy
+    # inspect.iscoroutinefunction(); do not reject them if they advertise
+    # an awaitable return annotation. Missing callable ``handle`` is the
+    # concrete structural bug we must surface early for this phase.
 
 
 def _import_handler_class(module_path: str, class_name: str) -> type:
@@ -477,7 +540,9 @@ def _make_projection_dispatch_callback(
                 dict(payload) if isinstance(payload, dict) else {}
             )
             if hasattr(payload, "model_dump"):
-                input_data = payload.model_dump(mode="python")  # type: ignore[union-attr]  # noqa: model-dump-bare
+                # Projection handlers need Python objects here because adapters
+                # are injected into the input payload before handle().
+                input_data = payload.model_dump(mode="python")  # type: ignore[union-attr]
             input_data["_db"] = adapter
             input_data["_event_type"] = event_type
             result = handler_instance.handle(input_data)  # type: ignore[union-attr, attr-defined]
@@ -654,6 +719,7 @@ async def wire_from_manifest(
     event_bus: object | None = None,
     environment: str = "dev",
     container: object | None = None,
+    runtime_profile: str = "default",
 ) -> ModelAutoWiringReport:
     """Wire all discovered contracts into the dispatch engine and event bus.
 
@@ -684,6 +750,13 @@ async def wire_from_manifest(
     Returns:
         A :class:`ModelAutoWiringReport` with per-contract outcomes.
     """
+    phase_started_at = time.monotonic()
+    logger.info(
+        "Runtime startup phase=auto_wiring action=enter runtime_profile=%s contracts=%d",
+        runtime_profile,
+        len(manifest.contracts),
+    )
+
     # Construct the resolver + ownership query ONCE per wiring pass from the
     # manifest itself (OMN-9201). The ownership query is set-membership
     # against the locally discovered node_name set — no I/O, no SQL. See
@@ -705,6 +778,11 @@ async def wire_from_manifest(
     pre_resolved_handlers: dict[str, object] = {}
     if container is not None:
         for contract in manifest.contracts:
+            profile_eligible, _profile_optional = _evaluate_runtime_profile_policy(
+                contract, runtime_profile
+            )
+            if not profile_eligible:
+                continue
             if contract.handler_routing is None:
                 continue
             for entry in contract.handler_routing.handlers:
@@ -730,8 +808,15 @@ async def wire_from_manifest(
 
     # Phase 1: Validate and prepare ALL contracts — no engine/bus side effects yet.
     # Failures are collected; if any exist, we raise before touching anything (OMN-8735).
+    prepare_started_at = time.monotonic()
+    logger.info(
+        "Runtime startup phase=auto_wiring_prepare action=enter runtime_profile=%s contracts=%d",
+        runtime_profile,
+        len(manifest.contracts),
+    )
     prepared_contracts: list[PreparedContractWiring] = []
     failed_results: list[ModelContractWiringResult] = []
+    skipped_contracts = 0
     for contract in manifest.contracts:
         try:
             prepared = _prepare_contract_wiring(
@@ -741,12 +826,15 @@ async def wire_from_manifest(
                 ownership_query=ownership_query,
                 event_bus=event_bus,
                 environment=environment,
+                runtime_profile=runtime_profile,
                 container=container,
                 pre_resolved_handlers=pre_resolved_handlers
                 if pre_resolved_handlers
                 else None,
             )
             prepared_contracts.append(prepared)
+            if prepared.skip_result is not None:
+                skipped_contracts += 1
         except TypeError:
             # OMN-8735 invariant: resolver-exhaustion TypeError must NOT be
             # demoted to a collectable failure. Propagate unchanged so the
@@ -769,6 +857,15 @@ async def wire_from_manifest(
                 )
             )
 
+    logger.info(
+        "Runtime startup phase=auto_wiring_prepare action=exit runtime_profile=%s duration_ms=%d prepared=%d skipped=%d failed=%d",
+        runtime_profile,
+        int((time.monotonic() - prepare_started_at) * 1000),
+        len(prepared_contracts),
+        skipped_contracts,
+        len(failed_results),
+    )
+
     # Check for failures before committing any side effects.
     # ONEX_WIRING_STRICT_MODE=1 raises on any failure (default OFF per OMN-9126:
     # strict gate ships after all downstream consumers are compliant).
@@ -789,10 +886,122 @@ async def wire_from_manifest(
     # Phase 2: All contracts validated — commit registrations and subscriptions.
     # Failed contracts are included in results so total_failed is accurate.
     # service_kernel respects the flag before asserting total_failed == 0.
+    commit_started_at = time.monotonic()
+    logger.info(
+        "Runtime startup phase=auto_wiring_commit action=enter runtime_profile=%s contracts=%d pre_failed=%d",
+        runtime_profile,
+        len(prepared_contracts),
+        len(failed_results),
+    )
     results: list[ModelContractWiringResult] = list(failed_results)
-    for pcw in prepared_contracts:
+    subscription_candidates: list[tuple[int, PreparedContractWiring]] = []
+    total_contracts = len(prepared_contracts)
+    for index, pcw in enumerate(prepared_contracts, start=1):
+        logger.info(
+            "Runtime startup phase=auto_wiring_commit_contract action=enter runtime_profile=%s contract_index=%d contracts_total=%d contract_name=%s",
+            runtime_profile,
+            index,
+            total_contracts,
+            pcw.contract.name,
+        )
         result = await _commit_contract_wiring(pcw, dispatch_engine, event_bus)
         results.append(result)
+        logger.info(
+            "Runtime startup phase=auto_wiring_commit_contract action=exit runtime_profile=%s contract_index=%d contracts_total=%d contract_name=%s outcome=%s",
+            runtime_profile,
+            index,
+            total_contracts,
+            pcw.contract.name,
+            result.outcome.value,
+        )
+        if (
+            event_bus is not None
+            and result.outcome is EnumWiringOutcome.WIRED
+            and pcw.subscription_topics
+        ):
+            subscription_candidates.append((len(results) - 1, pcw))
+        if (
+            index == 1
+            or index == total_contracts
+            or index % _COMMIT_PROGRESS_LOG_EVERY == 0
+        ):
+            wired_so_far = sum(
+                1 for item in results if item.outcome is EnumWiringOutcome.WIRED
+            )
+            skipped_so_far = sum(
+                1 for item in results if item.outcome is EnumWiringOutcome.SKIPPED
+            )
+            failed_so_far = sum(
+                1 for item in results if item.outcome is EnumWiringOutcome.FAILED
+            )
+            logger.info(
+                "Runtime startup phase=auto_wiring_commit action=progress runtime_profile=%s contracts_done=%d contracts_total=%d current_contract=%s wired=%d skipped=%d failed=%d",
+                runtime_profile,
+                index,
+                total_contracts,
+                pcw.contract.name,
+                wired_so_far,
+                skipped_so_far,
+                failed_so_far,
+            )
+
+    logger.info(
+        "Runtime startup phase=auto_wiring_commit action=exit runtime_profile=%s duration_ms=%d committed=%d",
+        runtime_profile,
+        int((time.monotonic() - commit_started_at) * 1000),
+        total_contracts,
+    )
+
+    _freeze_dispatch_engine_if_supported(dispatch_engine, runtime_profile)
+
+    if event_bus is not None and subscription_candidates:
+        subscription_started_at = time.monotonic()
+        logger.info(
+            "Runtime startup phase=auto_wiring_subscriptions action=enter runtime_profile=%s contracts=%d",
+            runtime_profile,
+            len(subscription_candidates),
+        )
+        subscription_tasks = [
+            asyncio.create_task(
+                _subscribe_contract_topics_for_result(
+                    result_index=result_index,
+                    pcw=pcw,
+                    dispatch_engine=dispatch_engine,
+                    event_bus=event_bus,
+                )
+            )
+            for result_index, pcw in subscription_candidates
+        ]
+        subscribed_topics_total = 0
+        for completed_count, task in enumerate(
+            asyncio.as_completed(subscription_tasks), start=1
+        ):
+            result_index, contract_name, topics_subscribed = await task
+            subscribed_topics_total += len(topics_subscribed)
+            results[result_index] = results[result_index].model_copy(
+                update={"topics_subscribed": tuple(topics_subscribed)}
+            )
+            if (
+                completed_count == 1
+                or completed_count == len(subscription_candidates)
+                or completed_count % _COMMIT_PROGRESS_LOG_EVERY == 0
+            ):
+                logger.info(
+                    "Runtime startup phase=auto_wiring_subscriptions action=progress runtime_profile=%s contracts_done=%d contracts_total=%d current_contract=%s topics_subscribed=%d",
+                    runtime_profile,
+                    completed_count,
+                    len(subscription_candidates),
+                    contract_name,
+                    subscribed_topics_total,
+                )
+
+        logger.info(
+            "Runtime startup phase=auto_wiring_subscriptions action=exit runtime_profile=%s duration_ms=%d contracts=%d topics_subscribed=%d",
+            runtime_profile,
+            int((time.monotonic() - subscription_started_at) * 1000),
+            len(subscription_candidates),
+            subscribed_topics_total,
+        )
 
     duplicates = _detect_duplicate_topics(manifest)
 
@@ -814,6 +1023,7 @@ async def wire_from_manifest(
 
     report = ModelAutoWiringReport(
         results=tuple(results),
+        runtime_profile=runtime_profile,
         duplicates=tuple(duplicates),
         quarantined_handlers=tuple(all_quarantined),
     )
@@ -834,8 +1044,10 @@ async def wire_from_manifest(
         )
 
     logger.info(
-        "Auto-wiring complete: wired=%d skipped=%d failed=%d "
+        "Runtime startup phase=auto_wiring action=exit runtime_profile=%s duration_ms=%d wired=%d skipped=%d failed=%d "
         "quarantined=%d duplicates=%d",
+        runtime_profile,
+        int((time.monotonic() - phase_started_at) * 1000),
         report.total_wired,
         report.total_skipped,
         report.total_failed,
@@ -854,6 +1066,7 @@ def _prepare_contract_wiring(
     ownership_query: object,
     event_bus: object | None,
     environment: str,
+    runtime_profile: str,
     container: object | None = None,
     materialized_explicit_dependencies: (dict[str, dict[str, object]] | None) = None,
     pre_resolved_handlers: dict[str, object] | None = None,
@@ -865,17 +1078,42 @@ def _prepare_contract_wiring(
     Resolver-Step-6 ``TypeError`` propagates unchanged to preserve the
     OMN-8735 fail-fast invariant.
     """
+    profile_eligible, profile_optional = _evaluate_runtime_profile_policy(
+        contract, runtime_profile
+    )
+    if not profile_eligible:
+        return PreparedContractWiring(
+            contract=contract,
+            prepared_wirings=[],
+            subscription_topics=[],
+            environment=environment,
+            runtime_profile=runtime_profile,
+            profile_optional=False,
+            skip_result=ModelContractWiringResult(
+                contract_name=contract.name,
+                package_name=contract.package_name,
+                outcome=EnumWiringOutcome.SKIPPED,
+                reason=f"ineligible for runtime profile '{runtime_profile}'",
+                runtime_profile=runtime_profile,
+                profile_skip_reason="ineligible",
+            ),
+        )
+
     if contract.handler_routing is None:
         return PreparedContractWiring(
             contract=contract,
             prepared_wirings=[],
             subscription_topics=[],
             environment=environment,
+            runtime_profile=runtime_profile,
+            profile_optional=profile_optional,
             skip_result=ModelContractWiringResult(
                 contract_name=contract.name,
                 package_name=contract.package_name,
                 outcome=EnumWiringOutcome.SKIPPED,
                 reason="No handler_routing declared in contract",
+                runtime_profile=runtime_profile,
+                profile_optional=profile_optional,
             ),
         )
 
@@ -885,15 +1123,20 @@ def _prepare_contract_wiring(
             prepared_wirings=[],
             subscription_topics=[],
             environment=environment,
+            runtime_profile=runtime_profile,
+            profile_optional=profile_optional,
             skip_result=ModelContractWiringResult(
                 contract_name=contract.name,
                 package_name=contract.package_name,
                 outcome=EnumWiringOutcome.SKIPPED,
                 reason="No event_bus.subscribe_topics declared in contract",
+                runtime_profile=runtime_profile,
+                profile_optional=profile_optional,
             ),
         )
 
     prepared_wirings: list[PreparedWiring] = []
+    structural_invalid_handlers: list[str] = []
     for entry in contract.handler_routing.handlers:
         try:
             prepared = _prepare_handler_wiring(
@@ -909,10 +1152,55 @@ def _prepare_contract_wiring(
             )
             prepared_wirings.append(prepared)
         except TypeError:
-            # OMN-8735 invariant: resolver Step 6 exhaustion must NOT be
-            # wrapped. Propagate unchanged so the kernel crashes loudly.
+            if profile_optional:
+                return PreparedContractWiring(
+                    contract=contract,
+                    prepared_wirings=[],
+                    subscription_topics=[],
+                    environment=environment,
+                    runtime_profile=runtime_profile,
+                    profile_optional=True,
+                    skip_result=ModelContractWiringResult(
+                        contract_name=contract.name,
+                        package_name=contract.package_name,
+                        outcome=EnumWiringOutcome.SKIPPED,
+                        reason=(
+                            f"optional contract unresolved for runtime profile "
+                            f"'{runtime_profile}'"
+                        ),
+                        runtime_profile=runtime_profile,
+                        profile_optional=True,
+                        profile_skip_reason="optional_unresolved",
+                        structural_invalid_handlers=tuple(structural_invalid_handlers),
+                    ),
+                )
             raise
         except Exception as exc:
+            if "does not expose a callable handle" in str(exc):
+                structural_invalid_handlers.append(entry.handler.name)
+            if profile_optional:
+                return PreparedContractWiring(
+                    contract=contract,
+                    prepared_wirings=[],
+                    subscription_topics=[],
+                    environment=environment,
+                    runtime_profile=runtime_profile,
+                    profile_optional=True,
+                    structural_invalid_handlers=tuple(structural_invalid_handlers),
+                    skip_result=ModelContractWiringResult(
+                        contract_name=contract.name,
+                        package_name=contract.package_name,
+                        outcome=EnumWiringOutcome.SKIPPED,
+                        reason=(
+                            f"optional contract unresolved for runtime profile "
+                            f"'{runtime_profile}'"
+                        ),
+                        runtime_profile=runtime_profile,
+                        profile_optional=True,
+                        profile_skip_reason="optional_unresolved",
+                        structural_invalid_handlers=tuple(structural_invalid_handlers),
+                    ),
+                )
             exc_summary = _sanitize_exc(exc)
             logger.error(
                 "Failed to prepare handler '%s' for contract '%s' (package '%s'): %s",
@@ -931,6 +1219,9 @@ def _prepare_contract_wiring(
         prepared_wirings=prepared_wirings,
         subscription_topics=list(contract.event_bus.subscribe_topics),
         environment=environment,
+        runtime_profile=runtime_profile,
+        profile_optional=profile_optional,
+        structural_invalid_handlers=tuple(structural_invalid_handlers),
     )
 
 
@@ -990,39 +1281,6 @@ async def _commit_contract_wiring(
             )
         )
 
-    if event_bus is not None and pcw.subscription_topics:
-        from omnibase_infra.enums import EnumConsumerGroupPurpose
-        from omnibase_infra.models import ModelNodeIdentity
-        from omnibase_infra.utils import compute_consumer_group_id
-
-        for topic in pcw.subscription_topics:
-            node_identity = ModelNodeIdentity(
-                env=pcw.environment,
-                service=contract.package_name,
-                node_name=contract.name,
-                version=str(contract.contract_version),
-            )
-            consumer_group = compute_consumer_group_id(
-                node_identity, EnumConsumerGroupPurpose.CONSUME
-            )
-            callback = _make_event_bus_callback(topic, dispatch_engine)  # type: ignore[arg-type]
-            typed_bus: ProtocolEventBusSubscriber = cast(
-                "ProtocolEventBusSubscriber", event_bus
-            )
-            await typed_bus.subscribe(
-                topic=topic,
-                node_identity=node_identity,
-                on_message=callback,
-            )
-            topics_subscribed.append(topic)
-
-            logger.info(
-                "Auto-wired subscription: topic=%s consumer_group=%s node=%s",
-                topic,
-                consumer_group,
-                contract.name,
-            )
-
     # OMN-9457: when every prepared handler was quarantined, report SKIPPED
     # with reason "all handlers quarantined" — there is nothing wired on
     # the dispatch engine and the quarantine is the reason. A mixed
@@ -1042,21 +1300,99 @@ async def _commit_contract_wiring(
             package_name=contract.package_name,
             outcome=EnumWiringOutcome.SKIPPED,
             reason="all handlers quarantined",
+            runtime_profile=pcw.runtime_profile,
+            profile_optional=pcw.profile_optional,
             wirings=tuple(wirings),
             skipped_handlers=tuple(skipped_handlers),
             quarantined_handlers=tuple(quarantined),
+            structural_invalid_handlers=pcw.structural_invalid_handlers,
         )
 
     return ModelContractWiringResult(
         contract_name=contract.name,
         package_name=contract.package_name,
         outcome=EnumWiringOutcome.WIRED,
+        runtime_profile=pcw.runtime_profile,
+        profile_optional=pcw.profile_optional,
         dispatchers_registered=tuple(dispatchers_registered),
         routes_registered=tuple(routes_registered),
         topics_subscribed=tuple(topics_subscribed),
         wirings=tuple(wirings),
         skipped_handlers=tuple(skipped_handlers),
         quarantined_handlers=tuple(quarantined),
+        structural_invalid_handlers=pcw.structural_invalid_handlers,
+    )
+
+
+async def _subscribe_contract_topics_for_result(
+    *,
+    result_index: int,
+    pcw: PreparedContractWiring,
+    dispatch_engine: object,
+    event_bus: object,
+) -> tuple[int, str, tuple[str, ...]]:
+    topics_subscribed = await _subscribe_contract_topics(
+        pcw=pcw,
+        dispatch_engine=dispatch_engine,
+        event_bus=event_bus,
+    )
+    return result_index, pcw.contract.name, tuple(topics_subscribed)
+
+
+async def _subscribe_contract_topics(
+    *,
+    pcw: PreparedContractWiring,
+    dispatch_engine: object,
+    event_bus: object,
+) -> list[str]:
+    from omnibase_infra.enums import EnumConsumerGroupPurpose
+    from omnibase_infra.models import ModelNodeIdentity
+    from omnibase_infra.utils import compute_consumer_group_id
+
+    contract: ModelDiscoveredContract = pcw.contract  # type: ignore[assignment]
+    typed_bus: ProtocolEventBusSubscriber = cast(
+        "ProtocolEventBusSubscriber", event_bus
+    )
+    topics_subscribed: list[str] = []
+
+    for topic in pcw.subscription_topics:
+        node_identity = ModelNodeIdentity(
+            env=pcw.environment,
+            service=contract.package_name,
+            node_name=contract.name,
+            version=str(contract.contract_version),
+        )
+        consumer_group = compute_consumer_group_id(
+            node_identity, EnumConsumerGroupPurpose.CONSUME
+        )
+        callback = _make_event_bus_callback(topic, dispatch_engine)  # type: ignore[arg-type]
+        await typed_bus.subscribe(
+            topic=topic,
+            node_identity=node_identity,
+            on_message=callback,
+        )
+        topics_subscribed.append(topic)
+
+        logger.info(
+            "Auto-wired subscription: topic=%s consumer_group=%s node=%s",
+            topic,
+            consumer_group,
+            contract.name,
+        )
+
+    return topics_subscribed
+
+
+def _freeze_dispatch_engine_if_supported(
+    dispatch_engine: object, runtime_profile: str
+) -> None:
+    freeze = getattr(dispatch_engine, "freeze", None)
+    if not callable(freeze):
+        return
+    freeze()
+    logger.info(
+        "Runtime startup phase=dispatch_engine_freeze action=exit runtime_profile=%s",
+        runtime_profile,
     )
 
 
@@ -1066,6 +1402,7 @@ async def _wire_single_contract(
     dispatch_engine: ProtocolDispatchEngine,
     event_bus: object | None,
     environment: str,
+    runtime_profile: str = "default",
     container: object | None = None,
 ) -> ModelContractWiringResult:
     """Wire a single discovered contract into the dispatch engine.
@@ -1090,6 +1427,7 @@ async def _wire_single_contract(
         ownership_query=ownership_query,
         event_bus=event_bus,
         environment=environment,
+        runtime_profile=runtime_profile,
         container=container,
     )
     return await _commit_contract_wiring(prepared, dispatch_engine, event_bus)
@@ -1286,6 +1624,11 @@ def _prepare_handler_wiring(
             [t.get("name") for t in db_tables],
         )
     else:
+        _validate_runtime_handle_contract(
+            handler_instance,
+            contract_name=contract.name,
+            handler_name=handler_ref.name,
+        )
         callback = _make_dispatch_callback(handler_instance)
     dispatcher_id = _derive_dispatcher_id(contract.name, handler_ref.name)
 

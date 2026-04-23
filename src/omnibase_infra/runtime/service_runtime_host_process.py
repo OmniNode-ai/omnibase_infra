@@ -1113,6 +1113,16 @@ class RuntimeHostProcess:
         # Track optional handlers skipped due to missing required_env [OMN-5356]
         # Informational only -- does not affect degraded state
         self._skipped_handlers: dict[str, str] = {}
+        self._startup_state: dict[str, object] = {
+            "runtime_profile": "default",
+            "startup_state": "healthy",
+            "mandatory_unresolved_contracts": 0,
+            "optional_skipped_contracts": 0,
+            "ineligible_skipped_contracts": 0,
+            "async_unsafe_handler_count": 0,
+            "structural_invalid_handler_count": 0,
+            "failed_contract_count": 0,
+        }
 
         # Handler descriptors (handler_type -> descriptor with contract_config)
         # Stored during registration for use during handler initialization
@@ -4491,6 +4501,7 @@ class RuntimeHostProcess:
         return {
             "healthy": healthy,
             "degraded": degraded,
+            "startup_state": self._startup_state,
             "is_running": self._is_running,
             "is_draining": self._is_draining,
             "pending_message_count": self._pending_message_count,
@@ -4514,6 +4525,10 @@ class RuntimeHostProcess:
             "config_prefetch_status": self._config_prefetch_status,
             "components": components,
         }
+
+    def set_startup_state(self, startup_state: dict[str, object]) -> None:
+        """Attach structured startup-state reporting for health endpoints."""
+        self._startup_state = dict(startup_state)
 
     async def _check_published_events_map(
         self,

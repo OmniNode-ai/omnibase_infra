@@ -1387,6 +1387,7 @@ class EventBusKafka(
         # Validate topic name
         self._validate_topic_name(topic, correlation_id)
 
+        start_consumer = False
         async with self._lock:
             # Track readiness-required topics (OMN-1931)
             if required_for_readiness:
@@ -1405,7 +1406,7 @@ class EventBusKafka(
                 and consumer_key not in self._pending_consumer_keys
                 and self._started
             ):
-                await self._start_consumer_for_topic(topic, effective_group_id)
+                start_consumer = True
 
             logger.debug(
                 "Subscriber added",
@@ -1416,6 +1417,9 @@ class EventBusKafka(
                     "required_for_readiness": required_for_readiness,
                 },
             )
+
+        if start_consumer:
+            await self._start_consumer_for_topic(topic, effective_group_id)
 
         async def unsubscribe() -> None:
             """Remove this subscription from the topic."""

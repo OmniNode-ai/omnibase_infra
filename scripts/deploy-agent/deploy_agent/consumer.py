@@ -64,6 +64,7 @@ class DeployConsumer:
         self, msg: Any
     ) -> tuple[ModelRebuildRequested | None, str | None]:
         payload = msg.value
+        command_payload = {k: v for k, v in payload.items() if k != "_signature"}
         correlation_id_str = payload.get("correlation_id", "unknown")
 
         # Step 2: Verify HMAC signature
@@ -77,7 +78,7 @@ class DeployConsumer:
 
         # Step 3: Validate payload
         try:
-            cmd = ModelRebuildRequested.model_validate(payload)
+            cmd = ModelRebuildRequested.model_validate(command_payload)
         except Exception as e:  # noqa: BLE001
             logger.warning(
                 "Invalid payload (correlation_id=%s): %s",
@@ -102,7 +103,7 @@ class DeployConsumer:
         # Step 6: Persist job state
         self.job_store.accept(
             correlation_id=cmd.correlation_id,
-            command=payload,
+            command=command_payload,
         )
 
         # Step 7: Commit offset

@@ -110,6 +110,13 @@ x-runtime-base: &runtime-base
   build:
     context: ..
     dockerfile: docker/Dockerfile.runtime
+    args:
+      BUILD_SOURCE: ${BUILD_SOURCE:-release}
+      RELEASE_MANIFEST_PATH: ${RELEASE_MANIFEST_PATH:-docker/runtime-release-manifest.json}
+    additional_contexts:
+      omnibase_compat_src: ${OMNI_HOME:-/data/omninode/omni_home}/omnibase_compat
+      onex_change_control_src: ${OMNI_HOME:-/data/omninode/omni_home}/onex_change_control
+      omnimarket_src: ${OMNI_HOME:-/data/omninode/omni_home}/omnimarket
   networks:
     - omnibase-infra-network
   logging: *logging-defaults

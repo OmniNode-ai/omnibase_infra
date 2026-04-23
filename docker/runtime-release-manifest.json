@@ -1,0 +1,18 @@
+{
+  "build_source": "release",
+  "dependencies": {
+    "omnibase_compat": {
+      "distribution": "omnibase-compat",
+      "version": "0.3.1"
+    },
+    "omnimarket": {
+      "distribution": "omnimarket",
+      "version": "0.2.0"
+    },
+    "onex_change_control": {
+      "distribution": "onex-change-control",
+      "version": "0.5.0"
+    }
+  },
+  "schema_version": "1.0.0"
+}

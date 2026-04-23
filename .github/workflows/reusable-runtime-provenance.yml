@@ -1,0 +1,102 @@
+name: Reusable Runtime Provenance
+
+on:
+  workflow_call:
+    inputs:
+      build_source:
+        description: "Provenance mode to validate: 'workspace' or 'release'."
+        required: true
+        type: string
+      workspace_root:
+        description: "Workspace root used for workspace provenance validation."
+        required: false
+        type: string
+        default: "."
+
+jobs:
+  provenance:
+    name: runtime-provenance (source=${{ inputs.build_source }})
+    runs-on: >-
+      ${{
+        (vars.USE_SELF_HOSTED_RUNNERS == 'true' &&
+         (github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'schedule'))
+        && fromJSON('["self-hosted","omnibase-ci"]')
+        || fromJSON('["ubuntu-latest"]')
+      }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Validate build_source input
+        run: |
+          set -euo pipefail
+          case "${{ inputs.build_source }}" in
+            workspace|release) ;;
+            *)
+              echo "::error::build_source must be 'workspace' or 'release'"
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Python and uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.6.14"
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync runtime project
+        run: |
+          set -euo pipefail
+          uv sync --no-dev
+
+      - name: Validate release provenance contract
+        if: inputs.build_source == 'release'
+        run: |
+          set -euo pipefail
+          test -f docker/runtime-release-manifest.json
+          uv run python -m omnibase_infra.docker.runtime_build release-requirement \
+            --manifest docker/runtime-release-manifest.json --repo omnibase_compat >/dev/null
+          uv run python -m omnibase_infra.docker.runtime_build release-requirement \
+            --manifest docker/runtime-release-manifest.json --repo onex_change_control >/dev/null
+          uv run python -m omnibase_infra.docker.runtime_build release-requirement \
+            --manifest docker/runtime-release-manifest.json --repo omnimarket >/dev/null
+          if grep -n "git+https://github.com/OmniNode-ai" docker/Dockerfile.runtime >/dev/null; then
+            echo "::error::release provenance forbids floating git+https runtime dependencies"
+            exit 1
+          fi
+          cp docker/runtime-release-manifest.json provenance-result.json
+
+      - name: Validate workspace provenance contract
+        if: inputs.build_source == 'workspace'
+        run: |
+          set -euo pipefail
+          workspace_root="${{ inputs.workspace_root }}"
+          uv run python -m omnibase_infra.docker.runtime_build write-workspace-manifest \
+            --workspace-root "$workspace_root" \
+            --output provenance-result.json
+          uv run python - <<'PY'
+          from pathlib import Path
+          import json
+
+          manifest = json.loads(Path("provenance-result.json").read_text(encoding="utf-8"))
+          repos = manifest.get("repos", [])
+          if not repos:
+              raise SystemExit("workspace provenance manifest missing repos")
+          for entry in repos:
+              if not entry.get("source_digest", "").startswith("sha256:"):
+                  raise SystemExit(f"invalid workspace digest: {entry}")
+          PY
+
+      - name: Upload provenance artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-provenance-${{ inputs.build_source }}
+          path: provenance-result.json
+          if-no-files-found: warn
+          retention-days: 14

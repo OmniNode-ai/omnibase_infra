@@ -2208,6 +2208,7 @@ async def bootstrap() -> int:
                     event_bus=event_bus,
                     environment=environment,
                     container=container,
+                    runtime_profile=os.getenv("RUNTIME_PROFILE", "default"),
                 )
 
                 # 6. Topic collision detection: warn for auto-wired topics
@@ -2294,14 +2295,27 @@ async def bootstrap() -> int:
         for plugin in ready_plugins:
             plugin_id = plugin.plugin_id
             try:
+                consumer_start_time = time.time()
+                logger.info(
+                    "Runtime startup phase=plugin_start_consumers action=enter "
+                    "plugin_id=%s correlation_id=%s",
+                    plugin_id,
+                    correlation_id,
+                )
                 consumer_result = await plugin.start_consumers(plugin_config)
+                consumer_duration = time.time() - consumer_start_time
                 if consumer_result and consumer_result.unsubscribe_callbacks:
                     plugin_unsubscribe_callbacks.extend(
                         consumer_result.unsubscribe_callbacks
                     )
                 logger.info(
-                    "Plugin '%s' consumers started (correlation_id=%s)",
+                    "Runtime startup phase=plugin_start_consumers action=exit "
+                    "plugin_id=%s duration_ms=%d unsubscribes=%d correlation_id=%s",
                     plugin_id,
+                    int(consumer_duration * 1000),
+                    len(consumer_result.unsubscribe_callbacks)
+                    if consumer_result and consumer_result.unsubscribe_callbacks
+                    else 0,
                     correlation_id,
                 )
             except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
@@ -2568,6 +2582,8 @@ async def bootstrap() -> int:
             # uses contract values instead of DEFAULT_* constants.
             runtime_node_graph_config=node_graph_config,
         )
+        if auto_wiring_report is not None:
+            runtime.set_startup_state(auto_wiring_report.startup_summary())
         runtime_create_duration = time.time() - runtime_create_start_time
         logger.debug(
             "Runtime host process created in %.3fs (correlation_id=%s)",
@@ -2665,8 +2681,19 @@ async def bootstrap() -> int:
             version=KERNEL_VERSION,
         )
         health_start_time = time.time()
+        logger.info(
+            "Runtime startup phase=health_server_start action=enter port=%d correlation_id=%s",
+            http_port,
+            correlation_id,
+        )
         await health_server.start()
         health_start_duration = time.time() - health_start_time
+        logger.info(
+            "Runtime startup phase=health_server_start action=exit duration_ms=%d port=%d correlation_id=%s",
+            int(health_start_duration * 1000),
+            http_port,
+            correlation_id,
+        )
         logger.debug(
             "Health server started in %.3fs (correlation_id=%s)",
             health_start_duration,
@@ -2680,11 +2707,16 @@ async def bootstrap() -> int:
         # 9. Start runtime
         runtime_start_time = time.time()
         logger.info(
-            "Starting ONEX runtime... (correlation_id=%s)",
+            "Runtime startup phase=runtime_start action=enter correlation_id=%s",
             correlation_id,
         )
         await runtime.start()
         runtime_start_duration = time.time() - runtime_start_time
+        logger.info(
+            "Runtime startup phase=runtime_start action=exit duration_ms=%d correlation_id=%s",
+            int(runtime_start_duration * 1000),
+            correlation_id,
+        )
         logger.debug(
             "Runtime started in %.3fs (correlation_id=%s)",
             runtime_start_duration,

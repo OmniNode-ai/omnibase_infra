@@ -119,6 +119,21 @@ class ModelContractWiringResult(BaseModel):
     package_name: str = Field(..., description="Package that owns this contract")
     outcome: EnumWiringOutcome = Field(..., description="Wiring outcome")
     reason: str = Field(default="", description="Reason for skip or failure")
+    runtime_profile: str = Field(
+        default="default",
+        description="Runtime profile under which this contract was evaluated.",
+    )
+    profile_optional: bool = Field(
+        default=False,
+        description="True when the contract is optional for the active runtime profile.",
+    )
+    profile_skip_reason: str = Field(
+        default="",
+        description=(
+            "Structured skip bucket for startup-state reporting "
+            "(e.g. 'ineligible', 'optional_unresolved')."
+        ),
+    )
     dispatchers_registered: tuple[str, ...] = Field(
         default_factory=tuple, description="Dispatcher IDs registered"
     )
@@ -156,6 +171,13 @@ class ModelContractWiringResult(BaseModel):
             "reports SKIPPED with reason='all handlers quarantined'."
         ),
     )
+    structural_invalid_handlers: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Handlers rejected before dispatch because they lack the required "
+            "runtime callable contract."
+        ),
+    )
 
 
 class ModelDuplicateTopicOwnership(BaseModel):
@@ -184,6 +206,10 @@ class ModelAutoWiringReport(BaseModel):
 
     results: tuple[ModelContractWiringResult, ...] = Field(
         default_factory=tuple, description="Per-contract wiring results"
+    )
+    runtime_profile: str = Field(
+        default="default",
+        description="Runtime profile under which the report was produced.",
     )
     duplicates: tuple[ModelDuplicateTopicOwnership, ...] = Field(
         default_factory=tuple, description="Duplicate topic ownership warnings"
@@ -215,6 +241,52 @@ class ModelAutoWiringReport(BaseModel):
     def total_quarantined(self) -> int:
         """Count of handlers quarantined during wiring (OMN-9457)."""
         return len(self.quarantined_handlers)
+
+    @property
+    def optional_skipped_contracts(self) -> int:
+        return sum(
+            1 for r in self.results if r.profile_skip_reason == "optional_unresolved"
+        )
+
+    @property
+    def ineligible_skipped_contracts(self) -> int:
+        return sum(1 for r in self.results if r.profile_skip_reason == "ineligible")
+
+    @property
+    def structural_invalid_handler_count(self) -> int:
+        return sum(len(r.structural_invalid_handlers) for r in self.results)
+
+    @property
+    def mandatory_unresolved_contracts(self) -> int:
+        return sum(
+            1
+            for r in self.results
+            if r.outcome == EnumWiringOutcome.FAILED and not r.profile_optional
+        )
+
+    @property
+    def startup_state(self) -> str:
+        if self.total_failed > 0 or self.mandatory_unresolved_contracts > 0:
+            return "failed"
+        if (
+            self.optional_skipped_contracts > 0
+            or self.total_quarantined > 0
+            or self.structural_invalid_handler_count > 0
+        ):
+            return "degraded"
+        return "healthy"
+
+    def startup_summary(self) -> dict[str, object]:
+        return {
+            "runtime_profile": self.runtime_profile,
+            "startup_state": self.startup_state,
+            "mandatory_unresolved_contracts": self.mandatory_unresolved_contracts,
+            "optional_skipped_contracts": self.optional_skipped_contracts,
+            "ineligible_skipped_contracts": self.ineligible_skipped_contracts,
+            "async_unsafe_handler_count": self.total_quarantined,
+            "structural_invalid_handler_count": self.structural_invalid_handler_count,
+            "failed_contract_count": self.total_failed,
+        }
 
     def __bool__(self) -> bool:
         """True when all contracts wired or skipped (no failures).

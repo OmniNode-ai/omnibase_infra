@@ -26,6 +26,11 @@ class Scope(StrEnum):
     CORE = "core"
 
 
+class BuildSource(StrEnum):
+    WORKSPACE = "workspace"
+    RELEASE = "release"
+
+
 class Phase(StrEnum):
     PREFLIGHT = "preflight"
     GIT = "git"
@@ -81,9 +86,12 @@ class ModelRebuildRequested(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     correlation_id: UUID
     requested_by: str
+    reason: str = ""
+    requested_at: datetime | None = None
     scope: Scope
     services: list[str] = Field(default_factory=list)
     git_ref: str = "origin/main"
+    build_source: BuildSource = BuildSource.RELEASE
 
     @model_validator(mode="after")
     def validate_services_subset(self) -> ModelRebuildRequested:

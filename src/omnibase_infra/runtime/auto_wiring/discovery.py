@@ -30,6 +30,7 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelHandlerRef,
     ModelHandlerRouting,
     ModelHandlerRoutingEntry,
+    ModelRuntimeProfilePolicy,
 )
 
 logger = logging.getLogger(__name__)
@@ -278,6 +279,17 @@ def _parse_contract(
         if isinstance(h_raw, dict):
             handler_routing = _parse_legacy_handler(h_raw)
 
+    runtime_profiles: dict[str, ModelRuntimeProfilePolicy] = {}
+    runtime_profiles_raw = raw.get("runtime_profiles")
+    if isinstance(runtime_profiles_raw, dict):
+        for profile_name, policy_raw in runtime_profiles_raw.items():
+            if not isinstance(profile_name, str) or not isinstance(policy_raw, dict):
+                continue
+            runtime_profiles[profile_name] = ModelRuntimeProfilePolicy(
+                eligible=policy_raw.get("eligible"),
+                optional=bool(policy_raw.get("optional", False)),
+            )
+
     return ModelDiscoveredContract(
         name=raw.get("name", entry_point_name),
         node_type=raw.get("node_type", "UNKNOWN"),
@@ -290,6 +302,7 @@ def _parse_contract(
         package_version=package_version,
         event_bus=event_bus,
         handler_routing=handler_routing,
+        runtime_profiles=runtime_profiles,
     )
 
 
