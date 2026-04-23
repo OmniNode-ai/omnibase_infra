@@ -200,7 +200,7 @@ from uuid import UUID, uuid4
 import httpx
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.abc import AbstractTokenProvider
-from aiokafka.errors import KafkaError
+from aiokafka.errors import KafkaError, UnknownTopicOrPartitionError
 
 from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -1218,6 +1218,25 @@ class EventBusKafka(
                         "correlation_id": str(headers.correlation_id),
                     },
                 )
+
+            except UnknownTopicOrPartitionError as e:
+                # Topic does not exist — configuration error, not a broker connectivity
+                # failure. Do NOT record a circuit failure; topic-not-found must not open
+                # the circuit breaker and block subsequent publishes to healthy topics.
+                # No retry benefit either: the topic won't appear between attempts. (OMN-9553)
+                last_exception = e
+                logger.warning(
+                    "Topic not found on broker — skipping circuit failure record "
+                    "(attempt %d/%d): %s",
+                    attempt + 1,
+                    self._max_retry_attempts + 1,
+                    topic,
+                    extra={
+                        "topic": topic,
+                        "correlation_id": str(headers.correlation_id),
+                    },
+                )
+                break  # No retry benefit; fall through to error raise
 
             except KafkaError as e:
                 last_exception = e
