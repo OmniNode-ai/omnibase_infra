@@ -19,6 +19,7 @@ from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
     EnumQuarantineReason,
 )
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+    subscribe_wired_contract_topics,
     wire_from_manifest,
 )
 from omnibase_infra.runtime.auto_wiring.lifecycle import LifecycleHookExecutor
@@ -71,5 +72,6 @@ __all__ = [
     "ModelQuarantinedWiring",
     "discover_contracts",
     "discover_contracts_from_paths",
+    "subscribe_wired_contract_topics",
     "wire_from_manifest",
 ]

@@ -2107,11 +2107,14 @@ async def bootstrap() -> int:
         # picks up contracts that have no plugin handler wired for the same topics.
         # Topic collision detection logs warnings for overlapping subscriptions.
         auto_wiring_report = None
+        claimed_topic_patterns: set[str] = set()
+        auto_wiring_manifest_for_subscriptions = None
         lifecycle_executor = None
         try:
             from omnibase_infra.runtime.auto_wiring import (
                 LifecycleHookExecutor,
                 discover_contracts,
+                subscribe_wired_contract_topics,
                 wire_from_manifest,
             )
 
@@ -2200,6 +2203,7 @@ async def bootstrap() -> int:
                     contracts=filtered_contracts,
                     errors=manifest.errors,
                 )
+                auto_wiring_manifest_for_subscriptions = filtered_manifest
 
                 # 5. Wire handlers into dispatch engine
                 auto_wiring_report = await wire_from_manifest(
@@ -2208,25 +2212,8 @@ async def bootstrap() -> int:
                     event_bus=event_bus,
                     environment=environment,
                     container=container,
+                    subscribe_immediately=False,
                 )
-
-                # 6. Topic collision detection: warn for auto-wired topics
-                #    that overlap with explicit plugin routes
-                if auto_wiring_report:
-                    for result in auto_wiring_report.results:
-                        for topic in result.topics_subscribed:
-                            for pattern in claimed_topic_patterns:
-                                if _topic_matches_pattern(topic, pattern):
-                                    logger.warning(
-                                        "Topic collision: auto-wired topic '%s' "
-                                        "(contract=%s) overlaps with explicit "
-                                        "plugin route pattern '%s' "
-                                        "(correlation_id=%s)",
-                                        topic,
-                                        result.contract_name,
-                                        pattern,
-                                        correlation_id,
-                                    )
 
                 auto_wiring_duration = time.time() - auto_wiring_start
 
@@ -2286,6 +2273,32 @@ async def bootstrap() -> int:
             "and auto-wiring (correlation_id=%s)",
             correlation_id,
         )
+
+        if (
+            auto_wiring_report is not None
+            and auto_wiring_manifest_for_subscriptions is not None
+        ):
+            auto_wired_subscriptions = await subscribe_wired_contract_topics(
+                manifest=auto_wiring_manifest_for_subscriptions,
+                report=auto_wiring_report,
+                dispatch_engine=dispatch_engine,
+                event_bus=event_bus,
+                environment=environment,
+            )
+            for contract_name, topics in auto_wired_subscriptions.items():
+                for topic in topics:
+                    for pattern in claimed_topic_patterns:
+                        if _topic_matches_pattern(topic, pattern):
+                            logger.warning(
+                                "Topic collision: auto-wired topic '%s' "
+                                "(contract=%s) overlaps with explicit "
+                                "plugin route pattern '%s' "
+                                "(correlation_id=%s)",
+                                topic,
+                                contract_name,
+                                pattern,
+                                correlation_id,
+                            )
 
         # --- Pass 2: Start consumers for ready plugins only ---
         # ready_plugins is a subset of activated_plugins: only plugins that

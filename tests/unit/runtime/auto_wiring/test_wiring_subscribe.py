@@ -12,7 +12,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
+from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+    subscribe_wired_contract_topics,
+    wire_from_manifest,
+)
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
     ModelContractVersion,
@@ -169,6 +172,44 @@ class TestWireFromManifestCallsSubscribe:
 
         # Still wired (dispatchers+routes registered), but no subscription
         assert report.total_wired == 1
+
+    @pytest.mark.asyncio
+    async def test_deferred_mode_skips_immediate_subscribe_until_committed(
+        self,
+    ) -> None:
+        topic = "onex.cmd.omnimarket.pr-lifecycle-orchestrator-start.v1"
+        contract = _contract(subscribe_topics=(topic,))
+        manifest = ModelAutoWiringManifest(contracts=(contract,))
+        engine = MessageDispatchEngine()
+
+        unsubscribe = AsyncMock()
+        event_bus = MagicMock()
+        event_bus.subscribe = AsyncMock(return_value=unsubscribe)
+
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=_fake_handler_cls(),
+        ):
+            report = await wire_from_manifest(
+                manifest,
+                engine,
+                event_bus=event_bus,
+                environment="local",
+                subscribe_immediately=False,
+            )
+
+            event_bus.subscribe.assert_not_called()
+
+            subscriptions = await subscribe_wired_contract_topics(
+                manifest=manifest,
+                report=report,
+                dispatch_engine=engine,
+                event_bus=event_bus,
+                environment="local",
+            )
+
+        event_bus.subscribe.assert_called_once()
+        assert subscriptions == {contract.name: (topic,)}
 
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,17 @@ import yaml
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.runtime.auto_wiring.models import (
+    ModelAutoWiringManifest,
+    ModelContractVersion,
+    ModelDiscoveredContract,
+    ModelEventBusWiring,
+)
+from omnibase_infra.runtime.auto_wiring.report import (
+    EnumWiringOutcome,
+    ModelAutoWiringReport,
+    ModelContractWiringResult,
+)
 
 # Import shared service registry availability check
 from tests.conftest import check_service_registry_available
@@ -732,6 +743,90 @@ class TestBootstrap:
         call_kwargs = mock_select.call_args[1]
         assert call_kwargs["kafka_bootstrap_servers"] == "kafka:9092"
         assert call_kwargs["environment"] == "dev"
+
+    async def test_bootstrap_defers_auto_wiring_subscriptions_until_after_freeze(
+        self,
+        mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+    ) -> None:
+        order: list[str] = []
+
+        manifest = ModelAutoWiringManifest(
+            contracts=(
+                ModelDiscoveredContract(
+                    name="node_registration_orchestrator",
+                    node_type="ORCHESTRATOR_GENERIC",
+                    contract_version=ModelContractVersion(major=1, minor=1, patch=0),
+                    contract_path=Path("/fake/contract.yaml"),
+                    entry_point_name="node_registration_orchestrator",
+                    package_name="omnibase_infra",
+                    event_bus=ModelEventBusWiring(
+                        subscribe_topics=("onex.evt.platform.node-introspection.v1",),
+                        publish_topics=(),
+                    ),
+                    handler_routing=None,
+                ),
+            ),
+            errors=(),
+        )
+
+        async def fake_wire_from_manifest(**kwargs: object) -> ModelAutoWiringReport:
+            order.append("wire")
+            assert kwargs["subscribe_immediately"] is False
+            return ModelAutoWiringReport(
+                results=(
+                    ModelContractWiringResult(
+                        contract_name="node_registration_orchestrator",
+                        package_name="omnibase_infra",
+                        outcome=EnumWiringOutcome.WIRED,
+                    ),
+                ),
+                duplicates=(),
+            )
+
+        async def fake_subscribe_wired_contract_topics(
+            **kwargs: object,
+        ) -> dict[str, tuple[str, ...]]:
+            order.append("subscribe")
+            return {
+                "node_registration_orchestrator": (
+                    "onex.evt.platform.node-introspection.v1",
+                )
+            }
+
+        def freeze_and_record(engine_self: object) -> None:
+            order.append("freeze")
+
+        with (
+            patch(
+                "omnibase_infra.runtime.auto_wiring.discover_contracts",
+                return_value=manifest,
+            ),
+            patch(
+                "omnibase_infra.runtime.auto_wiring.wire_from_manifest",
+                side_effect=fake_wire_from_manifest,
+            ),
+            patch(
+                "omnibase_infra.runtime.auto_wiring.subscribe_wired_contract_topics",
+                side_effect=fake_subscribe_wired_contract_topics,
+            ),
+            patch(
+                "omnibase_infra.runtime.service_message_dispatch_engine.MessageDispatchEngine.freeze",
+                new=freeze_and_record,
+            ),
+            patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event,
+        ):
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            exit_code = await bootstrap()
+
+        assert exit_code == 0
+        assert order == ["wire", "freeze", "subscribe"]
 
     async def test_bootstrap_fails_when_kafka_configured_without_bootstrap_servers(
         self,
