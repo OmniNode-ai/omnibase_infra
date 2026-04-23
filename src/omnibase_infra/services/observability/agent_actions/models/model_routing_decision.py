@@ -62,7 +62,7 @@ class ModelRoutingDecision(BaseModel):
         >>> decision = ModelRoutingDecision(
         ...     id=uuid4(),
         ...     correlation_id=uuid4(),
-        ...     selected_agent="polymorphic-agent",
+        ...     selected_agent="general-purpose",
         ...     confidence_score=0.87,
         ...     created_at=datetime.now(UTC),
         ...     routing_reason="Matched domain pattern for infrastructure tasks",

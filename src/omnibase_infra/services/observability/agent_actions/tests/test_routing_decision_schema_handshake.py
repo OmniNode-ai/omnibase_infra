@@ -93,7 +93,7 @@ def canonical_payload() -> dict[str, object]:
     return {
         "id": str(uuid4()),
         "correlation_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-        "selected_agent": "polymorphic-agent",
+        "selected_agent": "general-purpose",
         "confidence_score": 0.85,
         "created_at": datetime.now(UTC).isoformat(),
     }
@@ -244,7 +244,7 @@ class TestRoutingDecisionSchemaHandshake:
         drifted from the contract.
         """
         m = ModelRoutingDecision.model_validate(canonical_payload)
-        assert m.selected_agent == "polymorphic-agent"
+        assert m.selected_agent == "general-purpose"
         assert m.confidence_score == pytest.approx(0.85)
         assert isinstance(m.id, UUID)
         assert isinstance(m.correlation_id, UUID)
@@ -452,7 +452,7 @@ class TestProducerPayloadAlignmentRegression:
         "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
         "correlation_id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
         "claude_session_id": "sess-xyz-789",
-        "selected_agent": "polymorphic-agent",
+        "selected_agent": "general-purpose",
         "confidence_score": 0.87,
         "created_at": "2026-03-01T15:30:00+00:00",
         "domain": "infrastructure",
@@ -476,7 +476,7 @@ class TestProducerPayloadAlignmentRegression:
         can be retired (OMN-3424).
         """
         m = ModelRoutingDecision.model_validate(self._ROUTE_VIA_EVENTS_PAYLOAD)
-        assert m.selected_agent == "polymorphic-agent"
+        assert m.selected_agent == "general-purpose"
         assert m.confidence_score == pytest.approx(0.87)
         assert m.claude_session_id == "sess-xyz-789"
         assert m.routing_reason == "Matched infrastructure domain pattern"
@@ -547,7 +547,7 @@ class TestDriftDetection:
         drifted_payload = {
             "id": str(uuid4()),
             "correlation_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-            "selected_agent": "polymorphic-agent",
+            "selected_agent": "general-purpose",
             "confidence": 0.85,  # drift: old name
             "created_at": datetime.now(UTC).isoformat(),
         }
@@ -571,7 +571,7 @@ class TestDriftDetection:
         payload_missing_confidence = {
             "id": str(uuid4()),
             "correlation_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-            "selected_agent": "polymorphic-agent",
+            "selected_agent": "general-purpose",
             # confidence_score omitted — drift simulation
             "created_at": datetime.now(UTC).isoformat(),
         }

@@ -55,7 +55,7 @@ CREATE INDEX IF NOT EXISTS idx_agent_transformation_events_created_at
 COMMENT ON TABLE agent_transformation_events IS 'Agent transformation lifecycle events (OMN-1743). Append-only observability table.';
 COMMENT ON COLUMN agent_transformation_events.id IS 'Unique event identifier (UUID) - primary key for idempotent inserts';
 COMMENT ON COLUMN agent_transformation_events.correlation_id IS 'Request correlation ID for tracing across services';
-COMMENT ON COLUMN agent_transformation_events.source_agent IS 'Agent type before transformation (e.g., polymorphic-agent)';
+COMMENT ON COLUMN agent_transformation_events.source_agent IS 'Agent type before transformation (e.g., general-purpose)';
 COMMENT ON COLUMN agent_transformation_events.target_agent IS 'Agent type after transformation (e.g., api-architect)';
 COMMENT ON COLUMN agent_transformation_events.created_at IS 'Timestamp when event was recorded (TTL cleanup key)';
 COMMENT ON COLUMN agent_transformation_events.trigger IS 'Trigger that caused the transformation';

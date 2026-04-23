@@ -59,7 +59,7 @@ class ModelDetectionFailure(BaseModel):
         ...     failure_reason="Confidence below threshold (0.3 < 0.5)",
         ...     created_at=datetime.now(UTC),
         ...     attempted_patterns=("code-review", "testing", "infrastructure"),
-        ...     fallback_used="polymorphic-agent",
+        ...     fallback_used="general-purpose",
         ... )
     """
 

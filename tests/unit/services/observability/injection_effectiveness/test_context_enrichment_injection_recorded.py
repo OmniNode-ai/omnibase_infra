@@ -78,7 +78,7 @@ class TestModelContextEnrichmentEvent:
             net_tokens_saved=300,
             similarity_score=0.85,
             repo="omniclaude",
-            agent_name="polymorphic-agent",
+            agent_name="general-purpose",
         )
         assert event.model_name == "qwen3-coder-14b"
         assert event.cache_hit is True
@@ -88,7 +88,7 @@ class TestModelContextEnrichmentEvent:
         assert event.net_tokens_saved == 300
         assert event.similarity_score == 0.85
         assert event.repo == "omniclaude"
-        assert event.agent_name == "polymorphic-agent"
+        assert event.agent_name == "general-purpose"
 
     def test_frozen(self) -> None:
         event = self._minimal()
@@ -149,14 +149,14 @@ class TestModelInjectionRecordedEvent:
             patterns_injected=5,
             total_injected_tokens=1200,
             injection_latency_ms=15.3,
-            agent_name="polymorphic-agent",
+            agent_name="general-purpose",
             repo="omniclaude",
             cache_hit=True,
         )
         assert event.patterns_injected == 5
         assert event.total_injected_tokens == 1200
         assert event.injection_latency_ms == 15.3
-        assert event.agent_name == "polymorphic-agent"
+        assert event.agent_name == "general-purpose"
         assert event.repo == "omniclaude"
         assert event.cache_hit is True
 
