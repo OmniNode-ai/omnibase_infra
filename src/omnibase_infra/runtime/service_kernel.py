@@ -2139,7 +2139,7 @@ async def bootstrap() -> int:
             if manifest.total_discovered > 0:
                 # 2. Collect topics already claimed by explicit plugins
                 #    by inspecting registered routes on the dispatch engine
-                claimed_topic_patterns: set[str] = set()
+                claimed_topic_patterns = set()
                 for route in dispatch_engine._routes.values():
                     claimed_topic_patterns.add(route.topic_pattern)
 
