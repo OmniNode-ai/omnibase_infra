@@ -24,7 +24,7 @@ Example:
     >>> event = ModelTransformationEvent(
     ...     id=uuid4(),
     ...     correlation_id=uuid4(),
-    ...     source_agent="polymorphic-agent",
+    ...     source_agent="general-purpose",
     ...     target_agent="api-architect",
     ...     created_at=datetime.now(UTC),
     ... )
@@ -59,7 +59,7 @@ class ModelTransformationEvent(BaseModel):
         >>> event = ModelTransformationEvent(
         ...     id=uuid4(),
         ...     correlation_id=uuid4(),
-        ...     source_agent="polymorphic-agent",
+        ...     source_agent="general-purpose",
         ...     target_agent="debug-database",
         ...     created_at=datetime.now(UTC),
         ...     trigger="User requested database debugging",

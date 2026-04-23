@@ -48,7 +48,7 @@ Example:
     >>> action = ModelAgentAction(
     ...     id=uuid4(),
     ...     correlation_id=uuid4(),
-    ...     agent_name="polymorphic-agent",
+    ...     agent_name="general-purpose",
     ...     action_type="tool_call",
     ...     action_name="Read",
     ...     created_at=datetime.now(UTC),

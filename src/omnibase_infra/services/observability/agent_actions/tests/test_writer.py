@@ -115,7 +115,7 @@ def sample_transformation_event() -> ModelTransformationEvent:
     return ModelTransformationEvent(
         id=uuid4(),
         correlation_id=uuid4(),
-        source_agent="polymorphic-agent",
+        source_agent="general-purpose",
         target_agent="api-architect",
         created_at=datetime.now(UTC),
         trigger="Domain pattern match",

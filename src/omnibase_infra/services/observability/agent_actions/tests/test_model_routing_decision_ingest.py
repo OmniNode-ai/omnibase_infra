@@ -60,7 +60,7 @@ _PRODUCER_1_PAYLOAD: dict[str, object] = {
 _PRODUCER_2_PAYLOAD: dict[str, object] = {
     "correlation_id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
     "session_id": "sess-def-456",
-    "selected_agent": "polymorphic-agent",
+    "selected_agent": "general-purpose",
     "confidence": 0.75,
     "domain": "infrastructure",
     "reasoning": "Matched infrastructure domain pattern",
@@ -99,7 +99,7 @@ class TestProducerPayloadParsing:
     def test_producer2_payload_parses_cleanly(self) -> None:
         """Full producer 2 dict parses without exception; all aliases mapped."""
         m = ModelRoutingDecisionIngest.model_validate(_PRODUCER_2_PAYLOAD)
-        assert m.selected_agent == "polymorphic-agent"
+        assert m.selected_agent == "general-purpose"
         assert m.confidence_score == pytest.approx(0.75)
         assert m.claude_session_id == "sess-def-456"
         assert m.routing_reason == "Matched infrastructure domain pattern"
@@ -442,7 +442,7 @@ class TestIngestToStrictModelCompatibility:
         ingest = ModelRoutingDecisionIngest.model_validate(
             {
                 "correlation_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-                "selected_agent": "polymorphic-agent",
+                "selected_agent": "general-purpose",
                 "confidence": 0.85,
                 "session_id": "sess-xyz",
                 "emitted_at": "2026-03-01T12:00:00Z",
@@ -457,7 +457,7 @@ class TestIngestToStrictModelCompatibility:
         )
         dump = ingest.model_dump()
         strict = ModelRoutingDecision.model_validate(dump)
-        assert strict.selected_agent == "polymorphic-agent"
+        assert strict.selected_agent == "general-purpose"
         assert strict.confidence_score == pytest.approx(0.85)
         assert strict.claude_session_id == "sess-xyz"
         assert strict.routing_reason == "matched pattern"

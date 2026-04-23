@@ -277,7 +277,7 @@ class TestModelTransformationEventStrict:
             ModelTransformationEvent(  # type: ignore[call-arg]
                 id=uuid4(),
                 correlation_id=uuid4(),
-                source_agent="polymorphic-agent",
+                source_agent="general-purpose",
                 target_agent="api-architect",
                 created_at=datetime.now(UTC),
                 extra_transform_data={"key": "value"},
@@ -292,7 +292,7 @@ class TestModelTransformationEventStrict:
         event = ModelTransformationEvent(
             id=uuid4(),
             correlation_id=uuid4(),
-            source_agent="polymorphic-agent",
+            source_agent="general-purpose",
             target_agent="api-architect",
             created_at=datetime.now(UTC),
         )
@@ -1037,7 +1037,7 @@ class TestModelTransformationEventProjectContext:
         event = ModelTransformationEvent(
             id=uuid4(),
             correlation_id=uuid4(),
-            source_agent="polymorphic-agent",
+            source_agent="general-purpose",
             target_agent="api-architect",
             created_at=datetime.now(UTC),
         )
@@ -1051,7 +1051,7 @@ class TestModelTransformationEventProjectContext:
         event = ModelTransformationEvent(
             id=uuid4(),
             correlation_id=uuid4(),
-            source_agent="polymorphic-agent",
+            source_agent="general-purpose",
             target_agent="api-architect",
             created_at=datetime.now(UTC),
             project_path="/home/user/projects/omnibase_infra",

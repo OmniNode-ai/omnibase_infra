@@ -30,7 +30,7 @@ Example:
     >>> from uuid import uuid4
     >>> action = ModelAgentAction(
     ...     correlation_id=uuid4(),
-    ...     agent_name="polymorphic-agent",
+    ...     agent_name="general-purpose",
     ...     action_type="tool_call",
     ...     action_name="Bash",
     ... )
