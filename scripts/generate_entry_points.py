@@ -33,7 +33,11 @@ def collect_node_dirs(
     package_name: str,
     exclude: set[str] | None = None,
 ) -> list[Path]:
-    """Return sorted list of node_* directories under <repo_root>/src/<package>/nodes/.
+    """Return sorted list of contract-backed node_* directories.
+
+    Runtime entry points must only advertise packages that can be discovered as
+    valid nodes. Some historical node_* packages only contain shared models and
+    intentionally have no contract.yaml.
 
     Args:
         repo_root: Root directory of the repository.
@@ -41,7 +45,7 @@ def collect_node_dirs(
         exclude: Optional set of node directory names to skip.
 
     Returns:
-        Sorted list of Path objects for each node_* directory.
+        Sorted list of Path objects for each contract-backed node_* directory.
     """
     nodes_dir = repo_root / "src" / package_name / "nodes"
     if not nodes_dir.is_dir():
@@ -51,7 +55,10 @@ def collect_node_dirs(
     result = [
         p
         for p in nodes_dir.iterdir()
-        if p.is_dir() and p.name.startswith("node_") and p.name not in exclude_set
+        if p.is_dir()
+        and p.name.startswith("node_")
+        and p.name not in exclude_set
+        and (p / "contract.yaml").is_file()
     ]
     return sorted(result, key=lambda p: p.name)
 
