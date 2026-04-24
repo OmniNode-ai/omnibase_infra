@@ -232,11 +232,11 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 
 # Infrastructure thresholds (stricter than core defaults)
 INFRA_MAX_VIOLATIONS = 0        # Zero tolerance for architecture violations
-INFRA_PATTERNS_STRICT = True    # Strict pattern enforcement with documented exemptions (OMN-983)
+INFRA_PATTERNS_STRICT = True    # Strict pattern enforcement with documented exemptions
 
 # Union validation thresholds
 INFRA_MAX_UNIONS = 491          # Buffer above ~485 baseline (target: <200)
-INFRA_UNIONS_STRICT = True      # Strict union validation (flags actual violations per OMN-983)
+INFRA_UNIONS_STRICT = True      # Strict union validation (flags actual violations)
 ```
 
 ## Error Handling

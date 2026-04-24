@@ -6,6 +6,10 @@ Understanding how ONEX works - system design, component interactions, and archit
 
 > **Note**: For authoritative coding rules and standards, see [CLAUDE.md](../../CLAUDE.md). This documentation provides explanations and context that supplement those rules.
 
+Historical design notes, POC writeups, and one-time investigations are not
+listed here. Current conclusions from those materials are promoted into stable
+architecture docs.
+
 ## Overview
 
 Start here to understand the ONEX architecture:
@@ -28,12 +32,7 @@ Start here to understand the ONEX architecture:
 
 | Document | Description |
 |----------|-------------|
-| [Handler Protocol-Driven Architecture](HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md) | Handler system design |
-| [Handler Classification Rules](HANDLER_CLASSIFICATION_RULES.md) | Classification rubric for mixin/service → handler refactoring (Epic 3, OMN-4004) |
-| [Handler Classification 3.2a — Circuit Breaker + Retry](HANDLER_CLASSIFICATION_3_2A_CIRCUIT_BREAKER_RETRY.md) | Classification of MixinAsyncCircuitBreaker + MixinRetryExecution: KEEP AS MIXIN (OMN-4006) |
-| [Handler Classification POC 3.1](HANDLER_CLASSIFICATION_POC_3_1.md) | POC outcome: postgres mixin assessment — KEEP AS MIXIN (OMN-4005) |
-| [Handler Classification 3.3 — LLM HTTP Transport](HANDLER_CLASSIFICATION_3_3_LLM_HTTP_TRANSPORT.md) | MixinLlmHttpTransport: CONVERT justified (5/5), deferred — protocol interface mismatch abort (OMN-4008) |
-| [Handler Classification POC 3.2b](HANDLER_CLASSIFICATION_POC_3_2B.md) | Projector mixins classification: KEEP AS MIXIN (OMN-4009) |
+| [Handler Protocol-Driven Architecture](HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md) | Current handler loading, handler categories, allowed/forbidden capabilities, and stable classification outcomes |
 | [Snapshot Publishing](SNAPSHOT_PUBLISHING.md) | Snapshot publication patterns |
 
 ## Registration System

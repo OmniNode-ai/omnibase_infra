@@ -3,7 +3,6 @@
 # Migration Guide: wire_default_handlers() to Contract-Driven Handler Discovery
 
 **Status**: IMMEDIATE - No deprecation period per project policy
-**Ticket**: OMN-1133 (Contract-based handler discovery)
 **PR**: #143
 
 ---

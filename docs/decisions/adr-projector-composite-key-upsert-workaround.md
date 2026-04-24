@@ -4,7 +4,6 @@
 
 **Status**: Accepted
 **Date**: 2026-01-15
-**Related Tickets**: OMN-1170, PR #146
 
 ## Context
 
@@ -176,7 +175,7 @@ class ModelProjectorContract:
 - Can use composite `ON CONFLICT` clause
 
 **Cons**:
-- Defeats purpose of declarative contracts (OMN-1170)
+- Defeats purpose of declarative contracts
 - Increases maintenance burden
 - Diverges from ONEX contract-driven architecture
 
@@ -202,5 +201,5 @@ If omnibase-core adds composite key support in the future:
 - `src/omnibase_infra/projectors/contracts/registration_projector.yaml` - Declarative contract
 - `omnibase-core/src/omnibase_core/projectors/projector_shell.py` - ProjectorShell implementation
 - `omnibase-core/src/omnibase_core/projectors/models/model_projector_contract.py` - Contract model
-- OMN-1170: Convert ProjectorRegistration to declarative contract
+- : Convert ProjectorRegistration to declarative contract
 - PR #146: Implementation PR with composite key workaround

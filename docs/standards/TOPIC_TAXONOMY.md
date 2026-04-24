@@ -2,7 +2,7 @@
 
 > **Status**: Current | **Last Updated**: 2026-02-19
 
-Kafka topic naming convention for `omnibase_infra`. Covers the realm-agnostic suffix format introduced in OMN-2278, the topic name construction pattern, and all defined topic suffix constants.
+Kafka topic naming convention for `omnibase_infra`. Covers the realm-agnostic suffix format introduced in , the topic name construction pattern, and all defined topic suffix constants.
 
 ---
 
@@ -24,7 +24,7 @@ Kafka topic naming convention for `omnibase_infra`. Covers the realm-agnostic su
 
 All Kafka topics in `omnibase_infra` are defined as **realm-agnostic suffixes** in `src/omnibase_infra/topics/platform_topic_suffixes.py`. The full topic name is composed at runtime by prepending a tenant or namespace prefix.
 
-OMN-2278 changed the topic format from an environment-prefixed scheme (e.g., `dev.archon-intelligence.intelligence.code-analysis-requested.v1`) to the current realm-agnostic scheme (`onex.<kind>.<producer>.<event-name>.v<version>`). The new format does not encode environment or deployment context in the suffix itself — that is the caller's responsibility.
+ changed the topic format from an environment-prefixed scheme (e.g., `dev.archon-intelligence.intelligence.code-analysis-requested.v1`) to the current realm-agnostic scheme (`onex.<kind>.<producer>.<event-name>.v<version>`). The new format does not encode environment or deployment context in the suffix itself — that is the caller's responsibility.
 
 ---
 
@@ -84,7 +84,7 @@ full_topic = compose_full_topic(tenant="dev", namespace="myservice", suffix=suff
 # -> "dev.myservice.onex.evt.platform.node-registration.v1"
 ```
 
-**E2E tests use suffixes directly** (no prefix) when interacting with the local Docker infrastructure. The topic `onex.evt.platform.node-introspection.v1` is used as-is. Note that as of OMN-8784 the runtime kernel no longer reads `ONEX_INPUT_TOPIC` / `ONEX_OUTPUT_TOPIC` — topics are derived from each node's `contract.yaml` `event_bus` declaration and setting those env vars raises `ProtocolConfigurationError` at bootstrap.
+**E2E tests use suffixes directly** (no prefix) when interacting with the local Docker infrastructure. The topic `onex.evt.platform.node-introspection.v1` is used as-is. Note that as of  the runtime kernel no longer reads `ONEX_INPUT_TOPIC` / `ONEX_OUTPUT_TOPIC` — topics are derived from each node's `contract.yaml` `event_bus` declaration and setting those env vars raises `ProtocolConfigurationError` at bootstrap.
 
 **`TopicProvisioner`** at runtime startup creates topics from `ALL_PROVISIONED_TOPIC_SPECS`, using the suffix as the full Kafka topic name (no additional prefix in the current deployment model).
 

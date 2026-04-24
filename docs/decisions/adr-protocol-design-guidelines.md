@@ -4,7 +4,6 @@
 
 **Status**: Accepted
 **Date**: 2026-01-17
-**Related Tickets**: OMN-1079
 
 ## Context
 

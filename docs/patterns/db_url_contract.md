@@ -1,8 +1,5 @@
 # Per-Service Database URL Contract
 
-> **OMN-2146** | Phase 0.2 (Fix the foundation)
-> Part of: DB-Per-Repo -- Break Coupling, Separate Databases, Deploy to Cloud
-
 ## Overview
 
 Each OmniNode service owns its own PostgreSQL database and connects via a
@@ -60,10 +57,10 @@ error unless explicitly configured.
 The conceptual change is:
 
 ```python
-# Before (OMN-2146)
+# Before
 database = os.getenv("POSTGRES_DATABASE", "omninode_bridge")  # silent coupling
 
-# After (OMN-2146) — production code requires OMNIBASE_INFRA_DB_URL with no
+# After — production code requires OMNIBASE_INFRA_DB_URL with no
 # fallback.  The test helper (PostgresConfig.from_env) additionally falls
 # back to individual POSTGRES_* variables for local convenience.
 db_url = os.getenv("OMNIBASE_INFRA_DB_URL")

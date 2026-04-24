@@ -396,7 +396,7 @@ Called by `HandlerNodeHeartbeat` for each periodic heartbeat event.
 - `action="no_op"` if projection is `None`
 - `action="emit"` with:
   - `new_state = None` (no FSM transition)
-  - `events = ()` (heartbeats emit no domain events)
+  - `events =` (heartbeats emit no domain events)
   - `intents = (postgres_update_intent,)` — sets `last_heartbeat_at`, extends `liveness_deadline`
 
 ### `decide_timeout(overdue_ack_projections, overdue_liveness_projections, ctx)`
@@ -407,7 +407,7 @@ Called by `HandlerRuntimeTick` on each runtime tick.
 - `action="no_op"` if no timeouts detected
 - `action="emit"` with:
   - `events = (ModelNodeRegistrationAckTimedOut*, ModelNodeLivenessExpired*)`
-  - `intents = ()` (timeout events update state via projection, not direct intent)
+  - `intents =` (timeout events update state via projection, not direct intent)
 
 ---
 

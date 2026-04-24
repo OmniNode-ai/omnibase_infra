@@ -9,7 +9,6 @@ message dispatching based on topic category and message type. It routes incoming
 to registered dispatchers and collects dispatcher outputs for publishing.
 
 **Implementation**: `src/omnibase_infra/runtime/message_dispatch_engine.py`
-**Ticket**: OMN-934
 
 ## Design Principles
 
@@ -470,7 +469,7 @@ The following pattern exemptions are documented in `infra_validators.py`:
 ### Strict Mode Timeline
 
 ```
-Status: ENABLED (INFRA_PATTERNS_STRICT = True per OMN-983)
+Status: ENABLED (INFRA_PATTERNS_STRICT = True per )
 
 Enabled as of: 2025-12-20
 - All violations must be fixed or added to exempted_patterns with documented rationale

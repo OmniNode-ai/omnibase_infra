@@ -19,10 +19,11 @@ For the architecture of config discovery (how contract YAML files drive automati
 7. [Synchronous Access via get_secret_sync](#synchronous-access-via-get_secret_sync)
 8. [Handling SecretResolutionError](#handling-secretresolutionerror)
 9. [Adding a New Secret to the Seed Script](#adding-a-new-secret-to-the-seed-script)
-10. [Local Development Without Infisical](#local-development-without-infisical)
-11. [Config Prefetch at Startup](#config-prefetch-at-startup)
-12. [Cache Behavior](#cache-behavior)
-13. [Common Mistakes](#common-mistakes)
+10. [Seed Verification](#seed-verification)
+11. [Local Development Without Infisical](#local-development-without-infisical)
+12. [Config Prefetch at Startup](#config-prefetch-at-startup)
+13. [Cache Behavior](#cache-behavior)
+14. [Common Mistakes](#common-mistakes)
 
 ---
 
@@ -134,6 +135,36 @@ Step 6:  Runtime services start
 ```
 
 After step 6, the running services never read `.env` again (except the bootstrap credentials that stay there).
+
+### Seed Verification
+
+After seeding a new environment, verify both dry-run and execute paths from the
+repo root:
+
+```bash
+# Shows planned writes without changing Infisical
+uv run python scripts/seed-infisical.py \
+  --contracts-dir src/omnibase_infra/nodes \
+  --import-env .env
+
+# Writes values after review
+uv run python scripts/seed-infisical.py \
+  --contracts-dir src/omnibase_infra/nodes \
+  --import-env .env \
+  --set-values \
+  --execute
+```
+
+Expected checks:
+
+- The script discovers node contracts under `src/omnibase_infra/nodes`.
+- Shared transport folders exist for the active transports in
+  `TransportConfigMap`.
+- Service-specific folders are only created when contracts require them.
+- Bootstrap Infisical credentials still come from `.env`; they are not fetched
+  from Infisical.
+- Missing optional values are reported as warnings; missing required values must
+  block the seed or runtime start.
 
 ---
 

@@ -778,9 +778,9 @@ Snapshots can always be rebuilt from projections, so deleting the snapshot topic
 
 ### Tickets
 
-- **OMN-947 (F2)**: Snapshot Publishing (this feature)
-- **OMN-944 (F1)**: Implement Registration Projection Schema
-- **OMN-940 (F0)**: Define Projector Execution Model
+- ** (F2)**: Snapshot Publishing (this feature)
+- ** (F1)**: Implement Registration Projection Schema
+- ** (F0)**: Define Projector Execution Model
 
 ### Implementation Files
 

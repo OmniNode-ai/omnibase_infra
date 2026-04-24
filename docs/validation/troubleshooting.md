@@ -282,7 +282,7 @@ as violations. The target is to reduce to <200 through `dict[str, object]` to `J
    ```python
    # Current threshold is 491 (buffer above ~485 baseline as of 2025-12-21)
    # Only increase with documented justification and ticket reference
-   INFRA_MAX_UNIONS = 491  # Document justification per OMN-983
+   INFRA_MAX_UNIONS = 491  # Document justification per
    ```
 
 **Prevention**: Prefer protocols/base classes over large unions. Migrate

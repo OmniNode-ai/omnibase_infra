@@ -72,7 +72,7 @@ RUNTIME_HOST=localhost
 RUNTIME_PORT=8085
 
 # Topics are derived from each node's contract.yaml event_bus declaration
-# (OMN-8784). ONEX_INPUT_TOPIC / ONEX_OUTPUT_TOPIC env vars were removed and
+#. ONEX_INPUT_TOPIC / ONEX_OUTPUT_TOPIC env vars were removed and
 # setting them now raises ProtocolConfigurationError at kernel bootstrap.
 
 # Enable runtime E2E processing tests

@@ -778,7 +778,7 @@ except ValidationError as e:
 | `cache_ttl` | Non-negative | Must be >= 0.0 |
 | `extra` | Forbidden | No extra fields allowed (frozen model) |
 
-**Note:** Topic naming validation is available via contract-driven topic configuration (implemented in OMN-881). Nodes can define their event channels in `contract.yaml` and the runtime validates topic names against the canonical list.
+**Note:** Topic naming validation is available via contract-driven topic configuration (implemented in ). Nodes can define their event channels in `contract.yaml` and the runtime validates topic names against the canonical list.
 
 See `src/omnibase_infra/models/discovery/model_introspection_config.py` for the configuration model implementation.
 
@@ -862,7 +862,7 @@ class RegistryEffectNode(MixinNodeIntrospection):
         event_bus: KafkaEventBus,
     ) -> None:
         # Configure introspection with typed configuration model
-        # Topics can be configured via contract.yaml event_channels (implemented in OMN-881).
+        # Topics can be configured via contract.yaml event_channels (implemented in ).
         # Default topic names in mixin_node_introspection.py are used if not overridden:
         # - INTROSPECTION_TOPIC = "node.introspection"
         # - HEARTBEAT_TOPIC = "node.heartbeat"
@@ -880,13 +880,13 @@ class RegistryEffectNode(MixinNodeIntrospection):
 **Key Points:**
 - Topics are declared in `contract.yaml` for documentation and topology analysis
 - `MixinNodeIntrospection` uses module-level topic constants as defaults (`INTROSPECTION_TOPIC`, `HEARTBEAT_TOPIC`, `REQUEST_INTROSPECTION_TOPIC`)
-- Contract-driven topic configuration via `ModelIntrospectionConfig` is implemented (OMN-881) and can override defaults
+- Contract-driven topic configuration via `ModelIntrospectionConfig` is implemented and can override defaults
 - **Shutdown events are a separate concern**: The `onex.node.shutdown.announced.v1` topic is not managed by `MixinNodeIntrospection`. Nodes should publish shutdown events directly via their shutdown/cleanup logic, not through the introspection mixin.
 - Contract validation (see Validation Rules above) ensures topics exist in the canonical list
 - This pattern enables static analysis of event topology across all nodes
 
 **Current Behavior:**
-Topic names are defined as module-level constants in `mixin_node_introspection.py` as defaults. Contract-driven topic configuration is available via `ModelIntrospectionConfig` (implemented in OMN-881), enabling topology analysis and multi-tenant deployments.
+Topic names are defined as module-level constants in `mixin_node_introspection.py` as defaults. Contract-driven topic configuration is available via `ModelIntrospectionConfig` (implemented in ), enabling topology analysis and multi-tenant deployments.
 
 ---
 
@@ -980,10 +980,3 @@ Consider introducing an `EnumONEXTopic` enum for topic name type safety. Benefit
 ---
 
 ## Related Tickets
-
-- **OMN-881**: Contract-driven topic configuration (Done)
-- **OMN-888**: Node Registration Orchestrator (FSM)
-- **OMN-889**: Dual Registration Reducer
-- **OMN-890**: Registry Effect Node (Done)
-- **OMN-891**: Event Models (Done)
-- **OMN-893**: IntrospectionMixin (Done)

@@ -11,7 +11,6 @@ This guide provides step-by-step instructions for integrating with the ONEX Even
 - **InMemoryEventBus**: `src/omnibase_infra/event_bus/inmemory_event_bus.py`
 - **Models**: `src/omnibase_infra/event_bus/models/`
 
-**Ticket**: OMN-57
 
 ---
 

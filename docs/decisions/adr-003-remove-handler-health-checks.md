@@ -19,7 +19,7 @@ The handler implementations (HandlerVault, HandlerConsul, HandlerDb, HttpRestHan
 - HandlerDb: `ModelDbHealthResponse` (typed Pydantic model)
 - HttpRestHandler: `dict[str, JsonValue]`
 
-The initial ticket (OMN-1027) proposed standardizing these return types. However, architectural analysis revealed a more fundamental question: **Why do handlers need health check methods at all?**
+The initial ticket proposed standardizing these return types. However, architectural analysis revealed a more fundamental question: **Why do handlers need health check methods at all?**
 
 ### Event-Based Architecture Context
 
@@ -138,6 +138,5 @@ If existing code calls `handler.health_check()`:
 
 ## References
 
-- **OMN-1027**: Original ticket (repurposed from "standardize" to "remove")
 - **PR #99**: Implementation pull request
 - **PR #91**: Code review that identified the inconsistency
