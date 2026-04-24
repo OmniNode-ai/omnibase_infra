@@ -1,6 +1,8 @@
-> **Navigation**: [Home](index.md) > Plugin Determinism Verification
+> **Navigation**: [Home](../index.md) > [Plugins](README.md) > Plugin Determinism
 
-# Compute Plugin Determinism Verification Guide
+# Compute Plugin Determinism
+
+> **Status**: Current | **Last Updated**: 2026-04-24
 
 ## Overview
 

@@ -471,7 +471,7 @@ def _init_circuit_breaker(
 
 ### MixinInfisicalInitialization
 
-**Note**: The Vault-based `MixinVaultInitialization` was removed as part of the Infisical migration (OMN-2288). Infisical uses an async-native SDK and does not require a dedicated initialization mixin. See `src/omnibase_infra/adapters/_internal/adapter_infisical.py` for the current implementation.
+**Note**: The Vault-based `MixinVaultInitialization` was removed as part of the Infisical migration. Infisical uses an async-native SDK and does not require a dedicated initialization mixin. See `src/omnibase_infra/adapters/_internal/adapter_infisical.py` for the current implementation.
 
 ---
 

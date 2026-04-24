@@ -4,7 +4,6 @@
 
 **Status**: Accepted
 **Date**: 2025-12-21
-**Related Tickets**: OMN-985, OMN-974
 
 ## Context
 

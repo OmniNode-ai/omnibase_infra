@@ -14,7 +14,7 @@ This document specifies the Environment-Aware format — its structure, supporte
 environments, routing behavior, and operational best practices.
 
 **Related documentation**:
-- ONEX Topic Taxonomy: `docs/architecture/TOPIC_TAXONOMY.md` (OMN-981)
+- ONEX Topic Taxonomy: `docs/architecture/TOPIC_TAXONOMY.md`
 - Message category routing: `omnibase_infra.enums.EnumMessageCategory`
 - Topic standard detection: `omnibase_infra.enums.EnumTopicStandard`
 - Topic parser: `omnibase_infra.models.dispatch.ModelTopicParser`

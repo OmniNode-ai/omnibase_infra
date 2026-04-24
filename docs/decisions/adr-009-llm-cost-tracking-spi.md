@@ -45,8 +45,7 @@ cross-cutting infrastructure concern, not a business logic concern. The
 same argument applies to why circuit breakers, correlation IDs, and error
 taxonomy live in omnibase_infra rather than being re-implemented per service.
 
-Work was delivered in six tickets (OMN-2236 through OMN-2241, OMN-2295,
-OMN-2318, OMN-2319) as part of the 0.8.0 release.
+Work was delivered as part of the 0.8.0 release.
 
 ## Decision
 
@@ -67,7 +66,7 @@ The adapter classes implementing these protocols are in
 `src/omnibase_infra/adapters/` and wired through `ModelONEXContainer` via
 the standard DI registry pattern.
 
-### Token usage extraction (OMN-2238)
+### Token usage extraction
 
 LLM API responses do not have a uniform schema for token counts. The OpenAI
 wire format uses `usage.prompt_tokens` and `usage.completion_tokens`. Ollama
@@ -85,7 +84,7 @@ object with a `source` field indicating provenance:
 The `usage_is_estimated` boolean flag is derived from this source field and
 persisted alongside the raw usage object for audit purposes.
 
-### ModelPricingTable (OMN-2239)
+### ModelPricingTable
 
 `ModelPricingTable` loads per-model token costs from
 `src/omnibase_infra/configs/pricing_manifest.yaml`. The manifest is a YAML
@@ -118,7 +117,7 @@ estimated_cost_usd =
 The table is frozen after loading. To update pricing, deploy a new manifest
 and restart the service.
 
-### Static context token attribution (OMN-2241)
+### Static context token attribution
 
 Each LLM call carries a static system prompt derived from injected ONEX
 manifests (agent config, CLAUDE.md, patterns). `ServiceLlmCategoryAugmenter`
@@ -127,7 +126,7 @@ categories (manifest injection, patterns, documentation). This overhead is
 recorded alongside the call cost so that manifest size regressions are
 detectable.
 
-### Database schema (OMN-2236)
+### Database schema
 
 Migration 031 adds two tables:
 
@@ -184,7 +183,7 @@ running weighted average.
 Example: a single call to `qwen2.5-coder-14b` in session `abc` on repo
 `omnibase_infra` produces 9 aggregate rows: 3 dimensions × 3 windows.
 
-### Cost aggregation service (OMN-2240)
+### Cost aggregation service
 
 `ServiceLlmCostAggregator` is an async Kafka consumer that:
 
@@ -264,15 +263,6 @@ ServiceLlmCostAggregator (Kafka consumer)
 
 ## References
 
-- **OMN-2236**: `llm_call_metrics` and `llm_cost_aggregates` migration 031
-- **OMN-2238**: Token usage extraction and normalization
-- **OMN-2239**: `ModelPricingTable` with YAML manifest
-- **OMN-2240**: LLM cost aggregation service
-- **OMN-2241**: Static context token cost attribution
-- **OMN-2295**: Input validation and edge case tests
-- **OMN-2318**: Integrate SPI 0.9.0 LLM cost tracking contracts
-- **OMN-2319**: SPI protocol adapters for `ProtocolLlmCostTracker` and
-  `ProtocolLlmPricingTable`
 - **Aggregation consumer**: `src/omnibase_infra/services/observability/llm_cost_aggregation/consumer.py`
 - **PostgreSQL writer**: `src/omnibase_infra/services/observability/llm_cost_aggregation/writer_postgres.py`
 - **Pricing table**: `src/omnibase_infra/models/pricing/model_pricing_table.py`

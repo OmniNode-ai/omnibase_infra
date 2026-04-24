@@ -26,7 +26,6 @@ Verify that `omnibase_core` does not contain infrastructure dependencies (layer 
 
 This validator enforces the ONEX architecture principle that the core layer (`omnibase_core`) should not depend on infrastructure-specific packages. Infrastructure dependencies belong in `omnibase_infra`.
 
-**Ticket Reference**: OMN-255
 
 ### Implementation
 
@@ -59,11 +58,11 @@ The following infrastructure packages are forbidden in `omnibase_core`:
 | `kafka` | Event streaming client | - |
 | `httpx` | HTTP client library | - |
 | `asyncpg` | PostgreSQL async driver | - |
-| `aiohttp` | Async HTTP client | OMN-1015 |
-| `redis` | Redis client library | OMN-1295 |
+| `aiohttp` | Async HTTP client |  |
+| `redis` | Redis client library |  |
 | `psycopg` / `psycopg2` | PostgreSQL drivers | - |
-| `consul` | Consul client | OMN-1015 |
-| `infisicalsdk` | Infisical client library | OMN-2286 |
+| `consul` | Consul client |  |
+| `infisicalsdk` | Infisical client library |  |
 | `aiokafka` | Async Kafka client | - |
 | `confluent_kafka` | Confluent Kafka client | - |
 
@@ -71,9 +70,9 @@ The following infrastructure packages are forbidden in `omnibase_core`:
 
 Some imports have known violations tracked in Linear. When **only** known issues are detected, the validator passes (exit code 0) to avoid blocking CI:
 
-- `aiohttp`: OMN-1015 - async HTTP client needs migration to infra
-- `redis`: OMN-1295 - Redis client needs migration to infra
-- `consul`: OMN-1015 - Consul TYPE_CHECKING import
+- `aiohttp`:  - async HTTP client needs migration to infra
+- `redis`:  - Redis client needs migration to infra
+- `consul`:  - Consul TYPE_CHECKING import
 
 ### Exit Codes
 
@@ -301,7 +300,7 @@ def validate_infra_patterns(
 ### Parameters
 
 - **directory** (`str | Path`, optional): Directory to validate. Defaults to `"src/omnibase_infra/"`.
-- **strict** (`bool`, optional): Enable strict mode. Defaults to `True` (INFRA_PATTERNS_STRICT per OMN-983).
+- **strict** (`bool`, optional): Enable strict mode. Defaults to `True` (INFRA_PATTERNS_STRICT per ).
 
 ### Returns
 
@@ -315,7 +314,7 @@ def validate_infra_patterns(
 
 ### What It Validates
 
-**Strict Mode** (default per OMN-983):
+**Strict Mode** (default per ):
 - Model prefix naming (`Model*`)
 - snake_case file naming
 - Anti-pattern detection (no `*Manager`, `*Handler`, `*Helper`)
@@ -456,7 +455,7 @@ def validate_infra_union_usage(
 
 - **directory** (`str | Path`, optional): Directory to validate. Defaults to `"src/omnibase_infra/"`.
 - **max_unions** (`int`, optional): Maximum allowed complex unions. Defaults to `491` (INFRA_MAX_UNIONS).
-- **strict** (`bool`, optional): Enable strict mode. Defaults to `True` (INFRA_UNIONS_STRICT per OMN-983).
+- **strict** (`bool`, optional): Enable strict mode. Defaults to `True` (INFRA_UNIONS_STRICT per ).
 
 ### Returns
 
@@ -730,7 +729,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 INFRA_MAX_UNIONS = 491          # Maximum allowed union count (buffer above ~485 baseline)
 INFRA_MAX_VIOLATIONS = 0        # Zero tolerance for architecture violations
 
-# Strict mode flags (OMN-983)
+# Strict mode flags
 INFRA_PATTERNS_STRICT = True    # Strict pattern enforcement with documented exemptions
 INFRA_UNIONS_STRICT = True      # Strict union validation (flags actual violations)
 ```

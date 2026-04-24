@@ -1,4 +1,4 @@
-# Emergency runtime refresh (OMN-9455)
+# Emergency runtime refresh
 
 This runbook captures the **service-targeted runtime refresh** that must be
 used any time the automated deploy-agent pipeline is unavailable or the
@@ -12,7 +12,7 @@ Use this procedure when any of the following is true:
 - The deploy-agent on `.201` is unavailable or wedged.
 - The runtime containers must be rebuilt urgently and there is no
   corresponding change to core infra.
-- A prior runtime rebuild took core infra offline (OMN-9455) and the
+- A prior runtime rebuild took core infra offline and the
   operator needs to bring runtime back up without re-recreating core infra.
 
 Do **not** use this runbook for full-stack rebuilds. Use `onex up core runtime`
@@ -69,7 +69,7 @@ docker ps --format '{{.Names}}\t{{.RunningFor}}' | \
 Core infra container `RunningFor` values in step 4 should be older than the
 start of this procedure. If any core infra container has a fresh `RunningFor`
 value, the procedure recreated core infra (bug) — check that `--no-deps` was
-actually passed and report a regression against OMN-9455.
+actually passed and report a regression against .
 
 ## Subset refresh
 
@@ -98,5 +98,5 @@ If a runtime rebuild was performed without `--no-deps` and broke core infra:
      postgres redpanda valkey infisical phoenix
    ```
 3. Re-run the runtime refresh procedure above.
-4. File a Linear ticket citing OMN-9455 with the compose command that was
-   actually executed.
+4. File an internal follow-up issue with the compose command that was actually
+   executed.

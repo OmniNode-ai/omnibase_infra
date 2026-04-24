@@ -42,7 +42,7 @@ This is an ONEX architectural principle that ensures:
 - Return structured result (`ModelBackendResult`) with success/failure status
 - Include timing information (`duration_ms`) for orchestrator decisions
 - Do NOT track retry counts or implement backoff
-- The `retries` field was intentionally removed from effect result models (see OMN-1103)
+- The `retries` field was intentionally removed from effect result models (see )
 
 **Orchestrator Nodes**:
 - Implement retry policies via `coordination_rules.max_retries` in contract

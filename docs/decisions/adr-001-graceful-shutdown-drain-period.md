@@ -254,6 +254,5 @@ can be added when the broader metrics infrastructure is established.
 
 ## References
 
-- **OMN-756**: Implement Graceful Shutdown with Drain Period (MVP)
 - **PR #48**: Implementation pull request
 - **ModelLifecycleSubcontract**: Defines lifecycle patterns including shutdown behavior

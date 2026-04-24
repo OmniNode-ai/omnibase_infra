@@ -129,9 +129,9 @@ write back to `~/.omnibase/.env`, or depend on shell tooling co-located with the
 | Run CI validators | Clone + `uv run python scripts/validate.py` |
 | Develop nodes and handlers | Clone (full dev environment) |
 
-> **Note on `sync-omnibase-env.py`**: This script is **not** part of `omnibase_infra`.
-> It is provided by the `omniclaude` plugin and installed separately. See the
-> [omniclaude README](https://github.com/OmniNode-ai/omniclaude) for details.
+> **Note on `sync-omnibase-env.py`**: This script is **not** part of
+> `omnibase_infra`. Use the separately installed environment-sync tooling
+> available in your workspace.
 
 ---
 
@@ -156,7 +156,7 @@ Every deployable unit is a typed YAML manifest; the compose file is generated, n
 |--------|----------|---------|
 | `core` | postgres, redpanda, valkey, infisical | Always-on infrastructure |
 | `runtime` | (composed) | Full ONEX runtime stack — includes `core`, `tracing`, and the four sub-bundles below |
-| `runtime-core` | omninode-runtime, runtime-effects, agent-actions-consumer, skill-lifecycle-consumer, context-audit-consumer, omninode-contract-resolver, intelligence-api | 7 services with no env requirements beyond the 0.34.0 baseline — deploy correctness fixes without needing new secrets (OMN-9332) |
+| `runtime-core` | omninode-runtime, runtime-effects, agent-actions-consumer, skill-lifecycle-consumer, context-audit-consumer, omninode-contract-resolver, intelligence-api | 7 services with no env requirements beyond the 0.34.0 baseline; deploy correctness fixes without needing new secrets |
 | `runtime-integrations` | ci-relay, linear-relay, waitlist-signup-notifier | External-integration services; needs `CI_CALLBACK_TOKEN`, `LINEAR_WEBHOOK_SECRET`, `WAITLIST_NOTIFIER_SLACK_*` |
 | `runtime-observability-projections` | injection-effectiveness-consumer, savings-estimation-consumer, llm-cost-aggregation-consumer, consumer-health-projection, decision-store-consumer | Postgres projection consumers; needs `OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_POSTGRES_DSN` |
 | `runtime-infrastructure` | forward-migration, migration-gate, intelligence-migration, runtime-worker, retry-worker, autoheal | Migrations, workers, container autoheal |
@@ -168,7 +168,7 @@ Every deployable unit is a typed YAML manifest; the compose file is generated, n
 
 **Transitive resolution**: `runtime` includes `core`, `tracing`, and the four runtime sub-bundles; `tracing` includes `observability`. The resolver expands all `includes` before collecting services.
 
-**Incremental rollout (OMN-9332)**: when new runtime services land with new secret requirements, operators can deploy `onex up runtime-core` to pick up correctness fixes without also needing those secrets. Once the secrets are seeded (Infisical or `~/.omnibase/.env`), bring up the remaining sub-bundles with `onex up runtime-integrations`, `onex up runtime-observability-projections`, or `onex up runtime-infrastructure`.
+**Incremental rollout**: when new runtime services land with new secret requirements, operators can deploy `onex up runtime-core` to pick up correctness fixes without also needing those secrets. Once the secrets are seeded (Infisical or `~/.omnibase/.env`), bring up the remaining sub-bundles with `onex up runtime-integrations`, `onex up runtime-observability-projections`, or `onex up runtime-infrastructure`.
 
 **Env injection**: Each bundle may declare `inject_env` (hardcoded values injected into generated compose) and `inject_required_env` (vars that must be present in the operator environment at start time).
 
@@ -266,15 +266,16 @@ Canonical spec: `omnibase_core/docs/conventions/FILE_HEADERS.md`
 
 ---
 
-## Agent Behavioral Rules (OMN-6888)
+## Agent Behavioral Rules
 
 ### Autonomous mode safety rails
 
 When operating autonomously in this repo:
 - Never disable pre-commit hooks, CI checks, or type checkers to make code pass.
   Fix the code instead.
-- Never write state files to `~/.claude/` -- use `omni_home/.onex_state/`.
-- Friction logs go to `omni_home/.onex_state/friction/` for external observability.
+- Never write state files to `~/.claude/`; use the workspace `.onex_state/`
+  directory.
+- Friction logs go under `.onex_state/friction/` for external observability.
 
 ### Contract-first topic definitions
 
@@ -795,7 +796,7 @@ uv run pytest tests/ -n 0 -xvs
 | `cleanup_consul_test_services` | Cleans Consul test registrations |
 | `cleanup_postgres_test_projections` | Cleans PostgreSQL test rows |
 
-### Runtime Startup is a First-Class CI Gate (OMN-9126)
+### Runtime Startup is a First-Class CI Gate
 
 Any PR that touches `auto_wiring/`, `service_kernel.py`, handler `__init__` signatures, or kernel-level registration MUST include a test that:
 
@@ -818,7 +819,7 @@ Ad-hoc short timeouts are forbidden: any PR that shortens the gate below `start_
 
 ## Contract-Driven Config Discovery
 
-Part of OMN-2287: Infisical-backed configuration management.
+Infisical-backed configuration management.
 
 ### Overview
 
@@ -984,13 +985,13 @@ loader = HandlerPluginLoader(
 
 ## Release Process
 
-### Version Compatibility Matrix (OMN-3203)
+### Version Compatibility Matrix
 
 `src/omnibase_infra/runtime/version_compatibility.py` maintains a runtime
 check that verified installed `omnibase_core` and `omnibase_spi` versions match
 the constraints declared in `pyproject.toml`.
 
-**How it works (after OMN-3203):**
+**How it works:**
 
 `VERSION_MATRIX` is derived **automatically at import time** from `pyproject.toml`.
 No manual update is required when bumping dependency versions — just update

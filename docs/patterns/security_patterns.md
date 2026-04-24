@@ -627,7 +627,7 @@ def get_user_permissions(roles: frozenset[EnumRole]) -> frozenset[EnumPermission
 
 ### Infisical Integration
 
-ONEX uses Infisical for centralized secret management (migrated from HashiCorp Vault in OMN-2288).
+ONEX uses Infisical for centralized secret management (migrated from HashiCorp Vault in ).
 
 #### Secret Retrieval Pattern
 
@@ -1281,7 +1281,7 @@ kafka-acls.sh --add --deny-principal User:* \\
 
 ### Structured Security Error Reporting
 
-As of OMN-1091, ONEX uses structured error models for security validation failures. This enables consistent error tracking, remediation guidance, and CI integration.
+As of , ONEX uses structured error models for security validation failures. This enables consistent error tracking, remediation guidance, and CI integration.
 
 #### Using ModelHandlerValidationError for Security Violations
 

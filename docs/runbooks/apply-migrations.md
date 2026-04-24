@@ -234,7 +234,7 @@ Or re-run `run-migrations.py` — it uses `ON CONFLICT DO NOTHING` so re-applyin
 for already-applied migrations that have tracking rows. For migrations without tracking rows,
 wrap in a transaction and check for idempotency before re-applying.
 
-## Omnidash Read-Model Migrations (OMN-3748)
+## Omnidash Read-Model Migrations
 
 Omnidash maintains its own `omnidash_analytics` read-model database with SQL migrations
 in `omnidash/migrations/`. These are wired into the bootstrap pipeline as **Step 1d**.
@@ -291,5 +291,5 @@ cd "${OMNIDASH_DIR}"
 npx tsx scripts/check-migration-parity.ts
 ```
 
-This tool (added in OMN-3747) ensures no migrations are missing from either the
+This tool (added in ) ensures no migrations are missing from either the
 filesystem or the database.

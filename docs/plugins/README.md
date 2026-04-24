@@ -4,11 +4,20 @@
 
 Documentation for ONEX plugin system and plugin implementations.
 
+Current plugin docs describe active requirements and examples. Point-in-time
+optimization reports are not primary docs.
+
 ## Available Documents
 
 | Document | Description |
 |----------|-------------|
-| [JSON Normalizer Optimization](json_normalizer_optimization.md) | JSON normalizer plugin performance optimization |
+| [Compute Plugin Determinism](PLUGIN_DETERMINISM.md) | Required determinism guarantees, test patterns, and common violations for compute plugins |
+
+## Example Plugins
+
+| Example | Source | Tests |
+|---------|--------|-------|
+| JSON normalizer | `src/omnibase_infra/plugins/examples/plugin_json_normalizer.py` | `tests/unit/plugins/examples/test_plugin_json_normalizer.py`, `tests/unit/plugins/test_plugin_compute_determinism.py` |
 
 ## Related Documentation
 

@@ -4,7 +4,7 @@
 
 The topic catalog provides runtime discovery of all Kafka topics known to the ONEX platform. Any node or service can query the catalog to find out which topics exist, who publishes to them, who subscribes, and what their metadata looks like. This is central to dashboard observability, dynamic routing, and contract validation.
 
-Introduced across OMN-2310 (models), OMN-2311 (ServiceTopicCatalog), OMN-2312 (warnings channel), OMN-2313 (query handler + dispatcher).
+Introduced across  (models),  (ServiceTopicCatalog),  (warnings channel),  (query handler + dispatcher).
 
 ---
 

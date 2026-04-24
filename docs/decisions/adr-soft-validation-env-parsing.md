@@ -5,7 +5,6 @@
 **Status**: Implemented
 **Date**: 2025-12-28
 **PR**: #106
-**Related Tickets**: OMN-1058
 
 ## Context
 

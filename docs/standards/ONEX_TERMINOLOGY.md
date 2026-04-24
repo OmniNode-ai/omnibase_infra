@@ -21,7 +21,7 @@ Canonical term list for `omnibase_infra`-specific vocabulary. This document cove
 
 ## Overview
 
-This document establishes the authoritative term list for the infrastructure layer. Consistency in naming prevents confusion across code, docs, PR reviews, and Linear tickets. When writing code or documentation, always use the canonical term.
+This document establishes the authoritative term list for the infrastructure layer. Consistency in naming prevents confusion across code, docs, PR reviews, and internal issue tracking. When writing code or documentation, always use the canonical term.
 
 ---
 

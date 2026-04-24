@@ -251,7 +251,6 @@ WHERE indexrelname LIKE 'idx_registration_projections_%';
 
 ## References
 
-- **OMN-1134**: Registry Projection Extensions for Capabilities
 - **PostgreSQL GIN Documentation**: https://www.postgresql.org/docs/current/gin-intro.html
 - **ADR-001**: Graceful Shutdown (related projection lifecycle)
 - **ADR-004**: Performance Baseline Thresholds (related performance considerations)

@@ -47,8 +47,8 @@ consistent producer segment.
 be reconfigured with the correct `ONEX_ENV` value, and any mismatch silently
 produced zero traffic rather than a startup error.
 
-**OMN-2278** addressed all three issues by removing the environment prefix
-from `resolve_topic()` and introducing the structured topic suffix format
+The realm-agnostic topic change addressed all three issues by removing the
+environment prefix from `resolve_topic()` and introducing the structured topic suffix format
 documented in `docs/standards/TOPIC_TAXONOMY.md`.
 
 ## Decision
@@ -179,7 +179,6 @@ streams, not deployment namespaces.
 
 ## References
 
-- **OMN-2278**: Realm-agnostic topic format (remove environment prefix)
 - **Topic taxonomy**: `docs/standards/TOPIC_TAXONOMY.md`
 - **Suffix constants**: `src/omnibase_infra/topics/platform_topic_suffixes.py`
 - **Topic spec model**: `src/omnibase_infra/topics/model_topic_spec.py`

@@ -99,7 +99,7 @@ All required fields will raise `ProtocolConfigurationError` if absent. Do not ad
 
 ## Step 2 — Register the Tool with ONEXToMCPAdapter
 
-`ONEXToMCPAdapter` converts ONEX node metadata into `MCPToolDefinition` structs. Registration is currently manual (automatic discovery from contract `mcp_enabled: true` is planned under OMN-1288).
+`ONEXToMCPAdapter` converts ONEX node metadata into `MCPToolDefinition` structs. Registration is currently manual (automatic discovery from contract `mcp_enabled: true` is planned under ).
 
 ```python
 from omnibase_infra.handlers.mcp.adapter_onex_to_mcp import (
@@ -342,7 +342,7 @@ When `MCPServerLifecycle.start()` runs in production, it performs a Consul scan 
 
 `ServiceMCPToolDiscovery` queries Consul for services tagged with `mcp-enabled`. For each discovered service, it fetches the tool definitions and populates `ServiceMCPToolRegistry`.
 
-In the current MVP, the Consul scan finds services but tool definition loading is not yet fully automatic — the `mcp_enabled: true` contract flag and automatic contract scanning is tracked under OMN-1288. Manual registration via `register_node_as_tool()` is the supported path until that ticket is complete.
+In the current MVP, the Consul scan finds services but tool definition loading is not yet fully automatic. Manual registration via `register_node_as_tool()` is the supported path until automatic contract scanning is complete.
 
 ---
 
@@ -360,13 +360,13 @@ To disable hot reload in local development (where Kafka may not be running), set
 
 ## Current Limitations
 
-| Limitation | Tracking | Workaround |
-|------------|----------|------------|
-| Tool registration is manual only | OMN-1288 | Call `register_node_as_tool()` explicitly during startup |
-| `ONEXToMCPAdapter.invoke_tool()` returns a placeholder | OMN-1288 | Use `AdapterONEXToolExecution.execute()` directly |
-| No authentication on the HTTP endpoint | OMN-1288 | Deploy behind an API gateway or restrict via firewall rules |
-| `mcp.call_tool` in integrated mode requires registry + executor to be wired | OMN-1281 | Use `MCPServerLifecycle` to ensure both are initialized before calls |
-| `max_tools` limit (default 100) silently returns `False` | — | Check the return value of `handler.register_tool()` |
+| Limitation | Workaround |
+|------------|------------|
+| Tool registration is manual only | Call `register_node_as_tool()` explicitly during startup |
+| `ONEXToMCPAdapter.invoke_tool()` returns a placeholder | Use `AdapterONEXToolExecution.execute()` directly |
+| No authentication on the HTTP endpoint | Deploy behind an API gateway or restrict via firewall rules |
+| `mcp.call_tool` in integrated mode requires registry + executor to be wired | Use `MCPServerLifecycle` to ensure both are initialized before calls |
+| `max_tools` limit (default 100) silently returns `False` | Check the return value of `handler.register_tool()` |
 
 ---
 

@@ -1,6 +1,5 @@
 # Kafka Schema Handshake Gate
 
-**Ticket**: OMN-3411
 **Script**: `scripts/validate-kafka-schema-handshake.py`
 **CI job**: `schema-handshake` in `.github/workflows/test.yml`
 
@@ -19,7 +18,7 @@ producer→consumer pair:
 A `pydantic.ValidationError` at step 3 means the producer and consumer have
 drifted — the boundary is broken.  No Kafka broker is required.
 
-**Background**: OMN-3248 was caused by a field rename between the
+**Background**:  was caused by a field rename between the
 `omniintelligence` producer (`intent_class: EnumIntentClass`) and the
 `omnimemory` consumer (`intent_category: str`) on the same
 `onex.evt.intent.classified.v1` topic.  This gate would have caught that at PR
@@ -140,5 +139,5 @@ Run the full scan locally in that case:
 uv run python scripts/validate-kafka-schema-handshake.py
 ```
 
-The `kafka-boundary-compat` job (OMN-3256) in `test.yml` runs the full pytest
+The `kafka-boundary-compat` job in `test.yml` runs the full pytest
 boundary compat suite separately and is complementary to this gate.

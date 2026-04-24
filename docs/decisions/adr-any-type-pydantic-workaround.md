@@ -4,7 +4,6 @@
 
 **Status**: Superseded
 **Date**: 2026-01-06
-**Related Tickets**: OMN-1104, OMN-1262, OMN-1263, OMN-1274
 
 ## Resolution
 
@@ -13,7 +12,7 @@
 This ADR is now **superseded** - the workaround documented herein is no longer needed.
 
 **What Changed**:
-- **Migration completed**: All 33+ files have been migrated from `Any` to `JsonType` as part of OMN-1274
+- **Migration completed**: All 33+ files have been migrated from `Any` to `JsonType`
 - **omnibase_core fix available**: Version 0.6.3 of omnibase_core provides a working `JsonType` implementation that Pydantic 2.x can handle correctly
 - **No more workaround needed**: The `Any` type workaround for Pydantic's recursive type alias limitation is no longer necessary
 
@@ -26,12 +25,6 @@ This ADR is now **superseded** - the workaround documented herein is no longer n
 - New code should use `JsonType` from `omnibase_core.types` for JSON-serializable fields
 - The CLAUDE.md rule "NEVER use Any" is now fully enforceable without exceptions
 - This ADR remains as historical documentation of the workaround and migration path
-
-**Tracking Issues**:
-- [OMN-1262](https://linear.app/omninode/issue/OMN-1262) - Any type migration tracking
-- [OMN-1263](https://linear.app/omninode/issue/OMN-1263) - Integration test coverage and pre-existing test failures
-
----
 
 ## CRITICAL: Scope Boundaries and CLAUDE.md Alignment
 
@@ -98,7 +91,7 @@ def serialize_payload(data: object) -> str:
 
 - **New code with `Any` outside Pydantic model fields**: **AUTOMATIC PR REJECTION**
 - **New code with `Any` in Pydantic field without `NOTE:` comment**: **AUTOMATIC PR REJECTION**
-- **Legacy code violations**: Tracked under OMN-1262 for mandatory cleanup
+- **Legacy code violations**: Tracked internally for mandatory cleanup
 
 ---
 
@@ -355,7 +348,7 @@ This ADR defines **two distinct comment patterns** for different contexts.
 1. The narrow exception (Any in Pydantic fields)
 2. The standard practice (object everywhere else)
 
-**Implementation Status**: The 33 files listed in this ADR's "Affected Files" section are compliant - they use `Any` exclusively in Pydantic model field definitions. However, legacy violations (Any in function signatures, return types, or type aliases) may exist elsewhere in the codebase and are tracked under [OMN-1262](https://linear.app/omninode/issue/OMN-1262) for mandatory cleanup. New code introducing such violations will be rejected in PR review.
+**Implementation Status**: The 33 files listed in this ADR's "Affected Files" section are compliant - they use `Any` exclusively in Pydantic model field definitions. However, legacy violations (Any in function signatures, return types, or type aliases) may exist elsewhere in the codebase and are tracked internally for mandatory cleanup. New code introducing such violations will be rejected in PR review.
 
 #### Pattern 1: `Any` in Pydantic Models (JsonType Workaround)
 
@@ -494,7 +487,7 @@ JsonType: TypeAlias = "dict[str, JsonType] | list[JsonType] | str | int | float 
 - [x] omnibase_core v0.6.3 released with the fix
 - [x] omnibase_infra updated to depend on fixed version
 
-**Migration Steps Completed** (OMN-1274):
+**Migration Steps Completed**:
 1. [x] Updated `omnibase_core` dependency to v0.6.3
 2. [x] Searched for `NOTE: Using Any instead of JsonType` pattern
 3. [x] Replaced `Any` with `JsonType` import in all 33+ files
@@ -548,18 +541,17 @@ pytest tests/
 
 | Category | Files | Status |
 |----------|-------|--------|
-| Event Bus | 4 | **MIGRATED** to `JsonType` (OMN-1274) |
-| Handlers | 4 | **MIGRATED** to `JsonType` (OMN-1274) |
-| Handler Mixins | 6 | **MIGRATED** to `JsonType` (OMN-1274) |
-| Handler Models | 4 | **MIGRATED** to `JsonType` (OMN-1274) |
-| Mixins | 1 | **MIGRATED** to `JsonType` (OMN-1274) |
-| Models | 2 | **MIGRATED** to `JsonType` (OMN-1274) |
-| Nodes | 1 | **MIGRATED** to `JsonType` (OMN-1274) |
-| Plugins | 3 | **MIGRATED** to `JsonType` (OMN-1274) |
-| Runtime | 8 | **MIGRATED** to `JsonType` (OMN-1274) |
+| Event Bus | 4 | **MIGRATED** to `JsonType` |
+| Handlers | 4 | **MIGRATED** to `JsonType` |
+| Handler Mixins | 6 | **MIGRATED** to `JsonType` |
+| Handler Models | 4 | **MIGRATED** to `JsonType` |
+| Mixins | 1 | **MIGRATED** to `JsonType` |
+| Models | 2 | **MIGRATED** to `JsonType` |
+| Nodes | 1 | **MIGRATED** to `JsonType` |
+| Plugins | 3 | **MIGRATED** to `JsonType` |
+| Runtime | 8 | **MIGRATED** to `JsonType` |
 | **TOTAL** | **33** | **COMPLETED - All files migrated to `JsonType`** |
 
-**Migration Tracking**: [OMN-1262](https://linear.app/omninode/issue/OMN-1262), [OMN-1274](https://linear.app/omninode/issue/OMN-1274)
 
 ### File List
 
@@ -618,11 +610,11 @@ The following 33 files **previously used** `Any` as a workaround for `JsonType` 
 
 ## Migration Execution Plan - COMPLETED
 
-### Files That Were Migrated (OMN-1274)
+### Files That Were Migrated
 
 The following **33 files** have been successfully migrated from `Any` to `JsonType`:
 
-**Migration Completed**: [OMN-1274](https://linear.app/omninode/issue/OMN-1274) (2026-01-08)
+**Migration Completed**: 2026-01-08
 
 **Migration Script Used** (historical reference):
 ```bash
@@ -683,15 +675,13 @@ All phases were completed on 2026-01-08:
 
 **Integration tests verified during migration:**
 
-| Test Area | Status | Tracking |
-|-----------|--------|----------|
-| Intent emission from declarative reducer | PASSED | OMN-1263 |
-| Envelope validation with JsonType fields | PASSED | OMN-1274 |
-| RuntimeHostProcess with typed payloads | PASSED | OMN-1274 |
-| DLQ event handling with JsonType | PASSED | OMN-1274 |
-| Kafka event bus serialization | PASSED | OMN-1274 |
-
-**Note**: See [OMN-1263](https://linear.app/omninode/issue/OMN-1263) for any remaining integration test improvements tracked separately from this migration.
+| Test Area | Status |
+|-----------|--------|
+| Intent emission from declarative reducer | PASSED |
+| Envelope validation with JsonType fields | PASSED |
+| RuntimeHostProcess with typed payloads | PASSED |
+| DLQ event handling with JsonType | PASSED |
+| Kafka event bus serialization | PASSED |
 
 ### Rollback Plan (Historical)
 
@@ -846,15 +836,15 @@ grep -rn "def.*Any" src/ | grep -v "__pycache__"
 **Enforcement** (post-migration):
 - **All code**: MUST NOT use `Any` - use `JsonType` for Pydantic fields, `object` for signatures
 - **PRs with `Any`**: Will be rejected - the workaround exception no longer applies
-- **Legacy tracking**: [OMN-1262](https://linear.app/omninode/issue/OMN-1262) - closed as complete
+- **Legacy tracking**: closed as complete
 
 ## Integration Test Status
 
-Integration tests for the registration reducer and related infrastructure are tracked in **[OMN-1263](https://linear.app/omninode/issue/OMN-1263)**.
+Integration tests for the registration reducer and related infrastructure are tracked internally.
 
 ### Postponement Justification
 
-Integration tests are postponed to OMN-1263 for the following reasons:
+Integration tests are tracked separately for the following reasons:
 
 1. **Unit tests provide comprehensive coverage**: The RegistrationReducer has 100% coverage of FSM transitions, state machine logic, and intent generation through unit tests. All edge cases, error conditions, and state transitions are verified.
 
@@ -864,11 +854,11 @@ Integration tests are postponed to OMN-1263 for the following reasons:
    - Event bus infrastructure for end-to-end event flow
    - `RegistrationProjector` for FSM state persistence
 
-3. **Separation of concerns**: This PR (OMN-1104) focuses on the declarative reducer refactoring. Integration testing is a distinct scope that deserves dedicated attention.
+3. **Separation of concerns**: This PR focuses on the declarative reducer refactoring. Integration testing is a distinct scope that deserves dedicated attention.
 
-### OMN-1263 Integration Test Matrix
+### Integration Test Matrix
 
-The following integration tests are tracked under OMN-1263:
+The following integration tests are tracked internally:
 
 | Test Area | Description | Status |
 |-----------|-------------|--------|
@@ -882,12 +872,12 @@ The following integration tests are tracked under OMN-1263:
 
 **27 test failures in CI are pre-existing issues unrelated to this PR.**
 
-These failures existed before the OMN-1104 work began and are documented in the PR description. They are caused by:
+These failures existed before the migration work began and are documented in the PR description. They are caused by:
 - Missing infrastructure dependencies in CI environment
 - Incomplete mock configurations for external services
 - Test fixtures that require database connections
 
-These failures are tracked under OMN-1263 for resolution as part of the broader integration test effort.
+These failures are tracked internally for resolution as part of the broader integration test effort.
 
 ---
 
@@ -957,7 +947,7 @@ grep -rn ": Any" src/omnibase_infra/ | grep -v __pycache__
 - [Pydantic GitHub Issue #3278: Recursive type support](https://github.com/pydantic/pydantic/issues/3278)
 - [Pydantic Documentation on JSON Types](https://docs.pydantic.dev/latest/concepts/json/)
 - PR #116: Initial introduction of this workaround
-- OMN-1104: Refactor RegistrationReducer to be fully declarative
-- [OMN-1262](https://linear.app/omninode/issue/OMN-1262): Migration tracking issue for Any type cleanup
-- [OMN-1263](https://linear.app/omninode/issue/OMN-1263): Pre-existing test failures and integration test coverage
-- **[OMN-1274](https://linear.app/omninode/issue/OMN-1274): Migration completion - Any to JsonType (2026-01-08)**
+- : Refactor RegistrationReducer to be fully declarative
+- : Migration tracking issue for Any type cleanup
+- : Pre-existing test failures and integration test coverage
+- **: Migration completion - Any to JsonType (2026-01-08)**

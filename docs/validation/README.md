@@ -6,6 +6,9 @@ Comprehensive validation system for omnibase_infra, ensuring code quality, archi
 
 > **Note**: For authoritative coding rules and standards that validators enforce, see [CLAUDE.md](../../CLAUDE.md).
 
+Point-in-time validation coverage reports are not kept in this docs tree. Current
+coverage expectations are documented here and in [Validator Reference](validator_reference.md).
+
 ## Quick Start
 
 ```bash
@@ -33,18 +36,16 @@ uv run python scripts/validate.py all --quick
 
 **Implementation**: `scripts/check_architecture.sh` (bash script)
 
-**Ticket Reference**: OMN-255
-
 **What it checks**:
 - Forbidden infrastructure imports in core layer
 - Packages like kafka, httpx, asyncpg, redis, consul, etc.
 
 **Why it matters**: The ONEX architecture requires strict layer separation. Infrastructure packages belong in `omnibase_infra`, not `omnibase_core`.
 
-**Known Issues** (tracked in Linear, not blocking):
-- `aiohttp`: OMN-1015
-- `redis`: OMN-1295
-- `consul`: OMN-1015
+**Known Issues** (not blocking):
+- `aiohttp`: async HTTP client needs migration to the infra layer
+- `redis`: Redis client needs migration to the infra layer
+- `consul`: Consul import is limited to type-checking use
 
 See [Validator Reference](validator_reference.md#architecture_layers) for full documentation.
 
@@ -96,7 +97,7 @@ See [Validator Reference](validator_reference.md#architecture_layers) for full d
 
 **Configuration**:
 - Max unions: `491` (buffer above ~485 baseline, target: <200)
-- Strict mode: `True` (flags actual violations per OMN-983)
+- Strict mode: `True` (flags actual violations)
 - Directory: `src/omnibase_infra/`
 
 **What it checks**:
@@ -117,6 +118,38 @@ See [Validator Reference](validator_reference.md#architecture_layers) for full d
 - Import errors
 
 **Why it matters**: Infrastructure packages have complex dependencies (Consul, Kafka, Infisical). Circular imports cause runtime issues that are hard to debug.
+
+### 6. Markdown Link Validator (HIGH Priority For Docs)
+**Purpose**: Ensure repository docs do not contain broken local links.
+
+**Implementation**: `scripts/validation/validate_markdown_links.py`
+
+**What it checks**:
+- Markdown links resolve to existing local files
+- Relative doc links remain valid after docs are moved or deleted
+
+**Why it matters**: Documentation is treated as an architecture surface. Broken
+entrypoints hide stale ownership claims and make docs refresh work hard to
+verify.
+
+### 7. Event Bus Coverage Checks
+**Purpose**: Keep Kafka event-bus behavior covered at unit and integration
+boundaries.
+
+**Primary surfaces**:
+- `tests/unit/event_bus/`
+- `tests/unit/runtime/test_event_bus_subcontract_wiring.py`
+- `tests/integration/handlers/`
+- `scripts/check_topic_drift.py`
+- `scripts/validation/check_topic_completeness.py`
+- `scripts/validation/check_topic_literals.py`
+
+**Coverage expectations**:
+- Topic names follow [Topic Taxonomy](../standards/TOPIC_TAXONOMY.md).
+- Runtime wiring tests cover event-bus subcontract binding behavior.
+- Kafka config tests cover session timeout, heartbeat, auth, and reconnect
+  validation.
+- Topic drift and completeness scripts remain runnable from the repo root.
 
 ## Validation Results
 
@@ -168,8 +201,8 @@ INFRA_SRC_PATH = "src/omnibase_infra/"
 INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 INFRA_MAX_UNIONS = 491          # Buffer above ~485 baseline (target: <200)
 INFRA_MAX_VIOLATIONS = 0
-INFRA_PATTERNS_STRICT = True    # Strict mode with documented exemptions (OMN-983)
-INFRA_UNIONS_STRICT = True      # Strict union validation (OMN-983)
+INFRA_PATTERNS_STRICT = True    # Strict mode with documented exemptions
+INFRA_UNIONS_STRICT = True      # Strict union validation
 ```
 
 ### Customization

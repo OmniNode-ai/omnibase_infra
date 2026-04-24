@@ -4,7 +4,6 @@
 
 **Status**: Accepted
 **Date**: 2026-01-13
-**Related Tickets**: OMN-1317, PR #143
 
 ## Context
 

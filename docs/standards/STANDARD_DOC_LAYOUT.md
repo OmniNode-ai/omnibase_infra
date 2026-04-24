@@ -13,7 +13,7 @@ Prescriptive structure for the `docs/` directory in `omnibase_infra`.
 3. [File Naming](#file-naming)
 4. [Required Sections in Every Doc File](#required-sections-in-every-doc-file)
 5. [Doc Authority Model](#doc-authority-model)
-6. [Deleted Content Policy](#deleted-content-policy)
+6. [Historical Content Policy](#historical-content-policy)
 7. [See Also](#see-also)
 
 ---
@@ -112,11 +112,16 @@ Brief description of this directory's purpose.
 
 ---
 
-## Deleted Content Policy
+## Historical Content Policy
 
-- Completed plans, stale analyses, and point-in-time reports are **deleted outright**
-- No `archive/` directories — if unused, delete it
-- Inbound links to deleted files must be removed or updated in the same commit
+- Current runtime, architecture, operations, and reference guidance belongs in
+  this repository.
+- Historical plans, stale analyses, point-in-time verification reports, and old
+  POC writeups are removed from the primary docs tree.
+- If historical material contains current guidance, promote the current guidance
+  into a stable doc before removing the historical file.
+- Do not create public `archive/` directories in this repo.
+- Inbound links to removed files must be removed or updated in the same commit.
 
 ---
 

@@ -13,7 +13,7 @@ This document covers:
 - Error behavior and error codes
 - Best practices for context path naming and multi-tenant patterns
 
-**Related**: [OMN-1518](https://linear.app/omninode/issue/OMN-1518) (parent feature), [OMN-1644](https://linear.app/omninode/issue/OMN-1644) (observability)
+**Related**:  (parent feature),  (observability)
 
 ---
 

@@ -12,7 +12,7 @@ Accepted
 
 ## Context
 
-The ONEX 2-way registration pattern E2E tests (OMN-892) require performance threshold assertions to ensure the registration flow meets latency requirements. These tests run against remote infrastructure at remote infrastructure server, which introduces network latency that differs significantly from local development environments.
+The ONEX 2-way registration pattern E2E tests require performance threshold assertions to ensure the registration flow meets latency requirements. These tests run against remote infrastructure at remote infrastructure server, which introduces network latency that differs significantly from local development environments.
 
 **Problem Statement**: Without documented performance baselines:
 
@@ -21,7 +21,7 @@ The ONEX 2-way registration pattern E2E tests (OMN-892) require performance thre
 3. **Unclear expectations**: Developers don't know if a threshold violation indicates a real problem
 4. **Maintenance burden**: No guidance on when or how to recalibrate thresholds
 
-The original OMN-892 requirements assumed local infrastructure with minimal latency. When tests were implemented against production-like remote infrastructure, the thresholds needed recalibration.
+The original  requirements assumed local infrastructure with minimal latency. When tests were implemented against production-like remote infrastructure, the thresholds needed recalibration.
 
 ## Decision
 
@@ -106,7 +106,7 @@ Documented conditions requiring recalibration:
 - **Clear expectations**: Developers understand what each threshold means and why
 - **Maintainability**: Documented recalibration process for future changes
 - **Environment awareness**: Guidance for adjusting thresholds per environment
-- **Traceability**: Linked to OMN-892 and calibration date for context
+- **Traceability**: Linked to  and calibration date for context
 
 ### Negative
 
@@ -186,7 +186,6 @@ collector.print_summary()
 
 ## References
 
-- **OMN-892**: INFRA MVP: 2-Way Registration E2E Integration Test
 - **PR #101**: Implementation pull request
 - **CLAUDE.md (shared)**: Infrastructure topology and service endpoints
 - `performance_utils.py`: Full threshold documentation and utilities

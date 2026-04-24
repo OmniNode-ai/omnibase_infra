@@ -4,8 +4,7 @@
 
 **Status**: Accepted
 **Date**: 2026-01-16
-**Related Tickets**: OMN-1306, OMN-1350
-**Follow-up Tickets**: OMN-1363 (validator), OMN-1362 (migration)
+**Follow-up Tickets**:  (validator),  (migration)
 
 ## Context
 
@@ -498,7 +497,7 @@ This requires broader architectural consensus and is tracked separately.
 
 ### Finding Direct Constructor Usage
 
-These are quick manual checks for ad-hoc verification. The `correlation_patterns` validator ([OMN-1363](https://linear.app/omninode/issue/OMN-1363)) provides robust AST-based detection with proper exemption handling.
+These are quick manual checks for ad-hoc verification. The `correlation_patterns` validator provides robust AST-based detection with proper exemption handling.
 
 ```bash
 # Quick check: Find potential violations (direct constructor without with_correlation)
@@ -523,7 +522,7 @@ grep -rn "correlation_id.*or.*uuid4()" src/ --include="*.py" \
     | grep -v "model_infra_error_context.py"
 ```
 
-**Note**: These grep commands are for quick manual verification only. They may produce false positives (e.g., comments, string literals, docstrings) and miss complex patterns (e.g., multiline expressions, indirect variable assignment). Use the AST-based validator for authoritative enforcement once [OMN-1363](https://linear.app/omninode/issue/OMN-1363) is implemented.
+**Note**: These grep commands are for quick manual verification only. They may produce false positives (e.g., comments, string literals, docstrings) and miss complex patterns (e.g., multiline expressions, indirect variable assignment). Use the AST-based validator for authoritative enforcement once  is implemented.
 
 ### Code Review Checklist
 
@@ -539,12 +538,8 @@ When reviewing code with `ModelInfraErrorContext`:
 - CLAUDE.md "Error Context" section
 - `src/omnibase_infra/models/errors/model_infra_error_context.py`
 - `scripts/validate.py` - Existing validator framework
-- [OMN-1306](https://linear.app/omninode/issue/OMN-1306) - Infrastructure error context refactoring
-- [OMN-1350](https://linear.app/omninode/issue/OMN-1350) - Document factory pattern in ADR
-- [OMN-1363](https://linear.app/omninode/issue/OMN-1363) - Validator implementation (follow-up)
-- [OMN-1362](https://linear.app/omninode/issue/OMN-1362) - Migration to factory pattern (follow-up)
 
 ### Planned Follow-up Work
 
-- **Validator Implementation** ([OMN-1363](https://linear.app/omninode/issue/OMN-1363)): Implement `scripts/validate.py correlation_patterns` validator with pre-commit and CI integration (see "Lint/Validator Enforcement" section above)
-- **Migration** ([OMN-1362](https://linear.app/omninode/issue/OMN-1362)): Migrate existing codebase to use `with_correlation()` factory pattern consistently
+- **Validator Implementation**: Implement `scripts/validate.py correlation_patterns` validator with pre-commit and CI integration (see "Lint/Validator Enforcement" section above)
+- **Migration**: Migrate existing codebase to use `with_correlation()` factory pattern consistently

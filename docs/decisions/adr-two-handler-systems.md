@@ -4,18 +4,17 @@
 
 **Status**: Accepted
 **Date**: 2026-02-24
-**Related Tickets**: OMN-1973, OMN-1931, OMN-1929
 
 ---
 
 ## Context
 
-During OMN-1931 research (2026-02-06), it was discovered that omnibase_infra contains
+During  research (2026-02-06), it was discovered that omnibase_infra contains
 two completely separate handler systems that are superficially similar — both are called
 "handlers", both process messages — but have fundamentally different discovery, routing,
 wiring, and contract semantics.
 
-This distinction was **not documented anywhere**, which caused OMN-1931 to be planned
+This distinction was **not documented anywhere**, which caused  to be planned
 under the false assumption that the orchestrator needed its own Docker Compose service.
 Future contributors will make the same architectural mistake without this ADR.
 
@@ -225,5 +224,5 @@ preserved until a clear migration path for Option B or C is defined.
 - `src/omnibase_infra/runtime/service_message_dispatch_engine.py` — Dispatch engine
 - [adr-handler-type-vs-handler-category](adr-handler-type-vs-handler-category.md) — Three-dimensional handler type system
 - [adr-006-message-dispatch-engine-canonical-routing](adr-006-message-dispatch-engine-canonical-routing.md) — MessageDispatchEngine as canonical pattern
-- OMN-1931: Research that discovered this architectural gap
-- OMN-1929: Parent epic with architecture findings
+- : Research that discovered this architectural gap
+- : Parent epic with architecture findings

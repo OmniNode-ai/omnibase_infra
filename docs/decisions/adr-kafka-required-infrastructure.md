@@ -2,7 +2,6 @@
 
 **Status**: Accepted
 **Date**: 2026-02-10
-**Ticket**: OMN-2084
 
 ## Context
 

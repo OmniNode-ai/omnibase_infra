@@ -8,7 +8,7 @@ Operational guide for tuning thread pool configurations in omnibase_infra compon
 
 The omnibase_infra project uses `ThreadPoolExecutor` from `concurrent.futures` to handle synchronous blocking operations within async contexts. This pattern is essential for integrating synchronous client libraries with asyncio-based infrastructure.
 
-> **Note**: The secret management backend migrated from HashiCorp Vault (hvac) to Infisical in OMN-2288. The Infisical SDK is async-native and does **not** require thread pool wrapping. The thread pool configuration documented below applies to legacy synchronous adapters only.
+> **Note**: The secret management backend migrated from HashiCorp Vault (hvac) to Infisical in . The Infisical SDK is async-native and does **not** require thread pool wrapping. The thread pool configuration documented below applies to legacy synchronous adapters only.
 
 ## Thread Pool Locations
 

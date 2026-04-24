@@ -445,8 +445,6 @@ Use ISO 8601 format: `2025-01-01T00:00:00Z`
 
 ## Related Tickets
 
-- OMN-949 - DLQ configuration and routing
-- OMN-1032 - PostgreSQL replay tracking integration
 
 ---
 
