@@ -12,6 +12,7 @@ Tests prove:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -147,12 +148,15 @@ async def test_delegation_plugin_resolves_subscriber_bus_from_container() -> Non
         PluginDelegation,
     )
 
-    bus = EventBusInmemory(environment="test", group="test")
-    await bus.start()
+    resolved_bus = EventBusInmemory(environment="test", group="test-resolved")
+    fallback_bus = EventBusInmemory(environment="test", group="test-fallback")
+    await resolved_bus.start()
+    await fallback_bus.start()
 
     # Set up a container that returns the bus from service_registry
     registry = MagicMock()
-    registry.resolve_service = AsyncMock(return_value=bus)
+    registry.resolve_service = AsyncMock(return_value=resolved_bus)
+    registry.register_instance = AsyncMock()
 
     plugin = PluginDelegation()
     plugin._handler_wiring_succeeded = True
@@ -168,7 +172,7 @@ async def test_delegation_plugin_resolves_subscriber_bus_from_container() -> Non
     dispatch_engine.dispatch = AsyncMock()
 
     config = _make_plugin_config(
-        event_bus=bus,
+        event_bus=fallback_bus,
         service_registry=registry,
         dispatch_engine=dispatch_engine,
         node_identity=node_identity,
@@ -180,14 +184,26 @@ async def test_delegation_plugin_resolves_subscriber_bus_from_container() -> Non
     with (
         patch(
             "omnibase_infra.runtime.event_bus_subcontract_wiring.load_event_bus_subcontract",
-            return_value=None,
+            return_value=SimpleNamespace(
+                subscribe_topics=["onex.cmd.test.input.v1"],
+            ),
         ),
+        patch(
+            "omnibase_infra.runtime.event_bus_subcontract_wiring.EventBusSubcontractWiring"
+        ) as wiring_cls,
     ):
+        wiring = MagicMock()
+        wiring.wire_subscriptions = AsyncMock()
+        wiring_cls.return_value = wiring
         result = await plugin.start_consumers(config)
 
-    # When subcontract is None, plugin skips gracefully — but it MUST have called
-    # resolve_service with ProtocolEventBusSubscriber before checking subcontract.
-    registry.resolve_service.assert_called_once_with(ProtocolEventBusSubscriber)
+    assert isinstance(result, ModelDomainPluginResult)
+    assert registry.resolve_service.call_args_list[0].args == (
+        ProtocolEventBusSubscriber,
+    )
+    assert wiring_cls.call_args.kwargs["event_bus"] is resolved_bus
+    assert wiring_cls.call_args.kwargs["event_bus"] is not config.event_bus
+    wiring.wire_subscriptions.assert_awaited_once()
 
 
 @pytest.mark.unit
@@ -283,11 +299,14 @@ async def test_registration_plugin_resolves_subscriber_bus_from_container() -> N
         ServiceRegistration,
     )
 
-    bus = EventBusInmemory(environment="test", group="test")
-    await bus.start()
+    resolved_bus = EventBusInmemory(environment="test", group="test-resolved")
+    fallback_bus = EventBusInmemory(environment="test", group="test-fallback")
+    await resolved_bus.start()
+    await fallback_bus.start()
 
     registry = MagicMock()
-    registry.resolve_service = AsyncMock(return_value=bus)
+    registry.resolve_service = AsyncMock(return_value=resolved_bus)
+    registry.register_instance = AsyncMock()
 
     plugin = ServiceRegistration()
     plugin._handler_wiring_succeeded = True
@@ -303,7 +322,7 @@ async def test_registration_plugin_resolves_subscriber_bus_from_container() -> N
     dispatch_engine.dispatch = AsyncMock()
 
     config = _make_plugin_config(
-        event_bus=bus,
+        event_bus=fallback_bus,
         service_registry=registry,
         dispatch_engine=dispatch_engine,
         node_identity=node_identity,
@@ -313,13 +332,24 @@ async def test_registration_plugin_resolves_subscriber_bus_from_container() -> N
     with (
         patch(
             "omnibase_infra.runtime.event_bus_subcontract_wiring.load_event_bus_subcontract",
-            return_value=None,
+            return_value=SimpleNamespace(
+                subscribe_topics=["onex.cmd.test.input.v1"],
+            ),
         ),
+        patch(
+            "omnibase_infra.runtime.event_bus_subcontract_wiring.EventBusSubcontractWiring"
+        ) as wiring_cls,
     ):
+        wiring = MagicMock()
+        wiring.wire_subscriptions = AsyncMock()
+        wiring_cls.return_value = wiring
         result = await plugin.start_consumers(config)
 
-    # Resolution must have been attempted with ProtocolEventBusSubscriber
+    assert isinstance(result, ModelDomainPluginResult)
     registry.resolve_service.assert_called_once_with(ProtocolEventBusSubscriber)
+    assert wiring_cls.call_args.kwargs["event_bus"] is resolved_bus
+    assert wiring_cls.call_args.kwargs["event_bus"] is not config.event_bus
+    wiring.wire_subscriptions.assert_awaited_once()
 
 
 @pytest.mark.unit
