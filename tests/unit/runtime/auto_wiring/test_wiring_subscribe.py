@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import yaml
 
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     subscribe_wired_contract_topics,
@@ -313,6 +314,37 @@ class TestMakeEventBusCallbackFallbackPath:
         assert isinstance(call_envelope, ModelEventEnvelope)
 
     @pytest.mark.asyncio
+    async def test_raw_message_derives_event_type_from_topic(self) -> None:
+        """Object-erased Kafka envelopes must still route by topic-derived event_type."""
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, MagicMock
+
+        from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            _make_event_bus_callback,
+        )
+
+        dispatch_engine = MagicMock()
+        dispatch_engine.dispatch = AsyncMock()
+
+        callback = _make_event_bus_callback(
+            "onex.evt.platform.node-heartbeat.v1",
+            dispatch_engine,  # type: ignore[arg-type]
+        )
+
+        envelope = ModelEventEnvelope[object].model_construct(
+            payload={"node_id": "runtime_config"},
+            correlation_id=None,
+        )
+        message = SimpleNamespace(value=envelope.model_dump_json().encode())
+
+        await callback(message)
+
+        dispatch_engine.dispatch.assert_called_once()
+        _, call_envelope = dispatch_engine.dispatch.call_args.args
+        assert call_envelope.event_type == "platform.node-heartbeat"
+
+    @pytest.mark.asyncio
     async def test_valid_envelope_result_is_applied_when_applier_supplied(
         self,
     ) -> None:
@@ -346,3 +378,24 @@ class TestMakeEventBusCallbackFallbackPath:
 
         dispatch_engine.dispatch.assert_called_once()
         result_applier.apply.assert_awaited_once_with(dispatch_result, None)
+
+    def test_registration_heartbeat_handler_declares_wire_event_type(self) -> None:
+        """The heartbeat handler must match the event_type derived from the Kafka topic."""
+        contract_path = (
+            Path(__file__).parents[4]
+            / "src"
+            / "omnibase_infra"
+            / "nodes"
+            / "node_registration_orchestrator"
+            / "contract.yaml"
+        )
+        contract = yaml.safe_load(contract_path.read_text())
+
+        heartbeat_handlers = [
+            handler
+            for handler in contract["handler_routing"]["handlers"]
+            if handler["handler"]["name"] == "HandlerNodeHeartbeat"
+        ]
+
+        assert len(heartbeat_handlers) == 1
+        assert heartbeat_handlers[0]["event_type"] == "platform.node-heartbeat"

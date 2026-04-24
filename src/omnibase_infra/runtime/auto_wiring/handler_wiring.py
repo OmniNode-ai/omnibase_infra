@@ -525,6 +525,12 @@ def _make_event_bus_callback(
 
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
+    def _derive_event_type_from_topic(topic: str) -> str | None:
+        parts = topic.split(".")
+        if len(parts) >= 5 and parts[0] == "onex":
+            return f"{parts[2]}.{parts[3]}"
+        return None
+
     async def callback(message: object) -> None:
         try:
             raw = getattr(message, "value", None)
@@ -535,6 +541,17 @@ def _make_event_bus_callback(
                 envelope: ModelEventEnvelope[object] = ModelEventEnvelope[
                     object
                 ].model_validate(data)
+                explicit_event_type = data.get("event_type")
+                if explicit_event_type:
+                    envelope = envelope.model_copy(
+                        update={"event_type": explicit_event_type}
+                    )
+                else:
+                    derived_event_type = _derive_event_type_from_topic(topic)
+                    if derived_event_type is not None:
+                        envelope = envelope.model_copy(
+                            update={"event_type": derived_event_type}
+                        )
             else:
                 if not isinstance(message, ModelEventEnvelope):
                     logger.warning(

@@ -444,6 +444,7 @@ handler_routing:
     - event_model:
         name: "ModelNodeHeartbeatEvent"
         module: "omnibase_infra.models.registration.model_node_heartbeat_event"
+      event_type: "platform.node-heartbeat"
       handler:
         name: "HandlerNodeHeartbeat"
         module: "omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_heartbeat"
