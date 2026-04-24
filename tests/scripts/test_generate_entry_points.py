@@ -40,11 +40,14 @@ def script():  # type: ignore[return]
 
 @pytest.mark.unit
 def test_collect_node_dirs_returns_node_dirs(script, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    """collect_node_dirs() should return directories matching node_* pattern."""
+    """collect_node_dirs() should return contract-backed node_* directories."""
     nodes_dir = tmp_path / "src" / "mypkg" / "nodes"
     nodes_dir.mkdir(parents=True)
     (nodes_dir / "node_alpha").mkdir()
+    (nodes_dir / "node_alpha" / "contract.yaml").touch()
     (nodes_dir / "node_beta").mkdir()
+    (nodes_dir / "node_beta" / "contract.yaml").touch()
+    (nodes_dir / "node_model_only").mkdir()
     (nodes_dir / "__pycache__").mkdir()
     (nodes_dir / "helpers").mkdir()
 
@@ -53,6 +56,7 @@ def test_collect_node_dirs_returns_node_dirs(script, tmp_path: Path) -> None:  #
 
     assert "node_alpha" in names
     assert "node_beta" in names
+    assert "node_model_only" not in names
     assert "__pycache__" not in names
     assert "helpers" not in names
 
@@ -74,8 +78,11 @@ def test_collect_node_dirs_sorted(script, tmp_path: Path) -> None:  # type: igno
     nodes_dir = tmp_path / "src" / "mypkg" / "nodes"
     nodes_dir.mkdir(parents=True)
     (nodes_dir / "node_z").mkdir()
+    (nodes_dir / "node_z" / "contract.yaml").touch()
     (nodes_dir / "node_a").mkdir()
+    (nodes_dir / "node_a" / "contract.yaml").touch()
     (nodes_dir / "node_m").mkdir()
+    (nodes_dir / "node_m" / "contract.yaml").touch()
 
     result = script.collect_node_dirs(tmp_path, "mypkg")
     names = [p.name for p in result]
@@ -88,8 +95,11 @@ def test_collect_node_dirs_exclude_migrated(script, tmp_path: Path) -> None:  # 
     nodes_dir = tmp_path / "src" / "mypkg" / "nodes"
     nodes_dir.mkdir(parents=True)
     (nodes_dir / "node_alpha").mkdir()
+    (nodes_dir / "node_alpha" / "contract.yaml").touch()
     (nodes_dir / "node_beta").mkdir()
+    (nodes_dir / "node_beta" / "contract.yaml").touch()
     (nodes_dir / "node_gamma").mkdir()
+    (nodes_dir / "node_gamma" / "contract.yaml").touch()
 
     result = script.collect_node_dirs(
         tmp_path, "mypkg", exclude={"node_beta", "node_gamma"}
@@ -110,7 +120,9 @@ def test_build_entry_point_section_format(script, tmp_path: Path) -> None:  # ty
     nodes_dir = tmp_path / "src" / "mypkg" / "nodes"
     nodes_dir.mkdir(parents=True)
     (nodes_dir / "node_alpha").mkdir()
+    (nodes_dir / "node_alpha" / "contract.yaml").touch()
     (nodes_dir / "node_beta").mkdir()
+    (nodes_dir / "node_beta" / "contract.yaml").touch()
 
     node_dirs = script.collect_node_dirs(tmp_path, "mypkg")
     section = script.build_entry_point_section(node_dirs, "mypkg")
@@ -138,6 +150,7 @@ def test_build_entry_point_section_matches_omnimarket_format(
     nodes_dir = tmp_path / "src" / "omnimarket" / "nodes"
     nodes_dir.mkdir(parents=True)
     (nodes_dir / "node_merge_sweep").mkdir()
+    (nodes_dir / "node_merge_sweep" / "contract.yaml").touch()
 
     node_dirs = script.collect_node_dirs(tmp_path, "omnimarket")
     section = script.build_entry_point_section(node_dirs, "omnimarket")
@@ -156,6 +169,7 @@ def test_check_mode_exits_0_when_clean(script, tmp_path: Path) -> None:  # type:
     nodes_dir = tmp_path / "src" / "mypkg" / "nodes"
     nodes_dir.mkdir(parents=True)
     (nodes_dir / "node_alpha").mkdir()
+    (nodes_dir / "node_alpha" / "contract.yaml").touch()
 
     node_dirs = script.collect_node_dirs(tmp_path, "mypkg")
     section = script.build_entry_point_section(node_dirs, "mypkg")
@@ -173,7 +187,9 @@ def test_check_mode_exits_1_when_drifted(script, tmp_path: Path) -> None:  # typ
     nodes_dir = tmp_path / "src" / "mypkg" / "nodes"
     nodes_dir.mkdir(parents=True)
     (nodes_dir / "node_alpha").mkdir()
+    (nodes_dir / "node_alpha" / "contract.yaml").touch()
     (nodes_dir / "node_beta").mkdir()
+    (nodes_dir / "node_beta" / "contract.yaml").touch()
 
     # pyproject only has node_alpha, missing node_beta
     pyproject = tmp_path / "pyproject.toml"
@@ -242,3 +258,13 @@ def test_omnimarket_collect_and_build_smoke(script) -> None:  # type: ignore[no-
     # Every found dir must have a corresponding entry line
     for nd in node_dirs:
         assert f'{nd.name} = "{pkg}.nodes.{nd.name}"' in section
+
+
+@pytest.mark.unit
+def test_current_repo_entry_points_match_contract_backed_nodes(script) -> None:  # type: ignore[no-untyped-def]
+    """omnibase_infra entry points should match contract-backed node directories."""
+    repo_root = Path(__file__).parent.parent.parent
+    node_dirs = script.collect_node_dirs(repo_root, "omnibase_infra")
+
+    assert len(node_dirs) > 50, f"Expected >50 nodes, found {len(node_dirs)}"
+    assert script.check_mode(repo_root, "omnibase_infra", node_dirs) == 0
