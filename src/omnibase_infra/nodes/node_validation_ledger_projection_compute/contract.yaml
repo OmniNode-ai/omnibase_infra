@@ -94,6 +94,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-06"
+  updated: "2026-04-24"
   ticket: "OMN-1908"
   tags:
     - compute
@@ -101,3 +102,6 @@ metadata:
     - projection
     - cross-repo-validation
     - deterministic-replay
+  related_tickets:
+    - "OMN-1908"
+    - "OMN-9151"

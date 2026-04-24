@@ -601,8 +601,11 @@ metadata:
   description: "Registration workflow orchestrator that coordinates node lifecycle by calling reducer for intents and effect for execution."
   author: "OmniNode Team"
   created: "2025-12-18"
+  updated: "2026-04-24"
   tags:
     - "orchestrator"
     - "registration"
     - "workflow"
     - "mvp"
+  related_tickets:
+    - "OMN-9151"

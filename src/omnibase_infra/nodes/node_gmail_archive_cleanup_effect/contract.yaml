@@ -186,10 +186,13 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-25"
-  updated: "2026-02-25"
+  updated: "2026-04-24"
   tags:
     - effect
     - gmail
     - archive-cleanup
     - kafka-producer
     - scheduled
+  related_tickets:
+    - "OMN-2731"
+    - "OMN-9151"
