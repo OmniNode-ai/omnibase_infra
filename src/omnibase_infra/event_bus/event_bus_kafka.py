@@ -1238,7 +1238,7 @@ class EventBusKafka(
                 )
                 break  # No retry benefit; fall through to error raise
 
-            except KafkaError as e:
+            except KafkaError as e:  # NOTE: UnknownTopicOrPartitionError IS-A KafkaError — its handler MUST appear before this block
                 last_exception = e
                 async with self._circuit_breaker_lock:
                     await self._record_circuit_failure(
@@ -1293,6 +1293,15 @@ class EventBusKafka(
                 context=timeout_ctx,
                 topic=topic,
                 retry_count=self._max_retry_attempts + 1,
+            ) from last_exception
+        if isinstance(last_exception, UnknownTopicOrPartitionError):
+            # Topic does not exist — raise as a configuration error, not a connection error.
+            # Callers must be able to distinguish "topic missing" from "broker unreachable". (OMN-9553)
+            raise ProtocolConfigurationError(
+                f"Topic '{topic}' not found on broker. Ensure the topic is provisioned before publishing.",
+                context=context,
+                parameter="topic",
+                value=topic,
             ) from last_exception
         raise InfraConnectionError(
             f"Failed to publish to topic {topic} after {self._max_retry_attempts + 1} attempts",

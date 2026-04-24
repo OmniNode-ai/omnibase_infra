@@ -152,9 +152,7 @@ class ServiceRuntimeHealthMonitor:
         self._task: asyncio.Task[None] | None = None
         self._running = False
         self._boot_grace_seconds = boot_grace_seconds
-        self._started_at: float = (
-            time.monotonic()
-        )  # grace window starts at construction
+        self._started_at: float = time.monotonic()  # grace window starts at construction
 
     async def start(self) -> None:
         """Start the background health check loop. Idempotent.
