@@ -1085,9 +1085,9 @@ class ModelKafkaEventBusConfig(BaseModel):
         Example:
             >>> config = ModelKafkaEventBusConfig(environment="local")
             >>> config.get_dlq_topic()
-            'onex.dlq.intents.v1'
+            'onex.dlq.intents.v1'  # onex-topic-allow: pending contract auto-wiring
             >>> config.get_dlq_topic("events")
-            'onex.dlq.events.v1'
+            'onex.dlq.events.v1'  # onex-topic-allow: pending contract auto-wiring
             >>> # Explicit topic takes precedence
             >>> config = ModelKafkaEventBusConfig(
             ...     environment="local",

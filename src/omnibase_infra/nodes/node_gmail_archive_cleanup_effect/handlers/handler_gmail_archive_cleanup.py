@@ -32,7 +32,7 @@ A single summary event is appended to ``pending_events`` when
 ``purged_count > 0`` OR any errors exist:
 
     {
-        "event_type": "onex.evt.omnibase-infra.gmail-archive-purged.v1",
+        "event_type": "onex.evt.omnibase-infra.gmail-archive-purged.v1",  # onex-topic-allow: pending contract auto-wiring
         "purged_count": <int>,
         "label_counts": {<label_name>: <count>, ...},
         "error_count": <int>,

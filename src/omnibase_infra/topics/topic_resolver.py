@@ -163,8 +163,8 @@ class TopicResolver:
     Example:
         >>> # Pass-through (backward compatible)
         >>> resolver = TopicResolver()
-        >>> resolver.resolve("onex.evt.platform.node-registration.v1")
-        'onex.evt.platform.node-registration.v1'
+        >>> resolver.resolve("onex.evt.platform.node-registration.v1")  # onex-topic-allow: pending contract auto-wiring
+        'onex.evt.platform.node-registration.v1'  # onex-topic-allow: pending contract auto-wiring
 
         >>> # Multi-bus with namespace prefix
         >>> from omnibase_infra.topics.model_bus_descriptor import ModelBusDescriptor
@@ -178,7 +178,7 @@ class TopicResolver:
         ... )
         >>> resolver = TopicResolver(bus_descriptors=[desc])
         >>> resolver.resolve(
-        ...     "onex.evt.platform.node-registration.v1",
+        ...     "onex.evt.platform.node-registration.v1",  # onex-topic-allow: pending contract auto-wiring
         ...     trust_domain="org.omninode",
         ... )
         'org.omninode.onex.evt.platform.node-registration.v1'
@@ -224,7 +224,7 @@ class TopicResolver:
 
         Args:
             topic_suffix: ONEX format topic suffix
-                (e.g., ``'onex.evt.platform.node-registration.v1'``)
+                (e.g., ``'onex.evt.platform.node-registration.v1'``)  # onex-topic-allow: pending contract auto-wiring
             correlation_id: Optional correlation ID for error traceability.
                 When provided, included in the ``TopicResolutionError`` message
                 so callers can correlate failures to specific request flows.

@@ -9,7 +9,7 @@ contract_version:
   minor: 0
   patch: 0
 node_type: "SCHEMA"
-topic: "onex.cmd.omnibase-infra.delegation-request.v1"
+topic: "onex.cmd.omnibase-infra.delegation-request.v1" # onex-topic-sot
 schema_version: "1.0.0"
 ticket: "OMN-7360"
 description: >

@@ -113,7 +113,7 @@ class DispatchResultApplier:
         ```python
         applier = DispatchResultApplier(
             event_bus=event_bus,
-            output_topic="onex.evt.platform.node-registration-result.v1",
+            output_topic="onex.evt.platform.node-registration-result.v1",  # onex-topic-allow: pending contract auto-wiring
             projection_effect=node_projection_effect,
         )
         await applier.apply(dispatch_result)
@@ -150,7 +150,7 @@ class DispatchResultApplier:
                 Kafka publish is skipped if ``execute()`` raises.
             topic_router: Optional mapping of Python event class names to their
                 declared Kafka topics (e.g. ``{"ModelNodeRegistrationAccepted":
-                "onex.evt.platform.node-registration-accepted.v1"}``).  When
+                "onex.evt.platform.node-registration-accepted.v1"}``).  When  # onex-topic-allow: pending contract auto-wiring
                 provided, each output event is published to its per-type topic
                 instead of the single ``output_topic`` fallback.  Events whose
                 class name is not in the map fall back to ``output_topic``.

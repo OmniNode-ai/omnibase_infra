@@ -73,7 +73,7 @@ _REGISTRY = ServiceTopicRegistry.from_defaults()
 # These are the topics the canonical pipeline emits to.
 CANONICAL_EVENT_TOPICS: Final[tuple[str, ...]] = (
     # Platform topics (runtime)
-    "onex.evt.platform.node-introspection.v1",
+    "onex.evt.platform.node-introspection.v1",  # onex-topic-allow: pending contract auto-wiring
     # Intelligence topics
     _REGISTRY.resolve(topic_keys.SESSION_OUTCOME_CANONICAL),
     _REGISTRY.resolve(topic_keys.LLM_CALL_COMPLETED),

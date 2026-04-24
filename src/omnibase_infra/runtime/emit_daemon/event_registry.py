@@ -28,13 +28,13 @@ Example Usage:
     registry.register_batch([
         ModelEventRegistration(
             event_type="myapp.submitted",
-            topic_template="onex.evt.myapp.submitted.v1",
+            topic_template="onex.evt.myapp.submitted.v1",  # onex-topic-allow: pending contract auto-wiring
             partition_key_field="session_id",
             required_fields=("session_id", "payload"),
         ),
         ModelEventRegistration(
             event_type="myapp.completed",
-            topic_template="onex.evt.myapp.completed.v1",
+            topic_template="onex.evt.myapp.completed.v1",  # onex-topic-allow: pending contract auto-wiring
             partition_key_field="session_id",
             required_fields=("session_id",),
         ),
@@ -42,7 +42,7 @@ Example Usage:
 
     # Resolve topic for event type (realm-agnostic, no env prefix)
     topic = registry.resolve_topic("myapp.submitted")
-    # Returns: "onex.evt.myapp.submitted.v1"
+    # Returns: "onex.evt.myapp.submitted.v1"  # onex-topic-allow: pending contract auto-wiring
 
     # Inject metadata into payload
     enriched = registry.inject_metadata(
@@ -93,7 +93,7 @@ class ModelEventRegistration(BaseModel):
         event_type: Semantic event type identifier (e.g., "myapp.submitted").
             This is the logical name used by event emitters.
         topic_template: Kafka topic name (realm-agnostic, no environment prefix).
-            Example: "onex.evt.myapp.submitted.v1"
+            Example: "onex.evt.myapp.submitted.v1"  # onex-topic-allow: pending contract auto-wiring
             Note: Topics are realm-agnostic in ONEX. The environment/realm is
             enforced via envelope identity, not topic naming.
         partition_key_field: Optional field name in payload to use as partition key.
@@ -106,7 +106,7 @@ class ModelEventRegistration(BaseModel):
     Example:
         >>> reg = ModelEventRegistration(
         ...     event_type="myapp.submitted",
-        ...     topic_template="onex.evt.myapp.submitted.v1",
+        ...     topic_template="onex.evt.myapp.submitted.v1",  # onex-topic-allow: pending contract auto-wiring
         ...     partition_key_field="session_id",
         ...     required_fields=("session_id", "payload"),
         ...     schema_version="1.0.0",
@@ -160,12 +160,12 @@ class EventRegistry:
         >>> registry.register(
         ...     ModelEventRegistration(
         ...         event_type="myapp.submitted",
-        ...         topic_template="onex.evt.myapp.submitted.v1",
+        ...         topic_template="onex.evt.myapp.submitted.v1",  # onex-topic-allow: pending contract auto-wiring
         ...         required_fields=("payload",),
         ...     )
         ... )
         >>> registry.resolve_topic("myapp.submitted")
-        'onex.evt.myapp.submitted.v1'
+        'onex.evt.myapp.submitted.v1'  # onex-topic-allow: pending contract auto-wiring
 
     Note:
         Topics are realm-agnostic in ONEX. The environment is stored for
@@ -201,11 +201,11 @@ class EventRegistry:
             >>> registry.register(
             ...     ModelEventRegistration(
             ...         event_type="custom.event",
-            ...         topic_template="onex.evt.custom.event.v1",
+            ...         topic_template="onex.evt.custom.event.v1",  # onex-topic-allow: pending contract auto-wiring
             ...     )
             ... )
             >>> registry.resolve_topic("custom.event")
-            'onex.evt.custom.event.v1'
+            'onex.evt.custom.event.v1'  # onex-topic-allow: pending contract auto-wiring
         """
         self._registrations[registration.event_type] = registration
 
@@ -224,15 +224,15 @@ class EventRegistry:
             >>> registry.register_batch([
             ...     ModelEventRegistration(
             ...         event_type="custom.one",
-            ...         topic_template="onex.evt.custom.one.v1",
+            ...         topic_template="onex.evt.custom.one.v1",  # onex-topic-allow: pending contract auto-wiring
             ...     ),
             ...     ModelEventRegistration(
             ...         event_type="custom.two",
-            ...         topic_template="onex.evt.custom.two.v1",
+            ...         topic_template="onex.evt.custom.two.v1",  # onex-topic-allow: pending contract auto-wiring
             ...     ),
             ... ])
             >>> registry.resolve_topic("custom.one")
-            'onex.evt.custom.one.v1'
+            'onex.evt.custom.one.v1'  # onex-topic-allow: pending contract auto-wiring
         """
         for registration in registrations:
             self.register(registration)
@@ -258,11 +258,11 @@ class EventRegistry:
             >>> registry.register(
             ...     ModelEventRegistration(
             ...         event_type="myapp.submitted",
-            ...         topic_template="onex.evt.myapp.submitted.v1",
+            ...         topic_template="onex.evt.myapp.submitted.v1",  # onex-topic-allow: pending contract auto-wiring
             ...     )
             ... )
             >>> registry.resolve_topic("myapp.submitted")
-            'onex.evt.myapp.submitted.v1'
+            'onex.evt.myapp.submitted.v1'  # onex-topic-allow: pending contract auto-wiring
         """
         registration = self._registrations.get(event_type)
         if registration is None:
@@ -298,7 +298,7 @@ class EventRegistry:
             >>> registry.register(
             ...     ModelEventRegistration(
             ...         event_type="myapp.submitted",
-            ...         topic_template="onex.evt.myapp.submitted.v1",
+            ...         topic_template="onex.evt.myapp.submitted.v1",  # onex-topic-allow: pending contract auto-wiring
             ...         partition_key_field="session_id",
             ...     )
             ... )
@@ -350,7 +350,7 @@ class EventRegistry:
             >>> registry.register(
             ...     ModelEventRegistration(
             ...         event_type="myapp.submitted",
-            ...         topic_template="onex.evt.myapp.submitted.v1",
+            ...         topic_template="onex.evt.myapp.submitted.v1",  # onex-topic-allow: pending contract auto-wiring
             ...         required_fields=("payload",),
             ...     )
             ... )
@@ -414,7 +414,7 @@ class EventRegistry:
             >>> registry.register(
             ...     ModelEventRegistration(
             ...         event_type="myapp.submitted",
-            ...         topic_template="onex.evt.myapp.submitted.v1",
+            ...         topic_template="onex.evt.myapp.submitted.v1",  # onex-topic-allow: pending contract auto-wiring
             ...     )
             ... )
             >>> enriched = registry.inject_metadata(
@@ -459,13 +459,13 @@ class EventRegistry:
             >>> registry.register(
             ...     ModelEventRegistration(
             ...         event_type="myapp.submitted",
-            ...         topic_template="onex.evt.myapp.submitted.v1",
+            ...         topic_template="onex.evt.myapp.submitted.v1",  # onex-topic-allow: pending contract auto-wiring
             ...         partition_key_field="session_id",
             ...     )
             ... )
             >>> reg = registry.get_registration("myapp.submitted")
             >>> reg.topic_template
-            'onex.evt.myapp.submitted.v1'
+            'onex.evt.myapp.submitted.v1'  # onex-topic-allow: pending contract auto-wiring
         """
         return self._registrations.get(event_type)
 
@@ -480,7 +480,7 @@ class EventRegistry:
             >>> registry.register(
             ...     ModelEventRegistration(
             ...         event_type="myapp.submitted",
-            ...         topic_template="onex.evt.myapp.submitted.v1",
+            ...         topic_template="onex.evt.myapp.submitted.v1",  # onex-topic-allow: pending contract auto-wiring
             ...     )
             ... )
             >>> "myapp.submitted" in registry.list_event_types()

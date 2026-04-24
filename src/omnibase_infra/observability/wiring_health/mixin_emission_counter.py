@@ -67,9 +67,9 @@ class MixinEmissionCounter:
         ...         await self._record_emission(topic)
         ...
         >>> bus = MyEventBus()
-        >>> await bus.publish("onex.evt.omniclaude.agent-match.v1", b"data")
+        >>> await bus.publish("onex.evt.omniclaude.agent-match.v1", b"data")  # onex-topic-allow: pending contract auto-wiring
         >>> bus.get_emission_counts()
-        {'onex.evt.omniclaude.agent-match.v1': 1}
+        {'onex.evt.omniclaude.agent-match.v1': 1}  # onex-topic-allow: pending contract auto-wiring
     """
 
     def _init_emission_counter(

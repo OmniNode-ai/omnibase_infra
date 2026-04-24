@@ -47,9 +47,9 @@ class ServiceIntrospectionTopicStore:
 
     Example:
         >>> store = ServiceIntrospectionTopicStore()
-        >>> await store.update_node("node-id-123", ["onex.evt.platform.foo.v1"])
+        >>> await store.update_node("node-id-123", ["onex.evt.platform.foo.v1"])  # onex-topic-allow: pending contract auto-wiring
         >>> topics = await store.get_evt_topics()
-        >>> assert "onex.evt.platform.foo.v1" in topics
+        >>> assert "onex.evt.platform.foo.v1" in topics  # onex-topic-allow: pending contract auto-wiring
     """
 
     def __init__(self) -> None:

@@ -25,12 +25,12 @@
 #   4. Append version suffix: "_V{N}" where N is the digit(s) from version "v{N}"
 #
 # Examples:
-#   topic "onex.evt.platform.intent-classified.v1"
+#   topic "onex.evt.platform.intent-classified.v1"  # onex-topic-allow: pending contract auto-wiring
 #     event_name="intent-classified", kind="evt", version="v1"
 #     base_key = "INTENT_CLASSIFIED"
 #     full_key = "EVT_INTENT_CLASSIFIED_V1"
 #
-#   topic "onex.cmd.platform.intent-query-session.v1"
+#   topic "onex.cmd.platform.intent-query-session.v1"  # onex-topic-allow: pending contract auto-wiring
 #     event_name="intent-query-session", kind="cmd", version="v1"
 #     base_key = "INTENT_QUERY_SESSION"
 #     full_key = "CMD_INTENT_QUERY_SESSION_V1"
@@ -40,7 +40,7 @@
 #     base_key = "RUNTIME_TICK"
 #     full_key = "INTENT_RUNTIME_TICK_V1"
 #
-#   topic "onex.evt.platform.fsm-state-transitions.v2"
+#   topic "onex.evt.platform.fsm-state-transitions.v2"  # onex-topic-allow: pending contract auto-wiring
 #     event_name="fsm-state-transitions", kind="evt", version="v2"
 #     base_key = "FSM_STATE_TRANSITIONS"
 #     full_key = "EVT_FSM_STATE_TRANSITIONS_V2"

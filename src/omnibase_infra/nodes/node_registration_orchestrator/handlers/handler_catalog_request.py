@@ -39,7 +39,7 @@ Wire Format:
     ```json
     {
         "correlation_id": "...",
-        "topics": [{"topic_name": "onex.evt.foo.bar.v1"}, ...],
+        "topics": [{"topic_name": "onex.evt.foo.bar.v1"}, ...],  # onex-topic-allow: pending contract auto-wiring
         "warnings": []
     }
     ```

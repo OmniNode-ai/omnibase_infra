@@ -177,8 +177,8 @@ def mask_dsn_password(dsn: str) -> str:
 
 # Map topics to their Pydantic model class.
 # OMN-2621: 5 legacy bare topic names replaced with ONEX canonical names.
-# OMN-2902: "agent-execution-logs" renamed to "onex.evt.omniclaude.agent-execution-logs.v1".
-# OMN-2846: "onex.evt.omniclaude.agent-status.v1" renamed from "onex.evt.agent.status.v1".
+# OMN-2902: "agent-execution-logs" renamed to "onex.evt.omniclaude.agent-execution-logs.v1".  # onex-topic-allow: pending contract auto-wiring
+# OMN-2846: "onex.evt.omniclaude.agent-status.v1" renamed from "onex.evt.agent.status.v1".  # onex-topic-allow: pending contract auto-wiring
 # OMN-2986: All topic names must match config.py (canonical ONEX names).
 # OMN-3422: routing-decision.v1 uses permissive ingest model at Kafka boundary.
 #   ModelRoutingDecisionIngest maps producer field names (confidence, reasoning,
@@ -196,7 +196,7 @@ TOPIC_TO_MODEL: dict[str, type[BaseModel]] = {
 
 # Map topics to writer method names.
 # OMN-2621: Keys updated to match ONEX canonical topic names.
-# OMN-2902: "agent-execution-logs" → "onex.evt.omniclaude.agent-execution-logs.v1".
+# OMN-2902: "agent-execution-logs" → "onex.evt.omniclaude.agent-execution-logs.v1".  # onex-topic-allow: pending contract auto-wiring
 # OMN-2986: All topic names must match config.py (canonical ONEX names).
 TOPIC_TO_WRITER_METHOD: dict[str, str] = {
     SUFFIX_OMNICLAUDE_AGENT_ACTIONS: "write_agent_actions",

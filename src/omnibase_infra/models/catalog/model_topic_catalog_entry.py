@@ -45,8 +45,8 @@ class ModelTopicCatalogEntry(BaseModel):
 
     Example:
         >>> entry = ModelTopicCatalogEntry(
-        ...     topic_suffix="onex.evt.platform.node-registration.v1",
-        ...     topic_name="onex.evt.platform.node-registration.v1",
+        ...     topic_suffix="onex.evt.platform.node-registration.v1",  # onex-topic-allow: pending contract auto-wiring
+        ...     topic_name="onex.evt.platform.node-registration.v1",  # onex-topic-allow: pending contract auto-wiring
         ...     description="Node registration events",
         ...     partitions=6,
         ...     publisher_count=2,

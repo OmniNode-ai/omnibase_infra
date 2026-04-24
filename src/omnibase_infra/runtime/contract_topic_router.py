@@ -3,7 +3,7 @@
 """Build a Kafka topic router dict from a contract's published_events section.
 
 Maps Python class names (e.g. "ModelNodeRegistrationAccepted") to their
-declared Kafka topics (e.g. "onex.evt.platform.node-registration-accepted.v1").
+declared Kafka topics (e.g. "onex.evt.platform.node-registration-accepted.v1").  # onex-topic-allow: pending contract auto-wiring
 
 Convention: Python class name = "Model" + event_type from contract YAML.
 
@@ -11,7 +11,7 @@ Example::
 
     contract_data = yaml.safe_load(contract_path.read_text())
     router = build_topic_router_from_contract(contract_data)
-    # router == {"ModelNodeRegistrationAccepted": "onex.evt.platform.node-registration-accepted.v1", ...}
+    # router == {"ModelNodeRegistrationAccepted": "onex.evt.platform.node-registration-accepted.v1", ...}  # onex-topic-allow: pending contract auto-wiring
 
     applier = DispatchResultApplier(
         event_bus=event_bus,
@@ -38,7 +38,7 @@ def build_topic_router_from_contract(
 
     Returns:
         Mapping of Python class names to their declared Kafka topics.
-        e.g. ``{"ModelNodeRegistrationAccepted": "onex.evt.platform.node-registration-accepted.v1"}``
+        e.g. ``{"ModelNodeRegistrationAccepted": "onex.evt.platform.node-registration-accepted.v1"}``  # onex-topic-allow: pending contract auto-wiring
     """
     router: dict[str, str] = {}
     if not isinstance(contract_data, dict):

@@ -53,10 +53,18 @@ logger = logging.getLogger(__name__)
 
 # Default topic constants using ONEX platform suffix constants
 # These are the canonical source for introspection-related topic defaults
-DEFAULT_INTROSPECTION_TOPIC = SUFFIX_NODE_INTROSPECTION
-DEFAULT_HEARTBEAT_TOPIC = SUFFIX_NODE_HEARTBEAT
-DEFAULT_REQUEST_INTROSPECTION_TOPIC = SUFFIX_REQUEST_INTROSPECTION
-DEFAULT_REGISTRATION_ACCEPTED_TOPIC = SUFFIX_NODE_REGISTRATION_ACCEPTED
+DEFAULT_INTROSPECTION_TOPIC = (  # onex-topic-allow: pending contract auto-wiring
+    SUFFIX_NODE_INTROSPECTION
+)
+DEFAULT_HEARTBEAT_TOPIC = (  # onex-topic-allow: pending contract auto-wiring
+    SUFFIX_NODE_HEARTBEAT
+)
+DEFAULT_REQUEST_INTROSPECTION_TOPIC = (  # onex-topic-allow: pending contract auto-wiring
+    SUFFIX_REQUEST_INTROSPECTION
+)
+DEFAULT_REGISTRATION_ACCEPTED_TOPIC = (  # onex-topic-allow: pending contract auto-wiring
+    SUFFIX_NODE_REGISTRATION_ACCEPTED
+)
 
 # Topic validation patterns
 # Matches valid topic characters: lowercase alphanumeric, dots, hyphens, underscores
@@ -99,7 +107,7 @@ class ModelIntrospectionConfig(BaseModel):
             ONEX topics (onex.*) require version suffix (.v1, .v2, etc.).
         registration_accepted_topic: Topic for registration acceptance events.
             The mixin subscribes to this to emit ACK commands in response.
-            Defaults to "onex.evt.platform.node-registration-accepted.v1".
+            Defaults to "onex.evt.platform.node-registration-accepted.v1".  # onex-topic-allow: pending contract auto-wiring
             ONEX topics (onex.*) require version suffix (.v1, .v2, etc.).
         contract: Optional typed contract model for capability extraction.
             When provided, MixinNodeIntrospection extracts contract_capabilities

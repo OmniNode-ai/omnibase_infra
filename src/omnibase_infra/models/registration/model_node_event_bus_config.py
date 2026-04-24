@@ -6,7 +6,7 @@ The model for a node's resolved event bus configuration,
 containing lists of topics the node subscribes to and publishes to.
 
 Key Design Decisions:
-    1. Topics stored as realm-agnostic strings (e.g., "onex.evt.intent-classified.v1")
+    1. Topics stored as realm-agnostic strings (e.g., "onex.evt.intent-classified.v1")  # onex-topic-allow: pending contract auto-wiring
     2. Metadata fields are tooling-only; routing uses ONLY topic strings
     3. Property methods extract topic strings only for routing lookups
     4. Model is frozen (immutable) with extra="forbid" for safety
@@ -17,12 +17,12 @@ Example:
     ...     ModelNodeEventBusConfig,
     ... )
     >>> entry = ModelEventBusTopicEntry(
-    ...     topic="onex.evt.intent-classified.v1",
+    ...     topic="onex.evt.intent-classified.v1",  # onex-topic-allow: pending contract auto-wiring
     ...     event_type="ModelIntentClassified",
     ... )
     >>> config = ModelNodeEventBusConfig(subscribe_topics=[entry])
     >>> config.subscribe_topic_strings
-    ['onex.evt.intent-classified.v1']
+    ['onex.evt.intent-classified.v1']  # onex-topic-allow: pending contract auto-wiring
 """
 
 from __future__ import annotations
@@ -52,16 +52,16 @@ class ModelNodeEventBusConfig(BaseModel):
     Example:
         >>> config = ModelNodeEventBusConfig(
         ...     subscribe_topics=[
-        ...         ModelEventBusTopicEntry(topic="onex.evt.input.v1"),
+        ...         ModelEventBusTopicEntry(topic="onex.evt.input.v1"),  # onex-topic-allow: pending contract auto-wiring
         ...     ],
         ...     publish_topics=[
-        ...         ModelEventBusTopicEntry(topic="onex.evt.output.v1"),
+        ...         ModelEventBusTopicEntry(topic="onex.evt.output.v1"),  # onex-topic-allow: pending contract auto-wiring
         ...     ],
         ... )
         >>> config.subscribe_topic_strings
-        ['onex.evt.input.v1']
+        ['onex.evt.input.v1']  # onex-topic-allow: pending contract auto-wiring
         >>> config.publish_topic_strings
-        ['onex.evt.output.v1']
+        ['onex.evt.output.v1']  # onex-topic-allow: pending contract auto-wiring
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

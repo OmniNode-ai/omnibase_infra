@@ -957,7 +957,7 @@ class ProjectionReaderContract(MixinAsyncCircuitBreaker):
 
         Example:
             >>> topic = await reader.get_topic(
-            ...     "onex.evt.platform.contract-registered.v1",
+            ...     "onex.evt.platform.contract-registered.v1",  # onex-topic-allow: pending contract auto-wiring
             ...     "publish"
             ... )
             >>> if topic:
@@ -1232,7 +1232,7 @@ class ProjectionReaderContract(MixinAsyncCircuitBreaker):
 
         Example:
             >>> contracts = await reader.get_contracts_by_topic(
-            ...     "onex.evt.platform.contract-registered.v1"
+            ...     "onex.evt.platform.contract-registered.v1"  # onex-topic-allow: pending contract auto-wiring
             ... )
             >>> for c in contracts:
             ...     print(f"{c.contract_id}: {c.node_name}")

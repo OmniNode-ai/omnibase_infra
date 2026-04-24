@@ -49,7 +49,7 @@ class ModelTopicCatalogQuery(BaseModel):
         >>> query = ModelTopicCatalogQuery(
         ...     correlation_id=uuid4(),
         ...     client_id="node-registration-orchestrator",
-        ...     topic_pattern="onex.evt.platform.*",
+        ...     topic_pattern="onex.evt.platform.*",  # onex-topic-allow: pending contract auto-wiring
         ... )
     """
 

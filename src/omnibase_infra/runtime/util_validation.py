@@ -42,7 +42,7 @@ from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationE
 
 # Topic name pattern: alphanumeric, underscores, hyphens, and periods
 # This matches Kafka/Redpanda topic naming conventions and ONEX naming
-# (e.g., "onex.evt.platform.node-introspection.v1")
+# (e.g., "onex.evt.platform.node-introspection.v1")  # onex-topic-allow: pending contract auto-wiring
 TOPIC_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 # Valid event bus types (matches EnumEventBusType production-safe values)

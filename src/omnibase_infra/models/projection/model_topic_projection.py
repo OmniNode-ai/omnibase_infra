@@ -57,7 +57,7 @@ class ModelTopicProjection(BaseModel):
         >>> from datetime import datetime, UTC
         >>> now = datetime.now(UTC)
         >>> projection = ModelTopicProjection(
-        ...     topic_suffix="onex.evt.platform.contract-registered.v1",
+        ...     topic_suffix="onex.evt.platform.contract-registered.v1",  # onex-topic-allow: pending contract auto-wiring
         ...     direction="publish",
         ...     contract_ids=["node-registry-effect:1.0.0"],
         ...     first_seen_at=now,

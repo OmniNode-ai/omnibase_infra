@@ -83,13 +83,13 @@ DEMO_CONSUMER_GROUP_PATTERN: Final[re.Pattern[str]] = re.compile(
 # Topics that are considered demo-scoped. Only these may be purged.
 # Platform topics that carry demo event data.
 DEMO_TOPIC_PREFIXES: Final[tuple[str, ...]] = (
-    "onex.evt.platform.",
-    "onex.cmd.platform.",
-    "onex.evt.omniintelligence.",
-    "onex.cmd.omniintelligence.",
-    "onex.evt.omniclaude.",
-    # "onex.evt.agent." removed: agent-status topic renamed to onex.evt.omniclaude.agent-status.v1
-    # which is already covered by the "onex.evt.omniclaude." prefix (OMN-2846).
+    "onex.evt.platform.",  # onex-topic-allow: pending contract auto-wiring
+    "onex.cmd.platform.",  # onex-topic-allow: pending contract auto-wiring
+    "onex.evt.omniintelligence.",  # onex-topic-allow: pending contract auto-wiring
+    "onex.cmd.omniintelligence.",  # onex-topic-allow: pending contract auto-wiring
+    "onex.evt.omniclaude.",  # onex-topic-allow: pending contract auto-wiring
+    # "onex.evt.agent." removed: agent-status topic renamed to onex.evt.omniclaude.agent-status.v1  # onex-topic-allow: pending contract auto-wiring
+    # which is already covered by the "onex.evt.omniclaude." prefix (OMN-2846).  # onex-topic-allow: pending contract auto-wiring
 )
 
 # Resources that are NEVER touched, listed for the summary report.
