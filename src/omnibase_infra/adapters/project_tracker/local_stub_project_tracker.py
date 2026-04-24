@@ -45,7 +45,7 @@ class LocalStubProjectTracker:
 
     def __init__(self, state_root: Path | None = None) -> None:
         if state_root is None:
-            state_root = Path.home() / ".onex_state" / "local-tracker"
+            state_root = Path(".onex_state") / "local-tracker"
         self._state_root = Path(state_root)
         self._state_file = self._state_root / "project_tracker_stub.json"
         self._lock = threading.Lock()

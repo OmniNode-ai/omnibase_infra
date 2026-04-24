@@ -127,6 +127,7 @@ See [Validator Reference](validator_reference.md#architecture_layers) for full d
 **What it checks**:
 - Markdown links resolve to existing local files
 - Relative doc links remain valid after docs are moved or deleted
+- External link targets are reachable via HTTP HEAD requests
 
 **Why it matters**: Documentation is treated as an architecture surface. Broken
 entrypoints hide stale ownership claims and make docs refresh work hard to
