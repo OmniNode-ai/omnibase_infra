@@ -1888,6 +1888,7 @@ async def bootstrap() -> int:
         # could modify the engine while an early plugin's consumer is already
         # dispatching messages through it.
         plugin_activation_start = time.time()
+        auto_wiring_result_appliers = {}
 
         # --- Kernel-native: ServiceRegistration lifecycle (OMN-7115) ---
         # ServiceRegistration runs its lifecycle directly, not through the
@@ -1933,6 +1934,28 @@ async def bootstrap() -> int:
                         "ServiceRegistration wiring completed (correlation_id=%s)",
                         correlation_id,
                     )
+                    result_prepare = await registration_service.prepare_result_applier(
+                        plugin_config,
+                    )
+                    if (
+                        result_prepare.success
+                        and registration_service.result_applier is not None
+                    ):
+                        auto_wiring_result_appliers[
+                            "node_registration_orchestrator"
+                        ] = registration_service.result_applier
+                        logger.info(
+                            "ServiceRegistration result applier registered for "
+                            "contract auto-wiring (correlation_id=%s)",
+                            correlation_id,
+                        )
+                    else:
+                        logger.warning(
+                            "ServiceRegistration result applier unavailable for "
+                            "contract auto-wiring: %s (correlation_id=%s)",
+                            result_prepare.get_error_message_or_default(),
+                            correlation_id,
+                        )
                 else:
                     logger.warning(
                         "ServiceRegistration handler wiring failed: %s "
@@ -2213,6 +2236,7 @@ async def bootstrap() -> int:
                     environment=environment,
                     container=container,
                     subscribe_immediately=False,
+                    result_appliers_by_contract=auto_wiring_result_appliers,
                 )
 
                 auto_wiring_duration = time.time() - auto_wiring_start
@@ -2284,6 +2308,7 @@ async def bootstrap() -> int:
                 dispatch_engine=dispatch_engine,
                 event_bus=event_bus,
                 environment=environment,
+                result_appliers_by_contract=auto_wiring_result_appliers,
             )
             for contract_name, topics in auto_wired_subscriptions.items():
                 for topic in topics:

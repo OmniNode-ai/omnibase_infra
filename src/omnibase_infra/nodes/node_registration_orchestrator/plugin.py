@@ -104,6 +104,9 @@ if TYPE_CHECKING:
         EventBusSubcontractWiring,
     )
     from omnibase_infra.runtime.projector_shell import ProjectorShell
+    from omnibase_infra.runtime.service_dispatch_result_applier import (
+        DispatchResultApplier,
+    )
     from omnibase_infra.runtime.service_intent_executor import IntentExecutor
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -228,6 +231,7 @@ class ServiceRegistration:
         self._registration_storage: HandlerRegistrationStoragePostgres | None = None
         self._snapshot_publisher: SnapshotPublisherRegistration | None = None
         self._wiring: EventBusSubcontractWiring | None = None
+        self._result_applier: DispatchResultApplier | None = None
         self._shutdown_in_progress: bool = False
         self._handler_wiring_succeeded: bool = False
 
@@ -255,6 +259,11 @@ class ServiceRegistration:
     def snapshot_publisher(self) -> SnapshotPublisherRegistration | None:
         """Return the snapshot publisher (for external access)."""
         return self._snapshot_publisher
+
+    @property
+    def result_applier(self) -> DispatchResultApplier | None:
+        """Return the registration dispatch result applier."""
+        return self._result_applier
 
     def should_activate(self, config: ModelDomainPluginConfig) -> bool:
         """Check if Registration should activate based on environment.
@@ -1026,75 +1035,49 @@ class ServiceRegistration:
             ),
         )
 
-    async def start_consumers(
+    async def prepare_result_applier(
         self,
         config: ModelDomainPluginConfig,
     ) -> ModelDomainPluginResult:
-        """Start event consumers via EventBusSubcontractWiring.
+        """Prepare registration result application for auto-wired consumers.
 
-        Reads subscribe_topics from the registration orchestrator contract
-        and wires Kafka subscriptions through EventBusSubcontractWiring.
-        Messages are deserialized and dispatched through the frozen
-        MessageDispatchEngine. Output events are published by the
-        DispatchResultApplier.
-
-        Requires config.node_identity and config.dispatch_engine to be set.
+        Generic contract auto-wiring owns registration event-bus subscriptions.
+        This plugin still owns the registration-domain output side: topic
+        routing, intent effects, and the DispatchResultApplier that publishes
+        events and executes intents returned by registration handlers.
 
         Args:
-            config: Plugin configuration with event_bus, node_identity,
-                and dispatch_engine.
+            config: Plugin configuration with container and event bus.
 
         Returns:
-            Result with unsubscribe_callbacks for cleanup.
+            Result indicating whether result application services are ready.
         """
         start_time = time.time()
         correlation_id = config.correlation_id
 
-        # Guard: do not start consumers if handler wiring failed. Starting
-        # consumers without wired handlers would route messages to an empty
-        # dispatch engine, causing silent message loss or RuntimeHostError.
+        if self._result_applier is not None:
+            return ModelDomainPluginResult(
+                plugin_id=self.plugin_id,
+                success=True,
+                message="Registration result applier already prepared",
+                duration_seconds=0.0,
+            )
+
         if not self._handler_wiring_succeeded:
             logger.warning(
-                "Skipping consumer startup: handler wiring did not succeed "
+                "Skipping result-applier preparation: handler wiring did not succeed "
                 "for plugin '%s' (correlation_id=%s)",
                 self.plugin_id,
                 correlation_id,
             )
             return ModelDomainPluginResult.skipped(
                 plugin_id=self.plugin_id,
-                reason="Handler wiring did not succeed — consumers not started",
-            )
-
-        if config.dispatch_engine is None:
-            return ModelDomainPluginResult.skipped(
-                plugin_id=self.plugin_id,
-                reason="dispatch_engine not available",
-            )
-
-        # Check for subscribe capability via runtime-checkable protocol.
-        # ProtocolEventBusSubscriber is @runtime_checkable, so isinstance works
-        # without coupling to concrete InMemoryEventBus / KafkaEventBus.
-        from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
-            ProtocolEventBusSubscriber,
-        )
-
-        if not isinstance(config.event_bus, ProtocolEventBusSubscriber):
-            return ModelDomainPluginResult.skipped(
-                plugin_id=self.plugin_id,
-                reason="Event bus does not support subscribe",
-            )
-
-        if config.node_identity is None:
-            return ModelDomainPluginResult.skipped(
-                plugin_id=self.plugin_id,
-                reason="node_identity not set (required for consumer subscription)",
+                reason="Handler wiring did not succeed — result applier not prepared",
             )
 
         try:
             from omnibase_core.enums import EnumInjectionScope
             from omnibase_infra.runtime.event_bus_subcontract_wiring import (
-                EventBusSubcontractWiring,
-                load_event_bus_subcontract,
                 load_published_events_map,
             )
             from omnibase_infra.runtime.service_dispatch_result_applier import (
@@ -1104,20 +1087,7 @@ class ServiceRegistration:
                 IntentExecutor,
             )
 
-            # Load event_bus subcontract from registration orchestrator contract
             contract_path = Path(__file__).parent / "contract.yaml"
-            subcontract = load_event_bus_subcontract(contract_path, logger=logger)
-
-            if subcontract is None:
-                return ModelDomainPluginResult.skipped(
-                    plugin_id=self.plugin_id,
-                    reason=f"No event_bus subcontract in {contract_path}",
-                )
-
-            # Load per-event-type topic routing from contract published_events
-            # (OMN-5132).  Maps event_type names to their declared Kafka topics
-            # so DispatchResultApplier can route each output event to the correct
-            # topic instead of a single output_topic fallback.
             published_events_map = load_published_events_map(
                 contract_path, logger=logger
             )
@@ -1179,6 +1149,7 @@ class ServiceRegistration:
                 topic_router=_TOPIC_ROUTER,
                 output_topic_map=published_events_map,
             )
+            self._result_applier = result_applier
 
             # Register DispatchResultApplier in the DI container for the same
             # container-based DI consistency.
@@ -1197,72 +1168,24 @@ class ServiceRegistration:
                     correlation_id,
                 )
 
-            # Create EventBusSubcontractWiring with dispatch engine and result applier
-            self._wiring = EventBusSubcontractWiring(
-                event_bus=config.event_bus,
-                dispatch_engine=config.dispatch_engine,
-                environment=config.node_identity.env,
-                node_name=config.node_identity.node_name,
-                service=config.node_identity.service,
-                version=config.node_identity.version,
-                result_applier=result_applier,
-            )
-
-            # Register EventBusSubcontractWiring in the DI container for
-            # consistent service resolution and discoverability.
-            if config.container.service_registry is not None:
-                await config.container.service_registry.register_instance(
-                    interface=EventBusSubcontractWiring,
-                    instance=self._wiring,
-                    scope=EnumInjectionScope.GLOBAL,
-                    metadata={
-                        "description": "Event bus subcontract wiring for registration domain",
-                        "plugin_id": self.plugin_id,
-                    },
-                )
-                logger.debug(
-                    "Registered EventBusSubcontractWiring in container "
-                    "(correlation_id=%s)",
-                    correlation_id,
-                )
-
-            # Wire subscriptions from contract-declared topics
-            await self._wiring.wire_subscriptions(
-                subcontract=subcontract,
-                node_name="registration-orchestrator",
-            )
-
             logger.info(
-                "Registration consumers started via EventBusSubcontractWiring "
+                "Registration result applier prepared for auto-wired consumers "
                 "(correlation_id=%s)",
                 correlation_id,
-                extra={
-                    "subscribe_topics": subcontract.subscribe_topics,
-                    "topic_count": len(subcontract.subscribe_topics)
-                    if subcontract.subscribe_topics
-                    else 0,
-                },
             )
 
             duration = time.time() - start_time
-
-            # Cleanup callback wraps the wiring cleanup
-            async def _cleanup_wiring() -> None:
-                if self._wiring is not None:
-                    await self._wiring.cleanup()
-
             return ModelDomainPluginResult(
                 plugin_id=self.plugin_id,
                 success=True,
-                message="Registration consumers started via EventBusSubcontractWiring",
+                message="Registration result applier prepared",
                 duration_seconds=duration,
-                unsubscribe_callbacks=[_cleanup_wiring],
             )
 
         except Exception as e:
             duration = time.time() - start_time
             logger.exception(
-                "Failed to start registration consumers (correlation_id=%s)",
+                "Failed to prepare registration result applier (correlation_id=%s)",
                 correlation_id,
             )
             return ModelDomainPluginResult.failed(
@@ -1270,6 +1193,38 @@ class ServiceRegistration:
                 error_message=sanitize_error_message(e),
                 duration_seconds=duration,
             )
+
+    async def start_consumers(
+        self,
+        config: ModelDomainPluginConfig,
+    ) -> ModelDomainPluginResult:
+        """Skip plugin-local registration subscriptions.
+
+        Generic contract auto-wiring owns registration subscriptions because
+        ``node_registration_orchestrator/contract.yaml`` declares both
+        ``event_bus.subscribe_topics`` and ``handler_routing``. The plugin
+        prepares the registration DispatchResultApplier separately so
+        auto-wired callbacks can apply handler outputs without creating a
+        second consumer family.
+
+        Args:
+            config: Plugin configuration.
+
+        Returns:
+            A skipped-success result documenting the single-authority boundary.
+        """
+        if self._result_applier is None:
+            prepare_result = await self.prepare_result_applier(config)
+            if not prepare_result.success:
+                return prepare_result
+
+        return ModelDomainPluginResult.skipped(
+            plugin_id=self.plugin_id,
+            reason=(
+                "generic contract auto-wiring owns registration event-bus "
+                "subscriptions (OMN-9557)"
+            ),
+        )
 
     async def _wire_intent_effects(
         self,

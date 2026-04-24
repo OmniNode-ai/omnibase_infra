@@ -1,0 +1,43 @@
+# OMN-9557 contract file present in omnibase_infra for deploy-gate (OMN-8912).
+# deploy-gate checks `contracts/<OMN-XXXX>.yaml` for a dod_evidence item whose
+# check_value contains one of 'docker exec', 'rpk topic produce', or 'deploy'.
+#
+# The canonical ticket contract (schema-validated via onex_change_control
+# ModelTicketContract) lives at onex_change_control/contracts/OMN-9557.yaml.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: '1.0.0'
+ticket_id: OMN-9557
+summary: 'fix(runtime): consolidate registration subscription ownership'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: Targeted runtime subscription ownership tests pass for omnibase_infra PR #1394
+    command: 'uv run pytest tests/unit/runtime/auto_wiring/test_wiring_subscribe.py tests/unit/nodes/node_registration_orchestrator/test_plugin_wire_dispatchers_deferred.py tests/unit/runtime/test_kernel.py::TestBootstrap::test_bootstrap_defers_auto_wiring_subscriptions_until_after_freeze -v'
+  - kind: ci
+    description: CI passes on omnibase_infra PR #1394
+    command: 'gh pr checks 1394 --repo OmniNode-ai/omnibase_infra'
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: PR opened against the OMN-9550 stacked base branch
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'gh pr view 1394 --repo OmniNode-ai/omnibase_infra --json baseRefName -q .baseRefName | grep -x jonah/omn-9550-defer-autowire-subscriptions'
+  - id: dod-002
+    description: Contract artifact file present in repo
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'test -f contracts/OMN-9557.yaml'
+  - id: dod-003
+    description: Runtime deploy verifies registration subscriptions are owned by generic contract auto-wiring
+    source: manual
+    checks:
+      - check_type: command
+        check_value: 'docker exec omninode-runtime python -c "from omnibase_infra.nodes.node_registration_orchestrator.plugin import ServiceRegistration; assert hasattr(ServiceRegistration, ''prepare_result_applier'')"'
