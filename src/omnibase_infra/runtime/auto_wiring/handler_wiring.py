@@ -27,7 +27,7 @@ import logging
 import os
 import re
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
@@ -45,6 +45,9 @@ from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
 from omnibase_core.services.service_handler_resolver import ServiceHandlerResolver
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
+)
+from omnibase_infra.protocols.protocol_dispatch_result_applier import (
+    ProtocolDispatchResultApplier,
 )
 from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
     EnumQuarantineReason,
@@ -258,11 +261,11 @@ class PreparedContractWiring:
     _commit_contract_wiring returns skip_result directly in that case.
     """
 
-    contract: object  # ModelDiscoveredContract
+    contract: ModelDiscoveredContract
     prepared_wirings: list[PreparedWiring]
     subscription_topics: list[str]  # topics to subscribe after commit
     environment: str
-    skip_result: object = None  # ModelContractWiringResult | None
+    skip_result: ModelContractWiringResult | None = None
 
 
 def _import_handler_class(module_path: str, class_name: str) -> type:
@@ -510,11 +513,13 @@ def _make_projection_dispatch_callback(
 def _make_event_bus_callback(
     topic: str,
     dispatch_engine: ProtocolDispatchEngine,
+    result_applier: ProtocolDispatchResultApplier | None = None,
 ) -> Callable[..., Awaitable[None]]:
     """Create a Kafka on_message callback that deserializes and dispatches to engine.
 
     Mirrors EventBusSubcontractWiring._create_dispatch_callback but stripped of
-    DLQ/idempotency concerns — auto-wired nodes rely on the simplified path.
+    DLQ/idempotency concerns. When a result applier is supplied, dispatcher
+    outputs are applied on the same auto-wired path that owns the subscription.
     """
     import json
 
@@ -540,7 +545,9 @@ def _make_event_bus_callback(
                     )
                     return
                 envelope = message
-            await dispatch_engine.dispatch(topic, envelope)
+            result = await dispatch_engine.dispatch(topic, envelope)
+            if result_applier is not None and result is not None:
+                await result_applier.apply(result, envelope.correlation_id)
         except Exception as exc:  # noqa: BLE001 — boundary: log and discard; unsubscribe unavailable here
             logger.error(
                 "Auto-wiring callback error: topic=%s error_type=%s error=%s",
@@ -656,6 +663,8 @@ async def wire_from_manifest(
     container: object | None = None,
     *,
     subscribe_immediately: bool = True,
+    result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
+    | None = None,
 ) -> ModelAutoWiringReport:
     """Wire all discovered contracts into the dispatch engine and event bus.
 
@@ -686,6 +695,9 @@ async def wire_from_manifest(
             during this call. When False, only dispatchers/routes are registered;
             callers must invoke ``subscribe_wired_contract_topics()`` after the
             dispatch engine is frozen.
+        result_appliers_by_contract: Optional per-contract dispatch result
+            appliers. Only contracts present in this mapping apply dispatcher
+            outputs from auto-wired callbacks.
 
     Returns:
         A :class:`ModelAutoWiringReport` with per-contract outcomes.
@@ -802,6 +814,7 @@ async def wire_from_manifest(
             dispatch_engine,
             event_bus,
             subscribe_immediately=subscribe_immediately,
+            result_applier=(result_appliers_by_contract or {}).get(pcw.contract.name),
         )
         results.append(result)
 
@@ -863,6 +876,8 @@ async def subscribe_wired_contract_topics(
     dispatch_engine: ProtocolDispatchEngine,
     event_bus: object | None,
     environment: str = "dev",
+    result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
+    | None = None,
 ) -> dict[str, tuple[str, ...]]:
     """Subscribe Kafka topics for contracts that already wired successfully.
 
@@ -887,6 +902,7 @@ async def subscribe_wired_contract_topics(
             dispatch_engine=dispatch_engine,
             event_bus=event_bus,
             environment=environment,
+            result_applier=(result_appliers_by_contract or {}).get(contract.name),
         )
         subscriptions_by_contract[contract.name] = tuple(topics_subscribed)
 
@@ -987,6 +1003,7 @@ async def _commit_contract_wiring(
     event_bus: object | None,
     *,
     subscribe_immediately: bool = True,
+    result_applier: ProtocolDispatchResultApplier | None = None,
 ) -> ModelContractWiringResult:
     """Commit a validated PreparedContractWiring to the engine and event bus.
 
@@ -1046,6 +1063,7 @@ async def _commit_contract_wiring(
                 dispatch_engine=dispatch_engine,
                 event_bus=event_bus,
                 environment=pcw.environment,
+                result_applier=result_applier,
             )
         )
 
@@ -1092,6 +1110,7 @@ async def _subscribe_contract_topics(
     dispatch_engine: object,
     event_bus: object,
     environment: str,
+    result_applier: ProtocolDispatchResultApplier | None = None,
 ) -> list[str]:
     """Subscribe all declared event-bus topics for a wired contract."""
     if contract.event_bus is None or not contract.event_bus.subscribe_topics:
@@ -1116,7 +1135,11 @@ async def _subscribe_contract_topics(
 
     topics_subscribed: list[str] = []
     for topic in contract.event_bus.subscribe_topics:
-        callback = _make_event_bus_callback(topic, dispatch_engine)  # type: ignore[arg-type]
+        callback = _make_event_bus_callback(
+            topic,
+            dispatch_engine,  # type: ignore[arg-type]
+            result_applier=result_applier,
+        )
         await typed_bus.subscribe(
             topic=topic,
             node_identity=node_identity,

@@ -311,3 +311,38 @@ class TestMakeEventBusCallbackFallbackPath:
         dispatch_engine.dispatch.assert_called_once()
         _, call_envelope = dispatch_engine.dispatch.call_args.args
         assert isinstance(call_envelope, ModelEventEnvelope)
+
+    @pytest.mark.asyncio
+    async def test_valid_envelope_result_is_applied_when_applier_supplied(
+        self,
+    ) -> None:
+        """Auto-wired callbacks apply dispatcher results when ownership supplies an applier."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            _make_event_bus_callback,
+        )
+
+        dispatch_result = MagicMock()
+        dispatch_engine = MagicMock()
+        dispatch_engine.dispatch = AsyncMock(return_value=dispatch_result)
+
+        result_applier = MagicMock()
+        result_applier.apply = AsyncMock()
+
+        callback = _make_event_bus_callback(
+            "onex.cmd.test.v1",
+            dispatch_engine,  # type: ignore[arg-type]
+            result_applier=result_applier,
+        )
+
+        envelope = ModelEventEnvelope[object].model_construct(
+            event_type="onex.cmd.test.v1",
+            payload={},
+            correlation_id=None,
+        )
+        await callback(envelope)
+
+        dispatch_engine.dispatch.assert_called_once()
+        result_applier.apply.assert_awaited_once_with(dispatch_result, None)
