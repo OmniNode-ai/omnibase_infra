@@ -883,6 +883,7 @@ class ServiceRegistration:
     async def _cleanup_on_failure(self, config: ModelDomainPluginConfig) -> None:
         """Clean up resources if initialization fails."""
         correlation_id = config.correlation_id
+        self._result_applier = None
 
         if self._registration_storage is not None:
             try:
@@ -1524,6 +1525,7 @@ class ServiceRegistration:
 
         self._projector = None
         self._wiring = None
+        self._result_applier = None
 
         duration = time.time() - start_time
 

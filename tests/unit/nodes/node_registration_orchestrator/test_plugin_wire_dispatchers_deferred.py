@@ -194,3 +194,28 @@ async def test_start_consumers_skips_plugin_local_event_bus_wiring() -> None:
     assert "auto-wiring" in result.message.lower()
     assert plugin.result_applier is not None
     wiring_cls.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cleanup_on_failure_clears_cached_result_applier() -> None:
+    """Failed initialization must not leave stale output wiring cached."""
+    plugin = ServiceRegistration()
+    plugin._result_applier = MagicMock()  # type: ignore[assignment]
+
+    await plugin._cleanup_on_failure(_make_plugin_config())  # type: ignore[attr-defined]
+
+    assert plugin.result_applier is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_shutdown_clears_cached_result_applier() -> None:
+    """Shutdown must force the next boot to rebuild DI/effect wiring."""
+    plugin = ServiceRegistration()
+    plugin._result_applier = MagicMock()  # type: ignore[assignment]
+
+    result = await plugin._do_shutdown(_make_plugin_config())  # type: ignore[attr-defined]
+
+    assert result.success is True
+    assert plugin.result_applier is None
