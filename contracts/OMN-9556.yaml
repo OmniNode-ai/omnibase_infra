@@ -1,0 +1,40 @@
+# OMN-9556 contract file present in omnibase_infra for deploy-gate (OMN-8912).
+# deploy-gate checks `contracts/<OMN-XXXX>.yaml` for a dod_evidence item whose
+# check_value contains one of 'docker exec', 'rpk topic produce', or 'deploy'.
+# This file is the per-repo deploy-evidence carrier for the runtime PR.
+schema_version: '1.0.0'
+ticket_id: OMN-9556
+summary: 'refactor(runtime): resolve subscribe-capable event bus from container for domain plugins'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: ci
+    description: CI passes on omnibase_infra PR #1391
+    command: gh pr checks 1391 --repo OmniNode-ai/omnibase_infra
+  - kind: tests
+    description: Container subscriber resolution integration slice passes
+    command: uv run pytest tests/integration/runtime/test_event_bus_subscriber_container_resolution.py -v
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: PR opened against main branch
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'gh pr view 1391 --repo OmniNode-ai/omnibase_infra --json baseRefName -q .baseRefName | grep -x main'
+  - id: dod-002
+    description: Contract artifact file present in repo
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'test -f contracts/OMN-9556.yaml'
+  - id: dod-003
+    description: Runtime deploy validation confirms subscriber protocol is resolvable in deployed image
+    source: manual
+    checks:
+      - check_type: command
+        check_value: 'docker exec omninode-runtime python -c "from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import ProtocolEventBusSubscriber; from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory; assert isinstance(EventBusInmemory(environment=''local'', group=''deploy-check''), ProtocolEventBusSubscriber)"'
