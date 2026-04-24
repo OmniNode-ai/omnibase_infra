@@ -661,7 +661,7 @@ For bootstrap secrets or legacy code migration, add to `.secretresolver_allowlis
 
 ```text
 # SecretResolver Migration Allowlist
-# OMN-764: Centralized secret resolution
+# : Centralized secret resolution
 #
 # Format: filepath:line_number # ticket reason
 # Remove entries as files are migrated to use SecretResolver
@@ -672,25 +672,25 @@ For bootstrap secrets or legacy code migration, add to `.secretresolver_allowlis
 # ==============================================================================
 # Event Bus
 # ==============================================================================
-src/omnibase_infra/event_bus/models/config/model_kafka_event_bus_config.py:507 # OMN-764 KAFKA config from env
+src/omnibase_infra/event_bus/models/config/model_kafka_event_bus_config.py:507 #  KAFKA config from env
 
 # ==============================================================================
 # Runtime - Service Kernel
 # ==============================================================================
-src/omnibase_infra/runtime/service_kernel.py:157 # OMN-764 ONEX_CONTRACTS_DIR
-src/omnibase_infra/runtime/service_kernel.py:630 # OMN-764 POSTGRES_HOST
-src/omnibase_infra/runtime/service_kernel.py:635 # OMN-764 POSTGRES_USER
+src/omnibase_infra/runtime/service_kernel.py:157 #  ONEX_CONTRACTS_DIR
+src/omnibase_infra/runtime/service_kernel.py:630 #  POSTGRES_HOST
+src/omnibase_infra/runtime/service_kernel.py:635 #  POSTGRES_USER
 
 # ==============================================================================
 # Nodes - Registration Orchestrator Plugin
 # ==============================================================================
-src/omnibase_infra/nodes/node_registration_orchestrator/plugin.py:214 # OMN-764 POSTGRES_HOST
+src/omnibase_infra/nodes/node_registration_orchestrator/plugin.py:214 #  POSTGRES_HOST
 ```
 
 **Allowlist Conventions**:
 - Group entries by logical section using `# ===` delimiters
 - Use relative paths from repository root
-- Include ticket reference (e.g., `OMN-764`) and variable name as the reason
+- Include ticket reference (e.g., ``) and variable name as the reason
 - Remove entries as files are migrated to use SecretResolver
 - Bootstrap exceptions (e.g., `secret_resolver.py` itself) are hardcoded in the validator, not in the allowlist
 

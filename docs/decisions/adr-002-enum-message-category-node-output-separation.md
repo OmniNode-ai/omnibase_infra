@@ -335,7 +335,7 @@ violation = validator.validate_handler_output(params)
 
 ## References
 
-- **Ticket**: OMN-974 - Resolve EnumMessageCategory drift between core and infra
+- **Ticket**:  - Resolve EnumMessageCategory drift between core and infra
 - **PR**: #64 - fix(enums): resolve EnumMessageCategory drift between core and infra
 - **Related ADR**: See companion ADR at `docs/decisions/adr-enum-message-category-vs-node-output-type.md` (legacy `docs/decisions/` location) focusing on routing vs validation distinction
 - **Related Files**:

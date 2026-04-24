@@ -4,7 +4,7 @@
 
 Config discovery is the system that reads ONEX contract YAML files at runtime, extracts which infrastructure transports each node depends on, and prefetches those configuration values from Infisical before the node starts handling requests. This eliminates the need for a sprawling `.env` file listing every config key across every service.
 
-Introduced in OMN-2287 (version 0.10.0).
+Introduced in  (version 0.10.0).
 
 ---
 

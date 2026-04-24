@@ -36,7 +36,7 @@ every secret read. Infisical's model (project → environment → secret path)
 maps more naturally to the `ONEX_ENV / ONEX_SERVICE` namespace model already
 used in ONEX topic naming and service discovery.
 
-**Bootstrap integration.** OMN-2287 added contract-driven config discovery that
+**Bootstrap integration.**  added contract-driven config discovery that
 scans ONEX node contract YAML files for transport type declarations and
 pre-fetches the corresponding secrets from a central store. Infisical's REST
 SDK integrates cleanly into this prefetch pattern. Vault's token-based
@@ -45,12 +45,9 @@ before any secret could be read.
 
 Work proceeded in three tickets:
 
-- **OMN-2286**: `AdapterInfisical`, `HandlerInfisical`, and the config
   resolution layer added alongside the existing Vault handler.
-- **OMN-2287**: Contract-driven config discovery, Infisical seed script, and
   bootstrap orchestration that populates Infisical from the existing `.env` at
   first launch.
-- **OMN-2288**: `HandlerVault` removed; all secret resolution references updated
   to point at `HandlerInfisical`.
 
 ## Decision
@@ -169,10 +166,7 @@ development that does not run Infisical continues to work without change.
 
 ## References
 
-- **OMN-2286**: Infisical adapter, handler, and config resolution layer
-- **OMN-2287**: Contract-driven config discovery, seed script, bootstrap
   orchestration
-- **OMN-2288**: Remove Vault handler; migrate all secret resolution references
 - **Handler**: `src/omnibase_infra/handlers/handler_infisical.py`
 - **Adapter**: `src/omnibase_infra/adapters/_internal/adapter_infisical.py`
 - **Config discovery**: `src/omnibase_infra/runtime/config_discovery/`

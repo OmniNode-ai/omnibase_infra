@@ -637,8 +637,8 @@ validation ensures proper separation between `omnibase_core` (pure, no I/O) and
 - Python tests: `tests/ci/test_architecture_compliance.py`
 
 **Known Issues Tracking:**
-Known violations are tracked with Linear ticket references and use pytest.mark.xfail
-markers. See `scripts/validate.py` for the KNOWN_ISSUES registry.
+Known violations are tracked internally and use pytest.mark.xfail markers. See
+`scripts/validate.py` for the KNOWN_ISSUES registry.
 
 **Validation Limitations:**
 The regex-based validators cannot detect inline imports inside functions. For

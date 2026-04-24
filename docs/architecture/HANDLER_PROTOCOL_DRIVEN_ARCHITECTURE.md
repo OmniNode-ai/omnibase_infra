@@ -1,47 +1,60 @@
 > **Navigation**: [Home](../index.md) > [Architecture](README.md) > Handler Protocol-Driven Architecture
 
-# Handler Wiring -> Protocol-Driven Architecture
+# Handler Protocol-Driven Architecture
+
+> **Status**: Current | **Last Updated**: 2026-04-24
 
 ## Overview
 
-This document defines the migration from hardcoded handler wiring to a protocol-driven,
-contract-based handler loading system. The goal is to make handler registration explicit,
-type-safe, and extensible while preserving MVP velocity.
+This document defines the current protocol-driven, contract-based handler
+loading system in `omnibase_infra`. Handler registration is explicit,
+type-safe, and contract-backed. `wire_default_handlers()` remains as a legacy
+fallback and migration aid, but new runtime wiring should use
+`HandlerPluginLoader` through `RuntimeHostProcess`.
 
 **Implementation**: `src/omnibase_infra/runtime/` (wiring, handler_registry, runtime_host_process)
-**Status**: Design Complete, Implementation Pending
+**Current runtime entry points**:
+- `src/omnibase_infra/runtime/handler_plugin_loader.py`
+- `src/omnibase_infra/runtime/contract_handler_discovery.py`
+- `src/omnibase_infra/runtime/service_runtime_host_process.py`
+- `src/omnibase_infra/runtime/util_wiring.py`
 
 ## Design Principles
 
 | Principle | Description |
 |-----------|-------------|
-| **Protocol-First** | Runtime depends on `ProtocolHandlerSource`, never on concrete sources |
-| **Explicit Bootstrap** | Hardcoded handlers are centralized and loudly logged as "compat mode" |
+| **Protocol-First** | Runtime depends on protocol discovery boundaries, not concrete loader internals |
+| **Explicit Bootstrap** | Hardcoded handlers are centralized and treated as fallback compatibility wiring |
 | **Structural Constraints** | "Handlers cannot publish" is enforced by capability deprivation, not policy |
 | **Contract → Descriptor** | Contracts are serialization format; descriptors are runtime objects (one-way transform) |
-| **No Backwards Compatibility** | Breaking changes acceptable; descriptor schema co-released with runtime |
+| **No Backwards Compatibility** | This repo has no external compatibility promise for stale internal wiring patterns |
 
 ## Architecture Diagram
 
 ### ASCII Diagram
 
-**Diagram Description**: This diagram shows the Handler Loading Architecture with data flow from sources to runtime. At the top, ProtocolHandlerSource (from omnibase_spi) serves as the abstract protocol interface. Two concrete implementations branch from it: HandlerBootstrapSource (MVP - hardcoded handlers from _KNOWN_HANDLERS dict) and HandlerContractSource (Beta - YAML contracts from handler_contract.yaml files). Both sources produce data that flows downward to create a list of ModelHandlerDescriptor objects. These descriptors flow to RuntimeHostProcess, which registers them. Finally, Handler Instances are created with no publish access (a structural constraint, not a policy). Arrows indicate data flow direction, not control flow.
+**Diagram Description**: This diagram shows the current handler loading
+architecture with data flow from sources to runtime. Protocol discovery
+interfaces define the boundary. The preferred implementation is
+`HandlerPluginLoader` over handler contract files. Legacy bootstrap wiring is
+kept as fallback compatibility wiring. Both paths produce runtime descriptors
+registered by `RuntimeHostProcess`. Handler instances receive no publish access.
 
 ```
 +------------------------------------------------------------------+
 |                    Handler Loading Architecture                    |
 +------------------------------------------------------------------+
 |                                                                    |
-|   ProtocolHandlerSource (omnibase_spi)                            |
+|   ProtocolContractSource / ProtocolHandlerPluginLoader            |
 |        ^                                                           |
 |        |                                                           |
 |   +----+----+                                                      |
 |   |         |                                                      |
-|   |    HandlerBootstrapSource          HandlerContractSource       |
-|   |    (MVP - hardcoded)               (Beta - YAML contracts)     |
+|   |    Legacy Bootstrap Wiring         HandlerPluginLoader         |
+|   |    (fallback hardcoded map)        (contract files)            |
 |   |         |                                   |                  |
 |   |         v                                   v                  |
-|   |    _KNOWN_HANDLERS dict             **/handler_contract.yaml   |
+|   |    wire_default_handlers()          **/handler_contract.yaml   |
 |   |         |                                   |                  |
 |   |         +---------------+-------------------+                  |
 |   |                         |                                      |
@@ -64,15 +77,15 @@ type-safe, and extensible while preserving MVP velocity.
 ```mermaid
 flowchart TB
     accTitle: Handler Loading Architecture
-    accDescr: Data flow diagram showing handler loading from sources to runtime. ProtocolHandlerSource is the abstract protocol interface from omnibase_spi. Two concrete implementations exist: HandlerBootstrapSource (hardcoded MVP handlers from _KNOWN_HANDLERS dict) and HandlerContractSource (YAML contracts from handler_contract.yaml files). Both produce ModelHandlerDescriptor lists that flow to RuntimeHostProcess for registration. Handler Instances are created with no publish access as a structural constraint. Arrows indicate data flow direction.
+    accDescr: Data flow diagram showing handler loading from sources to runtime. Protocol discovery interfaces define the boundary. HandlerPluginLoader is the preferred contract-file implementation. Legacy bootstrap wiring remains as fallback compatibility wiring. Both produce descriptor lists that flow to RuntimeHostProcess for registration. Handler instances are created with no publish access as a structural constraint.
 
-    PROTOCOL["ProtocolHandlerSource<br/>(omnibase_spi)"]
+    PROTOCOL["ProtocolContractSource /<br/>ProtocolHandlerPluginLoader"]
 
     subgraph Sources["Handler Sources"]
-        BOOTSTRAP["HandlerBootstrapSource<br/>(MVP - hardcoded)"]
-        CONTRACT["HandlerContractSource<br/>(Beta - YAML contracts)"]
+        BOOTSTRAP["Legacy bootstrap wiring<br/>(fallback map)"]
+        CONTRACT["HandlerPluginLoader<br/>(contract files)"]
 
-        BOOTSTRAP --> KNOWN["_KNOWN_HANDLERS dict"]
+        BOOTSTRAP --> KNOWN["wire_default_handlers()"]
         CONTRACT --> YAML["**/handler_contract.yaml"]
     end
 
@@ -102,7 +115,7 @@ The codebase has two distinct handler systems that require different treatment:
 | **Location** | `src/omnibase_infra/handlers/handler_*.py` |
 | **Purpose** | Protocol/transport operations (HTTP, DB, Consul, Infisical) |
 | **Wiring** | Contract-driven via `HandlerPluginLoader` (preferred) or `wire_default_handlers()` (legacy fallback) |
-| **State** | Contract-driven discovery implemented (PR #143). See [Migration Guide](../migration/MIGRATION_WIRE_DEFAULT_HANDLERS.md) |
+| **State** | Contract-driven discovery is implemented. See [Migration Guide](../migration/MIGRATION_WIRE_DEFAULT_HANDLERS.md) for removing legacy calls. |
 
 **Current Handlers**:
 - `HttpRestHandler` - HTTP/REST API operations
@@ -139,7 +152,7 @@ These represent **different axes** and must remain separate.
 
 #### EnumHandlerType (Architectural Role)
 
-**Location**: `omnibase_core` (or rename existing in `omnibase_infra`)
+**Location**: shared enum package imported by infra
 **Purpose**: What is this handler in the architecture?
 
 ```python
@@ -155,7 +168,7 @@ class EnumHandlerType(str, Enum):
 
 #### EnumHandlerTypeCategory (Behavioral Classification)
 
-**Location**: `omnibase_core`
+**Location**: shared enum package imported by infra
 **Purpose**: How does this handler behave at runtime?
 
 ```python
@@ -223,13 +236,35 @@ All existing infrastructure handlers are **EFFECT** (none are tagged ADAPTER):
 | `handler_consul` | EFFECT | No | Service discovery with external state |
 | `handler_infisical` | EFFECT | No | Secret access (definitely not plumbing) |
 
+### Stable Mixin And Handlerization Outcomes
+
+Older handler-classification POC writeups have been removed from the primary
+docs tree. The current rules that matter to contributors are:
+
+| Surface | Current classification | Why |
+|---------|------------------------|-----|
+| PostgreSQL mixins | Keep as mixins | They provide reusable persistence behavior and do not become standalone routed handler capabilities by themselves. |
+| Circuit breaker and retry mixins | Keep as mixins | They are cross-cutting resilience behavior used by handlers and adapters, not externally routed operations. |
+| Projector mixins | Keep as mixins | They compose projection behavior and storage helpers; projection ownership remains with the node or service that uses them. |
+| LLM HTTP transport mixin | Candidate for handlerization only after protocol alignment | It performs external I/O, but conversion is blocked unless the target protocol and runtime invocation shape are made explicit. |
+
+Classification rule:
+
+- Convert a surface to a handler only when it is a named callable capability,
+  has a stable contract boundary, and can be invoked without inheriting hidden
+  state from the caller.
+- Keep a surface as a mixin when it only contributes shared implementation,
+  resilience, persistence, or projection mechanics to a larger handler or node.
+- Do not let handlers publish events directly. Publishing stays with
+  orchestrators and runtime-owned publisher components.
+
 ## Contract Architecture
 
 ### Distinct Contract Types (Do Not Unify)
 
 #### ModelHandlerContract (Infrastructure Handlers)
 
-**Location**: `omnibase_spi`
+**Location**: `src/omnibase_infra/models/runtime/model_handler_contract.py`
 **Purpose**: Declare callable units invoked by nodes
 
 ```yaml
@@ -254,7 +289,7 @@ security:
 
 #### ModelNodeHandlerContract (Node Handlers)
 
-**Location**: `omnibase_spi`
+**Location**: node `contract.yaml` files under `src/omnibase_infra/nodes/`
 **Purpose**: Declare routing bindings owned by a node
 
 ```yaml

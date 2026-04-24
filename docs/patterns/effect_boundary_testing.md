@@ -125,5 +125,5 @@ def clean_thread_local():
 - [Container Dependency Injection](./container_dependency_injection.md) - Full DI patterns
 - [Testing Patterns](./testing_patterns.md) - General testing conventions
 - [Protocol Patterns](./protocol_patterns.md) - Protocol interface design
-- OMN-1336: Add thread-local utility for EffectMockRegistry
-- OMN-1147: Effect Classification System
+- : Add thread-local utility for EffectMockRegistry
+- : Effect Classification System

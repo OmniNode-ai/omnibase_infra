@@ -27,7 +27,7 @@ The Model Context Protocol (MCP) integration exposes ONEX nodes as callable tool
 
 ONEX nodes are internal infrastructure primitives. The MCP integration bridges these nodes to the external world of AI agents. An AI agent that speaks MCP (such as an Anthropic Claude tool-use session) can query which ONEX operations are available, obtain their JSON Schema parameter definitions, and invoke them — without knowing anything about ONEX envelopes, contracts, or the Kafka event bus.
 
-The integration is currently in MVP state. Tool discovery is manual (via `register_node_as_tool()`). Automatic discovery from the node registry via a `mcp_enabled: true` contract flag is planned under OMN-1288.
+The integration is currently in MVP state. Tool discovery is manual (via `register_node_as_tool()`). Automatic discovery from the node registry via a `mcp_enabled: true` contract flag is planned.
 
 ---
 
@@ -202,7 +202,7 @@ params = ONEXToMCPAdapter.extract_parameters_from_schema(schema)
 
 **3. Tool invocation (future)**
 
-`invoke_tool(tool_name, arguments, correlation_id)` is implemented but currently returns a placeholder. Full ONEX node dispatch is tracked under OMN-1288.
+`invoke_tool(tool_name, arguments, correlation_id)` is implemented but currently returns a placeholder. Full ONEX node dispatch is tracked internally.
 
 ---
 
@@ -286,7 +286,7 @@ Authentication is NOT implemented in the current release. The MCP HTTP endpoint 
 - Use VPC/firewall rules to restrict which clients can reach the MCP port
 - Restrict to trusted internal services only
 
-Authentication via Bearer token is planned under OMN-1288.
+Authentication via Bearer token is planned.
 
 ### Circuit breaker
 
@@ -357,12 +357,12 @@ All operations return `ModelHandlerOutput.for_compute(result=...)`.
 
 ## Current Limitations and Roadmap
 
-| Limitation | Tracking | Notes |
-|------------|----------|-------|
-| Manual tool registration only | OMN-1288 | Auto-discovery from contract `mcp_enabled: true` planned |
-| `invoke_tool` returns placeholder | OMN-1288 | Full ONEX dispatcher integration planned |
-| No authentication | OMN-1288 | Bearer token, API key, or identity service integration planned |
-| `mcp.call_tool` placeholder mode | OMN-1281 | Integrated mode requires registry + executor |
+| Limitation | Notes |
+|------------|-------|
+| Manual tool registration only | Auto-discovery from contract `mcp_enabled: true` planned |
+| `invoke_tool` returns placeholder | Full ONEX dispatcher integration planned |
+| No authentication | Bearer token, API key, or identity service integration planned |
+| `mcp.call_tool` placeholder mode | Integrated mode requires registry + executor |
 
 ---
 

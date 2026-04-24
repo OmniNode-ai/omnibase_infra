@@ -4,7 +4,7 @@
 
 The LLM infrastructure provides two ONEX Effect nodes for communicating with external language model servers: one for text embeddings and one for chat/completion inference. Both nodes share a common HTTP transport layer (`MixinLlmHttpTransport`) that enforces security boundaries, handles retries, and exposes typed error classification.
 
-Introduced across OMN-2104 (transport), OMN-2107 (inference handler), OMN-2112 (embedding node), OMN-2238 (token usage), OMN-2250 (security layer).
+Introduced across  (transport),  (inference handler),  (embedding node),  (token usage),  (security layer).
 
 ---
 

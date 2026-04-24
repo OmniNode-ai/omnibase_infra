@@ -305,7 +305,6 @@ When group IDs exceed 255 characters, a hash suffix is computed from the origina
 
 ## References
 
-- **OMN-1602**: Derived Kafka Consumer Group IDs
 - **EnumConsumerGroupPurpose**: Purpose classification enum
 - **ModelNodeIdentity**: Typed node identity model
 - **ADR-001**: Graceful Shutdown with Drain Period (related consumer lifecycle)

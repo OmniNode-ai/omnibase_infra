@@ -4,7 +4,6 @@
 
 **Status**: Accepted
 **Date**: 2026-01-27
-**Related Tickets**: OMN-1614, OMN-1611 (parent)
 **Category**: Architecture
 
 ## Context
@@ -267,8 +266,8 @@ For existing handler-local protocols:
 
 ## References
 
-- **Parent Ticket**: [OMN-1611](https://linear.app/omninode/issue/OMN-1611) - Publish Interface Consolidation
-- **This Ticket**: [OMN-1614](https://linear.app/omninode/issue/OMN-1614) - Write ADR for Canonical Publish Interface Policy
+- **Parent Ticket**:  - Publish Interface Consolidation
+- **This Ticket**:  - Write ADR for Canonical Publish Interface Policy
 - **SPI Protocol**: `omnibase_spi/src/omnibase_spi/protocols/event_bus/protocol_event_publisher.py`
 - **Related ADR**: [Handler No-Publish Constraint](../../CLAUDE.md#handler-no-publish-constraint) (handlers cannot have direct bus access)
 - **Related Pattern**: [Dispatcher Resilience](../patterns/dispatcher_resilience.md) (dispatchers own their own resilience)
