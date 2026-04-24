@@ -88,7 +88,7 @@ ONEX infra uses four node archetypes:
 | Archetype | Role |
 |-----------|------|
 | `ORCHESTRATOR` | Coordinates workflows and publishes events |
-| `REDUCER` | Owns pure FSM state transitions and emits intents |
+| `REDUCER` | Owns pure FSM state transitions and emits projections |
 | `COMPUTE` | Performs deterministic transformations with no side effects |
 | `EFFECT` | Performs external I/O through infrastructure handlers |
 

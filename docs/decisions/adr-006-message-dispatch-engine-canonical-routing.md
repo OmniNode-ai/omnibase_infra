@@ -85,8 +85,8 @@ concern. No Phase 1 work depends on envelope evolution.
 ### Neutral
 
 - Phase 2 (envelope evolution with `event_type`, `payload_type`,
-  `payload_schema_version`) is a separate concern tracked in
-  through . It enhances routing but is not required for Phase 1.
+  `payload_schema_version`) is a separate concern tracked internally. It
+  enhances routing but is not required for Phase 1.
 
 ## Open Decisions (resolve before or during Phase 2)
 
@@ -103,10 +103,10 @@ affect Phase 2 ticket scope.
 
 ## References
 
-- **Epic**:  — Intelligence Domain Routing + Envelope Evolution
-- **Phase 1 tickets**:  through
-- **Phase 2 tickets**:  through
-- **Measurement work**:  (Workstream M — separate scope)
+- **Epic**: Intelligence Domain Routing + Envelope Evolution (tracked internally)
+- **Phase 1 tickets**: tracked internally
+- **Phase 2 tickets**: tracked internally
+- **Measurement work**: tracked internally (Workstream M — separate scope)
 - **PluginRegistration template**: `src/omnibase_infra/nodes/node_registration_orchestrator/plugin.py`
 - **MessageDispatchEngine**: `src/omnibase_infra/runtime/service_message_dispatch_engine.py`
 - **EventBusSubcontractWiring**: `src/omnibase_infra/runtime/event_bus_subcontract_wiring.py`

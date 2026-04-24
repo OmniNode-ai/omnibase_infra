@@ -20,6 +20,8 @@ Integration Test Coverage gate: OMN-7005 (hard gate since 2026-04-13).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from omnibase_infra.adapters.project_tracker.local_stub_project_tracker import (
@@ -30,61 +32,53 @@ from omnibase_infra.services.agent_registry.registry import AgentRegistry
 
 @pytest.mark.integration
 def test_local_stub_project_tracker_default_is_workspace_local(
-    tmp_path: pytest.TempPathFactory,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Default state_root must not reference Path.home()."""
-    tracker = LocalStubProjectTracker.__new__(LocalStubProjectTracker)
-    # Call __init__ without args to trigger the default path logic
-    # We intercept before mkdir calls by patching _state_root directly
-    import threading
-
-    tracker._lock = threading.Lock()
-    # Instantiate with a tmp override so no disk writes happen
-    tracker_with_default = LocalStubProjectTracker.__new__(LocalStubProjectTracker)
-
-    # Inspect the __init__ default without actually creating dirs by reading source
-    import inspect
-
-    source = inspect.getsource(LocalStubProjectTracker.__init__)
-    assert "Path.home()" not in source, (
-        "LocalStubProjectTracker.__init__ must not reference Path.home() — "
-        "defaults must be workspace-local per OMN-9600"
+    """Default state_root must resolve to workspace-local .onex_state, not Path.home()."""
+    monkeypatch.chdir(tmp_path)
+    tracker = LocalStubProjectTracker()
+    home = Path.home()
+    assert not str(tracker._state_root).startswith(str(home)), (
+        f"LocalStubProjectTracker._state_root ({tracker._state_root}) must not be "
+        f"under Path.home() ({home}) — defaults must be workspace-local per OMN-9600"
     )
-    assert ".onex_state" in source, (
-        "LocalStubProjectTracker.__init__ must default to .onex_state"
+    assert ".onex_state" in str(tracker._state_root), (
+        "LocalStubProjectTracker._state_root must contain .onex_state"
     )
 
 
 @pytest.mark.integration
-def test_agent_registry_default_is_workspace_local() -> None:
-    """Default state_dir must not reference Path.home()."""
-    import inspect
-
-    source = inspect.getsource(AgentRegistry.__init__)
-    assert "Path.home()" not in source, (
-        "AgentRegistry.__init__ must not reference Path.home() — "
-        "defaults must be workspace-local per OMN-9600"
+def test_agent_registry_default_is_workspace_local(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default state_dir must resolve to workspace-local .onex_state, not Path.home()."""
+    monkeypatch.chdir(tmp_path)
+    registry = AgentRegistry()
+    home = Path.home()
+    assert not str(registry._state_dir).startswith(str(home)), (
+        f"AgentRegistry._state_dir ({registry._state_dir}) must not be "
+        f"under Path.home() ({home}) — defaults must be workspace-local per OMN-9600"
     )
-    assert ".onex_state" in source, "AgentRegistry.__init__ must default to .onex_state"
+    assert ".onex_state" in str(registry._state_dir), (
+        "AgentRegistry._state_dir must contain .onex_state"
+    )
 
 
 @pytest.mark.integration
 def test_local_stub_project_tracker_state_root_under_workspace(
-    tmp_path: pytest.TempPathFactory,
+    tmp_path: Path,
 ) -> None:
     """When instantiated with a provided path, state_root resolves correctly."""
-    from pathlib import Path
-
     tracker = LocalStubProjectTracker(state_root=tmp_path)
     assert tracker._state_root == Path(tmp_path)
 
 
 @pytest.mark.integration
 def test_agent_registry_state_dir_under_workspace(
-    tmp_path: pytest.TempPathFactory,
+    tmp_path: Path,
 ) -> None:
     """When instantiated with a provided path, state_dir resolves correctly."""
-    from pathlib import Path
-
     registry = AgentRegistry(state_dir=tmp_path)
     assert registry._state_dir == Path(tmp_path)
