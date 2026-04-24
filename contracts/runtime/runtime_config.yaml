@@ -13,8 +13,9 @@
 # Only ONEX_ENVIRONMENT and ONEX_EVENT_BUS_TYPE override contract values
 # at runtime (applied by bootstrap after config loading).
 #
-# When this file does NOT exist, the kernel falls back to env vars and
-# model defaults: ONEX_INPUT_TOPIC, ONEX_OUTPUT_TOPIC, ONEX_GROUP_ID.
+# When this file does NOT exist, the kernel falls back to ONEX_GROUP_ID and
+# model defaults. Topics are ALWAYS derived from contract event_bus
+# declarations (OMN-8784); there is no env-var override for topics.
 #
 # =============================================================================
 # ENVIRONMENT VARIABLES:
@@ -27,9 +28,10 @@
 #                         through this contract)
 #
 # Fallback defaults (only when this file is absent):
-#   ONEX_INPUT_TOPIC    - Default input_topic
-#   ONEX_OUTPUT_TOPIC   - Default output_topic
 #   ONEX_GROUP_ID       - Default group_id
+#
+# Removed (OMN-8784) — kernel hard-fails if set:
+#   ONEX_INPUT_TOPIC, ONEX_OUTPUT_TOPIC
 #
 # =============================================================================
 # FIELD STATUS LEGEND:
@@ -43,9 +45,11 @@ contract_version: "1.0.0"
 name: "runtime_config"
 description: "Configuration for ONEX runtime kernel"
 # Topic configuration [ACTIVE - used by RuntimeHostProcess]
-# These values take precedence when this file is loaded. ONEX_INPUT_TOPIC,
-# ONEX_OUTPUT_TOPIC, ONEX_GROUP_ID are only used as fallback defaults when
-# this config file is absent (see load_runtime_config in service_kernel.py).
+# These values take precedence when this file is loaded. Topics are ALWAYS
+# derived from contract declarations — ONEX_INPUT_TOPIC / ONEX_OUTPUT_TOPIC
+# were removed (OMN-8784). Only ONEX_GROUP_ID is accepted as a fallback
+# default when this config file is absent (see load_runtime_config in
+# service_kernel.py).
 input_topic: "onex.evt.platform.node-introspection.v1"
 output_topic: "onex.evt.platform.registration-completed.v1"
 group_id: "onex-runtime"

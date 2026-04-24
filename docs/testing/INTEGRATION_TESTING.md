@@ -71,9 +71,9 @@ KAFKA_BOOTSTRAP_SERVERS=localhost:19092
 RUNTIME_HOST=localhost
 RUNTIME_PORT=8085
 
-# Topic overrides (match runtime container contract.yaml)
-ONEX_INPUT_TOPIC=onex.evt.platform.node-introspection.v1
-ONEX_OUTPUT_TOPIC=onex.evt.platform.registration-completed.v1
+# Topics are derived from each node's contract.yaml event_bus declaration
+# (OMN-8784). ONEX_INPUT_TOPIC / ONEX_OUTPUT_TOPIC env vars were removed and
+# setting them now raises ProtocolConfigurationError at kernel bootstrap.
 
 # Enable runtime E2E processing tests
 RUNTIME_E2E_PROCESSING_ENABLED=true

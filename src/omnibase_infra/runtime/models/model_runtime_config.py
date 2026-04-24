@@ -27,11 +27,13 @@ Reserved for Future Use:
       (currently kernel.py uses ONEX_LOG_LEVEL env var directly)
 
 Environment Variable Overrides:
-    ONEX_INPUT_TOPIC  - Overrides input_topic
-    ONEX_OUTPUT_TOPIC - Overrides output_topic
     ONEX_GROUP_ID     - Overrides group_id/consumer_group
     ONEX_ENVIRONMENT  - Overrides event_bus.environment
     ONEX_LOG_LEVEL    - Used directly by kernel (not via this model)
+
+Removed (OMN-8784) — kernel hard-fails if set:
+    ONEX_INPUT_TOPIC, ONEX_OUTPUT_TOPIC — topics are declared in each node's
+    contract.yaml event_bus.subscribe_topics / event_bus.publish_topics.
 
 Example:
     >>> config = ModelRuntimeConfig(
