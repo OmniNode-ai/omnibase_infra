@@ -9,6 +9,10 @@
 # re-attempts auto-merge after CodeRabbit review finishes and branch
 # protection gates clear. Silent continue-on-error removed; "already
 # enqueued" races are tolerated but real failures surface.
+#
+# Stacked PRs target feature branches that do not have protected-branch
+# auto-merge rules. Treat those as an expected no-op instead of failing
+# the required auto-merge enrollment check.
 name: Auto-Merge
 
 on:
@@ -70,6 +74,15 @@ jobs:
               exit 0
               ;;
           esac
+          BASE_REF="$(gh pr view "$PR" --repo "$GH_REPO" --json baseRefName --jq '.baseRefName')"
+          DEFAULT_BRANCH="$(gh repo view "$GH_REPO" --json defaultBranchRef --jq '.defaultBranchRef.name')"
+          if [ "$BASE_REF" != "$DEFAULT_BRANCH" ]; then
+            echo "PR #$PR targets '$BASE_REF', not default '$DEFAULT_BRANCH'; skipping auto-merge enrollment for stacked PR"
+            echo "pr=$PR" >> "$GITHUB_OUTPUT"
+            echo "actor=$ACTOR" >> "$GITHUB_OUTPUT"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           echo "pr=$PR" >> "$GITHUB_OUTPUT"
           echo "actor=$ACTOR" >> "$GITHUB_OUTPUT"
           echo "skip=false" >> "$GITHUB_OUTPUT"
