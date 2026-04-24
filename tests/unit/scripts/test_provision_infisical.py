@@ -32,6 +32,8 @@ import importlib
 _provision_mod = importlib.import_module("provision-infisical")
 
 _create_infisical_folders = _provision_mod._create_infisical_folders
+_default_shared_folder_slugs = _provision_mod._default_shared_folder_slugs
+_shared_folder_slugs_from_registry = _provision_mod._shared_folder_slugs_from_registry
 _main = _provision_mod.main
 
 
@@ -112,6 +114,65 @@ class TestCreateInfisicalFoldersIdempotency:
         log_text = caplog.text
         assert "[idempotent]" in log_text
         assert "[created]" not in log_text
+
+    def test_default_folder_creation_uses_registry_and_transport_map(self) -> None:
+        """Default provisioning must include all registry and runtime-prefetch folders."""
+        client = MagicMock()
+        client.post.return_value = _make_httpx_response(201)
+
+        _create_infisical_folders(
+            client,
+            "http://localhost:8880",
+            "tok",
+            "proj-id",
+            environments=("prod",),
+        )
+
+        created_folder_names = {
+            call.kwargs["json"]["name"]
+            for call in client.post.call_args_list
+            if call.kwargs["json"].get("path") == "/shared"
+        }
+
+        assert "filesystem" in created_folder_names
+
+
+@pytest.mark.unit
+class TestSharedFolderRegistry:
+    """Shared Infisical folders must be derived from typed source-of-truth maps."""
+
+    def test_shared_folder_slugs_from_registry(self, tmp_path: Path) -> None:
+        registry_path = tmp_path / "shared_key_registry.yaml"
+        registry_path.write_text(
+            """
+version: "1.1"
+shared:
+  /shared/db/:
+    - POSTGRES_HOST
+  /shared/filesystem/:
+    - FS_BASE_PATH
+bootstrap_only:
+  - POSTGRES_PASSWORD
+identity_defaults:
+  - POSTGRES_DATABASE
+""",
+            encoding="utf-8",
+        )
+
+        assert _shared_folder_slugs_from_registry(registry_path) == (
+            "db",
+            "filesystem",
+        )
+
+    def test_default_shared_folder_slugs_include_runtime_prefetch_and_seed_folders(
+        self,
+    ) -> None:
+        folders = set(_default_shared_folder_slugs())
+
+        assert "filesystem" in folders
+        assert "llm" in folders
+        assert "valkey" in folders
+        assert "auth" in folders
 
 
 # ---------------------------------------------------------------------------

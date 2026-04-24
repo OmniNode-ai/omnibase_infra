@@ -33,6 +33,8 @@ import secrets
 import sys
 from pathlib import Path
 
+import yaml
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -43,10 +45,12 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _ENV_FILE = Path.home() / ".omnibase" / ".env"
 _IDENTITY_FILE = _PROJECT_ROOT / ".infisical-identity"
 _ADMIN_TOKEN_FILE = _PROJECT_ROOT / ".infisical-admin-token"
+_REGISTRY_PATH = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
 
 # Shared utility — avoids duplicating the parser in every Infisical script.
 # Ensure the scripts dir is on the path so the import resolves from any cwd.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 from _infisical_util import _parse_env_file
 
 
@@ -283,30 +287,65 @@ def _create_client_secret(
     }
 
 
+def _folder_slug_from_shared_path(path: str) -> str:
+    """Return the transport slug from a registry path like ``/shared/db/``."""
+    parts = path.strip("/").split("/")
+    if len(parts) != 2 or parts[0] != "shared" or not parts[1]:
+        msg = (
+            f"Expected shared Infisical folder path like /shared/<name>/, got {path!r}"
+        )
+        raise ValueError(msg)
+    return parts[1]
+
+
+def _shared_folder_slugs_from_registry(
+    registry_path: Path = _REGISTRY_PATH,
+) -> tuple[str, ...]:
+    """Load shared folder slugs from the authoritative shared key registry."""
+    if not registry_path.exists():
+        raise FileNotFoundError(f"Shared key registry not found: {registry_path}")
+    with registry_path.open(encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    if not isinstance(data, dict):
+        msg = f"Registry file is empty or not a YAML mapping: {registry_path}"
+        raise ValueError(msg)
+    shared = data.get("shared")
+    if not isinstance(shared, dict):
+        msg = f"Registry missing shared mapping: {registry_path}"
+        raise ValueError(msg)
+    return tuple(sorted({_folder_slug_from_shared_path(path) for path in shared}))
+
+
+def _default_shared_folder_slugs() -> tuple[str, ...]:
+    """Return every shared folder required by seeding or runtime prefetch."""
+    from omnibase_infra.runtime.config_discovery.transport_config_map import (
+        TransportConfigMap,
+    )
+
+    registry_slugs = set(_shared_folder_slugs_from_registry())
+    prefetch_slugs = {
+        _folder_slug_from_shared_path(spec.infisical_folder)
+        for spec in TransportConfigMap().all_shared_specs()
+    }
+    return tuple(sorted(registry_slugs | prefetch_slugs))
+
+
 def _create_infisical_folders(
     client: object,  # type: ignore[type-arg]
     addr: str,
     token: str,
     project_id: str,
     environments: tuple[str, ...] = ("dev", "staging", "prod"),
-    transport_folders: tuple[str, ...] = (
-        "consul",
-        "db",
-        "http",
-        "mcp",
-        "graph",
-        "env",
-        "kafka",
-        "vault",
-        "qdrant",
-        "auth",  # Keycloak OIDC config (added for Keycloak integration)
-    ),
+    transport_folders: tuple[str, ...] | None = None,
 ) -> None:
     """Create the /shared/<transport> folder structure in every environment.
 
     Infisical requires folders to exist before secrets can be written into them.
     Folders that already exist are silently skipped (the API returns the existing one).
     """
+    if transport_folders is None:
+        transport_folders = _default_shared_folder_slugs()
+
     for env in environments:
         # Create /shared root
         resp = client.post(  # type: ignore[attr-defined]
