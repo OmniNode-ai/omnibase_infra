@@ -93,7 +93,7 @@ async def test_auto_wiring_defers_subscriptions_until_explicit_commit() -> None:
             environment="local",
         )
 
-    event_bus.subscribe.assert_called_once()
+    event_bus.subscribe.assert_awaited_once()
     assert subscriptions == {
         "node_deferred_subscription_probe": (
             "onex.cmd.omnimarket.deferred-subscription-probe.v1",
