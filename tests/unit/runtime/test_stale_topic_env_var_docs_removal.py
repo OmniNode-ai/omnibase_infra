@@ -7,15 +7,20 @@ kernel; topics are now derived from each node's `contract.yaml`
 `event_bus.subscribe_topics` / `event_bus.publish_topics`. Setting either env
 var now raises `ProtocolConfigurationError` at kernel bootstrap.
 
-This test locks in OMN-9409's documentation cleanup: if someone re-introduces
-an *active-looking* reference (uncommented assignment in env example files,
-`os.getenv("ONEX_*_TOPIC", ...)` in integration test helpers, or a live table
-row in operator docs), the next deploy-from-main would create containers with
-`ONEX_*_TOPIC` baked in and trigger the crash loop documented in OMN-9409.
+This test locks in OMN-9409's documentation cleanup against two regression
+paths: uncommented `ONEX_*_TOPIC=...` assignments in env-example files, and
+`os.getenv("ONEX_*_TOPIC", ...)` / `os.environ[...]` reads in integration
+test helpers. Either would re-introduce the banned env var on the next
+deploy and trigger the crash loop documented in OMN-9409.
+
+Scope note: operator-facing docs (e.g. `docker/README.md`,
+`docs/testing/INTEGRATION_TESTING.md`) are NOT enforced here — they were
+updated manually as part of OMN-9409 and are reviewed per-PR. This test
+guards only the machine-readable surfaces that flow into running containers.
 
 Historical / deprecation references (comments, docstrings, deprecated-guard
-unit tests, and this file itself) are allowed — the scan looks for patterns
-that would regress the removal.
+unit tests, and this file itself) are allowed — both scans skip commented
+lines so that doc-style references in source files cannot false-fail.
 """
 
 from __future__ import annotations
@@ -36,7 +41,7 @@ ENV_EXAMPLE_FILES: tuple[str, ...] = (
     "docker/env-example-full.txt",
     "docs/env-example-full.txt",
 )
-ACTIVE_ENV_ASSIGNMENT = re.compile(r"(?m)^(ONEX_INPUT_TOPIC|ONEX_OUTPUT_TOPIC)\s*=")
+ACTIVE_ENV_ASSIGNMENT = re.compile(r"^(ONEX_INPUT_TOPIC|ONEX_OUTPUT_TOPIC)\s*=")
 
 # E2E integration test helpers must not use ONEX_*_TOPIC as an override knob.
 # The kernel rejects these vars, so `os.getenv("ONEX_*_TOPIC", default)` is a
@@ -51,6 +56,18 @@ ENV_OVERRIDE_READ = re.compile(
     r"(ONEX_INPUT_TOPIC|ONEX_OUTPUT_TOPIC)"
     r"['\"]"
 )
+PYTHON_COMMENT_PREFIX = re.compile(r"^\s*#")
+
+
+def _iter_active_lines(content: str, comment_prefix: re.Pattern[str]) -> list[str]:
+    """Yield only non-blank, non-comment lines so doc-style references in
+    comments (e.g. 'ONEX_OUTPUT_TOPIC removed in OMN-8784') do not trip
+    regexes that legitimately match live code."""
+    return [
+        line
+        for line in content.splitlines()
+        if line.strip() and not comment_prefix.match(line)
+    ]
 
 
 class TestStaleTopicEnvVarDocsRemoval:
@@ -63,7 +80,13 @@ class TestStaleTopicEnvVarDocsRemoval:
         path = REPO_ROOT / rel_path
         assert path.exists(), f"env example file missing: {rel_path}"
         content = path.read_text(encoding="utf-8")
-        matches = ACTIVE_ENV_ASSIGNMENT.findall(content)
+        # Dotenv-style files use `#` for comments (same prefix as Python).
+        active_lines = _iter_active_lines(content, PYTHON_COMMENT_PREFIX)
+        matches = [
+            m.group(1)
+            for line in active_lines
+            if (m := ACTIVE_ENV_ASSIGNMENT.match(line))
+        ]
         assert not matches, (
             f"{rel_path} contains active ONEX_*_TOPIC assignment(s): "
             f"{matches}. OMN-8784 removed these env vars; OMN-9409 cleaned up "
@@ -77,7 +100,10 @@ class TestStaleTopicEnvVarDocsRemoval:
         path = REPO_ROOT / rel_path
         assert path.exists(), f"integration test file missing: {rel_path}"
         content = path.read_text(encoding="utf-8")
-        matches = ENV_OVERRIDE_READ.findall(content)
+        # Python `#` comments — a commented `os.getenv("ONEX_*_TOPIC")`
+        # discussing the removed env var must not fail the test.
+        active_source = "\n".join(_iter_active_lines(content, PYTHON_COMMENT_PREFIX))
+        matches = ENV_OVERRIDE_READ.findall(active_source)
         assert not matches, (
             f"{rel_path} reads ONEX_*_TOPIC from the environment: {matches}. "
             "Use the contract-declared topic string directly — the kernel "
