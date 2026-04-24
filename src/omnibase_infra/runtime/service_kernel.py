@@ -1920,6 +1920,7 @@ async def bootstrap() -> int:
         # could modify the engine while an early plugin's consumer is already
         # dispatching messages through it.
         plugin_activation_start = time.time()
+        auto_wiring_result_appliers = {}
 
         # --- Kernel-native: ServiceRegistration lifecycle (OMN-7115) ---
         # ServiceRegistration runs its lifecycle directly, not through the
@@ -1965,6 +1966,28 @@ async def bootstrap() -> int:
                         "ServiceRegistration wiring completed (correlation_id=%s)",
                         correlation_id,
                     )
+                    result_prepare = await registration_service.prepare_result_applier(
+                        plugin_config,
+                    )
+                    if (
+                        result_prepare.success
+                        and registration_service.result_applier is not None
+                    ):
+                        auto_wiring_result_appliers[
+                            "node_registration_orchestrator"
+                        ] = registration_service.result_applier
+                        logger.info(
+                            "ServiceRegistration result applier registered for "
+                            "contract auto-wiring (correlation_id=%s)",
+                            correlation_id,
+                        )
+                    else:
+                        logger.warning(
+                            "ServiceRegistration result applier unavailable for "
+                            "contract auto-wiring: %s (correlation_id=%s)",
+                            result_prepare.get_error_message_or_default(),
+                            correlation_id,
+                        )
                 else:
                     logger.warning(
                         "ServiceRegistration handler wiring failed: %s "
@@ -2139,11 +2162,14 @@ async def bootstrap() -> int:
         # picks up contracts that have no plugin handler wired for the same topics.
         # Topic collision detection logs warnings for overlapping subscriptions.
         auto_wiring_report = None
+        claimed_topic_patterns: set[str] = set()
+        auto_wiring_manifest_for_subscriptions = None
         lifecycle_executor = None
         try:
             from omnibase_infra.runtime.auto_wiring import (
                 LifecycleHookExecutor,
                 discover_contracts,
+                subscribe_wired_contract_topics,
                 wire_from_manifest,
             )
 
@@ -2168,7 +2194,7 @@ async def bootstrap() -> int:
             if manifest.total_discovered > 0:
                 # 2. Collect topics already claimed by explicit plugins
                 #    by inspecting registered routes on the dispatch engine
-                claimed_topic_patterns: set[str] = set()
+                claimed_topic_patterns = set()
                 for route in dispatch_engine._routes.values():
                     claimed_topic_patterns.add(route.topic_pattern)
 
@@ -2232,6 +2258,7 @@ async def bootstrap() -> int:
                     contracts=filtered_contracts,
                     errors=manifest.errors,
                 )
+                auto_wiring_manifest_for_subscriptions = filtered_manifest
 
                 # 5. Wire handlers into dispatch engine
                 auto_wiring_report = await wire_from_manifest(
@@ -2240,25 +2267,9 @@ async def bootstrap() -> int:
                     event_bus=event_bus,
                     environment=environment,
                     container=container,
+                    subscribe_immediately=False,
+                    result_appliers_by_contract=auto_wiring_result_appliers,
                 )
-
-                # 6. Topic collision detection: warn for auto-wired topics
-                #    that overlap with explicit plugin routes
-                if auto_wiring_report:
-                    for result in auto_wiring_report.results:
-                        for topic in result.topics_subscribed:
-                            for pattern in claimed_topic_patterns:
-                                if _topic_matches_pattern(topic, pattern):
-                                    logger.warning(
-                                        "Topic collision: auto-wired topic '%s' "
-                                        "(contract=%s) overlaps with explicit "
-                                        "plugin route pattern '%s' "
-                                        "(correlation_id=%s)",
-                                        topic,
-                                        result.contract_name,
-                                        pattern,
-                                        correlation_id,
-                                    )
 
                 auto_wiring_duration = time.time() - auto_wiring_start
 
@@ -2318,6 +2329,33 @@ async def bootstrap() -> int:
             "and auto-wiring (correlation_id=%s)",
             correlation_id,
         )
+
+        if (
+            auto_wiring_report is not None
+            and auto_wiring_manifest_for_subscriptions is not None
+        ):
+            auto_wired_subscriptions = await subscribe_wired_contract_topics(
+                manifest=auto_wiring_manifest_for_subscriptions,
+                report=auto_wiring_report,
+                dispatch_engine=dispatch_engine,
+                event_bus=event_bus,
+                environment=environment,
+                result_appliers_by_contract=auto_wiring_result_appliers,
+            )
+            for contract_name, topics in auto_wired_subscriptions.items():
+                for topic in topics:
+                    for pattern in claimed_topic_patterns:
+                        if _topic_matches_pattern(topic, pattern):
+                            logger.warning(
+                                "Topic collision: auto-wired topic '%s' "
+                                "(contract=%s) overlaps with explicit "
+                                "plugin route pattern '%s' "
+                                "(correlation_id=%s)",
+                                topic,
+                                contract_name,
+                                pattern,
+                                correlation_id,
+                            )
 
         # --- Pass 2: Start consumers for ready plugins only ---
         # ready_plugins is a subset of activated_plugins: only plugins that

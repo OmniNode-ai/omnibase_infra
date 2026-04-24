@@ -4,8 +4,7 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -80,8 +79,10 @@ async def test_container_resolves_same_runtime_bus_for_publish_and_subscribe() -
 
 
 @pytest.mark.asyncio
-async def test_registration_consumers_use_container_subscriber_not_config_bus() -> None:
-    """ServiceRegistration wires subscriptions with the container-resolved bus."""
+async def test_registration_consumers_defer_subscription_wiring_to_auto_wiring() -> (
+    None
+):
+    """ServiceRegistration no longer owns subscription wiring locally."""
     from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
         ServiceRegistration,
     )
@@ -101,29 +102,11 @@ async def test_registration_consumers_use_container_subscriber_not_config_bus() 
     plugin._handler_wiring_succeeded = True
     plugin._pool = MagicMock()
 
-    with (
-        patch(
-            "omnibase_infra.runtime.event_bus_subcontract_wiring.load_event_bus_subcontract",
-            return_value=SimpleNamespace(
-                subscribe_topics=("onex.evt.platform.node-heartbeat.v1",),
-                publish_topics=(),
-            ),
-        ),
-        patch(
-            "omnibase_infra.runtime.event_bus_subcontract_wiring.EventBusSubcontractWiring"
-        ) as wiring_cls,
-    ):
-        wiring = MagicMock()
-        wiring.wire_subscriptions = AsyncMock()
-        wiring_cls.return_value = wiring
-
-        try:
-            result = await plugin.start_consumers(config)
-        finally:
-            await resolved_bus.close()
-            await config_bus.close()
+    try:
+        result = await plugin.start_consumers(config)
+    finally:
+        await resolved_bus.close()
+        await config_bus.close()
 
     assert result.success is True
-    assert wiring_cls.call_args.kwargs["event_bus"] is resolved_bus
-    assert wiring_cls.call_args.kwargs["event_bus"] is not config.event_bus
-    wiring.wire_subscriptions.assert_awaited_once()
+    assert "auto-wiring" in result.message.lower()

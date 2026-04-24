@@ -27,7 +27,7 @@ import logging
 import os
 import re
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
@@ -45,6 +45,9 @@ from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
 from omnibase_core.services.service_handler_resolver import ServiceHandlerResolver
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
+)
+from omnibase_infra.protocols.protocol_dispatch_result_applier import (
+    ProtocolDispatchResultApplier,
 )
 from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
     EnumQuarantineReason,
@@ -258,11 +261,11 @@ class PreparedContractWiring:
     _commit_contract_wiring returns skip_result directly in that case.
     """
 
-    contract: object  # ModelDiscoveredContract
+    contract: ModelDiscoveredContract
     prepared_wirings: list[PreparedWiring]
     subscription_topics: list[str]  # topics to subscribe after commit
     environment: str
-    skip_result: object = None  # ModelContractWiringResult | None
+    skip_result: ModelContractWiringResult | None = None
 
 
 def _import_handler_class(module_path: str, class_name: str) -> type:
@@ -510,15 +513,23 @@ def _make_projection_dispatch_callback(
 def _make_event_bus_callback(
     topic: str,
     dispatch_engine: ProtocolDispatchEngine,
+    result_applier: ProtocolDispatchResultApplier | None = None,
 ) -> Callable[..., Awaitable[None]]:
     """Create a Kafka on_message callback that deserializes and dispatches to engine.
 
     Mirrors EventBusSubcontractWiring._create_dispatch_callback but stripped of
-    DLQ/idempotency concerns — auto-wired nodes rely on the simplified path.
+    DLQ/idempotency concerns. When a result applier is supplied, dispatcher
+    outputs are applied on the same auto-wired path that owns the subscription.
     """
     import json
 
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
+    def _derive_event_type_from_topic(topic: str) -> str | None:
+        parts = topic.split(".")
+        if len(parts) >= 5 and parts[0] == "onex":
+            return f"{parts[2]}.{parts[3]}"
+        return None
 
     async def callback(message: object) -> None:
         try:
@@ -530,6 +541,17 @@ def _make_event_bus_callback(
                 envelope: ModelEventEnvelope[object] = ModelEventEnvelope[
                     object
                 ].model_validate(data)
+                explicit_event_type = data.get("event_type")
+                if explicit_event_type:
+                    envelope = envelope.model_copy(
+                        update={"event_type": explicit_event_type}
+                    )
+                else:
+                    derived_event_type = _derive_event_type_from_topic(topic)
+                    if derived_event_type is not None:
+                        envelope = envelope.model_copy(
+                            update={"event_type": derived_event_type}
+                        )
             else:
                 if not isinstance(message, ModelEventEnvelope):
                     logger.warning(
@@ -540,7 +562,9 @@ def _make_event_bus_callback(
                     )
                     return
                 envelope = message
-            await dispatch_engine.dispatch(topic, envelope)
+            result = await dispatch_engine.dispatch(topic, envelope)
+            if result_applier is not None and result is not None:
+                await result_applier.apply(result, envelope.correlation_id)
         except Exception as exc:  # noqa: BLE001 — boundary: log and discard; unsubscribe unavailable here
             logger.error(
                 "Auto-wiring callback error: topic=%s error_type=%s error=%s",
@@ -654,6 +678,10 @@ async def wire_from_manifest(
     event_bus: object | None = None,
     environment: str = "dev",
     container: object | None = None,
+    *,
+    subscribe_immediately: bool = True,
+    result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
+    | None = None,
 ) -> ModelAutoWiringReport:
     """Wire all discovered contracts into the dispatch engine and event bus.
 
@@ -680,6 +708,13 @@ async def wire_from_manifest(
         container: Optional DI container used to resolve handler constructor
             deps. Threaded into ``ModelHandlerResolverContext`` and consumed
             by ``ServiceHandlerResolver`` at precedence Step 3 (OMN-9199).
+        subscribe_immediately: When True (default), commit Kafka subscriptions
+            during this call. When False, only dispatchers/routes are registered;
+            callers must invoke ``subscribe_wired_contract_topics()`` after the
+            dispatch engine is frozen.
+        result_appliers_by_contract: Optional per-contract dispatch result
+            appliers. Only contracts present in this mapping apply dispatcher
+            outputs from auto-wired callbacks.
 
     Returns:
         A :class:`ModelAutoWiringReport` with per-contract outcomes.
@@ -791,7 +826,13 @@ async def wire_from_manifest(
     # service_kernel respects the flag before asserting total_failed == 0.
     results: list[ModelContractWiringResult] = list(failed_results)
     for pcw in prepared_contracts:
-        result = await _commit_contract_wiring(pcw, dispatch_engine, event_bus)
+        result = await _commit_contract_wiring(
+            pcw,
+            dispatch_engine,
+            event_bus,
+            subscribe_immediately=subscribe_immediately,
+            result_applier=(result_appliers_by_contract or {}).get(pcw.contract.name),
+        )
         results.append(result)
 
     duplicates = _detect_duplicate_topics(manifest)
@@ -844,6 +885,45 @@ async def wire_from_manifest(
     )
 
     return report
+
+
+async def subscribe_wired_contract_topics(
+    manifest: ModelAutoWiringManifest,
+    report: ModelAutoWiringReport,
+    dispatch_engine: ProtocolDispatchEngine,
+    event_bus: object | None,
+    environment: str = "dev",
+    result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
+    | None = None,
+) -> dict[str, tuple[str, ...]]:
+    """Subscribe Kafka topics for contracts that already wired successfully.
+
+    This is the post-freeze companion to ``wire_from_manifest(...,
+    subscribe_immediately=False)``. It preserves the kernel invariant that
+    consumers only start after the dispatch engine becomes read-only.
+    """
+    if event_bus is None:
+        return {}
+
+    contract_by_name = {contract.name: contract for contract in manifest.contracts}
+    subscriptions_by_contract: dict[str, tuple[str, ...]] = {}
+
+    for result in report.results:
+        if result.outcome is not EnumWiringOutcome.WIRED:
+            continue
+        contract = contract_by_name.get(result.contract_name)
+        if contract is None:
+            continue
+        topics_subscribed = await _subscribe_contract_topics(
+            contract=contract,
+            dispatch_engine=dispatch_engine,
+            event_bus=event_bus,
+            environment=environment,
+            result_applier=(result_appliers_by_contract or {}).get(contract.name),
+        )
+        subscriptions_by_contract[contract.name] = tuple(topics_subscribed)
+
+    return subscriptions_by_contract
 
 
 def _prepare_contract_wiring(
@@ -938,6 +1018,9 @@ async def _commit_contract_wiring(
     pcw: PreparedContractWiring,
     dispatch_engine: object,
     event_bus: object | None,
+    *,
+    subscribe_immediately: bool = True,
+    result_applier: ProtocolDispatchResultApplier | None = None,
 ) -> ModelContractWiringResult:
     """Commit a validated PreparedContractWiring to the engine and event bus.
 
@@ -990,38 +1073,16 @@ async def _commit_contract_wiring(
             )
         )
 
-    if event_bus is not None and pcw.subscription_topics:
-        from omnibase_infra.enums import EnumConsumerGroupPurpose
-        from omnibase_infra.models import ModelNodeIdentity
-        from omnibase_infra.utils import compute_consumer_group_id
-
-        for topic in pcw.subscription_topics:
-            node_identity = ModelNodeIdentity(
-                env=pcw.environment,
-                service=contract.package_name,
-                node_name=contract.name,
-                version=str(contract.contract_version),
+    if subscribe_immediately and event_bus is not None and pcw.subscription_topics:
+        topics_subscribed.extend(
+            await _subscribe_contract_topics(
+                contract=contract,
+                dispatch_engine=dispatch_engine,
+                event_bus=event_bus,
+                environment=pcw.environment,
+                result_applier=result_applier,
             )
-            consumer_group = compute_consumer_group_id(
-                node_identity, EnumConsumerGroupPurpose.CONSUME
-            )
-            callback = _make_event_bus_callback(topic, dispatch_engine)  # type: ignore[arg-type]
-            typed_bus: ProtocolEventBusSubscriber = cast(
-                "ProtocolEventBusSubscriber", event_bus
-            )
-            await typed_bus.subscribe(
-                topic=topic,
-                node_identity=node_identity,
-                on_message=callback,
-            )
-            topics_subscribed.append(topic)
-
-            logger.info(
-                "Auto-wired subscription: topic=%s consumer_group=%s node=%s",
-                topic,
-                consumer_group,
-                contract.name,
-            )
+        )
 
     # OMN-9457: when every prepared handler was quarantined, report SKIPPED
     # with reason "all handlers quarantined" — there is nothing wired on
@@ -1058,6 +1119,58 @@ async def _commit_contract_wiring(
         skipped_handlers=tuple(skipped_handlers),
         quarantined_handlers=tuple(quarantined),
     )
+
+
+async def _subscribe_contract_topics(
+    *,
+    contract: ModelDiscoveredContract,
+    dispatch_engine: object,
+    event_bus: object,
+    environment: str,
+    result_applier: ProtocolDispatchResultApplier | None = None,
+) -> list[str]:
+    """Subscribe all declared event-bus topics for a wired contract."""
+    if contract.event_bus is None or not contract.event_bus.subscribe_topics:
+        return []
+
+    from omnibase_infra.enums import EnumConsumerGroupPurpose
+    from omnibase_infra.models import ModelNodeIdentity
+    from omnibase_infra.utils import compute_consumer_group_id
+
+    typed_bus: ProtocolEventBusSubscriber = cast(
+        "ProtocolEventBusSubscriber", event_bus
+    )
+    node_identity = ModelNodeIdentity(
+        env=environment,
+        service=contract.package_name,
+        node_name=contract.name,
+        version=str(contract.contract_version),
+    )
+    consumer_group = compute_consumer_group_id(
+        node_identity, EnumConsumerGroupPurpose.CONSUME
+    )
+
+    topics_subscribed: list[str] = []
+    for topic in contract.event_bus.subscribe_topics:
+        callback = _make_event_bus_callback(
+            topic,
+            dispatch_engine,  # type: ignore[arg-type]
+            result_applier=result_applier,
+        )
+        await typed_bus.subscribe(
+            topic=topic,
+            node_identity=node_identity,
+            on_message=callback,
+        )
+        topics_subscribed.append(topic)
+        logger.info(
+            "Auto-wired subscription: topic=%s consumer_group=%s node=%s",
+            topic,
+            consumer_group,
+            contract.name,
+        )
+
+    return topics_subscribed
 
 
 async def _wire_single_contract(

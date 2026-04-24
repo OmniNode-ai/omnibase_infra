@@ -66,6 +66,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolSnapshotPublisher": "protocols/protocol_snapshot_publisher.py",
     "ProtocolSnapshotStore": "protocols/protocol_snapshot_store.py",
     "ProtocolAutoWiringManifestLike": "protocols/protocol_auto_wiring_manifest_like.py",  # [RUNTIME] OMN-8623 manifest shape for health monitor DI
+    "ProtocolDispatchResultApplier": "protocols/protocol_dispatch_result_applier.py",  # [RUNTIME] OMN-9550 auto-wired handler output application boundary
     "ProtocolKafkaAdminLike": "protocols/protocol_kafka_admin_like.py",  # [RUNTIME] OMN-8623 Kafka admin client boundary for health monitor DI
     "ProtocolTopicRegistry": "protocols/protocol_topic_registry.py",  # [DI] OMN-5839
     "ProtocolValidationLedgerRepository": "protocols/protocol_validation_ledger_repository.py",

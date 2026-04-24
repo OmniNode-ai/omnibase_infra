@@ -165,3 +165,57 @@ async def test_wire_dispatchers_is_idempotent_across_repeat_calls() -> None:
     engine = config.dispatch_engine
     assert engine is not None
     engine.register_dispatcher.assert_not_called()  # type: ignore[attr-defined]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_start_consumers_skips_plugin_local_event_bus_wiring() -> None:
+    """start_consumers() must not create a second registration consumer family.
+
+    Generic contract auto-wiring owns registration subscriptions. The plugin
+    only prepares the DispatchResultApplier needed to apply outputs from the
+    auto-wired callbacks.
+    """
+    plugin = ServiceRegistration()
+    plugin._handler_wiring_succeeded = True
+    config = _make_plugin_config()
+    assert config.container.service_registry is not None
+    config.container.service_registry.register_instance = AsyncMock()
+
+    with (
+        patch.object(plugin, "_wire_intent_effects", new=AsyncMock()),
+        patch(
+            "omnibase_infra.runtime.event_bus_subcontract_wiring.EventBusSubcontractWiring",
+        ) as wiring_cls,
+    ):
+        result = await plugin.start_consumers(config)
+
+    assert result.success is True
+    assert "auto-wiring" in result.message.lower()
+    assert plugin.result_applier is not None
+    wiring_cls.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cleanup_on_failure_clears_cached_result_applier() -> None:
+    """Failed initialization must not leave stale output wiring cached."""
+    plugin = ServiceRegistration()
+    plugin._result_applier = MagicMock()  # type: ignore[assignment]
+
+    await plugin._cleanup_on_failure(_make_plugin_config())  # type: ignore[attr-defined]
+
+    assert plugin.result_applier is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_shutdown_clears_cached_result_applier() -> None:
+    """Shutdown must force the next boot to rebuild DI/effect wiring."""
+    plugin = ServiceRegistration()
+    plugin._result_applier = MagicMock()  # type: ignore[assignment]
+
+    result = await plugin._do_shutdown(_make_plugin_config())  # type: ignore[attr-defined]
+
+    assert result.success is True
+    assert plugin.result_applier is None

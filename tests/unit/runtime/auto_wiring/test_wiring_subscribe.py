@@ -11,8 +11,12 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import yaml
 
-from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
+from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+    subscribe_wired_contract_topics,
+    wire_from_manifest,
+)
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
     ModelContractVersion,
@@ -170,6 +174,44 @@ class TestWireFromManifestCallsSubscribe:
         # Still wired (dispatchers+routes registered), but no subscription
         assert report.total_wired == 1
 
+    @pytest.mark.asyncio
+    async def test_deferred_mode_skips_immediate_subscribe_until_committed(
+        self,
+    ) -> None:
+        topic = "onex.cmd.omnimarket.pr-lifecycle-orchestrator-start.v1"
+        contract = _contract(subscribe_topics=(topic,))
+        manifest = ModelAutoWiringManifest(contracts=(contract,))
+        engine = MessageDispatchEngine()
+
+        unsubscribe = AsyncMock()
+        event_bus = MagicMock()
+        event_bus.subscribe = AsyncMock(return_value=unsubscribe)
+
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=_fake_handler_cls(),
+        ):
+            report = await wire_from_manifest(
+                manifest,
+                engine,
+                event_bus=event_bus,
+                environment="local",
+                subscribe_immediately=False,
+            )
+
+            event_bus.subscribe.assert_not_called()
+
+            subscriptions = await subscribe_wired_contract_topics(
+                manifest=manifest,
+                report=report,
+                dispatch_engine=engine,
+                event_bus=event_bus,
+                environment="local",
+            )
+
+        event_bus.subscribe.assert_called_once()
+        assert subscriptions == {contract.name: (topic,)}
+
 
 # ---------------------------------------------------------------------------
 # Test 2 — callback routes to dispatch engine
@@ -270,3 +312,90 @@ class TestMakeEventBusCallbackFallbackPath:
         dispatch_engine.dispatch.assert_called_once()
         _, call_envelope = dispatch_engine.dispatch.call_args.args
         assert isinstance(call_envelope, ModelEventEnvelope)
+
+    @pytest.mark.asyncio
+    async def test_raw_message_derives_event_type_from_topic(self) -> None:
+        """Object-erased Kafka envelopes must still route by topic-derived event_type."""
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, MagicMock
+
+        from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            _make_event_bus_callback,
+        )
+
+        dispatch_engine = MagicMock()
+        dispatch_engine.dispatch = AsyncMock()
+
+        callback = _make_event_bus_callback(
+            "onex.evt.platform.node-heartbeat.v1",
+            dispatch_engine,  # type: ignore[arg-type]
+        )
+
+        envelope = ModelEventEnvelope[object].model_construct(
+            payload={"node_id": "runtime_config"},
+            correlation_id=None,
+        )
+        message = SimpleNamespace(value=envelope.model_dump_json().encode())
+
+        await callback(message)
+
+        dispatch_engine.dispatch.assert_called_once()
+        _, call_envelope = dispatch_engine.dispatch.call_args.args
+        assert call_envelope.event_type == "platform.node-heartbeat"
+
+    @pytest.mark.asyncio
+    async def test_valid_envelope_result_is_applied_when_applier_supplied(
+        self,
+    ) -> None:
+        """Auto-wired callbacks apply dispatcher results when ownership supplies an applier."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            _make_event_bus_callback,
+        )
+
+        dispatch_result = MagicMock()
+        dispatch_engine = MagicMock()
+        dispatch_engine.dispatch = AsyncMock(return_value=dispatch_result)
+
+        result_applier = MagicMock()
+        result_applier.apply = AsyncMock()
+
+        callback = _make_event_bus_callback(
+            "onex.cmd.test.v1",
+            dispatch_engine,  # type: ignore[arg-type]
+            result_applier=result_applier,
+        )
+
+        envelope = ModelEventEnvelope[object].model_construct(
+            event_type="onex.cmd.test.v1",
+            payload={},
+            correlation_id=None,
+        )
+        await callback(envelope)
+
+        dispatch_engine.dispatch.assert_called_once()
+        result_applier.apply.assert_awaited_once_with(dispatch_result, None)
+
+    def test_registration_heartbeat_handler_declares_wire_event_type(self) -> None:
+        """The heartbeat handler must match the event_type derived from the Kafka topic."""
+        contract_path = (
+            Path(__file__).parents[4]
+            / "src"
+            / "omnibase_infra"
+            / "nodes"
+            / "node_registration_orchestrator"
+            / "contract.yaml"
+        )
+        contract = yaml.safe_load(contract_path.read_text())
+
+        heartbeat_handlers = [
+            handler
+            for handler in contract["handler_routing"]["handlers"]
+            if handler["handler"]["name"] == "HandlerNodeHeartbeat"
+        ]
+
+        assert len(heartbeat_handlers) == 1
+        assert heartbeat_handlers[0]["event_type"] == "platform.node-heartbeat"

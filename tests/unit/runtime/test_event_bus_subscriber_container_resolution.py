@@ -4,9 +4,10 @@
 
 Tests prove:
 1. The kernel registers the event bus under ProtocolEventBusSubscriber in the container.
-2. Domain plugin start_consumers() resolves ProtocolEventBusSubscriber from the container
-   rather than relying solely on config.event_bus.
-3. The fallback path (container unavailable) still works via config.event_bus isinstance check.
+2. Domain plugins that own subscriptions resolve ProtocolEventBusSubscriber from the
+   container rather than relying solely on config.event_bus.
+3. The fallback path for subscription-owning plugins still works via
+   config.event_bus isinstance check.
 4. Publisher-only paths (ProtocolEventBusPublisher) remain unaffected.
 """
 
@@ -293,8 +294,8 @@ async def test_delegation_plugin_skips_when_bus_lacks_subscribe_and_not_in_conta
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_registration_plugin_resolves_subscriber_bus_from_container() -> None:
-    """ServiceRegistration.start_consumers() resolves ProtocolEventBusSubscriber from container."""
+async def test_registration_plugin_defers_subscriber_bus_to_auto_wiring() -> None:
+    """Registration no longer owns event-bus subscriptions in the plugin."""
     from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
         ServiceRegistration,
     )
@@ -329,27 +330,15 @@ async def test_registration_plugin_resolves_subscriber_bus_from_container() -> N
     )
     config.container.service_registry = registry
 
-    with (
-        patch(
-            "omnibase_infra.runtime.event_bus_subcontract_wiring.load_event_bus_subcontract",
-            return_value=SimpleNamespace(
-                subscribe_topics=["onex.cmd.test.input.v1"],
-            ),
-        ),
-        patch(
-            "omnibase_infra.runtime.event_bus_subcontract_wiring.EventBusSubcontractWiring"
-        ) as wiring_cls,
-    ):
-        wiring = MagicMock()
-        wiring.wire_subscriptions = AsyncMock()
-        wiring_cls.return_value = wiring
-        result = await plugin.start_consumers(config)
+    result = await plugin.start_consumers(config)
 
     assert isinstance(result, ModelDomainPluginResult)
-    registry.resolve_service.assert_called_once_with(ProtocolEventBusSubscriber)
-    assert wiring_cls.call_args.kwargs["event_bus"] is resolved_bus
-    assert wiring_cls.call_args.kwargs["event_bus"] is not config.event_bus
-    wiring.wire_subscriptions.assert_awaited_once()
+    assert result.success is True
+    assert result.message is not None
+    assert "generic contract auto-wiring owns registration event-bus" in (
+        result.message
+    )
+    registry.resolve_service.assert_not_called()
 
 
 @pytest.mark.unit

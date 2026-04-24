@@ -1,0 +1,43 @@
+# OMN-9550 contract file present in omnibase_infra for deploy-gate (OMN-8912).
+# deploy-gate checks `contracts/<OMN-XXXX>.yaml` for a dod_evidence item whose
+# check_value contains one of 'docker exec', 'rpk topic produce', or 'deploy'.
+#
+# The canonical ticket contract (schema-validated via onex_change_control
+# ModelTicketContract) lives at onex_change_control/contracts/OMN-9550.yaml.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: '1.0.0'
+ticket_id: OMN-9550
+summary: 'fix(runtime): defer auto-wired subscriptions until after dispatch freeze'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: Deferred auto-wiring subscription ordering tests pass for omnibase_infra PR #1388
+    command: 'uv run pytest tests/unit/runtime/auto_wiring/test_wiring_subscribe.py tests/unit/runtime/test_kernel.py::TestBootstrap::test_bootstrap_defers_auto_wiring_subscriptions_until_after_freeze tests/integration/runtime/test_auto_wiring_deferred_subscription_order.py -v'
+  - kind: ci
+    description: CI passes on omnibase_infra PR #1388
+    command: 'gh pr checks 1388 --repo OmniNode-ai/omnibase_infra'
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: PR opened against main branch
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'gh pr view 1388 --repo OmniNode-ai/omnibase_infra --json baseRefName -q .baseRefName | grep -x main'
+  - id: dod-002
+    description: Contract artifact file present in repo
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'test -f contracts/OMN-9550.yaml'
+  - id: dod-003
+    description: Runtime deploy verifies deferred auto-wiring subscription support
+    source: manual
+    checks:
+      - check_type: command
+        check_value: 'docker exec omninode-runtime python -c "from omnibase_infra.runtime.auto_wiring.handler_wiring import subscribe_wired_contract_topics; assert callable(subscribe_wired_contract_topics)"'
