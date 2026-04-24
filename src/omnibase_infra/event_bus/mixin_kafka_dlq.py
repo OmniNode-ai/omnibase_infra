@@ -146,6 +146,17 @@ class MixinKafkaDlq:
         self._dlq_callbacks: list[DlqCallbackType] = []
         self._dlq_callbacks_lock = asyncio.Lock()
 
+    def _resolve_dlq_topic(
+        self: ProtocolKafkaDlqHost,
+        dlq_topic: str | None = None,
+    ) -> str:
+        """Resolve the DLQ topic, preserving explicit bus configuration."""
+        if self._config.dead_letter_topic:
+            return self._config.dead_letter_topic
+        if dlq_topic:
+            return dlq_topic
+        return self._config.get_dlq_topic()
+
     @property
     def dlq_metrics(self) -> ModelDlqMetrics:
         """Get a deep copy of the current DLQ metrics.
@@ -213,6 +224,7 @@ class MixinKafkaDlq:
         correlation_id: UUID,
         *,
         consumer_group: str,
+        dlq_topic: str | None = None,
     ) -> None:
         """Publish failed message to dead letter queue with metrics and alerting.
 
@@ -235,6 +247,8 @@ class MixinKafkaDlq:
             correlation_id: Correlation ID for tracking
             consumer_group: Consumer group ID that processed the message.
                 Required for DLQ traceability.
+            dlq_topic: Optional category-specific DLQ topic. Explicit
+                ``dead_letter_topic`` config takes precedence when present.
 
         Note:
             This method logs errors if DLQ publishing fails but does not raise
@@ -255,10 +269,9 @@ class MixinKafkaDlq:
         start_time = datetime.now(UTC)
         error_type = type(error).__name__
 
-        # Get DLQ topic using convention-based resolution
-        # This supports both explicit dead_letter_topic config and automatic
-        # topic generation following ONEX conventions: <env>.dlq.<category>.v1
-        dlq_topic = self._config.get_dlq_topic()
+        # Explicit bus configuration wins; otherwise use caller-provided
+        # category routing before falling back to the default intents DLQ.
+        resolved_dlq_topic = self._resolve_dlq_topic(dlq_topic)
 
         # Sanitize error message to prevent credential leakage in DLQ
         sanitized_failure_reason = sanitize_error_message(error)
@@ -358,7 +371,7 @@ class MixinKafkaDlq:
                         "DLQ publish failed: producer not available",
                         extra={
                             "original_topic": original_topic,
-                            "dlq_topic": dlq_topic,
+                            "dlq_topic": resolved_dlq_topic,
                             "correlation_id": str(correlation_id),
                             "error_type": error_type,
                             "retry_count": failed_message.headers.retry_count,
@@ -369,6 +382,7 @@ class MixinKafkaDlq:
                     kafka_headers.extend(
                         [
                             ("original_topic", original_topic.encode("utf-8")),
+                            ("dlq_topic", resolved_dlq_topic.encode("utf-8")),
                             (
                                 "failure_reason",
                                 sanitized_failure_reason.encode("utf-8"),
@@ -386,7 +400,7 @@ class MixinKafkaDlq:
             if producer is not None and kafka_headers is not None:
                 await asyncio.wait_for(
                     producer.send_and_wait(
-                        dlq_topic,
+                        resolved_dlq_topic,
                         value=dlq_value,
                         key=failed_message.key,
                         headers=kafka_headers,
@@ -402,7 +416,7 @@ class MixinKafkaDlq:
                 "DLQ publish failed: message may be lost",
                 extra={
                     "original_topic": original_topic,
-                    "dlq_topic": dlq_topic,
+                    "dlq_topic": resolved_dlq_topic,
                     "correlation_id": str(correlation_id),
                     "error_type": error_type,
                     "dlq_error_type": dlq_error_type,
@@ -423,7 +437,7 @@ class MixinKafkaDlq:
                 "Message published to DLQ due to processing failure",
                 extra={
                     "original_topic": original_topic,
-                    "dlq_topic": dlq_topic,
+                    "dlq_topic": resolved_dlq_topic,
                     "correlation_id": str(correlation_id),
                     "error_type": error_type,
                     "error_message": sanitized_failure_reason,
@@ -481,7 +495,7 @@ class MixinKafkaDlq:
         )
         dlq_event = ModelDlqEvent(
             original_topic=original_topic,
-            dlq_topic=dlq_topic,
+            dlq_topic=resolved_dlq_topic,
             correlation_id=correlation_id,
             error_type=error_type,
             error_message=sanitized_failure_reason,
@@ -548,6 +562,7 @@ class MixinKafkaDlq:
         failure_type: str,
         *,
         consumer_group: str,
+        dlq_topic: str | None = None,
     ) -> None:
         """Publish raw Kafka message to DLQ when deserialization fails.
 
@@ -564,6 +579,8 @@ class MixinKafkaDlq:
             failure_type: Type of failure (e.g., "deserialization_error")
             consumer_group: Consumer group ID that processed the message.
                 Required for DLQ traceability.
+            dlq_topic: Optional category-specific DLQ topic. Explicit
+                ``dead_letter_topic`` config takes precedence when present.
 
         Note:
             This method logs errors if DLQ publishing fails but does not raise
@@ -585,10 +602,9 @@ class MixinKafkaDlq:
         start_time = datetime.now(UTC)
         error_type = type(error).__name__
 
-        # Get DLQ topic using convention-based resolution
-        # This supports both explicit dead_letter_topic config and automatic
-        # topic generation following ONEX conventions: <env>.dlq.<category>.v1
-        dlq_topic = self._config.get_dlq_topic()
+        # Explicit bus configuration wins; otherwise use caller-provided
+        # category routing before falling back to the default intents DLQ.
+        resolved_dlq_topic = self._resolve_dlq_topic(dlq_topic)
 
         # Sanitize error message
         sanitized_failure_reason = sanitize_error_message(error)
@@ -699,7 +715,7 @@ class MixinKafkaDlq:
                         "DLQ publish failed: producer not available for raw message",
                         extra={
                             "original_topic": original_topic,
-                            "dlq_topic": dlq_topic,
+                            "dlq_topic": resolved_dlq_topic,
                             "correlation_id": str(correlation_id),
                             "error_type": error_type,
                             "failure_type": failure_type,
@@ -710,6 +726,7 @@ class MixinKafkaDlq:
                     kafka_headers.extend(
                         [
                             ("original_topic", original_topic.encode("utf-8")),
+                            ("dlq_topic", resolved_dlq_topic.encode("utf-8")),
                             ("failure_type", failure_type.encode("utf-8")),
                             (
                                 "failure_reason",
@@ -728,7 +745,7 @@ class MixinKafkaDlq:
             if producer is not None and kafka_headers is not None:
                 await asyncio.wait_for(
                     producer.send_and_wait(
-                        dlq_topic,
+                        resolved_dlq_topic,
                         value=dlq_value,
                         key=dlq_key,
                         headers=kafka_headers,
@@ -744,7 +761,7 @@ class MixinKafkaDlq:
                 "DLQ publish failed for raw message: message may be lost",
                 extra={
                     "original_topic": original_topic,
-                    "dlq_topic": dlq_topic,
+                    "dlq_topic": resolved_dlq_topic,
                     "correlation_id": str(correlation_id),
                     "error_type": error_type,
                     "failure_type": failure_type,
@@ -765,7 +782,7 @@ class MixinKafkaDlq:
                 "Raw message published to DLQ due to deserialization/validation failure",
                 extra={
                     "original_topic": original_topic,
-                    "dlq_topic": dlq_topic,
+                    "dlq_topic": resolved_dlq_topic,
                     "correlation_id": str(correlation_id),
                     "error_type": error_type,
                     "error_message": sanitized_failure_reason,
@@ -780,7 +797,7 @@ class MixinKafkaDlq:
         message_offset_str = str(raw_offset) if raw_offset is not None else None
         dlq_event = ModelDlqEvent(
             original_topic=original_topic,
-            dlq_topic=dlq_topic,
+            dlq_topic=resolved_dlq_topic,
             correlation_id=correlation_id,
             error_type=error_type,
             error_message=sanitized_failure_reason,

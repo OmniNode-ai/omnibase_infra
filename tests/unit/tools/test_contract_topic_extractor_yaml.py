@@ -134,6 +134,38 @@ def test_extract_from_skill_manifests_returns_valid_entries(skills_root: Path) -
     assert [e.topic for e in entries] == sorted_topics
 
 
+@pytest.mark.unit
+def test_extract_from_skill_manifests_accepts_canonical_dlq_topics(
+    tmp_path: Path,
+) -> None:
+    """Service manifests may declare canonical four-segment runtime DLQ topics."""
+    services_root = tmp_path / "services"
+    services_root.mkdir()
+    (services_root / "topics.yaml").write_text(
+        textwrap.dedent(
+            """\
+            topics:
+              - onex.dlq.intents.v1
+              - onex.dlq.events.v1
+              - onex.dlq.commands.v1
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    extractor = ContractTopicExtractor()
+    entries = extractor.extract_from_skill_manifests(services_root)
+    topics = {entry.topic for entry in entries}
+
+    assert topics == {
+        "onex.dlq.intents.v1",
+        "onex.dlq.events.v1",
+        "onex.dlq.commands.v1",
+    }
+    assert {entry.kind for entry in entries} == {"dlq"}
+    assert {entry.producer for entry in entries} == {"dlq"}
+
+
 # ---------------------------------------------------------------------------
 # Test 2: malformed topics are warned and skipped, not raised
 # ---------------------------------------------------------------------------
