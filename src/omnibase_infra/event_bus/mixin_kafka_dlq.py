@@ -93,6 +93,10 @@ class ProtocolKafkaDlqHost(Protocol):
         """Invoke registered DLQ callbacks."""
         ...
 
+    def _resolve_dlq_topic(self, dlq_topic: str | None = None) -> str:
+        """Resolve explicit/configured DLQ topic routing."""
+        ...
+
 
 # Type alias for DLQ callback functions
 DlqCallbackType = Callable[[ModelDlqEvent], Awaitable[None]]
