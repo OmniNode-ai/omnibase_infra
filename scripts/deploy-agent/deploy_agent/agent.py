@@ -20,6 +20,7 @@ from deploy_agent.events import (
     ModelRebuildRequested,
     Phase,
     PhaseStatus,
+    Scope,
 )
 from deploy_agent.executor import SCOPE_BUNDLES, DeployExecutor
 from deploy_agent.health import create_health_app
@@ -184,6 +185,10 @@ class DeployAgent:
 
             # Seed Infisical before containers start (non-fatal)
             self.executor.seed_infisical(on_phase_update=on_phase_update)
+
+            # Runtime/full deploys must not start with stale endpoint env values.
+            if cmd.scope in (Scope.RUNTIME, Scope.FULL):
+                self.executor.validate_llm_endpoint_env_contract()
 
             # Rebuild — pass git_sha so _compose_build can bust the COPY src/ layer cache
             self.executor.rebuild_scope(
