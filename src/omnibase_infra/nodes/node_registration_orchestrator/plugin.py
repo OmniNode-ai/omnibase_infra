@@ -1138,10 +1138,9 @@ class ServiceRegistration:
                     correlation_id,
                 )
 
-            # Create dispatch result applier for output event publishing + intent delegation
-            # ProtocolEventBusSubscriber satisfies ProtocolEventBusLike structurally
-            # (both define publish_envelope) but mypy can't infer this across
-            # unrelated protocol hierarchies.
+            # Create dispatch result applier for output event publishing + intent delegation.
+            # Generic contract auto-wiring owns subscriptions; this publisher-only path
+            # uses config.event_bus for publish_envelope.
             result_applier = DispatchResultApplier(
                 event_bus=config.event_bus,  # type: ignore[arg-type]
                 output_topic=config.output_topic,

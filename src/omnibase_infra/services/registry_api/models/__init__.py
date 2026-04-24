@@ -46,6 +46,9 @@ from omnibase_infra.services.registry_api.models.model_registry_health_response 
 from omnibase_infra.services.registry_api.models.model_registry_instance_view import (
     ModelRegistryInstanceView,
 )
+from omnibase_infra.services.registry_api.models.model_registry_node_detail_view import (
+    ModelRegistryNodeDetailView,
+)
 from omnibase_infra.services.registry_api.models.model_registry_node_view import (
     ModelRegistryNodeView,
 )
@@ -88,6 +91,7 @@ __all__ = [
     "ModelPaginationInfo",
     "ModelRegistryDiscoveryResponse",
     "ModelRegistryHealthResponse",
+    "ModelRegistryNodeDetailView",
     "ModelRegistryInstanceView",
     "ModelRegistryNodeView",
     "ModelRegistrySummary",

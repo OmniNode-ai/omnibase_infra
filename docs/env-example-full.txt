@@ -257,25 +257,19 @@ ONEX_GROUP_ID=onex-runtime-main
 # Example: 8085 (standard), 8080 (common alternative), 3000 (Node.js convention)
 ONEX_HTTP_PORT=8085
 
-# Kafka input topic for main runtime
-# Default: requests
-# Example: requests (dev), prod.requests (production)
-ONEX_INPUT_TOPIC=requests
+# OMN-8784: ONEX_INPUT_TOPIC was removed from the kernel. Topics are now
+# derived from each node's contract.yaml event_bus declaration. Setting this
+# var now raises ProtocolConfigurationError at kernel bootstrap.
 
 # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
 # Default: INFO
 # Example: DEBUG (verbose), INFO (standard), WARNING (quiet)
 ONEX_LOG_LEVEL=INFO
 
-# Kafka output topic for main runtime
-# Default: responses
-# Example: responses (dev), prod.responses (production)
-ONEX_OUTPUT_TOPIC=responses
-
-# Effects runtime Kafka topics (optional)
-# Default: effect-requests, effect-responses, onex-runtime-effects
-# ONEX_EFFECTS_INPUT_TOPIC=effect-requests
-# ONEX_EFFECTS_OUTPUT_TOPIC=effect-responses
+# OMN-8784: ONEX_INPUT_TOPIC / ONEX_OUTPUT_TOPIC were removed from the kernel.
+# Topics are now derived from each node's contract.yaml event_bus declaration.
+# Setting either var raises ProtocolConfigurationError at kernel bootstrap.
+# The same rule applies to any future ONEX_EFFECTS_*_TOPIC overrides.
 # ONEX_EFFECTS_GROUP_ID=onex-runtime-effects
 
 # Worker runtime Kafka topics (optional)

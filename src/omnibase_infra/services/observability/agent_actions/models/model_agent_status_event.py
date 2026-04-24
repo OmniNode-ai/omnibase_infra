@@ -29,7 +29,7 @@ Example:
     >>> event = ModelAgentStatusEvent(
     ...     id=uuid4(),
     ...     correlation_id=uuid4(),
-    ...     agent_name="polymorphic-agent",
+    ...     agent_name="general-purpose",
     ...     session_id="session-abc123",
     ...     state="working",
     ...     message="Processing code review",

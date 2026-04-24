@@ -889,7 +889,7 @@ The full pre-Infisical config is preserved in `docs/env-example-full.txt`.
 | Complex workflows | `agent-onex-coordinator` → `agent-workflow-coordinator` |
 | Multi-domain | `agent-ticket-manager` for planning, orchestrators for execution |
 
-**Prefer `subagent_type: "polymorphic-agent"`** for ONEX development workflows.
+**Prefer `subagent_type: "general-purpose"`** for ONEX development workflows.
 
 ### Critical Policies
 

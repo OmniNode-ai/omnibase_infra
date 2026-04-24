@@ -546,9 +546,9 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | `RUNTIME_MAIN_PORT`          | `8085`                             | Main runtime exposed port              |
 | `RUNTIME_EFFECTS_PORT`       | `8086`                             | Effects runtime exposed port           |
 | **Topics**                   |                                    |                                        |
-| `ONEX_INPUT_TOPIC`           | `requests`                         | Input topic for main runtime           |
-| `ONEX_OUTPUT_TOPIC`          | `responses`                        | Output topic for main runtime          |
 | `ONEX_GROUP_ID`              | `onex-runtime-main`                | Consumer group for main runtime        |
+| *ONEX_INPUT_TOPIC*           | *removed (OMN-8784)*               | *Topics come from node `contract.yaml` event_bus; kernel hard-fails if set* |
+| *ONEX_OUTPUT_TOPIC*          | *removed (OMN-8784)*               | *Topics come from node `contract.yaml` event_bus; kernel hard-fails if set* |
 | **OpenTelemetry**            |                                    |                                        |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`| `http://localhost:4317`            | OTLP exporter endpoint                 |
 | `OTEL_SERVICE_NAME`          | `omninode-runtime`                 | Service name for tracing               |

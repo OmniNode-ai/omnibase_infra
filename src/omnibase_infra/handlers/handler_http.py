@@ -21,7 +21,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 import httpx
@@ -77,12 +76,6 @@ _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"http.get", "http.post"})
 # Streaming chunk size for responses without Content-Length header
 _STREAMING_CHUNK_SIZE: int = 8192  # 8 KB chunks
 
-# SSRF protection: only allow standard web schemes (OMN-435).
-# Blocks file://, gopher://, ftp://, data://, javascript:// etc. which are
-# common SSRF attack vectors that can read local files or probe internal
-# services via handler-initiated requests.
-_ALLOWED_URL_SCHEMES: frozenset[str] = frozenset({"http", "https"})
-
 # Per-handler client close timeout (OMN-882)
 _CLIENT_CLOSE_TIMEOUT_SECONDS: float = 5.0
 
@@ -115,71 +108,6 @@ def _categorize_size(size: int) -> str:
         return "large"
     else:
         return "very_large"
-
-
-def _validate_url(
-    url: str,
-    operation: str,
-    correlation_id: UUID,
-) -> None:
-    """Validate URL scheme to prevent SSRF (Server-Side Request Forgery) attacks.
-
-    Only ``http`` and ``https`` schemes are permitted. Schemes such as
-    ``file://``, ``gopher://``, ``ftp://``, ``data://``, and
-    ``javascript://`` are rejected because they are common SSRF vectors —
-    an attacker who can influence a URL passed to the handler could
-    otherwise read local files or probe internal services.
-
-    The scheme comparison is case-insensitive per RFC 3986
-    (scheme case is not semantically meaningful).
-
-    Args:
-        url: The URL to validate.
-        operation: The envelope operation (e.g. ``http.get``) for error context.
-        correlation_id: Correlation ID for error tracing.
-
-    Raises:
-        ProtocolConfigurationError: If the URL scheme is missing, unparseable,
-            or not in :data:`_ALLOWED_URL_SCHEMES`.
-    """
-    try:
-        parsed = urlparse(url)
-    except ValueError as e:
-        ctx = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.HTTP,
-            operation=operation,
-            target_name="http_handler",
-            correlation_id=correlation_id,
-        )
-        raise ProtocolConfigurationError(
-            "Malformed URL could not be parsed",
-            context=ctx,
-        ) from e
-
-    scheme = parsed.scheme.lower()
-    if scheme not in _ALLOWED_URL_SCHEMES:
-        logger.warning(
-            "Blocked HTTP request with disallowed URL scheme",
-            extra={
-                "scheme": scheme or "(empty)",
-                "operation": operation,
-                "correlation_id": str(correlation_id),
-            },
-        )
-        ctx = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.HTTP,
-            operation=operation,
-            target_name="http_handler",
-            correlation_id=correlation_id,
-        )
-        allowed = ", ".join(sorted(_ALLOWED_URL_SCHEMES))
-        raise ProtocolConfigurationError(
-            (
-                f"Invalid URL scheme {scheme!r} - only {allowed} are allowed. "
-                "This restriction prevents SSRF attacks."
-            ),
-            context=ctx,
-        )
 
 
 class HandlerHttpRest(MixinEnvelopeExtraction):
@@ -473,9 +401,6 @@ class HandlerHttpRest(MixinEnvelopeExtraction):
             raise ProtocolConfigurationError(
                 "Missing or invalid 'url' in payload", context=ctx
             )
-
-        # SSRF protection: validate URL scheme before any network activity (OMN-435)
-        _validate_url(url, operation, correlation_id)
 
         headers = self._extract_headers(payload, operation, url, correlation_id)
 

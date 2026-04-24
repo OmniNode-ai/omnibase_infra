@@ -740,11 +740,10 @@ async def introspectable_test_node(
             self.health_url = f"http://localhost:8080/{node_id}/health"
             self.api_url = f"http://localhost:8080/{node_id}/api"
 
-            # Get topic from environment or use contract.yaml default
-            # The runtime subscribes to: onex.evt.platform.node-introspection.v1
-            introspection_topic = os.getenv(
-                "ONEX_INPUT_TOPIC", "onex.evt.platform.node-introspection.v1"
-            )
+            # OMN-8784 removed ONEX_INPUT_TOPIC; the runtime derives its
+            # subscribe topic from the node contract's event_bus.subscribe_topics.
+            # The test uses the same contract-declared topic directly.
+            introspection_topic = "onex.evt.platform.node-introspection.v1"
             config = ModelIntrospectionConfig(
                 node_id=node_id,
                 node_type=node_type,

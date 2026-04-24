@@ -22,4 +22,5 @@ class ProtocolDispatchResultApplier(Protocol):
         self,
         result: ModelDispatchResult,
         correlation_id: UUID | None = None,
-    ) -> None: ...
+    ) -> None:
+        raise NotImplementedError

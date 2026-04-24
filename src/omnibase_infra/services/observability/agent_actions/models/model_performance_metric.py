@@ -62,7 +62,7 @@ class ModelPerformanceMetric(BaseModel):
         ...     metric_value=12.5,
         ...     created_at=datetime.now(UTC),
         ...     unit="ms",
-        ...     agent_name="polymorphic-agent",
+        ...     agent_name="general-purpose",
         ...     labels={"operation": "route", "status": "success"},
         ... )
     """

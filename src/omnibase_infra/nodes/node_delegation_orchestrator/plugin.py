@@ -258,15 +258,35 @@ class PluginDelegation:
                 reason="dispatch_engine not available",
             )
 
+        # Resolve the subscribe-capable event bus from the container (OMN-9556).
+        # The kernel registers the shared runtime bus as ProtocolEventBusSubscriber
+        # during step 4.1 so domain plugins resolve it here rather than reading
+        # config.event_bus directly. This makes DI boundaries explicit and keeps
+        # publisher-only paths unaffected.
         from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
             ProtocolEventBusSubscriber,
         )
 
-        if not isinstance(config.event_bus, ProtocolEventBusSubscriber):
-            return ModelDomainPluginResult.skipped(
-                plugin_id=self.plugin_id,
-                reason="Event bus does not support subscribe",
-            )
+        subscriber_bus: ProtocolEventBusSubscriber | None = None
+        if config.container.service_registry is not None:
+            try:
+                subscriber_bus = (
+                    await config.container.service_registry.resolve_service(
+                        ProtocolEventBusSubscriber
+                    )
+                )
+            except Exception:  # noqa: BLE001
+                pass  # fall through to config.event_bus isinstance check below
+
+        # Fallback: if container resolution failed (e.g. test environments that
+        # skip kernel registration), check config.event_bus directly.
+        if subscriber_bus is None:
+            if not isinstance(config.event_bus, ProtocolEventBusSubscriber):
+                return ModelDomainPluginResult.skipped(
+                    plugin_id=self.plugin_id,
+                    reason="Event bus does not support subscribe (not in container and config.event_bus lacks subscribe capability)",
+                )
+            subscriber_bus = config.event_bus  # type: ignore[assignment]
 
         if config.node_identity is None:
             return ModelDomainPluginResult.skipped(
@@ -305,6 +325,8 @@ class PluginDelegation:
                 len(published_events_map),
             )
 
+            # DispatchResultApplier uses config.event_bus for publish_envelope
+            # (publisher-only path, compatible with ProtocolEventBusPublisher).
             result_applier = DispatchResultApplier(
                 event_bus=config.event_bus,  # type: ignore[arg-type]
                 output_topic=config.output_topic,
@@ -323,8 +345,9 @@ class PluginDelegation:
                     },
                 )
 
+            # Use the container-resolved subscriber_bus for subscribe operations (OMN-9556).
             wiring = EventBusSubcontractWiring(
-                event_bus=config.event_bus,
+                event_bus=subscriber_bus,  # type: ignore[arg-type]
                 dispatch_engine=config.dispatch_engine,
                 environment=config.node_identity.env,
                 node_name=config.node_identity.node_name,
