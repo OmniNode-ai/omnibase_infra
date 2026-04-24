@@ -71,6 +71,9 @@ from pydantic import ValidationError
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.protocols.event_bus import ProtocolEventBusPublisher
+from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
+    ProtocolEventBusSubscriber,
+)
 from omnibase_infra.enums import (
     EnumCircuitState,
     EnumConsumerGroupPurpose,
@@ -1603,10 +1606,16 @@ async def bootstrap() -> int:
             },
         )
 
-        # 4.1. Register event bus as ProtocolEventBusPublisher in service registry
-        # Domain plugins (e.g., claude) resolve ProtocolEventBusPublisher from the
-        # registry during wire_dispatchers(). Without this registration, plugin
-        # handler wiring fails and no event consumers are started.
+        # 4.1. Register event bus in service registry under publisher and subscriber protocols.
+        #
+        # ProtocolEventBusPublisher: resolved by domain plugins during wire_dispatchers().
+        #   Without this registration, plugin handler wiring fails and no event
+        #   consumers are started.
+        #
+        # ProtocolEventBusSubscriber (OMN-9556): resolved by domain plugin start_consumers()
+        #   paths so subscribe-capable consumer startup goes through the container rather
+        #   than being threaded in via ModelDomainPluginConfig.event_bus (kernel-injected).
+        #   This makes DI boundaries explicit and keeps publisher-only paths unaffected.
         if container.service_registry is not None:
             try:
                 await container.service_registry.register_instance(
@@ -1625,6 +1634,29 @@ async def bootstrap() -> int:
                     correlation_id,
                     exc_info=True,
                 )
+
+            # Register as ProtocolEventBusSubscriber when the bus supports subscribe.
+            # Both EventBusKafka and EventBusInmemory implement ProtocolEventBusSubscriber
+            # structurally. Domain plugins resolve this interface from the container
+            # instead of pulling config.event_bus directly (OMN-9556).
+            if isinstance(event_bus, ProtocolEventBusSubscriber):
+                try:
+                    await container.service_registry.register_instance(
+                        ProtocolEventBusSubscriber,
+                        event_bus,  # type: ignore[arg-type]
+                    )
+                    logger.info(
+                        "Registered %s as ProtocolEventBusSubscriber (correlation_id=%s)",
+                        event_bus_type,
+                        correlation_id,
+                    )
+                except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                    logger.warning(
+                        "Failed to register event bus as ProtocolEventBusSubscriber "
+                        "(correlation_id=%s)",
+                        correlation_id,
+                        exc_info=True,
+                    )
 
         # 4.5. Activate domain plugins via RegistryDomainPlugin (OMN-1992)
         #
