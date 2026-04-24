@@ -1,0 +1,50 @@
+# OMN-9600 contract file for deploy-gate (OMN-8912).
+# deploy-gate checks `contracts/<OMN-XXXX>.yaml` for a dod_evidence item whose
+# check_value contains one of 'docker exec', 'rpk topic produce', or 'deploy'.
+# This file satisfies that gate via dod-004 below.
+#
+# The canonical ticket contract (schema-validated via onex_change_control
+# ModelTicketContract) lives at onex_change_control/contracts/OMN-9600.yaml.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: '1.0.0'
+ticket_id: OMN-9600
+summary: 'docs(OMN-9600): refresh omnibase_infra documentation; fix workspace-local .onex_state defaults'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: ci
+    description: CI passes on merge PR
+    command: gh pr checks
+  - kind: tests
+    description: Unit + integration tests for workspace-local path defaults
+    command: 'uv run pytest tests/integration/test_omn_9600_path_defaults.py -v'
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: PR opened against main branch
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'state=$(gh pr view {pr} --repo {repo} --json state,baseRefName -q ''[.state, .baseRefName] | @tsv''); [ "$(echo "$state" | cut -f1)" = "OPEN" ] && [ "$(echo "$state" | cut -f2)" = "main" ]'
+  - id: dod-002
+    description: Contract artifact file present in repo
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'test -f contracts/OMN-9600.yaml'
+  - id: dod-003
+    description: Integration test exists proving workspace-local path defaults
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'test -f tests/integration/test_omn_9600_path_defaults.py'
+  - id: dod-004
+    description: Deployed runtime reflects workspace-local .onex_state defaults (deploy evidence)
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'docker exec omninode-runtime python -c "from omnibase_infra.adapters.project_tracker.local_stub_project_tracker import LocalStubProjectTracker; t = LocalStubProjectTracker(); assert str(t._state_root).startswith(''.onex_state''), f\"Expected workspace-local default, got {t._state_root}\""'
