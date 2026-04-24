@@ -30,7 +30,7 @@ class AgentRegistry:
     """Local-first YAML agent registry."""
 
     def __init__(self, state_dir: Path | None = None) -> None:
-        self._state_dir = state_dir or Path.home() / ".onex_state"
+        self._state_dir = state_dir or Path(".onex_state")
         self._agents_dir = self._state_dir / "agents"
         self._agents_dir.mkdir(parents=True, exist_ok=True)
 
