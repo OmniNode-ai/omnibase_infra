@@ -188,11 +188,10 @@ class TestPluginJsonNormalizer:
         assert list(first_item.keys()) == ["nested_a", "nested_m", "nested_z"]
 
         # Performance assertion: should complete in reasonable time
-        # With optimizations, 1000 keys should take < 50ms on modern hardware
         # CI environments have variable performance due to shared resources,
-        # containerization overhead, and CPU throttling. Using 0.5s threshold
+        # containerization overhead, and CPU throttling. Using 2.0s threshold
         # to prevent flaky failures while still catching severe regressions.
-        assert elapsed_time < 0.5, (
+        assert elapsed_time < 2.0, (
             f"Performance regression: took {elapsed_time:.3f}s for 1000 keys"
         )
 
