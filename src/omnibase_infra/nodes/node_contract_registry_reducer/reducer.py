@@ -681,7 +681,7 @@ class ContractRegistryReducer:
         if isinstance(consumed_events, list):
             for consumed in consumed_events:
                 if isinstance(consumed, dict):
-                    # Topics are realm-agnostic (e.g., "onex.evt.platform.contract-registered.v1").
+                    # Topics are realm-agnostic (e.g., "onex.evt.platform.contract-registered.v1").  # onex-topic-allow: pending contract auto-wiring
                     # Legacy topics with {env}. prefix are normalized by the Effect layer.
                     topic_suffix = consumed.get("topic")
                     if topic_suffix and isinstance(topic_suffix, str):

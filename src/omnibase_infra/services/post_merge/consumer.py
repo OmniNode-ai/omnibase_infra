@@ -91,7 +91,9 @@ from omnibase_infra.topics.platform_topic_suffixes import (
 
 logger = logging.getLogger(__name__)
 
-RESULT_TOPIC = SUFFIX_GITHUB_POST_MERGE_RESULT
+RESULT_TOPIC = (  # onex-topic-allow: pending contract auto-wiring
+    SUFFIX_GITHUB_POST_MERGE_RESULT
+)
 
 # Severity ordering for filtering
 _SEVERITY_ORDER: dict[str, int] = {

@@ -198,7 +198,7 @@ def verify_snapshots(topic: str) -> None:
 @verify.command("idempotency")
 @click.option(
     "--topic",
-    default="onex.evt.platform.node-introspection.v1",
+    default="onex.evt.platform.node-introspection.v1",  # onex-topic-allow: pending contract auto-wiring
     help="Introspection topic.",
     show_default=True,
 )

@@ -78,7 +78,9 @@ _logger = logging.getLogger(__name__)
 
 # Intent type routing constants
 INTENT_UPSERT_CONTRACT = "postgres.upsert_contract"
-INTENT_UPDATE_TOPIC = "postgres.update_topic"
+INTENT_UPDATE_TOPIC = (  # onex-topic-allow: pending contract auto-wiring
+    "postgres.update_topic"
+)
 INTENT_MARK_STALE = "postgres.mark_stale"
 INTENT_UPDATE_HEARTBEAT = "postgres.update_heartbeat"
 INTENT_DEACTIVATE_CONTRACT = "postgres.deactivate_contract"

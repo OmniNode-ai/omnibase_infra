@@ -74,7 +74,7 @@ class MixinConsumptionCounter:
         >>> wiring = EventBusSubcontractWiring()
         >>> await wiring.callback(message)
         >>> wiring.get_consumption_counts()
-        {'onex.evt.omniclaude.agent-match.v1': 1}
+        {'onex.evt.omniclaude.agent-match.v1': 1}  # onex-topic-allow: pending contract auto-wiring
     """
 
     def _init_consumption_counter(

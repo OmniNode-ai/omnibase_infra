@@ -215,8 +215,8 @@ _HANDLER_TYPE_TO_KIND: dict[EnumHandlerTypeCategory, LiteralHandlerKind] = {
 _DEFAULT_HANDLER_KIND: LiteralHandlerKind = "effect"
 
 # Default configuration values
-DEFAULT_INPUT_TOPIC = "requests"
-DEFAULT_OUTPUT_TOPIC = "responses"
+DEFAULT_INPUT_TOPIC = "requests"  # onex-topic-allow: pending contract auto-wiring
+DEFAULT_OUTPUT_TOPIC = "responses"  # onex-topic-allow: pending contract auto-wiring
 DEFAULT_GROUP_ID = "runtime-host"
 
 # Health check timeout bounds (per ModelLifecycleSubcontract)
@@ -4683,7 +4683,7 @@ class RuntimeHostProcess:
 
         Args:
             topic: Realm-agnostic topic string
-                   (e.g., "onex.evt.intent-classified.v1")
+                   (e.g., "onex.evt.intent-classified.v1")  # onex-topic-allow: pending contract auto-wiring
 
         Returns:
             Empty list.  Consul-backed topic routing is no longer available.

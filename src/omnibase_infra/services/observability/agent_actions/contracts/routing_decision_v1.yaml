@@ -19,7 +19,7 @@
 #           (function: _build_routing_decision_payload)
 # Consumer: omnibase_infra/src/omnibase_infra/services/observability/agent_actions/consumer.py
 # Strict model: omnibase_infra/src/.../models/model_routing_decision.py
-topic: "onex.evt.omniclaude.routing-decision.v1"
+topic: "onex.evt.omniclaude.routing-decision.v1" # onex-topic-sot
 schema_version: "1.0.0"
 ticket: "OMN-3425"
 description: >

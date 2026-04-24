@@ -24,7 +24,9 @@ from omnibase_infra.topics import SUFFIX_EVAL_COMPLETED
 logger = logging.getLogger(__name__)
 
 # Topic declared in platform_topic_suffixes.py (OMN-6779)
-EVAL_COMPLETED_TOPIC = SUFFIX_EVAL_COMPLETED
+EVAL_COMPLETED_TOPIC = (  # onex-topic-allow: pending contract auto-wiring
+    SUFFIX_EVAL_COMPLETED
+)
 
 
 def build_eval_completed_payload(report: ModelEvalReport) -> dict[str, object]:

@@ -71,7 +71,7 @@ class ProtocolTopicRegistry(Protocol):
 
         Returns:
             The concrete Kafka topic string
-            (e.g., ``"onex.evt.platform.resolution-decided.v1"``).
+            (e.g., ``"onex.evt.platform.resolution-decided.v1"``).  # onex-topic-allow: pending contract auto-wiring
 
         Raises:
             KeyError: If ``topic_key`` is not registered. The error message

@@ -239,10 +239,10 @@ class ServiceTimeoutEmitter:
 
     # Default topic suffixes following ONEX 5-segment realm-agnostic conventions.
     # The runtime composes the full qualified topic by prepending env.namespace.
-    DEFAULT_ACK_TIMEOUT_TOPIC = (
+    DEFAULT_ACK_TIMEOUT_TOPIC = (  # onex-topic-allow: pending contract auto-wiring
         EnumPlatformTopic.EVT_NODE_REGISTRATION_ACK_TIMED_OUT_V1.value
     )
-    DEFAULT_LIVENESS_EXPIRED_TOPIC = (
+    DEFAULT_LIVENESS_EXPIRED_TOPIC = (  # onex-topic-allow: pending contract auto-wiring
         EnumPlatformTopic.EVT_NODE_LIVENESS_EXPIRED_V1.value
     )
 

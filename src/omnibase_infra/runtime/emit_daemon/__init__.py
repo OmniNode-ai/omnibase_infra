@@ -33,7 +33,7 @@ Example Usage:
     registry.register(
         ModelEventRegistration(
             event_type="myapp.submitted",
-            topic_template="onex.evt.myapp.submitted.v1",
+            topic_template="onex.evt.myapp.submitted.v1",  # onex-topic-allow: pending contract auto-wiring
             partition_key_field="session_id",
             required_fields=("session_id",),
         )

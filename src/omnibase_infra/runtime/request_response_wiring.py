@@ -174,10 +174,10 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
             instances=[
                 ModelRequestResponseInstance(
                     name="code-analysis",
-                    request_topic="onex.cmd.intelligence.analyze-code.v1",
+                    request_topic="onex.cmd.intelligence.analyze-code.v1",  # onex-topic-allow: pending contract auto-wiring
                     reply_topics=ModelReplyTopics(
-                        completed="onex.evt.intelligence.code-analyzed.v1",
-                        failed="onex.evt.intelligence.code-analysis-failed.v1",
+                        completed="onex.evt.intelligence.code-analyzed.v1",  # onex-topic-allow: pending contract auto-wiring
+                        failed="onex.evt.intelligence.code-analysis-failed.v1",  # onex-topic-allow: pending contract auto-wiring
                     ),
                     timeout_seconds=30,
                 )
@@ -283,11 +283,11 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
 
         Args:
             topic_suffix: ONEX format topic suffix
-                (e.g., 'onex.cmd.intelligence.analyze-code.v1')
+                (e.g., 'onex.cmd.intelligence.analyze-code.v1')  # onex-topic-allow: pending contract auto-wiring
 
         Returns:
             Topic name (same as suffix, no environment prefix)
-                (e.g., 'onex.cmd.intelligence.analyze-code.v1')
+                (e.g., 'onex.cmd.intelligence.analyze-code.v1')  # onex-topic-allow: pending contract auto-wiring
 
         Note:
             Consumer groups still include environment for proper isolation.

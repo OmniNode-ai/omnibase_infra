@@ -3,7 +3,7 @@
 # Ticket: OMN-7360
 #
 # Wire schema contract for intelligence hook event (full prompt path)
-topic: "onex.cmd.omniintelligence.claude-hook-event.v1"
+topic: "onex.cmd.omniintelligence.claude-hook-event.v1" # onex-topic-sot
 schema_version: "1.0.0"
 ticket: "OMN-7360"
 description: >

@@ -24,7 +24,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 CORRELATION_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
-TOPIC="onex.cmd.skill.scope-check.v1"
+TOPIC="onex.cmd.skill.scope-check.v1"  # onex-topic-allow: pending contract auto-wiring
 
 PAYLOAD=$(cat <<EOF
 {

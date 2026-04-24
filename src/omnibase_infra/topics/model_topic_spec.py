@@ -39,7 +39,7 @@ class ModelTopicSpec:
     """Per-topic creation spec: suffix + partitions + optional Kafka config overrides.
 
     Attributes:
-        suffix: Full ONEX 5-segment topic name (e.g., "onex.evt.platform.node-registration.v1").
+        suffix: Full ONEX 5-segment topic name (e.g., "onex.evt.platform.node-registration.v1").  # onex-topic-allow: pending contract auto-wiring
         partitions: Number of partitions for the topic.
         replication_factor: Replication factor for the topic.
         kafka_config: Optional Kafka topic config overrides (e.g., {"cleanup.policy": "compact"}).

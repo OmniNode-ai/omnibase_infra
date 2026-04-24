@@ -54,10 +54,10 @@ class ProtocolValidationLedgerRepository(Protocol):
         ...     return await repo.append(
         ...         run_id=run_id,
         ...         repo_id="omnibase_core",
-        ...         event_type="onex.evt.validation.cross-repo-run-started.v1",
+        ...         event_type="onex.evt.validation.cross-repo-run-started.v1",  # onex-topic-allow: pending contract auto-wiring
         ...         event_version="v1",
         ...         occurred_at=datetime.now(UTC),
-        ...         kafka_topic="onex.evt.validation.cross-repo-run-started.v1",
+        ...         kafka_topic="onex.evt.validation.cross-repo-run-started.v1",  # onex-topic-allow: pending contract auto-wiring
         ...         kafka_partition=0,
         ...         kafka_offset=42,
         ...         envelope_bytes=envelope_bytes,

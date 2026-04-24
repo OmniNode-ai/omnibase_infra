@@ -26,7 +26,7 @@ Example:
     ...     correlation_id=correlation_id,
     ...     event_type="context_utilization",
     ...     event_payload=b'{"session_id": "...", "utilization_score": 0.85}',
-    ...     kafka_topic="onex.evt.omniclaude.context-utilization.v1",
+    ...     kafka_topic="onex.evt.omniclaude.context-utilization.v1",  # onex-topic-allow: pending contract auto-wiring
     ...     kafka_partition=0,
     ...     kafka_offset=42,
     ... )

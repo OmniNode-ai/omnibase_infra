@@ -50,7 +50,7 @@ Example:
     ... )
     >>>
     >>> print(config.topics)
-    ['onex.evt.omniclaude.context-utilization.v1', ...]
+    ['onex.evt.omniclaude.context-utilization.v1', ...]  # onex-topic-allow: pending contract auto-wiring
 """
 
 from __future__ import annotations

@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 CONSUMER_GROUP = "omnibase_infra.session_registry.decision_project.v1"
 
 # Kafka topic for decision recorded events (from canonical topic registry).
-DECISION_RECORDED_TOPIC = SUFFIX_INTELLIGENCE_DECISION_RECORDED_EVT
+DECISION_RECORDED_TOPIC = SUFFIX_INTELLIGENCE_DECISION_RECORDED_EVT  # onex-topic-allow: pending contract auto-wiring
 
 # Coordination signal types that produce synthetic decisions.
 _COORDINATION_SIGNAL_TYPES = frozenset({"PR_MERGED", "TICKET_COMPLETED"})

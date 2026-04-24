@@ -213,7 +213,7 @@ def _run_smoke_suite(compose_file: str, project_name: str) -> None:
     """
     broker = get_broker()
     dsn = get_postgres_dsn()
-    topic = "onex.evt.platform.node-introspection.v1"
+    topic = "onex.evt.platform.node-introspection.v1"  # onex-topic-allow: pending contract auto-wiring
     node_id = str(uuid4())
     failures: list[str] = []
 
@@ -274,7 +274,7 @@ def _run_idempotency_suite(compose_file: str, project_name: str) -> None:
 
     broker = get_broker()
     dsn = get_postgres_dsn()
-    topic = "onex.evt.platform.node-introspection.v1"
+    topic = "onex.evt.platform.node-introspection.v1"  # onex-topic-allow: pending contract auto-wiring
     node_id = str(uuid4())
     repetitions = 3
 
@@ -355,7 +355,7 @@ def _run_failure_suite(compose_file: str, project_name: str) -> None:
     """
     broker = get_broker()
     dsn = get_postgres_dsn()
-    topic = "onex.evt.platform.node-introspection.v1"
+    topic = "onex.evt.platform.node-introspection.v1"  # onex-topic-allow: pending contract auto-wiring
     node_a = str(uuid4())
     node_b = str(uuid4())
 

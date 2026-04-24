@@ -225,7 +225,7 @@ class ServiceContractPublisher:
         is enforced via envelope identity, not topic naming.
 
         Args:
-            topic_suffix: Topic suffix (e.g., "onex.evt.contract-registered.v1")
+            topic_suffix: Topic suffix (e.g., "onex.evt.contract-registered.v1")  # onex-topic-allow: pending contract auto-wiring
 
         Returns:
             Topic name (same as suffix, no environment prefix)

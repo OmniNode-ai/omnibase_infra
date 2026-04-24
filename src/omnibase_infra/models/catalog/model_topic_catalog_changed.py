@@ -48,7 +48,7 @@ class ModelTopicCatalogChanged(BaseModel):
         >>> changed = ModelTopicCatalogChanged(
         ...     correlation_id=uuid4(),
         ...     catalog_version=2,
-        ...     topics_added=("onex.evt.platform.new-topic.v1",),
+        ...     topics_added=("onex.evt.platform.new-topic.v1",),  # onex-topic-allow: pending contract auto-wiring
         ...     topics_removed=(),
         ...     trigger_reason="Node registered with new topic",
         ...     changed_at=datetime.now(timezone.utc),

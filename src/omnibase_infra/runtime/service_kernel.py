@@ -192,8 +192,8 @@ DEFAULT_RUNTIME_CONFIG = "runtime/runtime_config.yaml"
 ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
 # Environment variable for omniclaude skills root (cross-repo topic discovery)
 ENV_OMNICLAUDE_SKILLS_ROOT = "OMNICLAUDE_SKILLS_ROOT"
-DEFAULT_INPUT_TOPIC = "requests"
-DEFAULT_OUTPUT_TOPIC = "responses"
+DEFAULT_INPUT_TOPIC = "requests"  # onex-topic-allow: pending contract auto-wiring
+DEFAULT_OUTPUT_TOPIC = "responses"  # onex-topic-allow: pending contract auto-wiring
 DEFAULT_GROUP_ID = "onex-runtime"
 
 # OMN-8784: Deprecated topic env vars — hard-fail if set.

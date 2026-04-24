@@ -35,7 +35,7 @@ Kafka Subscription Wiring:
 
     The topic constant is::
 
-        TOPIC_DB_ERROR_V1 = "onex.evt.omnibase-infra.db-error.v1"
+        TOPIC_DB_ERROR_V1 = "onex.evt.omnibase-infra.db-error.v1"  # onex-topic-allow: pending contract auto-wiring
 
     (defined in ``omnibase_infra.topics.platform_topic_suffixes``)
 

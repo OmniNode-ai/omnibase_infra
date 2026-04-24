@@ -1025,7 +1025,7 @@ class MixinNodeIntrospection:
             Topics follow ONEX naming convention:
             onex.{kind}.{producer}.{event-name}.v{n}
 
-            Example: "onex.evt.intent-classified.v1"
+            Example: "onex.evt.intent-classified.v1"  # onex-topic-allow: pending contract auto-wiring
 
         Returns:
             Resolved event bus config with topic strings, or None if:
@@ -1042,7 +1042,7 @@ class MixinNodeIntrospection:
         Example:
             >>> config = self._extract_event_bus_config()
             >>> config.publish_topic_strings
-            ['onex.evt.platform.node-registered.v1']
+            ['onex.evt.platform.node-registered.v1']  # onex-topic-allow: pending contract auto-wiring
 
         See Also:
             - ModelEventBusSubcontract: Contract model with topics

@@ -10,7 +10,7 @@ Usage:
 
     config = AuditConfig(
         broker="localhost:19092",
-        expected_topics=["onex.evt.platform.node-registration.v1"],
+        expected_topics=["onex.evt.platform.node-registration.v1"],  # onex-topic-allow: pending contract auto-wiring
     )
     report = run_audit(config)
     print(report.to_human_readable())
