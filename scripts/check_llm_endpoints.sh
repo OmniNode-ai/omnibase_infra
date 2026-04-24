@@ -6,11 +6,11 @@
 #
 # Required endpoints (must be reachable or script exits 1):
 #   LLM_CODER_URL       — Qwen3-Coder-30B (port 8000)
-#   LLM_DEEPSEEK_R1_URL — DeepSeek-R1-14B  (port 8001)
+#   LLM_DEEPSEEK_R1_URL — DeepSeek-R1-32B  (port 8101)
+#   LLM_EMBEDDING_URL   — embedding model, when configured
 #
 # Optional endpoints (failures are warned, not fatal):
 #   LLM_CODER_FAST_URL  — fast coder (port 8001 alias)
-#   LLM_EMBEDDING_URL   — embedding model
 #
 # Usage:
 #   bash scripts/check_llm_endpoints.sh
@@ -79,7 +79,7 @@ if [[ -n "${LLM_CODER_FAST_URL:-}" ]]; then
 fi
 
 if [[ -n "${LLM_EMBEDDING_URL:-}" ]]; then
-  _probe "embedding (LLM_EMBEDDING_URL)" "$LLM_EMBEDDING_URL" false
+  _probe "embedding (LLM_EMBEDDING_URL)" "$LLM_EMBEDDING_URL" true
 fi
 
 echo ""

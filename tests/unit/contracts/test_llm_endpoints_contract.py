@@ -67,6 +67,14 @@ _ROLE_TAXONOMY: frozenset[str] = frozenset(
 _PLANNED_NULLABLE_FIELDS: frozenset[str] = frozenset(
     ["host", "port", "endpoint_url", "model_hf_id"]
 )
+_RUNTIME_REQUIRED_URL_ENV_VARS: frozenset[str] = frozenset(
+    [
+        "LLM_CODER_URL",
+        "LLM_CODER_FAST_URL",
+        "LLM_EMBEDDING_URL",
+        "LLM_DEEPSEEK_R1_URL",
+    ]
+)
 
 
 def _load_endpoints() -> list[dict[str, Any]]:
@@ -125,3 +133,25 @@ class TestLlmEndpointsContract:
         assert ep["url_env_var"] == "LLM_QWEN3_NEXT_URL"
         assert ep["role_env_alias"] == "LLM_REASONING_FAST_URL"
         assert ep["role"] == "reasoning_fast"
+
+    def test_runtime_required_env_vars_are_owned_by_running_slots(self) -> None:
+        """Runtime-required URL env vars must point at running canonical slots."""
+        by_env = {
+            ep["url_env_var"]: ep
+            for ep in _load_endpoints()
+            if ep.get("url_env_var") is not None
+        }
+
+        for env_var in _RUNTIME_REQUIRED_URL_ENV_VARS:
+            ep = by_env.get(env_var)
+            assert ep is not None, f"{env_var} is not assigned to any endpoint slot"
+            assert ep["status"] == "running", (
+                f"{env_var} is assigned to non-running slot {ep['slot_id']!r}"
+            )
+
+    def test_disabled_slots_do_not_own_runtime_url_env_vars(self) -> None:
+        for ep in _load_endpoints():
+            if ep["status"] == "disabled":
+                assert ep["url_env_var"] is None, (
+                    f"disabled slot {ep['slot_id']!r} must not own url_env_var"
+                )
