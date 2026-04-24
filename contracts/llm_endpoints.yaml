@@ -68,7 +68,7 @@ endpoints:
     host: 192.168.86.201
     port: 8100
     endpoint_url: http://192.168.86.201:8100
-    url_env_var: null
+    url_env_var: LLM_EMBEDDING_URL
     role_env_alias: null
     model_hf_id: Alibaba-NLP/gte-Qwen2-1.5B-instruct
     role: embedding
@@ -76,7 +76,7 @@ endpoints:
     hardware: RTX 4090 (.201)
     context_window_budgeted: 8192
     launchd_unit_or_none: null
-    notes: Docker-internal embeddings; no env-var exposure outside Docker network.
+    notes: Canonical runtime embedding endpoint for LLM_EMBEDDING_URL.
   - slot_id: reasoning-deepseek-32b
     host: 192.168.86.200
     port: 8101
@@ -114,7 +114,7 @@ endpoints:
     host: 192.168.86.200
     port: 8100
     endpoint_url: http://192.168.86.200:8100
-    url_env_var: LLM_EMBEDDING_URL
+    url_env_var: null
     role_env_alias: null
     model_hf_id: mlx-community/Qwen3-Embedding-8B-4bit-DWQ
     role: embedding
@@ -125,6 +125,7 @@ endpoints:
     notes: |
       Stopped 2026-04-18 to free RAM. Restart:
       `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.mlx.embeddings.plist`.
+      Historical LLM_EMBEDDING_URL owner; disabled slots must not own runtime env vars.
   - slot_id: second-opinion-gemma
     host: 192.168.86.200
     port: 8103

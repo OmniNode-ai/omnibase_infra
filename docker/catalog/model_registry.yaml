@@ -75,7 +75,7 @@ models:
     context_window: 8192
     seed_cost_per_1k_tokens: 0.0
     seed_tokens_per_sec: 50
-    hardware: "M2 Ultra"
+    hardware: "RTX 4090"
     tier: local
   - model_key: "claude-sonnet"
     provider: anthropic
