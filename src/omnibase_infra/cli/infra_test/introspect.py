@@ -19,11 +19,11 @@ import click
 from rich.console import Console
 
 from omnibase_infra.cli.infra_test._helpers import get_broker
-from omnibase_infra.enums.generated.enum_platform_topic import EnumPlatformTopic
+from omnibase_infra.models.discovery.model_introspection_config import (
+    DEFAULT_INTROSPECTION_TOPIC,
+)
 
 console = Console()
-
-DEFAULT_INTROSPECTION_TOPIC = EnumPlatformTopic.EVT_NODE_INTROSPECTION_V1.value
 
 
 def _build_introspection_payload(

@@ -10,7 +10,12 @@ from uuid import UUID
 import click
 import pytest
 
+from omnibase_infra.cli.infra_test import introspect as introspect_cli
 from omnibase_infra.cli.infra_test.introspect import _build_introspection_payload
+from omnibase_infra.models.discovery.model_introspection_config import (
+    DEFAULT_INTROSPECTION_TOPIC as MODEL_DEFAULT_INTROSPECTION_TOPIC,
+)
+from omnibase_infra.topics import SUFFIX_NODE_INTROSPECTION
 
 
 @pytest.mark.unit
@@ -119,3 +124,19 @@ class TestBuildIntrospectionPayload:
         """Non-numeric version string raises click.BadParameter."""
         with pytest.raises(click.BadParameter, match="Invalid version"):
             _build_introspection_payload(version="abc")
+
+
+@pytest.mark.unit
+class TestDefaultIntrospectionTopicSoT:
+    """Guard against drift between the CLI default and the canonical topic source."""
+
+    def test_cli_default_matches_model_default(self) -> None:
+        """CLI default must be imported from the canonical model module (OMN-9154)."""
+        assert (
+            introspect_cli.DEFAULT_INTROSPECTION_TOPIC
+            is MODEL_DEFAULT_INTROSPECTION_TOPIC
+        )
+
+    def test_cli_default_matches_topic_suffix(self) -> None:
+        """Canonical model default must resolve to SUFFIX_NODE_INTROSPECTION."""
+        assert introspect_cli.DEFAULT_INTROSPECTION_TOPIC == SUFFIX_NODE_INTROSPECTION
