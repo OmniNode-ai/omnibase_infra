@@ -22,6 +22,7 @@ CI gate: any PR touching this module MUST satisfy the runtime-startup gate defin
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import logging
 import os
@@ -572,7 +573,9 @@ def _derive_route_id(
     """
     safe_topic = re.sub(r"[.\-]", "_", topic)
     if operation:
-        safe_op = re.sub(r"[.\-/]", "_", operation)
+        normalized = re.sub(r"[^A-Za-z0-9_]+", "_", operation.strip()).strip("_")
+        digest = hashlib.sha1(operation.encode()).hexdigest()[:8]
+        safe_op = f"{normalized}_{digest}" if normalized else digest
         return f"route.auto.{contract_name}.{handler_name}.{safe_op}.{safe_topic}"
     return f"route.auto.{contract_name}.{handler_name}.{safe_topic}"
 
@@ -593,7 +596,9 @@ def _derive_dispatcher_id(
     unaffected.
     """
     if operation:
-        safe_op = re.sub(r"[.\-/]", "_", operation)
+        normalized = re.sub(r"[^A-Za-z0-9_]+", "_", operation.strip()).strip("_")
+        digest = hashlib.sha1(operation.encode()).hexdigest()[:8]
+        safe_op = f"{normalized}_{digest}" if normalized else digest
         return f"dispatcher.auto.{contract_name}.{handler_name}.{safe_op}"
     return f"dispatcher.auto.{contract_name}.{handler_name}"
 

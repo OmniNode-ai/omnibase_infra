@@ -133,7 +133,7 @@ class TestDeriveIds:
                 "onex.cmd.omnibase-infra.llm-inference-request.v1",
                 "inference.gemini_cli",
             )
-            == "route.auto.my_node.HandlerLlmCliSubprocess.inference_gemini_cli.onex_cmd_omnibase_infra_llm_inference_request_v1"
+            == "route.auto.my_node.HandlerLlmCliSubprocess.inference_gemini_cli_fb462661.onex_cmd_omnibase_infra_llm_inference_request_v1"
         )
 
     def test_route_id_without_operation_unchanged(self) -> None:
@@ -162,8 +162,14 @@ class TestDeriveIds:
                 "HandlerLlmCliSubprocess",
                 "inference.gemini_cli",
             )
-            == "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_gemini_cli"
+            == "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_gemini_cli_fb462661"
         )
+
+    def test_dispatcher_id_collision_safe(self) -> None:
+        """OMN-9461: operations that normalize identically still produce distinct IDs."""
+        id_a = _derive_dispatcher_id("n", "H", "inference.a-b")
+        id_b = _derive_dispatcher_id("n", "H", "inference.a/b")
+        assert id_a != id_b
 
     def test_dispatcher_id_without_operation_unchanged(self) -> None:
         """OMN-9461: absence of operation keeps original ID form."""
