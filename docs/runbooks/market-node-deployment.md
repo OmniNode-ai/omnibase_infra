@@ -305,40 +305,28 @@ actionable from a static code-only PR.
 ## Manual deployment path (current fallback)
 
 When the deploy-agent is unreachable (e.g., OMN-9713 bus mismatch), the current
-manual path on .201 is:
+manual path on `.201` is (requires `INFRA_HOST` and `INFRA_USER` from `~/.omnibase/.env`):
 
 ```bash
-# 1. SSH to .201
-ssh jonah@192.168.86.201
+# 1. SSH to the infra host
+ssh ${INFRA_USER}@${INFRA_HOST}
 
-# 2. Pull latest omnibase_infra
+# 2. Pull latest omnibase_infra (path is hardcoded in deploy-agent executor.py)
 git -C /data/omninode/omnibase_infra pull --ff-only
 
-# 3. Run deploy-runtime.sh from omnibase_infra clone
+# 3. Run deploy-runtime.sh from the infra clone
 cd /data/omninode/omnibase_infra
 ./scripts/deploy-runtime.sh --execute --restart
 
-# 4. Verify health
-curl -sf http://192.168.86.201:8085/health | jq .details.config_prefetch_status
-curl -sf http://192.168.86.201:8086/health | jq .details.config_prefetch_status
+# 4. Verify runtime health (ports 8085/8086 — NOT 8000/8001 which are LLM ports)
+curl -sf http://localhost:8085/health | jq .details.config_prefetch_status
+curl -sf http://localhost:8086/health | jq .details.config_prefetch_status
 
-# 5. Verify consumer groups
-rpk group list --brokers 192.168.86.201:19092 | grep local.omnimarket
+# 5. Verify consumer groups (broker address from KAFKA_BOOTSTRAP_SERVERS in .env)
+rpk group list --brokers ${KAFKA_BOOTSTRAP_SERVERS:-localhost:19092} | grep local.omnimarket
 ```
 
 `deploy-runtime.sh` rsyncs the repo to `~/.omnibase/infra/deployed/<version>/`,
 builds the Docker image with VCS_REF label, and optionally restarts runtime containers.
 It does NOT install omnimarket from the local clone — the Dockerfile always fetches
 omnimarket from `git+https://github.com/OmniNode-ai/omnimarket.git@main` at build time.
-
----
-
-## dod_evidence
-
-```
-test -f /Users/jonah/Code/omni_worktrees/OMN-9727/omnibase_infra/docs/runbooks/market-node-deployment.md
-# → 0 (pass)
-
-wc -l /Users/jonah/Code/omni_worktrees/OMN-9727/omnibase_infra/docs/runbooks/market-node-deployment.md
-# → positive line count (pass)
-```
