@@ -143,7 +143,7 @@ def test_confluent_group_listing_ignores_binary_member_metadata(
 
     class FakeAdminClient:
         def __init__(self, config: dict[str, object]) -> None:
-            assert config["bootstrap.servers"] == "redpanda:9092"
+            assert config["bootstrap.servers"] == BOOTSTRAP_SERVERS
 
         def list_consumer_groups(self, request_timeout: float):
             assert request_timeout >= 1.0
@@ -151,7 +151,7 @@ def test_confluent_group_listing_ignores_binary_member_metadata(
 
     monkeypatch.setattr("confluent_kafka.admin.AdminClient", FakeAdminClient)
 
-    snapshots = _list_consumer_group_snapshots("redpanda:9092", 5000)
+    snapshots = _list_consumer_group_snapshots(BOOTSTRAP_SERVERS, 5000)
 
     assert len(snapshots) == 1
     assert snapshots[0].group_id == "onex-runtime-main"

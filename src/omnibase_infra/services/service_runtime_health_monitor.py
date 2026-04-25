@@ -30,6 +30,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
+from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
 from omnibase_infra.models.health.model_runtime_health_check_event import (
     ModelRuntimeHealthCheckEvent,
 )
@@ -101,7 +103,14 @@ def _list_consumer_group_snapshots(
 
     errors = getattr(result, "errors", None) or []
     if errors:
-        raise RuntimeError(f"list_consumer_groups returned {len(errors)} error(s)")
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="list_consumer_groups",
+        )
+        raise InfraConnectionError(
+            f"list_consumer_groups returned {len(errors)} error(s)",
+            context=context,
+        )
 
     snapshots: list[ConsumerGroupSnapshot] = []
     for group in getattr(result, "valid", None) or []:
@@ -297,17 +306,19 @@ class ServiceRuntimeHealthMonitor:
                 }
                 empty_consumer_group_count = len(empty_groups)
 
-                # Check which subscribe topics have a matching non-empty group
-                # Consumer groups in ONEX typically encode the topic in the group ID
-                # (e.g. "onex-runtime-consumer-<topic-slug>"). We consider a topic
-                # "covered" if at least one non-empty group ID contains the full
-                # topic name, ensuring exact-identity matching rather than a loose
-                # suffix match that could yield false positives on version tokens
-                # like "v1" (which appear in every consumer group name).
+                # Check which subscribe topics have a matching non-empty group.
+                # ONEX consumer group IDs embed the full topic name surrounded by
+                # "-" delimiters or at end-of-string (e.g. "onex-consumer-<topic>").
+                # A raw substring check would false-positive on prefix collisions
+                # like "orders.v1" matching "orders.v10-extra". We require the
+                # topic to appear as a complete token bounded by "-" or string end.
                 non_empty_groups = set(all_group_ids) - empty_groups
                 uncovered: list[str] = []
                 for topic in sorted(subscribe_topics):
-                    covered = any(topic in grp for grp in non_empty_groups)
+                    covered = any(
+                        f"-{topic}-" in grp or grp.endswith(f"-{topic}")
+                        for grp in non_empty_groups
+                    )
                     if not covered:
                         uncovered.append(topic)
                 uncovered_topic_count = len(uncovered)
