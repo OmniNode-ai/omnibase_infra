@@ -1,0 +1,86 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# ONEX Node Contract
+# Node: NodeRemoteAgentInvokeEffect
+#
+# Submits routed remote-agent invocation commands to protocol-specific
+# transports and emits remote task lifecycle events.
+name: "node_remote_agent_invoke_effect"
+contract_name: "node_remote_agent_invoke_effect"
+node_name: "node_remote_agent_invoke_effect"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  Remote-agent invocation effect node for the A2A delegation bridge. Consumes invocation commands emitted by the delegation orchestrator, delegates task submission and watch operations to protocol-specific handlers, persists remote task state, and emits lifecycle events back to the orchestration pipeline.
+
+input_model:
+  name: "ModelInvocationCommand"
+  module: "omnibase_core.models.delegation"
+  description: "Invocation command selected by delegation routing."
+output_model:
+  name: "ModelAgentTaskLifecycleEvent"
+  module: "omnibase_core.models.delegation"
+  description: "Lifecycle event emitted while watching a remote agent task."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers: []
+  execution_mode: "single"
+  max_timeout_seconds: 600
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.remote-agent-invoke.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.agent-task-lifecycle.v1"
+consumed_events:
+  - topic: "onex.cmd.omnibase-infra.remote-agent-invoke.v1"
+    event_type: "RemoteAgentInvokeCommand"
+    message_category: "COMMAND"
+    description: "Command requesting remote-agent task submission and lifecycle watch."
+published_events:
+  - topic: "onex.evt.omnibase-infra.agent-task-lifecycle.v1"
+    event_type: "AgentTaskLifecycleEvent"
+    description: "Remote-agent lifecycle event emitted by protocol handlers."
+persistence:
+  table: "remote_task_state"
+  reload_on_startup: true
+  description: "Durable remote task state used for restart resumption."
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  checks:
+    - name: "remote_agent_transport_handlers_loaded"
+      type: "handler"
+      critical: true
+    - name: "remote_task_state_persistence_available"
+      type: "database"
+      critical: true
+capabilities:
+  - name: "remote_agent_invocation"
+    description: "Submit tasks to remote agents via protocol-specific handlers."
+  - name: "remote_task_lifecycle_watch"
+    description: "Watch remote task state and emit typed lifecycle events."
+  - name: "remote_task_restart_resumption"
+    description: "Reload unfinished remote task state on startup."
+metadata:
+  description: "A2A delegation bridge effect node scaffold."
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-04-25"
+  tags:
+    - effect
+    - delegation
+    - a2a
+    - remote-agent
