@@ -1076,7 +1076,12 @@ def _load_monitor_alert_topic() -> str:
         raise RuntimeError(
             f"Failed to parse monitor_alert_contract.yaml: {exc}"
         ) from exc
-    topics = (data or {}).get("event_bus", {}).get("publish_topics", [])
+    from omnibase_infra.models.contracts.model_monitor_alert_contract import (
+        ModelMonitorAlertContract,
+    )
+
+    contract = ModelMonitorAlertContract.model_validate(data or {})
+    topics = contract.event_bus.get("publish_topics", [])
     if not topics:
         raise RuntimeError(
             "monitor_alert_contract.yaml exists but contains no "
