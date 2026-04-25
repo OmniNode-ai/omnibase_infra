@@ -47,6 +47,9 @@ import logging
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import yaml
+
+from omnibase_core.models.contracts.model_contract_base import ModelContractBase
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.bindings import ModelOperationBindingsSubcontract
@@ -455,6 +458,73 @@ class RuntimeContractConfigLoader:
             operation_bindings=operation_bindings,
             correlation_id=correlation_id,
         )
+
+    def load_from_directory(self, search_path: Path) -> list[ModelContractBase]:
+        """Scan a directory tree for contract.yaml files and return typed contract models.
+
+        Invokes model_validate() on each discovered YAML, dispatching to the
+        appropriate concrete ModelContract subclass based on node_type. Invalid
+        or unparseable contracts are logged and skipped.
+
+        Args:
+            search_path: Root directory to scan recursively for contract.yaml files.
+
+        Returns:
+            list[ModelContractBase] — one entry per successfully validated contract.
+        """
+        from omnibase_core.models.contracts.model_contract_compute import (
+            ModelContractCompute,
+        )
+        from omnibase_core.models.contracts.model_contract_effect import (
+            ModelContractEffect,
+        )
+        from omnibase_core.models.contracts.model_contract_orchestrator import (
+            ModelContractOrchestrator,
+        )
+        from omnibase_core.models.contracts.model_contract_reducer import (
+            ModelContractReducer,
+        )
+
+        contract_paths = self._scan_for_contracts([search_path])
+        results: list[ModelContractBase] = []
+
+        for path in contract_paths:
+            try:
+                with path.open("r", encoding="utf-8") as f:
+                    raw = yaml.safe_load(f)
+            except Exception as e:  # noqa: BLE001 — boundary: log and skip malformed YAML
+                logger.warning("Skipping %s — YAML parse error: %s", path, e)
+                continue
+
+            if not isinstance(raw, dict):
+                logger.warning("Skipping %s — contract root is not a mapping", path)
+                continue
+
+            node_type = str(raw.get("node_type", "")).upper()
+            contract_class: type[ModelContractBase]
+            if "ORCHESTRATOR" in node_type:
+                contract_class = ModelContractOrchestrator
+            elif "REDUCER" in node_type:
+                contract_class = ModelContractReducer
+            elif "COMPUTE" in node_type:
+                contract_class = ModelContractCompute
+            else:
+                contract_class = ModelContractEffect
+
+            model_fields = set(contract_class.model_fields.keys())
+            filtered = {k: v for k, v in raw.items() if k in model_fields}
+
+            try:
+                results.append(contract_class.model_validate(filtered))
+            except Exception as e:  # noqa: BLE001 — boundary: log and skip invalid contracts
+                logger.warning(
+                    "Skipping %s — model_validate() failed as %s: %s",
+                    path,
+                    contract_class.__name__,
+                    e,
+                )
+
+        return results
 
     def load_single_contract(
         self,
