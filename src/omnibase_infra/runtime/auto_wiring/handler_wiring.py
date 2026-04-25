@@ -1349,8 +1349,10 @@ def _prepare_handler_wiring(
     # Determine category up-front so the quarantine sentinel below (which
     # bypasses the regular resolve/construct path) can still carry consistent
     # reporting metadata.
-    _category_str_early = "EVENT"
-    if contract.event_bus and contract.event_bus.subscribe_topics:
+    _category_str_early = "event"
+    if entry.message_category:
+        _category_str_early = entry.message_category.strip().lower()
+    elif contract.event_bus and contract.event_bus.subscribe_topics:
         _category_str_early = _derive_message_category(
             contract.event_bus.subscribe_topics[0]
         )

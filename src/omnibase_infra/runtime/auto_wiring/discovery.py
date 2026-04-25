@@ -319,6 +319,7 @@ def _parse_handler_routing(hr_raw: dict) -> ModelHandlerRouting:
                 event_model=event_model,
                 operation=h.get("operation"),
                 event_type=h.get("event_type"),
+                message_category=h.get("message_category"),
             )
         )
     return ModelHandlerRouting(
