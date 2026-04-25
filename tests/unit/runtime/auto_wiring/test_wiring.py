@@ -11,6 +11,7 @@ import pytest
 
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _derive_dispatcher_id,
+    _derive_handler_entry_key,
     _derive_message_category,
     _derive_route_id,
     _derive_topic_pattern_from_topic,
@@ -129,6 +130,32 @@ class TestDeriveIds:
             _derive_dispatcher_id("my_node", "my_handler")
             == "dispatcher.auto.my_node.my_handler"
         )
+
+
+class TestDeriveHandlerEntryKey:
+    def test_no_operation_returns_handler_name(self) -> None:
+        assert _derive_handler_entry_key("HandlerFoo") == "HandlerFoo"
+        assert _derive_handler_entry_key("HandlerFoo", operation=None) == "HandlerFoo"
+
+    def test_with_operation_includes_hash(self) -> None:
+        key = _derive_handler_entry_key("HandlerFoo", operation="inference.codex_cli")
+        # Must include handler name and a hash-suffixed segment
+        assert key.startswith("HandlerFoo.")
+        parts = key.split(".")
+        assert len(parts) == 2
+        # The second part must end with an 8-char hex digest
+        assert len(parts[1].split("_")[-1]) == 8
+
+    def test_collision_safe_distinct_operations(self) -> None:
+        # These two operations normalize to the same string without hashing
+        key_a = _derive_handler_entry_key("H", operation="inference.a-b")
+        key_b = _derive_handler_entry_key("H", operation="inference.a/b")
+        assert key_a != key_b, "Distinct operations must produce distinct keys"
+
+    def test_same_operation_stable(self) -> None:
+        key1 = _derive_handler_entry_key("HandlerFoo", operation="inference.codex_cli")
+        key2 = _derive_handler_entry_key("HandlerFoo", operation="inference.codex_cli")
+        assert key1 == key2
 
 
 class TestMakeDispatchCallback:

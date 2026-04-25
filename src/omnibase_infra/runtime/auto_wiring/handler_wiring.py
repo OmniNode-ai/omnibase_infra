@@ -22,6 +22,7 @@ CI gate: any PR touching this module MUST satisfy the runtime-startup gate defin
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import logging
 import os
@@ -552,19 +553,48 @@ def _make_event_bus_callback(
     return callback
 
 
-def _derive_route_id(contract_name: str, handler_name: str, topic: str) -> str:
-    """Derive a route ID from contract name, handler name, and full topic path.
+def _derive_handler_entry_key(
+    handler_name: str,
+    *,
+    operation: str | None = None,
+) -> str:
+    """Return a deterministic handler-entry key for routing identifiers.
+
+    Contracts may reference the same handler class multiple times under
+    different operations. When that happens, handler-name-only IDs collide.
+    Including the operation in the key guarantees collision-free dispatcher
+    and route IDs for repeated handler references (OMN-9461).
+    """
+    if not operation:
+        return handler_name
+    normalized = re.sub(r"[^A-Za-z0-9_]+", "_", operation.strip()).strip("_")
+    digest = hashlib.sha1(operation.encode()).hexdigest()[:8]
+    safe_operation = f"{normalized}_{digest}" if normalized else digest
+    return f"{handler_name}.{safe_operation}"
+
+
+def _derive_route_id(contract_name: str, handler_key: str, topic: str) -> str:
+    """Derive a route ID from contract name, handler key, and full topic path.
 
     Uses the full topic path (sanitized) to guarantee uniqueness across topics
-    that share a common segment (OMN-8735).
+    that share a common segment (OMN-8735). ``handler_key`` is derived from
+    :func:`_derive_handler_entry_key` so repeated handler references with
+    different operations produce distinct route IDs (OMN-9461).
     """
     safe_topic = re.sub(r"[.\-]", "_", topic)
-    return f"route.auto.{contract_name}.{handler_name}.{safe_topic}"
+    safe_handler_key = re.sub(r"[.\-]", "_", handler_key)
+    return f"route.auto.{contract_name}.{safe_handler_key}.{safe_topic}"
 
 
-def _derive_dispatcher_id(contract_name: str, handler_name: str) -> str:
-    """Derive a dispatcher ID from contract and handler names."""
-    return f"dispatcher.auto.{contract_name}.{handler_name}"
+def _derive_dispatcher_id(contract_name: str, handler_key: str) -> str:
+    """Derive a dispatcher ID from contract and handler key.
+
+    ``handler_key`` is derived from :func:`_derive_handler_entry_key` so
+    repeated handler references with different operations produce distinct
+    dispatcher IDs (OMN-9461).
+    """
+    safe_handler_key = re.sub(r"[.\-]", "_", handler_key)
+    return f"dispatcher.auto.{contract_name}.{safe_handler_key}"
 
 
 def _derive_topic_pattern_from_topic(topic: str) -> str:
