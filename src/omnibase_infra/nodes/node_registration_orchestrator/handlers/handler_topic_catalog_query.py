@@ -108,7 +108,7 @@ class HandlerTopicCatalogQuery:
 
     def __init__(
         self,
-        catalog_service: ProtocolTopicCatalogService,
+        catalog_service: ProtocolTopicCatalogService | None = None,
     ) -> None:
         """Initialize the handler with a topic catalog service.
 
@@ -117,6 +117,8 @@ class HandlerTopicCatalogQuery:
                 either ``ServiceTopicCatalog`` (Consul-backed, legacy) or
                 ``HandlerTopicCatalogPostgres`` (PostgreSQL-backed, OMN-2746, OMN-4011).
                 Wired via registry ``handler_dependencies``.
+                When None, the handler returns an empty catalog with a warning
+                (OMN-9464: allows zero-arg construction by auto-wiring engine).
         """
         self._catalog_service = catalog_service
 
@@ -219,23 +221,34 @@ class HandlerTopicCatalogQuery:
             },
         )
 
-        # Delegate to ServiceTopicCatalog - it handles all partial-success logic
-        try:
-            catalog_response = await self._catalog_service.build_catalog(
-                correlation_id=correlation_id,
-                include_inactive=payload.include_inactive,
-                topic_pattern=payload.topic_pattern,
-            )
-        except Exception as e:  # noqa: BLE001 — boundary: logs error and degrades
-            logger.error(  # noqa: TRY400
-                "HandlerTopicCatalogQuery: unexpected error from ServiceTopicCatalog: %s",
-                type(e).__name__,
-                extra={"correlation_id": str(correlation_id)},
+        # When catalog_service is available, delegate to ServiceTopicCatalog (handles partial-success logic); otherwise short-circuit with an empty catalog + warning.
+        if self._catalog_service is None:
+            logger.warning(
+                "HandlerTopicCatalogQuery: no catalog_service configured, "
+                "returning empty catalog (correlation_id=%s)",
+                correlation_id,
             )
             catalog_response = self._empty_response(
                 correlation_id=correlation_id,
                 warnings=(INTERNAL_ERROR,),
             )
+        else:
+            try:
+                catalog_response = await self._catalog_service.build_catalog(
+                    correlation_id=correlation_id,
+                    include_inactive=payload.include_inactive,
+                    topic_pattern=payload.topic_pattern,
+                )
+            except Exception as e:  # noqa: BLE001 — boundary: logs error and degrades
+                logger.error(  # noqa: TRY400
+                    "HandlerTopicCatalogQuery: unexpected error from ServiceTopicCatalog: %s",
+                    type(e).__name__,
+                    extra={"correlation_id": str(correlation_id)},
+                )
+                catalog_response = self._empty_response(
+                    correlation_id=correlation_id,
+                    warnings=(INTERNAL_ERROR,),
+                )
 
         if catalog_response.warnings:
             logger.info(
