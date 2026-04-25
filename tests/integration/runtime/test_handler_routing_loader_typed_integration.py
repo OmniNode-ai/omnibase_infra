@@ -20,10 +20,13 @@ from omnibase_infra.runtime.contract_loaders.handler_routing_loader import (
 from tests.helpers.path_utils import find_project_root
 
 try:
-    _PROJECT_ROOT = find_project_root(start=Path(__file__).resolve().parent)
-    _NODES_ROOT = _PROJECT_ROOT / "src" / "omnibase_infra" / "nodes"
+    _NODES_ROOT = (
+        find_project_root(start=Path(__file__).resolve().parent)
+        / "src"
+        / "omnibase_infra"
+        / "nodes"
+    )
 except RuntimeError:
-    _PROJECT_ROOT = None
     _NODES_ROOT = None
 
 
