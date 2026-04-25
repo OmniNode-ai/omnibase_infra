@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -56,43 +58,43 @@ class TestModelFeatureFlagContract:
 class TestLoadServiceContract:
     """Tests for the load_service_contract path-based loader."""
 
-    def test_load_runtime_contract_yaml(self, tmp_path: pytest.TempPathFactory) -> None:
-        contract_file = tmp_path / "runtime.contract.yaml"  # type: ignore[operator]
+    def test_load_runtime_contract_yaml(self, tmp_path: Path) -> None:
+        contract_file = tmp_path / "runtime.contract.yaml"
         contract_file.write_text(
             "name: runtime_service\n"
             "description: Feature flags for ONEX runtime services\n"
             "feature_flags:\n"
             "  ENABLE_RUNTIME_LOG_BRIDGE: false\n"
         )
-        m = load_service_contract(contract_file)  # type: ignore[arg-type]
+        m = load_service_contract(contract_file)
         assert m.name == "runtime_service"
         assert m.feature_flags["ENABLE_RUNTIME_LOG_BRIDGE"] is False
 
-    def test_load_event_bus_contract_yaml(
-        self, tmp_path: pytest.TempPathFactory
-    ) -> None:
-        contract_file = tmp_path / "event_bus.contract.yaml"  # type: ignore[operator]
+    def test_load_event_bus_contract_yaml(self, tmp_path: Path) -> None:
+        contract_file = tmp_path / "event_bus.contract.yaml"
         contract_file.write_text(
             "name: event_bus_service\n"
             "description: Feature flags for Kafka event bus infrastructure services\n"
             "feature_flags:\n"
             "  ENABLE_CONSUMER_HEALTH_EMITTER: false\n"
         )
-        m = load_service_contract(contract_file)  # type: ignore[arg-type]
+        m = load_service_contract(contract_file)
         assert m.name == "event_bus_service"
         assert m.feature_flags["ENABLE_CONSUMER_HEALTH_EMITTER"] is False
 
-    def test_load_raises_on_missing_file(
-        self, tmp_path: pytest.TempPathFactory
-    ) -> None:
-        missing = tmp_path / "nonexistent.yaml"  # type: ignore[operator]
+    def test_load_raises_on_missing_file(self, tmp_path: Path) -> None:
+        missing = tmp_path / "nonexistent.yaml"
         with pytest.raises(FileNotFoundError):
-            load_service_contract(missing)  # type: ignore[arg-type]
+            load_service_contract(missing)
 
-    def test_load_raises_on_invalid_contract(
-        self, tmp_path: pytest.TempPathFactory
-    ) -> None:
-        bad_file = tmp_path / "bad.yaml"  # type: ignore[operator]
+    def test_load_raises_on_invalid_contract(self, tmp_path: Path) -> None:
+        bad_file = tmp_path / "bad.yaml"
         bad_file.write_text("unknown_key: boom\n")
         with pytest.raises(ValidationError):
-            load_service_contract(bad_file)  # type: ignore[arg-type]
+            load_service_contract(bad_file)
+
+    def test_load_raises_on_malformed_yaml(self, tmp_path: Path) -> None:
+        bad_file = tmp_path / "malformed.yaml"
+        bad_file.write_text("key: [unclosed bracket\n")
+        with pytest.raises(ValueError, match="Invalid YAML"):
+            load_service_contract(bad_file)
