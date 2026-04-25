@@ -27,6 +27,7 @@ def _write_contract(tmp_path, data: dict) -> object:
     return yaml_path
 
 
+@pytest.mark.unit
 class TestLoadAndValidateContractYaml:
     """load_and_validate_contract_yaml() returns ModelContractNodeType, not raw dict."""
 
@@ -166,6 +167,7 @@ class TestLoadAndValidateContractYaml:
         assert result.raw == contract
 
 
+@pytest.mark.unit
 class TestDispatchContractModel:
     """_dispatch_contract_model() validates node_type and raises on unknown."""
 

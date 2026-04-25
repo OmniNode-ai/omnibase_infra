@@ -63,9 +63,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from omnibase_core.enums.enum_node_type import EnumNodeType
+from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
@@ -303,7 +304,7 @@ def _dispatch_contract_model(raw: dict[str, Any]) -> ModelContractNodeType:
         )
     try:
         probe = ModelNodeTypeProbe.model_validate(raw)
-    except Exception as exc:
+    except (ValidationError, ModelOnexError) as exc:
         raise ValueError(f"Unknown node_type: {node_type_str!r}") from exc
     return ModelContractNodeType(node_type=probe.node_type, raw=raw)
 
