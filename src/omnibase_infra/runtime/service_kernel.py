@@ -1520,9 +1520,13 @@ async def bootstrap() -> int:
                 _health_interval = float(
                     os.environ.get("RUNTIME_HEALTH_CHECK_INTERVAL", "300")
                 )
+                _health_boot_grace = float(
+                    os.environ.get("RUNTIME_HEALTH_BOOT_GRACE_SECONDS", "120")
+                )
                 runtime_health_monitor = ServiceRuntimeHealthMonitor(
                     event_bus=event_bus,  # type: ignore[arg-type]
                     check_interval_seconds=_health_interval,
+                    boot_grace_seconds=_health_boot_grace,
                 )
                 await runtime_health_monitor.start()
                 logger.info(

@@ -200,7 +200,7 @@ from uuid import UUID, uuid4
 import httpx
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.abc import AbstractTokenProvider
-from aiokafka.errors import KafkaError
+from aiokafka.errors import KafkaError, UnknownTopicOrPartitionError
 
 from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -1234,7 +1234,26 @@ class EventBusKafka(
                     },
                 )
 
-            except KafkaError as e:
+            except UnknownTopicOrPartitionError as e:
+                # Topic does not exist — configuration error, not a broker connectivity
+                # failure. Do NOT record a circuit failure; topic-not-found must not open
+                # the circuit breaker and block subsequent publishes to healthy topics.
+                # No retry benefit either: the topic won't appear between attempts. (OMN-9553)
+                last_exception = e
+                logger.warning(
+                    "Topic not found on broker — skipping circuit failure record "
+                    "(attempt %d/%d): %s",
+                    attempt + 1,
+                    self._max_retry_attempts + 1,
+                    topic,
+                    extra={
+                        "topic": topic,
+                        "correlation_id": str(headers.correlation_id),
+                    },
+                )
+                break  # No retry benefit; fall through to error raise
+
+            except KafkaError as e:  # NOTE: UnknownTopicOrPartitionError IS-A KafkaError — its handler MUST appear before this block
                 last_exception = e
                 async with self._circuit_breaker_lock:
                     await self._record_circuit_failure(
@@ -1289,6 +1308,15 @@ class EventBusKafka(
                 context=timeout_ctx,
                 topic=topic,
                 retry_count=self._max_retry_attempts + 1,
+            ) from last_exception
+        if isinstance(last_exception, UnknownTopicOrPartitionError):
+            # Topic does not exist — raise as a configuration error, not a connection error.
+            # Callers must be able to distinguish "topic missing" from "broker unreachable". (OMN-9553)
+            raise ProtocolConfigurationError(
+                f"Topic '{topic}' not found on broker. Ensure the topic is provisioned before publishing.",
+                context=context,
+                parameter="topic",
+                value=topic,
             ) from last_exception
         raise InfraConnectionError(
             f"Failed to publish to topic {topic} after {self._max_retry_attempts + 1} attempts",
