@@ -52,9 +52,14 @@ _RE_EVENT_NAME = re.compile(r"^[a-z0-9._-]+$")
 _RE_PRODUCER = re.compile(r"^[a-z0-9-]+$")  # no underscores allowed
 
 # Regex to identify ONEX topic string literals in Python source code.
-# Matches: onex.<kind>.<producer>.<event-name>.<version>
+# Matches either:
+#   - 5-segment standard topics: onex.<kind>.<producer>.<event-name>.<version>
+#   - 4-segment DLQ topics: onex.dlq.<category>.<version>
 _RE_ONEX_TOPIC_LITERAL = re.compile(
-    r"^onex\.(evt|cmd|intent)\.[a-z0-9-]+\.[a-z0-9._-]+\.v\d+$"
+    r"^onex\.(?:"
+    r"(?:evt|cmd|intent)\.[a-z0-9-]+\.[a-z0-9._-]+\.v\d+"
+    r"|dlq\.[a-z0-9._-]+\.v\d+"
+    r")$"
 )
 
 # YAML keys to inspect — ordered by spec; always check ALL, no early break.
