@@ -453,6 +453,9 @@ handler_routing:
     # ModelTopicCatalogQuery -> HandlerTopicCatalogQuery
     # Topic catalog request-response - dashboard publishes a query; runtime
     # responds with a full catalog snapshot via ServiceTopicCatalog.
+    # OMN-9464: catalog_service is optional (None allowed) so the auto-wiring
+    # engine can construct this handler with zero args; the missing service
+    # path returns an empty catalog with INTERNAL_ERROR warning.
     - event_model:
         name: "ModelTopicCatalogQuery"
         module: "omnibase_infra.models.catalog.model_topic_catalog_query"
@@ -463,6 +466,7 @@ handler_routing:
       output_events:
         - "ModelTopicCatalogResponse"
       direct_handler: true
+      zero_arg_constructible: true
       description: "Returns topic catalog snapshot in response to a catalog query"
     # ModelTopicCatalogRequest -> HandlerCatalogRequest (OMN-2923)
     # Introspection-based catalog responder - returns onex.evt.* topics from
@@ -487,6 +491,14 @@ handler_routing:
       module: "omnibase_infra.projectors.projection_reader_registration"
       shared: true
       description: "Shared projection reader for all handlers"
+    # OMN-9464: catalog_service is optional for HandlerTopicCatalogQuery.
+    # Auto-wiring engine may construct it with zero args; missing service
+    # returns empty catalog with INTERNAL_ERROR warning rather than failing boot.
+    catalog_service:
+      protocol: "ProtocolTopicCatalogService"
+      module: "omnibase_infra.services.protocol_topic_catalog_service"
+      required: false
+      description: "Topic catalog service for HandlerTopicCatalogQuery (optional)"
 published_events:
   - topic: "onex.evt.platform.node-registration-result.v1"
     event_type: "NodeRegistrationResultEvent"
