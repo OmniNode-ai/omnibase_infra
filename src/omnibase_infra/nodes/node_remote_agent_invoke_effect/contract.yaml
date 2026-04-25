@@ -23,11 +23,11 @@ description: >
 
 input_model:
   name: "ModelInvocationCommand"
-  module: "omnibase_core.models.delegation"
+  module: "omnibase_infra.nodes.node_remote_agent_invoke_effect.models"
   description: "Invocation command selected by delegation routing."
 output_model:
   name: "ModelAgentTaskLifecycleEvent"
-  module: "omnibase_core.models.delegation"
+  module: "omnibase_infra.nodes.node_remote_agent_invoke_effect.models"
   description: "Lifecycle event emitted while watching a remote agent task."
 handler_routing:
   routing_strategy: "operation_match"
@@ -52,10 +52,6 @@ published_events:
   - topic: "onex.evt.omnibase-infra.agent-task-lifecycle.v1"
     event_type: "AgentTaskLifecycleEvent"
     description: "Remote-agent lifecycle event emitted by protocol handlers."
-persistence:
-  table: "remote_task_state"
-  reload_on_startup: true
-  description: "Durable remote task state used for restart resumption."
 health_check:
   enabled: true
   endpoint: "/health"
