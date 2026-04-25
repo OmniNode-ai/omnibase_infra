@@ -118,10 +118,10 @@ x-runtime-base: &runtime-base
     resources:
       limits:
         cpus: '1.0'
-        memory: 768M
+        memory: 1536M
       reservations:
         cpus: '0.25'
-        memory: 128M
+        memory: 256M
 # Runtime environment variables (OMN-2287: slimmed for Infisical bootstrap)
 # When INFISICAL_ADDR is set, the runtime prefetches most config from Infisical.
 # Only bootstrap-essential vars remain here; all others come from Infisical.
@@ -584,6 +584,9 @@ services:
   # ONEX Runtime - Main Kernel (Runtime Profile)
   # ==========================================================================
   # Primary runtime service that handles the kernel bootstrap process.
+  # OMN-9741: Main startup also performs long serial Kafka subscription joins.
+  # Keep the health window aligned with effects so autoheal does not recycle the
+  # process while it is still wiring contracts or joining consumer groups.
   omninode-runtime:
     !!merge <<: *runtime-base
     container_name: omninode-runtime
@@ -626,7 +629,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 600s
+      start_period: 1800s
     labels:
       - "com.omninode.service=runtime-main"
       - "com.omninode.layer=runtime"
@@ -690,10 +693,10 @@ services:
   # ONEX Runtime - Workers (Runtime Profile)
   # ==========================================================================
   # Scalable worker containers for parallel compute operations.
-  # OMN-7235: Workers have an extended start_period (1200s) and retries (5) because
-  # ~166 Kafka consumer groups are joined sequentially at startup (~15+ min total).
-  # Unhealthy detection latency = start_period + (interval * retries) = 1200s + 150s = 1350s.
-  # AUTOHEAL_START_PERIOD (1500s) exceeds this window to prevent premature restarts.
+  # OMN-7235/OMN-9741: Workers have an extended start_period (1200s) and
+  # retries (5) because Kafka consumer groups are joined sequentially at
+  # startup. Autoheal uses a workspace-wide 2400s grace period so main,
+  # effects, and workers can all finish contract wiring before restart checks.
   # OMN-7569: Default replicas=0 — workers join the same per-topic consumer groups
   # as the main runtime on 1-partition topics, causing a constant rebalance storm.
   # Scale to 0 until the kernel supports profile-based subscription filtering.
@@ -733,10 +736,10 @@ services:
       resources:
         limits:
           cpus: '0.5'
-          memory: 768M
+          memory: 1536M
         reservations:
           cpus: '0.1'
-          memory: 128M
+          memory: 256M
     labels:
       - "com.omninode.service=runtime-worker"
       - "com.omninode.layer=runtime"
@@ -1117,10 +1120,10 @@ services:
     environment:
       AUTOHEAL_CONTAINER_LABEL: autoheal
       AUTOHEAL_INTERVAL: 60
-      # OMN-9741: Set to 2400s to exceed effects unhealthy detection window.
-      # Effects: start_period=1800s + retries=5×interval=30s = 1950s max.
-      # Workers remain below this at 1350s max.
+      # OMN-9741: Set to 2400s to exceed main/effects unhealthy detection windows.
+      # Main/effects: start_period=1800s + retries=5×interval=30s = 1950s max.
       # Workers: start_period=1200s + retries=5×interval=30s = 1350s max.
+      # AUTOHEAL_START_PERIOD (2400s) must exceed all runtime unhealthy windows.
       AUTOHEAL_START_PERIOD: 2400
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

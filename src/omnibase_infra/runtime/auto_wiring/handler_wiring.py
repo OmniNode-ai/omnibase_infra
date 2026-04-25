@@ -22,6 +22,7 @@ CI gate: any PR touching this module MUST satisfy the runtime-startup gate defin
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import importlib
 import logging
@@ -563,6 +564,8 @@ def _make_event_bus_callback(
                     )
                     return
                 envelope = message
+            if not await _wait_for_dispatch_engine_freeze(topic, dispatch_engine):
+                return
             result = await dispatch_engine.dispatch(topic, envelope)
             if result_applier is not None and result is not None:
                 await result_applier.apply(result, envelope.correlation_id)
@@ -575,6 +578,52 @@ def _make_event_bus_callback(
             )
 
     return callback
+
+
+async def _wait_for_dispatch_engine_freeze(
+    topic: str,
+    dispatch_engine: object,
+) -> bool:
+    """Wait until the dispatch engine is frozen before consuming startup messages."""
+    if bool(getattr(dispatch_engine, "is_frozen", True)):
+        return True
+
+    timeout_seconds = _dispatch_freeze_wait_timeout_seconds()
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    logger.info(
+        "Auto-wiring callback waiting for MessageDispatchEngine freeze: topic=%s",
+        topic,
+    )
+
+    while not bool(getattr(dispatch_engine, "is_frozen", True)):
+        if asyncio.get_running_loop().time() >= deadline:
+            logger.error(
+                "Auto-wiring callback timed out waiting for MessageDispatchEngine "
+                "freeze; dropping message: topic=%s timeout_seconds=%.1f",
+                topic,
+                timeout_seconds,
+            )
+            return False
+        await asyncio.sleep(0.1)
+
+    logger.info(
+        "Auto-wiring callback resumed after MessageDispatchEngine freeze: topic=%s",
+        topic,
+    )
+    return True
+
+
+def _dispatch_freeze_wait_timeout_seconds() -> float:
+    raw = os.environ.get("ONEX_DISPATCH_FREEZE_WAIT_TIMEOUT_SECONDS", "900")
+    try:
+        timeout_seconds = float(raw)
+    except ValueError:
+        logger.warning(
+            "Invalid ONEX_DISPATCH_FREEZE_WAIT_TIMEOUT_SECONDS=%r; using 900s",
+            raw,
+        )
+        return 900.0
+    return max(timeout_seconds, 0.1)
 
 
 def _derive_route_id(

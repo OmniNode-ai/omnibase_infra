@@ -7,6 +7,7 @@ These tests were written BEFORE the fix and must fail on the unfixed codebase.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -399,3 +400,67 @@ class TestMakeEventBusCallbackFallbackPath:
 
         assert len(heartbeat_handlers) == 1
         assert heartbeat_handlers[0]["event_type"] == "platform.node-heartbeat"
+
+    @pytest.mark.asyncio
+    async def test_callback_waits_for_dispatch_engine_freeze(self) -> None:
+        """Startup messages must not dispatch before the engine is frozen."""
+        from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            _make_event_bus_callback,
+        )
+
+        class FakeDispatchEngine:
+            def __init__(self) -> None:
+                self.is_frozen = False
+                self.dispatch = AsyncMock()
+
+        dispatch_engine = FakeDispatchEngine()
+        callback = _make_event_bus_callback(
+            "onex.cmd.test.v1",
+            dispatch_engine,  # type: ignore[arg-type]
+        )
+        envelope = ModelEventEnvelope[object].model_construct(
+            event_type="onex.cmd.test.v1",
+            payload={},
+        )
+
+        task = asyncio.create_task(callback(envelope))
+        await asyncio.sleep(0.2)
+        dispatch_engine.dispatch.assert_not_called()
+
+        dispatch_engine.is_frozen = True
+        await asyncio.wait_for(task, timeout=2)
+
+        dispatch_engine.dispatch.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_callback_drops_after_freeze_wait_timeout(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A permanently unfrozen engine should not raise from the callback boundary."""
+        from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            _make_event_bus_callback,
+        )
+
+        class FakeDispatchEngine:
+            is_frozen = False
+
+            def __init__(self) -> None:
+                self.dispatch = AsyncMock()
+
+        monkeypatch.setenv("ONEX_DISPATCH_FREEZE_WAIT_TIMEOUT_SECONDS", "0.1")
+        dispatch_engine = FakeDispatchEngine()
+        callback = _make_event_bus_callback(
+            "onex.cmd.test.v1",
+            dispatch_engine,  # type: ignore[arg-type]
+        )
+        envelope = ModelEventEnvelope[object].model_construct(
+            event_type="onex.cmd.test.v1",
+            payload={},
+        )
+
+        await callback(envelope)
+
+        dispatch_engine.dispatch.assert_not_called()
