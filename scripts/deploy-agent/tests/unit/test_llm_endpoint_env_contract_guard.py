@@ -185,3 +185,34 @@ async def test_core_deploy_does_not_validate_runtime_llm_env(
     await agent._run_deploy(cmd)
 
     assert "validate_llm_endpoint_env_contract" not in fake_executor.calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_full_deploy_validates_llm_env_before_rebuild(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cmd = ModelRebuildRequested(
+        correlation_id=uuid4(),
+        requested_by="test",
+        scope=Scope.FULL,
+    )
+    store = JobStore(tmp_path)
+    store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
+
+    fake_executor = _FakeExecutor()
+    monkeypatch.setattr(agent_mod, "STATE_DIR", tmp_path / "agent-state")
+    agent = DeployAgent(skip_self_update=True)
+    agent.job_store = store
+    agent.executor = fake_executor  # type: ignore[assignment]
+    monkeypatch.setattr(agent_mod, "publish_result", lambda payload: False)
+
+    await agent._run_deploy(cmd)
+
+    assert fake_executor.calls.index("seed_infisical") < fake_executor.calls.index(
+        "validate_llm_endpoint_env_contract"
+    )
+    assert fake_executor.calls.index(
+        "validate_llm_endpoint_env_contract"
+    ) < fake_executor.calls.index("rebuild_scope")

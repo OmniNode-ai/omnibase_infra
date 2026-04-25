@@ -142,15 +142,21 @@ class DeployExecutor:
 
         env_files: list[Path] = []
         explicit_env_file = os.environ.get("OMNIBASE_ENV_FILE")
+        fallback_candidates = [
+            Path.home() / ".omnibase" / ".env",
+            Path(REPO_DIR) / ".env",
+        ]
         candidates = (
-            [Path(explicit_env_file)]
+            [Path(explicit_env_file), *fallback_candidates]
             if explicit_env_file
-            else [Path.home() / ".omnibase" / ".env", Path(REPO_DIR) / ".env"]
+            else fallback_candidates
         )
         for candidate in candidates:
             if candidate.is_file() and candidate not in env_files:
                 env_files.append(candidate)
-        if explicit_env_file and not env_files:
+        if explicit_env_file and not any(
+            f == Path(explicit_env_file) for f in env_files
+        ):
             raise RuntimeError(
                 f"LLM endpoint env contract check failed: OMNIBASE_ENV_FILE does not exist: {explicit_env_file}"
             )
