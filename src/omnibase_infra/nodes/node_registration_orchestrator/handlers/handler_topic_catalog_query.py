@@ -221,7 +221,7 @@ class HandlerTopicCatalogQuery:
             },
         )
 
-        # Delegate to ServiceTopicCatalog - it handles all partial-success logic
+        # When catalog_service is available, delegate to ServiceTopicCatalog (handles partial-success logic); otherwise short-circuit with an empty catalog + warning.
         if self._catalog_service is None:
             logger.warning(
                 "HandlerTopicCatalogQuery: no catalog_service configured, "
