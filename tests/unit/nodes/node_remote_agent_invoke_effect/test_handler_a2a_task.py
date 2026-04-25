@@ -8,10 +8,7 @@ import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
-import aiohttp
 import pytest
-from pytest_httpserver import HTTPServer
-from werkzeug.wrappers import Response
 
 from omnibase_core.enums.enum_agent_protocol import EnumAgentProtocol
 from omnibase_core.enums.enum_agent_task_lifecycle_type import (
@@ -19,6 +16,8 @@ from omnibase_core.enums.enum_agent_task_lifecycle_type import (
 )
 from omnibase_core.enums.enum_invocation_kind import EnumInvocationKind
 from omnibase_core.models.common.model_schema_value import ModelSchemaValue
+from omnibase_core.models.delegation.model_a2a_task_request import ModelA2ATaskRequest
+from omnibase_core.models.delegation.model_a2a_task_response import ModelA2ATaskResponse
 from omnibase_core.models.delegation.model_invocation_command import (
     ModelInvocationCommand,
 )
@@ -27,6 +26,7 @@ from omnibase_core.models.delegation.model_target_agent import ModelTargetAgent
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.nodes.node_remote_agent_invoke_effect.handlers.handler_a2a_task import (
     HandlerA2ATask,
+    ProtocolA2ATransport,
     map_remote_status,
 )
 
@@ -70,6 +70,40 @@ class RecordingEventBus:
         self.messages.append((topic, key, value))
 
 
+class FakeTransport(ProtocolA2ATransport):
+    def __init__(
+        self,
+        *,
+        submit_response: ModelA2ATaskResponse,
+        get_responses: list[ModelA2ATaskResponse] | None = None,
+    ) -> None:
+        self.submit_response = submit_response
+        self.get_responses = list(get_responses or [])
+        self.submit_requests: list[tuple[ModelTargetAgent, ModelA2ATaskRequest]] = []
+        self.get_requests: list[tuple[ModelTargetAgent, str]] = []
+
+    async def submit(
+        self,
+        *,
+        target: ModelTargetAgent,
+        request_model: ModelA2ATaskRequest,
+    ) -> ModelA2ATaskResponse:
+        self.submit_requests.append((target, request_model))
+        return self.submit_response
+
+    async def get_task(
+        self,
+        *,
+        target: ModelTargetAgent,
+        remote_task_handle: str,
+    ) -> ModelA2ATaskResponse:
+        self.get_requests.append((target, remote_task_handle))
+        if not self.get_responses:
+            msg = "No queued get_task responses"
+            raise AssertionError(msg)
+        return self.get_responses.pop(0)
+
+
 def _command() -> ModelInvocationCommand:
     return ModelInvocationCommand(
         task_id=uuid4(),
@@ -81,6 +115,17 @@ def _command() -> ModelInvocationCommand:
     )
 
 
+def _target_registry() -> dict[str, ModelTargetAgent]:
+    return {
+        "agent:local-a2a-smoke": ModelTargetAgent(
+            agent_ref="agent:local-a2a-smoke",
+            protocol=EnumAgentProtocol.A2A,
+            base_url="http://127.0.0.1:8011/a2a/app",
+            protocol_version="0.3",
+        )
+    }
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     ("raw_status", "expected"),
@@ -89,6 +134,7 @@ def _command() -> ModelInvocationCommand:
         ("accepted", EnumAgentTaskLifecycleType.ACCEPTED),
         ("working", EnumAgentTaskLifecycleType.PROGRESS),
         ("in_progress", EnumAgentTaskLifecycleType.PROGRESS),
+        ("input-required", EnumAgentTaskLifecycleType.PROGRESS),
         ("completed", EnumAgentTaskLifecycleType.COMPLETED),
         ("failed", EnumAgentTaskLifecycleType.FAILED),
         ("timed_out", EnumAgentTaskLifecycleType.TIMED_OUT),
@@ -110,46 +156,39 @@ def test_status_mapping_rejects_unknown() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_submit_emits_submitted_event_and_persists(
-    httpserver: HTTPServer,
-) -> None:
+async def test_submit_emits_submitted_event_and_persists() -> None:
     repo = RecordingRepository()
     event_bus = RecordingEventBus()
     command = _command()
     now = datetime(2026, 4, 25, 17, 15, tzinfo=UTC)
-
-    httpserver.expect_request("/tasks.send", method="POST").respond_with_json(
-        {
-            "remote_task_handle": "remote-123",
-            "status": "submitted",
-            "artifacts": [],
-        }
+    transport = FakeTransport(
+        submit_response=ModelA2ATaskResponse(
+            remote_task_handle="remote-123",
+            status="submitted",
+            artifacts=[],
+            error=None,
+        )
     )
 
-    async with aiohttp.ClientSession() as session:
-        handler = HandlerA2ATask(
-            repository=repo,  # type: ignore[arg-type]
-            event_bus=event_bus,
-            target_registry={
-                "agent:local-a2a-smoke": ModelTargetAgent(
-                    agent_ref="agent:local-a2a-smoke",
-                    protocol=EnumAgentProtocol.A2A,
-                    base_url=httpserver.url_for(""),
-                    protocol_version="0.3",
-                )
-            },
-            lifecycle_topic="onex.evt.omnibase-infra.agent-task-lifecycle.v1",
-            http_session=session,
-            clock=lambda: now,
-        )
+    handler = HandlerA2ATask(
+        repository=repo,  # type: ignore[arg-type]
+        event_bus=event_bus,
+        target_registry=_target_registry(),
+        lifecycle_topic="onex.evt.omnibase-infra.agent-task-lifecycle.v1",
+        clock=lambda: now,
+        transport=transport,
+    )
 
-        response = await handler.submit(command)
+    response = await handler.submit(command)
 
     assert response.remote_task_handle == "remote-123"
     assert len(repo.rows) == 2
     assert repo.rows[0].remote_task_handle is None
     assert repo.rows[1].remote_task_handle == "remote-123"
     assert len(event_bus.messages) == 1
+    assert len(transport.submit_requests) == 1
+    _target, request_model = transport.submit_requests[0]
+    assert request_model.input["prompt"].to_value() == "triage these findings"
 
     topic, key, value = event_bus.messages[0]
     assert topic == "onex.evt.omnibase-infra.agent-task-lifecycle.v1"
@@ -164,157 +203,120 @@ async def test_submit_emits_submitted_event_and_persists(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_watch_emits_transitions_until_completed(httpserver: HTTPServer) -> None:
+async def test_watch_emits_transitions_until_completed() -> None:
     repo = RecordingRepository()
     event_bus = RecordingEventBus()
     command = _command()
     now = datetime(2026, 4, 25, 17, 20, tzinfo=UTC)
-    poll_counter = {"count": 0}
-
-    def _watch_handler(request):
-        del request
-        poll_counter["count"] += 1
-        if poll_counter["count"] == 1:
-            return Response(
-                json.dumps(
-                    {
-                        "remote_task_handle": "remote-123",
-                        "status": "in_progress",
-                        "artifacts": [],
-                        "error": None,
-                    }
-                ),
-                status=200,
-                content_type="application/json",
-            )
-        return Response(
-            json.dumps(
-                {
-                    "remote_task_handle": "remote-123",
-                    "status": "completed",
-                    "artifacts": [{"result": {"summary": "done"}}],
-                    "error": None,
-                }
-            ),
-            status=200,
-            content_type="application/json",
-        )
-
-    httpserver.expect_request("/tasks.send", method="POST").respond_with_json(
-        {
-            "remote_task_handle": "remote-123",
-            "status": "submitted",
-            "artifacts": [],
-        }
-    )
-    httpserver.expect_request("/tasks.get", method="GET").respond_with_handler(
-        _watch_handler
-    )
-
-    async with aiohttp.ClientSession() as session:
-        handler = HandlerA2ATask(
-            repository=repo,  # type: ignore[arg-type]
-            event_bus=event_bus,
-            target_registry={
-                "agent:local-a2a-smoke": ModelTargetAgent(
-                    agent_ref="agent:local-a2a-smoke",
-                    protocol=EnumAgentProtocol.A2A,
-                    base_url=httpserver.url_for(""),
-                    protocol_version="0.3",
-                )
-            },
-            lifecycle_topic="onex.evt.omnibase-infra.agent-task-lifecycle.v1",
-            http_session=session,
-            clock=lambda: now,
-            poll_interval_seconds=0.0,
-        )
-        await handler.submit(command)
-        events = await handler.watch(
+    transport = FakeTransport(
+        submit_response=ModelA2ATaskResponse(
             remote_task_handle="remote-123",
-            correlation_id=command.correlation_id,
-        )
+            status="submitted",
+            artifacts=[],
+            error=None,
+        ),
+        get_responses=[
+            ModelA2ATaskResponse(
+                remote_task_handle="remote-123",
+                status="working",
+                artifacts=[],
+                error=None,
+            ),
+            ModelA2ATaskResponse(
+                remote_task_handle="remote-123",
+                status="completed",
+                artifacts=[
+                    {
+                        "report": ModelSchemaValue.from_value(
+                            {"summary": "done", "priority": "high"}
+                        )
+                    }
+                ],
+                error=None,
+            ),
+        ],
+    )
+
+    handler = HandlerA2ATask(
+        repository=repo,  # type: ignore[arg-type]
+        event_bus=event_bus,
+        target_registry=_target_registry(),
+        lifecycle_topic="onex.evt.omnibase-infra.agent-task-lifecycle.v1",
+        clock=lambda: now,
+        poll_interval_seconds=0.0,
+        transport=transport,
+    )
+    await handler.submit(command)
+    events = await handler.watch(
+        remote_task_handle="remote-123",
+        correlation_id=command.correlation_id,
+    )
 
     assert [event.lifecycle_type for event in events] == [
         EnumAgentTaskLifecycleType.PROGRESS,
         EnumAgentTaskLifecycleType.ARTIFACT,
         EnumAgentTaskLifecycleType.COMPLETED,
     ]
+    assert events[1].artifact is not None
+    assert events[1].artifact["report"].to_value() == {
+        "summary": "done",
+        "priority": "high",
+    }
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_watch_dedups_same_status_repeats(httpserver: HTTPServer) -> None:
+async def test_watch_dedups_same_status_repeats() -> None:
     repo = RecordingRepository()
     event_bus = RecordingEventBus()
     command = _command()
     now = datetime(2026, 4, 25, 17, 25, tzinfo=UTC)
-    poll_counter = {"count": 0}
-
-    def _watch_handler(request):
-        del request
-        poll_counter["count"] += 1
-        if poll_counter["count"] < 3:
-            return Response(
-                json.dumps(
-                    {
-                        "remote_task_handle": "remote-456",
-                        "status": "in_progress",
-                        "artifacts": [],
-                        "error": None,
-                    }
-                ),
-                status=200,
-                content_type="application/json",
-            )
-        return Response(
-            json.dumps(
-                {
-                    "remote_task_handle": "remote-456",
-                    "status": "completed",
-                    "artifacts": [],
-                    "error": None,
-                }
-            ),
-            status=200,
-            content_type="application/json",
-        )
-
-    httpserver.expect_request("/tasks.send", method="POST").respond_with_json(
-        {
-            "remote_task_handle": "remote-456",
-            "status": "submitted",
-            "artifacts": [],
-        }
-    )
-    httpserver.expect_request("/tasks.get", method="GET").respond_with_handler(
-        _watch_handler
-    )
-
-    async with aiohttp.ClientSession() as session:
-        handler = HandlerA2ATask(
-            repository=repo,  # type: ignore[arg-type]
-            event_bus=event_bus,
-            target_registry={
-                "agent:local-a2a-smoke": ModelTargetAgent(
-                    agent_ref="agent:local-a2a-smoke",
-                    protocol=EnumAgentProtocol.A2A,
-                    base_url=httpserver.url_for(""),
-                    protocol_version="0.3",
-                )
-            },
-            lifecycle_topic="onex.evt.omnibase-infra.agent-task-lifecycle.v1",
-            http_session=session,
-            clock=lambda: now,
-            poll_interval_seconds=0.0,
-        )
-        updated_command = command.model_copy(
-            update={"task_id": uuid4(), "correlation_id": uuid4()}
-        )
-        await handler.submit(updated_command)
-        events = await handler.watch(
+    transport = FakeTransport(
+        submit_response=ModelA2ATaskResponse(
             remote_task_handle="remote-456",
-            correlation_id=updated_command.correlation_id,
-        )
+            status="submitted",
+            artifacts=[],
+            error=None,
+        ),
+        get_responses=[
+            ModelA2ATaskResponse(
+                remote_task_handle="remote-456",
+                status="working",
+                artifacts=[],
+                error=None,
+            ),
+            ModelA2ATaskResponse(
+                remote_task_handle="remote-456",
+                status="working",
+                artifacts=[],
+                error=None,
+            ),
+            ModelA2ATaskResponse(
+                remote_task_handle="remote-456",
+                status="completed",
+                artifacts=[],
+                error=None,
+            ),
+        ],
+    )
+
+    handler = HandlerA2ATask(
+        repository=repo,  # type: ignore[arg-type]
+        event_bus=event_bus,
+        target_registry=_target_registry(),
+        lifecycle_topic="onex.evt.omnibase-infra.agent-task-lifecycle.v1",
+        clock=lambda: now,
+        poll_interval_seconds=0.0,
+        transport=transport,
+    )
+    updated_command = command.model_copy(
+        update={"task_id": uuid4(), "correlation_id": uuid4()}
+    )
+    await handler.submit(updated_command)
+    events = await handler.watch(
+        remote_task_handle="remote-456",
+        correlation_id=updated_command.correlation_id,
+    )
 
     assert [event.lifecycle_type for event in events] == [
         EnumAgentTaskLifecycleType.PROGRESS,
