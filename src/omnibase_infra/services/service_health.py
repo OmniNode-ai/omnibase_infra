@@ -895,7 +895,7 @@ class ServiceHealth:
                     status="degraded",
                     runtime_attached=False,
                     startup_in_progress=True,
-                    is_running=self.is_running,
+                    is_running=False,
                     event_bus_healthy=False,
                 )
                 response = ModelHealthCheckResponse.success(
@@ -906,7 +906,7 @@ class ServiceHealth:
                         {
                             "healthy": False,
                             "degraded": True,
-                            "is_running": self.is_running,
+                            "is_running": False,
                             "runtime_attached": False,
                             "startup_phase": "runtime_pending",
                         },

@@ -46,6 +46,7 @@ async def test_health_endpoint_returns_200_degraded_when_runtime_not_attached() 
     assert body["status"] == "degraded", (
         f"Expected status=degraded when runtime not attached, got {body['status']}"
     )
+    assert body["details"]["is_running"] is False
     assert body["details"]["startup_phase"] == "runtime_pending"
     assert body["details"]["runtime_attached"] is False
 

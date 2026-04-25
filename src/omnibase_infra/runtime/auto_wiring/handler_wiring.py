@@ -27,6 +27,7 @@ import hashlib
 import importlib
 import inspect
 import logging
+import math
 import os
 import re
 from collections import defaultdict
@@ -54,6 +55,7 @@ from omnibase_core.services.service_local_handler_ownership_query import (
 from omnibase_infra.protocols.protocol_dispatch_result_applier import (
     ProtocolDispatchResultApplier,
 )
+from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
     EnumQuarantineReason,
 )
@@ -86,7 +88,6 @@ if TYPE_CHECKING:
     from omnibase_infra.protocols.protocol_dispatch_engine import (
         ProtocolDispatchEngine,
     )
-    from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 
 logger = logging.getLogger(__name__)
 
@@ -755,6 +756,12 @@ def _dispatch_freeze_wait_timeout_seconds() -> float:
             raw,
         )
         return 900.0
+    if not math.isfinite(timeout_seconds):
+        logger.warning(
+            "Invalid ONEX_DISPATCH_FREEZE_WAIT_TIMEOUT_SECONDS=%r; using 900s",
+            raw,
+        )
+        return 900.0
     return max(timeout_seconds, 0.1)
 
 
@@ -1396,7 +1403,7 @@ async def _subscribe_contract_topics(
         and not _contract_declares_db_io(contract)
     ):
         effective_result_applier = DispatchResultApplier(
-            event_bus=cast("ProtocolEventBusLike", event_bus),
+            event_bus=cast(ProtocolEventBusLike, event_bus),  # noqa: TC006
             output_topic=contract.event_bus.publish_topics[0],
         )
     node_identity = ModelNodeIdentity(

@@ -344,6 +344,7 @@ class TestServiceHealthEndpoints:
         assert len(transition_logs) == 1
         assert transition_logs[0].kwargs["extra"]["runtime_attached"] is False
         assert transition_logs[0].kwargs["extra"]["startup_in_progress"] is True
+        assert transition_logs[0].kwargs["extra"]["is_running"] is False
 
     @pytest.mark.asyncio
     async def test_health_endpoint_treats_attached_startup_as_degraded(self) -> None:

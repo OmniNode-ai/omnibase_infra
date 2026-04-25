@@ -51,6 +51,7 @@ import os
 import random
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
@@ -1121,6 +1122,8 @@ class RuntimeHostProcess:
         # True while start() is actively progressing toward _is_running=True.
         # Health uses this to distinguish startup liveness from readiness.
         self._is_starting: bool = False
+        self._startup_task: asyncio.Task[None] | None = None
+        self._shutdown_requested: asyncio.Event = asyncio.Event()
 
         # Subscription handle (callable to unsubscribe)
         self._subscription: Callable[[], Awaitable[None]] | None = None
@@ -1567,9 +1570,9 @@ class RuntimeHostProcess:
 
     async def start(self) -> None:
         """Start the runtime host with explicit startup-state tracking."""
-        if self._is_running or self._is_starting:
+        if self._is_running:
             logger.debug(
-                "RuntimeHostProcess already running or starting, skipping",
+                "RuntimeHostProcess already running, skipping",
                 extra={
                     "is_running": self._is_running,
                     "is_starting": self._is_starting,
@@ -1577,10 +1580,29 @@ class RuntimeHostProcess:
             )
             return
 
+        if self._startup_task is not None and not self._startup_task.done():
+            logger.debug("RuntimeHostProcess startup already in progress, waiting")
+            await self._startup_task
+            return
+
+        self._shutdown_requested.clear()
         self._is_starting = True
+        startup_task = asyncio.create_task(self._start_runtime())
+        self._startup_task = startup_task
         try:
-            await self._start_runtime()
+            await startup_task
+        except asyncio.CancelledError:
+            self._is_running = False
+            if self._shutdown_requested.is_set():
+                logger.info("RuntimeHostProcess startup cancelled by shutdown")
+                return
+            raise
+        except Exception:
+            self._is_running = False
+            raise
         finally:
+            if self._startup_task is startup_task:
+                self._startup_task = None
             self._is_starting = False
 
     async def _start_runtime(self) -> None:
@@ -1888,11 +1910,20 @@ class RuntimeHostProcess:
             logger.debug("RuntimeHostProcess already stopped, skipping")
             return
 
-        if self._is_starting:
+        self._shutdown_requested.set()
+
+        startup_task = self._startup_task
+        if startup_task is not None and not startup_task.done():
             logger.warning(
                 "RuntimeHostProcess stop() called during startup — "
-                "startup will complete before shutdown proceeds"
+                "cancelling startup before shutdown proceeds"
             )
+            if startup_task is not asyncio.current_task():
+                startup_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await startup_task
+            self._startup_task = None
+            self._is_starting = False
 
         logger.info("Stopping RuntimeHostProcess")
 

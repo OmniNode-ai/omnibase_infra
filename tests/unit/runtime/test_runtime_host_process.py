@@ -786,6 +786,36 @@ class TestRuntimeHostProcessLifecycle:
 
         assert process.is_running is False
 
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_stop_cancels_in_progress_startup_before_shutdown(self) -> None:
+        """stop() must not tear resources down while startup keeps running."""
+
+        process = RuntimeHostProcess(config=make_runtime_config())
+        startup_entered = asyncio.Event()
+        startup_cancelled = asyncio.Event()
+        never_complete = asyncio.Event()
+
+        async def blocking_start_runtime() -> None:
+            startup_entered.set()
+            try:
+                await never_complete.wait()
+            except asyncio.CancelledError:
+                startup_cancelled.set()
+                raise
+
+        with patch.object(process, "_start_runtime", blocking_start_runtime):
+            start_task = asyncio.create_task(process.start())
+            await startup_entered.wait()
+
+            await process.stop()
+            await start_task
+
+        assert startup_cancelled.is_set()
+        assert process._startup_task is None
+        assert process._is_starting is False
+        assert process.is_running is False
+
     @pytest.mark.asyncio
     async def test_stop_calls_shutdown_on_all_handlers(self) -> None:
         """Test that stop() calls shutdown() on all registered handlers.

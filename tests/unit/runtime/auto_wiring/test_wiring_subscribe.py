@@ -464,3 +464,18 @@ class TestMakeEventBusCallbackFallbackPath:
         await callback(envelope)
 
         dispatch_engine.dispatch.assert_not_called()
+
+    @pytest.mark.unit
+    def test_freeze_wait_timeout_rejects_non_finite_values(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Non-finite timeout values must fall back instead of disabling timeout."""
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            _dispatch_freeze_wait_timeout_seconds,
+        )
+
+        for raw in ("nan", "inf", "-inf"):
+            monkeypatch.setenv("ONEX_DISPATCH_FREEZE_WAIT_TIMEOUT_SECONDS", raw)
+
+            assert _dispatch_freeze_wait_timeout_seconds() == 900.0
