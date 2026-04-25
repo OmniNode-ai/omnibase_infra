@@ -1,20 +1,18 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Integration tests for single-authority dispatcher wiring in registration plugin (OMN-9456).
+"""Integration tests for single-authority dispatcher wiring in registration plugin.
 
-Verifies that the ServiceRegistration plugin's wire_dispatchers() correctly
-defers to generic contract-driven auto-wiring, and that the registration
-contract.yaml declares the subscribe_topics and handler_routing needed for
-auto-wiring to own the dispatcher and route registration.
+Verifies that ServiceRegistration owns explicit dispatcher adapters while
+generic contract-driven auto-wiring owns event-bus subscriptions.
 
 The duplicate-registration error (ONEX_CORE_064_DUPLICATE_REGISTRATION)
 arose because both the legacy explicit path and the generic contract-driven
 path registered dispatchers for the same contract.  This integration suite
 confirms that:
 
-1. The contract.yaml has the fields that justify auto-wiring ownership.
+1. The contract.yaml has the fields that justify auto-wiring subscription ownership.
 2. The plugin can be imported and instantiated without side effects.
-3. No dispatcher registrations happen via the plugin path.
+3. Dispatcher adapter registration happens through the domain wiring helper.
 
 Fixtures from conftest.py:
     contract_data: parsed YAML content of node_registration_orchestrator/contract.yaml
@@ -22,7 +20,7 @@ Fixtures from conftest.py:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -30,10 +28,10 @@ pytestmark = pytest.mark.integration
 
 
 class TestContractDeclaresSubscribeTopics:
-    """The contract must declare event_bus.subscribe_topics — required for auto-wiring ownership.
+    """The contract must declare event_bus.subscribe_topics.
 
     The runtime reads event_bus.subscribe_topics to wire consumer subscriptions.
-    Generic auto-wiring owns dispatcher registration for this node because the
+    Generic auto-wiring owns subscription setup for this node because the
     contract fully declares this field.
     """
 
@@ -91,7 +89,7 @@ class TestContractDeclaresHandlerRouting:
 
 
 class TestPluginWireDispatchersNoDuplicateRegistration:
-    """The plugin.wire_dispatchers() must not register any dispatchers or routes directly."""
+    """The plugin.wire_dispatchers() delegates to explicit dispatcher adapters."""
 
     def test_plugin_importable(self) -> None:
         """ServiceRegistration can be imported without side effects."""
@@ -112,12 +110,12 @@ class TestPluginWireDispatchersNoDuplicateRegistration:
         assert plugin.plugin_id == "registration"
 
     @pytest.mark.asyncio
-    async def test_wire_dispatchers_skips_without_touching_engine(self) -> None:
-        """wire_dispatchers() returns skipped and does not register against dispatch engine.
+    async def test_wire_dispatchers_delegates_to_domain_wiring_helper(self) -> None:
+        """wire_dispatchers() delegates adapter registration to domain wiring.
 
-        This is the integration-level guard for OMN-9456: the plugin must never
-        directly call register_dispatcher or register_route because doing so
-        alongside the generic auto-wiring path produces duplicate dispatcher IDs.
+        Generic auto-wiring still owns subscriptions. The registration plugin
+        owns the adapter layer because registration handlers expect domain
+        envelope semantics rather than raw dict envelopes.
         """
         from dataclasses import dataclass
         from uuid import uuid4
@@ -152,14 +150,25 @@ class TestPluginWireDispatchersNoDuplicateRegistration:
         )
 
         plugin = ServiceRegistration()
-        result = await plugin.wire_dispatchers(config)
+        with patch(
+            "omnibase_infra.nodes.node_registration_orchestrator.wiring"
+            ".wire_registration_dispatchers",
+            new=AsyncMock(
+                return_value={
+                    "dispatchers": ["dispatcher.registration.catalog-request"],
+                    "routes": ["route.registration.catalog-request"],
+                    "status": "success",
+                }
+            ),
+        ) as wire_registration_dispatchers:
+            result = await plugin.wire_dispatchers(config)
 
-        # Skipped result is a success (kernel treats it as "nothing to do here")
-        assert result.success is True, (
-            "wire_dispatchers() returned a failure result — "
-            "the plugin must return a skipped success to avoid alarming the kernel"
+        assert result.success is True
+        assert result.message == "Registration dispatchers wired"
+        assert result.services_registered == ["dispatcher.registration.catalog-request"]
+        wire_registration_dispatchers.assert_awaited_once_with(
+            config.container,
+            config.dispatch_engine,
+            correlation_id=config.correlation_id,
+            event_bus=config.event_bus,
         )
-
-        # No dispatcher or route was registered via the plugin path
-        engine.register_dispatcher.assert_not_called()
-        engine.register_route.assert_not_called()
