@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from uuid import UUID
@@ -35,12 +36,19 @@ from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLik
 _STATUS_MAP: dict[str, EnumAgentTaskLifecycleType] = {
     "submitted": EnumAgentTaskLifecycleType.SUBMITTED,
     "accepted": EnumAgentTaskLifecycleType.ACCEPTED,
+    "artifact": EnumAgentTaskLifecycleType.ARTIFACT,
     "working": EnumAgentTaskLifecycleType.PROGRESS,
     "in_progress": EnumAgentTaskLifecycleType.PROGRESS,
     "completed": EnumAgentTaskLifecycleType.COMPLETED,
     "failed": EnumAgentTaskLifecycleType.FAILED,
     "timed_out": EnumAgentTaskLifecycleType.TIMED_OUT,
     "canceled": EnumAgentTaskLifecycleType.CANCELED,
+}
+_TERMINAL_LIFECYCLES = {
+    EnumAgentTaskLifecycleType.COMPLETED,
+    EnumAgentTaskLifecycleType.FAILED,
+    EnumAgentTaskLifecycleType.TIMED_OUT,
+    EnumAgentTaskLifecycleType.CANCELED,
 }
 
 
@@ -66,6 +74,7 @@ class HandlerA2ATask:
         lifecycle_topic: str,
         http_session: aiohttp.ClientSession,
         clock: Callable[[], datetime] | None = None,
+        poll_interval_seconds: float = 1.0,
     ) -> None:
         self._repository = repository
         self._event_bus = event_bus
@@ -73,6 +82,7 @@ class HandlerA2ATask:
         self._lifecycle_topic = lifecycle_topic
         self._http_session = http_session
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._poll_interval_seconds = poll_interval_seconds
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -125,6 +135,117 @@ class HandlerA2ATask:
         )
         return response
 
+    async def watch(
+        self,
+        remote_task_handle: str,
+        correlation_id: UUID,
+    ) -> list[ModelAgentTaskLifecycleEvent]:
+        """Poll tasks.get until the remote task reaches a terminal lifecycle."""
+        row = await self._repository.get_by_remote_task_handle(
+            remote_task_handle,
+            correlation_id=correlation_id,
+        )
+        if row is None:
+            msg = f"Unknown remote_task_handle: {remote_task_handle}"
+            raise ValueError(msg)
+
+        target = self._resolve_target(row.target_ref)
+        last_seen = row.last_emitted_event_type
+        events: list[ModelAgentTaskLifecycleEvent] = []
+        last_artifact_payload: list[dict[str, ModelSchemaValue]] | None = None
+
+        while True:
+            response = await self._get_tasks_get(
+                target=target,
+                remote_task_handle=remote_task_handle,
+            )
+            mapped = map_remote_status(response.status)
+            now = self._clock()
+
+            if response.artifacts and response.artifacts != last_artifact_payload:
+                artifact_event = await self._emit_lifecycle(
+                    task_id=row.task_id,
+                    correlation_id=correlation_id,
+                    lifecycle_type=EnumAgentTaskLifecycleType.ARTIFACT,
+                    remote_task_handle=remote_task_handle,
+                    artifact=response.artifacts[0],
+                    occurred_at=now,
+                    remote_status=response.status,
+                    error=response.error,
+                )
+                await self._repository.upsert(
+                    row.model_copy(
+                        update={
+                            "status": mapped,
+                            "last_remote_status": response.status,
+                            "last_emitted_event_type": EnumAgentTaskLifecycleType.ARTIFACT,
+                            "updated_at": now,
+                            "completed_at": now
+                            if mapped in _TERMINAL_LIFECYCLES
+                            else None,
+                            "error": response.error,
+                        }
+                    ),
+                    correlation_id=correlation_id,
+                )
+                row = row.model_copy(
+                    update={
+                        "status": mapped,
+                        "last_remote_status": response.status,
+                        "last_emitted_event_type": EnumAgentTaskLifecycleType.ARTIFACT,
+                        "updated_at": now,
+                        "completed_at": now if mapped in _TERMINAL_LIFECYCLES else None,
+                        "error": response.error,
+                    }
+                )
+                events.append(artifact_event)
+                last_artifact_payload = response.artifacts
+
+            if mapped is last_seen:
+                if mapped in _TERMINAL_LIFECYCLES:
+                    return events
+                await asyncio.sleep(self._poll_interval_seconds)
+                continue
+
+            lifecycle_event = await self._emit_lifecycle(
+                task_id=row.task_id,
+                correlation_id=correlation_id,
+                lifecycle_type=mapped,
+                remote_task_handle=remote_task_handle,
+                artifact=response.artifacts[0] if response.artifacts else None,
+                occurred_at=now,
+                remote_status=response.status,
+                error=response.error,
+            )
+            await self._repository.upsert(
+                row.model_copy(
+                    update={
+                        "status": mapped,
+                        "last_remote_status": response.status,
+                        "last_emitted_event_type": mapped,
+                        "updated_at": now,
+                        "completed_at": now if mapped in _TERMINAL_LIFECYCLES else None,
+                        "error": response.error,
+                    }
+                ),
+                correlation_id=correlation_id,
+            )
+            row = row.model_copy(
+                update={
+                    "status": mapped,
+                    "last_remote_status": response.status,
+                    "last_emitted_event_type": mapped,
+                    "updated_at": now,
+                    "completed_at": now if mapped in _TERMINAL_LIFECYCLES else None,
+                    "error": response.error,
+                }
+            )
+            last_seen = mapped
+            events.append(lifecycle_event)
+            if mapped in _TERMINAL_LIFECYCLES:
+                return events
+            await asyncio.sleep(self._poll_interval_seconds)
+
     def _resolve_target(self, target_ref: str) -> ModelTargetAgent:
         try:
             target = self._target_registry[target_ref]
@@ -150,6 +271,20 @@ class HandlerA2ATask:
             payload = await response.json()
         return ModelA2ATaskResponse.model_validate(payload)
 
+    async def _get_tasks_get(
+        self,
+        *,
+        target: ModelTargetAgent,
+        remote_task_handle: str,
+    ) -> ModelA2ATaskResponse:
+        async with self._http_session.get(
+            f"{target.base_url.rstrip('/')}/tasks.get",
+            params={"id": remote_task_handle},
+        ) as response:
+            response.raise_for_status()
+            payload = await response.json()
+        return ModelA2ATaskResponse.model_validate(payload)
+
     async def _emit_submitted(
         self,
         *,
@@ -157,7 +292,7 @@ class HandlerA2ATask:
         occurred_at: datetime,
         remote_task_handle: str | None,
     ) -> None:
-        lifecycle_event = ModelAgentTaskLifecycleEvent(
+        await self._emit_lifecycle(
             task_id=command.task_id,
             correlation_id=command.correlation_id,
             lifecycle_type=EnumAgentTaskLifecycleType.SUBMITTED,
@@ -168,15 +303,39 @@ class HandlerA2ATask:
             occurred_at=occurred_at,
             remote_status="submitted",
         )
+
+    async def _emit_lifecycle(
+        self,
+        *,
+        task_id: UUID,
+        correlation_id: UUID,
+        lifecycle_type: EnumAgentTaskLifecycleType,
+        remote_task_handle: str | None,
+        occurred_at: datetime,
+        artifact: dict[str, ModelSchemaValue] | None = None,
+        remote_status: str | None = None,
+        error: str | None = None,
+    ) -> ModelAgentTaskLifecycleEvent:
+        lifecycle_event = ModelAgentTaskLifecycleEvent(
+            task_id=task_id,
+            correlation_id=correlation_id,
+            lifecycle_type=lifecycle_type,
+            remote_task_handle=remote_task_handle,
+            artifact=artifact,
+            occurred_at=occurred_at,
+            remote_status=remote_status,
+            error=error,
+        )
         envelope = ModelEventEnvelope[dict[str, object]](
-            correlation_id=command.correlation_id,
+            correlation_id=correlation_id,
             payload=lifecycle_event.model_dump(mode="json"),
         )
         await self._event_bus.publish(
             self._lifecycle_topic,
-            key=str(command.task_id).encode("utf-8"),
+            key=str(task_id).encode("utf-8"),
             value=envelope.model_dump_json().encode("utf-8"),
         )
+        return lifecycle_event
 
 
-__all__ = ["HandlerA2ATask", "_STATUS_MAP", "map_remote_status"]
+__all__ = ["HandlerA2ATask", "_STATUS_MAP", "_TERMINAL_LIFECYCLES", "map_remote_status"]
