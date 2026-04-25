@@ -62,7 +62,7 @@ signed Kafka event to the cloud data-plane bus.
 - Any changed file matches `src/omnimarket/*` or `src/omnibase_infra/nodes/*`
 
 **Payload:** `ModelRebuildRequested` (from `deploy_agent/events.py`):
-```
+```text
 correlation_id, requested_by, scope="runtime", git_ref="origin/main"
 ```
 
@@ -108,7 +108,7 @@ on `.201` (`scripts/deploy-agent/deploy/deploy-agent.service`).
 7. **Up:** `docker compose up -d --force-recreate --no-deps <runtime-services>`
 
 **Runtime services restarted** (from `events.py::SCOPE_SERVICES[Scope.RUNTIME]`):
-```
+```text
 omninode-runtime, runtime-effects, runtime-worker, agent-actions-consumer,
 skill-lifecycle-consumer, context-audit-consumer, intelligence-migration,
 intelligence-api, omninode-contract-resolver, autoheal
@@ -116,7 +116,7 @@ intelligence-api, omninode-contract-resolver, autoheal
 
 **GAP — omnimarket is installed from git@main, not from local REPO_DIR:**
 The Dockerfile.runtime installs omnimarket with:
-```
+```bash
 uv pip install --no-deps "git+https://github.com/OmniNode-ai/omnimarket.git@main"
 ```
 The executor pulls `omnibase_infra` from `/data/omninode/omnibase_infra`, but omnimarket
