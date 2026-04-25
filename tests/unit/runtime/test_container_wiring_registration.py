@@ -82,6 +82,7 @@ class TestWireRegistrationHandlers:
         assert HandlerRuntimeTick in registered_interfaces
         assert HandlerNodeRegistrationAcked in registered_interfaces
 
+    @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_registers_heartbeat_under_concrete_and_protocol_interfaces(
         self,

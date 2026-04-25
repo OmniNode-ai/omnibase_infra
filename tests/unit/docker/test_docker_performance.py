@@ -25,6 +25,11 @@ from tests.unit.docker.conftest import COMPOSE_FILE_PATH, DOCKER_DIR
 pytestmark = [pytest.mark.unit]
 
 RUNTIME_STARTUP_SERVICES = ("omninode-runtime", "runtime-effects", "runtime-worker")
+MINIMUM_START_PERIODS = {
+    "omninode-runtime": 1800,
+    "runtime-effects": 1800,
+    "runtime-worker": 1200,
+}
 
 
 def _duration_seconds(value: object) -> int:
@@ -195,12 +200,6 @@ class TestDockerComposePerformance:
         autoheal_start_period = _duration_seconds(
             services["autoheal"]["environment"]["AUTOHEAL_START_PERIOD"]
         )
-        minimum_start_periods = {
-            "omninode-runtime": 1800,
-            "runtime-effects": 1800,
-            "runtime-worker": 1200,
-        }
-
         for service_name in RUNTIME_STARTUP_SERVICES:
             healthcheck = services[service_name]["healthcheck"]
             start_period = _duration_seconds(healthcheck["start_period"])
@@ -208,7 +207,7 @@ class TestDockerComposePerformance:
             retries = int(healthcheck["retries"])
             unhealthy_detection_window = start_period + (interval * retries)
 
-            assert start_period >= minimum_start_periods[service_name]
+            assert start_period >= MINIMUM_START_PERIODS[service_name]
             assert retries >= 5
             assert autoheal_start_period > unhealthy_detection_window, (
                 f"{service_name} autoheal grace period must exceed Docker's "
@@ -235,12 +234,6 @@ class TestDockerComposePerformance:
         autoheal_start_period = _duration_seconds(
             autoheal["hardcoded_env"]["AUTOHEAL_START_PERIOD"]
         )
-        minimum_start_periods = {
-            "omninode-runtime": 1800,
-            "runtime-effects": 1800,
-            "runtime-worker": 1200,
-        }
-
         for service_name in RUNTIME_STARTUP_SERVICES:
             service = _load_catalog_service(DOCKER_DIR, service_name)
             healthcheck = service["healthcheck"]
@@ -250,7 +243,7 @@ class TestDockerComposePerformance:
             retries = int(healthcheck["retries"])
             unhealthy_detection_window = start_period + (interval * retries)
 
-            assert start_period >= minimum_start_periods[service_name]
+            assert start_period >= MINIMUM_START_PERIODS[service_name]
             assert retries >= 5
             assert autoheal_start_period > unhealthy_detection_window
             assert _memory_mib(resources["memory"]) >= 1536
