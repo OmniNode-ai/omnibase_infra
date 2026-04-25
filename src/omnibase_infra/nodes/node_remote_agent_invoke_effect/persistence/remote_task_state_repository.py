@@ -216,13 +216,20 @@ class RemoteTaskStateRepository(MixinPostgresOpExecutor):
         if backend_result.success:
             return result_holder["value"]
 
+        retriable: bool | None = None
+        if backend_result.error_code is not None:
+            try:
+                retriable = EnumPostgresErrorCode(
+                    backend_result.error_code
+                ).is_retriable
+            except ValueError:
+                retriable = None
+
         raise RepositoryExecutionError(
             backend_result.error or f"{op_name} failed",
             op_name=op_name,
             table="remote_task_state",
-            retriable=backend_result.error_code.is_retriable
-            if backend_result.error_code is not None
-            else None,
+            retriable=retriable,
             context=self._context(correlation_id, op_name),
         )
 
