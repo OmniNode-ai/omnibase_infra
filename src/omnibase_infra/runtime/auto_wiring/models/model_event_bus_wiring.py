@@ -20,3 +20,7 @@ class ModelEventBusWiring(BaseModel):
         default_factory=tuple,
         description="Topics this node publishes to",
     )
+    consumer_purpose: str | None = Field(
+        default=None,
+        description="Optional contract-declared consumer purpose",
+    )

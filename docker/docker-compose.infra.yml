@@ -140,6 +140,7 @@ x-runtime-env: &runtime-env
   KAFKA_BROKER_ALLOWLIST: "redpanda:"
   BUS_ID: "local"
   ONEX_CONTRACTS_DIR: /app/contracts
+  ONEX_STATE_ROOT: /app/data/.onex_state
   # OMN-6440: Runtime contract YAMLs from omnibase_core (env var override for Docker)
   ONEX_RUNTIME_CONTRACTS_DIR: /app/contracts/runtime
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}

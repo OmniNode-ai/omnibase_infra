@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import importlib
+import inspect
 import logging
 import os
 import re
@@ -33,6 +34,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
+
+from pydantic import BaseModel
 
 from omnibase_core.enums.enum_handler_resolution_outcome import (
     EnumHandlerResolutionOutcome,
@@ -57,6 +60,7 @@ from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
     ModelDiscoveredContract,
+    ModelHandlerRef,
     ModelHandlerRoutingEntry,
 )
 from omnibase_infra.runtime.auto_wiring.report import (
@@ -82,6 +86,7 @@ if TYPE_CHECKING:
     from omnibase_infra.protocols.protocol_dispatch_engine import (
         ProtocolDispatchEngine,
     )
+    from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 
 logger = logging.getLogger(__name__)
 
@@ -313,21 +318,137 @@ async def _skip_dispatcher(
 
 def _make_dispatch_callback(
     handler_instance: ProtocolHandleable,
+    event_model: ModelHandlerRef | None = None,
 ) -> DispatcherFunc:
     """Create a dispatch callback wrapping a handler instance.
 
-    The callback calls ``handler_instance.handle(envelope)`` and returns the
-    result. This matches the ``DispatcherFunc`` signature expected by
-    ``MessageDispatchEngine.register_dispatcher``.
+    Legacy handlers receive the materialized dispatch envelope. Contract-typed
+    handlers receive a validated payload model and may be sync or async.
     """
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
     ) -> ModelDispatchResult | None:
         handle_method = handler_instance.handle
-        return await handle_method(envelope)
+        if event_model is None:
+            return await handle_method(envelope)
+
+        payload = _extract_dispatch_payload(envelope)
+        model_cls = _import_event_model_class(event_model)
+        typed_payload = (
+            payload
+            if isinstance(payload, model_cls)
+            else model_cls.model_validate(payload)
+        )
+        typed_handle = cast("Callable[[object], object]", handle_method)
+        raw_result = typed_handle(typed_payload)
+        if asyncio.iscoroutine(raw_result):
+            raw_result = await cast("Awaitable[object]", raw_result)
+        return _normalize_handler_result(raw_result, envelope, event_model.name)
 
     return _callback
+
+
+def _import_event_model_class(event_model: ModelHandlerRef) -> type[BaseModel]:
+    module = importlib.import_module(event_model.module)
+    model_cls = getattr(module, event_model.name)
+    if not hasattr(model_cls, "model_validate"):
+        raise TypeError(
+            f"Event model {event_model.module}.{event_model.name} "
+            "does not expose model_validate"
+        )
+    return cast("type[BaseModel]", model_cls)
+
+
+def _extract_dispatch_payload(envelope: object) -> object:
+    if isinstance(envelope, Mapping):
+        return envelope.get("payload", envelope)
+    return getattr(envelope, "payload", envelope)
+
+
+def _extract_dispatch_topic(envelope: object) -> str:
+    if isinstance(envelope, Mapping):
+        debug_trace = envelope.get("__debug_trace")
+        if isinstance(debug_trace, Mapping):
+            topic = debug_trace.get("topic")
+            if isinstance(topic, str) and topic:
+                return topic
+        topic = envelope.get("topic")
+        if isinstance(topic, str) and topic:
+            return topic
+    topic = getattr(envelope, "topic", None)
+    return topic if isinstance(topic, str) and topic else "auto-wired"
+
+
+def _extract_dispatch_correlation_id(
+    envelope: object, payload: object
+) -> object | None:
+    candidate = getattr(payload, "correlation_id", None)
+    if candidate is not None:
+        return candidate
+    if isinstance(payload, Mapping):
+        candidate = payload.get("correlation_id")
+        if candidate is not None:
+            return candidate
+    if isinstance(envelope, Mapping):
+        candidate = envelope.get("correlation_id")
+        if candidate is not None:
+            return candidate
+        debug_trace = envelope.get("__debug_trace")
+        if isinstance(debug_trace, Mapping):
+            return debug_trace.get("correlation_id")
+    return getattr(envelope, "correlation_id", None)
+
+
+def _normalize_handler_result(
+    result: object,
+    envelope: object,
+    message_type: str | None,
+) -> ModelDispatchResult | None:
+    from datetime import UTC, datetime
+    from uuid import UUID, uuid4
+
+    from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
+    from omnibase_infra.enums import EnumDispatchStatus
+    from omnibase_infra.models.dispatch.model_dispatch_result import (
+        ModelDispatchResult,
+    )
+
+    if result is None or isinstance(result, ModelDispatchResult):
+        return result
+
+    payload = _extract_dispatch_payload(envelope)
+    correlation_candidate = _extract_dispatch_correlation_id(envelope, payload)
+    if isinstance(correlation_candidate, UUID):
+        correlation_id = correlation_candidate
+    elif isinstance(correlation_candidate, str) and correlation_candidate:
+        correlation_id = UUID(correlation_candidate)
+    else:
+        correlation_id = uuid4()
+
+    output_events: list[BaseModel] = []
+    output_intents: tuple[object, ...] = ()
+    if isinstance(result, ModelHandlerOutput):
+        output_events = [
+            event for event in result.events if isinstance(event, BaseModel)
+        ]
+        output_intents = tuple(result.intents)
+        if isinstance(result.result, BaseModel):
+            output_events.append(result.result)
+    elif isinstance(result, BaseModel):
+        output_events = [result]
+
+    return ModelDispatchResult(
+        status=EnumDispatchStatus.SUCCESS,
+        topic=_extract_dispatch_topic(envelope),
+        message_type=message_type,
+        started_at=datetime.now(UTC),
+        completed_at=datetime.now(UTC),
+        output_count=len(output_events) + len(output_intents),
+        output_events=output_events,
+        output_intents=output_intents,  # type: ignore[arg-type]
+        correlation_id=correlation_id,
+    )
 
 
 _TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
@@ -341,6 +462,13 @@ _TOPIC_TO_EVENT_TYPE: dict[str, str] = {
     "node-heartbeat": "heartbeat",
     "node-introspection": "introspection",
 }
+
+
+def _is_raw_event_projection_contract(contract: ModelDiscoveredContract) -> bool:
+    if contract.event_bus is None:
+        return False
+    consumer_purpose = (contract.event_bus.consumer_purpose or "").strip().lower()
+    return consumer_purpose in {"audit", "projection"}
 
 
 def _read_db_io_tables(contract_path: Path) -> list[dict[str, str]]:
@@ -361,6 +489,10 @@ def _read_db_io_tables(contract_path: Path) -> list[dict[str, str]]:
         return []
     db_io = raw.get("db_io") or {}
     return list(db_io.get("db_tables") or [])
+
+
+def _contract_declares_db_io(contract: ModelDiscoveredContract) -> bool:
+    return bool(_read_db_io_tables(contract.contract_path))
 
 
 def _build_sync_db_adapter(db_url: str) -> object:
@@ -714,6 +846,14 @@ def _derive_message_category(topic: str) -> str:
     return "event"
 
 
+def _derive_event_type_alias_from_topic(topic: str) -> str | None:
+    """Derive the dispatch-engine event_type alias from an ONEX topic."""
+    parts = topic.split(".")
+    if len(parts) >= 5 and parts[0] == "onex":
+        return f"{parts[2]}.{parts[3]}"
+    return None
+
+
 def _detect_duplicate_topics(
     manifest: ModelAutoWiringManifest,
 ) -> list[ModelDuplicateTopicOwnership]:
@@ -825,6 +965,8 @@ async def wire_from_manifest(
     pre_resolved_handlers: dict[str, object] = {}
     if container is not None:
         for contract in manifest.contracts:
+            if _is_raw_event_projection_contract(contract):
+                continue
             if contract.handler_routing is None:
                 continue
             for entry in contract.handler_routing.handlers:
@@ -863,7 +1005,7 @@ async def wire_from_manifest(
                 environment=environment,
                 container=container,
                 pre_resolved_handlers=pre_resolved_handlers
-                if pre_resolved_handlers
+                if container is not None
                 else None,
             )
             prepared_contracts.append(prepared)
@@ -1058,6 +1200,24 @@ def _prepare_contract_wiring(
             ),
         )
 
+    if _is_raw_event_projection_contract(contract):
+        consumer_purpose = (contract.event_bus.consumer_purpose or "").strip().lower()
+        return PreparedContractWiring(
+            contract=contract,
+            prepared_wirings=[],
+            subscription_topics=[],
+            environment=environment,
+            skip_result=ModelContractWiringResult(
+                contract_name=contract.name,
+                package_name=contract.package_name,
+                outcome=EnumWiringOutcome.SKIPPED,
+                reason=(
+                    f"consumer_purpose={consumer_purpose!r} requires dedicated "
+                    "raw event projection wiring"
+                ),
+            ),
+        )
+
     prepared_wirings: list[PreparedWiring] = []
     for entry in contract.handler_routing.handlers:
         try:
@@ -1220,11 +1380,25 @@ async def _subscribe_contract_topics(
 
     from omnibase_infra.enums import EnumConsumerGroupPurpose
     from omnibase_infra.models import ModelNodeIdentity
+    from omnibase_infra.runtime.service_dispatch_result_applier import (
+        DispatchResultApplier,
+    )
     from omnibase_infra.utils import compute_consumer_group_id
 
     typed_bus: ProtocolEventBusSubscriber = cast(
         "ProtocolEventBusSubscriber", event_bus
     )
+    effective_result_applier = result_applier
+    if (
+        effective_result_applier is None
+        and contract.event_bus is not None
+        and len(contract.event_bus.publish_topics) == 1
+        and not _contract_declares_db_io(contract)
+    ):
+        effective_result_applier = DispatchResultApplier(
+            event_bus=cast("ProtocolEventBusLike", event_bus),
+            output_topic=contract.event_bus.publish_topics[0],
+        )
     node_identity = ModelNodeIdentity(
         env=environment,
         service=contract.package_name,
@@ -1240,7 +1414,7 @@ async def _subscribe_contract_topics(
         callback = _make_event_bus_callback(
             topic,
             dispatch_engine,  # type: ignore[arg-type]
-            result_applier=result_applier,
+            result_applier=effective_result_applier,
         )
         await typed_bus.subscribe(
             topic=topic,
@@ -1359,6 +1533,14 @@ def _prepare_handler_wiring(
     event_type_alias = entry.event_type.strip() if entry.event_type else ""
     if event_type_alias:
         message_types = (message_types or set()) | {event_type_alias}
+    elif contract.event_bus:
+        topic_aliases = {
+            alias
+            for topic in contract.event_bus.subscribe_topics
+            if (alias := _derive_event_type_alias_from_topic(topic)) is not None
+        }
+        if topic_aliases:
+            message_types = (message_types or set()) | topic_aliases
 
     if contract.name == "node_registration_orchestrator":
         return PreparedWiring(
@@ -1378,17 +1560,34 @@ def _prepare_handler_wiring(
 
     handler_cls = _import_handler_class(handler_ref.module, handler_ref.name)
 
-    _effective_container = container or (
-        getattr(dispatch_engine, "_container", None)
-        if dispatch_engine is not None
-        else None
-    )
-
     # Fast path: if Phase 0 pre-resolved this handler via get_service_async,
     # skip the sync resolver's container Step 3 entirely (OMN-9410).
     pre_resolved_instance = (
         pre_resolved_handlers.get(handler_ref.name) if pre_resolved_handlers else None
     )
+    sig = inspect.signature(handler_cls)
+    required_ctor_params = {
+        k
+        for k, v in sig.parameters.items()
+        if k != "self"
+        and v.kind
+        in {
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }
+        and v.default is inspect.Parameter.empty
+    }
+    can_construct_without_container = (
+        not required_ctor_params or required_ctor_params == {"event_bus"}
+    )
+    if pre_resolved_handlers is not None and can_construct_without_container:
+        _effective_container = None
+    else:
+        _effective_container = container or (
+            getattr(dispatch_engine, "_container", None)
+            if dispatch_engine is not None
+            else None
+        )
 
     def _quarantine_prepared(exc: BaseException) -> PreparedWiring:
         """Return a containment-only PreparedWiring for an async-incompat handler.
@@ -1504,7 +1703,7 @@ def _prepare_handler_wiring(
             [t.get("name") for t in db_tables],
         )
     else:
-        callback = _make_dispatch_callback(handler_instance)
+        callback = _make_dispatch_callback(handler_instance, entry.event_model)
     dispatcher_id = _derive_dispatcher_id(
         contract.name, handler_ref.name, entry.operation
     )

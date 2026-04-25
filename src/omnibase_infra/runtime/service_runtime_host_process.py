@@ -198,6 +198,21 @@ wire_handlers = wire_default_handlers
 
 logger = logging.getLogger(__name__)
 
+_RAW_EVENT_PROJECTION_CONSUMER_PURPOSES: frozenset[str] = frozenset(
+    {"audit", "projection"}
+)
+
+
+def _requires_raw_event_projection_wiring(event_bus_section: object) -> bool:
+    """Return True when generic event-bus wiring must not consume this contract."""
+    if not isinstance(event_bus_section, dict):
+        return False
+    consumer_purpose = event_bus_section.get("consumer_purpose")
+    if not isinstance(consumer_purpose, str):
+        return False
+    return consumer_purpose.strip().lower() in _RAW_EVENT_PROJECTION_CONSUMER_PURPOSES
+
+
 # Mapping from EnumHandlerTypeCategory to LiteralHandlerKind for descriptor creation.
 # COMPUTE and EFFECT map directly to their string values.
 # NONDETERMINISTIC_COMPUTE maps to "compute" because it is architecturally pure
@@ -530,6 +545,16 @@ async def _wire_package_node_subscriptions(
             "subscribe_topics"
         ):
             skipped_no_topics += 1
+            continue
+
+        if _requires_raw_event_projection_wiring(event_bus_section):
+            skipped_no_topics += 1
+            logger.info(
+                "Skipping package-node subscription for raw projection consumer: "
+                "node=%s consumer_purpose=%s",
+                node_name,
+                event_bus_section.get("consumer_purpose"),
+            )
             continue
 
         if node_name in already_wired_names:
@@ -2975,6 +3000,13 @@ class RuntimeHostProcess:
         event_bus_data = descriptor.contract_config.get("event_bus")
         if not event_bus_data or not isinstance(event_bus_data, dict):
             return
+        if _requires_raw_event_projection_wiring(event_bus_data):
+            logger.info(
+                "Skipping live handler subscription for raw projection consumer: "
+                "node=%s",
+                node_name,
+            )
+            return
 
         from omnibase_core.models.contracts.subcontracts import (
             ModelEventBusSubcontract,
@@ -4985,6 +5017,21 @@ class RuntimeHostProcess:
                 continue
 
             contract_path = Path(contract_path_str)
+            try:
+                raw_contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001 - loader below reports malformed contracts
+                raw_contract = None
+            if _requires_raw_event_projection_wiring(
+                raw_contract.get("event_bus")
+                if isinstance(raw_contract, dict)
+                else None
+            ):
+                logger.info(
+                    "Skipping event_bus subcontract wiring for raw projection consumer: "
+                    "handler=%s",
+                    descriptor.name or handler_type,
+                )
+                continue
 
             # Load event_bus subcontract from contract YAML
             subcontract = load_event_bus_subcontract(contract_path, logger)
