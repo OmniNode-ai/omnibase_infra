@@ -51,6 +51,11 @@ routing_rules:
     agent_protocol: A2A
     target_ref: adk-type-debt-scout
     fallbacks: []
+target_agents:
+  - agent_ref: adk-type-debt-scout
+    protocol: A2A
+    base_url: http://127.0.0.1:8050
+    protocol_version: "0.3"
 config_dependencies:
   - key: "LLM_CODER_URL"
     description: "Endpoint URL for Qwen3-Coder-30B-A3B (port 8000)"
