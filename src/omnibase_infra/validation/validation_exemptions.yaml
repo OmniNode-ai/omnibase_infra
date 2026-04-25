@@ -3196,7 +3196,7 @@ pattern_exemptions:
   # slot_id is a human-readable natural key (e.g. "coder-5090") defined in
   # contracts/llm_endpoints.yaml. Changing to UUID would break round-trip
   # fidelity with the contract YAML and operator tooling.
-  - file_pattern: 'model_llm_endpoint_entry\.py'
+  - file_pattern: 'src/omnibase_infra/models/contracts/model_llm_endpoint_entry\.py'
     violation_pattern: "Field 'slot_id' should use UUID"
     reason: >
       slot_id is a human-readable canonical slot identifier (e.g. "coder-5090") defined in contracts/llm_endpoints.yaml. It is a stable natural key used in config, docs, and operator references - not an internal UUID.

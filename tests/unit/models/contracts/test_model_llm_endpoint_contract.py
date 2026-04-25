@@ -92,8 +92,29 @@ class TestModelLlmEndpointEntry:
                 }
             )
 
+    def test_running_missing_required_fields_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="running endpoints require non-null"):
+            ModelLlmEndpointEntry(slot_id="x", role="coder_slow", status="running")
+
+    def test_running_missing_subset_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="port, endpoint_url, model_hf_id"):
+            ModelLlmEndpointEntry(
+                slot_id="x",
+                role="coder_slow",
+                status="running",
+                host="192.168.86.201",
+            )
+
     def test_frozen_immutability(self) -> None:
-        entry = ModelLlmEndpointEntry(slot_id="x", role="coder_slow", status="running")
+        entry = ModelLlmEndpointEntry(
+            slot_id="x",
+            role="coder_slow",
+            status="running",
+            host="192.168.86.201",
+            port=8000,
+            endpoint_url="http://192.168.86.201:8000",
+            model_hf_id="org/model",
+        )
         with pytest.raises((ValidationError, TypeError)):
             entry.slot_id = "y"  # type: ignore[misc]
 
@@ -135,6 +156,10 @@ class TestModelLlmEndpointContract:
                     "slot_id": "a",
                     "role": "coder_slow",
                     "status": "running",
+                    "host": "192.168.86.201",
+                    "port": 8000,
+                    "endpoint_url": "http://192.168.86.201:8000",
+                    "model_hf_id": "org/model",
                     "url_env_var": "LLM_CODER_URL",
                 },
                 {
@@ -149,10 +174,16 @@ class TestModelLlmEndpointContract:
         assert contract.running()[0].slot_id == "a"
 
     def test_by_role_filter(self) -> None:
+        _running = {
+            "host": "192.168.86.201",
+            "port": 8000,
+            "endpoint_url": "http://192.168.86.201:8000",
+            "model_hf_id": "org/model",
+        }
         raw = {
             "endpoints": [
-                {"slot_id": "a", "role": "coder_slow", "status": "running"},
-                {"slot_id": "b", "role": "embedding", "status": "running"},
+                {"slot_id": "a", "role": "coder_slow", "status": "running", **_running},
+                {"slot_id": "b", "role": "embedding", "status": "running", **_running},
                 {"slot_id": "c", "role": "coder_slow", "status": "disabled"},
             ]
         }

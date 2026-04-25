@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.models.contracts.enum_llm_endpoint_status import (
     EnumLlmEndpointStatus,
@@ -61,6 +61,25 @@ class ModelLlmEndpointEntry(BaseModel):
         default=None, description="launchd label or null."
     )
     notes: str = Field(default="", description="Free-text operator notes.")
+
+    @model_validator(mode="after")
+    def _validate_running_required_fields(self) -> ModelLlmEndpointEntry:
+        if self.status == EnumLlmEndpointStatus.RUNNING:
+            missing = [
+                name
+                for name, value in (
+                    ("host", self.host),
+                    ("port", self.port),
+                    ("endpoint_url", self.endpoint_url),
+                    ("model_hf_id", self.model_hf_id),
+                )
+                if value is None
+            ]
+            if missing:
+                raise ValueError(
+                    "running endpoints require non-null fields: " + ", ".join(missing)
+                )
+        return self
 
 
 __all__ = ["ModelLlmEndpointEntry"]
