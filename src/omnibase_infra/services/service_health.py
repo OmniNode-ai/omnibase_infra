@@ -943,16 +943,6 @@ class ServiceHealth:
             is_running = bool(health_details.get("is_running", False))
             event_bus_healthy = bool(health_details.get("event_bus_healthy", False))
 
-            if (
-                not is_healthy
-                and not is_degraded
-                and not startup_in_progress
-                and not is_running
-                and event_bus_healthy
-            ):
-                startup_in_progress = True
-                is_degraded = True
-
             if is_healthy:
                 status: Literal["healthy", "degraded", "unhealthy"] = "healthy"
                 http_status = 200

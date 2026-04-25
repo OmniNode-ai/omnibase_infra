@@ -1859,9 +1859,15 @@ class RuntimeHostProcess:
             - Connections shutdown before connection pools
             - Downstream resources shutdown before upstream resources
         """
-        if not self._is_running:
+        if not self._is_running and not self._is_starting:
             logger.debug("RuntimeHostProcess already stopped, skipping")
             return
+
+        if self._is_starting:
+            logger.warning(
+                "RuntimeHostProcess stop() called during startup — "
+                "startup will complete before shutdown proceeds"
+            )
 
         logger.info("Stopping RuntimeHostProcess")
 

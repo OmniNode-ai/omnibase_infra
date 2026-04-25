@@ -347,12 +347,13 @@ class TestServiceHealthEndpoints:
 
     @pytest.mark.asyncio
     async def test_health_endpoint_treats_attached_startup_as_degraded(self) -> None:
-        """Test /health returns degraded 200 during attached startup fallback."""
+        """Test /health returns degraded 200 when runtime reports startup_in_progress."""
         mock_runtime = MagicMock()
         mock_runtime.health_check = AsyncMock(
             return_value={
                 "healthy": False,
-                "degraded": False,
+                "degraded": True,
+                "startup_in_progress": True,
                 "is_running": False,
                 "event_bus_healthy": True,
             }
