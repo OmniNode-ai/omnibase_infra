@@ -34,8 +34,10 @@ logger = logging.getLogger(__name__)
 
 # Route IDs for delegation dispatchers
 ROUTE_ID_DELEGATION_REQUEST = "route.delegation.delegation-request"
+ROUTE_ID_INVOCATION_COMMAND = "route.delegation.invocation"
 ROUTE_ID_ROUTING_DECISION = "route.delegation.routing-decision"
 ROUTE_ID_QUALITY_GATE_RESULT = "route.delegation.quality-gate-result"
+ROUTE_ID_AGENT_TASK_LIFECYCLE = "route.delegation.agent-task-lifecycle"
 
 
 class WiringResult(TypedDict):
@@ -254,8 +256,14 @@ async def wire_delegation_dispatchers(
         Summary dict with dispatchers, routes, and status.
     """
     from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
+    from omnibase_infra.nodes.node_delegation_orchestrator.dispatchers.dispatcher_agent_task_lifecycle import (
+        DispatcherAgentTaskLifecycle,
+    )
     from omnibase_infra.nodes.node_delegation_orchestrator.dispatchers.dispatcher_delegation_request import (
         DispatcherDelegationRequest,
+    )
+    from omnibase_infra.nodes.node_delegation_orchestrator.dispatchers.dispatcher_invocation_command import (
+        DispatcherInvocationCommand,
     )
     from omnibase_infra.nodes.node_delegation_orchestrator.dispatchers.dispatcher_quality_gate_result import (
         DispatcherQualityGateResult,
@@ -295,7 +303,27 @@ async def wire_delegation_dispatchers(
     engine.register_route(route_delegation_request)
     routes_registered.append(route_delegation_request.route_id)
 
-    # 2. DispatcherRoutingDecision — handles routing decisions from reducer
+    # 2. DispatcherInvocationCommand — handles reducer output for A2A dispatch
+    dispatcher_invocation = DispatcherInvocationCommand(handler, event_bus=event_bus)
+    engine.register_dispatcher(
+        dispatcher_id=dispatcher_invocation.dispatcher_id,
+        dispatcher=dispatcher_invocation.handle,
+        category=dispatcher_invocation.category,
+        message_types=dispatcher_invocation.message_types,
+    )
+    dispatchers_registered.append(dispatcher_invocation.dispatcher_id)
+
+    route_invocation_command = ModelDispatchRoute(
+        route_id=ROUTE_ID_INVOCATION_COMMAND,
+        topic_pattern="*.cmd.*.invocation.*",
+        message_category=EnumMessageCategory.COMMAND,
+        dispatcher_id=dispatcher_invocation.dispatcher_id,
+        message_type="omnibase-infra.invocation",
+    )
+    engine.register_route(route_invocation_command)
+    routes_registered.append(route_invocation_command.route_id)
+
+    # 3. DispatcherRoutingDecision — handles routing decisions from reducer
     dispatcher_routing = DispatcherRoutingDecision(handler, event_bus=event_bus)
     engine.register_dispatcher(
         dispatcher_id=dispatcher_routing.dispatcher_id,
@@ -315,7 +343,7 @@ async def wire_delegation_dispatchers(
     engine.register_route(route_routing_decision)
     routes_registered.append(route_routing_decision.route_id)
 
-    # 3. DispatcherQualityGateResult — handles quality gate results
+    # 4. DispatcherQualityGateResult — handles quality gate results
     dispatcher_gate = DispatcherQualityGateResult(handler, event_bus=event_bus)
     engine.register_dispatcher(
         dispatcher_id=dispatcher_gate.dispatcher_id,
@@ -334,6 +362,26 @@ async def wire_delegation_dispatchers(
     )
     engine.register_route(route_quality_gate)
     routes_registered.append(route_quality_gate.route_id)
+
+    # 5. DispatcherAgentTaskLifecycle — handles A2A lifecycle events
+    dispatcher_lifecycle = DispatcherAgentTaskLifecycle(handler, event_bus=event_bus)
+    engine.register_dispatcher(
+        dispatcher_id=dispatcher_lifecycle.dispatcher_id,
+        dispatcher=dispatcher_lifecycle.handle,
+        category=dispatcher_lifecycle.category,
+        message_types=dispatcher_lifecycle.message_types,
+    )
+    dispatchers_registered.append(dispatcher_lifecycle.dispatcher_id)
+
+    route_agent_task_lifecycle = ModelDispatchRoute(
+        route_id=ROUTE_ID_AGENT_TASK_LIFECYCLE,
+        topic_pattern="*.evt.*.agent-task-lifecycle.*",
+        message_category=EnumMessageCategory.EVENT,
+        dispatcher_id=dispatcher_lifecycle.dispatcher_id,
+        message_type="omnibase-infra.agent-task-lifecycle",
+    )
+    engine.register_route(route_agent_task_lifecycle)
+    routes_registered.append(route_agent_task_lifecycle.route_id)
 
     logger.info(
         "Delegation dispatchers wired: %s (correlation_id=%s)",

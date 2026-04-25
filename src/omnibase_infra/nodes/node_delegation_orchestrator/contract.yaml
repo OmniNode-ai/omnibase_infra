@@ -5,11 +5,11 @@
 # ONEX Node Contract
 # Node: NodeDelegationOrchestrator
 #
-# Coordinates the full delegation workflow: receive request -> invoke
-# routing reducer -> invoke LLM inference effect -> invoke quality
-# gate -> emit completion or failure.
+# Coordinates the delegation workflow: receive request -> invoke
+# routing reducer -> dispatch to effect lane -> react to terminal
+# lifecycle or legacy inference/gate path -> emit completion or failure.
 #
-# FSM States: RECEIVED -> ROUTED -> INFERENCE_COMPLETED -> GATE_EVALUATED -> COMPLETED | FAILED
+# FSM States: RECEIVED -> ROUTED -> EXECUTING -> COMPLETED | FAILED
 #
 # Related Tickets:
 #   - OMN-7040: Node-based delegation pipeline
@@ -26,7 +26,7 @@ node_version:
   patch: 0
 node_type: "ORCHESTRATOR_GENERIC"
 description: >
-  Orchestrator node that coordinates the full delegation workflow through a correlation_id-keyed FSM: receive delegation request, invoke routing reducer, invoke LLM inference effect, invoke quality gate reducer, then emit delegation-completed or delegation-failed. Replay-safe with explicit terminal states (COMPLETED, FAILED).
+  Orchestrator node that coordinates delegation through a correlation_id-keyed FSM: receive delegation request, invoke routing reducer, dispatch typed invocation commands to the selected effect lane, react to remote agent lifecycle events or the legacy inference and quality-gate path, then emit delegation-completed or delegation-failed.
 
 input_model:
   name: "ModelDelegationRequest"
@@ -43,12 +43,15 @@ event_bus:
     patch: 0
   subscribe_topics:
     - "onex.cmd.omnibase-infra.delegation-request.v1"
+    - "onex.cmd.omnibase-infra.invocation.v1"
     - "onex.evt.omnibase-infra.routing-decision.v1"
+    - "onex.evt.omnibase-infra.agent-task-lifecycle.v1"
     - "onex.evt.omnibase-infra.quality-gate-result.v1"
   publish_topics:
     - "onex.evt.omnibase-infra.delegation-completed.v1"
     - "onex.evt.omnibase-infra.delegation-failed.v1"
     - "onex.cmd.omnibase-infra.delegation-routing-request.v1"
+    - "onex.cmd.omnibase-infra.remote-agent-invoke.v1"
     - "onex.cmd.omnibase-infra.delegation-inference-request.v1"
     - "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1"
     - "onex.evt.omnibase-infra.inference-response.v1"
@@ -58,6 +61,9 @@ published_events:
   - event_type: "RoutingIntent"
     topic: "onex.cmd.omnibase-infra.delegation-routing-request.v1"
     description: "Intent emitted by orchestrator to invoke the routing reducer for a delegation request."
+  - event_type: "InvocationCommand"
+    topic: "onex.cmd.omnibase-infra.remote-agent-invoke.v1"
+    description: "Typed invocation command dispatched by the orchestrator to the selected effect topic."
   - event_type: "InferenceIntent"
     topic: "onex.cmd.omnibase-infra.delegation-inference-request.v1"
     description: "Intent emitted by orchestrator to invoke LLM inference via the inference effect."
@@ -77,6 +83,7 @@ fsm:
   states:
     - RECEIVED
     - ROUTED
+    - EXECUTING
     - INFERENCE_COMPLETED
     - GATE_EVALUATED
     - COMPLETED
@@ -88,10 +95,19 @@ fsm:
   transitions:
     - from: RECEIVED
       to: ROUTED
-      trigger: "routing-decision received"
+      trigger: "invocation command accepted"
+    - from: ROUTED
+      to: EXECUTING
+      trigger: "agent lifecycle progress received"
     - from: ROUTED
       to: INFERENCE_COMPLETED
       trigger: "inference response received"
+    - from: EXECUTING
+      to: COMPLETED
+      trigger: "agent lifecycle completed"
+    - from: EXECUTING
+      to: FAILED
+      trigger: "agent lifecycle failed"
     - from: INFERENCE_COMPLETED
       to: GATE_EVALUATED
       trigger: "quality gate result received"

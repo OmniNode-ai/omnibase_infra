@@ -20,11 +20,23 @@ Related:
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID
 
+from pydantic import BaseModel
+
+from omnibase_core.enums.enum_agent_task_lifecycle_type import (
+    EnumAgentTaskLifecycleType,
+)
+from omnibase_core.models.delegation.model_agent_task_lifecycle_event import (
+    ModelAgentTaskLifecycleEvent,
+)
+from omnibase_core.models.delegation.model_invocation_command import (
+    ModelInvocationCommand,
+)
 from omnibase_infra.event_bus.topic_constants import (
     TOPIC_DELEGATION_COMPLETED,
     TOPIC_DELEGATION_FAILED,
@@ -32,6 +44,9 @@ from omnibase_infra.event_bus.topic_constants import (
 )
 from omnibase_infra.nodes.node_delegation_orchestrator.enums import (
     EnumDelegationState,
+)
+from omnibase_infra.nodes.node_delegation_orchestrator.lifecycle_reactor import (
+    next_state_from_lifecycle,
 )
 from omnibase_infra.nodes.node_delegation_orchestrator.models.model_baseline_intent import (
     ModelBaselineIntent,
@@ -70,8 +85,6 @@ from omnibase_infra.nodes.node_delegation_routing_reducer.models.model_routing_d
     ModelRoutingDecision,
 )
 
-GateResultEvent = ModelDelegationEvent | ModelTaskDelegatedEvent | ModelBaselineIntent
-
 # Temperature by task type (Task 10, OMN-7040)
 _TASK_TEMPERATURE: dict[str, float] = {
     "test": 0.3,
@@ -87,7 +100,17 @@ _CLAUDE_OUTPUT_PRICE_PER_TOKEN: float = 15.0 / 1_000_000
 # Valid state transitions: from_state -> set of valid to_states
 _VALID_TRANSITIONS: dict[EnumDelegationState, frozenset[EnumDelegationState]] = {
     EnumDelegationState.RECEIVED: frozenset({EnumDelegationState.ROUTED}),
-    EnumDelegationState.ROUTED: frozenset({EnumDelegationState.INFERENCE_COMPLETED}),
+    EnumDelegationState.ROUTED: frozenset(
+        {
+            EnumDelegationState.EXECUTING,
+            EnumDelegationState.INFERENCE_COMPLETED,
+            EnumDelegationState.COMPLETED,
+            EnumDelegationState.FAILED,
+        }
+    ),
+    EnumDelegationState.EXECUTING: frozenset(
+        {EnumDelegationState.COMPLETED, EnumDelegationState.FAILED}
+    ),
     EnumDelegationState.INFERENCE_COMPLETED: frozenset(
         {EnumDelegationState.GATE_EVALUATED}
     ),
@@ -107,6 +130,7 @@ class DelegationWorkflowState:
     state: EnumDelegationState = EnumDelegationState.RECEIVED
     request: ModelDelegationRequest | None = None
     routing_decision: ModelRoutingDecision | None = None
+    invocation_command: ModelInvocationCommand | None = None
     inference_content: str | None = None
     inference_model_used: str | None = None
     inference_latency_ms: int = 0
@@ -170,6 +194,21 @@ class HandlerDelegationWorkflow:
         self._workflows[cid] = workflow
 
         return [ModelRoutingIntent(payload=request)]
+
+    def handle_invocation_command(
+        self,
+        command: ModelInvocationCommand,
+    ) -> list[ModelInvocationCommand]:
+        """Handle typed invocation command from the routing reducer."""
+        workflow = self._workflows.get(command.correlation_id)
+        if workflow is None:
+            return []
+        if workflow.state != EnumDelegationState.RECEIVED:
+            return []
+
+        self._transition(workflow, EnumDelegationState.ROUTED)
+        workflow.invocation_command = command
+        return [command]
 
     def handle_routing_decision(
         self,
@@ -241,7 +280,7 @@ class HandlerDelegationWorkflow:
     def handle_gate_result(
         self,
         result: ModelQualityGateResult,
-    ) -> list[GateResultEvent]:
+    ) -> list[BaseModel]:
         """Handle quality gate result.
 
         Transitions INFERENCE_COMPLETED -> GATE_EVALUATED, then evaluates
@@ -309,7 +348,7 @@ class HandlerDelegationWorkflow:
             llm_call_id=workflow.inference_llm_call_id,
         )
 
-        events: list[GateResultEvent] = []
+        events: list[BaseModel] = []
 
         if result.passed:
             self._transition(workflow, EnumDelegationState.COMPLETED)
@@ -344,6 +383,96 @@ class HandlerDelegationWorkflow:
         events.append(compat_event)
 
         return events
+
+    def handle_agent_task_lifecycle(
+        self,
+        lifecycle_event: ModelAgentTaskLifecycleEvent,
+    ) -> list[BaseModel]:
+        """Handle remote-agent lifecycle events from the A2A effect lane."""
+        cid = lifecycle_event.correlation_id
+        workflow = self._workflows.get(cid)
+        if workflow is None:
+            return []
+
+        next_state = next_state_from_lifecycle(lifecycle_event.lifecycle_type)
+        if next_state is EnumDelegationState.EXECUTING:
+            if workflow.state == EnumDelegationState.ROUTED:
+                self._transition(workflow, EnumDelegationState.EXECUTING)
+            return []
+
+        if workflow.state not in {
+            EnumDelegationState.ROUTED,
+            EnumDelegationState.EXECUTING,
+        }:
+            return []
+
+        if workflow.state != next_state:
+            self._transition(workflow, next_state)
+
+        assert workflow.request is not None
+
+        elapsed_ms = (time.monotonic_ns() - workflow.started_at_ns) // 1_000_000
+        delegated_to = (
+            workflow.invocation_command.target_ref
+            if workflow.invocation_command is not None
+            else "remote-agent"
+        )
+        content = self._render_lifecycle_content(lifecycle_event)
+        failure_reason = lifecycle_event.error or ""
+
+        delegation_result = ModelDelegationResult(
+            correlation_id=cid,
+            task_type=workflow.request.task_type,
+            model_used=delegated_to,
+            endpoint_url=delegated_to,
+            content=content,
+            quality_passed=next_state is EnumDelegationState.COMPLETED,
+            quality_score=1.0 if next_state is EnumDelegationState.COMPLETED else 0.0,
+            latency_ms=elapsed_ms,
+            fallback_to_claude=False,
+            failure_reason=failure_reason,
+        )
+
+        compat_event = ModelTaskDelegatedEvent(
+            topic=TOPIC_DELEGATION_TASK_DELEGATED,
+            timestamp=datetime.now(UTC).isoformat(),
+            correlation_id=cid,
+            session_id=None,
+            task_type=workflow.request.task_type,
+            delegated_to=delegated_to,
+            model_name=delegated_to,
+            quality_gate_passed=next_state is EnumDelegationState.COMPLETED,
+            quality_gates_checked=["agent-task-lifecycle"],
+            quality_gates_failed=[failure_reason] if failure_reason else [],
+            cost_usd=0.0,
+            cost_savings_usd=0.0,
+            delegation_latency_ms=elapsed_ms,
+            llm_call_id=lifecycle_event.remote_task_handle or "",
+        )
+
+        topic = (
+            TOPIC_DELEGATION_COMPLETED
+            if next_state is EnumDelegationState.COMPLETED
+            else TOPIC_DELEGATION_FAILED
+        )
+        return [
+            ModelDelegationEvent(topic=topic, payload=delegation_result),
+            compat_event,
+        ]
+
+    @staticmethod
+    def _render_lifecycle_content(
+        lifecycle_event: ModelAgentTaskLifecycleEvent,
+    ) -> str:
+        """Render lifecycle payload into the legacy content string field."""
+        if lifecycle_event.artifact is not None:
+            plain = {
+                key: value.to_value() for key, value in lifecycle_event.artifact.items()
+            }
+            return json.dumps(plain, sort_keys=True)
+        if lifecycle_event.error:
+            return lifecycle_event.error
+        return lifecycle_event.lifecycle_type.value
 
 
 class InvalidStateTransitionError(Exception):

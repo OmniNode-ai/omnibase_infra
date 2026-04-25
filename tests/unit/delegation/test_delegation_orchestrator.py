@@ -620,6 +620,7 @@ class TestEnumDelegationState:
         assert states == {
             "RECEIVED",
             "ROUTED",
+            "EXECUTING",
             "INFERENCE_COMPLETED",
             "GATE_EVALUATED",
             "COMPLETED",
