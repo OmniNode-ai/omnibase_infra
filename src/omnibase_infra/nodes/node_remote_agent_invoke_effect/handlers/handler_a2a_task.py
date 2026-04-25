@@ -1,15 +1,30 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""A2A submit-path handler for node_remote_agent_invoke_effect."""
+"""A2A submit/watch handler for node_remote_agent_invoke_effect."""
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping
+import json
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from typing import Protocol
 from uuid import UUID
 
 import aiohttp
+import httpx
+from a2a.client.base_client import BaseClient
+from a2a.client.client import ClientConfig
+from a2a.client.client_factory import ClientFactory
+from a2a.types import (
+    Message,
+    MessageSendConfiguration,
+    Part,
+    Role,
+    TaskQueryParams,
+    TextPart,
+)
+from a2a.types import Task as A2ATask
 
 from omnibase_core.enums.enum_agent_protocol import EnumAgentProtocol
 from omnibase_core.enums.enum_agent_task_lifecycle_type import (
@@ -39,6 +54,8 @@ _STATUS_MAP: dict[str, EnumAgentTaskLifecycleType] = {
     "artifact": EnumAgentTaskLifecycleType.ARTIFACT,
     "working": EnumAgentTaskLifecycleType.PROGRESS,
     "in_progress": EnumAgentTaskLifecycleType.PROGRESS,
+    "input_required": EnumAgentTaskLifecycleType.PROGRESS,
+    "auth_required": EnumAgentTaskLifecycleType.PROGRESS,
     "completed": EnumAgentTaskLifecycleType.COMPLETED,
     "failed": EnumAgentTaskLifecycleType.FAILED,
     "timed_out": EnumAgentTaskLifecycleType.TIMED_OUT,
@@ -52,14 +69,185 @@ _TERMINAL_LIFECYCLES = {
 }
 
 
+class ProtocolA2ATransport(Protocol):
+    """Small transport boundary so unit tests can avoid protocol plumbing."""
+
+    async def submit(
+        self,
+        *,
+        target: ModelTargetAgent,
+        request_model: ModelA2ATaskRequest,
+    ) -> ModelA2ATaskResponse: ...
+
+    async def get_task(
+        self,
+        *,
+        target: ModelTargetAgent,
+        remote_task_handle: str,
+    ) -> ModelA2ATaskResponse: ...
+
+
 def map_remote_status(raw_status: str) -> EnumAgentTaskLifecycleType:
     """Map A2A peer status strings into typed lifecycle events."""
-    normalized = raw_status.strip().lower()
+    normalized = raw_status.strip().lower().replace("-", "_")
     try:
         return _STATUS_MAP[normalized]
     except KeyError as exc:
         msg = f"Unknown remote agent status: {raw_status}"
         raise ValueError(msg) from exc
+
+
+class A2ASdkTransport:
+    """Real A2A transport backed by the upstream A2A SDK."""
+
+    def __init__(self, *, request_timeout_seconds: float = 180.0) -> None:
+        self._request_timeout_seconds = request_timeout_seconds
+
+    async def submit(
+        self,
+        *,
+        target: ModelTargetAgent,
+        request_model: ModelA2ATaskRequest,
+    ) -> ModelA2ATaskResponse:
+        async with httpx.AsyncClient(timeout=self._request_timeout_seconds) as client:
+            a2a_client = await ClientFactory.connect(
+                target.base_url,
+                client_config=ClientConfig(
+                    streaming=False,
+                    polling=True,
+                    httpx_client=client,
+                ),
+            )
+            typed_client = _require_base_client(a2a_client)
+            message = Message(
+                message_id=str(request_model.correlation_id),
+                role=Role.user,
+                parts=[Part(root=TextPart(text=_build_prompt(request_model)))],
+            )
+            async for event in typed_client.send_message(
+                message,
+                configuration=MessageSendConfiguration(blocking=False),
+            ):
+                if isinstance(event, Message):
+                    msg = "Unexpected direct message response from A2A peer"
+                    raise ValueError(msg)
+                task, _update = event
+                return _task_to_response(task)
+
+        msg = "A2A peer returned no task from send_message"
+        raise ValueError(msg)
+
+    async def get_task(
+        self,
+        *,
+        target: ModelTargetAgent,
+        remote_task_handle: str,
+    ) -> ModelA2ATaskResponse:
+        async with httpx.AsyncClient(timeout=self._request_timeout_seconds) as client:
+            a2a_client = await ClientFactory.connect(
+                target.base_url,
+                client_config=ClientConfig(
+                    streaming=False,
+                    polling=True,
+                    httpx_client=client,
+                ),
+            )
+            typed_client = _require_base_client(a2a_client)
+            task = await typed_client.get_task(
+                TaskQueryParams(id=remote_task_handle, history_length=20)
+            )
+        return _task_to_response(task)
+
+
+def _require_base_client(client: object) -> BaseClient:
+    if isinstance(client, BaseClient):
+        return client
+    msg = f"Unsupported A2A client type: {type(client).__name__}"
+    raise TypeError(msg)
+
+
+def _build_prompt(request_model: ModelA2ATaskRequest) -> str:
+    payload = {key: value.to_value() for key, value in request_model.input.items()}
+    prompt = payload.get("prompt")
+    if isinstance(prompt, str) and prompt.strip():
+        return prompt
+    return json.dumps(
+        {
+            "skill_id": request_model.skill_ref,
+            "correlation_id": str(request_model.correlation_id),
+            "input": payload,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _task_to_response(task: A2ATask) -> ModelA2ATaskResponse:
+    status = getattr(task.status.state, "value", str(task.status.state))
+    return ModelA2ATaskResponse(
+        remote_task_handle=task.id,
+        status=status,
+        artifacts=_extract_artifacts(task),
+        error=_extract_error(task),
+    )
+
+
+def _extract_error(task: A2ATask) -> str | None:
+    state = getattr(task.status.state, "value", str(task.status.state)).lower()
+    if state not in {"failed", "canceled", "timed_out"}:
+        return None
+    status_message = getattr(task.status, "message", None)
+    if status_message is None:
+        return None
+    texts = _extract_texts(getattr(status_message, "parts", None) or [])
+    if texts:
+        return "\n".join(texts)
+    return None
+
+
+def _extract_artifacts(task: A2ATask) -> list[dict[str, ModelSchemaValue]]:
+    task_artifacts = getattr(task, "artifacts", None) or []
+    extracted: list[dict[str, ModelSchemaValue]] = []
+    for artifact in task_artifacts:
+        payload = _parts_to_payload(getattr(artifact, "parts", None) or [])
+        if payload is None:
+            continue
+        if isinstance(payload, dict):
+            extracted.append(
+                {
+                    key: ModelSchemaValue.from_value(value)
+                    for key, value in payload.items()
+                }
+            )
+            continue
+        extracted.append({"text": ModelSchemaValue.from_value(payload)})
+    return extracted
+
+
+def _parts_to_payload(parts: Sequence[object]) -> object | None:
+    texts = _extract_texts(parts)
+    if not texts:
+        return None
+    combined = "\n".join(texts).strip()
+    if not combined:
+        return None
+    try:
+        parsed = json.loads(combined)
+    except json.JSONDecodeError:
+        return combined
+    return parsed
+
+
+def _extract_texts(parts: Sequence[object]) -> list[str]:
+    texts: list[str] = []
+    for part in parts:
+        candidate = getattr(part, "root", part)
+        kind = getattr(candidate, "kind", None)
+        if kind == "text":
+            text = getattr(candidate, "text", None)
+            if isinstance(text, str) and text:
+                texts.append(text)
+    return texts
 
 
 class HandlerA2ATask:
@@ -72,9 +260,10 @@ class HandlerA2ATask:
         event_bus: ProtocolEventBusLike,
         target_registry: Mapping[str, ModelTargetAgent],
         lifecycle_topic: str,
-        http_session: aiohttp.ClientSession,
+        http_session: aiohttp.ClientSession | None = None,
         clock: Callable[[], datetime] | None = None,
         poll_interval_seconds: float = 1.0,
+        transport: ProtocolA2ATransport | None = None,
     ) -> None:
         self._repository = repository
         self._event_bus = event_bus
@@ -83,6 +272,7 @@ class HandlerA2ATask:
         self._http_session = http_session
         self._clock = clock or (lambda: datetime.now(UTC))
         self._poll_interval_seconds = poll_interval_seconds
+        self._transport = transport or A2ASdkTransport()
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -120,7 +310,7 @@ class HandlerA2ATask:
             input=command.payload,
             correlation_id=command.correlation_id,
         )
-        response = await self._post_tasks_send(
+        response = await self._transport.submit(
             target=target, request_model=request_model
         )
 
@@ -155,7 +345,7 @@ class HandlerA2ATask:
         last_artifact_payload: list[dict[str, ModelSchemaValue]] | None = None
 
         while True:
-            response = await self._get_tasks_get(
+            response = await self._transport.get_task(
                 target=target,
                 remote_task_handle=remote_task_handle,
             )
@@ -257,34 +447,6 @@ class HandlerA2ATask:
             raise ValueError(msg)
         return target
 
-    async def _post_tasks_send(
-        self,
-        *,
-        target: ModelTargetAgent,
-        request_model: ModelA2ATaskRequest,
-    ) -> ModelA2ATaskResponse:
-        async with self._http_session.post(
-            f"{target.base_url.rstrip('/')}/tasks.send",
-            json=request_model.model_dump(mode="json", by_alias=True),
-        ) as response:
-            response.raise_for_status()
-            payload = await response.json()
-        return ModelA2ATaskResponse.model_validate(payload)
-
-    async def _get_tasks_get(
-        self,
-        *,
-        target: ModelTargetAgent,
-        remote_task_handle: str,
-    ) -> ModelA2ATaskResponse:
-        async with self._http_session.get(
-            f"{target.base_url.rstrip('/')}/tasks.get",
-            params={"id": remote_task_handle},
-        ) as response:
-            response.raise_for_status()
-            payload = await response.json()
-        return ModelA2ATaskResponse.model_validate(payload)
-
     async def _emit_submitted(
         self,
         *,
@@ -338,4 +500,11 @@ class HandlerA2ATask:
         return lifecycle_event
 
 
-__all__ = ["HandlerA2ATask", "_STATUS_MAP", "_TERMINAL_LIFECYCLES", "map_remote_status"]
+__all__ = [
+    "A2ASdkTransport",
+    "HandlerA2ATask",
+    "ProtocolA2ATransport",
+    "_STATUS_MAP",
+    "_TERMINAL_LIFECYCLES",
+    "map_remote_status",
+]
