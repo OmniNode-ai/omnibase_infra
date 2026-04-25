@@ -60,9 +60,12 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
+from typing import Any
 
 import yaml
+from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.enums.enum_node_type import EnumNodeType
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
@@ -70,8 +73,33 @@ from omnibase_infra.models.routing import (
     ModelRoutingEntry,
     ModelRoutingSubcontract,
 )
+from omnibase_infra.runtime.contract_loaders.model_node_type_probe import (
+    ModelNodeTypeProbe,
+)
 
 logger = logging.getLogger(__name__)
+
+
+class ModelContractNodeType(BaseModel):
+    """Typed result of contract YAML loading — carries node_type enum and raw contract dict.
+
+    Returned by load_and_validate_contract_yaml() as the typed alternative to a
+    raw dict. Validates the node_type field via EnumNodeType (accepts YAML string
+    values) while preserving the full raw contract for downstream processing.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    node_type: EnumNodeType = Field(
+        ..., description="Validated node type from contract YAML"
+    )
+    # NOTE: raw stores the heterogeneous YAML dict from yaml.safe_load — values
+    # are primitives, lists, or nested dicts; no stricter type is available.
+    # ONEX_EXCLUDE: any_type - yaml.safe_load returns heterogeneous contract dict
+    raw: dict[str, Any] = Field(
+        ..., description="Full raw contract dict for downstream use"
+    )
+
 
 # Maximum allowed file size for contract.yaml files (10MB)
 # Security control to prevent memory exhaustion via large YAML files
@@ -249,6 +277,60 @@ def _load_and_validate_contract_yaml(  # stub-ok: tracked in OMN-41
         raise ProtocolConfigurationError(msg, context=ctx)
 
     return contract, handler_routing
+
+
+# ONEX_EXCLUDE: any_type - raw is a heterogeneous YAML dict from yaml.safe_load
+def _dispatch_contract_model(raw: dict[str, Any]) -> ModelContractNodeType:
+    """Validate node_type from raw contract dict and return a typed ModelContractNodeType.
+
+    Uses a probe model (extra='ignore') to validate the node_type field via
+    EnumNodeType without requiring the full contract schema. Raises ValueError
+    for unknown or missing node_type values.
+
+    Args:
+        raw: Raw contract dict loaded from YAML.
+
+    Returns:
+        ModelContractNodeType with validated node_type and the original raw dict.
+
+    Raises:
+        ValueError: If node_type is missing or not a valid EnumNodeType value.
+    """
+    node_type_str = raw.get("node_type", "")
+    if not node_type_str:
+        raise ValueError(
+            f"Missing or empty node_type in contract dict: {list(raw.keys())}"
+        )
+    try:
+        probe = ModelNodeTypeProbe.model_validate(raw)
+    except Exception as exc:
+        raise ValueError(f"Unknown node_type: {node_type_str!r}") from exc
+    return ModelContractNodeType(node_type=probe.node_type, raw=raw)
+
+
+def load_and_validate_contract_yaml(contract_path: Path) -> ModelContractNodeType:
+    """Load contract.yaml and return a typed ModelContractNodeType.
+
+    Reads the YAML file, validates its node_type via EnumNodeType, and returns
+    a typed model rather than a raw dict. This is the single choke-point for
+    contract loading introduced in OMN-9746 — all node contracts flow through
+    this function, ensuring node_type is always a validated enum value.
+
+    Args:
+        contract_path: Path to the contract.yaml file.
+
+    Returns:
+        ModelContractNodeType with validated node_type and full raw contract dict.
+
+    Raises:
+        ProtocolConfigurationError: If the file cannot be read, contains invalid
+            YAML, is empty, or has no handler_routing section.
+        ValueError: If node_type is missing or not a recognised EnumNodeType value.
+    """
+    contract, _handler_routing = _load_and_validate_contract_yaml(
+        contract_path, "load_and_validate_contract_yaml"
+    )
+    return _dispatch_contract_model(contract)
 
 
 # Valid routing strategies for handler routing contracts.
@@ -467,8 +549,11 @@ def load_handler_class_info_from_contract(
 
 __all__ = [
     "MAX_CONTRACT_FILE_SIZE_BYTES",
+    "ModelContractNodeType",
     "VALID_ROUTING_STRATEGIES",
+    "_dispatch_contract_model",
     "convert_class_to_handler_key",
+    "load_and_validate_contract_yaml",
     "load_handler_class_info_from_contract",
     "load_handler_routing_subcontract",
 ]
