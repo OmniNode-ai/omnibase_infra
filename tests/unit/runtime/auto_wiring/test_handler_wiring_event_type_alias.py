@@ -49,6 +49,7 @@ def _make_contract_with_event_type_alias(
     *,
     event_model_name: str,
     event_type_alias: str | None,
+    message_category: str | None = None,
     node_name: str = "node_local",
 ) -> ModelDiscoveredContract:
     event_model = ModelHandlerRef(name=event_model_name, module="fake.models")
@@ -59,6 +60,8 @@ def _make_contract_with_event_type_alias(
     }
     if event_type_alias is not None:
         entry_kwargs["event_type"] = event_type_alias
+    if message_category is not None:
+        entry_kwargs["message_category"] = message_category
 
     return ModelDiscoveredContract(
         name=node_name,
@@ -95,6 +98,15 @@ class TestModelHandlerRoutingEntryAcceptsEventType:
             event_type="platform.foo-start",
         )
         assert entry.event_type == "platform.foo-start"
+
+    @pytest.mark.unit
+    def test_message_category_can_be_set(self) -> None:
+        entry = ModelHandlerRoutingEntry(
+            handler=ModelHandlerRef(name="HandlerFoo", module="fake.module"),
+            event_model=ModelHandlerRef(name="ModelFooCommand", module="fake.models"),
+            message_category="COMMAND",
+        )
+        assert entry.message_category == "COMMAND"
 
 
 class TestPrepareHandlerWiringIncludesEventTypeAlias:
@@ -196,6 +208,91 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
         assert prepared.message_types == {"ModelFooCommand"}
 
     @pytest.mark.unit
+    def test_message_category_overrides_contract_first_topic_category(self) -> None:
+        """Mixed-topic contracts must route command handlers as commands.
+
+        The registration contract subscribes to event topics first, then command
+        topics. Before this regression fix, every handler inherited the first
+        topic category, so request-introspection commands were registered as
+        event routes and DLQ'd at runtime.
+        """
+        from omnibase_infra.enums import EnumMessageCategory
+
+        contract = _make_contract_with_event_type_alias(
+            event_model_name="ModelFooCommand",
+            event_type_alias="platform.foo-start",
+            message_category="COMMAND",
+        )
+        entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
+        handler_cls = _make_zero_arg_handler_cls()
+        ownership = ServiceLocalHandlerOwnershipQuery(
+            local_node_names=frozenset({contract.name})
+        )
+        resolver = ServiceHandlerResolver()
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=handler_cls,
+        ):
+            prepared = _prepare_handler_wiring(
+                contract=contract,
+                entry=entry,
+                dispatch_engine=None,
+                resolver=resolver,
+                ownership_query=ownership,
+                event_bus=None,
+                container=None,
+            )
+
+        assert prepared.category is EnumMessageCategory.COMMAND
+
+    @pytest.mark.unit
+    def test_registration_contract_skips_generic_direct_handler_dispatcher(
+        self,
+    ) -> None:
+        """Registration auto-wiring owns subscriptions, not generic dispatchers."""
+        from omnibase_core.enums.enum_handler_resolution_outcome import (
+            EnumHandlerResolutionOutcome,
+        )
+        from omnibase_infra.enums import EnumMessageCategory
+
+        contract = _make_contract_with_event_type_alias(
+            event_model_name="ModelTopicCatalogRequest",
+            event_type_alias="platform.request-introspection",
+            message_category="COMMAND",
+            node_name="node_registration_orchestrator",
+        )
+        entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
+        ownership = ServiceLocalHandlerOwnershipQuery(
+            local_node_names=frozenset({contract.name})
+        )
+        resolver = ServiceHandlerResolver()
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class"
+        ) as import_handler:
+            prepared = _prepare_handler_wiring(
+                contract=contract,
+                entry=entry,
+                dispatch_engine=None,
+                resolver=resolver,
+                ownership_query=ownership,
+                event_bus=None,
+                container=None,
+            )
+
+        import_handler.assert_not_called()
+        assert prepared.is_skip is True
+        assert prepared.category is EnumMessageCategory.COMMAND
+        assert prepared.message_types == {
+            "ModelTopicCatalogRequest",
+            "platform.request-introspection",
+        }
+        assert (
+            prepared.resolution_outcome
+            is EnumHandlerResolutionOutcome.RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP
+        )
+        assert "explicit dispatcher adapters" in prepared.skip_reason
+
+    @pytest.mark.unit
     def test_message_types_only_class_name_when_no_alias(self) -> None:
         """Absent event_type alias: message_types == {event_model.name} — unchanged."""
         contract = _make_contract_with_event_type_alias(
@@ -244,6 +341,7 @@ class TestContractDiscoveryParsesEventType:
                         "module": "fake.models",
                     },
                     "event_type": "platform.foo-start",
+                    "message_category": "COMMAND",
                 },
             ],
         }
@@ -252,9 +350,12 @@ class TestContractDiscoveryParsesEventType:
 
         assert len(parsed.handlers) == 1
         assert parsed.handlers[0].event_type == "platform.foo-start"
+        assert parsed.handlers[0].message_category == "COMMAND"
 
     @pytest.mark.unit
-    def test_parse_handler_routing_defaults_event_type_to_none(self) -> None:
+    def test_parse_handler_routing_defaults_event_type_and_category_to_none(
+        self,
+    ) -> None:
         from omnibase_infra.runtime.auto_wiring.discovery import _parse_handler_routing
 
         hr_raw = {
@@ -270,3 +371,4 @@ class TestContractDiscoveryParsesEventType:
         parsed = _parse_handler_routing(hr_raw)
 
         assert parsed.handlers[0].event_type is None
+        assert parsed.handlers[0].message_category is None

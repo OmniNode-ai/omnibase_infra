@@ -266,17 +266,19 @@ def _parse_contract(
         event_bus = ModelEventBusWiring(
             subscribe_topics=tuple(eb_raw.get("subscribe_topics", [])),
             publish_topics=tuple(eb_raw.get("publish_topics", [])),
+            consumer_purpose=eb_raw.get("consumer_purpose"),
         )
 
     # Extract handler routing — new format (handler_routing:) or legacy (handler:)
     handler_routing: ModelHandlerRouting | None = None
     hr_raw = raw.get("handler_routing")
+    h_raw = raw.get("handler")
     if isinstance(hr_raw, dict):
         handler_routing = _parse_handler_routing(hr_raw)
-    else:
-        h_raw = raw.get("handler")
-        if isinstance(h_raw, dict):
+        if not handler_routing.handlers and isinstance(h_raw, dict):
             handler_routing = _parse_legacy_handler(h_raw)
+    elif isinstance(h_raw, dict):
+        handler_routing = _parse_legacy_handler(h_raw)
 
     return ModelDiscoveredContract(
         name=raw.get("name", entry_point_name),
@@ -319,6 +321,7 @@ def _parse_handler_routing(hr_raw: dict) -> ModelHandlerRouting:
                 event_model=event_model,
                 operation=h.get("operation"),
                 event_type=h.get("event_type"),
+                message_category=h.get("message_category"),
             )
         )
     return ModelHandlerRouting(

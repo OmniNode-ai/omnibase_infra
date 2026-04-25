@@ -82,6 +82,39 @@ class TestWireRegistrationHandlers:
         assert HandlerRuntimeTick in registered_interfaces
         assert HandlerNodeRegistrationAcked in registered_interfaces
 
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_registers_heartbeat_under_concrete_and_protocol_interfaces(
+        self,
+    ) -> None:
+        """Heartbeat must be pre-resolvable by concrete class for auto-wiring."""
+        from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+            HandlerNodeHeartbeat,
+        )
+        from omnibase_infra.protocols.protocol_node_heartbeat import (
+            ProtocolNodeHeartbeat,
+        )
+
+        registered_interfaces: list[type] = []
+
+        async def capture_register(interface: type, **kwargs) -> None:
+            registered_interfaces.append(interface)
+
+        mock_registry = MagicMock()
+        mock_registry.register_instance = AsyncMock(side_effect=capture_register)
+
+        mock_container = MagicMock()
+        mock_container.service_registry = mock_registry
+
+        await wire_registration_handlers(
+            mock_container,
+            MagicMock(),
+            projector=MagicMock(),
+        )
+
+        assert HandlerNodeHeartbeat in registered_interfaces
+        assert ProtocolNodeHeartbeat in registered_interfaces
+
     @pytest.mark.asyncio
     async def test_custom_liveness_interval_passed_to_handler(self) -> None:
         """Test that custom liveness interval is passed to ack handler."""

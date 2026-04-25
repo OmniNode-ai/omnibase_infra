@@ -293,6 +293,17 @@ class ServiceHealth:
 
         # OMN-519: Track last successful health check timestamps per component
         self._last_healthy_timestamps: dict[str, str] = {}
+        # Track health phase transitions so frequent probes do not flood logs.
+        self._last_health_probe_signature: (
+            tuple[
+                str,
+                bool,
+                bool,
+                bool,
+                bool,
+            ]
+            | None
+        ) = None
 
         logger.debug(
             "ServiceHealth initialized",
@@ -388,6 +399,47 @@ class ServiceHealth:
                 context=context,
             )
         return self._runtime
+
+    def attach_runtime(self, runtime: RuntimeHostProcess) -> None:
+        """Attach a runtime after early health-server startup."""
+        self._runtime = runtime
+        logger.info(
+            "ServiceHealth attached runtime after early startup",
+            extra={"port": self._port, "host": self._host},
+        )
+
+    def _log_health_transition(
+        self,
+        *,
+        status: str,
+        runtime_attached: bool,
+        startup_in_progress: bool,
+        is_running: bool,
+        event_bus_healthy: bool,
+    ) -> None:
+        """Log health state transitions once per distinct phase."""
+        signature = (
+            status,
+            runtime_attached,
+            startup_in_progress,
+            is_running,
+            event_bus_healthy,
+        )
+        if signature == self._last_health_probe_signature:
+            return
+        self._last_health_probe_signature = signature
+        logger.info(
+            "ServiceHealth health probe state changed",
+            extra={
+                "status": status,
+                "runtime_attached": runtime_attached,
+                "startup_in_progress": startup_in_progress,
+                "is_running": is_running,
+                "event_bus_healthy": event_bus_healthy,
+                "port": self._port,
+                "host": self._host,
+            },
+        )
 
     @classmethod
     async def create_from_container(
@@ -838,6 +890,34 @@ class ServiceHealth:
         _ = request
 
         try:
+            if self._runtime is None:
+                self._log_health_transition(
+                    status="degraded",
+                    runtime_attached=False,
+                    startup_in_progress=True,
+                    is_running=False,
+                    event_bus_healthy=False,
+                )
+                response = ModelHealthCheckResponse.success(
+                    status="degraded",
+                    version=self._version,
+                    details=cast(
+                        "dict[str, JsonType]",
+                        {
+                            "healthy": False,
+                            "degraded": True,
+                            "is_running": False,
+                            "runtime_attached": False,
+                            "startup_phase": "runtime_pending",
+                        },
+                    ),
+                )
+                return web.Response(
+                    text=response.model_dump_json(exclude_none=True),
+                    status=200,
+                    content_type="application/json",
+                )
+
             # Get health status from runtime
             health_details = await self.runtime.health_check()
 
@@ -859,6 +939,9 @@ class ServiceHealth:
             # Determine overall status based on health check results
             is_healthy = bool(health_details.get("healthy", False))
             is_degraded = bool(health_details.get("degraded", False))
+            startup_in_progress = bool(health_details.get("startup_in_progress", False))
+            is_running = bool(health_details.get("is_running", False))
+            event_bus_healthy = bool(health_details.get("event_bus_healthy", False))
 
             if is_healthy:
                 status: Literal["healthy", "degraded", "unhealthy"] = "healthy"
@@ -892,11 +975,21 @@ class ServiceHealth:
                 status = "unhealthy"
                 http_status = 503
 
+            self._log_health_transition(
+                status=status,
+                runtime_attached=True,
+                startup_in_progress=startup_in_progress,
+                is_running=is_running,
+                event_bus_healthy=event_bus_healthy,
+            )
+
             # OMN-519: Add component breakdown to health response details
             components = self._build_component_health(health_details)
             enriched_details = dict(health_details)
+            enriched_details["degraded"] = is_degraded
+            enriched_details["startup_in_progress"] = startup_in_progress
             enriched_details["components"] = {
-                name: comp.model_dump(exclude_none=True)  # noqa: model-dump-bare
+                name: comp.model_dump(mode="json", exclude_none=True)
                 for name, comp in components.items()
             }
 

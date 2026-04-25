@@ -202,6 +202,49 @@ class TestPackageNodeSubscriptionWiring:
         assert skipped_no_topics == 2
 
     @pytest.mark.asyncio
+    async def test_raw_projection_consumer_purpose_not_wired(
+        self, tmp_path: Path, mock_event_bus_wiring: MagicMock
+    ) -> None:
+        """Audit/projection consumers require a raw-message projection path."""
+        node = tmp_path / "nodes" / "node_audit_projection" / "contract.yaml"
+        node.parent.mkdir(parents=True)
+        node.write_text(
+            textwrap.dedent("""\
+            name: "node_audit_projection"
+            node_type: "COMPUTE_GENERIC"
+            event_bus:
+              version:
+                major: 1
+                minor: 0
+                patch: 0
+              subscribe_topics:
+                - "onex.evt.platform.node-heartbeat.v1"
+              consumer_purpose: "audit"
+            """)
+        )
+
+        from omnibase_infra.runtime.service_runtime_host_process import (
+            _discover_package_node_contracts,
+            _wire_package_node_subscriptions,
+        )
+
+        contracts = _discover_package_node_contracts(tmp_path)
+
+        (
+            wired,
+            _skipped_existing,
+            skipped_no_topics,
+        ) = await _wire_package_node_subscriptions(
+            contracts=contracts,
+            event_bus_wiring=mock_event_bus_wiring,
+            already_wired_names=set(),
+        )
+
+        assert wired == 0
+        assert skipped_no_topics == 1
+        mock_event_bus_wiring.wire_subscriptions.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_subscription_wiring_is_idempotent(
         self, tmp_nodes_dir: Path, mock_event_bus_wiring: MagicMock
     ) -> None:

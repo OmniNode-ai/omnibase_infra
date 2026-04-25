@@ -6,8 +6,10 @@ from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID
 
 import pytest
+from pydantic import BaseModel
 
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _derive_dispatcher_id,
@@ -36,6 +38,16 @@ from omnibase_infra.runtime.auto_wiring.report import (
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+class FakeTypedPayload(BaseModel):
+    correlation_id: UUID
+    value: str
+
+
+class FakeTypedOutput(BaseModel):
+    correlation_id: UUID
+    result: str
 
 
 def _make_contract_version() -> ModelContractVersion:
@@ -70,6 +82,7 @@ def _make_contract(
     subscribe_topics: tuple[str, ...] = ("onex.evt.platform.test-input.v1",),
     publish_topics: tuple[str, ...] = (),
     handler_routing: ModelHandlerRouting | None = None,
+    consumer_purpose: str | None = None,
 ) -> ModelDiscoveredContract:
     return ModelDiscoveredContract(
         name=name,
@@ -81,6 +94,7 @@ def _make_contract(
         event_bus=ModelEventBusWiring(
             subscribe_topics=subscribe_topics,
             publish_topics=publish_topics,
+            consumer_purpose=consumer_purpose,
         ),
         handler_routing=handler_routing,
     )
@@ -190,6 +204,50 @@ class TestMakeDispatchCallback:
         handler.handle.assert_called_once_with(envelope)
         assert result is None
 
+    @pytest.mark.asyncio
+    async def test_callback_validates_typed_payload_and_normalizes_sync_result(
+        self,
+    ) -> None:
+        received: list[FakeTypedPayload] = []
+
+        class Handler:
+            def handle(self, payload: FakeTypedPayload) -> FakeTypedOutput:
+                received.append(payload)
+                return FakeTypedOutput(
+                    correlation_id=payload.correlation_id,
+                    result=f"handled:{payload.value}",
+                )
+
+        correlation_id = UUID("11111111-1111-4111-8111-111111111111")
+        callback = _make_dispatch_callback(
+            Handler(),
+            ModelHandlerRef(
+                name="FakeTypedPayload",
+                module=__name__,
+            ),
+        )
+
+        result = await callback(
+            {
+                "payload": {
+                    "correlation_id": str(correlation_id),
+                    "value": "market",
+                },
+                "__debug_trace": {
+                    "topic": "onex.cmd.omnimarket.ledger-tick.v1",
+                    "correlation_id": str(correlation_id),
+                },
+            }
+        )
+
+        assert len(received) == 1
+        assert received[0].value == "market"
+        assert result is not None
+        assert result.correlation_id == correlation_id
+        assert len(result.output_events) == 1
+        assert isinstance(result.output_events[0], FakeTypedOutput)
+        assert result.output_events[0].result == "handled:market"
+
 
 # ---------------------------------------------------------------------------
 # Unit tests: duplicate detection
@@ -282,6 +340,54 @@ class TestWireFromManifest:
         assert report.total_skipped == 1
 
     @pytest.mark.asyncio
+    async def test_skip_raw_projection_consumer_purpose(self) -> None:
+        contract = _make_contract(
+            name="node_ledger_projection_compute",
+            consumer_purpose="audit",
+            handler_routing=_make_handler_routing(
+                handler_name="HandlerLedgerProjection",
+                handler_module="fake.module",
+            ),
+        )
+        manifest = ModelAutoWiringManifest(contracts=(contract,))
+        engine = MagicMock()
+
+        report = await wire_from_manifest(manifest, engine)
+
+        assert report.total_skipped == 1
+        assert report.total_wired == 0
+        assert report.results[0].outcome == EnumWiringOutcome.SKIPPED
+        assert "raw event projection wiring" in str(report.results[0].reason)
+
+    @pytest.mark.asyncio
+    async def test_skip_raw_projection_before_container_preresolve(self) -> None:
+        contract = _make_contract(
+            name="node_ledger_projection_compute",
+            consumer_purpose="audit",
+            handler_routing=_make_handler_routing(
+                handler_name="HandlerLedgerProjection",
+                handler_module="fake.module",
+            ),
+        )
+        manifest = ModelAutoWiringManifest(contracts=(contract,))
+
+        class FakeContainer:
+            async def get_service_async(self, handler_cls: type) -> object | None:
+                return None
+
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class"
+        ) as import_handler:
+            report = await wire_from_manifest(
+                manifest,
+                MagicMock(),
+                container=FakeContainer(),
+            )
+
+        assert report.total_skipped == 1
+        import_handler.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_wire_success(self) -> None:
         """Test successful wiring with a mock handler class."""
         from omnibase_infra.runtime.service_message_dispatch_engine import (
@@ -314,6 +420,43 @@ class TestWireFromManifest:
         assert report.total_failed == 0
         assert len(report.results[0].dispatchers_registered) == 1
         assert len(report.results[0].routes_registered) >= 1
+
+    @pytest.mark.asyncio
+    async def test_container_miss_after_async_preresolve_falls_through_to_zero_arg(
+        self,
+    ) -> None:
+        """Unregistered zero-arg handlers must not re-enter sync container lookup."""
+        from omnibase_infra.runtime.service_message_dispatch_engine import (
+            MessageDispatchEngine,
+        )
+
+        handler_routing = _make_handler_routing(
+            handler_name="FakeHandler",
+            handler_module="fake.module",
+        )
+        contract = _make_contract(handler_routing=handler_routing)
+        manifest = ModelAutoWiringManifest(contracts=(contract,))
+        engine = MessageDispatchEngine()
+
+        class FakeContainer:
+            get_service = MagicMock(side_effect=RuntimeError("asyncio.run blocked"))
+
+            async def get_service_async(self, handler_cls: type) -> object | None:
+                return None
+
+        class FakeHandler:
+            async def handle(self, envelope: object) -> None:
+                return None
+
+        container = FakeContainer()
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=FakeHandler,
+        ):
+            report = await wire_from_manifest(manifest, engine, container=container)
+
+        assert report.total_wired == 1
+        container.get_service.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_wire_failure_import_error_strict_mode_raises(self) -> None:

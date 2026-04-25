@@ -51,6 +51,7 @@ import os
 import random
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
@@ -197,6 +198,21 @@ from omnibase_infra.topics import (
 wire_handlers = wire_default_handlers
 
 logger = logging.getLogger(__name__)
+
+_RAW_EVENT_PROJECTION_CONSUMER_PURPOSES: frozenset[str] = frozenset(
+    {"audit", "projection"}
+)
+
+
+def _requires_raw_event_projection_wiring(event_bus_section: object) -> bool:
+    """Return True when generic event-bus wiring must not consume this contract."""
+    if not isinstance(event_bus_section, dict):
+        return False
+    consumer_purpose = event_bus_section.get("consumer_purpose")
+    if not isinstance(consumer_purpose, str):
+        return False
+    return consumer_purpose.strip().lower() in _RAW_EVENT_PROJECTION_CONSUMER_PURPOSES
+
 
 # Mapping from EnumHandlerTypeCategory to LiteralHandlerKind for descriptor creation.
 # COMPUTE and EFFECT map directly to their string values.
@@ -530,6 +546,16 @@ async def _wire_package_node_subscriptions(
             "subscribe_topics"
         ):
             skipped_no_topics += 1
+            continue
+
+        if _requires_raw_event_projection_wiring(event_bus_section):
+            skipped_no_topics += 1
+            logger.info(
+                "Skipping package-node subscription for raw projection consumer: "
+                "node=%s consumer_purpose=%s",
+                node_name,
+                event_bus_section.get("consumer_purpose"),
+            )
             continue
 
         if node_name in already_wired_names:
@@ -1093,6 +1119,11 @@ class RuntimeHostProcess:
 
         # Runtime state
         self._is_running: bool = False
+        # True while start() is actively progressing toward _is_running=True.
+        # Health uses this to distinguish startup liveness from readiness.
+        self._is_starting: bool = False
+        self._startup_task: asyncio.Task[None] | None = None
+        self._shutdown_requested: asyncio.Event = asyncio.Event()
 
         # Subscription handle (callable to unsubscribe)
         self._subscription: Callable[[], Awaitable[None]] | None = None
@@ -1538,6 +1569,43 @@ class RuntimeHostProcess:
             return self._pending_message_count == 0
 
     async def start(self) -> None:
+        """Start the runtime host with explicit startup-state tracking."""
+        if self._is_running:
+            logger.debug(
+                "RuntimeHostProcess already running, skipping",
+                extra={
+                    "is_running": self._is_running,
+                    "is_starting": self._is_starting,
+                },
+            )
+            return
+
+        if self._startup_task is not None and not self._startup_task.done():
+            logger.debug("RuntimeHostProcess startup already in progress, waiting")
+            await self._startup_task
+            return
+
+        self._shutdown_requested.clear()
+        self._is_starting = True
+        startup_task = asyncio.create_task(self._start_runtime())
+        self._startup_task = startup_task
+        try:
+            await startup_task
+        except asyncio.CancelledError:
+            self._is_running = False
+            if self._shutdown_requested.is_set():
+                logger.info("RuntimeHostProcess startup cancelled by shutdown")
+                return
+            raise
+        except Exception:
+            self._is_running = False
+            raise
+        finally:
+            if self._startup_task is startup_task:
+                self._startup_task = None
+            self._is_starting = False
+
+    async def _start_runtime(self) -> None:
         """Start the runtime host.
 
         Performs the following steps:
@@ -1576,10 +1644,6 @@ class RuntimeHostProcess:
             ArchitectureViolationError: If architecture validation fails with
                 blocking violations (ERROR severity).
         """
-        if self._is_running:
-            logger.debug("RuntimeHostProcess already started, skipping")
-            return
-
         logger.info(
             "Starting RuntimeHostProcess",
             extra={
@@ -1842,9 +1906,24 @@ class RuntimeHostProcess:
             - Connections shutdown before connection pools
             - Downstream resources shutdown before upstream resources
         """
-        if not self._is_running:
+        if not self._is_running and not self._is_starting:
             logger.debug("RuntimeHostProcess already stopped, skipping")
             return
+
+        self._shutdown_requested.set()
+
+        startup_task = self._startup_task
+        if startup_task is not None and not startup_task.done():
+            logger.warning(
+                "RuntimeHostProcess stop() called during startup — "
+                "cancelling startup before shutdown proceeds"
+            )
+            if startup_task is not asyncio.current_task():
+                startup_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await startup_task
+            self._startup_task = None
+            self._is_starting = False
 
         logger.info("Stopping RuntimeHostProcess")
 
@@ -2951,6 +3030,13 @@ class RuntimeHostProcess:
 
         event_bus_data = descriptor.contract_config.get("event_bus")
         if not event_bus_data or not isinstance(event_bus_data, dict):
+            return
+        if _requires_raw_event_projection_wiring(event_bus_data):
+            logger.info(
+                "Skipping live handler subscription for raw projection consumer: "
+                "node=%s",
+                node_name,
+            )
             return
 
         from omnibase_core.models.contracts.subcontracts import (
@@ -4456,9 +4542,13 @@ class RuntimeHostProcess:
         # A runtime with no handlers cannot process any events and should be unhealthy
         no_handlers_registered = len(self._handlers) == 0
 
-        # Degraded state: process is running but some handlers failed to instantiate
-        # This means the system is operational but with reduced functionality
-        degraded = self._is_running and has_failed_handlers
+        # Degraded state:
+        # - running with failed handlers (reduced functionality)
+        # - actively starting with a live event bus (liveness OK, not ready yet)
+        startup_in_progress = (
+            self._is_starting and not self._is_running and event_bus_healthy
+        )
+        degraded = (self._is_running and has_failed_handlers) or startup_in_progress
 
         # Overall health is True only if running, event bus is healthy,
         # no handlers failed to instantiate, all registered handlers are healthy,
@@ -4491,6 +4581,7 @@ class RuntimeHostProcess:
         return {
             "healthy": healthy,
             "degraded": degraded,
+            "startup_in_progress": startup_in_progress,
             "is_running": self._is_running,
             "is_draining": self._is_draining,
             "pending_message_count": self._pending_message_count,
@@ -4957,6 +5048,21 @@ class RuntimeHostProcess:
                 continue
 
             contract_path = Path(contract_path_str)
+            try:
+                raw_contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001 - loader below reports malformed contracts
+                raw_contract = None
+            if _requires_raw_event_projection_wiring(
+                raw_contract.get("event_bus")
+                if isinstance(raw_contract, dict)
+                else None
+            ):
+                logger.info(
+                    "Skipping event_bus subcontract wiring for raw projection consumer: "
+                    "handler=%s",
+                    descriptor.name or handler_type,
+                )
+                continue
 
             # Load event_bus subcontract from contract YAML
             subcontract = load_event_bus_subcontract(contract_path, logger)

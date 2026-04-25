@@ -34,3 +34,12 @@ class ModelHandlerRoutingEntry(BaseModel):
             "Python class name on the wire (OMN-9215)."
         ),
     )
+    message_category: str | None = Field(
+        default=None,
+        description=(
+            "Optional per-handler message category override from contract YAML "
+            "(EVENT, COMMAND, or INTENT). Required for mixed-topic contracts so "
+            "command handlers do not inherit the category of the contract's first "
+            "subscribed topic."
+        ),
+    )

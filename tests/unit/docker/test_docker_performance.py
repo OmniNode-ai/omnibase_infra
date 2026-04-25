@@ -11,6 +11,8 @@ These tests verify Docker configuration follows performance best practices:
 from __future__ import annotations
 
 import re
+from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -21,6 +23,52 @@ from tests.unit.docker.conftest import COMPOSE_FILE_PATH, DOCKER_DIR
 
 # Explicit marker for documentation (also auto-applied by tests/unit/conftest.py)
 pytestmark = [pytest.mark.unit]
+
+RUNTIME_STARTUP_SERVICES = ("omninode-runtime", "runtime-effects", "runtime-worker")
+MINIMUM_START_PERIODS = {
+    "omninode-runtime": 1800,
+    "runtime-effects": 1800,
+    "runtime-worker": 1200,
+}
+
+
+def _duration_seconds(value: object) -> int:
+    """Parse a compose/catalog duration value into seconds."""
+    if isinstance(value, int):
+        return value
+    if not isinstance(value, str):
+        raise AssertionError(f"Unsupported duration value: {value!r}")
+
+    match = re.fullmatch(r"(\d+)([smh]?)", value.strip())
+    if match is None:
+        raise AssertionError(f"Unsupported duration value: {value!r}")
+
+    amount = int(match.group(1))
+    unit = match.group(2) or "s"
+    multipliers = {"s": 1, "m": 60, "h": 3600}
+    return amount * multipliers[unit]
+
+
+def _memory_mib(value: object) -> int:
+    """Parse a compose/catalog memory value into MiB."""
+    if isinstance(value, int):
+        return value // (1024 * 1024)
+    if not isinstance(value, str):
+        raise AssertionError(f"Unsupported memory value: {value!r}")
+
+    match = re.fullmatch(r"(\d+)([kKmMgG]?)", value.strip())
+    if match is None:
+        raise AssertionError(f"Unsupported memory value: {value!r}")
+
+    amount = int(match.group(1))
+    unit = match.group(2).upper() or "B"
+    multipliers = {"B": 1 / (1024 * 1024), "K": 1 / 1024, "M": 1, "G": 1024}
+    return int(amount * multipliers[unit])
+
+
+def _load_catalog_service(docker_dir: Path, service_name: str) -> dict[str, Any]:
+    catalog_path = docker_dir / "catalog" / "services" / f"{service_name}.yaml"
+    return yaml.safe_load(catalog_path.read_text())
 
 
 @pytest.mark.unit
@@ -144,6 +192,62 @@ class TestDockerComposePerformance:
         assert "reservations:" in content
         # Reservations should be lower than limits
         assert content.count("reservations:") > 0
+
+    def test_runtime_startup_health_windows_cover_contract_wiring(self) -> None:
+        """Verify runtime startup health windows outrun contract wiring."""
+        content = yaml.safe_load(COMPOSE_FILE_PATH.read_text())
+        services = content["services"]
+        autoheal_start_period = _duration_seconds(
+            services["autoheal"]["environment"]["AUTOHEAL_START_PERIOD"]
+        )
+        for service_name in RUNTIME_STARTUP_SERVICES:
+            healthcheck = services[service_name]["healthcheck"]
+            start_period = _duration_seconds(healthcheck["start_period"])
+            interval = _duration_seconds(healthcheck["interval"])
+            retries = int(healthcheck["retries"])
+            unhealthy_detection_window = start_period + (interval * retries)
+
+            assert start_period >= MINIMUM_START_PERIODS[service_name]
+            assert retries >= 5
+            assert autoheal_start_period > unhealthy_detection_window, (
+                f"{service_name} autoheal grace period must exceed Docker's "
+                "unhealthy detection window"
+            )
+
+    def test_runtime_startup_services_have_memory_headroom(self) -> None:
+        """Verify runtime startup services keep enough memory headroom."""
+        content = yaml.safe_load(COMPOSE_FILE_PATH.read_text())
+
+        for service_name in RUNTIME_STARTUP_SERVICES:
+            resources = content["services"][service_name]["deploy"]["resources"]
+            memory_limit = _memory_mib(resources["limits"]["memory"])
+            memory_reservation = _memory_mib(resources["reservations"]["memory"])
+
+            assert memory_limit >= 1536, (
+                f"{service_name} needs runtime contract-wiring headroom"
+            )
+            assert memory_reservation >= 256
+
+    def test_runtime_catalog_matches_startup_guardrails(self) -> None:
+        """Verify service catalog carries the same runtime startup guardrails."""
+        autoheal = _load_catalog_service(DOCKER_DIR, "autoheal")
+        autoheal_start_period = _duration_seconds(
+            autoheal["hardcoded_env"]["AUTOHEAL_START_PERIOD"]
+        )
+        for service_name in RUNTIME_STARTUP_SERVICES:
+            service = _load_catalog_service(DOCKER_DIR, service_name)
+            healthcheck = service["healthcheck"]
+            resources = service["resources"]
+            start_period = _duration_seconds(healthcheck["start_period_s"])
+            interval = _duration_seconds(healthcheck["interval_s"])
+            retries = int(healthcheck["retries"])
+            unhealthy_detection_window = start_period + (interval * retries)
+
+            assert start_period >= MINIMUM_START_PERIODS[service_name]
+            assert retries >= 5
+            assert autoheal_start_period > unhealthy_detection_window
+            assert _memory_mib(resources["memory"]) >= 1536
+            assert _memory_mib(resources["memory_reservation"]) >= 256
 
 
 @pytest.mark.unit
