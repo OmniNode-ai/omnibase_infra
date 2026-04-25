@@ -1332,6 +1332,50 @@ def _prepare_handler_wiring(
     from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
 
     handler_ref = entry.handler
+
+    # Determine category/message types before importing or constructing the
+    # handler. Some domain-owned contracts use auto-wiring for subscriptions
+    # only; those entries must report accurate metadata while avoiding generic
+    # direct-handler dispatcher registration.
+    _category_str_early = "event"
+    if entry.message_category:
+        _category_str_early = entry.message_category.strip().lower()
+    elif contract.event_bus and contract.event_bus.subscribe_topics:
+        _category_str_early = _derive_message_category(
+            contract.event_bus.subscribe_topics[0]
+        )
+    _early_category = EnumMessageCategory(_category_str_early)
+
+    message_types: set[str] | None = None
+    if entry.event_model is not None:
+        message_types = {entry.event_model.name}
+    # OMN-9215: index the dispatcher under the contract-declared event_type alias
+    # in addition to the Pydantic class name. Publishers set
+    # ModelEventEnvelope.event_type to the dot-path string; without this alias,
+    # the dispatcher lookup falls back to type(payload).__name__ which resolves
+    # to "dict" on object-erased envelopes and never matches the class-name key.
+    # Strip surrounding whitespace so registration matches the dispatch-engine
+    # normalization (service_message_dispatch_engine.py normalizes via .strip()).
+    event_type_alias = entry.event_type.strip() if entry.event_type else ""
+    if event_type_alias:
+        message_types = (message_types or set()) | {event_type_alias}
+
+    if contract.name == "node_registration_orchestrator":
+        return PreparedWiring(
+            dispatcher_id="",
+            dispatcher=_skip_dispatcher,
+            category=_early_category,
+            message_types=message_types,
+            handler_name=handler_ref.name,
+            handler_module=handler_ref.module,
+            resolution_outcome=(
+                EnumHandlerResolutionOutcome.RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP
+            ),
+            skip_reason=(
+                "registration domain plugin owns explicit dispatcher adapters"
+            ),
+        )
+
     handler_cls = _import_handler_class(handler_ref.module, handler_ref.name)
 
     _effective_container = container or (
@@ -1345,18 +1389,6 @@ def _prepare_handler_wiring(
     pre_resolved_instance = (
         pre_resolved_handlers.get(handler_ref.name) if pre_resolved_handlers else None
     )
-
-    # Determine category up-front so the quarantine sentinel below (which
-    # bypasses the regular resolve/construct path) can still carry consistent
-    # reporting metadata.
-    _category_str_early = "event"
-    if entry.message_category:
-        _category_str_early = entry.message_category.strip().lower()
-    elif contract.event_bus and contract.event_bus.subscribe_topics:
-        _category_str_early = _derive_message_category(
-            contract.event_bus.subscribe_topics[0]
-        )
-    _early_category = EnumMessageCategory(_category_str_early)
 
     def _quarantine_prepared(exc: BaseException) -> PreparedWiring:
         """Return a containment-only PreparedWiring for an async-incompat handler.
@@ -1430,20 +1462,6 @@ def _prepare_handler_wiring(
     # _early_category was computed up-front so the quarantine sentinel could
     # carry consistent reporting metadata; reuse it here for the live path.
     category = _early_category
-
-    message_types: set[str] | None = None
-    if entry.event_model is not None:
-        message_types = {entry.event_model.name}
-    # OMN-9215: index the dispatcher under the contract-declared event_type alias
-    # in addition to the Pydantic class name. Publishers set
-    # ModelEventEnvelope.event_type to the dot-path string; without this alias,
-    # the dispatcher lookup falls back to type(payload).__name__ which resolves
-    # to "dict" on object-erased envelopes and never matches the class-name key.
-    # Strip surrounding whitespace so registration matches the dispatch-engine
-    # normalization (service_message_dispatch_engine.py normalizes via .strip()).
-    event_type_alias = entry.event_type.strip() if entry.event_type else ""
-    if event_type_alias:
-        message_types = (message_types or set()) | {event_type_alias}
 
     if (
         resolution.outcome

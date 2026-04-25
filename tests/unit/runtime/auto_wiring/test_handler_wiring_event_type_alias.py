@@ -246,6 +246,53 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
         assert prepared.category is EnumMessageCategory.COMMAND
 
     @pytest.mark.unit
+    def test_registration_contract_skips_generic_direct_handler_dispatcher(
+        self,
+    ) -> None:
+        """Registration auto-wiring owns subscriptions, not generic dispatchers."""
+        from omnibase_core.enums.enum_handler_resolution_outcome import (
+            EnumHandlerResolutionOutcome,
+        )
+        from omnibase_infra.enums import EnumMessageCategory
+
+        contract = _make_contract_with_event_type_alias(
+            event_model_name="ModelTopicCatalogRequest",
+            event_type_alias="platform.request-introspection",
+            message_category="COMMAND",
+            node_name="node_registration_orchestrator",
+        )
+        entry = contract.handler_routing.handlers[0]  # type: ignore[union-attr]
+        ownership = ServiceLocalHandlerOwnershipQuery(
+            local_node_names=frozenset({contract.name})
+        )
+        resolver = ServiceHandlerResolver()
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class"
+        ) as import_handler:
+            prepared = _prepare_handler_wiring(
+                contract=contract,
+                entry=entry,
+                dispatch_engine=None,
+                resolver=resolver,
+                ownership_query=ownership,
+                event_bus=None,
+                container=None,
+            )
+
+        import_handler.assert_not_called()
+        assert prepared.is_skip is True
+        assert prepared.category is EnumMessageCategory.COMMAND
+        assert prepared.message_types == {
+            "ModelTopicCatalogRequest",
+            "platform.request-introspection",
+        }
+        assert (
+            prepared.resolution_outcome
+            is EnumHandlerResolutionOutcome.RESOLVED_VIA_LOCAL_OWNERSHIP_SKIP
+        )
+        assert "explicit dispatcher adapters" in prepared.skip_reason
+
+    @pytest.mark.unit
     def test_message_types_only_class_name_when_no_alias(self) -> None:
         """Absent event_type alias: message_types == {event_model.name} — unchanged."""
         contract = _make_contract_with_event_type_alias(
