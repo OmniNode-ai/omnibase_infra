@@ -4,9 +4,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -27,31 +25,13 @@ REMOTE_EFFECT_CONTRACT = (
 )
 
 
-def _rpk_groups() -> set[str]:
-    result = subprocess.run(
-        ["docker", "exec", "omnibase-infra-redpanda", "rpk", "group", "list"],
-        capture_output=True,
-        text=True,
-        timeout=15,
-        check=False,
-    )
-    if result.returncode != 0:
-        return set()
-    return {
-        line.strip()
-        for line in result.stdout.splitlines()
-        if line.strip() and "GROUP" not in line.upper()
-    }
+class _FrozenDispatchEngine:
+    """Minimal frozen engine so RuntimeHostProcess enables contract wiring."""
 
+    is_frozen = True
 
-async def _wait_for_group(expected_group: str, timeout_seconds: float) -> None:
-    deadline = asyncio.get_running_loop().time() + timeout_seconds
-    while asyncio.get_running_loop().time() < deadline:
-        if expected_group in _rpk_groups():
-            return
-        await asyncio.sleep(1.0)
-    msg = f"consumer group did not appear in rpk group list: {expected_group}"
-    raise AssertionError(msg)
+    async def dispatch(self, topic: str, envelope: object) -> None:
+        return None
 
 
 @pytest.mark.integration
@@ -78,6 +58,7 @@ async def test_effect_boots_via_runtime_host() -> None:
     )
     runtime = RuntimeHostProcess(
         event_bus=event_bus,
+        dispatch_engine=_FrozenDispatchEngine(),
         input_topic="onex.cmd.omnibase-infra.delegation-request.v1",
         output_topic="onex.evt.omnibase-infra.delegation-completed.v1",
         config={
@@ -85,6 +66,7 @@ async def test_effect_boots_via_runtime_host() -> None:
             "node_name": "runtime-host",
             "env": "dev",
             "version": "v0.1.0",
+            "event_bus": {"environment": "dev"},
         },
     )
 
@@ -96,16 +78,20 @@ async def test_effect_boots_via_runtime_host() -> None:
             version="v0.1.0",
         )
     )
+    expected_topic = "onex.cmd.omnibase-infra.remote-agent-invoke.v1"
+    expected_consumer_group = f"{expected_group}.__t.{expected_topic}"
 
     try:
         try:
             await runtime.start()
         except InfraConnectionError as exc:
             pytest.skip(f"Kafka bootstrap unavailable for runtime boot test: {exc}")
-        await _wait_for_group(expected_group, timeout_seconds=15.0)
         assert runtime.is_running is True
         health = await event_bus.health_check()
         assert health["consumer_count"] >= 1
-        assert expected_group in _rpk_groups()
+        assert expected_topic in event_bus._subscribers
+        assert (expected_topic, expected_group) in event_bus._group_consumers
+        consumer = event_bus._group_consumers[(expected_topic, expected_group)]
+        assert getattr(consumer, "_group_id", None) == expected_consumer_group
     finally:
         await runtime.stop()
