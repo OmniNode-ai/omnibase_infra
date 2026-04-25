@@ -124,9 +124,57 @@ class TestDeriveIds:
             == "route.auto.my_node.my_handler.onex_evt_platform_my_topic_v1"
         )
 
+    def test_route_id_with_operation(self) -> None:
+        """OMN-9461: operation suffix disambiguates repeated handler references."""
+        assert (
+            _derive_route_id(
+                "my_node",
+                "HandlerLlmCliSubprocess",
+                "onex.cmd.omnibase-infra.llm-inference-request.v1",
+                "inference.gemini_cli",
+            )
+            == "route.auto.my_node.HandlerLlmCliSubprocess.inference_gemini_cli_fb462661.onex_cmd_omnibase_infra_llm_inference_request_v1"
+        )
+
+    def test_route_id_without_operation_unchanged(self) -> None:
+        """OMN-9461: absence of operation keeps original ID form."""
+        assert (
+            _derive_route_id(
+                "my_node",
+                "my_handler",
+                "onex.evt.platform.my-topic.v1",
+                None,
+            )
+            == "route.auto.my_node.my_handler.onex_evt_platform_my_topic_v1"
+        )
+
     def test_dispatcher_id(self) -> None:
         assert (
             _derive_dispatcher_id("my_node", "my_handler")
+            == "dispatcher.auto.my_node.my_handler"
+        )
+
+    def test_dispatcher_id_with_operation(self) -> None:
+        """OMN-9461: operation suffix disambiguates repeated handler references."""
+        assert (
+            _derive_dispatcher_id(
+                "node_llm_inference_effect",
+                "HandlerLlmCliSubprocess",
+                "inference.gemini_cli",
+            )
+            == "dispatcher.auto.node_llm_inference_effect.HandlerLlmCliSubprocess.inference_gemini_cli_fb462661"
+        )
+
+    def test_dispatcher_id_collision_safe(self) -> None:
+        """OMN-9461: operations that normalize identically still produce distinct IDs."""
+        id_a = _derive_dispatcher_id("n", "H", "inference.a-b")
+        id_b = _derive_dispatcher_id("n", "H", "inference.a/b")
+        assert id_a != id_b
+
+    def test_dispatcher_id_without_operation_unchanged(self) -> None:
+        """OMN-9461: absence of operation keeps original ID form."""
+        assert (
+            _derive_dispatcher_id("my_node", "my_handler", None)
             == "dispatcher.auto.my_node.my_handler"
         )
 
@@ -454,6 +502,79 @@ class TestWireFromManifest:
         report = await wire_from_manifest(manifest, engine)
         assert len(report.duplicates) == 1
         assert report.duplicates[0].level == "package"
+
+    @pytest.mark.asyncio
+    async def test_repeated_handler_same_class_different_operations(self) -> None:
+        """OMN-9461: two entries referencing the same handler class for different
+        operations must wire without duplicate dispatcher or route ID collisions.
+
+        Mirrors the real node_llm_inference_effect contract which lists
+        HandlerLlmCliSubprocess for both ``inference.gemini_cli`` and
+        ``inference.codex_cli``.
+        """
+        from omnibase_infra.runtime.service_message_dispatch_engine import (
+            MessageDispatchEngine,
+        )
+
+        # Two routing entries — same handler class, different operations.
+        handler_entries = (
+            ModelHandlerRoutingEntry(
+                handler=ModelHandlerRef(name="HandlerShared", module="fake.module"),
+                event_model=None,
+                operation="inference.gemini_cli",
+            ),
+            ModelHandlerRoutingEntry(
+                handler=ModelHandlerRef(name="HandlerShared", module="fake.module"),
+                event_model=None,
+                operation="inference.codex_cli",
+            ),
+        )
+        handler_routing = ModelHandlerRouting(
+            routing_strategy="operation_match",
+            handlers=handler_entries,
+        )
+        contract = _make_contract(
+            name="node_llm_inference_effect",
+            subscribe_topics=("onex.cmd.omnibase-infra.llm-inference-request.v1",),
+            handler_routing=handler_routing,
+        )
+        manifest = ModelAutoWiringManifest(contracts=(contract,))
+        engine = MessageDispatchEngine()
+
+        class HandlerShared:
+            async def handle(self, envelope: object) -> None:
+                return None
+
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=HandlerShared,
+        ):
+            # Must not raise — before OMN-9461 this would raise
+            # "Dispatcher with ID ... is already registered".
+            report = await wire_from_manifest(manifest, engine)
+
+        assert report.total_failed == 0, f"Expected no failures, got: {report}"
+        assert report.total_wired == 1
+
+        all_dispatchers: list[str] = []
+        all_routes: list[str] = []
+        for r in report.results:
+            all_dispatchers.extend(r.dispatchers_registered)
+            all_routes.extend(r.routes_registered)
+
+        # Two distinct dispatcher IDs, one per operation.
+        assert len(all_dispatchers) == 2, (
+            f"Expected 2 dispatcher IDs, got {len(all_dispatchers)}: {all_dispatchers}"
+        )
+        assert len(set(all_dispatchers)) == 2, (
+            f"Duplicate dispatcher IDs: {all_dispatchers}"
+        )
+
+        # Two distinct route IDs, one per entry × one topic.
+        assert len(all_routes) == 2, (
+            f"Expected 2 route IDs, got {len(all_routes)}: {all_routes}"
+        )
+        assert len(set(all_routes)) == 2, f"Duplicate route IDs: {all_routes}"
 
 
 # ---------------------------------------------------------------------------

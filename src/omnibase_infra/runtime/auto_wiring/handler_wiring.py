@@ -22,6 +22,7 @@ CI gate: any PR touching this module MUST satisfy the runtime-startup gate defin
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import logging
 import os
@@ -576,18 +577,53 @@ def _make_event_bus_callback(
     return callback
 
 
-def _derive_route_id(contract_name: str, handler_name: str, topic: str) -> str:
-    """Derive a route ID from contract name, handler name, and full topic path.
+def _derive_route_id(
+    contract_name: str,
+    handler_name: str,
+    topic: str,
+    operation: str | None = None,
+) -> str:
+    """Derive a route ID from contract name, handler name, full topic path, and optional operation.
 
     Uses the full topic path (sanitized) to guarantee uniqueness across topics
     that share a common segment (OMN-8735).
+
+    When two routing entries reference the same handler class for different
+    operations (e.g. ``HandlerLlmCliSubprocess`` for both ``inference.gemini_cli``
+    and ``inference.codex_cli``) and subscribe to the same topic, the
+    ``handler_name + topic`` pair alone produces a collision.  Including the
+    sanitized ``operation`` suffix guarantees each entry gets a distinct route
+    ID (OMN-9461).
     """
     safe_topic = re.sub(r"[.\-]", "_", topic)
+    if operation:
+        normalized = re.sub(r"[^A-Za-z0-9_]+", "_", operation.strip()).strip("_")
+        digest = hashlib.sha1(operation.encode()).hexdigest()[:8]
+        safe_op = f"{normalized}_{digest}" if normalized else digest
+        return f"route.auto.{contract_name}.{handler_name}.{safe_op}.{safe_topic}"
     return f"route.auto.{contract_name}.{handler_name}.{safe_topic}"
 
 
-def _derive_dispatcher_id(contract_name: str, handler_name: str) -> str:
-    """Derive a dispatcher ID from contract and handler names."""
+def _derive_dispatcher_id(
+    contract_name: str, handler_name: str, operation: str | None = None
+) -> str:
+    """Derive a dispatcher ID from contract name, handler name, and optional operation.
+
+    When two routing entries in the same contract reference the same handler
+    class (e.g. ``HandlerLlmCliSubprocess`` wired for both ``inference.gemini_cli``
+    and ``inference.codex_cli``), the plain ``handler_name`` alone produces a
+    collision.  Including the sanitized ``operation`` suffix guarantees each
+    entry gets a distinct dispatcher ID (OMN-9461).
+
+    When ``operation`` is absent the ID degrades to the original two-segment
+    form so existing contracts without repeated handler references are
+    unaffected.
+    """
+    if operation:
+        normalized = re.sub(r"[^A-Za-z0-9_]+", "_", operation.strip()).strip("_")
+        digest = hashlib.sha1(operation.encode()).hexdigest()[:8]
+        safe_op = f"{normalized}_{digest}" if normalized else digest
+        return f"dispatcher.auto.{contract_name}.{handler_name}.{safe_op}"
     return f"dispatcher.auto.{contract_name}.{handler_name}"
 
 
@@ -1400,14 +1436,18 @@ def _prepare_handler_wiring(
         )
     else:
         callback = _make_dispatch_callback(handler_instance)
-    dispatcher_id = _derive_dispatcher_id(contract.name, handler_ref.name)
+    dispatcher_id = _derive_dispatcher_id(
+        contract.name, handler_ref.name, entry.operation
+    )
 
     # Pre-compute routes (no engine calls yet)
     route_ids: list[str] = []
     routes: list[ModelDispatchRoute] = []
     if contract.event_bus:
         for topic in contract.event_bus.subscribe_topics:
-            route_id = _derive_route_id(contract.name, handler_ref.name, topic)
+            route_id = _derive_route_id(
+                contract.name, handler_ref.name, topic, entry.operation
+            )
             topic_pattern = _derive_topic_pattern_from_topic(topic)
 
             route = ModelDispatchRoute(
