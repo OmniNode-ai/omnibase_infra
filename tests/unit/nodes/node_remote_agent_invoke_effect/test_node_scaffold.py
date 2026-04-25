@@ -68,13 +68,11 @@ class TestNodeRemoteAgentInvokeEffectScaffold:
         data = _load_contract()
         assert data["handler_routing"]["handlers"] == []
 
-    def test_persistence_declares_remote_task_state_reload(self) -> None:
+    def test_input_output_models_use_local_module(self) -> None:
         data = _load_contract()
-        assert data["persistence"] == {
-            "table": "remote_task_state",
-            "reload_on_startup": True,
-            "description": "Durable remote task state used for restart resumption.",
-        }
+        expected_module = "omnibase_infra.nodes.node_remote_agent_invoke_effect.models"
+        assert data["input_model"]["module"] == expected_module
+        assert data["output_model"]["module"] == expected_module
 
     def test_consumer_group_id_matches_expected_shape(self) -> None:
         identity = ModelNodeIdentity(
