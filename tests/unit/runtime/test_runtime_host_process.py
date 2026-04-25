@@ -1420,6 +1420,25 @@ class TestRuntimeHostProcessHealthCheck:
         assert health["is_running"] is False
 
     @pytest.mark.asyncio
+    async def test_health_check_degraded_while_starting(self) -> None:
+        """Test that health_check reports degraded liveness during startup."""
+
+        process = RuntimeHostProcess(config=make_runtime_config())
+        process._is_starting = True
+
+        with patch.object(
+            process._event_bus,
+            "health_check",
+            AsyncMock(return_value={"healthy": True}),
+        ):
+            health = await process.health_check()
+
+        assert health["healthy"] is False
+        assert health["degraded"] is True
+        assert health["startup_in_progress"] is True
+        assert health["is_running"] is False
+
+    @pytest.mark.asyncio
     async def test_health_check_includes_handler_health(
         self,
         mock_handler: MockHandler,
@@ -1810,24 +1829,30 @@ class TestRuntimeHostProcessLogWarnings:
             async def noop_populate() -> None:
                 pass
 
+            async def noop_prefetch() -> None:
+                process._config_prefetch_status = "skipped"
+
             with patch.object(
                 process, "_populate_handlers_from_registry", noop_populate
             ):
-                with patch.object(process, "_handlers", {"http": mock_handler}):
-                    await process.start()
+                with patch.object(
+                    process, "_prefetch_config_from_infisical", noop_prefetch
+                ):
+                    with patch.object(process, "_handlers", {"http": mock_handler}):
+                        await process.start()
 
-                    try:
-                        # Normal operation - process an envelope
-                        await process._handle_envelope(
-                            {
-                                "operation": "http.get",
-                                "payload": {"url": "https://example.com"},
-                                "correlation_id": uuid4(),
-                                "handler_type": "http",
-                            }
-                        )
-                    finally:
-                        await process.stop()
+                        try:
+                            # Normal operation - process an envelope
+                            await process._handle_envelope(
+                                {
+                                    "operation": "http.get",
+                                    "payload": {"url": "https://example.com"},
+                                    "correlation_id": uuid4(),
+                                    "handler_type": "http",
+                                }
+                            )
+                        finally:
+                            await process.stop()
 
         # Filter for warnings from our module
         runtime_warnings = filter_handler_warnings(caplog.records, self.RUNTIME_MODULE)

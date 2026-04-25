@@ -295,6 +295,81 @@ class TestServiceHealthEndpoints:
         assert '"status":"unhealthy"' in response_text
         assert "Health check failed" in response_text
 
+    @pytest.mark.asyncio
+    async def test_health_endpoint_logs_startup_transition_once(self) -> None:
+        """Test /health logs startup transition only once for repeated probes."""
+        mock_runtime = MagicMock()
+        mock_runtime.health_check = AsyncMock(
+            return_value={
+                "healthy": False,
+                "degraded": True,
+                "startup_in_progress": True,
+                "is_running": False,
+                "event_bus_healthy": True,
+            }
+        )
+
+        server = ServiceHealth(runtime=mock_runtime, version="1.0.0")
+        mock_request = MagicMock(spec=web.Request)
+
+        with patch("omnibase_infra.services.service_health.logger.info") as mock_info:
+            await server._handle_health(mock_request)
+            await server._handle_health(mock_request)
+
+        transition_logs = [
+            call
+            for call in mock_info.call_args_list
+            if call.args and call.args[0] == "ServiceHealth health probe state changed"
+        ]
+        assert len(transition_logs) == 1
+        assert transition_logs[0].kwargs["extra"]["startup_in_progress"] is True
+        assert transition_logs[0].kwargs["extra"]["event_bus_healthy"] is True
+
+    @pytest.mark.asyncio
+    async def test_health_endpoint_logs_runtime_pending_transition(self) -> None:
+        """Test /health logs the pre-attachment startup phase."""
+        mock_container = MagicMock()
+        server = ServiceHealth(container=mock_container)
+        mock_request = MagicMock(spec=web.Request)
+
+        with patch("omnibase_infra.services.service_health.logger.info") as mock_info:
+            response = await server._handle_health(mock_request)
+
+        assert response.status == 200
+        transition_logs = [
+            call
+            for call in mock_info.call_args_list
+            if call.args and call.args[0] == "ServiceHealth health probe state changed"
+        ]
+        assert len(transition_logs) == 1
+        assert transition_logs[0].kwargs["extra"]["runtime_attached"] is False
+        assert transition_logs[0].kwargs["extra"]["startup_in_progress"] is True
+
+    @pytest.mark.asyncio
+    async def test_health_endpoint_treats_attached_startup_as_degraded(self) -> None:
+        """Test /health returns degraded 200 during attached startup fallback."""
+        mock_runtime = MagicMock()
+        mock_runtime.health_check = AsyncMock(
+            return_value={
+                "healthy": False,
+                "degraded": False,
+                "is_running": False,
+                "event_bus_healthy": True,
+            }
+        )
+
+        server = ServiceHealth(runtime=mock_runtime, version="1.0.0")
+        mock_request = MagicMock(spec=web.Request)
+
+        response = await server._handle_health(mock_request)
+
+        assert response.status == 200
+        response_text = response.text
+        assert response_text is not None
+        assert '"status":"degraded"' in response_text
+        assert '"startup_in_progress":true' in response_text
+        assert '"degraded":true' in response_text
+
 
 @pytest.mark.unit
 class TestServiceHealthIntegration:
@@ -877,27 +952,34 @@ class TestServiceHealthContainerInjection:
         assert server.container is server.container
 
     @pytest.mark.asyncio
-    async def test_health_endpoint_raises_when_runtime_not_resolved(self) -> None:
-        """Test health endpoint behavior when runtime was never resolved.
-
-        When ServiceHealth is initialized with container-only (no runtime)
-        and create_from_container was not used, the health endpoint should
-        raise ProtocolConfigurationError when trying to access runtime.
-        """
+    async def test_health_endpoint_degrades_when_runtime_not_resolved(self) -> None:
+        """Container-only startup should still expose a live /health endpoint."""
         mock_container = MagicMock(spec=ModelONEXContainer)
         server = ServiceHealth(container=mock_container)
+        server._is_running = True
 
         mock_request = MagicMock(spec=web.Request)
 
-        # Health endpoint should return 503 with error details
         response = await server._handle_health(mock_request)
 
-        assert response.status == 503
+        assert response.status == 200
         response_text = response.text
         assert response_text is not None
-        assert '"status":"unhealthy"' in response_text
-        # The error should mention runtime not available
-        assert "RuntimeHostProcess not available" in response_text
+        assert '"status":"degraded"' in response_text
+        assert '"runtime_attached":false' in response_text
+        assert '"startup_phase":"runtime_pending"' in response_text
+
+    def test_attach_runtime_sets_runtime_for_later_checks(self) -> None:
+        """attach_runtime should support early health bind before runtime creation."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        mock_runtime = MagicMock()
+
+        server = ServiceHealth(container=mock_container)
+        assert server._runtime is None
+
+        server.attach_runtime(mock_runtime)
+
+        assert server.runtime is mock_runtime
 
     @pytest.mark.asyncio
     async def test_container_with_service_registry_returning_wrong_type(self) -> None:

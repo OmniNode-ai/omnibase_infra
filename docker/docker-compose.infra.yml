@@ -636,12 +636,12 @@ services:
   # ONEX Runtime - Effects Handler (Runtime Profile)
   # ==========================================================================
   # Handles effect nodes for external service interactions.
-  # OMN-5637: Effects has an extended start_period (600s) and retries (5)
-  # because plugin initialization (1950+ Kafka consumer subscriptions,
-  # intelligence DB ownership, schema fingerprint, message type registration)
-  # must complete before /health returns 200.
-  # Unhealthy detection latency = start_period + (interval * retries) = 600s + 150s = 750s.
-  # AUTOHEAL_START_PERIOD (840s) must exceed start_period + retry window to avoid premature restarts.
+  # OMN-9741: Effects startup performs long serial Kafka subscription joins.
+  # /health is liveness and returns degraded HTTP 200 while startup is in
+  # progress; strict readiness belongs to /ready. The extended health window
+  # prevents autoheal from recycling a live process before startup completes.
+  # Unhealthy detection latency = start_period + (interval * retries) = 1800s + 150s = 1950s.
+  # AUTOHEAL_START_PERIOD (2400s) must exceed this window to avoid premature restarts.
   runtime-effects:
     !!merge <<: *runtime-base
     container_name: omninode-runtime-effects
@@ -680,7 +680,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 600s
+      start_period: 1800s
     labels:
       - "com.omninode.service=runtime-effects"
       - "com.omninode.layer=runtime"
@@ -1117,10 +1117,11 @@ services:
     environment:
       AUTOHEAL_CONTAINER_LABEL: autoheal
       AUTOHEAL_INTERVAL: 60
-      # OMN-7235: Set to 1500s to exceed worker unhealthy detection window.
+      # OMN-9741: Set to 2400s to exceed effects unhealthy detection window.
+      # Effects: start_period=1800s + retries=5×interval=30s = 1950s max.
+      # Workers remain below this at 1350s max.
       # Workers: start_period=1200s + retries=5×interval=30s = 1350s max.
-      # 1500s = 1350s + 150s buffer to prevent premature autoheal restarts.
-      AUTOHEAL_START_PERIOD: 1500
+      AUTOHEAL_START_PERIOD: 2400
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     logging: *logging-defaults

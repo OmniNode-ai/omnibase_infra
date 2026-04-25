@@ -1093,6 +1093,9 @@ class RuntimeHostProcess:
 
         # Runtime state
         self._is_running: bool = False
+        # True while start() is actively progressing toward _is_running=True.
+        # Health uses this to distinguish startup liveness from readiness.
+        self._is_starting: bool = False
 
         # Subscription handle (callable to unsubscribe)
         self._subscription: Callable[[], Awaitable[None]] | None = None
@@ -1538,6 +1541,24 @@ class RuntimeHostProcess:
             return self._pending_message_count == 0
 
     async def start(self) -> None:
+        """Start the runtime host with explicit startup-state tracking."""
+        if self._is_running or self._is_starting:
+            logger.debug(
+                "RuntimeHostProcess already running or starting, skipping",
+                extra={
+                    "is_running": self._is_running,
+                    "is_starting": self._is_starting,
+                },
+            )
+            return
+
+        self._is_starting = True
+        try:
+            await self._start_runtime()
+        finally:
+            self._is_starting = False
+
+    async def _start_runtime(self) -> None:
         """Start the runtime host.
 
         Performs the following steps:
@@ -1576,10 +1597,6 @@ class RuntimeHostProcess:
             ArchitectureViolationError: If architecture validation fails with
                 blocking violations (ERROR severity).
         """
-        if self._is_running:
-            logger.debug("RuntimeHostProcess already started, skipping")
-            return
-
         logger.info(
             "Starting RuntimeHostProcess",
             extra={
@@ -4456,9 +4473,13 @@ class RuntimeHostProcess:
         # A runtime with no handlers cannot process any events and should be unhealthy
         no_handlers_registered = len(self._handlers) == 0
 
-        # Degraded state: process is running but some handlers failed to instantiate
-        # This means the system is operational but with reduced functionality
-        degraded = self._is_running and has_failed_handlers
+        # Degraded state:
+        # - running with failed handlers (reduced functionality)
+        # - actively starting with a live event bus (liveness OK, not ready yet)
+        startup_in_progress = (
+            self._is_starting and not self._is_running and event_bus_healthy
+        )
+        degraded = (self._is_running and has_failed_handlers) or startup_in_progress
 
         # Overall health is True only if running, event bus is healthy,
         # no handlers failed to instantiate, all registered handlers are healthy,
@@ -4491,6 +4512,7 @@ class RuntimeHostProcess:
         return {
             "healthy": healthy,
             "degraded": degraded,
+            "startup_in_progress": startup_in_progress,
             "is_running": self._is_running,
             "is_draining": self._is_draining,
             "pending_message_count": self._pending_message_count,
