@@ -25,6 +25,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_DELEGATION_QUALITY_GATE_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1"  # onex.cmd.omnibase-infra.delegation-quality-gate-request.v1
     CMD_DELEGATION_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-request.v1"  # onex.cmd.omnibase-infra.delegation-request.v1
     CMD_DELEGATION_ROUTING_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-routing-request.v1"  # onex.cmd.omnibase-infra.delegation-routing-request.v1
+    CMD_INVOCATION_V1 = "onex.cmd.omnibase-infra.invocation.v1"  # onex.cmd.omnibase-infra.invocation.v1
     CMD_LLM_COMPLETION_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-completion-request.v1"  # onex.cmd.omnibase-infra.llm-completion-request.v1
     CMD_LLM_EMBEDDING_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-embedding-request.v1"  # onex.cmd.omnibase-infra.llm-embedding-request.v1
     CMD_LLM_INFERENCE_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-inference-request.v1"  # onex.cmd.omnibase-infra.llm-inference-request.v1
