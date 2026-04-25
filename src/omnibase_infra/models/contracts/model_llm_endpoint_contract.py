@@ -51,7 +51,7 @@ def load_llm_endpoint_contract(yaml_path: Path) -> ModelLlmEndpointContract:
         FileNotFoundError: if yaml_path does not exist.
         pydantic.ValidationError: if the YAML content fails schema validation.
     """
-    raw = yaml.safe_load(yaml_path.read_text())
+    raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
     return ModelLlmEndpointContract.model_validate(raw)
 
 
