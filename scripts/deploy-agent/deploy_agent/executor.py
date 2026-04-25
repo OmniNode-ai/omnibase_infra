@@ -130,6 +130,50 @@ def verify_containers_up(
 
 
 class DeployExecutor:
+    def validate_llm_endpoint_env_contract(self) -> None:
+        """Fail runtime deploys when configured LLM endpoints drift from contract."""
+        script = f"{REPO_DIR}/scripts/check_llm_endpoint_env_contract.py"
+        venv_python = f"{REPO_DIR}/.venv/bin/python"
+        base_cmd = (
+            [venv_python, script]
+            if Path(venv_python).is_file()
+            else ["uv", "run", "--project", REPO_DIR, "python", script]
+        )
+
+        env_files: list[Path] = []
+        explicit_env_file = os.environ.get("OMNIBASE_ENV_FILE")
+        fallback_candidates = [
+            Path.home() / ".omnibase" / ".env",
+            Path(REPO_DIR) / ".env",
+        ]
+        candidates = (
+            [Path(explicit_env_file), *fallback_candidates]
+            if explicit_env_file
+            else fallback_candidates
+        )
+        for candidate in candidates:
+            if candidate.is_file() and candidate not in env_files:
+                env_files.append(candidate)
+        if explicit_env_file and not any(
+            f == Path(explicit_env_file) for f in env_files
+        ):
+            raise RuntimeError(
+                f"LLM endpoint env contract check failed: OMNIBASE_ENV_FILE does not exist: {explicit_env_file}"
+            )
+
+        commands = [base_cmd]
+        commands.extend([*base_cmd, "--env-file", str(path)] for path in env_files)
+        for cmd in commands:
+            result = _run(cmd, timeout=PHASE_TIMEOUTS[Phase.PREFLIGHT])
+            if result.returncode != 0:
+                source = "process environment"
+                if "--env-file" in cmd:
+                    source = cmd[cmd.index("--env-file") + 1]
+                raise RuntimeError(
+                    "LLM endpoint env contract check failed for "
+                    f"{source}: {result.stderr.strip() or result.stdout.strip()}"
+                )
+
     def self_update(self, *, skip: bool = False) -> None:
         """Pull and re-exec deploy-agent itself if behind origin/main.
 
