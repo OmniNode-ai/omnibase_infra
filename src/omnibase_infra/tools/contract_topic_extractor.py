@@ -46,14 +46,20 @@ _APPROVED_PACKAGES: tuple[str, ...] = (
 )
 
 _VALID_KINDS: frozenset[str] = frozenset({"evt", "cmd", "intent"})
+_VALID_DLQ_CATEGORIES: frozenset[str] = frozenset({"intents", "events", "commands"})
 _RE_VERSION = re.compile(r"^v\d+$")
 _RE_EVENT_NAME = re.compile(r"^[a-z0-9._-]+$")
 _RE_PRODUCER = re.compile(r"^[a-z0-9-]+$")  # no underscores allowed
 
 # Regex to identify ONEX topic string literals in Python source code.
-# Matches: onex.<kind>.<producer>.<event-name>.<version>
+# Matches either:
+#   - 5-segment standard topics: onex.<kind>.<producer>.<event-name>.<version>
+#   - 4-segment DLQ topics: onex.dlq.<category>.<version>
 _RE_ONEX_TOPIC_LITERAL = re.compile(
-    r"^onex\.(evt|cmd|intent)\.[a-z0-9-]+\.[a-z0-9._-]+\.v\d+$"
+    r"^onex\.(?:"
+    r"(?:evt|cmd|intent)\.[a-z0-9-]+\.[a-z0-9._-]+\.v\d+"
+    r"|dlq\.[a-z0-9._-]+\.v\d+"
+    r")$"
 )
 
 # YAML keys to inspect — ordered by spec; always check ALL, no early break.
@@ -78,7 +84,7 @@ class ModelContractTopicEntry(BaseModel):
     """A single validated topic extracted from one or more contract.yaml files."""
 
     topic: str
-    kind: Literal["evt", "cmd", "intent"]
+    kind: Literal["evt", "cmd", "intent", "dlq"]
     producer: str
     event_name: str
     version: str  # e.g. "v1"
@@ -119,6 +125,31 @@ def _parse_topic(raw: str, source: Path) -> ModelContractTopicEntry | None:
     that check happens at a higher level (deduplication); here we only parse.
     """
     parts = raw.split(".")
+    if len(parts) == 4:
+        prefix, kind, category, version = parts
+        if prefix == "onex" and kind == "dlq":
+            if category not in _VALID_DLQ_CATEGORIES:
+                _warn(
+                    "Skipping malformed DLQ topic "
+                    f"(invalid category {category!r}, must be one of "
+                    f"{sorted(_VALID_DLQ_CATEGORIES)}): {raw!r} in {source}"
+                )
+                return None
+            if not _RE_VERSION.match(version):
+                _warn(
+                    f"Skipping malformed DLQ topic (invalid version {version!r}, "
+                    f"must match ^v\\d+$): {raw!r} in {source}"
+                )
+                return None
+            return ModelContractTopicEntry(
+                topic=raw,
+                kind="dlq",
+                producer="dlq",
+                event_name=category,
+                version=version,
+                source_contracts=(source,),
+            )
+
     if len(parts) != 5:
         _warn(
             f"Skipping malformed topic (expected 5 segments, got {len(parts)}): "
@@ -165,7 +196,7 @@ def _parse_topic(raw: str, source: Path) -> ModelContractTopicEntry | None:
 
     return ModelContractTopicEntry(
         topic=raw,
-        kind=cast("Literal['evt', 'cmd', 'intent']", kind),
+        kind=cast("Literal['evt', 'cmd', 'intent', 'dlq']", kind),
         producer=producer,
         event_name=event_name,
         version=version,

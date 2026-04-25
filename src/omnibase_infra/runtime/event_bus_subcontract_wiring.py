@@ -102,12 +102,17 @@ from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
 from omnibase_core.protocols.event_bus.protocol_event_message import (
     ProtocolEventMessage,
 )
-from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportType
+from omnibase_infra.enums import (
+    EnumConsumerGroupPurpose,
+    EnumDispatchStatus,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.event_bus.topic_constants import get_dlq_topic_for_original
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.event_bus import (
     ModelConsumerRetryConfig,
@@ -525,6 +530,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         correlation_id: UUID,
         error_category: str,
         consumer_group: str,
+        dlq_topic: str | None = None,
     ) -> None:
         """Publish failed message to Dead Letter Queue.
 
@@ -540,6 +546,9 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
             consumer_group: The consumer group ID that was subscribed to this topic.
                 This should match the group_id used in wire_subscriptions() for
                 consistent traceability in DLQ messages.
+            dlq_topic: Optional category-specific DLQ topic. If omitted, the
+                topic is derived from the original topic before delegating to
+                the event bus.
         """
         if not self._dlq_config.enabled:
             self._logger.debug(
@@ -554,6 +563,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         publish_dlq_fn = getattr(self._event_bus, "_publish_raw_to_dlq", None)
         if publish_dlq_fn is not None and callable(publish_dlq_fn):
             try:
+                resolved_dlq_topic = dlq_topic or get_dlq_topic_for_original(topic)
                 await publish_dlq_fn(
                     original_topic=topic,
                     raw_msg=message,
@@ -561,14 +571,16 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                     correlation_id=correlation_id,
                     failure_type=f"{error_category}_error",
                     consumer_group=consumer_group,
+                    dlq_topic=resolved_dlq_topic,
                 )
                 self._logger.warning(
                     "dlq_published topic=%s error_category=%s error_type=%s "
-                    "correlation_id=%s",
+                    "correlation_id=%s dlq_topic=%s",
                     topic,
                     error_category,
                     type(error).__name__,
                     str(correlation_id),
+                    resolved_dlq_topic,
                 )
             except Exception as dlq_error:
                 self._logger.exception(
@@ -802,6 +814,34 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                     type(result).__name__ if result else "None",
                     self._node_name,
                 )
+
+                if (
+                    result is not None
+                    and result.status == EnumDispatchStatus.NO_DISPATCHER
+                ):
+                    no_dispatcher_error = ProtocolConfigurationError(
+                        result.error_message
+                        or f"No dispatcher registered for message from topic '{topic}'",
+                        context=ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.KAFKA,
+                            operation="event_bus_dispatch.no_dispatcher",
+                            target_name=topic,
+                        ),
+                    )
+                    await self._publish_to_dlq(
+                        topic,
+                        message,
+                        no_dispatcher_error,
+                        correlation_id,
+                        "content",
+                        consumer_group,
+                        dlq_topic=result.dlq_topic,
+                    )
+                    if self._should_commit_after_handler():
+                        await self._commit_offset(message, correlation_id)
+                    self._clear_retry_count(correlation_id)
+                    return
 
                 # Apply dispatch result (publish output events + delegate intents)
                 if self._result_applier is not None and result is not None:

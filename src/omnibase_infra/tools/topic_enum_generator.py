@@ -80,6 +80,7 @@ _KIND_PREFIX: dict[str, str] = {
     "evt": "EVT_",
     "cmd": "CMD_",
     "intent": "INTENT_",
+    "dlq": "DLQ_",
 }
 
 # File header template (filled per producer)

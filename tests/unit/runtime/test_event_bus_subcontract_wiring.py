@@ -27,8 +27,10 @@ import pytest
 
 from omnibase_core.models.contracts.subcontracts import ModelEventBusSubcontract
 from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_infra.enums import EnumDispatchStatus
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
+from omnibase_infra.models.dispatch import ModelDispatchResult
 from omnibase_infra.runtime.event_bus_subcontract_wiring import (
     EventBusSubcontractWiring,
     load_event_bus_subcontract,
@@ -549,6 +551,54 @@ class TestDispatchCallback:
         mock_event_bus._publish_raw_to_dlq.assert_called_once()
         call_kwargs = mock_event_bus._publish_raw_to_dlq.call_args.kwargs
         assert call_kwargs["failure_type"] == "content_error"
+        assert call_kwargs["dlq_topic"] == "onex.dlq.events.v1"
+
+    @pytest.mark.asyncio
+    async def test_dispatch_callback_routes_no_dispatcher_result_to_derived_dlq(
+        self,
+        mock_event_bus: AsyncMock,
+        mock_dispatch_engine: AsyncMock,
+        sample_event_message: ModelEventMessage,
+    ) -> None:
+        """NO_DISPATCHER must be DLQ-published before offset commit."""
+        from omnibase_infra.models.event_bus import ModelDlqConfig
+
+        mock_event_bus._publish_raw_to_dlq = AsyncMock()
+        mock_event_bus.commit_offset = AsyncMock()
+        result_applier = AsyncMock()
+        correlation_id = uuid4()
+        mock_dispatch_engine.dispatch.return_value = ModelDispatchResult(
+            status=EnumDispatchStatus.NO_DISPATCHER,
+            topic="onex.evt.test.v1",
+            started_at=datetime.now(UTC),
+            correlation_id=correlation_id,
+            error_message="No dispatcher found for test.event",
+            dlq_topic="onex.dlq.events.v1",
+        )
+
+        wiring = EventBusSubcontractWiring(
+            event_bus=mock_event_bus,
+            dispatch_engine=mock_dispatch_engine,
+            environment="dev",
+            node_name="test-handler",
+            service="test-service",
+            version="v1",
+            result_applier=result_applier,
+            dlq_config=ModelDlqConfig(enabled=True, on_content_error="dlq_and_commit"),
+        )
+
+        callback = wiring._create_dispatch_callback(
+            "onex.evt.test.v1", "dev.test-handler"
+        )
+        await callback(sample_event_message)
+
+        mock_event_bus._publish_raw_to_dlq.assert_called_once()
+        call_kwargs = mock_event_bus._publish_raw_to_dlq.call_args.kwargs
+        assert call_kwargs["failure_type"] == "content_error"
+        assert call_kwargs["dlq_topic"] == "onex.dlq.events.v1"
+        assert call_kwargs["consumer_group"] == "dev.test-handler"
+        mock_event_bus.commit_offset.assert_called_once_with(sample_event_message)
+        result_applier.apply.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_dispatch_callback_propagates_dispatch_errors(
@@ -1404,6 +1454,7 @@ class TestErrorClassification:
         mock_event_bus._publish_raw_to_dlq.assert_called_once()
         call_kwargs = mock_event_bus._publish_raw_to_dlq.call_args.kwargs
         assert call_kwargs["failure_type"] == "content_error"
+        assert call_kwargs["dlq_topic"] == "onex.dlq.events.v1"
 
     @pytest.mark.asyncio
     async def test_validation_error_classified_as_content_error(

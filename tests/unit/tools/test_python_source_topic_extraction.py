@@ -311,6 +311,43 @@ def test_extract_all_without_supplementary_equals_extract(tmp_path: Path) -> Non
 
 
 @pytest.mark.unit
+def test_extract_python_source_includes_dlq_literals(tmp_path: Path) -> None:
+    """4-segment DLQ topic literals in Python source are extracted (OMN-9649).
+
+    Regression: prior `_RE_ONEX_TOPIC_LITERAL` only matched 5-segment
+    evt|cmd|intent topics, so hardcoded `onex.dlq.*` literals were silently
+    skipped even though `_parse_topic()` accepted them.
+    """
+    source = write_python_source(
+        tmp_path,
+        "dlq_constants.py",
+        """\
+        from typing import Final
+
+        DLQ_INTENTS: Final[str] = "onex.dlq.intents.v1"
+        DLQ_EVENTS: Final[str] = "onex.dlq.events.v1"
+        DLQ_COMMANDS: Final[str] = "onex.dlq.commands.v1"
+        # 5-segment topic still works alongside DLQ literals
+        EVENT_TOPIC: Final[str] = "onex.evt.platform.example.v1"
+        """,
+    )
+
+    extractor = ContractTopicExtractor()
+    entries = extractor.extract_from_python_sources([source])
+    topics = {e.topic for e in entries}
+
+    assert "onex.dlq.intents.v1" in topics
+    assert "onex.dlq.events.v1" in topics
+    assert "onex.dlq.commands.v1" in topics
+    assert "onex.evt.platform.example.v1" in topics
+
+    dlq_entries = [e for e in entries if e.kind == "dlq"]
+    assert len(dlq_entries) == 3
+    assert {e.event_name for e in dlq_entries} == {"intents", "events", "commands"}
+    assert {e.producer for e in dlq_entries} == {"dlq"}
+
+
+@pytest.mark.unit
 def test_actual_topic_constants_extractable() -> None:
     """The real topic_constants.py yields at least the known topic constants."""
     source = Path(
