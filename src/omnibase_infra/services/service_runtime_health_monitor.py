@@ -27,9 +27,11 @@ import asyncio
 import logging
 import os
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
+from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
 from omnibase_infra.models.health.model_runtime_health_check_event import (
     ModelRuntimeHealthCheckEvent,
 )
@@ -40,7 +42,6 @@ from omnibase_infra.protocols import ProtocolTopicRegistry
 from omnibase_infra.protocols.protocol_auto_wiring_manifest_like import (
     ProtocolAutoWiringManifestLike,
 )
-from omnibase_infra.protocols.protocol_kafka_admin_like import ProtocolKafkaAdminLike
 from omnibase_infra.topics import topic_keys
 from omnibase_infra.utils.correlation import generate_correlation_id
 
@@ -62,21 +63,67 @@ def _discover_contracts() -> ProtocolAutoWiringManifestLike:
     return discover_contracts()  # type: ignore[return-value]
 
 
-def _get_kafka_admin_client(
+class ConsumerGroupSnapshot(NamedTuple):
+    """Minimal consumer group state used by runtime health checks."""
+
+    group_id: str
+    state: str
+
+
+def _consumer_group_state_name(state: object) -> str:
+    """Normalize confluent-kafka consumer group states to plain uppercase names."""
+    enum_name = getattr(state, "name", None)
+    raw = str(enum_name if enum_name else state)
+    return raw.rsplit(".", maxsplit=1)[-1].upper()
+
+
+def _list_consumer_group_snapshots(
     bootstrap_servers: str, request_timeout_ms: int
-) -> ProtocolKafkaAdminLike:
-    """Module-level shim for AIOKafkaAdminClient — patchable in tests.
+) -> list[ConsumerGroupSnapshot]:
+    """List consumer groups via confluent-kafka without decoding member metadata.
 
-    The return type is declared as ``ProtocolKafkaAdminLike`` to avoid a hard
-    import of ``AIOKafkaAdminClient`` at module import time while still providing
-    accurate type information to callers.
+    aiokafka's ``describe_consumer_groups`` path decodes Redpanda member
+    metadata as UTF-8 and can raise ``UnicodeDecodeError`` on valid binary
+    payloads. The confluent client exposes group state from list metadata, which
+    is sufficient for health coverage and avoids the brittle member decode path.
     """
-    from aiokafka.admin import AIOKafkaAdminClient
+    from confluent_kafka.admin import AdminClient
 
-    return AIOKafkaAdminClient(  # type: ignore[return-value]
-        bootstrap_servers=bootstrap_servers,
-        request_timeout_ms=request_timeout_ms,
+    timeout_seconds = max(request_timeout_ms / 1000.0, 1.0)
+    admin = AdminClient(
+        {
+            "bootstrap.servers": bootstrap_servers,
+            "socket.timeout.ms": request_timeout_ms,
+            "request.timeout.ms": request_timeout_ms,
+        }
     )
+    result = admin.list_consumer_groups(request_timeout=timeout_seconds).result(
+        timeout=timeout_seconds + 1.0
+    )
+
+    errors = getattr(result, "errors", None) or []
+    if errors:
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="list_consumer_groups",
+        )
+        raise InfraConnectionError(
+            f"list_consumer_groups returned {len(errors)} error(s)",
+            context=context,
+        )
+
+    snapshots: list[ConsumerGroupSnapshot] = []
+    for group in getattr(result, "valid", None) or []:
+        group_id = str(getattr(group, "group_id", ""))
+        if not group_id:
+            continue
+        snapshots.append(
+            ConsumerGroupSnapshot(
+                group_id=group_id,
+                state=_consumer_group_state_name(getattr(group, "state", "UNKNOWN")),
+            )
+        )
+    return snapshots
 
 
 _HealthStatus = Literal["HEALTHY", "DEGRADED", "CRITICAL"]
@@ -245,152 +292,91 @@ class ServiceRuntimeHealthMonitor:
 
         if self._bootstrap_servers:
             try:
-                admin = None
-                try:
-                    admin = _get_kafka_admin_client(
-                        self._bootstrap_servers, _KAFKA_ADMIN_TIMEOUT_MS
+                group_snapshots = await asyncio.to_thread(
+                    _list_consumer_group_snapshots,
+                    self._bootstrap_servers,
+                    _KAFKA_ADMIN_TIMEOUT_MS,
+                )
+                all_group_ids = [g.group_id for g in group_snapshots]
+                consumer_group_count = len(all_group_ids)
+
+                empty_states = {"DEAD", "EMPTY", "UNKNOWN"}
+                empty_groups = {
+                    g.group_id for g in group_snapshots if g.state in empty_states
+                }
+                empty_consumer_group_count = len(empty_groups)
+
+                # Check which subscribe topics have a matching non-empty group.
+                # ONEX consumer group IDs embed the full topic name surrounded by
+                # "-" delimiters or at end-of-string (e.g. "onex-consumer-<topic>").
+                # A raw substring check would false-positive on prefix collisions
+                # like "orders.v1" matching "orders.v10-extra". We require the
+                # topic to appear as a complete token bounded by "-" or string end.
+                non_empty_groups = set(all_group_ids) - empty_groups
+                uncovered: list[str] = []
+                for topic in sorted(subscribe_topics):
+                    covered = any(
+                        f"-{topic}-" in grp or grp.endswith(f"-{topic}")
+                        for grp in non_empty_groups
                     )
-                    await admin.start()  # type: ignore[union-attr]
+                    if not covered:
+                        uncovered.append(topic)
+                uncovered_topic_count = len(uncovered)
 
-                    # list_consumer_groups() returns list of (group_id, protocol_type) tuples
-                    all_groups_raw = await admin.list_consumer_groups()  # type: ignore[union-attr]
-                    all_group_ids = [g[0] for g in all_groups_raw]
-                    consumer_group_count = len(all_group_ids)
-
-                    # describe_consumer_groups to find empty ones
-                    described: dict[str, object] = {}
-                    describe_failed = False
-                    if all_group_ids:
-                        try:
-                            raw_described = await admin.describe_consumer_groups(  # type: ignore[union-attr]
-                                all_group_ids
-                            )
-                            described = dict(
-                                zip(all_group_ids, raw_described, strict=False)
-                            )
-                        except Exception as exc:  # noqa: BLE001
-                            describe_failed = True
-                            logger.warning(
-                                "Runtime health: describe_consumer_groups failed — %s; "
-                                "consumer group states unknown",
-                                exc,
-                            )
-
-                    empty_groups: set[str] = set()
-                    for group_id, group_meta in described.items():
-                        # GroupMetadata.state is a string e.g. "Empty", "Stable"
-                        state = getattr(group_meta, "state", None)
-                        if state == "Empty" or not getattr(group_meta, "members", None):
-                            empty_groups.add(group_id)
-                    empty_consumer_group_count = len(empty_groups)
-
-                    # Check which subscribe topics have a matching non-empty group
-                    # Consumer groups in ONEX typically encode the topic in the group ID
-                    # (e.g. "onex-runtime-consumer-<topic-slug>"). We consider a topic
-                    # "covered" if at least one non-empty group ID contains the full
-                    # topic name, ensuring exact-identity matching rather than a loose
-                    # suffix match that could yield false positives on version tokens
-                    # like "v1" (which appear in every consumer group name).
-                    if describe_failed:
-                        # Consumer group states are unknown — do not compute coverage
-                        # from unreliable data; both dimensions degrade together.
-                        non_empty_groups: set[str] = set()
-                    else:
-                        non_empty_groups = set(all_group_ids) - empty_groups
-                    uncovered: list[str] = []
-                    for topic in sorted(subscribe_topics):
-                        covered = any(topic in grp for grp in non_empty_groups)
-                        if not covered:
-                            uncovered.append(topic)
-                    uncovered_topic_count = len(uncovered)
-
-                    if describe_failed:
-                        dimensions.append(
-                            ModelRuntimeHealthDimension(
-                                name="empty_consumer_groups",
-                                status="DEGRADED",
-                                detail=(
-                                    f"describe_consumer_groups failed; "
-                                    f"{consumer_group_count} groups listed but states unknown"
-                                ),
-                            )
+                if empty_consumer_group_count > 0:
+                    dimensions.append(
+                        ModelRuntimeHealthDimension(
+                            name="empty_consumer_groups",
+                            status="DEGRADED",
+                            detail=(
+                                f"{empty_consumer_group_count}/{consumer_group_count}"
+                                " consumer groups are Empty"
+                            ),
                         )
-                        dimensions.append(
-                            ModelRuntimeHealthDimension(
-                                name="topic_coverage",
-                                status="DEGRADED",
-                                detail="Consumer group states unknown — topic coverage cannot be verified",
-                            )
+                    )
+                else:
+                    dimensions.append(
+                        ModelRuntimeHealthDimension(
+                            name="empty_consumer_groups",
+                            status="HEALTHY",
+                            detail=f"All {consumer_group_count} consumer groups active",
                         )
-                    elif empty_consumer_group_count > 0:
-                        dimensions.append(
-                            ModelRuntimeHealthDimension(
-                                name="empty_consumer_groups",
-                                status="DEGRADED",
-                                detail=(
-                                    f"{empty_consumer_group_count}/{consumer_group_count}"
-                                    " consumer groups are Empty"
-                                ),
-                            )
-                        )
-                    else:
-                        dimensions.append(
-                            ModelRuntimeHealthDimension(
-                                name="empty_consumer_groups",
-                                status="HEALTHY",
-                                detail=(
-                                    f"All {consumer_group_count} consumer groups active"
-                                ),
-                            )
-                        )
+                    )
 
-                    if not describe_failed:
-                        if uncovered_topic_count > 0:
-                            detail_topics = ", ".join(uncovered[:5])
-                            if len(uncovered) > 5:
-                                detail_topics += f" … +{len(uncovered) - 5} more"
-                            dimensions.append(
-                                ModelRuntimeHealthDimension(
-                                    name="topic_coverage",
-                                    status="CRITICAL"
-                                    if uncovered_topic_count > 10
-                                    else "DEGRADED",
-                                    detail=(
-                                        f"{uncovered_topic_count} subscribe topic(s) have"
-                                        f" no active consumer group: {detail_topics}"
-                                    ),
-                                )
-                            )
-                        else:
-                            dimensions.append(
-                                ModelRuntimeHealthDimension(
-                                    name="topic_coverage",
-                                    status="HEALTHY",
-                                    detail=(
-                                        f"All {len(subscribe_topics)} subscribe topics covered"
-                                    ),
-                                )
-                            )
-
-                finally:
-                    if admin is not None:
-                        try:
-                            await admin.close()
-                        except Exception:  # noqa: BLE001 — best-effort admin close
-                            logger.debug(
-                                "Runtime health: failed to close Kafka admin client",
-                                exc_info=True,
-                            )
+                if uncovered_topic_count > 0:
+                    detail_topics = ", ".join(uncovered[:5])
+                    if len(uncovered) > 5:
+                        detail_topics += f" … +{len(uncovered) - 5} more"
+                    dimensions.append(
+                        ModelRuntimeHealthDimension(
+                            name="topic_coverage",
+                            status="CRITICAL"
+                            if uncovered_topic_count > 10
+                            else "DEGRADED",
+                            detail=(
+                                f"{uncovered_topic_count} subscribe topic(s) have"
+                                f" no active consumer group: {detail_topics}"
+                            ),
+                        )
+                    )
+                else:
+                    dimensions.append(
+                        ModelRuntimeHealthDimension(
+                            name="topic_coverage",
+                            status="HEALTHY",
+                            detail=f"All {len(subscribe_topics)} subscribe topics covered",
+                        )
+                    )
 
             except ImportError:
                 logger.debug(
-                    "Runtime health: aiokafka not available — consumer checks skipped"
+                    "Runtime health: confluent-kafka not available — consumer checks skipped"
                 )
                 dimensions.append(
                     ModelRuntimeHealthDimension(
                         name="consumer_coverage",
                         status="HEALTHY",
-                        detail="aiokafka not installed — consumer checks skipped",
+                        detail="confluent-kafka not installed — consumer checks skipped",
                     )
                 )
             except Exception as exc:  # noqa: BLE001 — boundary: dimension degrades

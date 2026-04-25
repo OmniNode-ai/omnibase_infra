@@ -17,6 +17,7 @@ import json
 import os
 import uuid
 from collections.abc import AsyncGenerator
+from types import SimpleNamespace
 
 import pytest
 from aiokafka import AIOKafkaConsumer
@@ -30,6 +31,7 @@ from omnibase_infra.models.health.model_runtime_health_check_event import (
 )
 from omnibase_infra.services.service_runtime_health_monitor import (
     ServiceRuntimeHealthMonitor,
+    _list_consumer_group_snapshots,
 )
 from omnibase_infra.topics import topic_keys
 from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
@@ -118,3 +120,39 @@ async def test_run_once_emits_to_kafka(kafka_consumer: AIOKafkaConsumer) -> None
         assert payload["status"] in ("HEALTHY", "DEGRADED", "CRITICAL")
     finally:
         await bus.stop()
+
+
+def test_confluent_group_listing_ignores_binary_member_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Integration boundary: group state listing must not decode member metadata."""
+
+    class FakeGroupListFuture:
+        def result(self, timeout: float):
+            assert timeout >= 1.0
+            return SimpleNamespace(
+                errors=[],
+                valid=[
+                    SimpleNamespace(
+                        group_id="onex-runtime-main",
+                        state=SimpleNamespace(name="STABLE"),
+                        member_metadata=b"\x80\x01not-utf8",
+                    )
+                ],
+            )
+
+    class FakeAdminClient:
+        def __init__(self, config: dict[str, object]) -> None:
+            assert config["bootstrap.servers"] == BOOTSTRAP_SERVERS
+
+        def list_consumer_groups(self, request_timeout: float):
+            assert request_timeout >= 1.0
+            return FakeGroupListFuture()
+
+    monkeypatch.setattr("confluent_kafka.admin.AdminClient", FakeAdminClient)
+
+    snapshots = _list_consumer_group_snapshots(BOOTSTRAP_SERVERS, 5000)
+
+    assert len(snapshots) == 1
+    assert snapshots[0].group_id == "onex-runtime-main"
+    assert snapshots[0].state == "STABLE"

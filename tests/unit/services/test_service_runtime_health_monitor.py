@@ -30,6 +30,7 @@ from omnibase_infra.models.health.model_runtime_health_dimension import (
     ModelRuntimeHealthDimension,
 )
 from omnibase_infra.services.service_runtime_health_monitor import (
+    ConsumerGroupSnapshot,
     ServiceRuntimeHealthMonitor,
     _worst,
 )
@@ -186,33 +187,25 @@ class TestRunOnceNoKafka:
 
 
 class TestRunOnceWithKafka:
-    """Tests consumer group coverage checks with mocked AIOKafkaAdminClient."""
+    """Tests consumer group coverage checks with mocked Kafka group snapshots."""
 
     def _mock_admin(self, groups, empty_groups):
-        """Build a mock admin client."""
-        admin = AsyncMock()
-        # list_consumer_groups returns list of (group_id, protocol_type)
-        admin.list_consumer_groups.return_value = [(g, "consumer") for g in groups]
-
-        # describe_consumer_groups returns a list of GroupMetadata in the same
-        # order as the requested group_ids (matches AIOKafkaAdminClient behaviour
-        # and ProtocolKafkaAdminLike return type of list[object]).
-        described_list = []
-        for g in groups:
-            meta = MagicMock()
-            meta.state = "Empty" if g in empty_groups else "Stable"
-            meta.members = [] if g in empty_groups else [MagicMock()]
-            described_list.append(meta)
-        admin.describe_consumer_groups.return_value = described_list
-        return admin
+        """Build mock group snapshots."""
+        return [
+            ConsumerGroupSnapshot(
+                group_id=g,
+                state="EMPTY" if g in empty_groups else "STABLE",
+            )
+            for g in groups
+        ]
 
     @pytest.mark.asyncio
     async def test_healthy_when_all_groups_active(self):
-        groups = ["onex-consumer-v1", "onex-consumer-v2"]
+        groups = ["onex-consumer-topic.v1", "onex-consumer-v2"]
         manifest = _make_manifest(contracts=5, errors=0, subscribe_topics=["topic.v1"])
         monitor = ServiceRuntimeHealthMonitor(bootstrap_servers="localhost:9092")
 
-        admin = self._mock_admin(groups, empty_groups=set())
+        snapshots = self._mock_admin(groups, empty_groups=set())
 
         with (
             patch(
@@ -220,14 +213,15 @@ class TestRunOnceWithKafka:
                 return_value=manifest,
             ),
             patch(
-                "omnibase_infra.services.service_runtime_health_monitor._get_kafka_admin_client",
-                return_value=admin,
+                "omnibase_infra.services.service_runtime_health_monitor._list_consumer_group_snapshots",
+                return_value=snapshots,
             ),
         ):
             event = await monitor.run_once()
 
         assert event.consumer_group_count == 2
         assert event.empty_consumer_group_count == 0
+        assert event.uncovered_topic_count == 0
 
     @pytest.mark.asyncio
     async def test_degraded_when_empty_groups(self):
@@ -235,7 +229,7 @@ class TestRunOnceWithKafka:
         manifest = _make_manifest(contracts=5, errors=0)
         monitor = ServiceRuntimeHealthMonitor(bootstrap_servers="localhost:9092")
 
-        admin = self._mock_admin(groups, empty_groups={"onex-consumer-v2"})
+        snapshots = self._mock_admin(groups, empty_groups={"onex-consumer-v2"})
 
         with (
             patch(
@@ -243,8 +237,8 @@ class TestRunOnceWithKafka:
                 return_value=manifest,
             ),
             patch(
-                "omnibase_infra.services.service_runtime_health_monitor._get_kafka_admin_client",
-                return_value=admin,
+                "omnibase_infra.services.service_runtime_health_monitor._list_consumer_group_snapshots",
+                return_value=snapshots,
             ),
         ):
             event = await monitor.run_once()
@@ -252,6 +246,27 @@ class TestRunOnceWithKafka:
         assert event.empty_consumer_group_count == 1
         degraded_dims = [d for d in event.dimensions if d.status != "HEALTHY"]
         assert any(d.name == "empty_consumer_groups" for d in degraded_dims)
+
+    @pytest.mark.asyncio
+    async def test_degraded_when_group_listing_fails(self):
+        manifest = _make_manifest(contracts=5, errors=0, subscribe_topics=["topic.v1"])
+        monitor = ServiceRuntimeHealthMonitor(bootstrap_servers="localhost:9092")
+
+        with (
+            patch(
+                "omnibase_infra.services.service_runtime_health_monitor._discover_contracts",
+                return_value=manifest,
+            ),
+            patch(
+                "omnibase_infra.services.service_runtime_health_monitor._list_consumer_group_snapshots",
+                side_effect=UnicodeDecodeError("utf-8", b"\x80", 0, 1, "bad byte"),
+            ),
+        ):
+            event = await monitor.run_once()
+
+        assert event.status == "DEGRADED"
+        degraded_dims = [d for d in event.dimensions if d.status == "DEGRADED"]
+        assert any(d.name == "consumer_coverage" for d in degraded_dims)
 
 
 # =============================================================================
