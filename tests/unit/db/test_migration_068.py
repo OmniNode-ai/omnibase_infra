@@ -111,18 +111,26 @@ class TestMigration068Schema:
     def test_check_constraint_valid_offset(self) -> None:
         sql = _strip_comments(MIGRATION_FILE.read_text())
         assert re.search(
-            r"\bvalid_offset\b",
+            r"\bCONSTRAINT\s+valid_offset\s+CHECK\s*\([^)]*>=\s*0[^)]*\)",
             sql,
             re.IGNORECASE,
-        ), "Migration must declare valid_offset CHECK constraint"
+        ), (
+            "Migration must declare valid_offset CHECK constraint with non-negative predicate"
+        )
 
     def test_check_constraint_valid_sequence(self) -> None:
         sql = _strip_comments(MIGRATION_FILE.read_text())
         assert re.search(
-            r"\bvalid_sequence\b",
+            r"\bCONSTRAINT\s+valid_sequence\s+CHECK\s*\(",
             sql,
             re.IGNORECASE,
-        ), "Migration must declare valid_sequence CHECK constraint"
+        ) and re.search(
+            r"\bvalid_sequence\b[^;]*>=\s*0",
+            sql,
+            re.IGNORECASE | re.DOTALL,
+        ), (
+            "Migration must declare valid_sequence CHECK constraint with non-negative predicate"
+        )
 
     def test_two_indexes_declared(self) -> None:
         sql = _strip_comments(MIGRATION_FILE.read_text())
