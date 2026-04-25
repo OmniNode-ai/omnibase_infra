@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.models.contracts.model_monitor_alert_contract import (
     ModelMonitorAlertContract,
@@ -37,12 +38,12 @@ def test_monitor_alert_contract_dict_version() -> None:
 
 
 def test_monitor_alert_contract_rejects_missing_name() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ModelMonitorAlertContract.model_validate({"contract_version": "1.0.0"})
 
 
 def test_monitor_alert_contract_rejects_extra_fields() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ModelMonitorAlertContract.model_validate(
             {"name": "x", "contract_version": "1.0.0", "unknown_field": "bad"}
         )
