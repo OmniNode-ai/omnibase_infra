@@ -10,10 +10,8 @@ from pathlib import Path
 import pytest
 
 
-@pytest.mark.integration
-def test_health_server_starts_before_kafka_subscription_bootstrap() -> None:
-    """Kernel must bind /health before long effects Kafka subscription work."""
-    source = (
+def _read_service_kernel_source() -> str:
+    return (
         Path(__file__).parents[2]
         / "src"
         / "omnibase_infra"
@@ -21,7 +19,13 @@ def test_health_server_starts_before_kafka_subscription_bootstrap() -> None:
         / "service_kernel.py"
     ).read_text()
 
-    freeze_idx = source.index("MessageDispatchEngine frozen after all")
+
+@pytest.mark.integration
+def test_health_server_starts_before_kafka_subscription_bootstrap() -> None:
+    """Kernel must bind /health before long effects Kafka subscription work."""
+    source = _read_service_kernel_source()
+
+    freeze_idx = source.index("dispatch_engine.freeze()")
     health_start_idx = source.index("await health_server.start()")
     subscribe_idx = source.index("await subscribe_wired_contract_topics(")
     plugin_consumers_idx = source.index("await plugin.start_consumers(plugin_config)")
@@ -35,13 +39,7 @@ def test_health_server_starts_before_kafka_subscription_bootstrap() -> None:
 @pytest.mark.integration
 def test_health_server_uses_runtime_pending_mode_before_attach() -> None:
     """Early ServiceHealth construction must not require RuntimeHostProcess."""
-    source = (
-        Path(__file__).parents[2]
-        / "src"
-        / "omnibase_infra"
-        / "runtime"
-        / "service_kernel.py"
-    ).read_text()
+    source = _read_service_kernel_source()
 
     start_block = source[
         source.index("health_server = ServiceHealth(") : source.index(
