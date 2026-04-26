@@ -1130,8 +1130,16 @@ shutdown:
         assert call_kwargs["container"] is not None, "Container should not be None"
         assert call_kwargs["port"] == DEFAULT_HTTP_PORT
         assert call_kwargs["version"] == KERNEL_VERSION
+        mock_health_server.return_value.start.assert_awaited_once()
         mock_health_server.return_value.attach_runtime.assert_called_once_with(
             mock_runtime_host.return_value
+        )
+        method_names = [
+            method_call[0]
+            for method_call in mock_health_server.return_value.method_calls
+        ]
+        assert method_names.index("start") < method_names.index("attach_runtime"), (
+            "Expected ServiceHealth.start() before attach_runtime()"
         )
 
     async def test_bootstrap_logs_run_loop_entered_and_shutdown_reason(
