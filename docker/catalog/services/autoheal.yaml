@@ -7,7 +7,7 @@ required_env: []
 hardcoded_env:
   AUTOHEAL_CONTAINER_LABEL: autoheal
   AUTOHEAL_INTERVAL: '60'
-  AUTOHEAL_START_PERIOD: '180'
+  AUTOHEAL_START_PERIOD: '2400'
 operational_defaults: {}
 ports: null
 healthcheck: null

@@ -20,6 +20,7 @@ hardcoded_env:
   KAFKA_BROKER_ALLOWLIST: 'redpanda:'
   BUS_ID: local
   ONEX_CONTRACTS_DIR: /app/contracts
+  ONEX_STATE_ROOT: /app/data/.onex_state
   VALKEY_HOST: valkey
   VALKEY_PORT: '6379'
   OMNICLAUDE_CONTRACTS_ROOT: /app/.venv/lib/python3.12/site-packages/omniclaude/nodes
@@ -50,7 +51,7 @@ healthcheck:
   interval_s: 45
   timeout_s: 10
   retries: 5
-  start_period_s: 600
+  start_period_s: 1800
 volumes:
   - effects_logs:/app/logs
   - effects_data:/app/data
@@ -65,9 +66,9 @@ depends_on:
 restart: unless-stopped
 resources:
   cpus: '1.0'
-  memory: 768M
+  memory: 1536M
   cpus_reservation: '0.25'
-  memory_reservation: 128M
+  memory_reservation: 256M
 stop_grace_period: 90s
 labels:
   com.omninode.service: runtime-effects

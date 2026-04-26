@@ -123,7 +123,14 @@ async def test_async_pre_resolution_succeeds_when_sync_raises_runtime_error() ->
 @pytest.mark.asyncio
 async def test_async_pre_resolution_miss_falls_through_to_zero_arg() -> None:
     """When get_service_async misses (ServiceResolutionError), a zero-arg handler
-    wires via the zero-arg fallback path — no failure [OMN-9410].
+    wires via the construct-without-container fast path — no sync get_service
+    fallback is needed because the handler has no required ctor params.
+
+    This guards the optimization in handler_wiring._prepare_handler_wiring
+    (``can_construct_without_container``) which short-circuits the sync
+    container resolver when ``required_ctor_params`` is empty (or only
+    {"event_bus"}). Adding a sync fallback for this case would re-introduce
+    the OMN-9410 ``asyncio.run()`` reentrancy hazard inside event-loop boots.
     """
 
     class _HandlerZeroArg:
@@ -177,4 +184,4 @@ async def test_async_pre_resolution_miss_falls_through_to_zero_arg() -> None:
     assert report.total_failed == 0
     assert report.total_wired == 1
     container.get_service_async.assert_called_once_with(_HandlerZeroArg)
-    container.get_service.assert_called_once_with(_HandlerZeroArg)
+    container.get_service.assert_not_called()

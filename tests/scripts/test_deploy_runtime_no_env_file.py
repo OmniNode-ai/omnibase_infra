@@ -81,3 +81,22 @@ def test_sources_omnibase_env_at_top() -> None:
         f"source ~/.omnibase/.env found at line {line_number}, "
         "expected within first 50 lines of script"
     )
+
+
+@pytest.mark.unit
+def test_compose_project_defaults_to_live_runtime_project() -> None:
+    """deploy-runtime.sh must target the canonical live runtime compose project."""
+    text = "\n".join(_read_script_lines())
+
+    assert "OMNIBASE_INFRA_COMPOSE_PROJECT:-omnibase-infra" in text
+    assert 'local compose_project="omnibase-infra-${COMPOSE_PROFILE}"' not in text
+
+
+@pytest.mark.unit
+def test_verify_deployment_uses_fixed_runtime_container_name() -> None:
+    """deploy-runtime.sh must inspect the fixed omninode-runtime container first."""
+    text = "\n".join(_read_script_lines())
+
+    assert "name=^/omninode-runtime$" in text
+    assert "${compose_project}-omninode-runtime-1" not in text
+    assert '${compose_project}-omninode-runtime" | head -1' not in text

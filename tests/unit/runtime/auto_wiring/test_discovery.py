@@ -45,6 +45,7 @@ def _make_contract_yaml(
                 - "onex.evt.platform.test-input.v1"
               publish_topics:
                 - "onex.evt.platform.test-output.v1"
+              consumer_purpose: "consume"
         """)
 
     contract_path = tmp_path / "contract.yaml"
@@ -108,6 +109,44 @@ class TestParseContract:
         assert result.event_bus is not None
         assert result.event_bus.subscribe_topics == ("onex.evt.platform.test-input.v1",)
         assert result.event_bus.publish_topics == ("onex.evt.platform.test-output.v1",)
+        assert result.event_bus.consumer_purpose == "consume"
+
+    @pytest.mark.unit
+    def test_falls_back_to_legacy_handler_when_default_handler_has_no_entries(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "contract.yaml"
+        path.write_text(
+            dedent("""\
+                name: ledger_orchestrator
+                node_type: orchestrator
+                handler:
+                  module: omnimarket.handlers.ledger
+                  class: HandlerLedger
+                  input_model: omnimarket.models.ModelLedgerTickCommand
+                handler_routing:
+                  default_handler: omnimarket.handlers.ledger:HandlerLedger
+                event_bus:
+                  subscribe_topics:
+                    - onex.cmd.omnimarket.ledger-tick.v1
+                  publish_topics:
+                    - onex.cmd.omnimarket.ledger-append.v1
+            """)
+        )
+
+        result = _parse_contract(
+            contract_path=path,
+            entry_point_name="ledger_orchestrator",
+            package_name="omnimarket",
+            package_version="0.2.0",
+        )
+
+        assert result.handler_routing is not None
+        assert len(result.handler_routing.handlers) == 1
+        entry = result.handler_routing.handlers[0]
+        assert entry.handler.name == "HandlerLedger"
+        assert entry.event_model is not None
+        assert entry.event_model.name == "ModelLedgerTickCommand"
 
     @pytest.mark.unit
     def test_raises_on_non_dict_yaml(self, tmp_path: Path) -> None:

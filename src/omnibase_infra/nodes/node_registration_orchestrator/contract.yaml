@@ -367,6 +367,7 @@ handler_routing:
     - event_model:
         name: "ModelNodeIntrospectionEvent"
         module: "omnibase_infra.models.registration.model_node_introspection_event"
+      event_type: "platform.node-introspection"
       handler:
         name: "HandlerNodeIntrospected"
         module: "omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_introspected"
@@ -408,6 +409,8 @@ handler_routing:
     - event_model:
         name: "ModelRuntimeTick"
         module: "omnibase_infra.runtime.models.model_runtime_tick"
+      event_type: "platform.runtime-tick"
+      message_category: "INTENT"
       handler:
         name: "HandlerRuntimeTick"
         module: "omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_runtime_tick"
@@ -428,6 +431,7 @@ handler_routing:
     - event_model:
         name: "ModelNodeRegistrationAcked"
         module: "omnibase_infra.models.registration.commands.model_node_registration_acked"
+      event_type: "platform.node-registration-acked"
       handler:
         name: "HandlerNodeRegistrationAcked"
         module: "omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_registration_acked"

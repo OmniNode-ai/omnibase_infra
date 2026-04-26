@@ -55,9 +55,9 @@ depends_on:
 restart: unless-stopped
 resources:
   cpus: '0.5'
-  memory: 768M
+  memory: 1536M
   cpus_reservation: '0.1'
-  memory_reservation: 128M
+  memory_reservation: 256M
 stop_grace_period: 90s
 labels:
   com.omninode.service: runtime-worker

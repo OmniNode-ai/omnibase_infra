@@ -772,6 +772,15 @@ async def wire_registration_handlers(
                 reducer=reducer,
             )
             await container.service_registry.register_instance(
+                interface=HandlerNodeHeartbeat,
+                instance=handler_heartbeat,
+                scope=EnumInjectionScope.GLOBAL,
+                metadata={
+                    "description": "Handler for NodeHeartbeatEvent",
+                    "version": str(semver_default),
+                },
+            )
+            await container.service_registry.register_instance(
                 interface=ProtocolNodeHeartbeat,  # type: ignore[type-abstract]
                 instance=handler_heartbeat,
                 scope=EnumInjectionScope.GLOBAL,

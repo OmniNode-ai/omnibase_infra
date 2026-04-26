@@ -182,8 +182,7 @@ EXAMPLES
     cat ~/.omnibase/infra/registry.json | jq .
 
     # Verify image labels match deployed SHA
-    # Container name follows compose convention: <project>-omninode-runtime-1
-    docker inspect <compose-project>-omninode-runtime-1 \\
+    docker inspect omninode-runtime \\
         --format='{{index .Config.Labels "org.opencontainers.image.revision"}}'
 EOF
     exit 0
@@ -244,6 +243,23 @@ parse_args() {
         log_error "--restart requires --execute"
         exit 1
     fi
+}
+
+resolve_compose_project() {
+    # Runtime compose files use fixed container names, and the deploy-agent
+    # targets the canonical "omnibase-infra" project. Keep deploy-runtime on the
+    # same project by default so rebuild/recreate updates the live stack instead
+    # of creating a parallel profile-derived project such as
+    # "omnibase-infra-runtime".
+    local compose_project="${OMNIBASE_INFRA_COMPOSE_PROJECT:-omnibase-infra}"
+
+    if [[ ! "${compose_project}" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        log_error "OMNIBASE_INFRA_COMPOSE_PROJECT must contain only alphanumeric characters, hyphens, and underscores."
+        log_error "  Got: '${compose_project}'"
+        exit 1
+    fi
+
+    echo "${compose_project}"
 }
 
 # =============================================================================
@@ -1242,16 +1258,22 @@ verify_deployment() {
     else
         log_error "Health check FAILED after ${HEALTH_CHECK_RETRIES} attempts."
         log_error "Service is not responding at ${HEALTH_CHECK_URL}"
-        log_error "Check container logs: docker logs omnibase-infra-omninode-runtime"
+        log_error "Check container logs: docker logs omninode-runtime"
         exit 1
     fi
 
-    # 2. Resolve runtime container ID (supports dynamic compose project names)
+    # 2. Resolve runtime container ID. Prefer the fixed runtime container name
+    # used by docker-compose.infra.yml, then fall back to a compose label lookup.
     log_info "Checking image labels for VCS_REF..."
     local container_id
-    container_id="$(docker ps -q --filter "name=${compose_project}-omninode-runtime" | head -1)"
+    container_id="$(docker ps -q --filter "name=^/omninode-runtime$" | head -1)"
     if [[ -z "${container_id}" ]]; then
-        container_id="$(docker ps -q --filter "name=omninode-runtime" | head -1)"
+        container_id="$(
+            docker ps -q \
+                --filter "label=com.docker.compose.project=${compose_project}" \
+                --filter "label=com.docker.compose.service=omninode-runtime" \
+                | head -1
+        )"
     fi
 
     if [[ -z "${container_id}" ]]; then
@@ -1393,7 +1415,7 @@ show_summary() {
     log_info ""
     log_info "  Verify deployment:"
     log_info "    cat ${REGISTRY_FILE} | jq ."
-    log_info "    docker inspect ${compose_project}-omninode-runtime-1 --format='{{index .Config.Labels \"org.opencontainers.image.revision\"}}'"
+    log_info "    docker inspect omninode-runtime --format='{{index .Config.Labels \"org.opencontainers.image.revision\"}}'"
 }
 
 # =============================================================================
@@ -1449,7 +1471,8 @@ main() {
 
     # Compute paths
     local deploy_target="${DEPLOY_ROOT}/deployed/${version}"
-    local compose_project="omnibase-infra-${COMPOSE_PROFILE}"
+    local compose_project
+    compose_project="$(resolve_compose_project)"
 
     # --print-compose-cmd: show commands and exit
     if [[ "${PRINT_COMPOSE_CMD}" == true ]]; then
