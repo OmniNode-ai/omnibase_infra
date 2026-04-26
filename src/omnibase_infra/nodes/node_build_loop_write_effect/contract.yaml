@@ -1,0 +1,118 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeBuildLoopWriteEffect
+#
+# EFFECT node that consumes ModelPayloadBuildLoopAppend intents emitted by
+# NodeBuildLoopProjectionCompute and INSERTs them into the build_loop_runs
+# append-only audit table via HandlerDb.
+#
+# Related Tickets:
+#   - OMN-9774: Add build-loop projection consumer chain + build_loop_runs table
+#   - OMN-8943: Prove Full Four-Node ONEX Pattern End-to-End (parent epic)
+name: "node_build_loop_write_effect"
+contract_name: "node_build_loop_write_effect"
+node_name: "node_build_loop_write_effect"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  Capability-oriented EFFECT node for build_loop terminal-event persistence. Consumes ModelPayloadBuildLoopAppend intents and INSERTs one row per intent into the public.build_loop_runs append-only audit table. There is no idempotency key — retried terminal events surface as duplicate rows so duplication is observable rather than silently swallowed.
+
+input_model:
+  name: "ModelPayloadBuildLoopAppend"
+  module: "omnibase_infra.nodes.node_build_loop_projection_compute.models"
+  description: "Input payload describing one terminal event to persist."
+output_model:
+  name: "ModelBuildLoopAppendResult"
+  module: "omnibase_infra.nodes.node_build_loop_write_effect.models"
+  description: "Outcome of one build_loop_runs INSERT."
+capabilities:
+  - name: "build_loop.write"
+    description: "Append a build_loop terminal event to build_loop_runs"
+    version: "0.1.0"
+  - name: "build_loop.write.append"
+    description: "Insert a single row into build_loop_runs"
+node_capabilities:
+  postgres: true
+  write: true
+  database: true
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "build_loop.append"
+      handler_class: "HandlerBuildLoopAppend"
+      handler_module: "omnibase_infra.nodes.node_build_loop_write_effect.handlers.handler_build_loop_append"
+      description: "Append-only INSERT into build_loop_runs"
+io_operations:
+  - operation: "build_loop.append"
+    description: "Append a single build_loop terminal event row"
+    input_fields:
+      - id: "UUID"
+      - run_id: "str"
+      - workflow_name: "str"
+      - event_type: "str"
+      - terminal_event_at: "datetime"
+      - payload: "dict[str, JsonType]"
+      - correlation_id: "UUID | None"
+    output_fields:
+      - success: "bool"
+      - id: "UUID"
+      - run_id: "str"
+      - workflow_name: "str"
+    idempotent: false
+dependencies:
+  - name: "handler_build_loop_append"
+    type: "handler"
+    class_name: "HandlerBuildLoopAppend"
+    module: "omnibase_infra.nodes.node_build_loop_write_effect.handlers.handler_build_loop_append"
+    description: "Append handler that writes to build_loop_runs via HandlerDb"
+  - name: "handler_db"
+    type: "handler"
+    class_name: "HandlerDb"
+    module: "omnibase_infra.handlers.handler_db"
+    description: "PostgreSQL database handler (composed by build_loop append handler)"
+error_handling:
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  timeout_ms: 5000
+  checks:
+    - name: "database_backend"
+      type: "connection"
+      critical: true
+metadata:
+  description: >
+    Capability-oriented EFFECT node that persists build_loop terminal events into the append-only public.build_loop_runs table.
+
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-04-26"
+  ticket: "OMN-9774"
+  tags:
+    - effect
+    - build_loop
+    - storage
+    - postgresql
+    - append-only
