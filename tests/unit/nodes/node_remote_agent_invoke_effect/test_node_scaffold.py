@@ -64,9 +64,16 @@ class TestNodeRemoteAgentInvokeEffectScaffold:
         published_topics = {event["topic"] for event in data["published_events"]}
         assert published_topics == {AGENT_TASK_LIFECYCLE_TOPIC}
 
-    def test_handlers_are_deferred_to_p14(self) -> None:
+    def test_p14_handler_is_wired(self) -> None:
         data = _load_contract()
-        assert data["handler_routing"]["handlers"] == []
+        handlers = data["handler_routing"]["handlers"]
+        assert len(handlers) == 1
+        handler_entry = handlers[0]
+        assert handler_entry["operation"] == "agent.a2a_task"
+        assert handler_entry["handler"]["name"] == "HandlerA2ATask"
+        assert handler_entry["handler"]["module"].endswith(
+            "node_remote_agent_invoke_effect.handlers.handler_a2a_task"
+        )
 
     def test_input_output_models_use_local_module(self) -> None:
         data = _load_contract()

@@ -74,6 +74,25 @@ FROM remote_task_state
 WHERE task_id = $1
 """
 
+SQL_GET_REMOTE_TASK_STATE_BY_HANDLE = """
+SELECT
+    task_id,
+    invocation_kind,
+    protocol,
+    target_ref,
+    remote_task_handle,
+    correlation_id,
+    status,
+    last_remote_status,
+    last_emitted_event_type,
+    submitted_at,
+    updated_at,
+    completed_at,
+    error
+FROM remote_task_state
+WHERE remote_task_handle = $1
+"""
+
 SQL_LOAD_UNFINISHED_REMOTE_TASK_STATES = """
 SELECT
     task_id,
@@ -160,6 +179,25 @@ class RemoteTaskStateRepository(MixinPostgresOpExecutor):
             op_name="get_remote_task_state",
             log_context={"task_id": str(task_id)},
             fn=lambda: self._fetchrow(SQL_GET_REMOTE_TASK_STATE, task_id),
+        )
+        if row is None:
+            return None
+        return self._row_to_model(row)
+
+    async def get_by_remote_task_handle(
+        self,
+        remote_task_handle: str,
+        *,
+        correlation_id: UUID | None = None,
+    ) -> ModelRemoteTaskState | None:
+        row = await self._run_checked(
+            correlation_id=correlation_id or uuid4(),
+            op_name="get_remote_task_state_by_handle",
+            log_context={"remote_task_handle": remote_task_handle},
+            fn=lambda: self._fetchrow(
+                SQL_GET_REMOTE_TASK_STATE_BY_HANDLE,
+                remote_task_handle,
+            ),
         )
         if row is None:
             return None

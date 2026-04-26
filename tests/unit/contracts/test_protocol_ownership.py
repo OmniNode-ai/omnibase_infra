@@ -139,6 +139,9 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolChainEmbeddingClient": "nodes/node_chain_orchestrator/models/protocol_chain_embedding_client.py",
     # [NODE] DI boundary for chain retrieval/store effects — vector store client interface (chain-learning)
     "ProtocolChainVectorClient": "nodes/node_chain_orchestrator/models/protocol_chain_vector_client.py",
+    # [NODE] DI boundary for A2A transport — narrows the SDK surface so the handler
+    # can be unit-tested without driving the real a2a-sdk client (OMN-9634).
+    "ProtocolA2ATransport": "nodes/node_remote_agent_invoke_effect/handlers/handler_a2a_task.py",
 }
 
 # Duplicate protocol names that appear in multiple files (node-internal

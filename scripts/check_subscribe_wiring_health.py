@@ -157,6 +157,9 @@ _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
     "onex.int.platform.runtime-tick.v1": "Published by runtime scheduler | owner: jonah | expiry: 2026-09-01",
     # Onboarding — triggered by omniclaude /onboarding skill, not Kafka publisher
     "onex.cmd.omnibase-infra.onboarding-start.v1": "Triggered by /onboarding skill via claude -p, not Kafka | owner: jonah | expiry: 2026-12-01",
+    # Remote-agent invoke — emitted by node_delegation_orchestrator (OMN-9620 epic);
+    # its contract addition is tracked separately and pending in another wave.
+    "onex.cmd.omnibase-infra.remote-agent-invoke.v1": "Publisher pending in delegation_orchestrator (OMN-9620 epic) | owner: jonah | expiry: 2026-09-01",
 }
 # fmt: on
 
