@@ -809,7 +809,7 @@ class TestRuntimeHostProcessLifecycle:
             await startup_entered.wait()
 
             await process.stop()
-            _ = await start_task
+            await start_task  # codeql[py/ineffectual-statement]
 
         assert startup_cancelled.is_set()
         assert process._startup_task is None
