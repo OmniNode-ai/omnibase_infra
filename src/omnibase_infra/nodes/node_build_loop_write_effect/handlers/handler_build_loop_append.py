@@ -209,6 +209,21 @@ class HandlerBuildLoopAppend:
             result=result,
         )
 
+    @staticmethod
+    def _safe_correlation_id(raw: object) -> UUID:
+        """Parse a correlation ID from envelope-supplied raw input.
+
+        Returns a fresh UUID if `raw` is missing, empty, or unparseable —
+        we never want a malformed envelope to surface as ValueError to the
+        runtime, since terminal-event persistence is best-effort audit.
+        """
+        if not raw:
+            return uuid4()
+        try:
+            return UUID(str(raw))
+        except (ValueError, TypeError):
+            return uuid4()
+
 
 __all__ = [
     "HandlerBuildLoopAppend",
