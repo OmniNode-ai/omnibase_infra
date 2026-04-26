@@ -18,6 +18,7 @@ REPOS=(
   omnibase_infra
   omnibase_spi
   omnidash
+  omnidash-v2
   omnigemini
   omniintelligence
   omnimarket
