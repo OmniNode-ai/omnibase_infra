@@ -3204,6 +3204,44 @@ pattern_exemptions:
     documentation:
       - contracts/llm_endpoints.yaml (slot_id field comment)
     ticket: OMN-9750
+  # ==========================================================================
+  # build_loop projection chain — run_id / workflow_name (OMN-9774)
+  # ==========================================================================
+  # run_id is the externally-supplied workflow run identifier (TEXT NOT NULL in
+  # build_loop_runs migration 070). Workflows may emit slug-style ids
+  # ("build-loop-2026-04-26-abc123"), not UUIDs — the append-only audit table
+  # records them verbatim. workflow_name is a workflow-yaml name label
+  # ("build_loop") used by the build_loop_runs (workflow_name, created_at DESC)
+  # index, not an entity reference.
+  - file_pattern: 'src/omnibase_infra/nodes/node_build_loop_projection_compute/models/model_payload_build_loop_append\.py'
+    violation_pattern: "Field 'run_id' should use UUID"
+    reason: >
+      run_id is the externally-supplied workflow run identifier persisted as TEXT NOT NULL in migration 070_build_loop_runs.sql. Producers may emit slug-style ids; the append-only audit table records them verbatim.
+
+    documentation:
+      - docker/migrations/forward/070_build_loop_runs.sql
+      - docs/plans/2026-04-25-overnight-p0-integration-plan.md (Wave 2.5a)
+    ticket: OMN-9774
+  - file_pattern: 'src/omnibase_infra/nodes/node_build_loop_projection_compute/models/model_payload_build_loop_append\.py'
+    violation_pattern: "Field 'workflow_name' might reference an entity"
+    reason: >
+      workflow_name is a workflow-yaml name label (e.g. "build_loop"), not an entity reference. Used as the leading column of the build_loop_runs (workflow_name, created_at DESC) index for newest-run-per-workflow reads.
+
+    documentation:
+      - docker/migrations/forward/070_build_loop_runs.sql
+    ticket: OMN-9774
+  - file_pattern: 'src/omnibase_infra/nodes/node_build_loop_write_effect/models/model_build_loop_append_result\.py'
+    violation_pattern: "Field 'run_id' should use UUID"
+    reason: Mirrors ModelPayloadBuildLoopAppend.run_id — see OMN-9774 entry above.
+    documentation:
+      - docker/migrations/forward/070_build_loop_runs.sql
+    ticket: OMN-9774
+  - file_pattern: 'src/omnibase_infra/nodes/node_build_loop_write_effect/models/model_build_loop_append_result\.py'
+    violation_pattern: "Field 'workflow_name' might reference an entity"
+    reason: Mirrors ModelPayloadBuildLoopAppend.workflow_name — see OMN-9774 entry above.
+    documentation:
+      - docker/migrations/forward/070_build_loop_runs.sql
+    ticket: OMN-9774
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
