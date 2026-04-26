@@ -809,7 +809,9 @@ class TestRuntimeHostProcessLifecycle:
             await startup_entered.wait()
 
             await process.stop()
-            await start_task  # codeql[py/ineffectual-statement]
+            # Drain the start_task after stop() so its done state is observable.
+            done, _pending = await asyncio.wait({start_task})
+            assert start_task in done
 
         assert startup_cancelled.is_set()
         assert process._startup_task is None

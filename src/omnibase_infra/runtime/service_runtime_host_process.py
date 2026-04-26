@@ -1920,10 +1920,11 @@ class RuntimeHostProcess:
             )
             if startup_task is not asyncio.current_task():
                 startup_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    # CodeQL flags bare-await as "no effect" — the await IS the
-                    # effect (drains the cancelled task before shutdown proceeds).
-                    await startup_task  # codeql[py/ineffectual-statement]
+                try:
+                    await startup_task
+                except asyncio.CancelledError:
+                    # Expected: drain the cancelled startup task before shutdown.
+                    pass
             self._startup_task = None
             self._is_starting = False
 
