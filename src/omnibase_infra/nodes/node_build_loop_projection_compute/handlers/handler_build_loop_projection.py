@@ -79,6 +79,20 @@ class HandlerBuildLoopProjection:
             payload=payload,
         )
 
+    async def handle(
+        self,
+        message: object,
+    ) -> ModelHandlerOutput[ModelIntent]:
+        """Contract-typed auto-wiring entry point."""
+        raw_message = self._coerce_event_message(message)
+        intent = self.project(raw_message)
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=uuid4(),
+            correlation_id=raw_message.headers.correlation_id,
+            handler_id=HANDLER_ID_BUILD_LOOP_PROJECTION,
+            result=intent,
+        )
+
     async def execute(
         self,
         envelope: dict[str, object],
@@ -179,6 +193,16 @@ class HandlerBuildLoopProjection:
             payload=body,
             correlation_id=correlation_id,
         )
+
+    @staticmethod
+    def _coerce_event_message(raw: object) -> ModelEventMessage:
+        """Accept direct ModelEventMessage or an auto-wired envelope wrapper."""
+        if isinstance(raw, ModelEventMessage):
+            return raw
+        payload = getattr(raw, "payload", raw)
+        if isinstance(raw, dict):
+            payload = raw.get("payload", raw)
+        return ModelEventMessage.model_validate(payload)
 
     @staticmethod
     def _safe_correlation_id(raw: object) -> UUID:
