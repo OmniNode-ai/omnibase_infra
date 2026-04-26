@@ -351,10 +351,10 @@ def _make_dispatch_callback(
             else model_cls.model_validate(payload)
         )
         typed_handle = cast("Callable[[object], object]", handle_method)
-        raw_result = typed_handle(typed_payload)
-        if asyncio.iscoroutine(raw_result):
-            raw_result = await cast("Awaitable[object]", raw_result)
-        return _normalize_handler_result(raw_result, envelope, event_model.name)
+        typed_result: object = typed_handle(typed_payload)
+        if asyncio.iscoroutine(typed_result):
+            typed_result = await cast("Awaitable[object]", typed_result)
+        return _normalize_handler_result(typed_result, envelope, event_model.name)
 
     return _callback
 
@@ -759,8 +759,8 @@ def _make_raw_event_projection_callback(
             )
             if not await _wait_for_dispatch_engine_freeze(topic, dispatch_engine):
                 return
-            envelope: ModelEventEnvelope[dict[str, object]] = ModelEventEnvelope(
-                payload=raw_message.model_dump(mode="json"),
+            envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+                payload=cast("object", raw_message.model_dump(mode="json")),
                 correlation_id=raw_message.headers.correlation_id,
                 envelope_timestamp=raw_message.headers.timestamp,
                 event_type=(
