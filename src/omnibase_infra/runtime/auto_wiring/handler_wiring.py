@@ -1403,7 +1403,7 @@ async def _subscribe_contract_topics(
         and not _contract_declares_db_io(contract)
     ):
         effective_result_applier = DispatchResultApplier(
-            event_bus=cast(ProtocolEventBusLike, event_bus),  # noqa: TC006
+            event_bus=cast("ProtocolEventBusLike", event_bus),
             output_topic=contract.event_bus.publish_topics[0],
         )
     node_identity = ModelNodeIdentity(
@@ -1547,7 +1547,7 @@ def _prepare_handler_wiring(
             if (alias := _derive_event_type_alias_from_topic(topic)) is not None
         }
         if topic_aliases:
-            message_types = (message_types or set()) | topic_aliases
+            message_types = (message_types or set()).union(topic_aliases)
 
     if contract.name == "node_registration_orchestrator":
         return PreparedWiring(

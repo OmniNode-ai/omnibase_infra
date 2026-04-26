@@ -181,7 +181,15 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
 
     @pytest.mark.unit
     def test_message_types_omits_alias_when_only_whitespace(self) -> None:
-        """A whitespace-only alias reduces to empty and is not registered."""
+        """A whitespace-only alias reduces to empty and the topic-derived
+        alias is registered instead.
+
+        The contract supplies subscribe_topics=("onex.cmd.platform.foo-start.v1",)
+        so when the explicit event_type alias is empty after stripping, the
+        wiring derives the routing alias from the topic suffix
+        ("platform.foo-start") to match the dispatch-engine envelope rewrite
+        introduced in OMN-9648 (derive auto-wired event types from topic).
+        """
         contract = _make_contract_with_event_type_alias(
             event_model_name="ModelFooCommand",
             event_type_alias="   ",
@@ -205,7 +213,7 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
                 event_bus=None,
                 container=None,
             )
-        assert prepared.message_types == {"ModelFooCommand"}
+        assert prepared.message_types == {"ModelFooCommand", "platform.foo-start"}
 
     @pytest.mark.unit
     def test_message_category_overrides_contract_first_topic_category(self) -> None:
@@ -293,8 +301,15 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
         assert "explicit dispatcher adapters" in prepared.skip_reason
 
     @pytest.mark.unit
-    def test_message_types_only_class_name_when_no_alias(self) -> None:
-        """Absent event_type alias: message_types == {event_model.name} — unchanged."""
+    def test_message_types_includes_topic_derived_alias_when_no_explicit_alias(
+        self,
+    ) -> None:
+        """Absent event_type alias: message_types is augmented by the topic
+        suffix-derived alias for each subscribe topic, so installed market
+        package handlers can route envelopes that arrive with the
+        topic-derived event_type set by the dispatch-engine envelope rewrite
+        (OMN-9648). Class-name remains as a fallback key.
+        """
         contract = _make_contract_with_event_type_alias(
             event_model_name="ModelFooCommand",
             event_type_alias=None,
@@ -318,7 +333,7 @@ class TestPrepareHandlerWiringIncludesEventTypeAlias:
                 event_bus=None,
                 container=None,
             )
-        assert prepared.message_types == {"ModelFooCommand"}
+        assert prepared.message_types == {"ModelFooCommand", "platform.foo-start"}
 
 
 class TestContractDiscoveryParsesEventType:
