@@ -183,10 +183,10 @@ def _build_prompt(request_model: ModelA2ATaskRequest) -> str:
 
 
 def _task_to_response(task: A2ATask) -> ModelA2ATaskResponse:
-    status = getattr(task.status.state, "value", str(task.status.state))
+    raw_status = getattr(task.status.state, "value", str(task.status.state))
     return ModelA2ATaskResponse(
         remote_task_handle=task.id,
-        status=status,
+        status=map_remote_status(raw_status),
         artifacts=_extract_artifacts(task),
         error=_extract_error(task),
     )
@@ -318,7 +318,7 @@ class HandlerA2ATask:
             submitted_state.model_copy(
                 update={
                     "remote_task_handle": response.remote_task_handle,
-                    "last_remote_status": response.status,
+                    "last_remote_status": response.status.value,
                     "updated_at": self._clock(),
                 }
             )
@@ -349,7 +349,8 @@ class HandlerA2ATask:
                 target=target,
                 remote_task_handle=remote_task_handle,
             )
-            mapped = map_remote_status(response.status)
+            mapped = response.status
+            raw_status = response.status.value
             now = self._clock()
 
             if response.artifacts and response.artifacts != last_artifact_payload:
@@ -360,14 +361,14 @@ class HandlerA2ATask:
                     remote_task_handle=remote_task_handle,
                     artifact=response.artifacts[0],
                     occurred_at=now,
-                    remote_status=response.status,
+                    remote_status=raw_status,
                     error=response.error,
                 )
                 await self._repository.upsert(
                     row.model_copy(
                         update={
                             "status": mapped,
-                            "last_remote_status": response.status,
+                            "last_remote_status": raw_status,
                             "last_emitted_event_type": EnumAgentTaskLifecycleType.ARTIFACT,
                             "updated_at": now,
                             "completed_at": now
@@ -381,7 +382,7 @@ class HandlerA2ATask:
                 row = row.model_copy(
                     update={
                         "status": mapped,
-                        "last_remote_status": response.status,
+                        "last_remote_status": raw_status,
                         "last_emitted_event_type": EnumAgentTaskLifecycleType.ARTIFACT,
                         "updated_at": now,
                         "completed_at": now if mapped in _TERMINAL_LIFECYCLES else None,
@@ -404,14 +405,14 @@ class HandlerA2ATask:
                 remote_task_handle=remote_task_handle,
                 artifact=response.artifacts[0] if response.artifacts else None,
                 occurred_at=now,
-                remote_status=response.status,
+                remote_status=raw_status,
                 error=response.error,
             )
             await self._repository.upsert(
                 row.model_copy(
                     update={
                         "status": mapped,
-                        "last_remote_status": response.status,
+                        "last_remote_status": raw_status,
                         "last_emitted_event_type": mapped,
                         "updated_at": now,
                         "completed_at": now if mapped in _TERMINAL_LIFECYCLES else None,
@@ -423,7 +424,7 @@ class HandlerA2ATask:
             row = row.model_copy(
                 update={
                     "status": mapped,
-                    "last_remote_status": response.status,
+                    "last_remote_status": raw_status,
                     "last_emitted_event_type": mapped,
                     "updated_at": now,
                     "completed_at": now if mapped in _TERMINAL_LIFECYCLES else None,

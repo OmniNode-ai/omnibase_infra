@@ -118,10 +118,9 @@ def _command() -> ModelInvocationCommand:
 def _target_registry() -> dict[str, ModelTargetAgent]:
     return {
         "agent:local-a2a-smoke": ModelTargetAgent(
-            agent_ref="agent:local-a2a-smoke",
+            target_ref="agent:local-a2a-smoke",
             protocol=EnumAgentProtocol.A2A,
             base_url="http://127.0.0.1:8011/a2a/app",
-            protocol_version="0.3",
         )
     }
 
@@ -164,7 +163,7 @@ async def test_submit_emits_submitted_event_and_persists() -> None:
     transport = FakeTransport(
         submit_response=ModelA2ATaskResponse(
             remote_task_handle="remote-123",
-            status="submitted",
+            status=EnumAgentTaskLifecycleType.SUBMITTED,
             artifacts=[],
             error=None,
         )
@@ -211,20 +210,20 @@ async def test_watch_emits_transitions_until_completed() -> None:
     transport = FakeTransport(
         submit_response=ModelA2ATaskResponse(
             remote_task_handle="remote-123",
-            status="submitted",
+            status=EnumAgentTaskLifecycleType.SUBMITTED,
             artifacts=[],
             error=None,
         ),
         get_responses=[
             ModelA2ATaskResponse(
                 remote_task_handle="remote-123",
-                status="working",
+                status=EnumAgentTaskLifecycleType.PROGRESS,
                 artifacts=[],
                 error=None,
             ),
             ModelA2ATaskResponse(
                 remote_task_handle="remote-123",
-                status="completed",
+                status=EnumAgentTaskLifecycleType.COMPLETED,
                 artifacts=[
                     {
                         "report": ModelSchemaValue.from_value(
@@ -274,26 +273,26 @@ async def test_watch_dedups_same_status_repeats() -> None:
     transport = FakeTransport(
         submit_response=ModelA2ATaskResponse(
             remote_task_handle="remote-456",
-            status="submitted",
+            status=EnumAgentTaskLifecycleType.SUBMITTED,
             artifacts=[],
             error=None,
         ),
         get_responses=[
             ModelA2ATaskResponse(
                 remote_task_handle="remote-456",
-                status="working",
+                status=EnumAgentTaskLifecycleType.PROGRESS,
                 artifacts=[],
                 error=None,
             ),
             ModelA2ATaskResponse(
                 remote_task_handle="remote-456",
-                status="working",
+                status=EnumAgentTaskLifecycleType.PROGRESS,
                 artifacts=[],
                 error=None,
             ),
             ModelA2ATaskResponse(
                 remote_task_handle="remote-456",
-                status="completed",
+                status=EnumAgentTaskLifecycleType.COMPLETED,
                 artifacts=[],
                 error=None,
             ),
