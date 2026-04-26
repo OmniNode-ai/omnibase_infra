@@ -809,7 +809,7 @@ class TestRuntimeHostProcessLifecycle:
             await startup_entered.wait()
 
             await process.stop()
-            await start_task
+            _ = await start_task
 
         assert startup_cancelled.is_set()
         assert process._startup_task is None

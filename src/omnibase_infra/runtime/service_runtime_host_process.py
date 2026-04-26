@@ -1921,7 +1921,7 @@ class RuntimeHostProcess:
             if startup_task is not asyncio.current_task():
                 startup_task.cancel()
                 with suppress(asyncio.CancelledError):
-                    await startup_task
+                    _ = await startup_task
             self._startup_task = None
             self._is_starting = False
 

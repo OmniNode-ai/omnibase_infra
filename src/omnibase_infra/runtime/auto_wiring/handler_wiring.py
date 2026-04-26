@@ -55,7 +55,6 @@ from omnibase_core.services.service_local_handler_ownership_query import (
 from omnibase_infra.protocols.protocol_dispatch_result_applier import (
     ProtocolDispatchResultApplier,
 )
-from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
     EnumQuarantineReason,
 )
@@ -88,6 +87,7 @@ if TYPE_CHECKING:
     from omnibase_infra.protocols.protocol_dispatch_engine import (
         ProtocolDispatchEngine,
     )
+    from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 
 logger = logging.getLogger(__name__)
 
