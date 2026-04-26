@@ -1092,7 +1092,7 @@ shutdown:
         container_arg = call_kwargs["container"]
         assert container_arg is not None, "Container should not be None"
 
-    async def test_bootstrap_passes_all_required_args_to_service_health(
+    async def test_bootstrap_starts_service_health_before_runtime_attach(
         self,
         mock_wire_infrastructure: MagicMock,
         mock_inmemory_runtime_config: MagicMock,
@@ -1100,10 +1100,10 @@ shutdown:
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
     ) -> None:
-        """Test that bootstrap passes all required arguments to ServiceHealth.
+        """Test that bootstrap starts ServiceHealth before runtime attachment.
 
-        Verifies that container, runtime, port, and version are all passed
-        to the ServiceHealth constructor.
+        OMN-9741 binds /health before long Kafka subscription startup, so the
+        ServiceHealth constructor must not require RuntimeHostProcess.
         """
         from omnibase_infra.runtime.service_kernel import KERNEL_VERSION
         from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
@@ -1119,19 +1119,19 @@ shutdown:
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args.kwargs
 
-        # Verify all required parameters are present
-        expected_params = {"container", "runtime", "port", "version"}
+        # Runtime is attached later after RuntimeHostProcess construction.
+        expected_params = {"container", "port", "version"}
         actual_params = set(call_kwargs.keys())
         assert expected_params == actual_params, (
             f"Expected ServiceHealth params {expected_params}, got {actual_params}"
         )
 
-        # Verify specific values
-        # Note: container is mocked by mock_wire_infrastructure, so we just verify it's passed
         assert call_kwargs["container"] is not None, "Container should not be None"
-        assert call_kwargs["runtime"] == mock_runtime_host.return_value
         assert call_kwargs["port"] == DEFAULT_HTTP_PORT
         assert call_kwargs["version"] == KERNEL_VERSION
+        mock_health_server.return_value.attach_runtime.assert_called_once_with(
+            mock_runtime_host.return_value
+        )
 
     async def test_bootstrap_logs_run_loop_entered_and_shutdown_reason(
         self,
