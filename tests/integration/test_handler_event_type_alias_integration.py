@@ -125,11 +125,18 @@ def test_registration_emits_alias_matching_dispatch_engine_normalization() -> No
 
 
 @pytest.mark.integration
-def test_alias_absent_falls_back_to_class_name_only() -> None:
-    """OMN-9215 fix must not leak: no alias declared → class-name key only.
+def test_alias_absent_falls_back_to_class_name_and_topic_derived_alias() -> None:
+    """OMN-9215 fix must not leak: no alias declared → class-name key plus
+    topic-derived alias.
 
-    Regression guard: the strip() addition must not accidentally synthesize
-    an alias where none was declared.
+    When the contract omits an explicit ``event_type`` alias, registration
+    must still register the class-name key (``ModelFooCommand``) AND the
+    topic-suffix-derived alias (``platform.foo-start``). The latter was added
+    to support installed market-package handlers whose envelopes arrive with
+    the dispatch-engine-rewritten topic-derived event_type (OMN-9648). The
+    strip() guard from OMN-9215 still must not synthesize an alias from an
+    explicit-but-empty value, which is covered by the unit test
+    ``test_message_types_omits_alias_when_only_whitespace``.
     """
 
     class _FakeHandler:
@@ -156,4 +163,4 @@ def test_alias_absent_falls_back_to_class_name_only() -> None:
             container=None,
         )
 
-    assert prepared.message_types == {"ModelFooCommand"}
+    assert prepared.message_types == {"ModelFooCommand", "platform.foo-start"}
