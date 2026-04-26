@@ -2330,6 +2330,50 @@ async def bootstrap() -> int:
             correlation_id,
         )
 
+        # Start HTTP health server before long Kafka subscription work. At this
+        # point RuntimeHostProcess does not exist yet, so ServiceHealth serves
+        # startup liveness with runtime_attached=false and attaches runtime later.
+        http_port_str = os.getenv("ONEX_HTTP_PORT", str(DEFAULT_HTTP_PORT))
+        try:
+            http_port = int(http_port_str)
+            if not MIN_PORT <= http_port <= MAX_PORT:
+                logger.warning(
+                    "ONEX_HTTP_PORT %d outside valid range %d-%d, using default %d (correlation_id=%s)",
+                    http_port,
+                    MIN_PORT,
+                    MAX_PORT,
+                    DEFAULT_HTTP_PORT,
+                    correlation_id,
+                )
+                http_port = DEFAULT_HTTP_PORT
+        except ValueError:
+            logger.warning(
+                "Invalid ONEX_HTTP_PORT value '%s', using default %d (correlation_id=%s)",
+                http_port_str,
+                DEFAULT_HTTP_PORT,
+                correlation_id,
+            )
+            http_port = DEFAULT_HTTP_PORT
+
+        health_server = ServiceHealth(
+            container=container,
+            port=http_port,
+            version=KERNEL_VERSION,
+        )
+        health_start_time = time.time()
+        await health_server.start()
+        health_start_duration = time.time() - health_start_time
+        logger.debug(
+            "Health server started in %.3fs before Kafka subscriptions (correlation_id=%s)",
+            health_start_duration,
+            correlation_id,
+            extra={
+                "duration_seconds": health_start_duration,
+                "port": http_port,
+                "runtime_attached": False,
+            },
+        )
+
         if (
             auto_wiring_report is not None
             and auto_wiring_manifest_for_subscriptions is not None
@@ -2649,6 +2693,7 @@ async def bootstrap() -> int:
                 "output_topic": config.output_topic,
             },
         )
+        health_server.attach_runtime(runtime)
 
         # 7. Setup graceful shutdown
         shutdown_event = asyncio.Event()
@@ -2700,52 +2745,6 @@ async def bootstrap() -> int:
                 loop.call_soon_threadsafe(shutdown_event.set)
 
             signal.signal(signal.SIGINT, windows_handler)
-
-        # 8. Start HTTP health server for Docker/K8s probes
-        # Started BEFORE runtime.start() so Docker health checks pass during
-        # the slow Kafka consumer-join phase (runtime.start() can take 10+ min).
-        # The health server has no dependency on the runtime being started.
-        # Port can be configured via ONEX_HTTP_PORT environment variable
-        http_port_str = os.getenv("ONEX_HTTP_PORT", str(DEFAULT_HTTP_PORT))
-        try:
-            http_port = int(http_port_str)
-            if not MIN_PORT <= http_port <= MAX_PORT:
-                logger.warning(
-                    "ONEX_HTTP_PORT %d outside valid range %d-%d, using default %d (correlation_id=%s)",
-                    http_port,
-                    MIN_PORT,
-                    MAX_PORT,
-                    DEFAULT_HTTP_PORT,
-                    correlation_id,
-                )
-                http_port = DEFAULT_HTTP_PORT
-        except ValueError:
-            logger.warning(
-                "Invalid ONEX_HTTP_PORT value '%s', using default %d (correlation_id=%s)",
-                http_port_str,
-                DEFAULT_HTTP_PORT,
-                correlation_id,
-            )
-            http_port = DEFAULT_HTTP_PORT
-
-        health_server = ServiceHealth(
-            container=container,
-            runtime=runtime,
-            port=http_port,
-            version=KERNEL_VERSION,
-        )
-        health_start_time = time.time()
-        await health_server.start()
-        health_start_duration = time.time() - health_start_time
-        logger.debug(
-            "Health server started in %.3fs (correlation_id=%s)",
-            health_start_duration,
-            correlation_id,
-            extra={
-                "duration_seconds": health_start_duration,
-                "port": http_port,
-            },
-        )
 
         # 9. Start runtime
         runtime_start_time = time.time()
