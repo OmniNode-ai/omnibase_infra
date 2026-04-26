@@ -39,6 +39,10 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelLifecycleHooks,
     ModelQuarantineRecord,
 )
+from omnibase_infra.runtime.auto_wiring.profile_ownership import (
+    ModelRuntimeProfileOwnershipResult,
+    filter_manifest_for_runtime_profile,
+)
 from omnibase_infra.runtime.auto_wiring.report import (
     EnumWiringOutcome,
     ModelAutoWiringReport,
@@ -70,8 +74,10 @@ __all__ = [
     "ModelLifecycleHooks",
     "ModelQuarantineRecord",
     "ModelQuarantinedWiring",
+    "ModelRuntimeProfileOwnershipResult",
     "discover_contracts",
     "discover_contracts_from_paths",
+    "filter_manifest_for_runtime_profile",
     "subscribe_wired_contract_topics",
     "wire_from_manifest",
 ]

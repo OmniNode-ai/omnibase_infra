@@ -280,6 +280,8 @@ def _parse_contract(
     elif isinstance(h_raw, dict):
         handler_routing = _parse_legacy_handler(h_raw)
 
+    runtime_profiles = _extract_runtime_profiles(raw)
+
     return ModelDiscoveredContract(
         name=raw.get("name", entry_point_name),
         node_type=raw.get("node_type", "UNKNOWN"),
@@ -290,9 +292,42 @@ def _parse_contract(
         entry_point_name=entry_point_name,
         package_name=package_name,
         package_version=package_version,
+        runtime_profiles=runtime_profiles,
         event_bus=event_bus,
         handler_routing=handler_routing,
     )
+
+
+def _extract_runtime_profiles(raw: dict) -> tuple[str, ...]:
+    """Extract contract-declared runtime profile ownership.
+
+    Preferred location is top-level ``runtime_profiles``. ``descriptor`` is also
+    supported so node contracts can keep operational ownership metadata next to
+    existing archetype/purity declarations.
+    """
+    profiles_raw = raw.get("runtime_profiles")
+    descriptor_raw = raw.get("descriptor")
+    if profiles_raw is None and isinstance(descriptor_raw, dict):
+        profiles_raw = descriptor_raw.get("runtime_profiles")
+
+    if profiles_raw is None:
+        return ()
+    if isinstance(profiles_raw, str):
+        raw_values = (profiles_raw,)
+    elif isinstance(profiles_raw, list | tuple):
+        raw_values = tuple(profiles_raw)
+    else:
+        raise ValueError("runtime_profiles must be a string or list of strings")
+
+    profiles: list[str] = []
+    for raw_profile in raw_values:
+        if not isinstance(raw_profile, str):
+            raise ValueError("runtime_profiles entries must be strings")
+        profile = raw_profile.strip().lower()
+        if not profile:
+            raise ValueError("runtime_profiles entries cannot be blank")
+        profiles.append(profile)
+    return tuple(dict.fromkeys(profiles))
 
 
 def _parse_handler_routing(hr_raw: dict) -> ModelHandlerRouting:

@@ -24,6 +24,8 @@ node_version:
   minor: 1
   patch: 0
 node_type: "EFFECT_GENERIC"
+runtime_profiles:
+  - "effects"
 description: >
   Capability-oriented EFFECT node for build_loop terminal-event persistence. Consumes ModelPayloadBuildLoopAppend intents and INSERTs one row per intent into the public.build_loop_runs append-only audit table. There is no idempotency key — retried terminal events surface as duplicate rows so duplication is observable rather than silently swallowed.
 

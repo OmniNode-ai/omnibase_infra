@@ -739,6 +739,7 @@ async def bootstrap() -> int:
     wiring_health_checker: WiringHealthChecker | None = None
     wiring_health_task: asyncio.Task[None] | None = None
     triage_unsub: Callable[[], Awaitable[None]] | None = None
+    build_loop_db_handler = None  # HandlerDb | None, assigned inside try block
     baselines_task: asyncio.Task[None] | None = None
     _baselines_pool = None  # asyncpg.Pool | None, assigned inside try block
     savings_task: asyncio.Task[None] | None = None
@@ -1922,6 +1923,68 @@ async def bootstrap() -> int:
         plugin_activation_start = time.time()
         auto_wiring_result_appliers = {}
 
+        if event_bus is not None:
+            from omnibase_infra.enums.generated.enum_omnimarket_topic import (
+                EnumOmnimarketTopic,
+            )
+            from omnibase_infra.runtime.service_dispatch_result_applier import (
+                DispatchResultApplier,
+            )
+
+            auto_wiring_result_appliers["build_loop_orchestrator"] = (
+                DispatchResultApplier(
+                    event_bus=event_bus,
+                    output_topic=EnumOmnimarketTopic.EVT_BUILD_LOOP_ORCHESTRATOR_COMPLETED_V1.value,
+                )
+            )
+            logger.info(
+                "Build-loop orchestrator terminal result applier registered "
+                "(contract=build_loop_orchestrator, correlation_id=%s)",
+                correlation_id,
+            )
+
+        build_loop_dsn = (os.getenv("OMNIBASE_INFRA_DB_URL") or "").strip()
+        if event_bus is not None and build_loop_dsn:
+            from omnibase_infra.handlers.handler_db import HandlerDb
+            from omnibase_infra.nodes.node_build_loop_write_effect.handlers import (
+                HandlerBuildLoopAppend,
+            )
+            from omnibase_infra.runtime.intent_effects import (
+                IntentEffectBuildLoopAppend,
+            )
+            from omnibase_infra.runtime.service_intent_executor import IntentExecutor
+
+            build_loop_db_handler = HandlerDb(container)
+            await build_loop_db_handler.initialize({"dsn": build_loop_dsn})
+            build_loop_append_handler = HandlerBuildLoopAppend(
+                container,
+                build_loop_db_handler,
+            )
+            await build_loop_append_handler.initialize({})
+            build_loop_intent_executor = IntentExecutor(container=container)
+            build_loop_intent_executor.register_handler(
+                "build_loop.append",
+                IntentEffectBuildLoopAppend(build_loop_append_handler),
+            )
+            auto_wiring_result_appliers["node_build_loop_projection_compute"] = (
+                DispatchResultApplier(
+                    event_bus=event_bus,
+                    output_topic=config.output_topic,
+                    intent_executor=build_loop_intent_executor,
+                )
+            )
+            logger.info(
+                "Build-loop raw projection result applier registered "
+                "(contract=node_build_loop_projection_compute, correlation_id=%s)",
+                correlation_id,
+            )
+        elif event_bus is not None:
+            logger.warning(
+                "Build-loop raw projection result applier not registered: "
+                "OMNIBASE_INFRA_DB_URL is not set (correlation_id=%s)",
+                correlation_id,
+            )
+
         # --- Kernel-native: ServiceRegistration lifecycle (OMN-7115) ---
         # ServiceRegistration runs its lifecycle directly, not through the
         # plugin registry loop. It is always activated first.
@@ -2169,6 +2232,7 @@ async def bootstrap() -> int:
             from omnibase_infra.runtime.auto_wiring import (
                 LifecycleHookExecutor,
                 discover_contracts,
+                filter_manifest_for_runtime_profile,
                 subscribe_wired_contract_topics,
                 wire_from_manifest,
             )
@@ -2192,6 +2256,28 @@ async def bootstrap() -> int:
             )
 
             if manifest.total_discovered > 0:
+                runtime_profile = os.getenv("RUNTIME_PROFILE", "main")
+                ownership_result = filter_manifest_for_runtime_profile(
+                    manifest=manifest,
+                    runtime_profile=runtime_profile,
+                )
+                manifest = ownership_result.manifest
+                if ownership_result.skipped_contracts:
+                    logger.info(
+                        "Auto-wiring runtime profile ownership: profile=%s "
+                        "owned=%d skipped=%d (correlation_id=%s)",
+                        ownership_result.runtime_profile,
+                        manifest.total_discovered,
+                        len(ownership_result.skipped_contracts),
+                        correlation_id,
+                        extra={
+                            "runtime_profile": ownership_result.runtime_profile,
+                            "skipped_contracts": list(
+                                ownership_result.skipped_contracts
+                            ),
+                        },
+                    )
+
                 # 2. Collect topics already claimed by explicit plugins
                 #    by inspecting registered routes on the dispatch engine
                 claimed_topic_patterns = set()
@@ -3228,6 +3314,17 @@ async def bootstrap() -> int:
                 )
             triage_unsub = None
 
+        if build_loop_db_handler is not None:
+            try:
+                await build_loop_db_handler.shutdown()
+            except Exception as build_loop_db_error:  # noqa: BLE001
+                logger.warning(
+                    "Failed to shut down build-loop DB handler: %s (correlation_id=%s)",
+                    sanitize_error_message(build_loop_db_error),
+                    correlation_id,
+                )
+            build_loop_db_handler = None
+
         # Stop WiringHealthChecker periodic emission (OMN-6133)
         if wiring_health_task is not None:
             wiring_health_task.cancel()
@@ -3476,6 +3573,16 @@ async def bootstrap() -> int:
             except Exception as cleanup_error:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Failed to stop runtime error triage consumer during cleanup: %s (correlation_id=%s)",
+                    sanitize_error_message(cleanup_error),
+                    correlation_id,
+                )
+
+        if build_loop_db_handler is not None:
+            try:
+                await build_loop_db_handler.shutdown()
+            except Exception as cleanup_error:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "Failed to shut down build-loop DB handler during cleanup: %s (correlation_id=%s)",
                     sanitize_error_message(cleanup_error),
                     correlation_id,
                 )

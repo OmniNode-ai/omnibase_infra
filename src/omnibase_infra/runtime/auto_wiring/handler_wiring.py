@@ -332,7 +332,16 @@ def _make_dispatch_callback(
     ) -> ModelDispatchResult | None:
         handle_method = handler_instance.handle
         if event_model is None:
-            return await handle_method(envelope)
+            from omnibase_infra.models.dispatch.model_dispatch_result import (
+                ModelDispatchResult,
+            )
+
+            raw_result = await handle_method(envelope)
+            if raw_result is None or isinstance(raw_result, ModelDispatchResult):
+                return raw_result
+            if isinstance(raw_result, str | list):
+                return cast("ModelDispatchResult | None", raw_result)
+            return _normalize_handler_result(raw_result, envelope, None)
 
         payload = _extract_dispatch_payload(envelope)
         model_cls = _import_event_model_class(event_model)
@@ -410,6 +419,7 @@ def _normalize_handler_result(
     from uuid import UUID, uuid4
 
     from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
+    from omnibase_core.models.reducer.model_intent import ModelIntent
     from omnibase_infra.enums import EnumDispatchStatus
     from omnibase_infra.models.dispatch.model_dispatch_result import (
         ModelDispatchResult,
@@ -434,7 +444,9 @@ def _normalize_handler_result(
             event for event in result.events if isinstance(event, BaseModel)
         ]
         output_intents = tuple(result.intents)
-        if isinstance(result.result, BaseModel):
+        if isinstance(result.result, ModelIntent):
+            output_intents = output_intents + (result.result,)
+        elif isinstance(result.result, BaseModel):
             output_events.append(result.result)
     elif isinstance(result, BaseModel):
         output_events = [result]
@@ -470,6 +482,22 @@ def _is_raw_event_projection_contract(contract: ModelDiscoveredContract) -> bool
         return False
     consumer_purpose = (contract.event_bus.consumer_purpose or "").strip().lower()
     return consumer_purpose in {"audit", "projection"}
+
+
+def _raw_event_projection_enabled(
+    contract: ModelDiscoveredContract,
+    result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier] | None,
+) -> bool:
+    """Return true when a raw projection contract has an explicit effect path.
+
+    Raw audit/projection consumers carry Kafka `ModelEventMessage` bytes and
+    usually emit intents. Wiring them without a result applier would consume
+    offsets while dropping those intents, so the kernel must opt in per contract.
+    """
+    return _is_raw_event_projection_contract(contract) and (
+        result_appliers_by_contract is not None
+        and contract.name in result_appliers_by_contract
+    )
 
 
 def _read_db_io_tables(contract_path: Path) -> list[dict[str, str]]:
@@ -615,7 +643,7 @@ def _make_projection_dispatch_callback(
                 dict(payload) if isinstance(payload, dict) else {}
             )
             if hasattr(payload, "model_dump"):
-                input_data = payload.model_dump(mode="python")  # type: ignore[union-attr]  # noqa: model-dump-bare
+                input_data = payload.model_dump(mode="json")  # type: ignore[union-attr]
             input_data["_db"] = adapter
             input_data["_event_type"] = event_type
             result = handler_instance.handle(input_data)  # type: ignore[union-attr, attr-defined]
@@ -705,6 +733,48 @@ def _make_event_bus_callback(
         except Exception as exc:  # noqa: BLE001 — boundary: log and discard; unsubscribe unavailable here
             logger.error(
                 "Auto-wiring callback error: topic=%s error_type=%s error=%s",
+                topic,
+                type(exc).__name__,
+                exc,
+            )
+
+    return callback
+
+
+def _make_raw_event_projection_callback(
+    topic: str,
+    dispatch_engine: ProtocolDispatchEngine,
+    result_applier: ProtocolDispatchResultApplier,
+) -> Callable[..., Awaitable[None]]:
+    """Create a callback for raw Kafka `ModelEventMessage` projection contracts."""
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+    from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+
+    async def callback(message: object) -> None:
+        try:
+            raw_message = (
+                message
+                if isinstance(message, ModelEventMessage)
+                else ModelEventMessage.model_validate(message)
+            )
+            if not await _wait_for_dispatch_engine_freeze(topic, dispatch_engine):
+                return
+            envelope: ModelEventEnvelope[dict[str, object]] = ModelEventEnvelope(
+                payload=raw_message.model_dump(mode="json"),
+                correlation_id=raw_message.headers.correlation_id,
+                envelope_timestamp=raw_message.headers.timestamp,
+                event_type=(
+                    _derive_event_type_alias_from_topic(topic)
+                    or raw_message.headers.event_type
+                ),
+                source_tool=raw_message.headers.source,
+            )
+            result = await dispatch_engine.dispatch(topic, envelope)
+            if result is not None:
+                await result_applier.apply(result, envelope.correlation_id)
+        except Exception as exc:  # noqa: BLE001 — consumer boundary; log and continue
+            logger.error(
+                "Raw projection callback error: topic=%s error_type=%s error=%s",
                 topic,
                 type(exc).__name__,
                 exc,
@@ -972,7 +1042,11 @@ async def wire_from_manifest(
     pre_resolved_handlers: dict[str, object] = {}
     if container is not None:
         for contract in manifest.contracts:
-            if _is_raw_event_projection_contract(contract):
+            if _is_raw_event_projection_contract(
+                contract
+            ) and not _raw_event_projection_enabled(
+                contract, result_appliers_by_contract
+            ):
                 continue
             if contract.handler_routing is None:
                 continue
@@ -1014,6 +1088,7 @@ async def wire_from_manifest(
                 pre_resolved_handlers=pre_resolved_handlers
                 if container is not None
                 else None,
+                result_appliers_by_contract=result_appliers_by_contract,
             )
             prepared_contracts.append(prepared)
         except TypeError:
@@ -1142,11 +1217,19 @@ async def subscribe_wired_contract_topics(
     contract_by_name = {contract.name: contract for contract in manifest.contracts}
     subscriptions_by_contract: dict[str, tuple[str, ...]] = {}
 
-    for result in report.results:
+    for result in _prioritize_subscription_results(
+        report,
+        result_appliers_by_contract,
+    ):
         if result.outcome is not EnumWiringOutcome.WIRED:
             continue
         contract = contract_by_name.get(result.contract_name)
         if contract is None:
+            continue
+        if _is_raw_event_projection_contract(contract) and (
+            result_appliers_by_contract is None
+            or contract.name not in result_appliers_by_contract
+        ):
             continue
         topics_subscribed = await _subscribe_contract_topics(
             contract=contract,
@@ -1160,6 +1243,34 @@ async def subscribe_wired_contract_topics(
     return subscriptions_by_contract
 
 
+def _prioritize_subscription_results(
+    report: ModelAutoWiringReport,
+    result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
+    | None = None,
+) -> tuple[ModelContractWiringResult, ...]:
+    """Return wired results with explicitly-applied contracts first.
+
+    Contract-specific result appliers represent durable side effects such as
+    projection writes. Subscribing them before the generic backlog avoids
+    missing readiness-critical events during long Kafka group-join startup.
+    """
+    if not result_appliers_by_contract:
+        return tuple(report.results)
+
+    priority_contracts = frozenset(result_appliers_by_contract)
+    indexed_results = tuple(enumerate(report.results))
+    return tuple(
+        result
+        for _, result in sorted(
+            indexed_results,
+            key=lambda item: (
+                0 if item[1].contract_name in priority_contracts else 1,
+                item[0],
+            ),
+        )
+    )
+
+
 def _prepare_contract_wiring(
     *,
     contract: ModelDiscoveredContract,
@@ -1171,6 +1282,8 @@ def _prepare_contract_wiring(
     container: object | None = None,
     materialized_explicit_dependencies: (dict[str, dict[str, object]] | None) = None,
     pre_resolved_handlers: dict[str, object] | None = None,
+    result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
+    | None = None,
 ) -> PreparedContractWiring:
     """Prepare one contract for wiring — NO side effects.
 
@@ -1207,7 +1320,9 @@ def _prepare_contract_wiring(
             ),
         )
 
-    if _is_raw_event_projection_contract(contract):
+    if _is_raw_event_projection_contract(
+        contract
+    ) and not _raw_event_projection_enabled(contract, result_appliers_by_contract):
         consumer_purpose = (contract.event_bus.consumer_purpose or "").strip().lower()
         return PreparedContractWiring(
             contract=contract,
@@ -1424,11 +1539,23 @@ async def _subscribe_contract_topics(
 
     topics_subscribed: list[str] = []
     for topic in contract.event_bus.subscribe_topics:
-        callback = _make_event_bus_callback(
-            topic,
-            dispatch_engine,  # type: ignore[arg-type]
-            result_applier=effective_result_applier,
-        )
+        if _is_raw_event_projection_contract(contract):
+            if effective_result_applier is None:
+                raise ModelOnexError(
+                    f"Raw event projection contract {contract.name!r} requires "
+                    "an explicit result applier to avoid dropping intents."
+                )
+            callback = _make_raw_event_projection_callback(
+                topic,
+                dispatch_engine,  # type: ignore[arg-type]
+                effective_result_applier,
+            )
+        else:
+            callback = _make_event_bus_callback(
+                topic,
+                dispatch_engine,  # type: ignore[arg-type]
+                result_applier=effective_result_applier,
+            )
         await typed_bus.subscribe(
             topic=topic,
             node_identity=node_identity,
