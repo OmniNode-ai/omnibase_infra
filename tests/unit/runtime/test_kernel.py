@@ -1092,6 +1092,7 @@ shutdown:
         container_arg = call_kwargs["container"]
         assert container_arg is not None, "Container should not be None"
 
+    @pytest.mark.unit
     async def test_bootstrap_starts_service_health_before_runtime_attach(
         self,
         mock_wire_infrastructure: MagicMock,
