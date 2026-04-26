@@ -19,9 +19,13 @@ from omnibase_core.enums.enum_agent_task_lifecycle_type import (
 )
 from omnibase_core.enums.enum_invocation_kind import EnumInvocationKind
 from omnibase_core.models.common.model_schema_value import ModelSchemaValue
-from omnibase_core.models.delegation import (
+from omnibase_core.models.delegation.model_agent_task_lifecycle_event import (
     ModelAgentTaskLifecycleEvent,
+)
+from omnibase_core.models.delegation.model_invocation_command import (
     ModelInvocationCommand,
+)
+from omnibase_core.models.delegation.model_remote_task_state import (
     ModelRemoteTaskState,
 )
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
