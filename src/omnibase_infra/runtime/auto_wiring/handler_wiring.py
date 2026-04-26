@@ -55,6 +55,7 @@ from omnibase_core.services.service_local_handler_ownership_query import (
 from omnibase_infra.protocols.protocol_dispatch_result_applier import (
     ProtocolDispatchResultApplier,
 )
+from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
     EnumQuarantineReason,
 )
@@ -87,7 +88,6 @@ if TYPE_CHECKING:
     from omnibase_infra.protocols.protocol_dispatch_engine import (
         ProtocolDispatchEngine,
     )
-    from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 
 logger = logging.getLogger(__name__)
 
@@ -1402,8 +1402,14 @@ async def _subscribe_contract_topics(
         and len(contract.event_bus.publish_topics) == 1
         and not _contract_declares_db_io(contract)
     ):
+        # ProtocolEventBusLike is @runtime_checkable; isinstance both narrows
+        # the type for mypy and provides a runtime use of the import (avoiding
+        # CodeQL py/unused-import false positive when cast() is the only ref).
+        assert isinstance(event_bus, ProtocolEventBusLike), (
+            f"event_bus must implement ProtocolEventBusLike, got {type(event_bus).__name__}"
+        )
         effective_result_applier = DispatchResultApplier(
-            event_bus=cast("ProtocolEventBusLike", event_bus),
+            event_bus=event_bus,
             output_topic=contract.event_bus.publish_topics[0],
         )
     node_identity = ModelNodeIdentity(
