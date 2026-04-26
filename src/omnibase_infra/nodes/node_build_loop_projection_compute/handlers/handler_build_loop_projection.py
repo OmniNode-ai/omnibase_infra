@@ -84,10 +84,7 @@ class HandlerBuildLoopProjection:
         envelope: dict[str, object],
     ) -> ModelHandlerOutput[ModelIntent]:
         """ProtocolHandler entry point — extract message, delegate to project()."""
-        correlation_id_raw = envelope.get("correlation_id")
-        correlation_id = (
-            UUID(str(correlation_id_raw)) if correlation_id_raw else uuid4()
-        )
+        correlation_id = self._safe_correlation_id(envelope.get("correlation_id"))
         input_envelope_id = uuid4()
 
         payload_raw = envelope.get("payload")
@@ -184,6 +181,21 @@ class HandlerBuildLoopProjection:
         )
 
     @staticmethod
+    def _safe_correlation_id(raw: object) -> UUID:
+        """Parse a correlation ID from envelope-supplied raw input.
+
+        Returns a fresh UUID if `raw` is missing, empty, or unparseable —
+        we never want a malformed envelope to surface as ValueError to the
+        runtime, since terminal-event projection is best-effort audit.
+        """
+        if not raw:
+            return uuid4()
+        try:
+            return UUID(str(raw))
+        except (ValueError, TypeError):
+            return uuid4()
+
+    @staticmethod
     def _first_str(body: dict[str, JsonType], keys: tuple[str, ...]) -> str | None:
         for k in keys:
             v = body.get(k)
@@ -197,9 +209,13 @@ class HandlerBuildLoopProjection:
             raw = body.get(k)
             if isinstance(raw, str) and raw:
                 try:
-                    return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                    parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
                 except ValueError:
                     continue
+                # Persist into TIMESTAMPTZ; assume UTC if input lacked a tzinfo.
+                return (
+                    parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+                )
         return datetime.now(UTC)
 
     @staticmethod

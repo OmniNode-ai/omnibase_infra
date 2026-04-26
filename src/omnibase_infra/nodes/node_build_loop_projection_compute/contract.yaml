@@ -22,7 +22,7 @@ contract_version:
 node_version: "0.1.0"
 node_type: "COMPUTE_GENERIC"
 description: >
-  COMPUTE node that subscribes to onex.evt.omnimarket.build-loop-orchestrator-completed.v1 and emits ledger-style intents for the EFFECT layer to persist into the build_loop_runs append-only audit table. Uses consumer_purpose="audit" and auto_offset_reset="earliest" so retried or replayed terminal events are captured rather than silently swallowed.
+  Subscribes to onex.evt.omnimarket.build-loop-orchestrator-completed.v1 and projects each terminal event into a ModelPayloadBuildLoopAppend intent for NodeBuildLoopWriteEffect to persist into the build_loop_runs append-only audit table. Uses consumer_purpose="audit" and auto_offset_reset="earliest" so retried or replayed terminal events are captured rather than silently swallowed. Mirrors the canonical node_ledger_projection_compute pattern.
 
 event_bus:
   version:
@@ -69,7 +69,7 @@ dependencies:
     description: "Effect node that persists projected intents into build_loop_runs"
 metadata:
   description: >
-    COMPUTE node that subscribes to the build_loop_workflow terminal event topic and projects each event into a ModelPayloadBuildLoopAppend intent for the EFFECT layer.
+    Subscribes to the build_loop_workflow terminal event topic and projects each event into a ModelPayloadBuildLoopAppend intent for the EFFECT layer to persist into the build_loop_runs append-only audit table.
 
   author: "OmniNode Team"
   license: "MIT"

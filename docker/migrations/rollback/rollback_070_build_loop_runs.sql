@@ -4,5 +4,5 @@
 -- per-workflow index. Manual execution only — never auto-applied (rollback/
 -- is not mounted to docker-entrypoint-initdb.d).
 
-DROP INDEX IF EXISTS build_loop_runs_workflow_created_idx;
-DROP TABLE IF EXISTS build_loop_runs;
+DROP INDEX IF EXISTS public.build_loop_runs_workflow_created_idx;
+DROP TABLE IF EXISTS public.build_loop_runs;

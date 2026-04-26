@@ -12,6 +12,7 @@ Ticket: OMN-9774
 
 from __future__ import annotations
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.nodes.node_effect import NodeEffect
 
 
@@ -19,10 +20,12 @@ class NodeBuildLoopWriteEffect(NodeEffect):
     """Declarative EFFECT node for build_loop_runs persistence.
 
     All behavior is defined in contract.yaml and delegated to
-    HandlerBuildLoopAppend. This node contains no custom logic.
+    HandlerBuildLoopAppend. This node contains no custom logic beyond the
+    explicit DI constructor required by the nodes/*/node.py guideline.
     """
 
-    # Declarative node - all behavior defined in contract.yaml
+    def __init__(self, container: ModelONEXContainer) -> None:
+        super().__init__(container)
 
 
 __all__ = ["NodeBuildLoopWriteEffect"]

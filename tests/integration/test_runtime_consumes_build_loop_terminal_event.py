@@ -36,6 +36,8 @@ KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
 
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.kafka,
+    pytest.mark.postgres,
     pytest.mark.skipif(
         not KAFKA_INTEGRATION_TESTS,
         reason=(

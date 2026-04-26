@@ -99,9 +99,16 @@ class HandlerBuildLoopAppend:
     async def append(
         self,
         payload: ModelPayloadBuildLoopAppend,
+        *,
+        correlation_id: UUID | None = None,
     ) -> ModelBuildLoopAppendResult:
-        """INSERT one row into build_loop_runs."""
-        correlation_id = payload.correlation_id or uuid4()
+        """INSERT one row into build_loop_runs.
+
+        ``correlation_id`` resolution order: caller-supplied → payload-embedded
+        → fresh uuid4. Pass the envelope-derived correlation_id from
+        ``execute()`` to keep request traceability intact.
+        """
+        correlation_id = correlation_id or payload.correlation_id or uuid4()
 
         if not self._initialized:
             ctx = ModelInfraErrorContext.with_correlation(
@@ -177,10 +184,7 @@ class HandlerBuildLoopAppend:
         envelope: dict[str, object],
     ) -> ModelHandlerOutput[ModelBuildLoopAppendResult]:
         """ProtocolHandler entry point."""
-        correlation_id_raw = envelope.get("correlation_id")
-        correlation_id = (
-            UUID(str(correlation_id_raw)) if correlation_id_raw else uuid4()
-        )
+        correlation_id = self._safe_correlation_id(envelope.get("correlation_id"))
         input_envelope_id = uuid4()
 
         payload_raw = envelope.get("payload")

@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelBuildLoopAppendResult(BaseModel):
     """Outcome of one build_loop_runs INSERT."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     success: bool = Field(
         ...,
