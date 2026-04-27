@@ -25,6 +25,9 @@ from omnibase_infra.enums import (
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.nodes.node_delegation_orchestrator.contract_topics import (
+    TOPIC_ID_AGENT_TASK_LIFECYCLE,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.dispatchers._util_envelope_extract import (
     extract_envelope_fields,
 )
@@ -39,9 +42,6 @@ if TYPE_CHECKING:
 __all__ = ["DispatcherAgentTaskLifecycle"]
 
 logger = logging.getLogger(__name__)
-
-TOPIC_ID_AGENT_TASK_LIFECYCLE = "delegation.agent-task-lifecycle"
-_MODEL_EVENT_ENVELOPE_TYPE = ModelEventEnvelope
 
 
 class DispatcherAgentTaskLifecycle(MixinAsyncCircuitBreaker):
@@ -85,12 +85,27 @@ class DispatcherAgentTaskLifecycle(MixinAsyncCircuitBreaker):
         envelope: object,
     ) -> ModelDispatchResult:
         started_at = datetime.now(UTC)
-        correlation_id = None
+        correlation_id = uuid4()
 
         try:
-            correlation_id, raw_payload = extract_envelope_fields(
+            if not isinstance(envelope, (dict, ModelEventEnvelope)):
+                return ModelDispatchResult(
+                    dispatch_id=uuid4(),
+                    status=EnumDispatchStatus.INVALID_MESSAGE,
+                    topic=TOPIC_ID_AGENT_TASK_LIFECYCLE,
+                    dispatcher_id=self.dispatcher_id,
+                    started_at=started_at,
+                    completed_at=started_at,
+                    duration_ms=0.0,
+                    error_message=f"Unsupported envelope type: {type(envelope).__name__}",
+                    correlation_id=correlation_id,
+                    output_events=[],
+                )
+
+            extracted_correlation_id, raw_payload = extract_envelope_fields(
                 cast("ModelEventEnvelope[object] | dict[str, object]", envelope)
             )
+            correlation_id = extracted_correlation_id or correlation_id
             async with self._circuit_breaker_lock:
                 await self._check_circuit_breaker("handle", correlation_id)
 
@@ -148,7 +163,7 @@ class DispatcherAgentTaskLifecycle(MixinAsyncCircuitBreaker):
                 correlation_id=correlation_id,
                 output_events=[],
             )
-        except (ValidationError, ValueError, KeyError) as e:
+        except (ValidationError, ValueError, KeyError, TypeError, AttributeError) as e:
             completed_at = datetime.now(UTC)
             duration_ms = (completed_at - started_at).total_seconds() * 1000
             return ModelDispatchResult(
