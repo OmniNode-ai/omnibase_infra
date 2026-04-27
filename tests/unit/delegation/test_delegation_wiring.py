@@ -16,7 +16,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from omnibase_infra.nodes.node_delegation_orchestrator.wiring import (
+    ROUTE_ID_AGENT_TASK_LIFECYCLE,
     ROUTE_ID_DELEGATION_REQUEST,
+    ROUTE_ID_INVOCATION_COMMAND,
     ROUTE_ID_QUALITY_GATE_RESULT,
     ROUTE_ID_ROUTING_DECISION,
     wire_delegation_dispatchers,
@@ -47,25 +49,25 @@ def mock_engine() -> MagicMock:
 
 @pytest.mark.unit
 class TestWireDelegationDispatchers:
-    """wire_delegation_dispatchers must register 3 dispatchers AND 3 routes."""
+    """wire_delegation_dispatchers must register all delegation routes."""
 
     @pytest.mark.asyncio
-    async def test_registers_three_dispatchers(
+    async def test_registers_dispatchers(
         self, mock_container: MagicMock, mock_engine: MagicMock
     ) -> None:
         result = await wire_delegation_dispatchers(mock_container, mock_engine)
 
-        assert len(result["dispatchers"]) == 3
-        assert mock_engine.register_dispatcher.call_count == 3
+        assert len(result["dispatchers"]) == 5
+        assert mock_engine.register_dispatcher.call_count == 5
 
     @pytest.mark.asyncio
-    async def test_registers_three_routes(
+    async def test_registers_routes(
         self, mock_container: MagicMock, mock_engine: MagicMock
     ) -> None:
         result = await wire_delegation_dispatchers(mock_container, mock_engine)
 
-        assert len(result["routes"]) == 3
-        assert mock_engine.register_route.call_count == 3
+        assert len(result["routes"]) == 5
+        assert mock_engine.register_route.call_count == 5
 
     @pytest.mark.asyncio
     async def test_route_ids_are_correct(
@@ -74,8 +76,10 @@ class TestWireDelegationDispatchers:
         result = await wire_delegation_dispatchers(mock_container, mock_engine)
 
         assert ROUTE_ID_DELEGATION_REQUEST in result["routes"]
+        assert ROUTE_ID_INVOCATION_COMMAND in result["routes"]
         assert ROUTE_ID_ROUTING_DECISION in result["routes"]
         assert ROUTE_ID_QUALITY_GATE_RESULT in result["routes"]
+        assert ROUTE_ID_AGENT_TASK_LIFECYCLE in result["routes"]
 
     @pytest.mark.asyncio
     async def test_dispatcher_ids_are_correct(
@@ -84,8 +88,10 @@ class TestWireDelegationDispatchers:
         result = await wire_delegation_dispatchers(mock_container, mock_engine)
 
         assert "dispatcher.delegation.request" in result["dispatchers"]
+        assert "dispatcher.delegation.invocation" in result["dispatchers"]
         assert "dispatcher.delegation.routing-decision" in result["dispatchers"]
         assert "dispatcher.delegation.quality-gate-result" in result["dispatchers"]
+        assert "dispatcher.delegation.agent-task-lifecycle" in result["dispatchers"]
 
     @pytest.mark.asyncio
     async def test_status_is_success(

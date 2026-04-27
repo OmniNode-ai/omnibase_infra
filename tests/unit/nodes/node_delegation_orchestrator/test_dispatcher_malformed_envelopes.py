@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+import yaml
 
 from omnibase_infra.enums import EnumDispatchStatus
 from omnibase_infra.nodes.node_delegation_orchestrator.contract_topics import (
@@ -16,6 +19,22 @@ from omnibase_infra.nodes.node_delegation_orchestrator.dispatchers.dispatcher_ag
 from omnibase_infra.nodes.node_delegation_orchestrator.dispatchers.dispatcher_invocation_command import (
     DispatcherInvocationCommand,
 )
+
+
+def test_dispatcher_topic_constants_match_delegation_contract() -> None:
+    contract_path = (
+        Path(__file__).parents[4]
+        / "src"
+        / "omnibase_infra"
+        / "nodes"
+        / "node_delegation_orchestrator"
+        / "contract.yaml"
+    )
+    contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    subscribe_topics = contract["event_bus"]["subscribe_topics"]
+
+    assert TOPIC_ID_INVOCATION_COMMAND in subscribe_topics
+    assert TOPIC_ID_AGENT_TASK_LIFECYCLE in subscribe_topics
 
 
 @pytest.mark.asyncio
