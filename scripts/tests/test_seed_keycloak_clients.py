@@ -309,8 +309,6 @@ class TestAudienceMapper:
             return (200, None)
 
         post_called = False
-        original_request = _ensure_mod()._request
-
         def tracking_request(method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
             nonlocal post_called
             if method == "POST" and "protocol-mappers" in url:
