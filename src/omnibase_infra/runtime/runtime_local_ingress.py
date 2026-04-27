@@ -14,9 +14,19 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+from pydantic import ValidationError
 
 from omnibase_infra.runtime.event_bus_subcontract_wiring import (
     EventBusSubcontractWiring,
+)
+from omnibase_infra.runtime.models.model_local_runtime_ingress_error import (
+    ModelLocalRuntimeIngressError,
+)
+from omnibase_infra.runtime.models.model_local_runtime_ingress_request import (
+    ModelLocalRuntimeIngressRequest,
+)
+from omnibase_infra.runtime.models.model_local_runtime_ingress_response import (
+    ModelLocalRuntimeIngressResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -117,7 +127,10 @@ class RuntimeLocalIngressServer:
     def __init__(
         self,
         socket_path: str,
-        request_handler: Callable[[dict[str, object]], Awaitable[dict[str, object]]],
+        request_handler: Callable[
+            [ModelLocalRuntimeIngressRequest],
+            Awaitable[ModelLocalRuntimeIngressResponse],
+        ],
         *,
         socket_timeout_seconds: float = 5.0,
         socket_permissions: int = 0o660,
@@ -186,7 +199,7 @@ class RuntimeLocalIngressServer:
                     break
 
                 response = await self._process_request_line(line)
-                writer.write(json.dumps(response).encode("utf-8") + b"\n")
+                writer.write(response.model_dump_json().encode("utf-8") + b"\n")
                 await writer.drain()
         except ConnectionResetError:
             pass
@@ -194,25 +207,51 @@ class RuntimeLocalIngressServer:
             writer.close()
             await writer.wait_closed()
 
-    async def _process_request_line(self, line: bytes) -> dict[str, object]:
+    async def _process_request_line(
+        self,
+        line: bytes,
+    ) -> ModelLocalRuntimeIngressResponse:
         if len(line) > self._max_payload_bytes:
-            return {
-                "ok": False,
-                "error": "Request exceeds max_payload_bytes",
-            }
+            return ModelLocalRuntimeIngressResponse(
+                ok=False,
+                node_alias="unknown",
+                error=ModelLocalRuntimeIngressError(
+                    code="validation_error",
+                    message="Request exceeds max_payload_bytes",
+                ),
+            )
 
         try:
             raw = json.loads(line.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            return {"ok": False, "error": f"Invalid JSON request: {exc}"}
+            return ModelLocalRuntimeIngressResponse(
+                ok=False,
+                node_alias="unknown",
+                error=ModelLocalRuntimeIngressError(
+                    code="validation_error",
+                    message=f"Invalid JSON request: {exc}",
+                ),
+            )
 
-        if not isinstance(raw, dict):
-            return {
-                "ok": False,
-                "error": "Request must be a JSON object",
-            }
+        try:
+            request = ModelLocalRuntimeIngressRequest.model_validate(raw)
+        except ValidationError as exc:
+            node_alias = "unknown"
+            if isinstance(raw, dict):
+                raw_alias = raw.get("node_alias")
+                if isinstance(raw_alias, str):
+                    node_alias = raw_alias
+            return ModelLocalRuntimeIngressResponse(
+                ok=False,
+                node_alias=node_alias,
+                error=ModelLocalRuntimeIngressError(
+                    code="validation_error",
+                    message="Invalid local runtime ingress request",
+                    details={"errors": json.loads(exc.json(include_url=False))},
+                ),
+            )
 
-        return await self._request_handler(raw)
+        return await self._request_handler(request)
 
 
 def _resolve_package_root(package_name: str) -> Path:
