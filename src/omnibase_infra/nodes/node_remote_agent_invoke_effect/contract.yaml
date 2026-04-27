@@ -12,7 +12,7 @@ node_name: "node_remote_agent_invoke_effect"
 contract_version:
   major: 0
   minor: 1
-  patch: 0
+  patch: 1
 node_version:
   major: 0
   minor: 1
@@ -37,7 +37,7 @@ handler_routing:
         name: "HandlerA2ATask"
         module: "omnibase_infra.nodes.node_remote_agent_invoke_effect.handlers.handler_a2a_task"
         handler_type: "HTTP"
-      description: "Submit remote A2A tasks and persist their initial lifecycle state."
+      description: "Submit remote A2A tasks, persist lifecycle state, deduplicate artifact payloads, and emit terminal lifecycle outcomes."
   execution_mode: "single"
   max_timeout_seconds: 600
 event_bus:

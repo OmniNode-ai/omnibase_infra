@@ -34,6 +34,15 @@ output_model:
   name: "ModelRoutingDecision"
   module: "omnibase_infra.nodes.node_delegation_routing_reducer.models"
   description: "Routing output with selected model, endpoint, cost tier."
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.delegation-routing-request.v1"
+  publish_topics:
+    - "onex.cmd.omnibase-infra.invocation.v1"
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
@@ -45,7 +54,21 @@ handler_routing:
         name: "ModelDelegationRequest"
         module: "omnibase_infra.nodes.node_delegation_orchestrator.models"
         description: "Delegation request to route."
+routing_rules:
+  - capability: tech_debt_triage
+    invocation_kind: agent
+    agent_protocol: A2A
+    target_ref: adk-type-debt-scout
+    fallbacks: []
+target_agents:
+  - target_ref: adk-type-debt-scout
+    protocol: A2A
+    base_url: ${DEBT_SCOUT_BASE_URL}
+    protocol_version: "0.3"
 config_dependencies:
+  - key: "DEBT_SCOUT_BASE_URL"
+    description: "A2A endpoint URL for the ADK type debt scout agent"
+    required: true
   - key: "LLM_CODER_URL"
     description: "Endpoint URL for Qwen3-Coder-30B-A3B (port 8000)"
     required: true

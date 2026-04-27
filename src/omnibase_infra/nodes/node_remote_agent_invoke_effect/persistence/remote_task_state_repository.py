@@ -4,12 +4,14 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, TypeVar, cast
 from uuid import UUID, uuid4
 
 import asyncpg
 
+from omnibase_core.models.common.model_schema_value import ModelSchemaValue
 from omnibase_core.models.delegation.model_remote_task_state import ModelRemoteTaskState
 from omnibase_infra.enums import EnumInfraTransportType, EnumPostgresErrorCode
 from omnibase_infra.errors import ModelInfraErrorContext, RepositoryExecutionError
@@ -35,9 +37,10 @@ INSERT INTO remote_task_state (
     submitted_at,
     updated_at,
     completed_at,
-    error
+    error,
+    last_emitted_artifact_payload
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NULL
 )
 ON CONFLICT (task_id) DO UPDATE SET
     invocation_kind = EXCLUDED.invocation_kind,
@@ -51,7 +54,11 @@ ON CONFLICT (task_id) DO UPDATE SET
     submitted_at = EXCLUDED.submitted_at,
     updated_at = EXCLUDED.updated_at,
     completed_at = EXCLUDED.completed_at,
-    error = EXCLUDED.error
+    error = EXCLUDED.error,
+    last_emitted_artifact_payload = COALESCE(
+        remote_task_state.last_emitted_artifact_payload,
+        EXCLUDED.last_emitted_artifact_payload
+    )
 RETURNING task_id
 """
 
@@ -111,6 +118,20 @@ SELECT
 FROM remote_task_state
 WHERE status NOT IN ('COMPLETED', 'FAILED', 'TIMED_OUT', 'CANCELED')
 ORDER BY submitted_at ASC
+"""
+
+SQL_GET_LAST_EMITTED_ARTIFACT_PAYLOAD = """
+SELECT last_emitted_artifact_payload
+FROM remote_task_state
+WHERE task_id = $1
+"""
+
+SQL_SET_LAST_EMITTED_ARTIFACT_PAYLOAD = """
+UPDATE remote_task_state
+SET last_emitted_artifact_payload = $2::jsonb,
+    updated_at = GREATEST(updated_at, NOW())
+WHERE task_id = $1
+RETURNING task_id
 """
 
 
@@ -216,6 +237,60 @@ class RemoteTaskStateRepository(MixinPostgresOpExecutor):
         )
         return [self._row_to_model(row) for row in rows]
 
+    async def get_last_emitted_artifact_payload(
+        self,
+        task_id: UUID,
+        *,
+        correlation_id: "UUID | None" = None,  # noqa: UP037
+    ) -> "list[dict[str, ModelSchemaValue]] | None":  # noqa: UP037
+        row = await self._run_checked(
+            correlation_id=correlation_id or uuid4(),
+            op_name="get_last_emitted_artifact_payload",
+            log_context={"task_id": str(task_id)},
+            fn=lambda: self._fetchrow(
+                SQL_GET_LAST_EMITTED_ARTIFACT_PAYLOAD,
+                task_id,
+            ),
+        )
+        if row is None or row["last_emitted_artifact_payload"] is None:
+            return None
+        return self._artifact_payload_from_json(row["last_emitted_artifact_payload"])
+
+    async def set_last_emitted_artifact_payload(
+        self,
+        task_id: UUID,
+        payload: list[dict[str, ModelSchemaValue]],
+        *,
+        correlation_id: "UUID | None" = None,  # noqa: UP037
+    ) -> None:
+        op_correlation_id = correlation_id or uuid4()
+
+        async def _op() -> None:
+            async with self._pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    SQL_SET_LAST_EMITTED_ARTIFACT_PAYLOAD,
+                    task_id,
+                    self._artifact_payload_to_json(payload),
+                )
+            if row is None:
+                raise RepositoryExecutionError(
+                    "remote_task_state artifact payload update returned no row",
+                    op_name="set_last_emitted_artifact_payload",
+                    table="remote_task_state",
+                    sql_fingerprint="UPDATE remote_task_state SET last_emitted_artifact_payload = ...",
+                    context=self._context(
+                        op_correlation_id,
+                        "set_last_emitted_artifact_payload",
+                    ),
+                )
+
+        await self._run_checked(
+            correlation_id=op_correlation_id,
+            op_name="set_last_emitted_artifact_payload",
+            log_context={"task_id": str(task_id)},
+            fn=_op,
+        )
+
     async def _fetchrow(
         self,
         sql: str,
@@ -276,16 +351,49 @@ class RemoteTaskStateRepository(MixinPostgresOpExecutor):
         correlation_id: UUID,
         operation: str,
     ) -> ModelInfraErrorContext:
-        return ModelInfraErrorContext(
+        return ModelInfraErrorContext.with_correlation(
+            correlation_id=correlation_id,
             transport_type=EnumInfraTransportType.DATABASE,
             operation=operation,
-            correlation_id=correlation_id,
             target_name="remote_task_state",
         )
 
     @staticmethod
     def _row_to_model(row: asyncpg.Record) -> ModelRemoteTaskState:
         return ModelRemoteTaskState.model_validate(dict(row))
+
+    @staticmethod
+    def _artifact_payload_to_json(
+        payload: list[dict[str, ModelSchemaValue]],
+    ) -> str:
+        return json.dumps(
+            [
+                {key: value.to_value() for key, value in artifact.items()}
+                for artifact in payload
+            ],
+            sort_keys=True,
+        )
+
+    @staticmethod
+    def _artifact_payload_from_json(
+        raw_payload: object,
+    ) -> list[dict[str, ModelSchemaValue]]:
+        decoded = (
+            json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
+        )
+        if not isinstance(decoded, list):
+            return []
+        artifacts: list[dict[str, ModelSchemaValue]] = []
+        for artifact in decoded:
+            if not isinstance(artifact, dict):
+                continue
+            artifacts.append(
+                {
+                    str(key): ModelSchemaValue.from_value(value)
+                    for key, value in artifact.items()
+                }
+            )
+        return artifacts
 
 
 __all__ = ["RemoteTaskStateRepository"]

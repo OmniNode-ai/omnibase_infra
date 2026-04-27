@@ -484,6 +484,16 @@ TOPIC_DELEGATION_ROUTING_REQUEST: Final[str] = (
 )
 """Command topic for routing reducer invocation from the delegation orchestrator."""
 
+TOPIC_DELEGATION_INVOCATION_COMMAND: Final[str] = (
+    "onex.cmd.omnibase-infra.invocation.v1"
+)
+"""Command topic for typed invocation commands from the delegation orchestrator."""
+
+TOPIC_DELEGATION_AGENT_TASK_LIFECYCLE: Final[str] = (
+    "onex.evt.omnibase-infra.agent-task-lifecycle.v1"
+)
+"""Event topic for remote agent task lifecycle updates."""
+
 TOPIC_DELEGATION_QUALITY_GATE_REQUEST: Final[str] = (
     "onex.cmd.omnibase-infra.delegation-quality-gate-request.v1"
 )
@@ -510,8 +520,10 @@ TOPIC_DELEGATION_BASELINE_COMPARISON: Final[str] = (
 __all__ = [
     "TOPIC_DELEGATION_COMPLETED",
     "TOPIC_DELEGATION_FAILED",
+    "TOPIC_DELEGATION_AGENT_TASK_LIFECYCLE",
     "TOPIC_DELEGATION_INFERENCE_REQUEST",
     "TOPIC_DELEGATION_INFERENCE_RESPONSE",
+    "TOPIC_DELEGATION_INVOCATION_COMMAND",
     "TOPIC_DELEGATION_QUALITY_GATE_REQUEST",
     "TOPIC_DELEGATION_QUALITY_GATE_RESULT",
     "TOPIC_DELEGATION_REQUEST",

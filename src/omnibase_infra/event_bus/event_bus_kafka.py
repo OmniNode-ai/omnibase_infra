@@ -2126,6 +2126,14 @@ class EventBusKafka(
             "consumer_count": consumer_count,
         }
 
+    def get_consumer_groups(self) -> dict[tuple[str, str], str]:
+        """Return active topic/group keys mapped to effective Kafka group IDs."""
+        consumer_groups: dict[tuple[str, str], str] = {}
+        for key, consumer in self._group_consumers.items():
+            _topic, group_id = key
+            consumer_groups[key] = str(getattr(consumer, "_group_id", group_id))
+        return consumer_groups
+
     async def get_readiness_status(self) -> ModelEventBusReadiness:
         """Check event bus readiness for serving traffic.
 

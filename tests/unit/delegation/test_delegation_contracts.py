@@ -61,6 +61,7 @@ class TestOrchestratorContract:
         expected_states = {
             "RECEIVED",
             "ROUTED",
+            "EXECUTING",
             "INFERENCE_COMPLETED",
             "GATE_EVALUATED",
             "COMPLETED",
@@ -76,12 +77,14 @@ class TestOrchestratorContract:
         data = self._load()
         topics = data["event_bus"]["subscribe_topics"]
         assert "onex.cmd.omnibase-infra.delegation-request.v1" in topics
+        assert "onex.cmd.omnibase-infra.invocation.v1" in topics
 
     def test_publishes_completed_and_failed(self) -> None:
         data = self._load()
         topics = data["event_bus"]["publish_topics"]
         assert "onex.evt.omnibase-infra.delegation-completed.v1" in topics
         assert "onex.evt.omnibase-infra.delegation-failed.v1" in topics
+        assert "onex.cmd.omnibase-infra.remote-agent-invoke.v1" in topics
 
 
 @pytest.mark.unit
