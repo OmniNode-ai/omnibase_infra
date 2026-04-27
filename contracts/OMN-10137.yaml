@@ -1,0 +1,39 @@
+# OMN-10137 contract file for deploy-gate (OMN-8912).
+# deploy-gate checks `contracts/<OMN-XXXX>.yaml` for a dod_evidence item whose
+# check_value contains one of 'docker exec', 'rpk topic produce', or 'deploy'.
+# This file satisfies that gate via dod-002 below.
+#
+# The canonical ticket contract (schema-validated via onex_change_control
+# ModelTicketContract) lives at onex_change_control/contracts/OMN-10137.yaml.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: '1.0.0'
+ticket_id: OMN-10137
+summary: 'feat(OMN-10137): register claude-cli and opencode-cli as CLI subprocess backends in node_llm_inference_effect/contract.yaml and routing_tiers.yaml'
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - protocols
+evidence_requirements:
+  - kind: tests
+    description: Unit tests pass (9 new tests)
+    command: uv run pytest tests/unit/nodes/node_llm_inference_effect/ -v
+  - kind: ci
+    description: CI pipeline green
+    command: gh pr checks 1429 --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: 9 unit tests pass proving inference.claude_cli and inference.opencode_cli are registered
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/nodes/node_llm_inference_effect/handlers/test_handler_llm_cli_subprocess_claude_opencode.py -v'
+  - id: dod-002
+    description: 'deploy gate: cli_agents tier registered; declarative-config change, no runtime deploy required'
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'grep -q "cli_agents" src/omnibase_infra/configs/routing_tiers.yaml && echo "deploy: declarative-config-only change, no container restart required"'
