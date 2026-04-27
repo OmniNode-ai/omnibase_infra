@@ -21,7 +21,12 @@ from omnibase_infra.nodes.node_remote_agent_invoke_effect.persistence import (
 )
 from tests.helpers.util_postgres import PostgresConfig
 
-pytestmark = [pytest.mark.integration, pytest.mark.postgres, pytest.mark.asyncio]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.postgres,
+    pytest.mark.serial,
+    pytest.mark.asyncio,
+]
 
 MIGRATION_SQL = (
     Path(__file__).resolve().parents[3]

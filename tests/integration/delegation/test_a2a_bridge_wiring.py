@@ -65,7 +65,7 @@ def test_agent_routing_end_to_topic_boundary() -> None:
     assert (
         resolve_effect_topic(command.invocation_kind) is TopicBase.REMOTE_AGENT_INVOKE
     )
-    assert any(agent.agent_ref == command.target_ref for agent in agents)
+    assert any(agent.target_ref == command.target_ref for agent in agents)
 
 
 @pytest.mark.integration
@@ -85,9 +85,17 @@ def test_contract_yaml_target_agents_parse_as_models() -> None:
     ]
     assert parsed == [
         ModelTargetAgent(
-            agent_ref="adk-type-debt-scout",
+            target_ref="adk-type-debt-scout",
             protocol=EnumAgentProtocol.A2A,
-            base_url="http://127.0.0.1:8050",
-            protocol_version="0.3",
+            base_url="${DEBT_SCOUT_BASE_URL}",
         )
     ]
+
+
+@pytest.mark.integration
+def test_debt_scout_target_url_is_config_dependency() -> None:
+    contract = _load_contract()
+    deps = {item["key"] for item in contract.get("config_dependencies", [])}
+    assert "DEBT_SCOUT_BASE_URL" in deps
+    target = contract["target_agents"][0]
+    assert target["base_url"] == "${DEBT_SCOUT_BASE_URL}"

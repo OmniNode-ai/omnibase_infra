@@ -36,6 +36,7 @@ class _FrozenDispatchEngine:
 
 @pytest.mark.integration
 @pytest.mark.kafka
+@pytest.mark.serial
 @pytest.mark.asyncio
 async def test_effect_boots_via_runtime_host() -> None:
     """RuntimeHostProcess package-node wiring boots the effect subscription."""

@@ -36,6 +36,7 @@ REQUIRED_COLUMNS = [
     "updated_at",
     "completed_at",
     "error",
+    "last_emitted_artifact_payload",
 ]
 
 LIFECYCLE_VALUES = [

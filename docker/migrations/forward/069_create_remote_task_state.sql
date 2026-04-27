@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS public.remote_task_state (
     updated_at TIMESTAMPTZ NOT NULL,
     completed_at TIMESTAMPTZ,
     error TEXT,
+    last_emitted_artifact_payload JSONB,
 
     CONSTRAINT remote_task_state_invocation_kind_check CHECK (
         invocation_kind IN ('agent', 'model')

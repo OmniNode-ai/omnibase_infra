@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -78,12 +78,15 @@ class DispatcherInvocationCommand(MixinAsyncCircuitBreaker):
 
     async def handle(
         self,
-        envelope: ModelEventEnvelope[object] | dict[str, object],
+        envelope: object,
     ) -> ModelDispatchResult:
         started_at = datetime.now(UTC)
-        correlation_id, raw_payload = extract_envelope_fields(envelope)
+        correlation_id = None
 
         try:
+            correlation_id, raw_payload = extract_envelope_fields(
+                cast("ModelEventEnvelope[object] | dict[str, object]", envelope)
+            )
             async with self._circuit_breaker_lock:
                 await self._check_circuit_breaker("handle", correlation_id)
 
@@ -127,6 +130,8 @@ class DispatcherInvocationCommand(MixinAsyncCircuitBreaker):
         except InfraUnavailableError as e:
             completed_at = datetime.now(UTC)
             duration_ms = (completed_at - started_at).total_seconds() * 1000
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("handle")
             return ModelDispatchResult(
                 dispatch_id=uuid4(),
                 status=EnumDispatchStatus.HANDLER_ERROR,
