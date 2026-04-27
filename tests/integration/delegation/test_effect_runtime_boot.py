@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 import pytest
+from dotenv import load_dotenv
 
 from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
@@ -16,8 +17,10 @@ from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from omnibase_infra.utils import compute_consumer_group_id
 
+REPO_ROOT = Path(__file__).parent.parent.parent.parent
 REMOTE_EFFECT_CONTRACT = (
-    Path("src")
+    REPO_ROOT
+    / "src"
     / "omnibase_infra"
     / "nodes"
     / "node_remote_agent_invoke_effect"
@@ -40,6 +43,7 @@ class _FrozenDispatchEngine:
 @pytest.mark.asyncio
 async def test_effect_boots_via_runtime_host() -> None:
     """RuntimeHostProcess package-node wiring boots the effect subscription."""
+    load_dotenv(Path.home() / ".omnibase" / ".env")
     bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "").strip()
     if not bootstrap_servers:
         pytest.skip("KAFKA_BOOTSTRAP_SERVERS is not configured")
@@ -90,9 +94,9 @@ async def test_effect_boots_via_runtime_host() -> None:
         assert runtime.is_running is True
         health = await event_bus.health_check()
         assert health["consumer_count"] >= 1
-        assert expected_topic in event_bus._subscribers
-        assert (expected_topic, expected_group) in event_bus._group_consumers
-        consumer = event_bus._group_consumers[(expected_topic, expected_group)]
-        assert getattr(consumer, "_group_id", None) == expected_consumer_group
+        assert (
+            event_bus.get_consumer_groups()[(expected_topic, expected_group)]
+            == expected_consumer_group
+        )
     finally:
         await runtime.stop()

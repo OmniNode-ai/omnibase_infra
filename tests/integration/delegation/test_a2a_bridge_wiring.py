@@ -23,8 +23,10 @@ from omnibase_infra.nodes.node_delegation_routing_reducer.handlers.handler_deleg
     resolve_invocation_command,
 )
 
+REPO_ROOT = Path(__file__).parent.parent.parent.parent
 CONTRACT_PATH = (
-    Path("src")
+    REPO_ROOT
+    / "src"
     / "omnibase_infra"
     / "nodes"
     / "node_delegation_routing_reducer"
@@ -88,6 +90,7 @@ def test_contract_yaml_target_agents_parse_as_models() -> None:
             target_ref="adk-type-debt-scout",
             protocol=EnumAgentProtocol.A2A,
             base_url="${DEBT_SCOUT_BASE_URL}",
+            protocol_version="0.3",
         )
     ]
 

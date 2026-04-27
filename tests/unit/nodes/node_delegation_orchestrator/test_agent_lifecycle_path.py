@@ -57,11 +57,7 @@ def _command(correlation_id) -> ModelInvocationCommand:
         invocation_kind=EnumInvocationKind.AGENT,
         agent_protocol=EnumAgentProtocol.A2A,
         target_ref="adk-type-debt-scout",
-        payload={
-            "repo_path": ModelSchemaValue.from_value(
-                "/Users/jonah/Code/omni_worktrees/OMN-9620/OMN-9632/omnibase_infra"
-            )
-        },
+        payload={"repo_path": ModelSchemaValue.from_value("/path/to/repo")},
     )
 
 

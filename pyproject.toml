@@ -29,7 +29,7 @@ dependencies = [
     #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
     # Remember to switch back to PyPI versions before merging to main.
     #
-    "omnibase-core>=0.39.0",
+    "omnibase-core>=0.40.0,<0.41.0",
     "omnibase-spi>=0.20.4",
     "omnimarket>=0.1.0",
     # ============================================================================
@@ -161,15 +161,15 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    "omnibase-core>=0.39.0",
+    "omnibase-core>=0.40.0,<0.41.0",
 ]
 
 [tool.uv.sources]
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 omnimarket = { git = "https://github.com/OmniNode-ai/omnimarket.git", branch = "main" }
-# Pinned to core main post-OMN-9196 (resolver models + enum_handler_resolution_outcome).
-# PyPI release v0.39.0 (2026-04-06) predates PR 846 — switch back after v0.40.0 ships.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "9d64d5a3944477093824a53ca931fd17a4b6a8e1" }
+# Pinned to core main post-OMN-9637 (delegation models — ModelRemoteTaskState et al.).
+# PyPI release v0.39.0 (2026-04-06) predates PR 912 — switch back after v0.40.0 ships.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "6a65f885303e29b4ddc36a66a0cb860537f47316" }
 # Pinned to spi main post-OMN-9197 (ProtocolHandlerResolver + ProtocolHandlerOwnershipQuery).
 # PyPI release v0.20.4 (2026-04-03) predates PR 186 — switch back after v0.20.5 ships.
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", rev = "a9380008fb4a2f2a784d374389260d896455c3b2" }
@@ -509,6 +509,7 @@ node_registration_reducer = "omnibase_infra.nodes.node_registration_reducer"
 node_registration_storage_effect = "omnibase_infra.nodes.node_registration_storage_effect"
 node_registry_api_effect = "omnibase_infra.nodes.node_registry_api_effect"
 node_registry_effect = "omnibase_infra.nodes.node_registry_effect"
+node_remote_agent_invoke_effect = "omnibase_infra.nodes.node_remote_agent_invoke_effect"
 node_reward_binder_effect = "omnibase_infra.nodes.node_reward_binder_effect"
 node_routing_orchestrator = "omnibase_infra.nodes.node_routing_orchestrator"
 node_routing_score_reducer = "omnibase_infra.nodes.node_routing_score_reducer"

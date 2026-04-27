@@ -19,13 +19,18 @@ from omnibase_core.enums.enum_agent_task_lifecycle_type import (
 )
 from omnibase_core.enums.enum_invocation_kind import EnumInvocationKind
 from omnibase_core.models.common.model_schema_value import ModelSchemaValue
-from omnibase_core.models.delegation import (
+from omnibase_core.models.delegation.model_agent_task_lifecycle_event import (
     ModelAgentTaskLifecycleEvent,
+)
+from omnibase_core.models.delegation.model_invocation_command import (
     ModelInvocationCommand,
+)
+from omnibase_core.models.delegation.model_remote_task_state import (
     ModelRemoteTaskState,
 )
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumConsumerGroupPurpose
+from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models import ModelEventMessage
@@ -38,8 +43,10 @@ from omnibase_infra.runtime.event_bus_subcontract_wiring import (
 from omnibase_infra.utils import compute_consumer_group_id
 from tests.helpers.util_kafka import KafkaTopicManager, wait_for_consumer_ready
 
+REPO_ROOT = Path(__file__).parent.parent.parent.parent
 CONTRACT_PATH = (
-    Path("src")
+    REPO_ROOT
+    / "src"
     / "omnibase_infra"
     / "nodes"
     / "node_remote_agent_invoke_effect"
@@ -149,6 +156,7 @@ async def _ensure_contract_topic_exists(topic: str, bootstrap_servers: str) -> N
 
 @pytest.mark.integration
 @pytest.mark.kafka
+@pytest.mark.serial
 @pytest.mark.asyncio
 async def test_remote_agent_invoke_contract_wires_real_kafka_dispatch() -> None:
     """Contract-declared remote-agent invoke topic reaches dispatch via Kafka."""
@@ -161,7 +169,10 @@ async def test_remote_agent_invoke_contract_wires_real_kafka_dispatch() -> None:
     assert len(subcontract.subscribe_topics) == 1
     invoke_topic = subcontract.subscribe_topics[0]
 
-    await _ensure_contract_topic_exists(invoke_topic, bootstrap_servers)
+    try:
+        await _ensure_contract_topic_exists(invoke_topic, bootstrap_servers)
+    except InfraConnectionError as exc:
+        pytest.skip(f"Kafka bootstrap unavailable for real dispatch test: {exc}")
 
     config = ModelKafkaEventBusConfig(
         bootstrap_servers=bootstrap_servers,
