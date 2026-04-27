@@ -360,6 +360,7 @@ markers = [
     "llm: Tests requiring real LLM inference endpoints (local GPU/Apple Silicon servers)",
     "consul: Tests requiring a live Consul instance (legacy marker retained for existing tests — Consul removed in OMN-3995)",
     "ci: CI/CD parity and configuration tests that run without infrastructure (OMN-4307)",
+    "linear: Tests requiring a real Linear API key (LINEAR_API_KEY env var)",
 ]
 addopts = [
     "--strict-markers",

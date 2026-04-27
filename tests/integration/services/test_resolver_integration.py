@@ -3,9 +3,9 @@
 
 """Integration tests for `resolve_project_tracker()`.
 
-Unlike the unit tests in `tests/services/test_resolver.py`, these exercise
-the resolver against a real `LocalStubProjectTracker` backing file on disk
-and assert the returned instance satisfies the `ProtocolProjectTracker`
+Unlike the unit tests in ``tests/services/test_resolver.py``, these exercise
+the resolver against a real ``LocalStubProjectTracker`` backing file on disk
+and assert the returned instance satisfies the ``ProtocolProjectTracker``
 behavioral contract end-to-end (connect → create_issue → get_issue → close).
 """
 
@@ -17,6 +17,9 @@ from unittest.mock import patch
 
 import pytest
 
+from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adapter import (
+    AdapterLinearGraphQLProjectTracker,
+)
 from omnibase_infra.adapters.project_tracker.local_stub_project_tracker import (
     LocalStubProjectTracker,
 )
@@ -68,15 +71,12 @@ class TestResolveProjectTrackerIntegration:
         asyncio.run(_lifecycle())
 
     def test_linear_adapter_branch_integration(self, tmp_path: Path) -> None:
-        """End-to-end token branch — activates once OMN-8816 lands."""
-        pytest.importorskip(
-            "omnibase_infra.adapters.project_tracker.linear_project_tracker_adapter",
-            reason="AdapterLinearProjectTracker ships in OMN-8816; skip until merged",
-        )
-        from omnibase_infra.adapters.project_tracker.linear_project_tracker_adapter import (
-            AdapterLinearProjectTracker,
-        )
-
+        """End-to-end token branch — resolver returns the GraphQL adapter."""
         with patch.dict("os.environ", {"LINEAR_TOKEN": "fake"}, clear=True):
             tracker = resolve_project_tracker(state_root=tmp_path)
-        assert isinstance(tracker, AdapterLinearProjectTracker)
+        assert isinstance(tracker, AdapterLinearGraphQLProjectTracker)
+
+        async def _close() -> None:
+            await tracker.close()
+
+        asyncio.run(_close())

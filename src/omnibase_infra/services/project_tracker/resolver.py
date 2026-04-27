@@ -5,13 +5,14 @@
 
 Single authoritative surface for selecting a `ProtocolProjectTracker`
 implementation. Token present (LINEAR_API_KEY or LINEAR_TOKEN) →
-`AdapterLinearProjectTracker`. Absent → `LocalStubProjectTracker`.
-Fail-soft: NEVER raises; on any construction error (missing adapter
-module, constructor failure, bad token) falls back to `LocalStubProjectTracker`
-with a warning log.
+`AdapterLinearGraphQLProjectTracker` (calls Linear GraphQL via httpx).
+Absent → `LocalStubProjectTracker`. Fail-soft: NEVER raises; on any
+construction error (missing adapter module, constructor failure, bad
+token) falls back to `LocalStubProjectTracker` with a warning log.
 
-Only `node_session_compose` and the canary skill's handler are permitted
-callers. Skill prose MUST NOT re-encode token-detection or fallback logic.
+Returns a fully-functional Linear adapter when LINEAR_API_KEY is set;
+otherwise returns LocalStubProjectTracker. Safe to call from any Python
+context (no MCP-runtime dependency).
 """
 
 from __future__ import annotations
@@ -43,19 +44,23 @@ def resolve_project_tracker(
     Returns:
         A `ProtocolProjectTracker`-shaped instance. Never raises.
     """
-    token = os.environ.get("LINEAR_TOKEN") or os.environ.get("LINEAR_API_KEY")
+    token = os.environ.get("LINEAR_API_KEY") or os.environ.get("LINEAR_TOKEN")
     if token and not _force_construction_error:
         try:
-            from omnibase_infra.adapters.project_tracker.linear_project_tracker_adapter import (
-                AdapterLinearProjectTracker,
+            from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adapter import (
+                AdapterLinearGraphQLProjectTracker,
             )
 
-            # cast: AdapterLinearProjectTracker returns ModelStub* typed
-            # variants that are structural-compatible subclasses of the
-            # canonical ModelIssue/ModelComment/ModelProject declared by
-            # ProtocolProjectTracker. Runtime @runtime_checkable suffices.
-            # Stub type consolidation is tracked separately (OMN-9210).
-            return cast("ProtocolProjectTracker", AdapterLinearProjectTracker())
+            # cast: AdapterLinearGraphQLProjectTracker returns ModelStub*
+            # typed variants that are structural-compatible subclasses of
+            # the canonical ModelIssue/ModelComment/ModelProject declared
+            # by ProtocolProjectTracker. Runtime @runtime_checkable
+            # suffices. Stub type consolidation is tracked separately
+            # (OMN-9210).
+            return cast(
+                "ProtocolProjectTracker",
+                AdapterLinearGraphQLProjectTracker(api_key=token),
+            )
         except Exception as exc:  # noqa: BLE001 — fail-soft is the contract
             # Log only the exception class name; never interpolate `exc` body to
             # avoid leaking upstream secrets (tokens, connection strings, PII).
