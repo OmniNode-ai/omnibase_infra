@@ -85,7 +85,6 @@ tiers:
         max_context_tokens: 200000
         use_for:
           - agent_delegation
-          - code_generation
           - complex_reasoning
       - id: opencode-cli
         env_var: OPENCODE_CLI_AVAILABLE

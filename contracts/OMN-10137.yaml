@@ -36,4 +36,4 @@ dod_evidence:
     source: generated
     checks:
       - check_type: command
-        check_value: 'grep -q "cli_agents" src/omnibase_infra/configs/routing_tiers.yaml && echo "deploy: declarative-config-only change, no container restart required"'
+        check_value: 'grep -qE "^[[:space:]]*- name: cli_agents$" src/omnibase_infra/configs/routing_tiers.yaml && echo "deploy: declarative-config-only change, no container restart required"'
