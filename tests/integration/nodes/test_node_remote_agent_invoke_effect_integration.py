@@ -153,6 +153,7 @@ async def _ensure_contract_topic_exists(topic: str, bootstrap_servers: str) -> N
 
 @pytest.mark.integration
 @pytest.mark.kafka
+@pytest.mark.serial
 @pytest.mark.asyncio
 async def test_remote_agent_invoke_contract_wires_real_kafka_dispatch() -> None:
     """Contract-declared remote-agent invoke topic reaches dispatch via Kafka."""

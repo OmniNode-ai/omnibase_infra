@@ -42,7 +42,15 @@ from omnibase_core.models.delegation.model_invocation_command import (
 from omnibase_core.models.delegation.model_remote_task_state import ModelRemoteTaskState
 from omnibase_core.models.delegation.model_target_agent import ModelTargetAgent
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    ModelInfraErrorContext,
+)
 from omnibase_infra.nodes.node_remote_agent_invoke_effect.persistence.remote_task_state_repository import (
     RemoteTaskStateRepository,
 )
@@ -77,14 +85,16 @@ class ProtocolA2ATransport(Protocol):
         *,
         target: ModelTargetAgent,
         request_model: ModelA2ATaskRequest,
-    ) -> ModelA2ATaskResponse: ...
+    ) -> ModelA2ATaskResponse:
+        """Submit a task request to the remote agent."""
 
     async def get_task(
         self,
         *,
         target: ModelTargetAgent,
         remote_task_handle: str,
-    ) -> ModelA2ATaskResponse: ...
+    ) -> ModelA2ATaskResponse:
+        """Fetch the latest state of a remote task."""
 
 
 def map_remote_status(raw_status: str) -> EnumAgentTaskLifecycleType:
@@ -310,9 +320,33 @@ class HandlerA2ATask:
             input=command.payload,
             correlation_id=command.correlation_id,
         )
-        response = await self._transport.submit(
-            target=target, request_model=request_model
-        )
+        try:
+            response = await self._transport.submit(
+                target=target, request_model=request_model
+            )
+        except Exception as exc:
+            failed_at = self._clock()
+            await self._repository.upsert(
+                submitted_state.model_copy(
+                    update={
+                        "status": EnumAgentTaskLifecycleType.FAILED,
+                        "last_remote_status": "failed",
+                        "last_emitted_event_type": EnumAgentTaskLifecycleType.FAILED,
+                        "completed_at": failed_at,
+                        "updated_at": failed_at,
+                        "error": str(exc),
+                    }
+                )
+            )
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=command.correlation_id,
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="a2a_submit",
+            )
+            raise InfraConnectionError(
+                f"A2A submit failed for target {command.target_ref}: {exc}",
+                context=context,
+            ) from exc
 
         await self._repository.upsert(
             submitted_state.model_copy(
@@ -345,10 +379,21 @@ class HandlerA2ATask:
         last_artifact_payload: list[dict[str, ModelSchemaValue]] | None = None
 
         while True:
-            response = await self._transport.get_task(
-                target=target,
-                remote_task_handle=remote_task_handle,
-            )
+            try:
+                response = await self._transport.get_task(
+                    target=target,
+                    remote_task_handle=remote_task_handle,
+                )
+            except Exception as exc:
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    operation="a2a_watch",
+                )
+                raise InfraConnectionError(
+                    f"A2A watch failed for handle {remote_task_handle}: {exc}",
+                    context=context,
+                ) from exc
             mapped = response.status
             raw_status = response.status.value
             now = self._clock()

@@ -24,6 +24,7 @@ from omnibase_core.models.delegation.model_invocation_command import (
 from omnibase_core.models.delegation.model_remote_task_state import ModelRemoteTaskState
 from omnibase_core.models.delegation.model_target_agent import ModelTargetAgent
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.nodes.node_remote_agent_invoke_effect.handlers.handler_a2a_task import (
     HandlerA2ATask,
     ProtocolA2ATransport,
@@ -321,3 +322,123 @@ async def test_watch_dedups_same_status_repeats() -> None:
         EnumAgentTaskLifecycleType.PROGRESS,
         EnumAgentTaskLifecycleType.COMPLETED,
     ]
+
+
+class FailingSubmitTransport(ProtocolA2ATransport):
+    async def submit(
+        self,
+        *,
+        target: ModelTargetAgent,
+        request_model: ModelA2ATaskRequest,
+    ) -> ModelA2ATaskResponse:
+        del target, request_model
+        msg = "boom"
+        raise RuntimeError(msg)
+
+    async def get_task(
+        self,
+        *,
+        target: ModelTargetAgent,
+        remote_task_handle: str,
+    ) -> ModelA2ATaskResponse:
+        del target, remote_task_handle
+        msg = "unused"
+        raise AssertionError(msg)
+
+
+class FailingWatchTransport(ProtocolA2ATransport):
+    def __init__(self, *, submit_response: ModelA2ATaskResponse) -> None:
+        self.submit_response = submit_response
+
+    async def submit(
+        self,
+        *,
+        target: ModelTargetAgent,
+        request_model: ModelA2ATaskRequest,
+    ) -> ModelA2ATaskResponse:
+        del target, request_model
+        return self.submit_response
+
+    async def get_task(
+        self,
+        *,
+        target: ModelTargetAgent,
+        remote_task_handle: str,
+    ) -> ModelA2ATaskResponse:
+        del target, remote_task_handle
+        msg = "watch boom"
+        raise RuntimeError(msg)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_submit_failure_marks_state_failed_and_wraps_error_context() -> None:
+    repo = RecordingRepository()
+    event_bus = RecordingEventBus()
+    command = _command()
+    now = datetime(2026, 4, 26, 12, 0, tzinfo=UTC)
+    handler = HandlerA2ATask(
+        repository=repo,  # type: ignore[arg-type]
+        event_bus=event_bus,
+        target_registry=_target_registry(),
+        lifecycle_topic="onex.evt.omnibase-infra.agent-task-lifecycle.v1",
+        clock=lambda: now,
+        transport=FailingSubmitTransport(),
+    )
+
+    with pytest.raises(InfraConnectionError) as exc_info:
+        await handler.submit(command)
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert exc_info.value.correlation_id == command.correlation_id
+    error_context = exc_info.value.model.context
+    assert error_context.get("operation") == "a2a_submit"
+    transport_type = error_context.get("transport_type")
+    assert transport_type is not None
+    assert getattr(transport_type, "value", transport_type) == "http"
+
+    assert len(repo.rows) == 2
+    assert repo.rows[0].status is EnumAgentTaskLifecycleType.SUBMITTED
+    assert repo.rows[1].status is EnumAgentTaskLifecycleType.FAILED
+    assert repo.rows[1].error == "boom"
+    assert repo.rows[1].completed_at == now
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_watch_failure_wraps_error_context() -> None:
+    repo = RecordingRepository()
+    event_bus = RecordingEventBus()
+    command = _command()
+    now = datetime(2026, 4, 26, 12, 5, tzinfo=UTC)
+    handler = HandlerA2ATask(
+        repository=repo,  # type: ignore[arg-type]
+        event_bus=event_bus,
+        target_registry=_target_registry(),
+        lifecycle_topic="onex.evt.omnibase-infra.agent-task-lifecycle.v1",
+        clock=lambda: now,
+        poll_interval_seconds=0.0,
+        transport=FailingWatchTransport(
+            submit_response=ModelA2ATaskResponse(
+                remote_task_handle="remote-watch-fail",
+                status=EnumAgentTaskLifecycleType.SUBMITTED,
+                artifacts=[],
+                error=None,
+            )
+        ),
+    )
+    await handler.submit(command)
+
+    with pytest.raises(InfraConnectionError) as exc_info:
+        await handler.watch(
+            remote_task_handle="remote-watch-fail",
+            correlation_id=command.correlation_id,
+        )
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert exc_info.value.correlation_id == command.correlation_id
+    error_context = exc_info.value.model.context
+    assert error_context.get("operation") == "a2a_watch"
+    transport_type = error_context.get("transport_type")
+    assert transport_type is not None
+    assert getattr(transport_type, "value", transport_type) == "http"
