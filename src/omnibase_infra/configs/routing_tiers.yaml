@@ -75,3 +75,23 @@ tiers:
           - research
     eval_before_accept: false
     max_retries: 0
+  # CLI agent delegation tier (OMN-10137)
+  # Models dispatched via subprocess rather than HTTP API.
+  # Availability confirmed at dispatch time via shutil.which inside HandlerLlmCliSubprocess.
+  - name: cli_agents
+    models:
+      - id: claude-cli
+        env_var: CLAUDE_CLI_AVAILABLE
+        max_context_tokens: 200000
+        use_for:
+          - agent_delegation
+          - code_generation
+          - complex_reasoning
+      - id: opencode-cli
+        env_var: OPENCODE_CLI_AVAILABLE
+        max_context_tokens: 200000
+        use_for:
+          - agent_delegation
+          - code_generation
+    eval_before_accept: false
+    max_retries: 0
