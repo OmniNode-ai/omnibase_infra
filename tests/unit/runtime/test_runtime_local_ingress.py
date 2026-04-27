@@ -12,16 +12,21 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumDispatchStatus
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.runtime.models import (
+    ModelLocalRuntimeIngressRequest,
+    ModelLocalRuntimeIngressResponse,
+)
 from omnibase_infra.runtime.runtime_local_ingress import (
     RuntimeLocalIngressServer,
     discover_runtime_local_ingress_routes,
     parse_active_runtime_packages,
 )
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
-from tests.helpers.runtime_helpers import make_runtime_config
+from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 
 
 @pytest.mark.asyncio
@@ -29,21 +34,41 @@ async def test_runtime_local_ingress_server_round_trip(tmp_path: Path) -> None:
     socket_path = Path(f"/tmp/runtime-local-ingress-{uuid4().hex}.sock")  # noqa: S108
     server = RuntimeLocalIngressServer(
         str(socket_path),
-        AsyncMock(return_value={"ok": True, "status": "done"}),
+        AsyncMock(
+            return_value=ModelLocalRuntimeIngressResponse(
+                ok=True,
+                node_alias="test",
+                resolved_node_name="node_test",
+                dispatch_result=ModelDispatchResult(
+                    status=EnumDispatchStatus.SUCCESS,
+                    topic="onex.cmd.test.start.v1",
+                    started_at=datetime.now(UTC),
+                    completed_at=datetime.now(UTC),
+                    correlation_id=uuid4(),
+                ),
+            )
+        ),
     )
 
     await server.start()
     try:
         reader, writer = await asyncio.open_unix_connection(str(socket_path))
-        writer.write(b'{"node_name":"test","payload":{}}\n')
+        writer.write(b'{"node_alias":"test","payload":{}}\n')
         await writer.drain()
         response = await reader.readline()
         writer.close()
         await writer.wait_closed()
 
-        assert json.loads(response.decode("utf-8")) == {"ok": True, "status": "done"}
+        decoded = json.loads(response.decode("utf-8"))
+        assert decoded["ok"] is True
+        assert decoded["node_alias"] == "test"
     finally:
         await server.stop()
+
+
+def test_local_runtime_ingress_request_rejects_blank_node_name() -> None:
+    with pytest.raises(ValidationError, match="node_alias must be a non-empty string"):
+        ModelLocalRuntimeIngressRequest(node_alias="   ")
 
 
 def test_parse_active_runtime_packages_honors_env_override() -> None:
@@ -144,14 +169,89 @@ async def test_runtime_host_process_dispatch_local_ingress_request() -> None:
     process._local_ingress_dispatch_result_applier = SimpleNamespace(apply=AsyncMock())
 
     response = await process._dispatch_local_ingress_request(
-        {
-            "node_name": "session_orchestrator",
-            "payload": {"dry_run": True},
-            "correlation_id": str(uuid4()),
-        }
+        ModelLocalRuntimeIngressRequest(
+            node_alias="session_orchestrator",
+            payload={"dry_run": True},
+            correlation_id=uuid4(),
+        )
     )
 
-    assert response["ok"] is True
-    assert response["topic"] == "onex.cmd.omnimarket.session-orchestrator-start.v1"
+    assert response.ok is True
+    assert response.topic == "onex.cmd.omnimarket.session-orchestrator-start.v1"
     dispatch_engine.dispatch.assert_awaited()
     process._local_ingress_dispatch_result_applier.apply.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runtime_host_process_dispatch_local_ingress_request_times_out() -> None:
+    async def _sleepy_dispatch(
+        *_args: object, **_kwargs: object
+    ) -> ModelDispatchResult:
+        await asyncio.sleep(0.05)
+        return ModelDispatchResult(
+            status=EnumDispatchStatus.SUCCESS,
+            topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+            correlation_id=uuid4(),
+        )
+
+    dispatch_engine = AsyncMock()
+    dispatch_engine.dispatch = AsyncMock(side_effect=_sleepy_dispatch)
+    process = RuntimeHostProcess(
+        config=make_runtime_config(local_ingress={"enabled": True}),
+        dispatch_engine=dispatch_engine,
+    )
+    process._is_running = True
+    process._local_ingress_routes = {
+        "session_orchestrator": SimpleNamespace(
+            node_name="node_session_orchestrator",
+            contract_name="session_orchestrator",
+            command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
+            event_type="omnimarket.session-orchestrator-start",
+            terminal_event="onex.evt.omnimarket.session-orchestrator-completed.v1",
+        )
+    }
+
+    response = await process._dispatch_local_ingress_request(
+        ModelLocalRuntimeIngressRequest(
+            node_alias="session_orchestrator",
+            payload={"dry_run": True},
+            timeout_ms=1,
+        )
+    )
+
+    assert response.ok is False
+    assert response.error is not None
+    assert response.error.code == "dispatch_timeout"
+
+
+@pytest.mark.asyncio
+async def test_runtime_health_includes_local_ingress_details() -> None:
+    process = RuntimeHostProcess(
+        config=make_runtime_config(local_ingress={"enabled": True}),
+        dispatch_engine=AsyncMock(),
+    )
+    seed_mock_handlers(process)
+    process._is_running = True
+    process._local_ingress_active_packages = ("omnibase_infra", "omnimarket")
+    process._local_ingress_routes = {
+        "session_orchestrator": SimpleNamespace(
+            node_name="node_session_orchestrator",
+            contract_name="session_orchestrator",
+            command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
+            event_type="omnimarket.session-orchestrator-start",
+            terminal_event="onex.evt.omnimarket.session-orchestrator-completed.v1",
+        )
+    }
+
+    health = await process.health_check()
+
+    assert "local_ingress" in health
+    local_ingress = health["local_ingress"]
+    assert local_ingress["enabled"] is True
+    assert local_ingress["route_count"] == 1
+    assert "components" in health
+    assert any(
+        component["name"] == "local_ingress" for component in health["components"]
+    )
