@@ -57,6 +57,9 @@ from omnibase_infra.runtime.models.model_enabled_protocols_config import (
     ModelEnabledProtocolsConfig,
 )
 from omnibase_infra.runtime.models.model_event_bus_config import ModelEventBusConfig
+from omnibase_infra.runtime.models.model_local_runtime_ingress_config import (
+    ModelLocalRuntimeIngressConfig,
+)
 from omnibase_infra.runtime.models.model_logging_config import ModelLoggingConfig
 from omnibase_infra.runtime.models.model_shutdown_config import ModelShutdownConfig
 
@@ -160,6 +163,10 @@ class ModelRuntimeConfig(BaseModel):
     gateway: ModelGatewayConfig | None = Field(
         default=None,
         description="Gateway configuration for envelope signing and realm enforcement",
+    )
+    local_ingress: ModelLocalRuntimeIngressConfig = Field(
+        default_factory=ModelLocalRuntimeIngressConfig,
+        description="Configuration for the runtime-owned local command ingress.",
     )
 
 
