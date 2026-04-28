@@ -68,6 +68,9 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # node_build_loop_projection_compute (this repo) consumes it. Cross-repo
     # publisher lives in omnimarket and is not visible to this scan.
     "onex.evt.omnimarket.build-loop-orchestrator-completed.v1": "Published by omnimarket node_build_loop_orchestrator (cross-repo) | owner: jonah | expiry: 2026-12-01",
+    # Pattern B dispatch commands enter through local runtime transport / skill clients;
+    # RuntimePatternBBroker consumes them but no contract-declared node publishes them.
+    "onex.cmd.omnibase-infra.pattern-b-dispatch.v1": "Published by local runtime transport / runtime-backed skill clients | owner: jonah | expiry: 2026-12-01",
 }
 
 # ---------------------------------------------------------------------------

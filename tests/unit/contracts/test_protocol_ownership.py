@@ -112,7 +112,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolDomainPlugin": "runtime/protocol_domain_plugin.py",
     "ProtocolHandlerPluginLoader": "runtime/protocol_handler_plugin_loader.py",
     "ProtocolHandlerDiscovery": "runtime/protocol_handler_discovery.py",
-    "ProtocolPatternBBrokerTransport": "protocols/protocol_pattern_b_broker_transport.py",  # [RUNTIME] OMN-10238 narrow broker transport DI boundary
+    "ProtocolPatternBBrokerTransport": "protocols/protocol_pattern_b_broker_transport.py",  # [RUNTIME] OMN-10237 narrow broker transport DI boundary
     "ProtocolPolicy": "runtime/protocol_policy.py",
     "ProtocolProjectionEffect": "runtime/protocol_projection_effect.py",
     "ProtocolContractEventCallbacks": "runtime/kafka_contract_source.py",
