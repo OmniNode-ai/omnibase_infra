@@ -527,6 +527,11 @@ TOPIC_PATTERN_B_DISPATCH_COMMAND: Final[str] = (
 )
 """Command topic for runtime-owned Pattern B skill dispatch requests."""
 
+TOPIC_PATTERN_B_DISPATCH_COMPLETED: Final[str] = (
+    "onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1"
+)
+"""Terminal event topic for runtime-owned Pattern B skill dispatch results."""
+
 __all__ = [
     "TOPIC_DELEGATION_COMPLETED",
     "TOPIC_DELEGATION_FAILED",
@@ -540,6 +545,7 @@ __all__ = [
     "TOPIC_DELEGATION_ROUTING_DECISION",
     "TOPIC_EVAL_COMPLETED",
     "TOPIC_PATTERN_B_DISPATCH_COMMAND",
+    "TOPIC_PATTERN_B_DISPATCH_COMPLETED",
     "DLQ_CATEGORY_SUFFIXES",
     "DLQ_COMMAND_TOPIC_SUFFIX",
     "DLQ_DOMAIN",

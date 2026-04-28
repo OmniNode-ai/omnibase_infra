@@ -53,6 +53,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_LLM_COMPLETION_COMPLETED_V1 = "onex.evt.omnibase-infra.llm-completion-completed.v1"  # onex.evt.omnibase-infra.llm-completion-completed.v1
     EVT_ONBOARDING_COMPLETED_V1 = "onex.evt.omnibase-infra.onboarding-completed.v1"  # onex.evt.omnibase-infra.onboarding-completed.v1
     EVT_ONBOARDING_STEP_VERIFIED_V1 = "onex.evt.omnibase-infra.onboarding-step-verified.v1"  # onex.evt.omnibase-infra.onboarding-step-verified.v1
+    EVT_PATTERN_B_DISPATCH_COMPLETED_V1 = "onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1"  # onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1
     EVT_QUALITY_GATE_RESULT_V1 = "onex.evt.omnibase-infra.quality-gate-result.v1"  # onex.evt.omnibase-infra.quality-gate-result.v1
     EVT_ROUTING_DECISION_V1 = "onex.evt.omnibase-infra.routing-decision.v1"  # onex.evt.omnibase-infra.routing-decision.v1
     EVT_ROW_COUNT_DIAGNOSTIC_V1 = "onex.evt.omnibase-infra.row-count-diagnostic.v1"  # onex.evt.omnibase-infra.row-count-diagnostic.v1
