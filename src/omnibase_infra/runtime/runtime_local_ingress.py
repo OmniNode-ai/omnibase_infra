@@ -216,7 +216,7 @@ class RuntimeLocalIngressServer:
                 writer.write(response.model_dump_json().encode("utf-8") + b"\n")
                 await writer.drain()
         except ConnectionResetError:
-            pass
+            logger.debug("Local ingress client reset the Unix-socket connection")
         finally:
             writer.close()
             await writer.wait_closed()
