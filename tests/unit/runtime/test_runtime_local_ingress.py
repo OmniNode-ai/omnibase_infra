@@ -28,7 +28,6 @@ from omnibase_infra.runtime.runtime_local_ingress import (
     discover_runtime_local_ingress_routes,
     parse_active_runtime_packages,
 )
-from omnibase_infra.runtime.service_dispatch_result_applier import DispatchResultApplier
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 
@@ -223,9 +222,7 @@ async def test_runtime_host_process_dispatch_local_ingress_request() -> None:
         "session_orchestrator": _session_orchestrator_route()
     }
     applier = SimpleNamespace(apply=AsyncMock())
-    process._local_ingress_dispatch_result_applier = cast(
-        "DispatchResultApplier", applier
-    )
+    process._local_ingress_dispatch_result_applier = cast("object", applier)
 
     response = await process._dispatch_local_ingress_request(
         ModelLocalRuntimeIngressRequest(
