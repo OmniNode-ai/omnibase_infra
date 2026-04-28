@@ -16,6 +16,7 @@ Currently Used by kernel.py:
     - consumer_group (alias: group_id): Used for EventBusInmemory.group
     - event_bus.environment: Used for EventBusInmemory.environment
     - shutdown.grace_period_seconds: Used for graceful shutdown timeout
+    - local_ingress: Used by RuntimeHostProcess to bind local command ingress
 
 Reserved for Future Use:
     - contract_version, name, description: Metadata fields for contract versioning
@@ -83,6 +84,7 @@ class ModelRuntimeConfig(BaseModel):
         shutdown: Shutdown configuration [ACTIVE - grace_period_seconds used]
         contract_registry: Contract registry configuration [ACTIVE]
         gateway: Gateway configuration for envelope signing and realm enforcement [RESERVED]
+        local_ingress: Local Unix-socket command ingress configuration [ACTIVE]
 
     Field Status Legend:
         [ACTIVE]   - Currently used by kernel.py

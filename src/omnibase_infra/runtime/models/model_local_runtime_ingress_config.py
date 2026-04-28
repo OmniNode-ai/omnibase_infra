@@ -57,6 +57,13 @@ class ModelLocalRuntimeIngressConfig(BaseModel):
             raise ValueError("socket_path must be a non-empty string")
         return normalized
 
+    @field_validator("package_names", mode="before")
+    @classmethod
+    def _coerce_package_names(cls, value: object) -> object:
+        if isinstance(value, list):
+            return tuple(value)
+        return value
+
     @field_validator("package_names")
     @classmethod
     def _validate_package_names(cls, value: tuple[str, ...]) -> tuple[str, ...]:

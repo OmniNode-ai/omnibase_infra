@@ -9,6 +9,7 @@ import importlib
 import json
 import logging
 import os
+import stat
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -79,7 +80,21 @@ def discover_runtime_local_ingress_routes(
             continue
 
         for contract_path in sorted(nodes_dir.glob("*/contract.yaml")):
-            raw = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+            try:
+                raw = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+            except yaml.YAMLError as exc:
+                logger.warning(
+                    "Skipping malformed local ingress contract",
+                    extra={"contract_path": str(contract_path), "error": str(exc)},
+                )
+                continue
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Skipping unreadable local ingress contract",
+                    extra={"contract_path": str(contract_path), "error": str(exc)},
+                    exc_info=True,
+                )
+                continue
             if not isinstance(raw, dict):
                 continue
 
@@ -155,7 +170,7 @@ class RuntimeLocalIngressServer:
     async def start(self) -> None:
         socket_path = Path(self._socket_path)
         socket_path.parent.mkdir(parents=True, exist_ok=True)
-        socket_path.unlink(missing_ok=True)
+        _unlink_existing_socket(socket_path, raise_on_refusal=True)
 
         stream_limit = self._max_payload_bytes + 4096
         self._server = await asyncio.start_unix_server(
@@ -175,8 +190,7 @@ class RuntimeLocalIngressServer:
             self._server = None
 
         socket_path = Path(self._socket_path)
-        if socket_path.exists():
-            socket_path.unlink(missing_ok=True)
+        _unlink_existing_socket(socket_path, raise_on_refusal=False)
 
         logger.info("RuntimeLocalIngressServer stopped")
 
@@ -234,7 +248,7 @@ class RuntimeLocalIngressServer:
             )
 
         try:
-            request = ModelLocalRuntimeIngressRequest.model_validate(raw)
+            request = ModelLocalRuntimeIngressRequest.model_validate(raw, strict=False)
         except ValidationError as exc:
             node_alias = "unknown"
             if isinstance(raw, dict):
@@ -260,6 +274,35 @@ def _resolve_package_root(package_name: str) -> Path:
     if not isinstance(module_file, str) or not module_file:
         raise ValueError(f"Cannot resolve package root for '{package_name}'")
     return Path(module_file).resolve().parent
+
+
+def _unlink_existing_socket(
+    socket_path: Path,
+    *,
+    raise_on_refusal: bool,
+) -> None:
+    if not socket_path.exists() and not socket_path.is_symlink():
+        return
+
+    existing_stat = socket_path.lstat()
+    allowed_group_ids = set(os.getgroups()) | {os.getgid(), os.getegid()}
+    parent_group_id = socket_path.parent.stat().st_gid
+    is_owned_socket = (
+        stat.S_ISSOCK(existing_stat.st_mode)
+        and existing_stat.st_uid == os.getuid()
+        and existing_stat.st_gid in allowed_group_ids | {parent_group_id}
+    )
+    if is_owned_socket:
+        socket_path.unlink()
+        return
+
+    message = (
+        f"Refusing to unlink local ingress path {socket_path}: existing path is "
+        "not an owned Unix socket"
+    )
+    if raise_on_refusal:
+        raise FileExistsError(message)
+    logger.warning(message)
 
 
 def _safe_optional_string(value: object) -> str | None:

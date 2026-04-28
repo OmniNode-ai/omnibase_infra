@@ -8,6 +8,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -17,16 +18,32 @@ from pydantic import ValidationError
 from omnibase_infra.enums import EnumDispatchStatus
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.runtime.models import (
+    ModelLocalRuntimeIngressConfig,
     ModelLocalRuntimeIngressRequest,
     ModelLocalRuntimeIngressResponse,
 )
 from omnibase_infra.runtime.runtime_local_ingress import (
+    RuntimeLocalIngressRoute,
     RuntimeLocalIngressServer,
     discover_runtime_local_ingress_routes,
     parse_active_runtime_packages,
 )
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
+
+pytestmark = pytest.mark.unit
+
+
+def _session_orchestrator_route() -> RuntimeLocalIngressRoute:
+    return RuntimeLocalIngressRoute(
+        node_name="node_session_orchestrator",
+        contract_name="session_orchestrator",
+        command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
+        event_type="omnimarket.session-orchestrator-start",
+        terminal_event="onex.evt.omnimarket.session-orchestrator-completed.v1",
+        contract_path="/tmp/node_session_orchestrator/contract.yaml",  # noqa: S108
+        package_name="omnimarket",
+    )
 
 
 @pytest.mark.asyncio
@@ -66,6 +83,23 @@ async def test_runtime_local_ingress_server_round_trip(tmp_path: Path) -> None:
         await server.stop()
 
 
+@pytest.mark.asyncio
+async def test_runtime_local_ingress_server_refuses_non_socket_path(
+    tmp_path: Path,
+) -> None:
+    socket_path = tmp_path / "runtime-local-ingress.sock"
+    socket_path.write_text("do not unlink", encoding="utf-8")
+    server = RuntimeLocalIngressServer(
+        str(socket_path),
+        AsyncMock(),
+    )
+
+    with pytest.raises(FileExistsError, match="not an owned Unix socket"):
+        await server.start()
+
+    assert socket_path.read_text(encoding="utf-8") == "do not unlink"
+
+
 def test_local_runtime_ingress_request_rejects_blank_node_name() -> None:
     with pytest.raises(ValidationError, match="node_alias must be a non-empty string"):
         ModelLocalRuntimeIngressRequest(node_alias="   ")
@@ -77,6 +111,14 @@ def test_parse_active_runtime_packages_honors_env_override() -> None:
         env={"ONEX_ACTIVE_RUNTIME_PACKAGES": "omnibase_infra, omnimarket"},
     )
     assert resolved == ("omnibase_infra", "omnimarket")
+
+
+def test_local_runtime_ingress_config_accepts_yaml_list_package_names() -> None:
+    config = ModelLocalRuntimeIngressConfig.model_validate(
+        {"package_names": ["omnibase_infra", "omnimarket"]}
+    )
+
+    assert config.package_names == ("omnibase_infra", "omnimarket")
 
 
 def test_discover_runtime_local_ingress_routes_registers_aliases(
@@ -106,6 +148,25 @@ terminal_event: onex.evt.demo.completed.v1
     assert routes["demo"].command_topic == "onex.cmd.demo.start.v1"
     assert routes["node_demo"].contract_name == "demo"
     assert routes["demo"].terminal_event == "onex.evt.demo.completed.v1"
+
+
+def test_discover_runtime_local_ingress_routes_skips_malformed_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package_root = tmp_path / "fakepkg"
+    (package_root / "nodes" / "node_bad").mkdir(parents=True)
+    (package_root / "__init__.py").write_text("", encoding="utf-8")
+    (package_root / "nodes" / "node_bad" / "contract.yaml").write_text(
+        "name: [unterminated",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.runtime_local_ingress.importlib.import_module",
+        lambda _name: SimpleNamespace(__file__=str(package_root / "__init__.py")),
+    )
+
+    assert discover_runtime_local_ingress_routes(("fakepkg",)) == {}
 
 
 def test_discover_runtime_local_ingress_routes_rejects_duplicate_alias(
@@ -158,15 +219,10 @@ async def test_runtime_host_process_dispatch_local_ingress_request() -> None:
     )
     process._is_running = True
     process._local_ingress_routes = {
-        "session_orchestrator": SimpleNamespace(
-            node_name="node_session_orchestrator",
-            contract_name="session_orchestrator",
-            command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
-            event_type="omnimarket.session-orchestrator-start",
-            terminal_event="onex.evt.omnimarket.session-orchestrator-completed.v1",
-        )
+        "session_orchestrator": _session_orchestrator_route()
     }
-    process._local_ingress_dispatch_result_applier = SimpleNamespace(apply=AsyncMock())
+    applier = SimpleNamespace(apply=AsyncMock())
+    process._local_ingress_dispatch_result_applier = cast("Any", applier)
 
     response = await process._dispatch_local_ingress_request(
         ModelLocalRuntimeIngressRequest(
@@ -179,7 +235,51 @@ async def test_runtime_host_process_dispatch_local_ingress_request() -> None:
     assert response.ok is True
     assert response.topic == "onex.cmd.omnimarket.session-orchestrator-start.v1"
     dispatch_engine.dispatch.assert_awaited()
-    process._local_ingress_dispatch_result_applier.apply.assert_awaited()
+    applier.apply.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runtime_host_process_dispatch_local_ingress_uses_handler_semaphore() -> (
+    None
+):
+    dispatch_result = ModelDispatchResult(
+        status=EnumDispatchStatus.SUCCESS,
+        topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
+        started_at=datetime.now(UTC),
+        completed_at=datetime.now(UTC),
+        correlation_id=uuid4(),
+    )
+    dispatch_engine = AsyncMock()
+    dispatch_engine.dispatch = AsyncMock(return_value=dispatch_result)
+
+    process = RuntimeHostProcess(
+        config=make_runtime_config(),
+        dispatch_engine=dispatch_engine,
+    )
+    process._is_running = True
+    process._handler_semaphore = asyncio.Semaphore(1)
+    await process._handler_semaphore.acquire()
+    process._local_ingress_routes = {
+        "session_orchestrator": _session_orchestrator_route()
+    }
+
+    task = asyncio.create_task(
+        process._dispatch_local_ingress_request(
+            ModelLocalRuntimeIngressRequest(
+                node_alias="session_orchestrator",
+                payload={"dry_run": True},
+                correlation_id=uuid4(),
+            )
+        )
+    )
+    await asyncio.sleep(0)
+    dispatch_engine.dispatch.assert_not_awaited()
+
+    process._handler_semaphore.release()
+    response = await task
+
+    assert response.ok is True
+    dispatch_engine.dispatch.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -204,13 +304,7 @@ async def test_runtime_host_process_dispatch_local_ingress_request_times_out() -
     )
     process._is_running = True
     process._local_ingress_routes = {
-        "session_orchestrator": SimpleNamespace(
-            node_name="node_session_orchestrator",
-            contract_name="session_orchestrator",
-            command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
-            event_type="omnimarket.session-orchestrator-start",
-            terminal_event="onex.evt.omnimarket.session-orchestrator-completed.v1",
-        )
+        "session_orchestrator": _session_orchestrator_route()
     }
 
     response = await process._dispatch_local_ingress_request(
@@ -236,22 +330,15 @@ async def test_runtime_health_includes_local_ingress_details() -> None:
     process._is_running = True
     process._local_ingress_active_packages = ("omnibase_infra", "omnimarket")
     process._local_ingress_routes = {
-        "session_orchestrator": SimpleNamespace(
-            node_name="node_session_orchestrator",
-            contract_name="session_orchestrator",
-            command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
-            event_type="omnimarket.session-orchestrator-start",
-            terminal_event="onex.evt.omnimarket.session-orchestrator-completed.v1",
-        )
+        "session_orchestrator": _session_orchestrator_route()
     }
 
     health = await process.health_check()
 
     assert "local_ingress" in health
-    local_ingress = health["local_ingress"]
+    local_ingress = cast("dict[str, object]", health["local_ingress"])
     assert local_ingress["enabled"] is True
     assert local_ingress["route_count"] == 1
     assert "components" in health
-    assert any(
-        component["name"] == "local_ingress" for component in health["components"]
-    )
+    components = cast("list[dict[str, object]]", health["components"])
+    assert any(component["name"] == "local_ingress" for component in components)
