@@ -70,6 +70,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolKafkaAdminLike": "protocols/protocol_kafka_admin_like.py",  # [RUNTIME] OMN-8623 Kafka admin client boundary for health monitor DI
     "ProtocolTopicRegistry": "protocols/protocol_topic_registry.py",  # [DI] OMN-5839
     "ProtocolValidationLedgerRepository": "protocols/protocol_validation_ledger_repository.py",
+    "ProtocolPatternBBrokerTransport": "protocols/protocol_pattern_b_broker_transport.py",  # [RUNTIME] OMN-10204 Pattern B broker transport boundary
     # === [DI] Dependency injection boundaries ===
     # ProtocolConsulClient removed in OMN-3540 (Consul removal)
     "ProtocolEffectIdempotencyStore": "nodes/node_registry_effect/protocols/protocol_effect_idempotency_store.py",
@@ -112,7 +113,6 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolDomainPlugin": "runtime/protocol_domain_plugin.py",
     "ProtocolHandlerPluginLoader": "runtime/protocol_handler_plugin_loader.py",
     "ProtocolHandlerDiscovery": "runtime/protocol_handler_discovery.py",
-    "ProtocolPatternBBrokerTransport": "protocols/protocol_pattern_b_broker_transport.py",  # [RUNTIME] OMN-10238 narrow broker transport DI boundary
     "ProtocolPolicy": "runtime/protocol_policy.py",
     "ProtocolProjectionEffect": "runtime/protocol_projection_effect.py",
     "ProtocolContractEventCallbacks": "runtime/kafka_contract_source.py",
