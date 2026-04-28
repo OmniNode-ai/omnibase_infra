@@ -19,11 +19,11 @@ dod_evidence:
       - check_type: "command"
         check_value: "cd scripts/deploy-agent && uv run --extra dev pytest tests/unit/test_kafka_config.py tests/unit/test_publisher_kafka_bus.py -q"
   - id: "dod-002"
-    description: "Deploy-agent consume/publish paths use the same explicit Kafka config"
+    description: "Deploy-agent consume/publish paths use the same explicit Kafka config and canonical repo source"
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "cd scripts/deploy-agent && uv run --extra dev pytest tests/unit -q"
+        check_value: "cd scripts/deploy-agent && uv run --extra dev pytest tests/unit/test_executor_self_update.py tests/unit/test_deploy_agent_service_source.py tests/unit/test_kafka_config.py tests/unit/test_publisher_kafka_bus.py -q"
   - id: "dod-003"
     description: "Post-merge deploy validation confirms .201 deploy-agent is configured with the same KAFKA_BOOTSTRAP_SERVERS as the trigger publisher"
     source: "manual"

@@ -20,8 +20,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/data/omninode/deploy-agent
+WorkingDirectory=/data/omninode/omnibase_infra/scripts/deploy-agent
 EnvironmentFile=/home/jonah/.omnibase/.env
+Environment=DEPLOY_AGENT_DIR=/data/omninode/omnibase_infra/scripts/deploy-agent
 Environment=DEPLOY_AGENT_STATE_DIR=/data/omninode/deploy-agent/state/jobs
 Environment=DEPLOY_AGENT_PORT=8099
 ExecStartPre=/bin/sh -c 'fuser -k 8099/tcp || true'
