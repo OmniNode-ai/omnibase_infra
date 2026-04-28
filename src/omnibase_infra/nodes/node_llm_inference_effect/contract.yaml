@@ -66,6 +66,18 @@ handler_routing:
         name: "HandlerLlmCliSubprocess"
         module: "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess"
       description: "Execute LLM inference via Codex CLI subprocess (codex exec)"
+    # Claude CLI Subprocess Handler (OMN-10137)
+    - operation: "inference.claude_cli"
+      handler:
+        name: "HandlerLlmCliSubprocess"
+        module: "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess"
+      description: "Execute LLM inference via Claude CLI subprocess (claude -p --output-format json)"
+    # opencode CLI Subprocess Handler (OMN-10137)
+    - operation: "inference.opencode_cli"
+      handler:
+        name: "HandlerLlmCliSubprocess"
+        module: "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_cli_subprocess"
+      description: "Execute LLM inference via opencode CLI subprocess (opencode run --format json --pure)"
   execution_mode: "single"
   max_timeout_seconds: 600
 # =============================================================================
