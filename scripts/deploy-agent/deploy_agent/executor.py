@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
@@ -46,6 +47,11 @@ PHASE_TIMEOUTS = {
 
 PhaseCallback = Callable[[Phase, PhaseStatus], None]
 
+RUNTIME_HEALTH_TARGETS: tuple[tuple[str, int], ...] = (
+    ("omninode-runtime", 8085),
+    ("runtime-effects", 8086),
+)
+
 
 def _requested_services_for_up(scope: Scope, services: list[str]) -> list[str]:
     """Return the explicit service list compose should recreate for this scope.
@@ -78,6 +84,26 @@ def _run(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedProcess:
         text=True,
         check=False,
         **kwargs,
+    )
+
+
+def _runtime_health_passed(result: subprocess.CompletedProcess) -> bool:
+    """Return whether a runtime /health response proves deploy readiness."""
+    if result.returncode != 0:
+        return False
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    details = payload.get("details")
+    if not isinstance(details, dict):
+        return False
+    return (
+        payload.get("status") == "healthy"
+        and details.get("is_running") is True
+        and details.get("config_prefetch_status") == "ok"
     )
 
 
@@ -676,15 +702,21 @@ class DeployExecutor:
                 )
             )
 
-        # Health endpoint checks
-        for service, port in [
-            ("runtime", 8000),
-            ("intelligence-api", 8001),
-            ("contract-resolver", 8002),
-        ]:
+        # Runtime health endpoint checks.
+        #
+        # OMN-9728: deployment readiness is owned by the runtime health servers
+        # on 8085/8086. Ports 8000/8001/8002 are LLM endpoints and cannot prove
+        # that the runtime or runtime-effects processes are healthy.
+        for service, port in RUNTIME_HEALTH_TARGETS:
             start = time.monotonic()
             result = _run(
-                ["curl", "-sf", f"http://localhost:{port}/health"],
+                [
+                    "curl",
+                    "-sS",
+                    "--max-time",
+                    "10",
+                    f"http://localhost:{port}/health",
+                ],
                 timeout=10,
             )
             latency = int((time.monotonic() - start) * 1000)
@@ -692,7 +724,7 @@ class DeployExecutor:
                 ModelHealthCheck(
                     service=service,
                     endpoint=f"http://localhost:{port}/health",
-                    status="pass" if result.returncode == 0 else "fail",
+                    status="pass" if _runtime_health_passed(result) else "fail",
                     latency_ms=latency,
                 )
             )

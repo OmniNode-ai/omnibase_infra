@@ -1,0 +1,26 @@
+# OMN-9728 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: "1.0.0"
+ticket_id: "OMN-9728"
+summary: "fix(deploy-agent): verify runtime health on canonical 8085/8086 endpoints"
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "Deploy-agent verification probes runtime health ports instead of LLM ports"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run --extra dev pytest scripts/deploy-agent/tests/unit/test_executor_runtime_health_verify.py -q"
+  - id: "dod-002"
+    description: "Runtime deploy verification rejects degraded config prefetch after merge"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy omninode-runtime after merge, then verify http://localhost:8085/health and http://localhost:8086/health both report status=healthy, details.is_running=true, and details.config_prefetch_status=ok"
