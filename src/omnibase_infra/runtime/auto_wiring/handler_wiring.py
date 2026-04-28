@@ -96,6 +96,7 @@ _SENSITIVE_PATTERN = re.compile(
     r"(?:postgresql|postgres|mysql|redis|amqp|kafka|mongodb|http|https)://\S*",
     re.IGNORECASE,
 )
+_STRICT_DISPATCHER_COVERAGE_ENV = "ONEX_STRICT_DISPATCHER_COVERAGE"
 
 
 def _sanitize_exc(exc: BaseException) -> str:
@@ -931,6 +932,94 @@ def _derive_event_type_alias_from_topic(topic: str) -> str | None:
     return None
 
 
+def _strict_dispatcher_coverage_enabled() -> bool:
+    """Return True when strict orchestrator dispatcher coverage is enabled."""
+    return os.environ.get(_STRICT_DISPATCHER_COVERAGE_ENV, "").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _is_orchestrator_contract(contract: ModelDiscoveredContract) -> bool:
+    """Return True when a discovered contract is an orchestrator variant."""
+    return "orchestrator" in contract.node_type.lower()
+
+
+def _start_event_type_aliases(contract: ModelDiscoveredContract) -> tuple[str, ...]:
+    """Return topic-derived event_type aliases for orchestrator start commands."""
+    if contract.event_bus is None:
+        return ()
+
+    aliases: list[str] = []
+    for topic in contract.event_bus.subscribe_topics:
+        parts = topic.split(".")
+        if (
+            len(parts) < 5
+            or parts[0] != "onex"
+            or parts[1] != "cmd"
+            or not parts[3].endswith("-start")
+            or parts[4] != "v1"
+        ):
+            continue
+        alias = _derive_event_type_alias_from_topic(topic)
+        if alias is not None:
+            aliases.append(alias)
+    return tuple(dict.fromkeys(aliases))
+
+
+def _live_message_types(pcw: PreparedContractWiring) -> set[str]:
+    """Return message types that will be committed for non-skipped handlers."""
+    message_types: set[str] = set()
+    for prepared in pcw.prepared_wirings:
+        if prepared.is_skip or prepared.is_quarantined:
+            continue
+        if prepared.message_types is not None:
+            message_types.update(prepared.message_types)
+    return message_types
+
+
+def _collect_orchestrator_dispatcher_coverage_gaps(
+    prepared_contracts: list[PreparedContractWiring],
+    failed_gaps: list[str] | None = None,
+) -> tuple[str, ...]:
+    """Find orchestrator start topics that lack a matching live dispatcher."""
+    gaps: list[str] = list(failed_gaps or [])
+    for pcw in prepared_contracts:
+        contract = pcw.contract
+        if not _is_orchestrator_contract(contract):
+            continue
+        start_aliases = _start_event_type_aliases(contract)
+        if not start_aliases:
+            continue
+        message_types = _live_message_types(pcw)
+        for alias in start_aliases:
+            if alias in message_types:
+                continue
+            gaps.append(
+                f"{contract.name}: missing dispatcher for {alias} "
+                f"(node_type={contract.node_type}, contract={contract.contract_path})"
+            )
+    return tuple(gaps)
+
+
+def _assert_orchestrator_dispatcher_coverage(
+    prepared_contracts: list[PreparedContractWiring],
+    failed_gaps: list[str] | None = None,
+) -> None:
+    """Raise when strict mode finds an orchestrator start topic without a dispatcher."""
+    gaps = _collect_orchestrator_dispatcher_coverage_gaps(
+        prepared_contracts,
+        failed_gaps,
+    )
+    if gaps:
+        raise ModelOnexError(
+            "Strict dispatcher coverage failed for orchestrator start topics: "
+            + "; ".join(gaps)
+        )
+
+
 def _detect_duplicate_topics(
     manifest: ModelAutoWiringManifest,
 ) -> list[ModelDuplicateTopicOwnership]:
@@ -1075,6 +1164,7 @@ async def wire_from_manifest(
     # Failures are collected; if any exist, we raise before touching anything (OMN-8735).
     prepared_contracts: list[PreparedContractWiring] = []
     failed_results: list[ModelContractWiringResult] = []
+    dispatcher_coverage_failed_gaps: list[str] = []
     for contract in manifest.contracts:
         try:
             prepared = _prepare_contract_wiring(
@@ -1112,6 +1202,13 @@ async def wire_from_manifest(
                     reason=f"{type(exc).__name__}: {exc_summary}",
                 )
             )
+            if _is_orchestrator_contract(contract):
+                for alias in _start_event_type_aliases(contract):
+                    dispatcher_coverage_failed_gaps.append(
+                        f"{contract.name}: missing dispatcher for {alias} "
+                        f"because handler preparation failed "
+                        f"({type(exc).__name__}: {exc_summary})"
+                    )
 
     # Check for failures before committing any side effects.
     # ONEX_WIRING_STRICT_MODE=1 raises on any failure (default OFF per OMN-9126:
@@ -1128,6 +1225,12 @@ async def wire_from_manifest(
             "Auto-wiring failed for %d contract(s) (non-strict — set ONEX_WIRING_STRICT_MODE=1 to enforce): %s",
             len(failures),
             "; ".join(failed_reasons),
+        )
+
+    if _strict_dispatcher_coverage_enabled():
+        _assert_orchestrator_dispatcher_coverage(
+            prepared_contracts,
+            dispatcher_coverage_failed_gaps,
         )
 
     # Phase 2: All contracts validated — commit registrations and subscriptions.
