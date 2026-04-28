@@ -1,22 +1,53 @@
-version: 1
+# OMN-9727 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for runtime verification hardening.
+schema_version: '1.0.0'
 ticket_id: OMN-9727
-title: "Market node deployment runbook and runtime verification hardening"
-repo: omnibase_infra
-change_type: runtime_verification
-summary: >
-  Tighten runtime health consumer coverage so discovered auto-wired contracts are checked against the exact EventBusKafka consumer group IDs they should create, not broad topic substring matches.
-
-runtime_impact:
-  deploy_required: true
-  restart_required: true
-  services:
-    - omninode-runtime
-    - runtime-effects
-validation:
-  local:
-    - "uv run pytest tests/unit/services/test_service_runtime_health_monitor.py -q"
-    - "uv run ruff check src/omnibase_infra/services/service_runtime_health_monitor.py tests/unit/services/test_service_runtime_health_monitor.py"
-post_merge:
-  - "Deploy runtime after merge."
-  - "Confirm runtime-health-check events report topic_coverage using exact expected consumer group coverage."
-  - "Diff rpk group list against at least one expected omnimarket auto-wired group ending in .__t.<topic>."
+summary: 'fix(OMN-9727): check exact runtime consumer groups'
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - events
+  - topics
+evidence_requirements:
+  - kind: tests
+    description: Unit tests cover exact runtime consumer group matching
+    command: uv run pytest tests/unit/services/test_service_runtime_health_monitor.py -q
+  - kind: tests
+    description: Integration test proves exact group coverage through run_once
+    command: uv run pytest tests/integration/test_runtime_health_monitor_exact_groups.py -q
+  - kind: ci
+    description: Runtime health monitor code passes ruff
+    command: uv run ruff check src/omnibase_infra/services/service_runtime_health_monitor.py tests/unit/services/test_service_runtime_health_monitor.py tests/integration/test_runtime_health_monitor_exact_groups.py
+  - kind: manual
+    description: Post-merge deploy validates runtime health monitor output on .201
+    command: deploy omninode-runtime and runtime-effects, then verify runtime-health-check topic_coverage uses exact .__t.<topic> consumer groups
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: Exact consumer group unit tests pass
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/services/test_service_runtime_health_monitor.py -q'
+  - id: dod-002
+    description: Exact consumer group integration test passes
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/integration/test_runtime_health_monitor_exact_groups.py -q'
+  - id: dod-003
+    description: Runtime health monitor lint passes
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run ruff check src/omnibase_infra/services/service_runtime_health_monitor.py tests/unit/services/test_service_runtime_health_monitor.py tests/integration/test_runtime_health_monitor_exact_groups.py'
+  - id: dod-004
+    description: Runtime deploy verifies exact consumer group topic coverage
+    source: manual
+    checks:
+      - check_type: command
+        check_value: 'deploy omninode-runtime and runtime-effects after merge; docker exec omnibase-infra-redpanda rpk group list; verify expected group IDs end with .__t.<topic>'
