@@ -14,7 +14,7 @@ import sys
 from unittest.mock import call, patch
 
 import pytest
-from deploy_agent.executor import DeployExecutor
+from deploy_agent.executor import DEPLOY_AGENT_DIR, DeployExecutor
 
 SHA_LOCAL = "aaaaaaaabbbbbbbb"
 SHA_REMOTE = "ccccccccdddddddd"
@@ -54,6 +54,9 @@ def _make_git_responses(
 
 
 class TestSelfUpdateSkip:
+    def test_default_update_source_is_canonical_repo_copy(self) -> None:
+        assert DEPLOY_AGENT_DIR == "/data/omninode/omnibase_infra/scripts/deploy-agent"
+
     def test_skip_flag_bypasses_all_git_calls(self) -> None:
         executor = DeployExecutor()
         with patch("deploy_agent.executor._run") as mock_run:

@@ -145,11 +145,12 @@ async def test_runtime_deploy_validates_llm_env_before_rebuild(
     store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
 
     fake_executor = _FakeExecutor()
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
     monkeypatch.setattr(agent_mod, "STATE_DIR", tmp_path / "agent-state")
     agent = DeployAgent(skip_self_update=True)
     agent.job_store = store
     agent.executor = fake_executor  # type: ignore[assignment]
-    monkeypatch.setattr(agent_mod, "publish_result", lambda payload: False)
+    monkeypatch.setattr(agent_mod, "publish_result", lambda payload, config: False)
 
     await agent._run_deploy(cmd)
 
@@ -176,11 +177,12 @@ async def test_core_deploy_does_not_validate_runtime_llm_env(
     store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
 
     fake_executor = _FakeExecutor()
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
     monkeypatch.setattr(agent_mod, "STATE_DIR", tmp_path / "agent-state")
     agent = DeployAgent(skip_self_update=True)
     agent.job_store = store
     agent.executor = fake_executor  # type: ignore[assignment]
-    monkeypatch.setattr(agent_mod, "publish_result", lambda payload: False)
+    monkeypatch.setattr(agent_mod, "publish_result", lambda payload, config: False)
 
     await agent._run_deploy(cmd)
 
@@ -202,11 +204,12 @@ async def test_full_deploy_validates_llm_env_before_rebuild(
     store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
 
     fake_executor = _FakeExecutor()
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
     monkeypatch.setattr(agent_mod, "STATE_DIR", tmp_path / "agent-state")
     agent = DeployAgent(skip_self_update=True)
     agent.job_store = store
     agent.executor = fake_executor  # type: ignore[assignment]
-    monkeypatch.setattr(agent_mod, "publish_result", lambda payload: False)
+    monkeypatch.setattr(agent_mod, "publish_result", lambda payload, config: False)
 
     await agent._run_deploy(cmd)
 

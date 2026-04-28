@@ -1,0 +1,32 @@
+# OMN-9713 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: "1.0.0"
+ticket_id: "OMN-9713"
+summary: "fix(deploy-agent): use one explicit Kafka control bus for consume and publish"
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "Deploy-agent Kafka config has no localhost fallback and supports SASL_SSL cloud bus"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "cd scripts/deploy-agent && uv run --extra dev pytest tests/unit/test_kafka_config.py tests/unit/test_publisher_kafka_bus.py -q"
+  - id: "dod-002"
+    description: "Deploy-agent consume/publish paths use the same explicit Kafka config and canonical repo source"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "cd scripts/deploy-agent && uv run --extra dev pytest tests/unit/test_executor_self_update.py tests/unit/test_deploy_agent_service_source.py tests/unit/test_kafka_config.py tests/unit/test_publisher_kafka_bus.py -q"
+  - id: "dod-003"
+    description: "Post-merge deploy validation confirms .201 deploy-agent is configured with the same KAFKA_BOOTSTRAP_SERVERS as the trigger publisher"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy deploy-agent after merge, then inspect the user service environment and verify KAFKA_BOOTSTRAP_SERVERS matches the runtime-rebuild-trigger publish bus; no live restart performed in PR"

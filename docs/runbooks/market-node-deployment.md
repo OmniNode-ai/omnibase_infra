@@ -69,15 +69,14 @@ correlation_id, requested_by, scope="runtime", git_ref="origin/main"
 **HMAC signing:** the payload is signed with `DEPLOY_AGENT_HMAC_SECRET` before
 publishing. The deploy-agent verifies the signature on receipt.
 
-**GAP — trigger fires on Kafka cloud bus, not local Docker bus:**
-The trigger script publishes to `KAFKA_BOOTSTRAP_SERVERS` (cloud Confluent endpoint).
-The deploy-agent on .201 must be configured to consume from the same cloud bus
-(or a bridge). There is no evidence in the codebase that the deploy-agent is
-configured to consume from the cloud bus vs the local Docker Redpanda. This is
-a known issue: OMN-9713 tracks "deploy-agent localhost" — the deploy-agent was
-consuming from `localhost:19092` (Docker Redpanda) while the trigger was publishing
-to the cloud bus. Any PR touching `src/omnimarket/**` would silently never reach
-the deploy-agent.
+**Deploy-agent Kafka control bus:** The trigger script publishes to
+`KAFKA_BOOTSTRAP_SERVERS`, and the deploy-agent now requires the same explicit
+Kafka config for command consumption, completion publishing, and rejection
+publishing. There is intentionally no localhost fallback. OMN-9713 fixed the
+code-level split-brain path where the deploy-agent could silently consume or
+publish on a different bus from the trigger publisher. Post-merge validation must
+still verify the `.201` user service environment contains the intended
+`KAFKA_BOOTSTRAP_SERVERS` value before relying on automated rebuilds.
 
 ---
 
@@ -263,7 +262,7 @@ but it is not yet implemented.
 
 | # | Gap | Severity | Evidence | Recommended fix |
 |---|-----|----------|----------|-----------------|
-| 1 | Deploy-agent consuming from wrong Kafka bus (localhost vs cloud) | HIGH | OMN-9713; executor.py hardcodes `localhost:19092`; trigger publishes to cloud SASL endpoint | Fix deploy-agent Kafka config to match trigger bus; add preflight broker-reachability check |
+| 1 | Deploy-agent consuming from wrong Kafka bus (localhost vs cloud) | CODE FIXED | OMN-9713 removes localhost fallback and routes consume/completion/rejection through one explicit Kafka config | Deploy deploy-agent after merge and verify `.201` user service env uses the trigger publisher bus |
 | 2 | No per-node round-trip verification after deploy | HIGH | executor.py verify() checks only count>0 and wrong ports; OMN-9695 undetected 6 days | Implement F4 canary: synthetic event → expected response per node |
 | 3 | Deploy-agent health check probes wrong ports (8000/8001/8002 vs 8085/8086) | HIGH | executor.py:636-654 hardcodes LLM ports; runtime health is on 8085/8086 | Fix executor.py verify() to probe 8085 and 8086; check `details.config_prefetch_status=ok` |
 | 4 | No expected consumer group registry | HIGH | No `expected_consumer_groups.yaml` exists; rpk group list diff is manual | Create registry from F0 matrix; wire into E1a baseline check |
@@ -292,9 +291,10 @@ in `config_prefetch_status=degraded_error`.
   asserts the verifier correctly distinguishes `config_prefetch_status=ok` from
   `config_prefetch_status=degraded_error`
 
-**Why not Gap #1 (bus mismatch)?** Gap #1 (OMN-9713) is already tracked by the
-runtime team and gated on their deliverable. It cannot be fixed here without
-SSH access to .201 and changes to the live deploy-agent configuration.
+**Gap #1 (bus mismatch):** OMN-9713 fixes the code path by requiring explicit
+Kafka config and using it for both consume and publish surfaces. The remaining
+work is post-merge deployment validation on `.201`; this runbook intentionally
+does not imply a PR can mutate the live user service environment.
 
 **Why not Gap #2 (no round-trip canary)?** Gap #2 (F4 canary) is Wave 3 work
 gated on Track B completion. It is the right long-term fix but is not immediately
@@ -304,7 +304,8 @@ actionable from a static code-only PR.
 
 ## Manual deployment path (current fallback)
 
-When the deploy-agent is unreachable (e.g., OMN-9713 bus mismatch), the current
+When the deploy-agent is unreachable (for example, before OMN-9713 is deployed
+and validated on `.201`), the current
 manual path on `.201` is (requires `INFRA_HOST` and `INFRA_USER` from `~/.omnibase/.env`):
 
 ```bash

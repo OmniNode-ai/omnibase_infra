@@ -16,15 +16,18 @@ from deploy_agent.events import (
     ModelRebuildRequested,
 )
 from deploy_agent.job_state import JobStore
+from deploy_agent.kafka_config import ModelDeployAgentKafkaConfig
 
 logger = logging.getLogger(__name__)
 
 
 class DeployConsumer:
-    def __init__(self, bootstrap_servers: str, job_store: JobStore):
+    def __init__(
+        self, kafka_config: ModelDeployAgentKafkaConfig, job_store: JobStore
+    ) -> None:
         self.consumer = KafkaConsumer(
             TOPIC_REBUILD_REQUESTED,
-            bootstrap_servers=bootstrap_servers,
+            **kafka_config.consumer_kwargs(),
             group_id="onex-deploy-agent",
             auto_offset_reset="latest",
             enable_auto_commit=False,

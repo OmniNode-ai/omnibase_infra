@@ -31,7 +31,7 @@ SCOPE_BUNDLES: dict[Scope, list[str]] = {
 logger = logging.getLogger(__name__)
 
 REPO_DIR = "/data/omninode/omnibase_infra"
-DEPLOY_AGENT_DIR = "/data/omninode/deploy-agent"
+DEPLOY_AGENT_DIR = f"{REPO_DIR}/scripts/deploy-agent"
 COMPOSE_FILE = f"{REPO_DIR}/docker/docker-compose.infra.yml"
 COMPOSE_PROJECT = "omnibase-infra"
 
