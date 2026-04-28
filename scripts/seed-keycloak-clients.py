@@ -28,8 +28,8 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any, NoReturn
-
 
 # ---------------------------------------------------------------------------
 # HTTP helpers (stdlib only)
@@ -47,7 +47,7 @@ def _request(
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)  # noqa: S310
     try:
         with urllib.request.urlopen(req) as resp:  # noqa: S310
             body = resp.read()
@@ -56,7 +56,7 @@ def _request(
         body = exc.read()
         try:
             parsed = json.loads(body)
-        except Exception:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             parsed = body.decode(errors="replace")
         return exc.code, parsed
 
@@ -71,7 +71,7 @@ def _get_token(kc_url: str, username: str, password: str) -> str:
             "password": password,
         }
     ).encode()
-    req = urllib.request.Request(
+    req = urllib.request.Request(  # noqa: S310
         token_url,
         data=data,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
@@ -82,8 +82,8 @@ def _get_token(kc_url: str, username: str, password: str) -> str:
             body = json.loads(resp.read())
             return str(body["access_token"])
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode(errors="replace")
-        _die(f"Failed to obtain admin token from {token_url}: {exc.code} {body}")
+        _die(f"Failed to obtain admin token from {token_url}: HTTP {exc.code}")
+        raise RuntimeError("unreachable after _die")
 
 
 # ---------------------------------------------------------------------------
@@ -142,9 +142,7 @@ def _get_existing_client(
     return matches[0] if matches else None
 
 
-def _build_create_payload(
-    spec: dict[str, Any], secret: str | None
-) -> dict[str, Any]:
+def _build_create_payload(spec: dict[str, Any], secret: str | None) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "clientId": spec["clientId"],
         "enabled": True,
@@ -187,9 +185,7 @@ def _ensure_protocol_mappers(
         }
         status, _ = _request("POST", url, token=token, payload=full_mapper)
         if status not in (200, 201):
-            _die(
-                f"Failed to create protocol mapper '{mapper['name']}': HTTP {status}"
-            )
+            _die(f"Failed to create protocol mapper '{mapper['name']}': HTTP {status}")
         changed.append(f"protocolMapper:{mapper['name']}")
     return changed
 
@@ -232,16 +228,12 @@ def _ensure_default_scopes(
         )
         status, _ = _request("PUT", put_url, token=token)
         if status not in (200, 201, 204):
-            _die(
-                f"Failed to bind scope '{scope_name}' to client: HTTP {status}"
-            )
+            _die(f"Failed to bind scope '{scope_name}' to client: HTTP {status}")
         changed.append(f"defaultClientScope:{scope_name}")
     return changed
 
 
-def _get_realm_mgmt_client_id(
-    kc_url: str, realm: str, token: str
-) -> str | None:
+def _get_realm_mgmt_client_id(kc_url: str, realm: str, token: str) -> str | None:
     existing = _get_existing_client(kc_url, realm, token, "realm-management")
     return str(existing["id"]) if existing else None
 
@@ -262,9 +254,7 @@ def _ensure_realm_roles(
         _die(f"realm-management client not found in realm '{realm}'")
 
     # Get service account user
-    sa_url = (
-        f"{kc_url}/admin/realms/{realm}/clients/{internal_id}/service-account-user"
-    )
+    sa_url = f"{kc_url}/admin/realms/{realm}/clients/{internal_id}/service-account-user"
     status, sa_user = _request("GET", sa_url, token=token)
     if status != 200 or not sa_user:
         _die(f"Could not retrieve service account user for client '{internal_id}'")
@@ -292,16 +282,12 @@ def _ensure_realm_roles(
         )
         status, role_obj = _request("GET", role_url, token=token)
         if status != 200 or not role_obj:
-            _die(
-                f"Role '{role_name}' not found in realm-management client"
-            )
+            _die(f"Role '{role_name}' not found in realm-management client")
         roles_to_add.append(role_obj)
         changed.append(f"realmRole:{role_name}")
 
     if roles_to_add:
-        status, _ = _request(
-            "POST", assigned_url, token=token, payload=roles_to_add
-        )
+        status, _ = _request("POST", assigned_url, token=token, payload=roles_to_add)
         if status not in (200, 201, 204):
             _die(f"Failed to assign realm roles: HTTP {status}")
 
@@ -392,7 +378,7 @@ def _reconcile_client(
 def _reset_bootstrap_admin(kc_url: str) -> None:
     if "localhost" not in kc_url and "127.0.0.1" not in kc_url:
         return
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         [
             "docker",
             "exec",
@@ -403,12 +389,16 @@ def _reset_bootstrap_admin(kc_url: str) -> None:
             "--no-prompt",
         ],
         capture_output=True,
+        check=False,
         text=True,
     )
     if result.returncode != 0 and "already exists" not in result.stderr:
         print(
             json.dumps(
-                {"op": "warning", "message": f"bootstrap-admin: {result.stderr.strip()}"}
+                {
+                    "op": "warning",
+                    "message": f"bootstrap-admin: {result.stderr.strip()}",
+                }
             ),
             flush=True,
         )
@@ -451,11 +441,11 @@ def main() -> None:
     if args.reset_bootstrap_admin:
         _reset_bootstrap_admin(args.kc_url)
 
-    config_path = args.config
-    if not os.path.isfile(config_path):
+    config_path = Path(args.config)
+    if not config_path.is_file():
         _die(f"Config file not found: {config_path}")
 
-    with open(config_path) as f:  # noqa: PTH123
+    with config_path.open() as f:
         config = json.load(f)
 
     clients = config.get("clients", [])

@@ -12,7 +12,7 @@ import sys
 import types
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -27,7 +27,7 @@ _mod: types.ModuleType  # assigned by _ensure_mod() on first use
 
 
 def _ensure_mod() -> types.ModuleType:
-    global _mod
+    global _mod  # noqa: PLW0603
     try:
         return _mod
     except NameError:
@@ -43,7 +43,7 @@ def _ensure_mod() -> types.ModuleType:
 
 
 @pytest.fixture(autouse=True, scope="session")
-def _load_module() -> None:  # noqa: PT004
+def _load_module() -> None:
     _ensure_mod()
 
 
@@ -56,7 +56,9 @@ _KC_URL = "http://localhost:28080"
 _TOKEN = "test-access-token"
 
 
-def _client_list_response(clients: list[dict[str, Any]]) -> tuple[int, list[dict[str, Any]]]:
+def _client_list_response(
+    clients: list[dict[str, Any]],
+) -> tuple[int, list[dict[str, Any]]]:
     return (200, clients)
 
 
@@ -142,9 +144,7 @@ class TestIdempotency:
         assert record["op"] == "unchanged"
         assert record["clientId"] == "omniweb"
 
-    def test_second_run_all_unchanged(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_second_run_all_unchanged(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Running reconciler twice in a row: second run is all unchanged."""
         existing = _make_existing_client("onex-api", bearerOnly=True)
         spec = {
@@ -167,7 +167,9 @@ class TestIdempotency:
             with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
                 _ensure_mod()._reconcile_client(_KC_URL, _REALM, _TOKEN, spec)
 
-        lines = [json.loads(l) for l in capsys.readouterr().out.strip().splitlines()]
+        lines = [
+            json.loads(line) for line in capsys.readouterr().out.strip().splitlines()
+        ]
         assert all(rec["op"] == "unchanged" for rec in lines)
 
 
@@ -183,7 +185,11 @@ class TestMissingSecretEnv:
             "secretEnv": "KEYCLOAK_ADMIN_CLIENT_SECRET_MISSING_IN_TEST",
             "serviceAccountsEnabled": True,
         }
-        env = {k: v for k, v in os.environ.items() if k != "KEYCLOAK_ADMIN_CLIENT_SECRET_MISSING_IN_TEST"}
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k != "KEYCLOAK_ADMIN_CLIENT_SECRET_MISSING_IN_TEST"
+        }
         with patch.dict(os.environ, env, clear=True):
             with pytest.raises(SystemExit) as exc_info:
                 _ensure_mod()._resolve_client_secret(spec)
@@ -194,7 +200,9 @@ class TestMissingSecretEnv:
             "clientId": "onex-admin",
             "secretEnv": "KEYCLOAK_ADMIN_CLIENT_SECRET_TEST_VAR",
         }
-        with patch.dict(os.environ, {"KEYCLOAK_ADMIN_CLIENT_SECRET_TEST_VAR": "mysecret"}):
+        with patch.dict(
+            os.environ, {"KEYCLOAK_ADMIN_CLIENT_SECRET_TEST_VAR": "mysecret"}
+        ):
             result = _ensure_mod()._resolve_client_secret(spec)
         assert result == "mysecret"
 
@@ -309,6 +317,7 @@ class TestAudienceMapper:
             return (200, None)
 
         post_called = False
+
         def tracking_request(method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
             nonlocal post_called
             if method == "POST" and "protocol-mappers" in url:
@@ -461,11 +470,50 @@ class TestClientCreation:
     ) -> None:
         """Smoke: all 5 desired clients reconcile without error."""
         clients_spec = [
-            {"clientId": "omniweb", "publicClient": True, "standardFlowEnabled": True, "directAccessGrantsEnabled": False, "serviceAccountsEnabled": False, "defaultClientScopes": DESIRED_SCOPES},
-            {"clientId": "onex-api", "publicClient": False, "bearerOnly": True, "standardFlowEnabled": True, "directAccessGrantsEnabled": False, "serviceAccountsEnabled": False, "defaultClientScopes": DESIRED_SCOPES},
-            {"clientId": "redpanda-events", "publicClient": False, "serviceAccountsEnabled": True, "standardFlowEnabled": True, "directAccessGrantsEnabled": False, "defaultClientScopes": DESIRED_SCOPES},
-            {"clientId": "onex-admin", "publicClient": False, "serviceAccountsEnabled": True, "standardFlowEnabled": False, "directAccessGrantsEnabled": False, "secretEnv": "KC_ADMIN_CLIENT_SECRET_T", "realmRoles": ["realm-management:manage-users"], "defaultClientScopes": DESIRED_SCOPES},
-            {"clientId": "onex-service", "publicClient": False, "serviceAccountsEnabled": True, "standardFlowEnabled": False, "directAccessGrantsEnabled": False, "secretEnv": "ONEX_SVC_SECRET_T", "defaultClientScopes": DESIRED_SCOPES},
+            {
+                "clientId": "omniweb",
+                "publicClient": True,
+                "standardFlowEnabled": True,
+                "directAccessGrantsEnabled": False,
+                "serviceAccountsEnabled": False,
+                "defaultClientScopes": DESIRED_SCOPES,
+            },
+            {
+                "clientId": "onex-api",
+                "publicClient": False,
+                "bearerOnly": True,
+                "standardFlowEnabled": True,
+                "directAccessGrantsEnabled": False,
+                "serviceAccountsEnabled": False,
+                "defaultClientScopes": DESIRED_SCOPES,
+            },
+            {
+                "clientId": "redpanda-events",
+                "publicClient": False,
+                "serviceAccountsEnabled": True,
+                "standardFlowEnabled": True,
+                "directAccessGrantsEnabled": False,
+                "defaultClientScopes": DESIRED_SCOPES,
+            },
+            {
+                "clientId": "onex-admin",
+                "publicClient": False,
+                "serviceAccountsEnabled": True,
+                "standardFlowEnabled": False,
+                "directAccessGrantsEnabled": False,
+                "secretEnv": "KC_ADMIN_CLIENT_SECRET_T",
+                "realmRoles": ["realm-management:manage-users"],
+                "defaultClientScopes": DESIRED_SCOPES,
+            },
+            {
+                "clientId": "onex-service",
+                "publicClient": False,
+                "serviceAccountsEnabled": True,
+                "standardFlowEnabled": False,
+                "directAccessGrantsEnabled": False,
+                "secretEnv": "ONEX_SVC_SECRET_T",
+                "defaultClientScopes": DESIRED_SCOPES,
+            },
         ]
         # Build existing-client map that exactly matches each spec so no drift fires
         existing_by_id = {
@@ -514,7 +562,7 @@ class TestClientCreation:
 
         lines = capsys.readouterr().out.strip().splitlines()
         assert len(lines) == 5
-        ops = {json.loads(l)["op"] for l in lines}
+        ops = {json.loads(line)["op"] for line in lines}
         # All should be unchanged (existing clients with correct state)
         assert ops == {"unchanged"}
 
@@ -534,7 +582,7 @@ class TestGetToken:
             def read(self) -> bytes:
                 return token_response
 
-            def __enter__(self) -> "FakeResponse":
+            def __enter__(self) -> FakeResponse:
                 return self
 
             def __exit__(self, *args: object) -> None:
@@ -548,7 +596,11 @@ class TestGetToken:
         import urllib.error
 
         exc = urllib.error.HTTPError(
-            url="http://x", code=401, msg="Unauthorized", hdrs={}, fp=None  # type: ignore[arg-type]
+            url="http://x",
+            code=401,
+            msg="Unauthorized",
+            hdrs={},
+            fp=None,  # type: ignore[arg-type]
         )
         exc.read = lambda: b'{"error": "unauthorized"}'  # type: ignore[method-assign]
 
@@ -595,41 +647,63 @@ class TestMain:
         assert exc_info.value.code != 0
 
     def test_main_dies_without_admin_password(self) -> None:
-        with patch("sys.argv", ["seed-keycloak-clients.py", "--kc-url", "http://localhost:28080"]):
-            with patch.dict(os.environ, {"KC_URL": "http://localhost:28080"}, clear=False):
+        with patch(
+            "sys.argv",
+            ["seed-keycloak-clients.py", "--kc-url", "http://localhost:28080"],
+        ):
+            with patch.dict(
+                os.environ, {"KC_URL": "http://localhost:28080"}, clear=False
+            ):
                 with pytest.raises(SystemExit) as exc_info:
                     _ensure_mod().main()
         assert exc_info.value.code != 0
 
     def test_main_dies_without_config(self) -> None:
-        with patch("sys.argv", [
-            "seed-keycloak-clients.py",
-            "--kc-url", "http://localhost:28080",
-            "--admin-password", "secret",
-        ]):
+        with patch(
+            "sys.argv",
+            [
+                "seed-keycloak-clients.py",
+                "--kc-url",
+                "http://localhost:28080",
+                "--admin-password",
+                "secret",
+            ],
+        ):
             with patch.dict(os.environ, {}, clear=False):
                 with pytest.raises(SystemExit) as exc_info:
                     _ensure_mod().main()
         assert exc_info.value.code != 0
 
-    def test_main_dies_on_missing_config_file(self, tmp_path: pytest.TempPathFactory) -> None:
-        with patch("sys.argv", [
-            "seed-keycloak-clients.py",
-            "--kc-url", "http://localhost:28080",
-            "--admin-password", "secret",
-            "--config", "/nonexistent/path/desired-clients.json",
-        ]):
+    def test_main_dies_on_missing_config_file(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        with patch(
+            "sys.argv",
+            [
+                "seed-keycloak-clients.py",
+                "--kc-url",
+                "http://localhost:28080",
+                "--admin-password",
+                "secret",
+                "--config",
+                "/nonexistent/path/desired-clients.json",
+            ],
+        ):
             with pytest.raises(SystemExit) as exc_info:
                 _ensure_mod().main()
         assert exc_info.value.code != 0
 
     def test_main_runs_reconciler_from_config_file(
-        self, tmp_path: "pytest.TempPathFactory", capsys: pytest.CaptureFixture[str]
+        self, tmp_path: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]
     ) -> None:
         config = {
             "realm": "omninode",
             "clients": [
-                {"clientId": "omniweb", "publicClient": True, "defaultClientScopes": DESIRED_SCOPES},
+                {
+                    "clientId": "omniweb",
+                    "publicClient": True,
+                    "defaultClientScopes": DESIRED_SCOPES,
+                },
             ],
         }
         config_file = tmp_path / "desired-clients.json"  # type: ignore[operator]
@@ -648,13 +722,20 @@ class TestMain:
                 return _scopes_response(DESIRED_SCOPES)
             return (200, None)
 
-        with patch("sys.argv", [
-            "seed-keycloak-clients.py",
-            "--kc-url", _KC_URL,
-            "--admin-username", "admin",
-            "--admin-password", "secret",
-            "--config", str(config_file),
-        ]):
+        with patch(
+            "sys.argv",
+            [
+                "seed-keycloak-clients.py",
+                "--kc-url",
+                _KC_URL,
+                "--admin-username",
+                "admin",
+                "--admin-password",
+                "secret",
+                "--config",
+                str(config_file),
+            ],
+        ):
             with patch.object(_ensure_mod(), "_get_token", return_value="tok"):
                 with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
                     _ensure_mod().main()
@@ -677,7 +758,13 @@ class TestErrorPaths:
                 return (200, [])  # no existing mappers
             return (500, {"error": "server error"})  # POST fails
 
-        mapper_spec = [{"name": "bad-mapper", "protocolMapper": "oidc-audience-mapper", "config": {}}]
+        mapper_spec = [
+            {
+                "name": "bad-mapper",
+                "protocolMapper": "oidc-audience-mapper",
+                "config": {},
+            }
+        ]
         with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
             with pytest.raises(SystemExit):
                 _ensure_mod()._ensure_protocol_mappers(
@@ -707,7 +794,11 @@ class TestErrorPaths:
         with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
             with pytest.raises(SystemExit):
                 _ensure_mod()._ensure_realm_roles(
-                    _KC_URL, _REALM, _TOKEN, "internal-id", ["realm-management:manage-users"]
+                    _KC_URL,
+                    _REALM,
+                    _TOKEN,
+                    "internal-id",
+                    ["realm-management:manage-users"],
                 )
 
     def test_ensure_default_scopes_fails_on_put_error(self) -> None:
@@ -747,8 +838,11 @@ class TestErrorPaths:
         with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
             with pytest.raises(SystemExit):
                 _ensure_mod()._ensure_realm_roles(
-                    _KC_URL, _REALM, _TOKEN, "internal-id",
-                    ["realm-management:manage-users"]
+                    _KC_URL,
+                    _REALM,
+                    _TOKEN,
+                    "internal-id",
+                    ["realm-management:manage-users"],
                 )
 
 
@@ -767,14 +861,18 @@ class TestRequest:
             def read(self) -> bytes:
                 return response_body
 
-            def __enter__(self) -> "FakeResp":
+            def __enter__(self) -> FakeResp:
                 return self
 
             def __exit__(self, *args: object) -> None:
                 pass
 
         with patch("urllib.request.urlopen", return_value=FakeResp()):
-            status, body = _ensure_mod()._request("GET", "http://localhost/test", token="tok")
+            status, body = _ensure_mod()._request(
+                "GET",
+                "http://localhost/test",
+                token="tok",  # noqa: S106
+            )
         assert status == 200
         assert body == {"id": "abc"}
 
@@ -782,12 +880,20 @@ class TestRequest:
         import urllib.error
 
         exc = urllib.error.HTTPError(
-            url="http://x", code=404, msg="Not Found", hdrs={}, fp=None  # type: ignore[arg-type]
+            url="http://x",
+            code=404,
+            msg="Not Found",
+            hdrs={},
+            fp=None,  # type: ignore[arg-type]
         )
         exc.read = lambda: b'{"error": "not found"}'  # type: ignore[method-assign]
 
         with patch("urllib.request.urlopen", side_effect=exc):
-            status, body = _ensure_mod()._request("GET", "http://localhost/test", token="tok")
+            status, body = _ensure_mod()._request(
+                "GET",
+                "http://localhost/test",
+                token="tok",  # noqa: S106
+            )
         assert status == 404
         assert body == {"error": "not found"}
 
@@ -795,7 +901,11 @@ class TestRequest:
         import urllib.error
 
         exc = urllib.error.HTTPError(
-            url="http://x", code=500, msg="Server Error", hdrs={}, fp=None  # type: ignore[arg-type]
+            url="http://x",
+            code=500,
+            msg="Server Error",
+            hdrs={},
+            fp=None,  # type: ignore[arg-type]
         )
         exc.read = lambda: b"Internal Server Error"  # type: ignore[method-assign]
 
@@ -862,28 +972,40 @@ class TestResetBootstrapAdmin:
 
 
 class TestMainExtended:
-    def test_main_dies_on_empty_clients_list(self, tmp_path: "pytest.TempPathFactory") -> None:
+    def test_main_dies_on_empty_clients_list(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
         config = {"realm": "omninode", "clients": []}
         config_file = tmp_path / "empty-clients.json"  # type: ignore[operator]
         config_file.write_text(json.dumps(config))
 
-        with patch("sys.argv", [
-            "seed-keycloak-clients.py",
-            "--kc-url", _KC_URL,
-            "--admin-password", "secret",
-            "--config", str(config_file),
-        ]):
+        with patch(
+            "sys.argv",
+            [
+                "seed-keycloak-clients.py",
+                "--kc-url",
+                _KC_URL,
+                "--admin-password",
+                "secret",
+                "--config",
+                str(config_file),
+            ],
+        ):
             with pytest.raises(SystemExit) as exc_info:
                 _ensure_mod().main()
         assert exc_info.value.code != 0
 
     def test_main_calls_reset_bootstrap_admin_when_flag_set(
-        self, tmp_path: "pytest.TempPathFactory", capsys: pytest.CaptureFixture[str]
+        self, tmp_path: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]
     ) -> None:
         config = {
             "realm": "omninode",
             "clients": [
-                {"clientId": "omniweb", "publicClient": True, "defaultClientScopes": DESIRED_SCOPES},
+                {
+                    "clientId": "omniweb",
+                    "publicClient": True,
+                    "defaultClientScopes": DESIRED_SCOPES,
+                },
             ],
         }
         config_file = tmp_path / "desired-clients.json"  # type: ignore[operator]
@@ -899,15 +1021,23 @@ class TestMainExtended:
                 return _scopes_response(DESIRED_SCOPES)
             return (200, None)
 
-        with patch("sys.argv", [
-            "seed-keycloak-clients.py",
-            "--kc-url", _KC_URL,
-            "--admin-password", "secret",
-            "--config", str(config_file),
-            "--reset-bootstrap-admin",
-        ]):
+        with patch(
+            "sys.argv",
+            [
+                "seed-keycloak-clients.py",
+                "--kc-url",
+                _KC_URL,
+                "--admin-password",
+                "secret",
+                "--config",
+                str(config_file),
+                "--reset-bootstrap-admin",
+            ],
+        ):
             with patch.object(_ensure_mod(), "_get_token", return_value="tok"):
                 with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
-                    with patch.object(_ensure_mod(), "_reset_bootstrap_admin") as mock_reset:
+                    with patch.object(
+                        _ensure_mod(), "_reset_bootstrap_admin"
+                    ) as mock_reset:
                         _ensure_mod().main()
         mock_reset.assert_called_once_with(_KC_URL)
