@@ -318,7 +318,10 @@ async def test_runtime_host_process_dispatch_local_ingress_sanitizes_broker_erro
 
     assert response.ok is False
     assert response.error is not None
-    assert response.error.message == "[REDACTED - potentially sensitive data]"
+    assert (
+        response.error.message
+        == "RuntimeError: [REDACTED - potentially sensitive data]"
+    )
 
 
 @pytest.mark.asyncio

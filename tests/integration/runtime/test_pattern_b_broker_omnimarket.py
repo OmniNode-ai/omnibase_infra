@@ -19,9 +19,9 @@ from omnibase_core.models.dispatch.model_dispatch_bus_route import (
     ModelDispatchBusRoute,
 )
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.enums.generated import EnumOmnibaseInfraTopic
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
-from omnibase_infra.event_bus.topic_constants import TOPIC_PATTERN_B_DISPATCH_COMMAND
 from omnibase_infra.runtime.runtime_local_ingress import RuntimeLocalIngressRoute
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
 
@@ -59,7 +59,7 @@ async def test_pattern_b_broker_dispatches_real_aislop_handler(tmp_path: Path) -
 
     broker = RuntimePatternBBroker(
         bus,
-        command_topic=TOPIC_PATTERN_B_DISPATCH_COMMAND,
+        command_topic=EnumOmnibaseInfraTopic.CMD_PATTERN_B_DISPATCH_V1.value,
         routes={"aislop_sweep": route},
     )
     await broker.start()
@@ -91,7 +91,7 @@ async def test_pattern_b_broker_dispatches_real_aislop_handler(tmp_path: Path) -
     client = DispatchBusClient(bus, source="pytest")
     broker_route = ModelDispatchBusRoute(
         contract_path=Path(route.contract_path),
-        command_topic=TOPIC_PATTERN_B_DISPATCH_COMMAND,
+        command_topic=EnumOmnibaseInfraTopic.CMD_PATTERN_B_DISPATCH_V1.value,
         terminal_topic="onex.evt.omnibase-infra.pattern-b-dispatch-test-completed.v1",
     )
 

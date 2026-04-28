@@ -75,6 +75,7 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
     EnumIntrospectionReason,
 )
+from omnibase_infra.enums.generated import EnumOmnibaseInfraTopic
 from omnibase_infra.errors import (
     EnvelopeValidationError,
     ModelInfraErrorContext,
@@ -86,9 +87,6 @@ from omnibase_infra.errors import (
 # OMN-7077: EventBusInmemory is migrating to omnibase_core.
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
-from omnibase_infra.event_bus.topic_constants import (
-    TOPIC_PATTERN_B_DISPATCH_COMPLETED,
-)
 from omnibase_infra.gateway import (
     ModelGatewayConfig,
     ServiceEnvelopeSigner,
@@ -2330,7 +2328,9 @@ class RuntimeHostProcess:
                         requester="runtime-local-ingress",
                         payload=request.payload,
                         correlation_id=correlation_id,
-                        response_topic=TOPIC_PATTERN_B_DISPATCH_COMPLETED,
+                        response_topic=(
+                            EnumOmnibaseInfraTopic.EVT_PATTERN_B_DISPATCH_COMPLETED_V1.value
+                        ),
                         timeout_seconds=max(1, (request.timeout_ms + 999) // 1000),
                     )
                 )
@@ -2379,9 +2379,11 @@ class RuntimeHostProcess:
                 output_payloads=output_payloads,
                 error=ModelLocalRuntimeIngressError(
                     code=error_code,
-                    message=sanitize_error_string(
-                        result.error_message
-                        or f"Pattern B broker failed for command {route.contract_name}"
+                    message=sanitize_error_message(
+                        RuntimeError(
+                            result.error_message
+                            or f"Pattern B broker failed for command {route.contract_name}"
+                        )
                     ),
                     retryable=result.status == "timeout",
                 ),

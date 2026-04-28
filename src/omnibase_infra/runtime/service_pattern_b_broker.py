@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from omnibase_core.models.dispatch.model_dispatch_bus_command import (
     ModelDispatchBusCommand,
