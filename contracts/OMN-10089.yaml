@@ -1,0 +1,40 @@
+# OMN-10089 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: "1.0.0"
+ticket_id: "OMN-10089"
+summary: "feat(OMN-10089): add Keycloak OIDC discovery healthcheck to docker-compose"
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - "public_api"
+evidence_requirements:
+  - kind: "tests"
+    description: "Compose YAML assertion proves the Keycloak healthcheck shape"
+    command: "uv run python -c 'from pathlib import Path; import yaml; data=yaml.safe_load(Path(\"docker/docker-compose.infra.yml\").read_text()); hc=data[\"services\"][\"keycloak\"][\"healthcheck\"]; assert hc[\"interval\"] == \"15s\"; assert hc[\"start_period\"] == \"60s\"; assert hc[\"retries\"] == 10; assert \"realms/omninode/.well-known/openid-configuration\" in \" \".join(hc[\"test\"]); print(\"keycloak healthcheck validated\")'"
+  - kind: "ci"
+    description: "CI pipeline green on PR"
+    command: "gh pr checks 1433 --repo OmniNode-ai/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "Contract artifact file present in repo"
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "test -f contracts/OMN-10089.yaml"
+  - id: "dod-002"
+    description: "Local compose YAML assertion validates the Keycloak healthcheck shape"
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "uv run python -c 'from pathlib import Path; import yaml; data=yaml.safe_load(Path(\"docker/docker-compose.infra.yml\").read_text()); hc=data[\"services\"][\"keycloak\"][\"healthcheck\"]; assert hc[\"interval\"] == \"15s\"; assert hc[\"start_period\"] == \"60s\"; assert hc[\"retries\"] == 10; assert \"realms/omninode/.well-known/openid-configuration\" in \" \".join(hc[\"test\"]); print(\"keycloak healthcheck validated\")'"
+  - id: "dod-003"
+    description: "Runtime deploy validates Keycloak health after merge"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy omnibase_infra after merge, then verify docker compose keycloak reaches healthy via the OIDC discovery healthcheck"
