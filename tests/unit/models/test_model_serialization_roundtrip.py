@@ -159,7 +159,6 @@ UNCOVERED_MODELS: dict[str, str] = {
     "ModelProjectorNotificationConfig": "Config with notification channel deps",
     "ModelProjectorPluginLoaderConfig": "Config with plugin path dependencies",
     "ModelProtocolRegistrationConfig": "Config with protocol enum dependencies",
-    "ModelPatternBBrokerConfig": "Broker config model not yet prioritized for roundtrip coverage",
     "ModelRuntimeConfig": "Top-level config aggregating many nested configs",
     "ModelRuntimeContractConfig": "Config with contract path dependencies",
     "ModelRuntimeSchedulerMetrics": "Metrics model, simple but low priority",

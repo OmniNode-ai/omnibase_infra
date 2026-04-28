@@ -1,0 +1,40 @@
+# OMN-10204 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for the Pattern B broker transport change.
+schema_version: '1.0.0'
+ticket_id: OMN-10204
+summary: 'feat(OMN-10204): add pattern b broker full scope implementation'
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - protocols
+evidence_requirements:
+  - kind: tests
+    description: Pattern B broker unit tests pass
+    command: uv run pytest tests/unit/runtime/test_service_pattern_b_broker.py -q
+  - kind: manual
+    description: Runtime deploy validates Pattern B broker transport after merge
+    command: deploy omninode-runtime after merge and verify PATTERN_B_BROKER_ENABLED startup
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: Pattern B broker unit tests pass
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/runtime/test_service_pattern_b_broker.py -q'
+  - id: dod-002
+    description: Protocol ownership allowlist updated to include ProtocolPatternBBrokerTransport
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/contracts/test_protocol_ownership.py -q'
+  - id: dod-003
+    description: Runtime deploy validates Pattern B broker transport boundary after merge
+    source: manual
+    checks:
+      - check_type: command
+        check_value: 'deploy omninode-runtime after merge and verify broker transport initialises without errors'
