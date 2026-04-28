@@ -2426,7 +2426,7 @@ class RuntimeHostProcess:
             return None
         payload = result.payload
         if isinstance(payload, dict):
-            return [cast("dict[str, JsonType]", payload)]
+            return [payload]
         if isinstance(payload, list) and all(
             isinstance(item, dict) for item in payload
         ):

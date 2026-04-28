@@ -3242,6 +3242,22 @@ pattern_exemptions:
     documentation:
       - docker/migrations/forward/070_build_loop_runs.sql
     ticket: OMN-9774
+  # ==========================================================================
+  # ModelLocalRuntimeIngressResponse command_name Exemption (OMN-10237)
+  # ==========================================================================
+  # command_name in ModelLocalRuntimeIngressResponse is the resolved command
+  # name string from the local runtime ingress request (e.g. "run_node"). It
+  # is NOT a foreign-key reference to a command entity — it is the literal
+  # command identifier resolved from the incoming request, used for routing
+  # and audit logging. No separate ID + display_name entity exists for it.
+  - file_pattern: 'model_local_runtime_ingress_response\.py'
+    violation_pattern: "Field 'command_name' might reference an entity"
+    reason: >
+      command_name is the resolved command identifier string from the local runtime ingress request (e.g., "run_node"). It is an audit/routing field, not a foreign key reference to a command entity. No separate command entity with ID + display_name exists in this domain.
+
+    documentation:
+      - CLAUDE.md (Repo Invariants - contracts are source of truth)
+    ticket: OMN-10237
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
