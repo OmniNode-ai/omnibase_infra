@@ -95,32 +95,30 @@ class RuntimePatternBBroker:
             ModelDispatchBusCommand
         ].model_validate_json(message.value)
         command = command_envelope.payload
-        correlation_id = command.correlation_id
+        _route, result = await self.dispatch_request(command)
+        await self._publish_terminal_result(command.response_topic, result)
 
+    async def dispatch_request(
+        self,
+        command: ModelDispatchBusCommand,
+    ) -> tuple[RuntimeLocalIngressRoute | None, ModelDispatchBusTerminalResult]:
+        correlation_id = command.correlation_id
         route = self._routes.get(command.command_name)
         if route is None:
-            await self._publish_terminal_result(
-                command.response_topic,
-                _error_result(
-                    correlation_id,
-                    status="failed",
-                    error_message=f"Unknown Pattern B route '{command.command_name}'",
-                ),
+            return None, _error_result(
+                correlation_id,
+                status="failed",
+                error_message=f"Unknown Pattern B route '{command.command_name}'",
             )
-            return
 
         if route.terminal_event is None:
-            await self._publish_terminal_result(
-                command.response_topic,
-                _error_result(
-                    correlation_id,
-                    status="failed",
-                    error_message=(
-                        f"Route '{command.command_name}' does not declare a terminal_event"
-                    ),
+            return route, _error_result(
+                correlation_id,
+                status="failed",
+                error_message=(
+                    f"Route '{command.command_name}' does not declare a terminal_event"
                 ),
             )
-            return
 
         terminal_queue: asyncio.Queue[object] = asyncio.Queue(maxsize=1)
 
@@ -159,35 +157,25 @@ class RuntimePatternBBroker:
                     timeout=command.timeout_seconds,
                 )
             except TimeoutError:
-                await self._publish_terminal_result(
-                    command.response_topic,
-                    _error_result(
-                        correlation_id,
-                        status="timeout",
-                        error_message=(
-                            "Timed out waiting for Pattern B broker terminal event."
-                        ),
+                return route, _error_result(
+                    correlation_id,
+                    status="timeout",
+                    error_message=(
+                        "Timed out waiting for Pattern B broker terminal event."
                     ),
                 )
-                return
 
-            await self._publish_terminal_result(
-                command.response_topic,
-                ModelDispatchBusTerminalResult(
-                    correlation_id=correlation_id,
-                    status="completed",
-                    payload=terminal_payload,
-                    completed_at=datetime.now(UTC),
-                ),
+            return route, ModelDispatchBusTerminalResult(
+                correlation_id=correlation_id,
+                status="completed",
+                payload=terminal_payload,
+                completed_at=datetime.now(UTC),
             )
         except Exception as exc:  # noqa: BLE001
-            await self._publish_terminal_result(
-                command.response_topic,
-                _error_result(
-                    correlation_id,
-                    status="failed",
-                    error_message=str(exc),
-                ),
+            return route, _error_result(
+                correlation_id,
+                status="failed",
+                error_message=str(exc),
             )
         finally:
             await unsubscribe_terminal()

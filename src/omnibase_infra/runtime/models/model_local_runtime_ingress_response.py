@@ -8,7 +8,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
+    ModelDispatchBusTerminalResult,
+)
+from omnibase_core.types import JsonType
 from omnibase_infra.runtime.models.model_local_runtime_ingress_error import (
     ModelLocalRuntimeIngressError,
 )
@@ -25,7 +28,12 @@ class ModelLocalRuntimeIngressResponse(BaseModel):
     )
 
     ok: bool = Field(..., description="Whether the request completed successfully.")
-    node_alias: str = Field(..., min_length=1, description="Requested node alias.")
+    command_name: str = Field(..., min_length=1, description="Resolved command name.")
+    node_alias: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Deprecated compatibility alias when supplied by the caller.",
+    )
     resolved_node_name: str | None = Field(
         default=None,
         description="Resolved node directory name when the request is routable.",
@@ -34,7 +42,7 @@ class ModelLocalRuntimeIngressResponse(BaseModel):
         default=None,
         description="Resolved contract name when the request is routable.",
     )
-    topic: str | None = Field(
+    command_topic: str | None = Field(
         default=None,
         description="Resolved command topic used for dispatch.",
     )
@@ -46,9 +54,13 @@ class ModelLocalRuntimeIngressResponse(BaseModel):
         default=None,
         description="Resolved correlation identifier for the request.",
     )
-    dispatch_result: ModelDispatchResult | None = Field(
+    dispatch_result: ModelDispatchBusTerminalResult | None = Field(
         default=None,
-        description="Dispatch result for successful runtime execution.",
+        description="Terminal broker result for runtime execution.",
+    )
+    output_payloads: list[dict[str, JsonType]] | None = Field(
+        default=None,
+        description="Typed dict payloads extracted from successful terminal results.",
     )
     error: ModelLocalRuntimeIngressError | None = Field(
         default=None,

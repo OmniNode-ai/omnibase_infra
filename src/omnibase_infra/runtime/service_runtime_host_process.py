@@ -54,16 +54,22 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID, uuid4
 
 import yaml
 from pydantic import BaseModel, ValidationError
 
+from omnibase_core.models.dispatch.model_dispatch_bus_command import (
+    ModelDispatchBusCommand,
+)
+from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
+    ModelDispatchBusTerminalResult,
+)
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_core.types import JsonType
 from omnibase_infra.enums import (
     EnumConsumerGroupPurpose,
-    EnumDispatchStatus,
     EnumHandlerSourceMode,
     EnumHandlerTypeCategory,
     EnumInfraTransportType,
@@ -80,6 +86,9 @@ from omnibase_infra.errors import (
 # OMN-7077: EventBusInmemory is migrating to omnibase_core.
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+from omnibase_infra.event_bus.topic_constants import (
+    TOPIC_PATTERN_B_DISPATCH_COMPLETED,
+)
 from omnibase_infra.gateway import (
     ModelGatewayConfig,
     ServiceEnvelopeSigner,
@@ -2226,22 +2235,25 @@ class RuntimeHostProcess:
         self,
         request: ModelLocalRuntimeIngressRequest,
     ) -> ModelLocalRuntimeIngressResponse:
-        """Dispatch a local ingress request through the runtime dispatch engine."""
+        """Dispatch a local ingress request through the Pattern B broker."""
         correlation_id = normalize_correlation_id(request.correlation_id)
-        if self._dispatch_engine is None:
+        requested_command_name = request.requested_command_name
+        if self._pattern_b_broker is None:
             return ModelLocalRuntimeIngressResponse(
                 ok=False,
+                command_name=requested_command_name,
                 node_alias=request.node_alias,
                 correlation_id=correlation_id,
                 error=ModelLocalRuntimeIngressError(
                     code="runtime_unavailable",
-                    message="dispatch_engine is not configured",
+                    message="pattern_b_broker is not configured",
                 ),
             )
-        dispatch_engine = self._dispatch_engine
+        broker = self._pattern_b_broker
         if not self._is_running and not self._is_starting:
             return ModelLocalRuntimeIngressResponse(
                 ok=False,
+                command_name=requested_command_name,
                 node_alias=request.node_alias,
                 correlation_id=correlation_id,
                 error=ModelLocalRuntimeIngressError(
@@ -2252,6 +2264,7 @@ class RuntimeHostProcess:
         if self._is_draining or self._shutdown_requested.is_set():
             return ModelLocalRuntimeIngressResponse(
                 ok=False,
+                command_name=requested_command_name,
                 node_alias=request.node_alias,
                 correlation_id=correlation_id,
                 error=ModelLocalRuntimeIngressError(
@@ -2261,103 +2274,109 @@ class RuntimeHostProcess:
                 ),
             )
 
-        route = self._local_ingress_routes.get(request.node_alias)
-        if route is None:
+        resolved_request_route = self._local_ingress_routes.get(requested_command_name)
+        if resolved_request_route is None:
             return ModelLocalRuntimeIngressResponse(
                 ok=False,
+                command_name=requested_command_name,
                 node_alias=request.node_alias,
                 correlation_id=correlation_id,
                 error=ModelLocalRuntimeIngressError(
-                    code="unknown_node",
-                    message=f"Unknown local ingress node '{request.node_alias}'",
+                    code="unknown_command",
+                    message=f"Unknown local ingress command '{requested_command_name}'",
                 ),
             )
+        route = resolved_request_route
 
-        envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
-            payload=cast("object", request.payload),
-            correlation_id=correlation_id,
-            envelope_timestamp=datetime.now(UTC),
-            event_type=route.event_type,
-            source_tool="runtime-local-ingress",
-            target_tool=route.contract_name,
-        )
+        if request.command_name is None and request.node_alias is not None:
+            logger.warning(
+                "Local ingress request used deprecated node_alias compatibility path",
+                extra={
+                    "node_alias": request.node_alias,
+                    "resolved_command_name": route.contract_name,
+                    "correlation_id": str(correlation_id),
+                },
+            )
 
         await self._handler_semaphore.acquire()
         try:
             async with self._pending_lock:
                 self._pending_message_count += 1
 
-            async def _dispatch_and_apply_result() -> ModelDispatchResult | None:
-                dispatch_result = await dispatch_engine.dispatch(
-                    route.command_topic,
-                    envelope,
-                )
-                if (
-                    self._local_ingress_dispatch_result_applier is not None
-                    and dispatch_result is not None
-                ):
-                    await self._local_ingress_dispatch_result_applier.apply(
-                        dispatch_result,
-                        correlation_id,
+            async def _dispatch_through_broker() -> tuple[
+                RuntimeLocalIngressRoute | None,
+                ModelDispatchBusTerminalResult,
+            ]:
+                return await broker.dispatch_request(
+                    ModelDispatchBusCommand(
+                        command_name=route.contract_name,
+                        requester="runtime-local-ingress",
+                        payload=request.payload,
+                        correlation_id=correlation_id,
+                        response_topic=TOPIC_PATTERN_B_DISPATCH_COMPLETED,
+                        timeout_seconds=max(
+                            1, min(600, (request.timeout_ms + 999) // 1000)
+                        ),
                     )
-                return dispatch_result
+                )
 
-            result = await asyncio.wait_for(
-                _dispatch_and_apply_result(),
+            resolved_route, result = await asyncio.wait_for(
+                _dispatch_through_broker(),
                 timeout=request.timeout_ms / 1000.0,
             )
+            route = resolved_route or route
 
-            if result is None:
+            output_payloads = self._extract_local_ingress_output_payloads(result)
+            if result.status == "completed":
                 return ModelLocalRuntimeIngressResponse(
-                    ok=False,
+                    ok=True,
+                    command_name=route.contract_name,
                     node_alias=request.node_alias,
                     resolved_node_name=route.node_name,
                     contract_name=route.contract_name,
-                    topic=route.command_topic,
-                    terminal_event=route.terminal_event,
-                    correlation_id=correlation_id,
-                    error=ModelLocalRuntimeIngressError(
-                        code="dispatch_result_missing",
-                        message="dispatch_engine returned no result",
-                    ),
-                )
-
-            if result.status == EnumDispatchStatus.NO_DISPATCHER:
-                return ModelLocalRuntimeIngressResponse(
-                    ok=False,
-                    node_alias=request.node_alias,
-                    resolved_node_name=route.node_name,
-                    contract_name=route.contract_name,
-                    topic=route.command_topic,
+                    command_topic=route.command_topic,
                     terminal_event=route.terminal_event,
                     correlation_id=correlation_id,
                     dispatch_result=result,
-                    error=ModelLocalRuntimeIngressError(
-                        code="dispatch_error",
-                        message=(
-                            result.error_message
-                            or f"No dispatcher registered for topic {route.command_topic}"
-                        ),
-                    ),
+                    output_payloads=output_payloads,
                 )
 
+            error_code: Literal[
+                "unknown_command", "dispatch_timeout", "dispatch_error"
+            ] = "dispatch_error"
+            if result.status == "timeout":
+                error_code = "dispatch_timeout"
+            elif resolved_route is None:
+                error_code = "unknown_command"
+
             return ModelLocalRuntimeIngressResponse(
-                ok=True,
+                ok=False,
+                command_name=route.contract_name
+                if resolved_route is not None
+                else requested_command_name,
                 node_alias=request.node_alias,
                 resolved_node_name=route.node_name,
                 contract_name=route.contract_name,
-                topic=route.command_topic,
+                command_topic=route.command_topic,
                 terminal_event=route.terminal_event,
                 correlation_id=correlation_id,
                 dispatch_result=result,
+                output_payloads=output_payloads,
+                error=ModelLocalRuntimeIngressError(
+                    code=error_code,
+                    message=result.error_message
+                    or f"Pattern B broker failed for command {route.contract_name}",
+                    retryable=result.status == "timeout",
+                ),
             )
         except TimeoutError:
             return ModelLocalRuntimeIngressResponse(
                 ok=False,
+                command_name=route.contract_name,
                 node_alias=request.node_alias,
                 resolved_node_name=route.node_name,
                 contract_name=route.contract_name,
-                topic=route.command_topic,
+                command_topic=route.command_topic,
                 terminal_event=route.terminal_event,
                 correlation_id=correlation_id,
                 error=ModelLocalRuntimeIngressError(
@@ -2371,9 +2390,9 @@ class RuntimeHostProcess:
         except Exception as exc:  # noqa: BLE001
             sanitized_error = sanitize_error_message(exc)
             logger.error(  # noqa: TRY400
-                "Local ingress dispatch failed",
+                "Local ingress broker passthrough failed",
                 extra={
-                    "node_alias": request.node_alias,
+                    "command_name": route.contract_name,
                     "topic": route.command_topic,
                     "correlation_id": str(correlation_id),
                     "error": sanitized_error,
@@ -2381,10 +2400,11 @@ class RuntimeHostProcess:
             )
             return ModelLocalRuntimeIngressResponse(
                 ok=False,
+                command_name=route.contract_name,
                 node_alias=request.node_alias,
                 resolved_node_name=route.node_name,
                 contract_name=route.contract_name,
-                topic=route.command_topic,
+                command_topic=route.command_topic,
                 terminal_event=route.terminal_event,
                 correlation_id=correlation_id,
                 error=ModelLocalRuntimeIngressError(
@@ -2397,6 +2417,21 @@ class RuntimeHostProcess:
             self._handler_semaphore.release()
             async with self._pending_lock:
                 self._pending_message_count -= 1
+
+    @staticmethod
+    def _extract_local_ingress_output_payloads(
+        result: ModelDispatchBusTerminalResult,
+    ) -> list[dict[str, JsonType]] | None:
+        if result.status != "completed":
+            return None
+        payload = result.payload
+        if isinstance(payload, dict):
+            return [cast("dict[str, JsonType]", payload)]
+        if isinstance(payload, list) and all(
+            isinstance(item, dict) for item in payload
+        ):
+            return [cast("dict[str, JsonType]", item) for item in payload]
+        return None
 
     def _load_handler_source_config(self) -> ModelHandlerSourceConfig:
         """Load handler source configuration from runtime config.
@@ -2420,7 +2455,6 @@ class RuntimeHostProcess:
         """
         # Deferred imports: avoid circular dependencies at module load time
         # and reduce import overhead when this method is not called.
-        from datetime import datetime
 
         from pydantic import ValidationError
 

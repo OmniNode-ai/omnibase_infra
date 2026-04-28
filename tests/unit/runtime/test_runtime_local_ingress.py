@@ -15,8 +15,9 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from omnibase_infra.enums import EnumDispatchStatus
-from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
+    ModelDispatchBusTerminalResult,
+)
 from omnibase_infra.runtime.models import (
     ModelLocalRuntimeIngressConfig,
     ModelLocalRuntimeIngressRequest,
@@ -54,12 +55,13 @@ async def test_runtime_local_ingress_server_round_trip(tmp_path: Path) -> None:
         AsyncMock(
             return_value=ModelLocalRuntimeIngressResponse(
                 ok=True,
+                command_name="test",
                 node_alias="test",
                 resolved_node_name="node_test",
-                dispatch_result=ModelDispatchResult(
-                    status=EnumDispatchStatus.SUCCESS,
-                    topic="onex.cmd.test.start.v1",
-                    started_at=datetime.now(UTC),
+                command_topic="onex.cmd.test.start.v1",
+                dispatch_result=ModelDispatchBusTerminalResult(
+                    status="completed",
+                    payload={"ok": True},
                     completed_at=datetime.now(UTC),
                     correlation_id=uuid4(),
                 ),
@@ -100,8 +102,10 @@ async def test_runtime_local_ingress_server_refuses_non_socket_path(
     assert socket_path.read_text(encoding="utf-8") == "do not unlink"
 
 
-def test_local_runtime_ingress_request_rejects_blank_node_name() -> None:
-    with pytest.raises(ValidationError, match="node_alias must be a non-empty string"):
+def test_local_runtime_ingress_request_rejects_blank_name() -> None:
+    with pytest.raises(
+        ValidationError, match="command_name/node_alias must be a non-empty string"
+    ):
         ModelLocalRuntimeIngressRequest(node_alias="   ")
 
 
@@ -203,58 +207,62 @@ def test_discover_runtime_local_ingress_routes_rejects_duplicate_alias(
 
 @pytest.mark.asyncio
 async def test_runtime_host_process_dispatch_local_ingress_request() -> None:
-    dispatch_result = ModelDispatchResult(
-        status=EnumDispatchStatus.SUCCESS,
-        topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
-        started_at=datetime.now(UTC),
+    correlation_id = uuid4()
+    dispatch_result = ModelDispatchBusTerminalResult(
+        status="completed",
+        payload={"status": "complete"},
         completed_at=datetime.now(UTC),
-        correlation_id=uuid4(),
+        correlation_id=correlation_id,
     )
-    dispatch_engine = AsyncMock()
-    dispatch_engine.dispatch = AsyncMock(return_value=dispatch_result)
+    broker = SimpleNamespace(
+        dispatch_request=AsyncMock(
+            return_value=(_session_orchestrator_route(), dispatch_result)
+        )
+    )
 
     process = RuntimeHostProcess(
-        config=make_runtime_config(),
-        dispatch_engine=dispatch_engine,
+        config=make_runtime_config(), dispatch_engine=AsyncMock()
     )
     process._is_running = True
     process._local_ingress_routes = {
         "session_orchestrator": _session_orchestrator_route()
     }
-    applier = SimpleNamespace(apply=AsyncMock())
-    process._local_ingress_dispatch_result_applier = cast("object", applier)
+    process._pattern_b_broker = cast("object", broker)
 
     response = await process._dispatch_local_ingress_request(
         ModelLocalRuntimeIngressRequest(
-            node_alias="session_orchestrator",
+            command_name="session_orchestrator",
             payload={"dry_run": True},
-            correlation_id=uuid4(),
+            correlation_id=correlation_id,
         )
     )
 
     assert response.ok is True
-    assert response.topic == "onex.cmd.omnimarket.session-orchestrator-start.v1"
-    dispatch_engine.dispatch.assert_awaited()
-    applier.apply.assert_awaited()
+    assert response.command_name == "session_orchestrator"
+    assert response.command_topic == "onex.cmd.omnimarket.session-orchestrator-start.v1"
+    assert response.output_payloads == [{"status": "complete"}]
+    broker.dispatch_request.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_runtime_host_process_dispatch_local_ingress_uses_handler_semaphore() -> (
     None
 ):
-    dispatch_result = ModelDispatchResult(
-        status=EnumDispatchStatus.SUCCESS,
-        topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
-        started_at=datetime.now(UTC),
+    dispatch_result = ModelDispatchBusTerminalResult(
+        status="completed",
+        payload={"status": "complete"},
         completed_at=datetime.now(UTC),
         correlation_id=uuid4(),
     )
-    dispatch_engine = AsyncMock()
-    dispatch_engine.dispatch = AsyncMock(return_value=dispatch_result)
+    broker = SimpleNamespace(
+        dispatch_request=AsyncMock(
+            return_value=(_session_orchestrator_route(), dispatch_result)
+        )
+    )
 
     process = RuntimeHostProcess(
         config=make_runtime_config(),
-        dispatch_engine=dispatch_engine,
+        dispatch_engine=AsyncMock(),
     )
     process._is_running = True
     process._handler_semaphore = asyncio.Semaphore(1)
@@ -262,54 +270,54 @@ async def test_runtime_host_process_dispatch_local_ingress_uses_handler_semaphor
     process._local_ingress_routes = {
         "session_orchestrator": _session_orchestrator_route()
     }
+    process._pattern_b_broker = cast("object", broker)
 
     task = asyncio.create_task(
         process._dispatch_local_ingress_request(
             ModelLocalRuntimeIngressRequest(
-                node_alias="session_orchestrator",
+                command_name="session_orchestrator",
                 payload={"dry_run": True},
                 correlation_id=uuid4(),
             )
         )
     )
     await asyncio.sleep(0)
-    dispatch_engine.dispatch.assert_not_awaited()
+    broker.dispatch_request.assert_not_awaited()
 
     process._handler_semaphore.release()
     response = await task
 
     assert response.ok is True
-    dispatch_engine.dispatch.assert_awaited_once()
+    broker.dispatch_request.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_runtime_host_process_dispatch_local_ingress_request_times_out() -> None:
     async def _sleepy_dispatch(
         *_args: object, **_kwargs: object
-    ) -> ModelDispatchResult:
+    ) -> tuple[RuntimeLocalIngressRoute, ModelDispatchBusTerminalResult]:
         await asyncio.sleep(0.05)
-        return ModelDispatchResult(
-            status=EnumDispatchStatus.SUCCESS,
-            topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
-            started_at=datetime.now(UTC),
+        return _session_orchestrator_route(), ModelDispatchBusTerminalResult(
+            status="completed",
+            payload={"status": "complete"},
             completed_at=datetime.now(UTC),
             correlation_id=uuid4(),
         )
 
-    dispatch_engine = AsyncMock()
-    dispatch_engine.dispatch = AsyncMock(side_effect=_sleepy_dispatch)
+    broker = SimpleNamespace(dispatch_request=AsyncMock(side_effect=_sleepy_dispatch))
     process = RuntimeHostProcess(
         config=make_runtime_config(local_ingress={"enabled": True}),
-        dispatch_engine=dispatch_engine,
+        dispatch_engine=AsyncMock(),
     )
     process._is_running = True
     process._local_ingress_routes = {
         "session_orchestrator": _session_orchestrator_route()
     }
+    process._pattern_b_broker = cast("object", broker)
 
     response = await process._dispatch_local_ingress_request(
         ModelLocalRuntimeIngressRequest(
-            node_alias="session_orchestrator",
+            command_name="session_orchestrator",
             payload={"dry_run": True},
             timeout_ms=1,
         )
@@ -318,6 +326,44 @@ async def test_runtime_host_process_dispatch_local_ingress_request_times_out() -
     assert response.ok is False
     assert response.error is not None
     assert response.error.code == "dispatch_timeout"
+
+
+@pytest.mark.asyncio
+async def test_runtime_host_process_dispatch_local_ingress_warns_on_node_alias_compatibility(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    broker = SimpleNamespace(
+        dispatch_request=AsyncMock(
+            return_value=(
+                _session_orchestrator_route(),
+                ModelDispatchBusTerminalResult(
+                    status="completed",
+                    payload={"status": "complete"},
+                    completed_at=datetime.now(UTC),
+                    correlation_id=uuid4(),
+                ),
+            )
+        )
+    )
+    process = RuntimeHostProcess(
+        config=make_runtime_config(), dispatch_engine=AsyncMock()
+    )
+    process._is_running = True
+    process._local_ingress_routes = {
+        "session_orchestrator": _session_orchestrator_route()
+    }
+    process._pattern_b_broker = cast("object", broker)
+
+    with caplog.at_level("WARNING"):
+        response = await process._dispatch_local_ingress_request(
+            ModelLocalRuntimeIngressRequest(
+                node_alias="session_orchestrator",
+                payload={"dry_run": True},
+            )
+        )
+
+    assert response.ok is True
+    assert "deprecated node_alias compatibility path" in caplog.text
 
 
 @pytest.mark.asyncio
