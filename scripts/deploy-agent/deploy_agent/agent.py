@@ -25,6 +25,7 @@ from deploy_agent.events import (
 from deploy_agent.executor import SCOPE_BUNDLES, DeployExecutor
 from deploy_agent.health import create_health_app
 from deploy_agent.job_state import JobStore
+from deploy_agent.kafka_config import load_deploy_agent_kafka_config_from_env
 from deploy_agent.lock import single_flight_lock
 from deploy_agent.publisher import (
     PublishCircuitBreaker,
@@ -37,7 +38,6 @@ logger = logging.getLogger(__name__)
 STATE_DIR = Path(
     os.environ.get("DEPLOY_AGENT_STATE_DIR", "/data/omninode/deploy-agent/state/jobs")
 )
-BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 HEALTH_PORT = int(os.environ.get("DEPLOY_AGENT_PORT", "8099"))
 PUBLISH_RETRY_INTERVAL = 30
 
@@ -69,6 +69,7 @@ class DeployAgent:
         self._current_git_sha = ""
         self._skip_self_update = skip_self_update
         self._publish_cb = PublishCircuitBreaker()
+        self._kafka_config = load_deploy_agent_kafka_config_from_env()
 
     def _get_state(self) -> str:
         return self._state
@@ -81,7 +82,7 @@ class DeployAgent:
         logger.info(
             "Deploy agent starting (state_dir=%s, kafka=%s)",
             STATE_DIR,
-            BOOTSTRAP_SERVERS,
+            self._kafka_config.bootstrap_servers,
         )
 
         # Step 1: Recover crashed jobs
@@ -116,7 +117,7 @@ class DeployAgent:
 
         # Step 5+6: Main loop
         consumer = DeployConsumer(
-            bootstrap_servers=BOOTSTRAP_SERVERS,
+            kafka_config=self._kafka_config,
             job_store=self.job_store,
         )
 
@@ -220,7 +221,7 @@ class DeployAgent:
             payload = build_completion_payload(
                 job, self._current_git_sha, health_checks
             )
-            if publish_result(payload):
+            if publish_result(payload, self._kafka_config):
                 job.phase_results[Phase.PUBLISH] = PhaseStatus.SUCCESS
                 self.job_store._save(job)
                 self._publish_cb.record_success(str(cid))
@@ -243,7 +244,10 @@ class DeployAgent:
             }
         ).encode()
         try:
-            producer = KafkaProducer(bootstrap_servers=BOOTSTRAP_SERVERS)
+            producer = KafkaProducer(
+                **self._kafka_config.producer_kwargs(),
+                value_serializer=lambda v: v,
+            )
             producer.send(TOPIC_REBUILD_REJECTED, payload)
             producer.flush(timeout=5)
             producer.close()
@@ -269,7 +273,7 @@ class DeployAgent:
                 continue
 
             payload = build_completion_payload(job, "")
-            if publish_result(payload):
+            if publish_result(payload, self._kafka_config):
                 self.job_store.mark_published(job.correlation_id)
                 self._publish_cb.record_success(cid_str)
                 logger.info("Retried publish for %s: success", cid_str)

@@ -6,16 +6,18 @@ from __future__ import annotations
 
 import json
 import logging
-import subprocess
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+
+from kafka import KafkaProducer
 
 from deploy_agent.events import (
     TOPIC_REBUILD_COMPLETED,
     ModelHealthCheck,
 )
 from deploy_agent.job_state import JobState
+from deploy_agent.kafka_config import ModelDeployAgentKafkaConfig
 
 logger = logging.getLogger(__name__)
 
@@ -90,42 +92,36 @@ def build_completion_payload(
     }
 
 
-def publish_result(payload: dict) -> bool:
-    """Publish completion event via rpk inside the redpanda container. Returns True on success."""
+def publish_result(payload: dict, kafka_config: ModelDeployAgentKafkaConfig) -> bool:
+    """Publish completion event to the same control bus consumed by deploy-agent."""
     try:
-        data = json.dumps(payload) + "\n"
-        result = subprocess.run(
-            [
-                "docker",
-                "exec",
-                "-i",
-                "omnibase-infra-redpanda",
-                "rpk",
-                "topic",
-                "produce",
-                TOPIC_REBUILD_COMPLETED,
-            ],
-            input=data,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
+        producer = KafkaProducer(
+            **kafka_config.producer_kwargs(),
+            value_serializer=lambda v: json.dumps(v, default=str).encode("utf-8"),
+            key_serializer=lambda v: str(v).encode("utf-8"),
         )
-        if result.returncode == 0:
-            logger.info("Published result for %s", payload.get("correlation_id"))
-            return True
-        logger.warning("rpk produce failed: %s", result.stderr)
-        return False
+        correlation_id = payload.get("correlation_id", "")
+        producer.send(
+            TOPIC_REBUILD_COMPLETED,
+            key=f"deploy-result/{correlation_id}",
+            value=payload,
+        )
+        producer.flush(timeout=30)
+        producer.close()
+        logger.info("Published result for %s", correlation_id)
+        return True
     except Exception as e:  # noqa: BLE001
         logger.warning("Publish failed: %s", e)
         return False
 
 
-def publish_with_retry(payload: dict) -> bool:
+def publish_with_retry(
+    payload: dict, kafka_config: ModelDeployAgentKafkaConfig
+) -> bool:
     """Attempt to publish with exponential backoff."""
     total_waited = 0
     for delay in RETRY_DELAYS:
-        if publish_result(payload):
+        if publish_result(payload, kafka_config):
             return True
         if total_waited + delay > MAX_RETRY_TOTAL_SECONDS:
             logger.error(
@@ -137,4 +133,4 @@ def publish_with_retry(payload: dict) -> bool:
         time.sleep(delay)
         total_waited += delay
 
-    return publish_result(payload)
+    return publish_result(payload, kafka_config)
