@@ -1,0 +1,22 @@
+# OMN-10122 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for the service_kernel.py dead-code removal.
+schema_version: '1.0.0'
+ticket_id: OMN-10122
+summary: 'Delete PluginEmitDaemon — replaced by node_emit_daemon entry point (OMN-10121)'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-deploy
+    description: >-
+      deploy-gate: service_kernel.py change is dead-code removal only — no new behaviour deployed, no Docker restart required. PluginEmitDaemon was gated by ONEX_EMIT_DAEMON_ENABLED=false (default off) so no running container was affected. Superseded by omnimarket node_emit_daemon via onex.nodes entry point (OMN-10121).
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          deploy omninode-runtime not required: PluginEmitDaemon was ONEX_EMIT_DAEMON_ENABLED=false by default (dead code). Replacement node_emit_daemon is already live via omnimarket onex.nodes entry point (OMN-10121). No running container behaviour changed.
