@@ -29,6 +29,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.linear]
 _NO_KEY_REASON = (
     "LINEAR_API_KEY (or LINEAR_TOKEN) not set; skipping live Linear API test"
 )
+_NO_TEST_ISSUE_REASON = "LINEAR_TEST_ISSUE_ID not set; skipping live issue lookup test"
 
 
 def _have_key() -> bool:
@@ -51,15 +52,19 @@ async def test_connect_against_live_linear() -> None:
 
 
 @pytest.mark.skipif(not _have_key(), reason=_NO_KEY_REASON)
+@pytest.mark.skipif(
+    not os.environ.get("LINEAR_TEST_ISSUE_ID"),
+    reason=_NO_TEST_ISSUE_REASON,
+)
 @pytest.mark.asyncio
 async def test_get_issue_against_live_linear() -> None:
-    """Fetch this ticket (OMN-10048) and verify the wire shape round-trips."""
+    """Fetch a configured live Linear issue and verify stable shape."""
+    issue_id = os.environ["LINEAR_TEST_ISSUE_ID"]
     adapter = AdapterLinearGraphQLProjectTracker()
     try:
         await adapter.connect()
-        issue = await adapter.get_issue("OMN-10048")
-        assert issue.identifier == "OMN-10048"
-        assert "Linear" in issue.title or "tracker" in issue.title.lower()
+        issue = await adapter.get_issue(issue_id)
+        assert issue.identifier == issue_id
         assert issue.url is not None
         assert issue.created_at is not None
     finally:

@@ -118,6 +118,6 @@ class TestOmn10048Regression:
                 f"OMN-10048 regression: tracker.get_issue raised "
                 f"NotImplementedError: {exc}"
             )
-
-        assert issue.identifier == "OMN-1"
+        else:
+            assert issue.identifier == "OMN-1"
         await tracker.close()

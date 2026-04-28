@@ -17,7 +17,6 @@ Strategy reference: OMN-7709 ("Primary: Linear GraphQL API").
 
 from __future__ import annotations
 
-import logging
 import os
 from types import TracebackType
 from typing import Final, cast
@@ -38,8 +37,6 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
-
-logger = logging.getLogger(__name__)
 
 # Default Linear GraphQL endpoint; overridable via constructor.
 DEFAULT_LINEAR_GRAPHQL_ENDPOINT: Final[str] = "https://api.linear.app/graphql"
@@ -648,7 +645,10 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
 
         try:
             response = await self._client.post(
-                self._endpoint, json=payload, headers=self._request_headers
+                self._endpoint,
+                json=payload,
+                headers=self._request_headers,
+                timeout=self._timeout_seconds,
             )
         except httpx.TimeoutException as exc:
             async with self._circuit_breaker_lock:
@@ -679,8 +679,6 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
         # Handle HTTP-level failures.
         status = response.status_code
         if status in (401, 403):
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(operation=operation)
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation=operation,

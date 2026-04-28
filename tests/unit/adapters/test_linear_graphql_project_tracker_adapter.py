@@ -50,7 +50,11 @@ def _build_adapter(
         transport=handler,
         headers={"Authorization": api_key, "Content-Type": "application/json"},
     )
-    return AdapterLinearGraphQLProjectTracker(api_key=api_key, client=client)
+    adapter = AdapterLinearGraphQLProjectTracker(api_key=api_key, client=client)
+    # The helper constructs the injected client, so tests transfer ownership to
+    # the adapter and keep existing ``await adapter.close()`` teardown reliable.
+    adapter._owns_client = True
+    return adapter
 
 
 _ISSUE_FIXTURE: dict[str, object] = {
@@ -176,7 +180,7 @@ class TestLifecycle:
         handler = httpx.MockTransport(lambda _request: _ok({}))
         adapter = _build_adapter(handler)
         await adapter.close()
-        # Second close on the same adapter (caller-owned client) must not raise.
+        # Second close on the same adapter must not raise.
         await adapter.close()
 
     @pytest.mark.asyncio
@@ -413,6 +417,8 @@ class TestErrorMapping:
         adapter = _build_adapter(handler)
         with pytest.raises(InfraAuthenticationError):
             await adapter.connect()
+        assert adapter._circuit_breaker_failures == 0
+        assert adapter._circuit_breaker_open is False
         await adapter.close()
 
     @pytest.mark.asyncio
@@ -423,6 +429,8 @@ class TestErrorMapping:
         adapter = _build_adapter(handler)
         with pytest.raises(InfraAuthenticationError):
             await adapter.connect()
+        assert adapter._circuit_breaker_failures == 0
+        assert adapter._circuit_breaker_open is False
         await adapter.close()
 
     @pytest.mark.asyncio
