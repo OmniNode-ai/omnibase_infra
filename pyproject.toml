@@ -30,7 +30,7 @@ dependencies = [
     # Remember to switch back to PyPI versions before merging to main.
     #
     "omnibase-core>=0.40.0,<0.41.0",
-    "omnibase-spi>=0.20.4",
+    "omnibase-spi>=0.20.5",
     "omnimarket>=0.1.0",
     # ============================================================================
     # External Dependency Security Guidance
@@ -170,11 +170,6 @@ omnimarket = { git = "https://github.com/OmniNode-ai/omnimarket.git", branch = "
 # Pinned to core main post-OMN-9637 (delegation models — ModelRemoteTaskState et al.).
 # PyPI release v0.39.0 (2026-04-06) predates PR 912 — switch back after v0.40.0 ships.
 omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "6a65f885303e29b4ddc36a66a0cb860537f47316" }
-# Pinned to spi main post-OMN-9197 (ProtocolHandlerResolver + ProtocolHandlerOwnershipQuery).
-# PyPI release v0.20.4 (2026-04-03) predates PR 186 — switch back after v0.20.5 ships.
-omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", rev = "a9380008fb4a2f2a784d374389260d896455c3b2" }
-
-
 [tool.ruff]
 target-version = "py312"
 line-length = 88
