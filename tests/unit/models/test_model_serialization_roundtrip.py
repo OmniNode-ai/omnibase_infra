@@ -75,6 +75,9 @@ from omnibase_infra.runtime.models.model_local_runtime_ingress_response import (
 )
 from omnibase_infra.runtime.models.model_logging_config import ModelLoggingConfig
 from omnibase_infra.runtime.models.model_optional_string import ModelOptionalString
+from omnibase_infra.runtime.models.model_pattern_b_broker_config import (
+    ModelPatternBBrokerConfig,
+)
 from omnibase_infra.runtime.models.model_retry_policy import ModelRetryPolicy
 from omnibase_infra.runtime.models.model_runtime_scheduler_config import (
     ModelRuntimeSchedulerConfig,
@@ -394,6 +397,14 @@ def _make_local_runtime_ingress_response() -> ModelLocalRuntimeIngressResponse:
     )
 
 
+def _make_pattern_b_broker_config() -> ModelPatternBBrokerConfig:
+    return ModelPatternBBrokerConfig(
+        enabled=True,
+        command_topic="onex.cmd.omnibase-infra.pattern-b-dispatch.v1",
+        package_names=("omnibase_infra", "omnimarket"),
+    )
+
+
 # ============================================================================
 # Factory registry: maps model class -> factory callable
 # ============================================================================
@@ -419,6 +430,7 @@ MODEL_FACTORIES: dict[type[BaseModel], Any] = {
     ModelLocalRuntimeIngressRequest: _make_local_runtime_ingress_request,
     ModelLocalRuntimeIngressResponse: _make_local_runtime_ingress_response,
     ModelOptionalString: _make_optional_string,
+    ModelPatternBBrokerConfig: _make_pattern_b_broker_config,
     ModelRetryPolicy: _make_retry_policy,
     ModelRuntimeSchedulerConfig: _make_runtime_scheduler_config,
     ModelRuntimeTick: _make_runtime_tick,
