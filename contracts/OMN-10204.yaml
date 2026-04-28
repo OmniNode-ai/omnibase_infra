@@ -8,14 +8,17 @@ is_seam_ticket: true
 interface_change: true
 interfaces_touched:
   - protocols
-  - runtime
 evidence_requirements:
   - kind: tests
     description: Pattern B broker unit tests pass
     command: uv run pytest tests/unit/runtime/test_service_pattern_b_broker.py -q
-  - kind: deploy
+  - kind: manual
     description: Runtime deploy validates Pattern B broker transport after merge
     command: deploy omninode-runtime after merge and verify PATTERN_B_BROKER_ENABLED startup
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-001
     description: Pattern B broker unit tests pass
