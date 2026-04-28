@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -2055,7 +2055,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<7.0.0" },
     { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=6a65f885303e29b4ddc36a66a0cb860537f47316" },
-    { name = "omnibase-spi", git = "https://github.com/OmniNode-ai/omnibase_spi.git?rev=a9380008fb4a2f2a784d374389260d896455c3b2" },
+    { name = "omnibase-spi", specifier = ">=0.20.5" },
     { name = "omnimarket", git = "https://github.com/OmniNode-ai/omnimarket.git?branch=main" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },
@@ -2109,12 +2109,16 @@ dev = [
 
 [[package]]
 name = "omnibase-spi"
-version = "0.20.4"
-source = { git = "https://github.com/OmniNode-ai/omnibase_spi.git?rev=a9380008fb4a2f2a784d374389260d896455c3b2#a9380008fb4a2f2a784d374389260d896455c3b2" }
+version = "0.20.5"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "omnibase-core" },
     { name = "pydantic" },
     { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c9/c4/d2198088d22006d197ce75c335ac5b79d7be08e9fd82da1b23a71c56e88a/omnibase_spi-0.20.5.tar.gz", hash = "sha256:6245001d2c263dec93ac12612dbe2c19ce215b28413e8e7f208fae857d0c4747", size = 1143592, upload-time = "2026-04-23T15:49:56.29Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/27/f4/bdf41eefebadc983ef36bc44c2b32ac2c1695f5acfe779a103670ba0bc3e/omnibase_spi-0.20.5-py3-none-any.whl", hash = "sha256:57b4be9e53b630062032254fb9e98f98601712e8e372df7fd8bfc6c3ee792cba", size = 790932, upload-time = "2026-04-23T15:49:57.886Z" },
 ]
 
 [[package]]
