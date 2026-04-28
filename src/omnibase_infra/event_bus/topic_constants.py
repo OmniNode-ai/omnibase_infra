@@ -517,6 +517,16 @@ TOPIC_DELEGATION_BASELINE_COMPARISON: Final[str] = (
 )
 """Command topic for baseline comparison compute from the delegation orchestrator."""
 
+
+# ---------------------------------------------------------------------------
+# Pattern B Broker Topics (OMN-10204)
+# ---------------------------------------------------------------------------
+
+TOPIC_PATTERN_B_DISPATCH_COMMAND: Final[str] = (
+    "onex.cmd.omnibase-infra.pattern-b-dispatch.v1"
+)
+"""Command topic for runtime-owned Pattern B skill dispatch requests."""
+
 __all__ = [
     "TOPIC_DELEGATION_COMPLETED",
     "TOPIC_DELEGATION_FAILED",
@@ -529,6 +539,7 @@ __all__ = [
     "TOPIC_DELEGATION_REQUEST",
     "TOPIC_DELEGATION_ROUTING_DECISION",
     "TOPIC_EVAL_COMPLETED",
+    "TOPIC_PATTERN_B_DISPATCH_COMMAND",
     "DLQ_CATEGORY_SUFFIXES",
     "DLQ_COMMAND_TOPIC_SUFFIX",
     "DLQ_DOMAIN",
