@@ -158,13 +158,12 @@ healthcheck:
   start_period_s: 90
 ```
 
-**GAP — deploy-agent verification checks wrong ports:**
-`executor.py::verify()` checks `http://localhost:8000/health` (LLM port),
-`http://localhost:8001/health` (LLM port), and `http://localhost:8002/health`.
-The real runtime health endpoints are `8085` (omninode-runtime) and
-`8086` (runtime-effects). This is a documented gap from the E3 addendum in the
-platform plan. The verification phase may report "pass" while the actual runtime
-is unhealthy.
+**Deploy-agent verification:** `executor.py::verify()` checks the real runtime
+health endpoints: `8085` (omninode-runtime) and `8086` (runtime-effects). It
+requires `status=healthy`, `details.is_running=true`, and
+`details.config_prefetch_status=ok`. This closes the former E3 gap where
+verification probed LLM ports and could report "pass" while the actual runtime
+was unhealthy.
 
 ---
 
@@ -244,7 +243,7 @@ consuming correctly. The deploy-agent's `verify()` phase checks:
 1. No unhealthy Docker containers
 2. No restarting Docker containers
 3. `handler_registry` row count > 0 in Postgres
-4. HTTP health on ports 8000, 8001, 8002 (wrong ports — see Step 4 gap)
+4. HTTP health on ports 8085 and 8086, including `config_prefetch_status=ok`
 
 None of these checks send a synthetic event and await a node-specific response.
 
@@ -265,7 +264,7 @@ but it is not yet implemented.
 |---|-----|----------|----------|-----------------|
 | 1 | Deploy-agent consuming from wrong Kafka bus (localhost vs cloud) | HIGH | OMN-9713; executor.py hardcodes `localhost:19092`; trigger publishes to cloud SASL endpoint | Fix deploy-agent Kafka config to match trigger bus; add preflight broker-reachability check |
 | 2 | No per-node round-trip verification after deploy | HIGH | executor.py verify() checks only count>0 and wrong ports; OMN-9695 undetected 6 days | Implement F4 canary: synthetic event → expected response per node |
-| 3 | Deploy-agent health check probes wrong ports (8000/8001/8002 vs 8085/8086) | HIGH | executor.py:636-654 hardcodes LLM ports; runtime health is on 8085/8086 | Fix executor.py verify() to probe 8085 and 8086; check `details.config_prefetch_status=ok` |
+| 3 | Deploy-agent health check probes wrong ports (8000/8001/8002 vs 8085/8086) | DONE | OMN-9728 updates `executor.py::verify()` to probe 8085/8086 and require `details.config_prefetch_status=ok` | Keep regression tests in `scripts/deploy-agent/tests/unit/test_executor_runtime_health_verify.py` green |
 | 4 | No expected consumer group registry | HIGH | No `expected_consumer_groups.yaml` exists; rpk group list diff is manual | Create registry from F0 matrix; wire into E1a baseline check |
 | 5 | No feedback loop from deploy-agent to PR/CI | MED | trigger_rebuild_on_merge.py exits after publish; no status returned | Publish `rebuild-completed` event back; add GHA job that polls for completion |
 | 6 | handler_registry count check is not node-specific | MED | executor.py verify() only checks count>0; a single registered node passes | Query expected set from contract.yaml discovery; diff against actual registry |
@@ -275,22 +274,17 @@ but it is not yet implemented.
 
 ## Highest-leverage gap (proposed for immediate closure)
 
-**Gap #3 — Deploy-agent health check probes wrong ports** is the most actionable
-immediate fix because it is a single-file code change with high impact: it makes
-the deploy-agent's `verify()` phase actually test the real runtime health surface
-instead of the LLM inference ports. This closes the scenario where a deploy
-completes with a green verify result while `omninode-runtime` is actually down or
-in `config_prefetch_status=degraded_error`.
+**Gap #3 — Deploy-agent health check probes wrong ports** is closed by OMN-9728.
+The deploy-agent's `verify()` phase now tests the real runtime health surface
+instead of the LLM inference ports and fails when either runtime endpoint is not
+healthy, not running, or reports `config_prefetch_status` other than `ok`.
 
-**Proposed fix scope:**
-- `scripts/deploy-agent/deploy_agent/executor.py`: change the health check loop at
-  lines 636-654 to probe `http://localhost:8085/health` and `http://localhost:8086/health`
-  instead of ports 8000/8001/8002
-- Add a check that the health response body contains `config_prefetch_status` equal
-  to `ok` (not just HTTP 200), matching the E3b spec in the platform plan
-- Add a test in `scripts/deploy-agent/tests/` that mocks the health endpoints and
-  asserts the verifier correctly distinguishes `config_prefetch_status=ok` from
-  `config_prefetch_status=degraded_error`
+**Regression scope:**
+- `scripts/deploy-agent/deploy_agent/executor.py`: probes
+  `http://localhost:8085/health` and `http://localhost:8086/health`
+- `scripts/deploy-agent/tests/unit/test_executor_runtime_health_verify.py`: asserts
+  the verifier avoids LLM ports and distinguishes `config_prefetch_status=ok`
+  from `config_prefetch_status=degraded_error`
 
 **Why not Gap #1 (bus mismatch)?** Gap #1 (OMN-9713) is already tracked by the
 runtime team and gated on their deliverable. It cannot be fixed here without
