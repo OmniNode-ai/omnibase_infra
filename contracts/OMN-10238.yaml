@@ -1,0 +1,41 @@
+# OMN-10238 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for the concrete local transport client.
+schema_version: "1.0.0"
+ticket_id: "OMN-10238"
+summary: "feat(OMN-10238): add shared local runtime skill client"
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - protocols
+  - public_api
+evidence_requirements:
+  - kind: "tests"
+    description: "Local runtime skill client unit tests pass"
+    command: "PYTHONPATH=/Users/jonah/Code/omni_home/omni_worktrees/OMN-10238/omnibase_core/src uv run pytest tests/unit/clients/test_runtime_skill_client.py -q"
+  - kind: "ci"
+    description: "omnibase_infra PR checks pass for the shared runtime skill client"
+    command: "gh pr checks 1445 --repo OmniNode-ai/omnibase_infra --watch"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "Concrete host-local transport client unit tests pass"
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "PYTHONPATH=/Users/jonah/Code/omni_home/omni_worktrees/OMN-10238/omnibase_core/src uv run pytest tests/unit/clients/test_runtime_skill_client.py -q"
+  - id: "dod-002"
+    description: "Concrete transport imports shared runtime skill models from omnibase_core"
+    source: "generated"
+    checks:
+      - check_type: "command"
+        check_value: "rg -n \"from omnibase_core.models.runtime\" src/omnibase_infra/clients/runtime_skill_client.py"
+  - id: "dod-003"
+    description: "Runtime deploy validates local socket client against merged runtime ingress after merge"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy omninode-runtime after merge and verify LocalRuntimeSkillClient reaches the runtime socket ingress"
