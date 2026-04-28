@@ -98,8 +98,17 @@ def _log(op: str, client_id: str, fields_changed: list[str] | None = None) -> No
     print(json.dumps(record), flush=True)
 
 
-def _die(msg: str) -> NoReturn:
-    print(json.dumps({"op": "error", "message": msg}), file=sys.stderr, flush=True)
+def _die(_msg: str) -> NoReturn:
+    print(
+        json.dumps(
+            {
+                "op": "error",
+                "message": "seed-keycloak-clients failed; details redacted",
+            }
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
     sys.exit(1)
 
 
