@@ -13,8 +13,9 @@ from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.enums import EnumDispatchStatus
-from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
+    ModelDispatchBusTerminalResult,
+)
 from omnibase_infra.runtime.runtime_local_ingress import (
     RuntimeLocalIngressRoute,
     RuntimeLocalIngressServer,
@@ -30,19 +31,31 @@ async def test_unix_socket_request_dispatches_through_runtime_host(
     tmp_path: Path,
 ) -> None:
     socket_path = Path(f"/tmp/runtime-local-ingress-{uuid4().hex}.sock")  # noqa: S108
-    dispatch_result = ModelDispatchResult(
-        status=EnumDispatchStatus.SUCCESS,
-        topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
-        started_at=datetime.now(UTC),
+    dispatch_result = ModelDispatchBusTerminalResult(
+        status="completed",
+        payload={"status": "complete"},
         completed_at=datetime.now(UTC),
         correlation_id=uuid4(),
     )
-    dispatch_engine = AsyncMock()
-    dispatch_engine.dispatch = AsyncMock(return_value=dispatch_result)
+    broker = AsyncMock()
+    broker.dispatch_request = AsyncMock(
+        return_value=(
+            RuntimeLocalIngressRoute(
+                node_name="node_session_orchestrator",
+                contract_name="session_orchestrator",
+                command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
+                event_type="omnimarket.session-orchestrator-start",
+                terminal_event="onex.evt.omnimarket.session-orchestrator-completed.v1",
+                contract_path="/tmp/node_session_orchestrator/contract.yaml",  # noqa: S108
+                package_name="omnimarket",
+            ),
+            dispatch_result,
+        )
+    )
 
     process = RuntimeHostProcess(
         config=make_runtime_config(local_ingress={"enabled": True}),
-        dispatch_engine=dispatch_engine,
+        dispatch_engine=AsyncMock(),
     )
     process._is_running = True
     process._local_ingress_routes = {
@@ -56,6 +69,7 @@ async def test_unix_socket_request_dispatches_through_runtime_host(
             package_name="omnimarket",
         )
     }
+    process._pattern_b_broker = broker
     server = RuntimeLocalIngressServer(
         str(socket_path),
         process._dispatch_local_ingress_request,
@@ -68,7 +82,7 @@ async def test_unix_socket_request_dispatches_through_runtime_host(
         writer.write(
             json.dumps(
                 {
-                    "node_alias": "session_orchestrator",
+                    "command_name": "session_orchestrator",
                     "payload": {"dry_run": True},
                     "correlation_id": str(correlation_id),
                 }
@@ -82,7 +96,10 @@ async def test_unix_socket_request_dispatches_through_runtime_host(
 
         assert response["ok"] is True
         assert response["correlation_id"] == str(correlation_id)
-        assert response["topic"] == "onex.cmd.omnimarket.session-orchestrator-start.v1"
-        dispatch_engine.dispatch.assert_awaited_once()
+        assert (
+            response["command_topic"]
+            == "onex.cmd.omnimarket.session-orchestrator-start.v1"
+        )
+        broker.dispatch_request.assert_awaited_once()
     finally:
         await server.stop()

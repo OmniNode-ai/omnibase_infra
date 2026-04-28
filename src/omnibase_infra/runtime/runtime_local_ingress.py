@@ -33,6 +33,16 @@ from omnibase_infra.runtime.models.model_local_runtime_ingress_response import (
 logger = logging.getLogger(__name__)
 
 
+def _preferred_request_name(raw: object) -> str:
+    if not isinstance(raw, dict):
+        return "unknown"
+    for key in ("command_name", "node_alias"):
+        value = raw.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "unknown"
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeLocalIngressRoute:
     """Resolved route for a node exposed through the local runtime ingress."""
@@ -228,7 +238,7 @@ class RuntimeLocalIngressServer:
         if len(line) > self._max_payload_bytes:
             return ModelLocalRuntimeIngressResponse(
                 ok=False,
-                node_alias="unknown",
+                command_name="unknown",
                 error=ModelLocalRuntimeIngressError(
                     code="validation_error",
                     message="Request exceeds max_payload_bytes",
@@ -240,7 +250,7 @@ class RuntimeLocalIngressServer:
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             return ModelLocalRuntimeIngressResponse(
                 ok=False,
-                node_alias="unknown",
+                command_name="unknown",
                 error=ModelLocalRuntimeIngressError(
                     code="validation_error",
                     message=f"Invalid JSON request: {exc}",
@@ -250,14 +260,9 @@ class RuntimeLocalIngressServer:
         try:
             request = ModelLocalRuntimeIngressRequest.model_validate(raw, strict=False)
         except ValidationError as exc:
-            node_alias = "unknown"
-            if isinstance(raw, dict):
-                raw_alias = raw.get("node_alias")
-                if isinstance(raw_alias, str):
-                    node_alias = raw_alias
             return ModelLocalRuntimeIngressResponse(
                 ok=False,
-                node_alias=node_alias,
+                command_name=_preferred_request_name(raw),
                 error=ModelLocalRuntimeIngressError(
                     code="validation_error",
                     message="Invalid local runtime ingress request",

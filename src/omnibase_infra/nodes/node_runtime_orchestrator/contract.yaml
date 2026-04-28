@@ -63,7 +63,16 @@ output_model:
 contract_version: {major: 1, minor: 1, patch: 0}
 # Fingerprint: SHA-256 hash of canonical normalized contract content (excluding fingerprint field).
 # See docs/architecture/CONTRACT_STABILITY_SPEC.md for normalization specification.
-fingerprint: "1.1.0:33154c46968c"
+fingerprint: "1.1.0:99b7cb8850f5"
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.pattern-b-dispatch.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1"
 # Workflow Coordination Subcontract
 workflow_coordination:
   version: {major: 1, minor: 1, patch: 0}

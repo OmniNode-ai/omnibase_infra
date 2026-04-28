@@ -23,11 +23,10 @@ class ModelLocalRuntimeIngressError(BaseModel):
 
     code: Literal[
         "validation_error",
-        "unknown_node",
+        "unknown_command",
         "runtime_unavailable",
         "dispatch_timeout",
         "dispatch_error",
-        "dispatch_result_missing",
     ] = Field(..., description="Stable local ingress error code.")
     message: str = Field(..., min_length=1, description="Human-readable error message.")
     retryable: bool = Field(

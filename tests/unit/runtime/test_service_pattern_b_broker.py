@@ -17,6 +17,7 @@ from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
     ModelDispatchBusTerminalResult,
 )
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.runtime.runtime_local_ingress import RuntimeLocalIngressRoute
@@ -218,6 +219,52 @@ async def test_service_pattern_b_broker_publishes_failed_result_for_unknown_rout
 
 
 @pytest.mark.asyncio
+async def test_service_pattern_b_broker_sanitizes_dispatch_exception() -> None:
+    class FailingPublishTransport:
+        async def publish(
+            self,
+            _topic: str,
+            _key: bytes | None,
+            _value: bytes,
+            _headers: object | None = None,
+        ) -> None:
+            raise RuntimeError("failed to connect to postgres://user:pass@db:5432/app")
+
+        async def subscribe(
+            self,
+            _topic: str,
+            *_args: object,
+            **_kwargs: object,
+        ) -> object:
+            async def _unsubscribe() -> None:
+                return None
+
+            return _unsubscribe
+
+    route = _route()
+    broker = RuntimePatternBBroker(
+        FailingPublishTransport(),
+        command_topic="onex.cmd.omnibase-infra.pattern-b-dispatch.v1",
+        routes={"session_orchestrator": route},
+    )
+
+    command = ModelDispatchBusCommand(
+        command_name="session_orchestrator",
+        requester="codex",
+        payload={"dry_run": True},
+        response_topic="onex.evt.pattern-b.dispatch-completed.v1",
+        timeout_seconds=1,
+    )
+    resolved_route, result = await broker.dispatch_request(command)
+
+    assert resolved_route == route
+    assert result.status == "failed"
+    assert (
+        result.error_message == "RuntimeError: [REDACTED - potentially sensitive data]"
+    )
+
+
+@pytest.mark.asyncio
 async def test_runtime_host_process_starts_pattern_b_broker_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -272,3 +319,75 @@ async def test_runtime_host_process_starts_pattern_b_broker_when_enabled(
     start_mock = captured["start_mock"]
     assert isinstance(start_mock, AsyncMock)
     start_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_runtime_host_process_reuses_local_ingress_routes_for_pattern_b_broker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    route = _route()
+    captured: dict[str, object] = {}
+
+    class FakeBroker:
+        def __init__(
+            self,
+            event_bus: object,
+            *,
+            command_topic: str,
+            routes: object,
+        ) -> None:
+            captured["event_bus"] = event_bus
+            captured["command_topic"] = command_topic
+            captured["routes"] = routes
+            self.start = AsyncMock()
+
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_runtime_host_process.discover_runtime_local_ingress_routes",
+        lambda _packages: pytest.fail("broker should reuse local ingress routes"),
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_runtime_host_process.RuntimePatternBBroker",
+        FakeBroker,
+    )
+
+    process = RuntimeHostProcess(
+        event_bus=EventBusInmemory(environment="test", group="pattern-b"),
+        config={
+            "service_name": "test-service",
+            "node_name": "test-node",
+            "env": "test",
+            "version": "v1",
+            "local_ingress": {"enabled": True},
+            "pattern_b_broker": {"enabled": True},
+        },
+        dispatch_engine=AsyncMock(),
+    )
+    process._local_ingress_routes = {"session_orchestrator": route}
+
+    await process._start_pattern_b_broker()
+
+    assert captured["routes"] == {"session_orchestrator": route}
+
+
+@pytest.mark.asyncio
+async def test_runtime_host_process_rejects_enabled_ingress_without_pattern_b_broker() -> (
+    None
+):
+    process = RuntimeHostProcess(
+        event_bus=EventBusInmemory(environment="test", group="pattern-b"),
+        config={
+            "service_name": "test-service",
+            "node_name": "test-node",
+            "env": "test",
+            "version": "v1",
+            "local_ingress": {"enabled": True},
+            "pattern_b_broker": {"enabled": False},
+        },
+        dispatch_engine=AsyncMock(),
+    )
+
+    with pytest.raises(
+        ProtocolConfigurationError,
+        match=r"local runtime ingress requires pattern_b_broker\.enabled=true",
+    ):
+        await process._start_pattern_b_broker()

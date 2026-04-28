@@ -30,6 +30,9 @@ from uuid import uuid4
 import pytest
 from pydantic import BaseModel
 
+from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
+    ModelDispatchBusTerminalResult,
+)
 from omnibase_infra.enums import EnumDispatchStatus
 
 # -- Event bus models --
@@ -354,7 +357,7 @@ def _make_local_runtime_ingress_error() -> ModelLocalRuntimeIngressError:
         code="dispatch_error",
         message="dispatcher rejected request",
         retryable=True,
-        details={"node_alias": "session_orchestrator"},
+        details={"command_name": "session_orchestrator"},
     )
 
 
@@ -370,7 +373,7 @@ def _make_local_runtime_ingress_health() -> ModelLocalRuntimeIngressHealth:
 
 def _make_local_runtime_ingress_request() -> ModelLocalRuntimeIngressRequest:
     return ModelLocalRuntimeIngressRequest(
-        node_alias="session_orchestrator",
+        command_name="session_orchestrator",
         payload={"dry_run": True},
         correlation_id=uuid4(),
         timeout_ms=30_000,
@@ -381,19 +384,20 @@ def _make_local_runtime_ingress_response() -> ModelLocalRuntimeIngressResponse:
     correlation_id = uuid4()
     return ModelLocalRuntimeIngressResponse(
         ok=True,
+        command_name="session_orchestrator",
         node_alias="session_orchestrator",
         resolved_node_name="node_session_orchestrator",
         contract_name="session_orchestrator",
-        topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
+        command_topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
         terminal_event="onex.evt.omnimarket.session-orchestrator-completed.v1",
         correlation_id=correlation_id,
-        dispatch_result=ModelDispatchResult(
-            status=EnumDispatchStatus.SUCCESS,
-            topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
-            started_at=datetime.now(UTC),
+        dispatch_result=ModelDispatchBusTerminalResult(
+            status="completed",
+            payload={"status": "complete"},
             completed_at=datetime.now(UTC),
             correlation_id=correlation_id,
         ),
+        output_payloads=[{"status": "complete"}],
     )
 
 

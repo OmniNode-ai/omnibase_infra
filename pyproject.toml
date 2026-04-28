@@ -168,8 +168,8 @@ override-dependencies = [
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 omnimarket = { git = "https://github.com/OmniNode-ai/omnimarket.git", branch = "main" }
 # OMN-10238 depends on the shared runtime skill contract models/protocol added in core.
-# Switch back to the mainline core pin after the OMN-10238 core PR merges.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "f5ac07cb269ad12c6f5084fbc3f230c235b5c486" }
+# Pinned to f5508002 (jonah/omn-10238-shared-runtime-skill-client) — switch back to mainline after core #957 merges.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "f550800252d6bfc990309aa0074ca020cc6003a6" }
 [tool.ruff]
 target-version = "py312"
 line-length = 88
