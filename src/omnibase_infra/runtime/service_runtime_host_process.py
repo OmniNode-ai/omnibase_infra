@@ -1890,7 +1890,13 @@ class RuntimeHostProcess:
 
         # Step 5.75: Start local runtime ingress once dispatch routing is ready.
         await self._start_local_ingress()
-        await self._start_pattern_b_broker()
+        try:
+            await self._start_pattern_b_broker()
+        except Exception:
+            if self._local_ingress_server is not None:
+                await self._local_ingress_server.stop()
+                self._local_ingress_server = None
+            raise
 
         self._is_running = True
 
@@ -2217,13 +2223,24 @@ class RuntimeHostProcess:
     async def _start_pattern_b_broker(self) -> None:
         """Start the runtime-owned Pattern B broker when enabled."""
         if not self._pattern_b_broker_config.enabled:
+            if self._local_ingress_config.enabled:
+                raise ProtocolConfigurationError(
+                    "local runtime ingress requires pattern_b_broker.enabled=true",
+                    context=ModelInfraErrorContext.with_correlation(
+                        transport_type=EnumInfraTransportType.RUNTIME,
+                        operation="pattern_b_broker.start",
+                    ),
+                )
             self._pattern_b_broker = None
             return
 
-        package_names = parse_active_runtime_packages(
-            self._pattern_b_broker_config.package_names
-        )
-        routes = discover_runtime_local_ingress_routes(package_names)
+        if self._local_ingress_config.enabled:
+            routes = dict(self._local_ingress_routes)
+        else:
+            package_names = parse_active_runtime_packages(
+                self._pattern_b_broker_config.package_names
+            )
+            routes = discover_runtime_local_ingress_routes(package_names)
         self._pattern_b_broker = RuntimePatternBBroker(
             self._event_bus,
             command_topic=self._pattern_b_broker_config.command_topic,
@@ -2314,9 +2331,7 @@ class RuntimeHostProcess:
                         payload=request.payload,
                         correlation_id=correlation_id,
                         response_topic=TOPIC_PATTERN_B_DISPATCH_COMPLETED,
-                        timeout_seconds=max(
-                            1, min(600, (request.timeout_ms + 999) // 1000)
-                        ),
+                        timeout_seconds=max(1, (request.timeout_ms + 999) // 1000),
                     )
                 )
 
@@ -2364,8 +2379,10 @@ class RuntimeHostProcess:
                 output_payloads=output_payloads,
                 error=ModelLocalRuntimeIngressError(
                     code=error_code,
-                    message=result.error_message
-                    or f"Pattern B broker failed for command {route.contract_name}",
+                    message=sanitize_error_string(
+                        result.error_message
+                        or f"Pattern B broker failed for command {route.contract_name}"
+                    ),
                     retryable=result.status == "timeout",
                 ),
             )

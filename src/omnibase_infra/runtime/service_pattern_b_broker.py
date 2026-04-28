@@ -22,6 +22,7 @@ from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
     ProtocolPatternBBrokerTransport,
 )
 from omnibase_infra.runtime.runtime_local_ingress import RuntimeLocalIngressRoute
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 
 def _broker_group_id(command_topic: str) -> str:
@@ -175,7 +176,7 @@ class RuntimePatternBBroker:
             return route, _error_result(
                 correlation_id,
                 status="failed",
-                error_message=str(exc),
+                error_message=sanitize_error_message(exc),
             )
         finally:
             await unsubscribe_terminal()

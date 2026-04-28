@@ -245,6 +245,83 @@ async def test_runtime_host_process_dispatch_local_ingress_request() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_host_process_dispatch_local_ingress_preserves_request_timeout() -> (
+    None
+):
+    broker = SimpleNamespace(
+        dispatch_request=AsyncMock(
+            return_value=(
+                _session_orchestrator_route(),
+                ModelDispatchBusTerminalResult(
+                    status="completed",
+                    payload={"status": "complete"},
+                    completed_at=datetime.now(UTC),
+                    correlation_id=uuid4(),
+                ),
+            )
+        )
+    )
+    process = RuntimeHostProcess(
+        config=make_runtime_config(), dispatch_engine=AsyncMock()
+    )
+    process._is_running = True
+    process._local_ingress_routes = {
+        "session_orchestrator": _session_orchestrator_route()
+    }
+    process._pattern_b_broker = cast("object", broker)
+
+    response = await process._dispatch_local_ingress_request(
+        ModelLocalRuntimeIngressRequest(
+            command_name="session_orchestrator",
+            payload={"dry_run": True},
+            timeout_ms=600_000,
+        )
+    )
+
+    assert response.ok is True
+    command = broker.dispatch_request.await_args.args[0]
+    assert command.timeout_seconds == 600
+
+
+@pytest.mark.asyncio
+async def test_runtime_host_process_dispatch_local_ingress_sanitizes_broker_error() -> (
+    None
+):
+    broker = SimpleNamespace(
+        dispatch_request=AsyncMock(
+            return_value=(
+                _session_orchestrator_route(),
+                ModelDispatchBusTerminalResult(
+                    status="failed",
+                    error_message="failed to connect to postgres://user:pass@db:5432/app",
+                    completed_at=datetime.now(UTC),
+                    correlation_id=uuid4(),
+                ),
+            )
+        )
+    )
+    process = RuntimeHostProcess(
+        config=make_runtime_config(), dispatch_engine=AsyncMock()
+    )
+    process._is_running = True
+    process._local_ingress_routes = {
+        "session_orchestrator": _session_orchestrator_route()
+    }
+    process._pattern_b_broker = cast("object", broker)
+
+    response = await process._dispatch_local_ingress_request(
+        ModelLocalRuntimeIngressRequest(
+            command_name="session_orchestrator",
+            payload={"dry_run": True},
+        )
+    )
+
+    assert response.ok is False
+    assert response.error is not None
+    assert response.error.message == "[REDACTED - potentially sensitive data]"
+
+
+@pytest.mark.asyncio
 async def test_runtime_host_process_dispatch_local_ingress_uses_handler_semaphore() -> (
     None
 ):

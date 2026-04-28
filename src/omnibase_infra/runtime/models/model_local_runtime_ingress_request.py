@@ -43,8 +43,11 @@ class ModelLocalRuntimeIngressRequest(BaseModel):
     timeout_ms: int = Field(
         default=300_000,
         gt=0,
-        le=900_000,
-        description="Maximum local dispatch time before returning a timeout response.",
+        le=600_000,
+        description=(
+            "Maximum local dispatch time before returning a timeout response. "
+            "The upper bound matches ModelDispatchBusCommand.timeout_seconds."
+        ),
     )
 
     @field_validator("command_name", "node_alias")
