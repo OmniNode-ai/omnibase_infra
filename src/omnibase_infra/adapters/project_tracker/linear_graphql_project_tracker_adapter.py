@@ -37,6 +37,7 @@ from omnibase_infra.errors import (
     ModelTimeoutErrorContext,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 logger = logging.getLogger(__name__)
 
@@ -351,6 +352,8 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
             or os.environ.get("LINEAR_API_KEY")
             or os.environ.get("LINEAR_TOKEN")
         )
+        if resolved_key is not None:
+            resolved_key = resolved_key.strip()
         if not resolved_key:
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.HTTP,
@@ -698,9 +701,25 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
                 context=context,
                 retry_after_seconds=retry_after_seconds,
             )
-        if status >= 500 or status >= 400:
+        # 5xx — transient service failure; counts toward circuit breaker.
+        if status >= 500:
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(operation=operation)
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation=operation,
+                target_name=SERVICE_NAME,
+            )
+            raise InfraConnectionError(
+                f"Linear GraphQL HTTP {status}",
+                context=context,
+            )
+
+        # 4xx (other than 401/403/429 handled above) — caller-side errors
+        # like validation/schema. Surface as InfraConnectionError but do
+        # NOT count toward the circuit breaker — a noisy caller should not
+        # be able to open the circuit and starve healthy traffic.
+        if status >= 400:
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation=operation,
@@ -742,12 +761,15 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
 
         errors = body.get("errors")
         if errors:
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(operation=operation)
-            # Sanitize: surface only the first message and its extensions code.
+            # GraphQL errors[] payloads are caller-side schema/validation
+            # problems — do NOT count toward the circuit breaker. Sanitize
+            # the upstream message so credentials / connection strings in
+            # error text never leak through to logs.
             first_msg = "unknown"
             if isinstance(errors, list) and errors and isinstance(errors[0], dict):
-                first_msg = str(errors[0].get("message", "unknown"))
+                first_msg = sanitize_error_string(
+                    str(errors[0].get("message", "unknown"))
+                )
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation=operation,

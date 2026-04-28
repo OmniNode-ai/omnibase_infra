@@ -103,6 +103,18 @@ class TestConstruction:
             adapter = AdapterLinearGraphQLProjectTracker(api_key="explicit")
         assert adapter._api_key == "explicit"
 
+    def test_rejects_whitespace_only_api_key(self) -> None:
+        """Whitespace-only credentials must fail at construction, not on first call."""
+        with patch.dict("os.environ", {"LINEAR_API_KEY": "   "}, clear=True):
+            with pytest.raises(InfraAuthenticationError):
+                AdapterLinearGraphQLProjectTracker()
+
+    def test_strips_whitespace_around_api_key(self) -> None:
+        """A key with surrounding whitespace is accepted but stripped."""
+        with patch.dict("os.environ", {}, clear=True):
+            adapter = AdapterLinearGraphQLProjectTracker(api_key="  real-key  ")
+        assert adapter._api_key == "real-key"
+
 
 # ---------- lifecycle ----------
 
@@ -402,6 +414,21 @@ class TestErrorMapping:
         await adapter.close()
 
     @pytest.mark.asyncio
+    async def test_400_raises_connection_but_does_not_burn_circuit(self) -> None:
+        """Caller-side 4xx must not count toward circuit breaker."""
+        handler = httpx.MockTransport(
+            lambda _request: httpx.Response(400, json={"error": "bad input"})
+        )
+        adapter = _build_adapter(handler)
+        for _ in range(10):
+            with pytest.raises(InfraConnectionError):
+                await adapter.connect()
+        # Circuit breaker counter must remain at 0 — 4xx are not transient.
+        assert adapter._circuit_breaker_failures == 0
+        assert adapter._circuit_breaker_open is False
+        await adapter.close()
+
+    @pytest.mark.asyncio
     async def test_timeout_raises_infra_timeout(self) -> None:
         def _raise(_request: httpx.Request) -> httpx.Response:
             raise httpx.TimeoutException("boom")
@@ -425,11 +452,16 @@ class TestErrorMapping:
 
     @pytest.mark.asyncio
     async def test_graphql_errors_raise_connection(self) -> None:
+        """GraphQL errors[] payloads must not count toward circuit breaker."""
         handler = httpx.MockTransport(lambda _request: _err(["something broke"]))
         adapter = _build_adapter(handler)
-        with pytest.raises(InfraConnectionError) as exc_info:
-            await adapter.connect()
-        assert "something broke" in str(exc_info.value)
+        for _ in range(10):
+            with pytest.raises(InfraConnectionError) as exc_info:
+                await adapter.connect()
+            assert "something broke" in str(exc_info.value)
+        # Caller-side schema/validation errors don't open the circuit.
+        assert adapter._circuit_breaker_failures == 0
+        assert adapter._circuit_breaker_open is False
         await adapter.close()
 
     @pytest.mark.asyncio
