@@ -1,0 +1,53 @@
+# OMN-10168 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for the runtime auto-wiring change.
+schema_version: '1.0.0'
+ticket_id: OMN-10168
+summary: 'fix(OMN-10168): add strict orchestrator dispatcher coverage gate'
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - events
+  - protocols
+evidence_requirements:
+  - kind: tests
+    description: Unit tests cover strict dispatcher coverage behavior
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_orchestrator_dispatcher_coverage.py -q
+  - kind: tests
+    description: Integration test covers the strict gate at the wire_from_manifest boundary
+    command: uv run pytest tests/integration/test_orchestrator_dispatcher_coverage_integration.py -q
+  - kind: tests
+    description: Existing auto-wiring regression tests still pass
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_wiring.py tests/unit/runtime/auto_wiring/test_handler_wiring_event_type_alias.py -q
+  - kind: ci
+    description: CI pipeline green on PR
+    command: gh pr checks {pr} --repo OmniNode-ai/omnibase_infra
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: Strict dispatcher coverage unit tests pass
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/runtime/auto_wiring/test_orchestrator_dispatcher_coverage.py -q'
+  - id: dod-002
+    description: Strict dispatcher coverage integration test passes
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/integration/test_orchestrator_dispatcher_coverage_integration.py -q'
+  - id: dod-003
+    description: Strict dispatcher coverage helper imports cleanly
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run python -c "from omnibase_infra.runtime.auto_wiring.handler_wiring import _strict_dispatcher_coverage_enabled; assert callable(_strict_dispatcher_coverage_enabled)"'
+  - id: dod-004
+    description: Runtime deploy validates ONEX_STRICT_DISPATCHER_COVERAGE startup after merge
+    source: manual
+    checks:
+      - check_type: command
+        check_value: 'deploy omninode-runtime-effects after merge with ONEX_STRICT_DISPATCHER_COVERAGE=1 and verify auto-wiring completes before enabling the flag permanently'
