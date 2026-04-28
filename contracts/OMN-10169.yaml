@@ -1,0 +1,44 @@
+# OMN-10169 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control.
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: "1.0.0"
+ticket_id: "OMN-10169"
+summary: "Pin omnibase_infra to published omnibase-spi 0.20.5 for runtime protocol imports"
+is_seam_ticket: true
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "manual"
+    description: "PyPI publishes omnibase-spi 0.20.5"
+    command: "curl -fsS https://pypi.org/pypi/omnibase-spi/json | jq -e '.releases | has(\"0.20.5\")' >/dev/null"
+  - kind: "manual"
+    description: "omnibase_spi runtime protocol import works from the published wheel"
+    command: "uv run --with \"omnibase-spi==0.20.5\" python -c \"from omnibase_spi.protocols.runtime import protocol_handler_resolver; print('ok')\""
+  - kind: "ci"
+    description: "omnibase_infra PR checks pass, including deploy gate"
+    command: "gh pr checks 1441 --repo OmniNode-ai/omnibase_infra --watch"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "PyPI release 0.20.5 exists"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "curl -fsS https://pypi.org/pypi/omnibase-spi/json | jq -e '.releases | has(\"0.20.5\")' >/dev/null"
+  - id: "dod-002"
+    description: "Published omnibase-spi 0.20.5 exposes protocols.runtime"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run --with \"omnibase-spi==0.20.5\" python -c \"from omnibase_spi.protocols.runtime import protocol_handler_resolver; print('ok')\""
+  - id: "dod-003"
+    description: "Dependency floor is raised and the stale git source override is removed"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "grep -F '\"omnibase-spi>=0.20.5\"' pyproject.toml && ! grep -F 'omnibase-spi = { git =' pyproject.toml"
+      - check_type: "command"
+        check_value: "gh pr checks 1441 --repo OmniNode-ai/omnibase_infra | grep -F 'deploy-gate / deploy-gate'"
