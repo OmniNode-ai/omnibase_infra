@@ -6,7 +6,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from omnibase_infra.event_bus.topic_constants import TOPIC_PATTERN_B_DISPATCH_COMMAND
+from omnibase_infra.enums.generated.enum_omnibase_infra_topic import (
+    EnumOmnibaseInfraTopic,
+)
 
 
 class ModelPatternBBrokerConfig(BaseModel):
@@ -24,7 +26,7 @@ class ModelPatternBBrokerConfig(BaseModel):
         description="Whether the runtime should start the Pattern B broker service.",
     )
     command_topic: str = Field(
-        default=TOPIC_PATTERN_B_DISPATCH_COMMAND,
+        default=EnumOmnibaseInfraTopic.CMD_PATTERN_B_DISPATCH_V1.value,
         min_length=1,
         description="Command topic consumed by the Pattern B broker.",
     )
