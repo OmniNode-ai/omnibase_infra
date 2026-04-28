@@ -1893,6 +1893,10 @@ class RuntimeHostProcess:
         try:
             await self._start_pattern_b_broker()
         except Exception:
+            if self._pattern_b_broker is not None:
+                with suppress(Exception):
+                    await self._pattern_b_broker.stop()
+                self._pattern_b_broker = None
             if self._local_ingress_server is not None:
                 await self._local_ingress_server.stop()
                 self._local_ingress_server = None

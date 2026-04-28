@@ -179,7 +179,10 @@ class RuntimePatternBBroker:
                 error_message=sanitize_error_message(exc),
             )
         finally:
-            await unsubscribe_terminal()
+            try:
+                await unsubscribe_terminal()
+            except Exception:  # noqa: BLE001
+                pass
 
     async def _publish_terminal_result(
         self,
