@@ -370,13 +370,18 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
         self._api_key: str = resolved_key
         self._endpoint: str = endpoint
         self._timeout_seconds: float = timeout_seconds
+        # Per-request headers — applied on every POST so that callers who
+        # inject a pre-built httpx.AsyncClient do NOT need to preconfigure
+        # Authorization. The default-constructed client also gets these as
+        # client-level defaults for parity.
+        self._request_headers: dict[str, str] = {
+            "Authorization": resolved_key,
+            "Content-Type": "application/json",
+        }
         self._owns_client: bool = client is None
         self._client: httpx.AsyncClient = client or httpx.AsyncClient(
             timeout=timeout_seconds,
-            headers={
-                "Authorization": resolved_key,
-                "Content-Type": "application/json",
-            },
+            headers=self._request_headers,
         )
         self._connected: bool = False
 
@@ -423,7 +428,13 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
     # -- async context manager (ergonomic resource management) --
 
     async def __aenter__(self) -> AdapterLinearGraphQLProjectTracker:
-        await self.connect()
+        try:
+            await self.connect()
+        except BaseException:
+            # If connect fails, Python never calls __aexit__, which would
+            # leak the owned httpx.AsyncClient. Clean up before re-raising.
+            await self.close()
+            raise
         return self
 
     async def __aexit__(
@@ -636,7 +647,9 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
             payload["variables"] = variables
 
         try:
-            response = await self._client.post(self._endpoint, json=payload)
+            response = await self._client.post(
+                self._endpoint, json=payload, headers=self._request_headers
+            )
         except httpx.TimeoutException as exc:
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(operation=operation)

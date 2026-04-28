@@ -88,20 +88,32 @@ class TestConstruction:
             with pytest.raises(InfraAuthenticationError):
                 AdapterLinearGraphQLProjectTracker()
 
-    def test_falls_back_to_linear_api_key_env(self) -> None:
+    @pytest.mark.asyncio
+    async def test_falls_back_to_linear_api_key_env(self) -> None:
         with patch.dict("os.environ", {"LINEAR_API_KEY": "from-env"}, clear=True):
             adapter = AdapterLinearGraphQLProjectTracker()
-        assert adapter._api_key == "from-env"
+        try:
+            assert adapter._api_key == "from-env"
+        finally:
+            await adapter.close()
 
-    def test_falls_back_to_linear_token_env(self) -> None:
+    @pytest.mark.asyncio
+    async def test_falls_back_to_linear_token_env(self) -> None:
         with patch.dict("os.environ", {"LINEAR_TOKEN": "tok"}, clear=True):
             adapter = AdapterLinearGraphQLProjectTracker()
-        assert adapter._api_key == "tok"
+        try:
+            assert adapter._api_key == "tok"
+        finally:
+            await adapter.close()
 
-    def test_explicit_api_key_overrides_env(self) -> None:
+    @pytest.mark.asyncio
+    async def test_explicit_api_key_overrides_env(self) -> None:
         with patch.dict("os.environ", {"LINEAR_API_KEY": "env"}, clear=True):
             adapter = AdapterLinearGraphQLProjectTracker(api_key="explicit")
-        assert adapter._api_key == "explicit"
+        try:
+            assert adapter._api_key == "explicit"
+        finally:
+            await adapter.close()
 
     def test_rejects_whitespace_only_api_key(self) -> None:
         """Whitespace-only credentials must fail at construction, not on first call."""
@@ -109,11 +121,15 @@ class TestConstruction:
             with pytest.raises(InfraAuthenticationError):
                 AdapterLinearGraphQLProjectTracker()
 
-    def test_strips_whitespace_around_api_key(self) -> None:
+    @pytest.mark.asyncio
+    async def test_strips_whitespace_around_api_key(self) -> None:
         """A key with surrounding whitespace is accepted but stripped."""
         with patch.dict("os.environ", {}, clear=True):
             adapter = AdapterLinearGraphQLProjectTracker(api_key="  real-key  ")
-        assert adapter._api_key == "real-key"
+        try:
+            assert adapter._api_key == "real-key"
+        finally:
+            await adapter.close()
 
 
 # ---------- lifecycle ----------
@@ -173,6 +189,27 @@ class TestLifecycle:
             assert a is adapter
             assert adapter._connected is True
         assert adapter._connected is False
+
+    @pytest.mark.asyncio
+    async def test_aenter_cleans_up_on_connect_failure(self) -> None:
+        """When connect() raises, __aenter__ must close the owned client
+        before re-raising to avoid leaking the AsyncClient."""
+        handler = httpx.MockTransport(
+            lambda _request: httpx.Response(401, json={"error": "unauthorized"})
+        )
+        with patch.dict("os.environ", {}, clear=True):
+            adapter = AdapterLinearGraphQLProjectTracker(
+                api_key="bad",
+                client=httpx.AsyncClient(transport=handler),
+            )
+        # Mark as owned for this test so the cleanup branch fires.
+        adapter._owns_client = True
+
+        with pytest.raises(InfraAuthenticationError):
+            async with adapter:
+                pass  # pragma: no cover — connect should raise before body
+        # Client must be closed on failure.
+        assert adapter._client.is_closed
 
 
 # ---------- domain operations ----------
