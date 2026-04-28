@@ -30,6 +30,8 @@ from uuid import uuid4
 import pytest
 from pydantic import BaseModel
 
+from omnibase_infra.enums import EnumDispatchStatus
+
 # -- Event bus models --
 from omnibase_infra.event_bus.models.model_dlq_event import ModelDlqEvent
 from omnibase_infra.event_bus.models.model_dlq_metrics import ModelDlqMetrics
@@ -38,6 +40,7 @@ from omnibase_infra.event_bus.models.model_event_bus_readiness import (
 )
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 
 # -- Runtime models --
 from omnibase_infra.runtime.models.model_batch_publisher_config import (
@@ -55,6 +58,21 @@ from omnibase_infra.runtime.models.model_duplicate_response import (
 )
 from omnibase_infra.runtime.models.model_failed_component import ModelFailedComponent
 from omnibase_infra.runtime.models.model_lifecycle_result import ModelLifecycleResult
+from omnibase_infra.runtime.models.model_local_runtime_ingress_config import (
+    ModelLocalRuntimeIngressConfig,
+)
+from omnibase_infra.runtime.models.model_local_runtime_ingress_error import (
+    ModelLocalRuntimeIngressError,
+)
+from omnibase_infra.runtime.models.model_local_runtime_ingress_health import (
+    ModelLocalRuntimeIngressHealth,
+)
+from omnibase_infra.runtime.models.model_local_runtime_ingress_request import (
+    ModelLocalRuntimeIngressRequest,
+)
+from omnibase_infra.runtime.models.model_local_runtime_ingress_response import (
+    ModelLocalRuntimeIngressResponse,
+)
 from omnibase_infra.runtime.models.model_logging_config import ModelLoggingConfig
 from omnibase_infra.runtime.models.model_optional_string import ModelOptionalString
 from omnibase_infra.runtime.models.model_retry_policy import ModelRetryPolicy
@@ -319,6 +337,62 @@ def _make_runtime_tick() -> ModelRuntimeTick:
     )
 
 
+def _make_local_runtime_ingress_config() -> ModelLocalRuntimeIngressConfig:
+    return ModelLocalRuntimeIngressConfig(
+        enabled=True,
+        socket_path="/tmp/onex-runtime-roundtrip.sock",  # noqa: S108
+        package_names=("omnibase_infra", "omnimarket"),
+    )
+
+
+def _make_local_runtime_ingress_error() -> ModelLocalRuntimeIngressError:
+    return ModelLocalRuntimeIngressError(
+        code="dispatch_error",
+        message="dispatcher rejected request",
+        retryable=True,
+        details={"node_alias": "session_orchestrator"},
+    )
+
+
+def _make_local_runtime_ingress_health() -> ModelLocalRuntimeIngressHealth:
+    return ModelLocalRuntimeIngressHealth(
+        enabled=True,
+        running=True,
+        socket_path="/tmp/onex-runtime-roundtrip.sock",  # noqa: S108
+        route_count=1,
+        active_packages=("omnibase_infra", "omnimarket"),
+    )
+
+
+def _make_local_runtime_ingress_request() -> ModelLocalRuntimeIngressRequest:
+    return ModelLocalRuntimeIngressRequest(
+        node_alias="session_orchestrator",
+        payload={"dry_run": True},
+        correlation_id=uuid4(),
+        timeout_ms=30_000,
+    )
+
+
+def _make_local_runtime_ingress_response() -> ModelLocalRuntimeIngressResponse:
+    correlation_id = uuid4()
+    return ModelLocalRuntimeIngressResponse(
+        ok=True,
+        node_alias="session_orchestrator",
+        resolved_node_name="node_session_orchestrator",
+        contract_name="session_orchestrator",
+        topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
+        terminal_event="onex.evt.omnimarket.session-orchestrator-completed.v1",
+        correlation_id=correlation_id,
+        dispatch_result=ModelDispatchResult(
+            status=EnumDispatchStatus.SUCCESS,
+            topic="onex.cmd.omnimarket.session-orchestrator-start.v1",
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+            correlation_id=correlation_id,
+        ),
+    )
+
+
 # ============================================================================
 # Factory registry: maps model class -> factory callable
 # ============================================================================
@@ -338,6 +412,11 @@ MODEL_FACTORIES: dict[type[BaseModel], Any] = {
     ModelFailedComponent: _make_failed_component,
     ModelLifecycleResult: _make_lifecycle_result,
     ModelLoggingConfig: _make_logging_config,
+    ModelLocalRuntimeIngressConfig: _make_local_runtime_ingress_config,
+    ModelLocalRuntimeIngressError: _make_local_runtime_ingress_error,
+    ModelLocalRuntimeIngressHealth: _make_local_runtime_ingress_health,
+    ModelLocalRuntimeIngressRequest: _make_local_runtime_ingress_request,
+    ModelLocalRuntimeIngressResponse: _make_local_runtime_ingress_response,
     ModelOptionalString: _make_optional_string,
     ModelRetryPolicy: _make_retry_policy,
     ModelRuntimeSchedulerConfig: _make_runtime_scheduler_config,

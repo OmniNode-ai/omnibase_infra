@@ -139,6 +139,21 @@ from omnibase_infra.runtime.models.model_kafka_producer_config import (
 from omnibase_infra.runtime.models.model_lifecycle_result import (
     ModelLifecycleResult,
 )
+from omnibase_infra.runtime.models.model_local_runtime_ingress_config import (
+    ModelLocalRuntimeIngressConfig,
+)
+from omnibase_infra.runtime.models.model_local_runtime_ingress_error import (
+    ModelLocalRuntimeIngressError,
+)
+from omnibase_infra.runtime.models.model_local_runtime_ingress_health import (
+    ModelLocalRuntimeIngressHealth,
+)
+from omnibase_infra.runtime.models.model_local_runtime_ingress_request import (
+    ModelLocalRuntimeIngressRequest,
+)
+from omnibase_infra.runtime.models.model_local_runtime_ingress_response import (
+    ModelLocalRuntimeIngressResponse,
+)
 from omnibase_infra.runtime.models.model_logging_config import ModelLoggingConfig
 from omnibase_infra.runtime.models.model_materialized_resources import (
     ModelMaterializedResources,
@@ -248,6 +263,11 @@ __all__: list[str] = [
     "ModelHealthCheckResult",
     # NOTE: ModelIntentExecutionSummary excluded - import directly from module
     "ModelLifecycleResult",
+    "ModelLocalRuntimeIngressError",
+    "ModelLocalRuntimeIngressHealth",
+    "ModelLocalRuntimeIngressConfig",
+    "ModelLocalRuntimeIngressRequest",
+    "ModelLocalRuntimeIngressResponse",
     "ModelLoggingConfig",
     "ModelOptionalCorrelationId",
     "ModelOptionalString",

@@ -52,6 +52,7 @@ import random
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
@@ -59,8 +60,10 @@ from uuid import UUID, uuid4
 import yaml
 from pydantic import BaseModel, ValidationError
 
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import (
     EnumConsumerGroupPurpose,
+    EnumDispatchStatus,
     EnumHandlerSourceMode,
     EnumHandlerTypeCategory,
     EnumInfraTransportType,
@@ -86,6 +89,7 @@ from omnibase_infra.gateway import (
     load_public_key_from_pem,
 )
 from omnibase_infra.models import ModelNodeIdentity
+from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.runtime.model_resolved_dependencies import (
     ModelResolvedDependencies,
 )
@@ -108,6 +112,11 @@ from omnibase_infra.runtime.health.health_published_events_map import (
 )
 from omnibase_infra.runtime.models import (
     ModelDuplicateResponse,
+    ModelLocalRuntimeIngressConfig,
+    ModelLocalRuntimeIngressError,
+    ModelLocalRuntimeIngressHealth,
+    ModelLocalRuntimeIngressRequest,
+    ModelLocalRuntimeIngressResponse,
     ModelRuntimeContractConfig,
 )
 from omnibase_infra.runtime.models.model_component_health import (
@@ -122,6 +131,12 @@ from omnibase_infra.runtime.protocol_lifecycle_executor import (
 )
 from omnibase_infra.runtime.runtime_contract_config_loader import (
     RuntimeContractConfigLoader,
+)
+from omnibase_infra.runtime.runtime_local_ingress import (
+    RuntimeLocalIngressRoute,
+    RuntimeLocalIngressServer,
+    discover_runtime_local_ingress_routes,
+    parse_active_runtime_packages,
 )
 from omnibase_infra.runtime.util_mcp_auth import inject_mcp_api_keys
 from omnibase_infra.runtime.util_wiring import wire_default_handlers
@@ -156,6 +171,9 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.runtime.models.model_runtime_node_graph_config import (
         ModelRuntimeNodeGraphConfig,
+    )
+    from omnibase_infra.runtime.service_dispatch_result_applier import (
+        DispatchResultApplier,
     )
     from omnibase_infra.runtime.service_message_dispatch_engine import (
         MessageDispatchEngine,
@@ -869,6 +887,13 @@ class RuntimeHostProcess:
         # Extract configuration with defaults
         config = config or {}
 
+        local_ingress_config_raw = config.get("local_ingress", {})
+        if not isinstance(local_ingress_config_raw, dict):
+            raise ValueError("config.local_ingress must be a mapping when provided")
+        self._local_ingress_config = ModelLocalRuntimeIngressConfig.model_validate(
+            local_ingress_config_raw
+        )
+
         # Topic configuration (config overrides constructor args)
         self._input_topic: str = str(config.get("input_topic", input_topic))
         self._output_topic: str = str(config.get("output_topic", output_topic))
@@ -1192,6 +1217,10 @@ class RuntimeHostProcess:
         # Bridges contract-declared topics to Kafka subscriptions.
         # None until wired during start() when dispatch_engine is available.
         self._event_bus_wiring: EventBusSubcontractWiring | None = None
+        self._local_ingress_routes: dict[str, RuntimeLocalIngressRoute] = {}
+        self._local_ingress_server: RuntimeLocalIngressServer | None = None
+        self._local_ingress_dispatch_result_applier: DispatchResultApplier | None = None
+        self._local_ingress_active_packages: tuple[str, ...] = ()
 
         # Message dispatch engine for routing received messages (OMN-2050)
         # When set, contract-declared topics are routed through
@@ -1839,6 +1868,9 @@ class RuntimeHostProcess:
         if self._batch_publisher is not None:
             await self._batch_publisher.start()
 
+        # Step 5.75: Start local runtime ingress once dispatch routing is ready.
+        await self._start_local_ingress()
+
         self._is_running = True
 
         # Step 6: Publish introspection event with jitter (OMN-1930)
@@ -1929,6 +1961,12 @@ class RuntimeHostProcess:
             self._is_starting = False
 
         logger.info("Stopping RuntimeHostProcess")
+
+        # Stop local ingress first so new host-local work cannot enter while
+        # the runtime drains and shuts down.
+        if self._local_ingress_server is not None:
+            await self._local_ingress_server.stop()
+            self._local_ingress_server = None
 
         # Step 1: Unsubscribe from topics (stop receiving new messages)
         if self._subscription is not None:
@@ -2116,6 +2154,217 @@ class RuntimeHostProcess:
         self._is_running = False
 
         logger.info("RuntimeHostProcess stopped successfully")
+
+    async def _start_local_ingress(self) -> None:
+        """Start the runtime-owned local command ingress when enabled."""
+        if not self._local_ingress_config.enabled:
+            self._local_ingress_routes.clear()
+            self._local_ingress_active_packages = ()
+            return
+
+        if self._dispatch_engine is None:
+            raise ProtocolConfigurationError(
+                "local runtime ingress requires a dispatch_engine",
+                context=ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="local_ingress.start",
+                ),
+            )
+
+        package_names = parse_active_runtime_packages(
+            self._local_ingress_config.package_names
+        )
+        self._local_ingress_active_packages = package_names
+        self._local_ingress_routes = discover_runtime_local_ingress_routes(
+            package_names
+        )
+        self._local_ingress_dispatch_result_applier = (
+            await self._resolve_dispatch_result_applier_from_container()
+        )
+        self._local_ingress_server = RuntimeLocalIngressServer(
+            socket_path=self._local_ingress_config.socket_path,
+            request_handler=self._dispatch_local_ingress_request,
+            socket_timeout_seconds=self._local_ingress_config.socket_timeout_seconds,
+            socket_permissions=self._local_ingress_config.socket_permissions,
+            max_payload_bytes=self._local_ingress_config.max_payload_bytes,
+        )
+        await self._local_ingress_server.start()
+
+    async def _dispatch_local_ingress_request(
+        self,
+        request: ModelLocalRuntimeIngressRequest,
+    ) -> ModelLocalRuntimeIngressResponse:
+        """Dispatch a local ingress request through the runtime dispatch engine."""
+        correlation_id = normalize_correlation_id(request.correlation_id)
+        if self._dispatch_engine is None:
+            return ModelLocalRuntimeIngressResponse(
+                ok=False,
+                node_alias=request.node_alias,
+                correlation_id=correlation_id,
+                error=ModelLocalRuntimeIngressError(
+                    code="runtime_unavailable",
+                    message="dispatch_engine is not configured",
+                ),
+            )
+        dispatch_engine = self._dispatch_engine
+        if not self._is_running and not self._is_starting:
+            return ModelLocalRuntimeIngressResponse(
+                ok=False,
+                node_alias=request.node_alias,
+                correlation_id=correlation_id,
+                error=ModelLocalRuntimeIngressError(
+                    code="runtime_unavailable",
+                    message="runtime is not running",
+                ),
+            )
+        if self._is_draining or self._shutdown_requested.is_set():
+            return ModelLocalRuntimeIngressResponse(
+                ok=False,
+                node_alias=request.node_alias,
+                correlation_id=correlation_id,
+                error=ModelLocalRuntimeIngressError(
+                    code="runtime_unavailable",
+                    message="runtime is draining",
+                    retryable=True,
+                ),
+            )
+
+        route = self._local_ingress_routes.get(request.node_alias)
+        if route is None:
+            return ModelLocalRuntimeIngressResponse(
+                ok=False,
+                node_alias=request.node_alias,
+                correlation_id=correlation_id,
+                error=ModelLocalRuntimeIngressError(
+                    code="unknown_node",
+                    message=f"Unknown local ingress node '{request.node_alias}'",
+                ),
+            )
+
+        envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+            payload=cast("object", request.payload),
+            correlation_id=correlation_id,
+            envelope_timestamp=datetime.now(UTC),
+            event_type=route.event_type,
+            source_tool="runtime-local-ingress",
+            target_tool=route.contract_name,
+        )
+
+        await self._handler_semaphore.acquire()
+        try:
+            async with self._pending_lock:
+                self._pending_message_count += 1
+
+            async def _dispatch_and_apply_result() -> ModelDispatchResult | None:
+                dispatch_result = await dispatch_engine.dispatch(
+                    route.command_topic,
+                    envelope,
+                )
+                if (
+                    self._local_ingress_dispatch_result_applier is not None
+                    and dispatch_result is not None
+                ):
+                    await self._local_ingress_dispatch_result_applier.apply(
+                        dispatch_result,
+                        correlation_id,
+                    )
+                return dispatch_result
+
+            result = await asyncio.wait_for(
+                _dispatch_and_apply_result(),
+                timeout=request.timeout_ms / 1000.0,
+            )
+
+            if result is None:
+                return ModelLocalRuntimeIngressResponse(
+                    ok=False,
+                    node_alias=request.node_alias,
+                    resolved_node_name=route.node_name,
+                    contract_name=route.contract_name,
+                    topic=route.command_topic,
+                    terminal_event=route.terminal_event,
+                    correlation_id=correlation_id,
+                    error=ModelLocalRuntimeIngressError(
+                        code="dispatch_result_missing",
+                        message="dispatch_engine returned no result",
+                    ),
+                )
+
+            if result.status == EnumDispatchStatus.NO_DISPATCHER:
+                return ModelLocalRuntimeIngressResponse(
+                    ok=False,
+                    node_alias=request.node_alias,
+                    resolved_node_name=route.node_name,
+                    contract_name=route.contract_name,
+                    topic=route.command_topic,
+                    terminal_event=route.terminal_event,
+                    correlation_id=correlation_id,
+                    dispatch_result=result,
+                    error=ModelLocalRuntimeIngressError(
+                        code="dispatch_error",
+                        message=(
+                            result.error_message
+                            or f"No dispatcher registered for topic {route.command_topic}"
+                        ),
+                    ),
+                )
+
+            return ModelLocalRuntimeIngressResponse(
+                ok=True,
+                node_alias=request.node_alias,
+                resolved_node_name=route.node_name,
+                contract_name=route.contract_name,
+                topic=route.command_topic,
+                terminal_event=route.terminal_event,
+                correlation_id=correlation_id,
+                dispatch_result=result,
+            )
+        except TimeoutError:
+            return ModelLocalRuntimeIngressResponse(
+                ok=False,
+                node_alias=request.node_alias,
+                resolved_node_name=route.node_name,
+                contract_name=route.contract_name,
+                topic=route.command_topic,
+                terminal_event=route.terminal_event,
+                correlation_id=correlation_id,
+                error=ModelLocalRuntimeIngressError(
+                    code="dispatch_timeout",
+                    message=(
+                        f"Local runtime ingress timed out after {request.timeout_ms} ms"
+                    ),
+                    retryable=True,
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            sanitized_error = sanitize_error_message(exc)
+            logger.error(  # noqa: TRY400
+                "Local ingress dispatch failed",
+                extra={
+                    "node_alias": request.node_alias,
+                    "topic": route.command_topic,
+                    "correlation_id": str(correlation_id),
+                    "error": sanitized_error,
+                },
+            )
+            return ModelLocalRuntimeIngressResponse(
+                ok=False,
+                node_alias=request.node_alias,
+                resolved_node_name=route.node_name,
+                contract_name=route.contract_name,
+                topic=route.command_topic,
+                terminal_event=route.terminal_event,
+                correlation_id=correlation_id,
+                error=ModelLocalRuntimeIngressError(
+                    code="dispatch_error",
+                    message=sanitized_error,
+                    retryable=True,
+                ),
+            )
+        finally:
+            self._handler_semaphore.release()
+            async with self._pending_lock:
+                self._pending_message_count -= 1
 
     def _load_handler_source_config(self) -> ModelHandlerSourceConfig:
         """Load handler source configuration from runtime config.
@@ -4580,6 +4829,14 @@ class RuntimeHostProcess:
             components.append(published_events_map_health.model_dump(mode="json"))
             if published_events_map_health.status == "unhealthy":
                 healthy = False
+        local_ingress_health = self._build_local_ingress_health()
+        if local_ingress_health.enabled:
+            local_ingress_component = self._build_local_ingress_component(
+                local_ingress_health
+            )
+            components.append(local_ingress_component.model_dump(mode="json"))
+            if local_ingress_component.status == "unhealthy":
+                healthy = False
 
         return {
             "healthy": healthy,
@@ -4606,8 +4863,43 @@ class RuntimeHostProcess:
             "handler_pools": pool_metrics,
             "no_handlers_registered": no_handlers_registered,
             "config_prefetch_status": self._config_prefetch_status,
+            "local_ingress": local_ingress_health.model_dump(mode="json"),
             "components": components,
         }
+
+    def _build_local_ingress_health(self) -> ModelLocalRuntimeIngressHealth:
+        """Build typed health details for local runtime ingress."""
+        return ModelLocalRuntimeIngressHealth(
+            enabled=self._local_ingress_config.enabled,
+            running=(
+                self._local_ingress_server.is_running
+                if self._local_ingress_server is not None
+                else False
+            ),
+            socket_path=(
+                self._local_ingress_config.socket_path
+                if self._local_ingress_config.enabled
+                else None
+            ),
+            route_count=len(self._local_ingress_routes),
+            active_packages=self._local_ingress_active_packages,
+        )
+
+    def _build_local_ingress_component(
+        self,
+        health: ModelLocalRuntimeIngressHealth,
+    ) -> ModelComponentHealth:
+        """Convert local ingress health to component health."""
+        details = health.model_dump(mode="json")
+        if not health.enabled:
+            return ModelComponentHealth.healthy("local_ingress", details=details)
+        if health.running:
+            return ModelComponentHealth.healthy("local_ingress", details=details)
+        return ModelComponentHealth.unhealthy(
+            "local_ingress",
+            error="Local runtime ingress is enabled but not serving",
+            details=details,
+        )
 
     async def _check_published_events_map(
         self,
@@ -4642,6 +4934,21 @@ class RuntimeHostProcess:
             return None
 
         return check_published_events_map_health(applier.published_events_map)
+
+    async def _resolve_dispatch_result_applier_from_container(
+        self,
+    ) -> DispatchResultApplier | None:
+        """Resolve DispatchResultApplier from the container service registry."""
+        from omnibase_infra.runtime.service_dispatch_result_applier import (
+            DispatchResultApplier,
+        )
+
+        if self._container is None:
+            return None
+        registry = self._container.service_registry
+        if registry is None:
+            return None
+        return await registry.try_resolve_service(DispatchResultApplier)
 
     async def readiness_check(
         self, correlation_id: UUID | None = None
