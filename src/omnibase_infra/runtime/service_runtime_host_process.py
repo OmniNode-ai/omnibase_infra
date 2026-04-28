@@ -75,7 +75,9 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
     EnumIntrospectionReason,
 )
-from omnibase_infra.enums.generated import EnumOmnibaseInfraTopic
+from omnibase_infra.enums.generated.enum_omnibase_infra_topic import (
+    EnumOmnibaseInfraTopic,
+)
 from omnibase_infra.errors import (
     EnvelopeValidationError,
     ModelInfraErrorContext,
