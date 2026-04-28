@@ -1,0 +1,33 @@
+# OMN-10048 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control
+# (contracts/OMN-10048.yaml in OnniNode-ai/onex_change_control).
+# This file is the per-repo deploy-evidence carrier only.
+schema_version: '1.0.0'
+ticket_id: OMN-10048
+summary: 'Replace MCP-callable Linear adapter with Linear GraphQL httpx adapter'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: PR opened for Linear GraphQL adapter replacement
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'gh pr view 1430 --repo OmniNode-ai/omnibase_infra --json state -q .state'
+  - id: dod-002
+    description: Contract artifact file present in repo
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'test -f contracts/OMN-10048.yaml'
+  - id: dod-deploy
+    description: Post-deploy — runtime container resolves project tracker without raising NotImplementedError (the bug this ticket fixes). Run after redeploy.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'docker exec omninode-runtime python -c ''from omnibase_infra.services.project_tracker.resolver import resolve_project_tracker; t = resolve_project_tracker(); assert t.__class__.__name__ in ("AdapterLinearGraphQLProjectTracker", "LocalStubProjectTracker"), t.__class__.__name__'''
