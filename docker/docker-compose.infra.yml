@@ -456,7 +456,7 @@ services:
   #
   # Realm JSON is imported at startup via --import-realm (start-dev command).
   # onex-service and onex-admin clients are created dynamically by provision-keycloak.py.
-  # No compose healthcheck — provision-keycloak.py handles readiness polling.
+  # Compose healthcheck uses Keycloak's management readiness endpoint.
   keycloak:
     image: quay.io/keycloak/keycloak:26.3.3
     container_name: omnibase-infra-keycloak
@@ -471,6 +471,7 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-keycloak-dev-password}
       KC_HTTP_ENABLED: "true"
       KC_HTTP_PORT: "8080"
+      KC_HEALTH_ENABLED: "true"
       KC_HOSTNAME_STRICT: "false"
       # KC_HOSTNAME_STRICT_HTTPS removed: not supported in Keycloak 26+
       KC_LOG_LEVEL: INFO
@@ -485,7 +486,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS -m 3 http://localhost:8080/realms/omninode/.well-known/openid-configuration > /dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "bash -ec \"{ printf 'HEAD /health/ready HTTP/1.0\\r\\n\\r\\n' >&0; grep 'HTTP/1.0 200'; } 0<>/dev/tcp/localhost/9000\""]
       interval: 15s
       timeout: 5s
       retries: 10
