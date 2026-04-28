@@ -1,0 +1,22 @@
+version: 1
+ticket_id: OMN-9727
+title: "Market node deployment runbook and runtime verification hardening"
+repo: omnibase_infra
+change_type: runtime_verification
+summary: >
+  Tighten runtime health consumer coverage so discovered auto-wired contracts are checked against the exact EventBusKafka consumer group IDs they should create, not broad topic substring matches.
+
+runtime_impact:
+  deploy_required: true
+  restart_required: true
+  services:
+    - omninode-runtime
+    - runtime-effects
+validation:
+  local:
+    - "uv run pytest tests/unit/services/test_service_runtime_health_monitor.py -q"
+    - "uv run ruff check src/omnibase_infra/services/service_runtime_health_monitor.py tests/unit/services/test_service_runtime_health_monitor.py"
+post_merge:
+  - "Deploy runtime after merge."
+  - "Confirm runtime-health-check events report topic_coverage using exact expected consumer group coverage."
+  - "Diff rpk group list against at least one expected omnimarket auto-wired group ending in .__t.<topic>."
