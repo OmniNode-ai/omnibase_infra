@@ -30,6 +30,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_LLM_EMBEDDING_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-embedding-request.v1"  # onex.cmd.omnibase-infra.llm-embedding-request.v1
     CMD_LLM_INFERENCE_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-inference-request.v1"  # onex.cmd.omnibase-infra.llm-inference-request.v1
     CMD_ONBOARDING_START_V1 = "onex.cmd.omnibase-infra.onboarding-start.v1"  # onex.cmd.omnibase-infra.onboarding-start.v1
+    CMD_PATTERN_B_DISPATCH_V1 = "onex.cmd.omnibase-infra.pattern-b-dispatch.v1"  # onex.cmd.omnibase-infra.pattern-b-dispatch.v1
     CMD_REMOTE_AGENT_INVOKE_V1 = "onex.cmd.omnibase-infra.remote-agent-invoke.v1"  # onex.cmd.omnibase-infra.remote-agent-invoke.v1
     CMD_VECTOR_STORE_REQUEST_V1 = "onex.cmd.omnibase-infra.vector-store-request.v1"  # onex.cmd.omnibase-infra.vector-store-request.v1
     EVT_AGENT_TASK_LIFECYCLE_V1 = "onex.evt.omnibase-infra.agent-task-lifecycle.v1"  # onex.evt.omnibase-infra.agent-task-lifecycle.v1
@@ -52,6 +53,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_LLM_COMPLETION_COMPLETED_V1 = "onex.evt.omnibase-infra.llm-completion-completed.v1"  # onex.evt.omnibase-infra.llm-completion-completed.v1
     EVT_ONBOARDING_COMPLETED_V1 = "onex.evt.omnibase-infra.onboarding-completed.v1"  # onex.evt.omnibase-infra.onboarding-completed.v1
     EVT_ONBOARDING_STEP_VERIFIED_V1 = "onex.evt.omnibase-infra.onboarding-step-verified.v1"  # onex.evt.omnibase-infra.onboarding-step-verified.v1
+    EVT_PATTERN_B_DISPATCH_COMPLETED_V1 = "onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1"  # onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1
     EVT_QUALITY_GATE_RESULT_V1 = "onex.evt.omnibase-infra.quality-gate-result.v1"  # onex.evt.omnibase-infra.quality-gate-result.v1
     EVT_ROUTING_DECISION_V1 = "onex.evt.omnibase-infra.routing-decision.v1"  # onex.evt.omnibase-infra.routing-decision.v1
     EVT_ROW_COUNT_DIAGNOSTIC_V1 = "onex.evt.omnibase-infra.row-count-diagnostic.v1"  # onex.evt.omnibase-infra.row-count-diagnostic.v1

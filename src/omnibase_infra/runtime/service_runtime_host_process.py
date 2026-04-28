@@ -125,6 +125,9 @@ from omnibase_infra.runtime.models.model_component_health import (
 from omnibase_infra.runtime.models.model_materialized_resources import (
     ModelMaterializedResources,
 )
+from omnibase_infra.runtime.models.model_pattern_b_broker_config import (
+    ModelPatternBBrokerConfig,
+)
 from omnibase_infra.runtime.protocol_lifecycle_executor import (
     DEFAULT_HANDLER_SHUTDOWN_TIMEOUT,
     ProtocolLifecycleExecutor,
@@ -138,6 +141,7 @@ from omnibase_infra.runtime.runtime_local_ingress import (
     discover_runtime_local_ingress_routes,
     parse_active_runtime_packages,
 )
+from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
 from omnibase_infra.runtime.util_mcp_auth import inject_mcp_api_keys
 from omnibase_infra.runtime.util_wiring import wire_default_handlers
 from omnibase_infra.utils.util_consumer_group import compute_consumer_group_id
@@ -893,6 +897,12 @@ class RuntimeHostProcess:
         self._local_ingress_config = ModelLocalRuntimeIngressConfig.model_validate(
             local_ingress_config_raw
         )
+        pattern_b_broker_config_raw = config.get("pattern_b_broker", {})
+        if not isinstance(pattern_b_broker_config_raw, dict):
+            raise ValueError("config.pattern_b_broker must be a mapping when provided")
+        self._pattern_b_broker_config = ModelPatternBBrokerConfig.model_validate(
+            pattern_b_broker_config_raw
+        )
 
         # Topic configuration (config overrides constructor args)
         self._input_topic: str = str(config.get("input_topic", input_topic))
@@ -1221,6 +1231,7 @@ class RuntimeHostProcess:
         self._local_ingress_server: RuntimeLocalIngressServer | None = None
         self._local_ingress_dispatch_result_applier: DispatchResultApplier | None = None
         self._local_ingress_active_packages: tuple[str, ...] = ()
+        self._pattern_b_broker: RuntimePatternBBroker | None = None
 
         # Message dispatch engine for routing received messages (OMN-2050)
         # When set, contract-declared topics are routed through
@@ -1870,6 +1881,7 @@ class RuntimeHostProcess:
 
         # Step 5.75: Start local runtime ingress once dispatch routing is ready.
         await self._start_local_ingress()
+        await self._start_pattern_b_broker()
 
         self._is_running = True
 
@@ -1967,6 +1979,9 @@ class RuntimeHostProcess:
         if self._local_ingress_server is not None:
             await self._local_ingress_server.stop()
             self._local_ingress_server = None
+        if self._pattern_b_broker is not None:
+            await self._pattern_b_broker.stop()
+            self._pattern_b_broker = None
 
         # Step 1: Unsubscribe from topics (stop receiving new messages)
         if self._subscription is not None:
@@ -2189,6 +2204,23 @@ class RuntimeHostProcess:
             max_payload_bytes=self._local_ingress_config.max_payload_bytes,
         )
         await self._local_ingress_server.start()
+
+    async def _start_pattern_b_broker(self) -> None:
+        """Start the runtime-owned Pattern B broker when enabled."""
+        if not self._pattern_b_broker_config.enabled:
+            self._pattern_b_broker = None
+            return
+
+        package_names = parse_active_runtime_packages(
+            self._pattern_b_broker_config.package_names
+        )
+        routes = discover_runtime_local_ingress_routes(package_names)
+        self._pattern_b_broker = RuntimePatternBBroker(
+            self._event_bus,
+            command_topic=self._pattern_b_broker_config.command_topic,
+            routes=routes,
+        )
+        await self._pattern_b_broker.start()
 
     async def _dispatch_local_ingress_request(
         self,
