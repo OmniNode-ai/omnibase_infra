@@ -167,10 +167,9 @@ override-dependencies = [
 [tool.uv.sources]
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
 omnimarket = { git = "https://github.com/OmniNode-ai/omnimarket.git", branch = "main" }
-# Pinned to core main post-OMN-9637 (delegation models — ModelRemoteTaskState et al.).
-# OMN-10204 depends on the Pattern B broker client/models added in OMN-10203.
-# Switch back to the mainline core pin after PR #954 merges.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "0e4939cbb6af9a65d7703ec2bbedfebfc5b9f2c5" }
+# OMN-10238 depends on the shared runtime skill contract models/protocol added in core.
+# Switch back to the mainline core pin after the OMN-10238 core PR merges.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "f5ac07cb269ad12c6f5084fbc3f230c235b5c486" }
 [tool.ruff]
 target-version = "py312"
 line-length = 88
