@@ -434,7 +434,7 @@ jobs:
 
       - name: Upload smoke-result.json
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoke-result-${{ inputs.mode }}
           path: smoke-result.json
@@ -443,7 +443,7 @@ jobs:
 
       - name: Upload runtime startup logs
         if: always() && inputs.mode == 'compose'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: runtime-startup-logs-${{ inputs.mode }}
           path: |
