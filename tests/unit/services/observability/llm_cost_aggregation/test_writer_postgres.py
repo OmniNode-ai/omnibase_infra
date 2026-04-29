@@ -156,6 +156,39 @@ class TestBuildAggregationRows:
         assert keys == {"session", "model"}
 
     @pytest.mark.unit
+    def test_repo_dimension_prefers_top_level_repo_name(self) -> None:
+        """Top-level repo_name is authoritative over legacy extensions.repo."""
+        event = {
+            "model_id": "gpt-4o",
+            "repo_name": "omnibase_core",
+            "extensions": {"repo": "legacy-repo"},
+        }
+        rows = _build_aggregation_rows([event])
+
+        repo_keys = {
+            row["aggregation_key"]
+            for row in rows
+            if str(row["aggregation_key"]).startswith("repo:")
+        }
+        assert repo_keys == {"repo:omnibase_core"}
+
+    @pytest.mark.unit
+    def test_repo_dimension_falls_back_to_extensions_repo(self) -> None:
+        """Legacy events still aggregate by extensions.repo."""
+        event = {
+            "model_id": "gpt-4o",
+            "extensions": {"repo": "legacy-repo"},
+        }
+        rows = _build_aggregation_rows([event])
+
+        repo_keys = {
+            row["aggregation_key"]
+            for row in rows
+            if str(row["aggregation_key"]).startswith("repo:")
+        }
+        assert repo_keys == {"repo:legacy-repo"}
+
+    @pytest.mark.unit
     def test_builds_rows_without_session(self) -> None:
         """Events without session_id produce only model rows."""
         event = {"model_id": "gpt-4o"}
@@ -501,6 +534,35 @@ class TestWriterCallMetrics:
         conn = mock_pool.acquire.return_value.__aenter__.return_value
         # SET LOCAL + 1 INSERT = 2 execute calls
         assert conn.execute.call_count == 2
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_write_call_metrics_persists_attribution_fields(
+        self,
+        writer: WriterLlmCostAggregationPostgres,
+        mock_pool: MagicMock,
+        sample_event: dict[str, object],
+    ) -> None:
+        """Raw metric insert binds top-level repo_name and machine_id."""
+        event = {
+            **sample_event,
+            "repo_name": "omnibase_core",
+            "machine_id": "devbox-201",
+        }
+
+        result = await writer.write_call_metrics([event])
+
+        assert result == 1
+        conn = mock_pool.acquire.return_value.__aenter__.return_value
+        insert_call = next(
+            call
+            for call in conn.execute.call_args_list
+            if "INSERT INTO llm_call_metrics" in call.args[0]
+        )
+        sql = insert_call.args[0]
+        assert "repo_name, machine_id" in sql
+        assert insert_call.args[16] == "omnibase_core"
+        assert insert_call.args[17] == "devbox-201"
 
     @pytest.mark.unit
     @pytest.mark.asyncio
