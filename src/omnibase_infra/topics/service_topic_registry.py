@@ -128,6 +128,9 @@ class ServiceTopicRegistry:
             topic_keys.SAVINGS_ESTIMATED: (
                 "onex.evt.omnibase-infra.savings-estimated.v1"
             ),
+            topic_keys.RUNNER_USAGE_RECORDED: (
+                "onex.evt.omninode.runner-usage-recorded.v1"
+            ),
             topic_keys.VALIDATOR_CATCH: ("onex.evt.omniclaude.validator-catch.v1"),
             topic_keys.PATTERN_ENFORCEMENT: (
                 "onex.evt.omniclaude.pattern-enforcement.v1"

@@ -73,6 +73,7 @@ class TestModelPricingTableFromDict:
         assert "gpt-4o" in table.models
         assert "qwen2.5-coder-14b" in table.models
         assert table.compute_cost == {}
+        assert table.runner_cost is None
 
     def test_from_dict_missing_schema_version(self) -> None:
         """Missing schema_version should raise ValueError."""
@@ -115,6 +116,43 @@ class TestModelPricingTableFromDict:
                     "compute_cost": ["rtx_5090"],
                 }
             )
+
+    def test_from_dict_accepts_runner_cost_section(
+        self, sample_manifest_data: dict
+    ) -> None:
+        """Runner cost policy is parsed and used for runner avoidance."""
+        sample_manifest_data["runner_cost"] = {
+            "github_hosted_per_minute_usd": 0.008,
+        }
+
+        table = ModelPricingTable.from_dict(sample_manifest_data)
+
+        assert table.runner_cost is not None
+        assert table.runner_cost.github_hosted_per_minute_usd == 0.008
+        assert table.estimate_github_hosted_runner_cost(10) == 0.08
+
+    def test_from_dict_rejects_invalid_runner_cost_section(self) -> None:
+        """Non-mapping runner cost section is rejected."""
+        with pytest.raises(ValueError, match=r"runner_cost.*mapping"):
+            ModelPricingTable.from_dict(
+                {
+                    "schema_version": "1.0.0",
+                    "models": {},
+                    "runner_cost": ["github"],
+                }
+            )
+
+    def test_runner_cost_requires_manifest_policy(self) -> None:
+        """Runner estimates must not silently fallback without manifest pricing."""
+        table = ModelPricingTable.from_dict(
+            {
+                "schema_version": "1.0.0",
+                "models": {},
+            }
+        )
+
+        with pytest.raises(ValueError, match="runner_cost"):
+            table.estimate_github_hosted_runner_cost(10)
 
     def test_from_dict_no_models_key(self) -> None:
         """Missing models key defaults to empty dict."""

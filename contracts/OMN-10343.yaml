@@ -1,0 +1,35 @@
+# OMN-10343 contract file for omnibase_infra deploy-gate (OMN-8912).
+# Canonical OCC evidence lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for runner usage savings events.
+schema_version: "1.0.0"
+ticket_id: "OMN-10343"
+title: "CI runner cost avoidance"
+summary: "Estimate avoided GitHub-hosted runner spend from self-hosted runner usage."
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - "events"
+evidence_requirements:
+  - kind: "tests"
+    description: "Runner usage effect golden replay and pricing manifest tests pass"
+    command: "uv run pytest tests/integration/nodes/test_node_runner_usage_effect.py tests/unit/models/pricing/test_model_pricing_table.py tests/ci/test_pricing_manifest_schema.py -q"
+  - kind: "manual"
+    description: "Post-merge deploy smoke confirms runner usage effect imports in the deployed runtime"
+    command: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.nodes.node_runner_usage_effect import HandlerRunnerUsageSavings; print('deploy smoke ok', HandlerRunnerUsageSavings.__name__)\""
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "Runner usage effect golden replay and pricing manifest tests pass"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/nodes/test_node_runner_usage_effect.py tests/unit/models/pricing/test_model_pricing_table.py tests/ci/test_pricing_manifest_schema.py -q"
+  - id: "dod-002"
+    description: "Post-merge deploy smoke plan for runner usage effect"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.nodes.node_runner_usage_effect import HandlerRunnerUsageSavings; print('deploy smoke ok', HandlerRunnerUsageSavings.__name__)\""

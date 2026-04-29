@@ -43,6 +43,9 @@ from omnibase_infra.models.pricing.model_compute_cost_entry import (
 )
 from omnibase_infra.models.pricing.model_cost_estimate import ModelCostEstimate
 from omnibase_infra.models.pricing.model_pricing_entry import ModelPricingEntry
+from omnibase_infra.models.pricing.model_runner_cost_policy import (
+    ModelRunnerCostPolicy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +90,10 @@ class ModelPricingTable(BaseModel):
     compute_cost: dict[str, ModelComputeCostEntry] = Field(
         default_factory=dict,
         description="Mapping from GPU type to hourly compute cost policy.",
+    )
+    runner_cost: ModelRunnerCostPolicy | None = Field(
+        default=None,
+        description="CI runner-cost policy used for avoidance estimates.",
     )
 
     @model_validator(mode="after")
@@ -212,6 +219,30 @@ class ModelPricingTable(BaseModel):
         cost = (gpu_seconds / 3600.0) * entry.total_per_hour * gpu_count
         return round(cost, 10)
 
+    def estimate_github_hosted_runner_cost(self, runner_minutes: float) -> float:
+        """Estimate GitHub-hosted runner baseline cost from runner minutes.
+
+        Args:
+            runner_minutes: Runner wall-clock minutes.
+
+        Returns:
+            Rounded USD cost using the manifest runner-cost policy.
+
+        Raises:
+            ValueError: If ``runner_minutes`` is negative or the manifest does
+                not define ``runner_cost.github_hosted_per_minute_usd``.
+        """
+        if runner_minutes < 0:
+            raise ValueError("runner_minutes must be non-negative")
+        if self.runner_cost is None:
+            raise ValueError(
+                "Pricing manifest missing required runner_cost section for "
+                "runner avoidance estimates"
+            )
+
+        cost = runner_minutes * self.runner_cost.github_hosted_per_minute_usd
+        return round(cost, 10)
+
     @staticmethod
     def from_yaml(path: Path | str | None = None) -> ModelPricingTable:
         """Load a pricing table from a YAML manifest file.
@@ -281,7 +312,7 @@ class ModelPricingTable(BaseModel):
                 "Pricing manifest missing required field: 'schema_version'"
             )
 
-        allowed_keys = {"schema_version", "models", "compute_cost"}
+        allowed_keys = {"schema_version", "models", "compute_cost", "runner_cost"}
         extra_keys = set(data.keys()) - allowed_keys
         if extra_keys:
             raise ValueError(
@@ -320,10 +351,21 @@ class ModelPricingTable(BaseModel):
                 )
             compute_entries[str(gpu_type)] = ModelComputeCostEntry(**entry_data)
 
+        raw_runner_cost = data.get("runner_cost")
+        runner_cost: ModelRunnerCostPolicy | None = None
+        if raw_runner_cost is not None:
+            if not isinstance(raw_runner_cost, dict):
+                raise ValueError(
+                    f"Pricing manifest 'runner_cost' must be a mapping, "
+                    f"got: {type(raw_runner_cost).__name__}"
+                )
+            runner_cost = ModelRunnerCostPolicy(**raw_runner_cost)
+
         return ModelPricingTable(
             schema_version=str(schema_version),
             models=entries,
             compute_cost=compute_entries,
+            runner_cost=runner_cost,
         )
 
 
