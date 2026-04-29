@@ -118,4 +118,5 @@ def test_stability_runbook_is_validation_only() -> None:
     assert "does not deploy, restart, or change `.201`" in runbook
     assert "It does not run `docker compose up`." in runbook
     assert "config" in runbook
+    assert "--profile runtime" in runbook
     assert "BUILD_SOURCE=workspace" in runbook
