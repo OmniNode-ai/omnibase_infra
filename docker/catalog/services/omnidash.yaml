@@ -1,0 +1,32 @@
+name: omnidash
+description: OmniDash Next.js analytics dashboard
+image: omnidash:latest
+layer: runtime
+container_name: omnidash
+required_env:
+  - OMNIDASH_ANALYTICS_DB_URL
+hardcoded_env: {}
+operational_defaults:
+  NODE_ENV: production
+ports:
+  external: 3000
+  internal: 3000
+healthcheck:
+  test: curl -f http://localhost:3000/api/registry/health
+  interval_s: 30
+  timeout_s: 10
+  retries: 3
+  start_period_s: 20
+volumes: []
+depends_on:
+  - service: postgres
+    condition: service_healthy
+restart: unless-stopped
+resources:
+  cpus: "1.0"
+  memory: 512M
+  cpus_reservation: "0.25"
+  memory_reservation: 128M
+labels:
+  com.omninode.service: omnidash
+  com.omninode.layer: runtime

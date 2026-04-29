@@ -1,0 +1,42 @@
+name: omnimemory-memgraph
+description: Memgraph graph database for OmniMemory relationship queries
+image: memgraph/memgraph:${MEMGRAPH_VERSION:-2.18.1}
+layer: infrastructure
+container_name: omnimemory-memgraph
+required_env: []
+hardcoded_env: {}
+operational_defaults:
+  MEMGRAPH_BOLT_PORT: "7687"
+  MEMGRAPH_HTTP_PORT: "7444"
+  MEMGRAPH_MEMORY_LIMIT: "4096"
+ports:
+  external: 7687
+  internal: 7687
+healthcheck:
+  test:
+    - bash
+    - -c
+    - echo 'RETURN 1;' | mgconsole --host localhost --port 7687 || exit 1
+  interval_s: 30
+  timeout_s: 10
+  retries: 3
+  start_period_s: 30
+volumes:
+  - omnimemory-memgraph-data:/var/lib/memgraph
+depends_on: []
+restart: unless-stopped
+resources:
+  cpus: "2.0"
+  memory: 4G
+  cpus_reservation: "0.25"
+  memory_reservation: 512M
+command:
+  - --storage-snapshot-retention-count=2
+  - --storage-wal-enabled=true
+  - --storage-snapshot-interval-sec=3600
+  - --bolt-port=7687
+extra_networks:
+  - omnimemory-network
+labels:
+  com.omninode.service: omnimemory-memgraph
+  com.omninode.layer: infrastructure

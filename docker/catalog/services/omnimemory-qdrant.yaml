@@ -1,0 +1,39 @@
+name: omnimemory-qdrant
+description: Qdrant vector database for OmniMemory semantic storage
+image: qdrant/qdrant:${QDRANT_VERSION:-v1.16.3}
+layer: infrastructure
+container_name: omnimemory-qdrant
+required_env: []
+hardcoded_env:
+  QDRANT__SERVICE__HOST: 0.0.0.0
+  QDRANT__STORAGE__STORAGE_PATH: /qdrant/storage
+  QDRANT__STORAGE__ON_DISK_PAYLOAD: "true"
+  QDRANT__LOG_LEVEL: INFO
+operational_defaults:
+  QDRANT__SERVICE__HTTP_PORT: "6333"
+  QDRANT__SERVICE__GRPC_PORT: "6334"
+  QDRANT__SERVICE__API_KEY: ""
+ports:
+  external: 6333
+  internal: 6333
+healthcheck:
+  test: "bash -c 'exec 3<>/dev/tcp/localhost/6333 && echo -e \"GET /readyz HTTP/1.1\\r\\nHost: localhost:6333\\r\\n\\r\\n\" >&3 && timeout 2 cat <&3 | grep -q ready'"
+  interval_s: 30
+  timeout_s: 10
+  retries: 3
+  start_period_s: 30
+volumes:
+  - omnimemory-qdrant-data:/qdrant/storage
+  - omnimemory-qdrant-snapshots:/qdrant/snapshots
+depends_on: []
+restart: unless-stopped
+resources:
+  cpus: "2.0"
+  memory: 2G
+  cpus_reservation: "0.25"
+  memory_reservation: 512M
+extra_networks:
+  - omnimemory-network
+labels:
+  com.omninode.service: omnimemory-qdrant
+  com.omninode.layer: infrastructure

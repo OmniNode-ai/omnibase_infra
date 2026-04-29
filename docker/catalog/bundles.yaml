@@ -117,3 +117,34 @@ tracing:
   inject_env:
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://phoenix:6006"
     OTEL_TRACES_EXPORTER: "otlp"
+omnimemory:
+  description: "OmniMemory data layer — Qdrant, Memgraph, Valkey, Kreuzberg (OMN-8738)"
+  services:
+    - omnimemory-qdrant
+    - omnimemory-memgraph
+    - omnimemory-valkey
+    - omnimemory-kreuzberg
+  includes: []
+  inject_env: {}
+  inject_required_env: []
+omnimarket-projections:
+  description: "OmniMarket Kafka-to-DB projection consumers (OMN-7610 / OMN-8738)"
+  services:
+    - omnimarket-projection-session-outcome
+    - omnimarket-projection-llm-cost
+    - omnimarket-projection-savings
+    - omnimarket-projection-delegation
+    - omnimarket-projection-baselines
+    - omnimarket-projection-registration
+  includes:
+    - core
+  inject_required_env:
+    - OMNIDASH_ANALYTICS_DB_URL
+omnidash:
+  description: "OmniDash Next.js analytics dashboard (OMN-8738)"
+  services:
+    - omnidash
+  includes:
+    - core
+  inject_required_env:
+    - OMNIDASH_ANALYTICS_DB_URL

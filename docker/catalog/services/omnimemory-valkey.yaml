@@ -1,0 +1,33 @@
+name: omnimemory-valkey
+description: Valkey in-memory cache for OmniMemory session and embedding state
+image: valkey/valkey:${VALKEY_VERSION:-8}
+layer: infrastructure
+container_name: omnimemory-valkey
+required_env: []
+hardcoded_env: {}
+operational_defaults:
+  VALKEY_PORT: "6379"
+ports:
+  external: 6380
+  internal: 6379
+healthcheck:
+  test: sh -c 'REDISCLI_AUTH=${VALKEY_PASSWORD:-} valkey-cli -p 6379 ping'
+  interval_s: 30
+  timeout_s: 10
+  retries: 3
+  start_period_s: 10
+volumes:
+  - omnimemory-valkey-data:/data
+depends_on: []
+restart: unless-stopped
+resources:
+  cpus: "1.0"
+  memory: 1G
+  cpus_reservation: "0.1"
+  memory_reservation: 128M
+command: sh -c 'valkey-server --port 6379 --appendonly yes ${VALKEY_PASSWORD:+--requirepass ${VALKEY_PASSWORD}}'
+extra_networks:
+  - omnimemory-network
+labels:
+  com.omninode.service: omnimemory-valkey
+  com.omninode.layer: infrastructure
