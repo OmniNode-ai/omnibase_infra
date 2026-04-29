@@ -58,6 +58,14 @@ class TestPricingManifestSchema:
         assert "models" in data, "Manifest missing 'models' section"
         assert isinstance(data["models"], dict), "models must be a mapping"
 
+    def test_manifest_has_runner_cost_section(self) -> None:
+        """Runner pricing must stay in the manifest for cost avoidance."""
+        table = ModelPricingTable.from_yaml(_MANIFEST_PATH)
+
+        assert table.runner_cost is not None
+        assert table.runner_cost.github_hosted_per_minute_usd == 0.008
+        assert table.estimate_github_hosted_runner_cost(10) == 0.08
+
     def test_manifest_loads_as_pricing_table(self) -> None:
         """The manifest must load successfully as a ModelPricingTable."""
         table = ModelPricingTable.from_yaml(_MANIFEST_PATH)

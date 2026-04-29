@@ -1,0 +1,22 @@
+[
+  {
+    "schema_version": "1.0",
+    "source_event_id": "runner-usage:103430001:build-and-test",
+    "event_timestamp": "2026-04-29T12:00:00Z",
+    "session_id": "runner:103430001:build-and-test",
+    "workflow_run_id": "103430001",
+    "job_id": "build-and-test",
+    "runner_minutes": "10.000000",
+    "model_local": "self_hosted_runner",
+    "model_cloud_baseline": "github_runner",
+    "local_cost_usd": "0.000000",
+    "cloud_cost_usd": "0.080000",
+    "savings_usd": "0.080000",
+    "repo_name": "omnibase_infra",
+    "machine_id": "runner-host-201",
+    "runner_name": "omninode-runner-1",
+    "workflow_name": "CI",
+    "pricing_manifest_version": "1.0.0",
+    "estimation_method": "runner_cost_manifest_v1"
+  }
+]

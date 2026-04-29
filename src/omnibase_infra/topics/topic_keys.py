@@ -137,6 +137,9 @@ WIRING_HEALTH_SNAPSHOT: Final[str] = "WIRING_HEALTH_SNAPSHOT"
 SAVINGS_ESTIMATED: Final[str] = "SAVINGS_ESTIMATED"
 """Savings estimation event with tiered attribution breakdown."""
 
+RUNNER_USAGE_RECORDED: Final[str] = "RUNNER_USAGE_RECORDED"
+"""CI runner usage event emitted by self-hosted GitHub Actions runners."""
+
 VALIDATOR_CATCH: Final[str] = "VALIDATOR_CATCH"
 """Validator catch events from pre-commit hooks, CI checks, poly enforcer."""
 
@@ -282,6 +285,7 @@ __all__: list[str] = [
     "REWARD_ASSIGNED",
     "RUNTIME_ERROR",
     "RUNTIME_HEALTH_CHECK",
+    "RUNNER_USAGE_RECORDED",
     "SAVINGS_ESTIMATED",
     "SESSION_OUTCOME_CANONICAL",
     "SESSION_OUTCOME_CURRENT",

@@ -1,0 +1,64 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: "node_runner_usage_effect"
+contract_name: "node_runner_usage_effect"
+node_name: "node_runner_usage_effect"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  Consumes self-hosted GitHub Actions runner usage events, computes avoided GitHub-hosted runner cost using the pricing manifest, and emits SAVINGS_ESTIMATED payloads for the savings projection.
+
+input_model:
+  name: "ModelRunnerUsageEvent"
+  module: "omnibase_infra.nodes.node_runner_usage_effect.models"
+  description: "Self-hosted runner usage event."
+output_model:
+  name: "ModelRunnerSavingsEstimated"
+  module: "omnibase_infra.nodes.node_runner_usage_effect.models"
+  description: "Runner cost avoidance savings estimate."
+capabilities:
+  - name: "runner_usage.estimate_savings"
+    description: "Estimate avoided GitHub-hosted runner cost from self-hosted usage."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "runner_usage.estimate_savings"
+      handler_class: "HandlerRunnerUsageSavings"
+      handler_module: "omnibase_infra.nodes.node_runner_usage_effect.handlers.handler_runner_usage_savings"
+      description: "Compute runner savings estimate from manifest-backed pricing."
+      input_model:
+        name: "ModelRunnerUsageEvent"
+        module: "omnibase_infra.nodes.node_runner_usage_effect.models"
+        description: "Self-hosted runner usage event."
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.evt.omninode.runner-usage-recorded.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.savings-estimated.v1"
+topics:
+  consumes:
+    - topic: "onex.evt.omninode.runner-usage-recorded.v1"
+      description: "Self-hosted runner usage events"
+      schema: "ModelRunnerUsageEvent"
+  produces:
+    - topic: "onex.evt.omnibase-infra.savings-estimated.v1"
+      description: "Runner cost avoidance savings estimates"
+      schema: "ModelRunnerSavingsEstimated"
+metadata:
+  related_tickets:
+    - "OMN-10343"
+  tags:
+    - runner
+    - savings
+    - cost

@@ -33,6 +33,8 @@ compute_cost:
     electricity_per_hour: 0.04
     amortization_per_hour: 0.12
     note: "Local M2 Ultra compute cost policy"
+runner_cost:
+  github_hosted_per_minute_usd: 0.008
 models:
   # --- Anthropic Claude models ---
   claude-opus-4-6:
