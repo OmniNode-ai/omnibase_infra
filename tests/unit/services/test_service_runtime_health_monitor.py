@@ -29,9 +29,16 @@ from omnibase_infra.models.health.model_runtime_health_check_event import (
 from omnibase_infra.models.health.model_runtime_health_dimension import (
     ModelRuntimeHealthDimension,
 )
+from omnibase_infra.runtime.auto_wiring.models import (
+    ModelAutoWiringManifest,
+    ModelContractVersion,
+    ModelDiscoveredContract,
+    ModelEventBusWiring,
+)
 from omnibase_infra.services.service_runtime_health_monitor import (
     ConsumerGroupSnapshot,
     ServiceRuntimeHealthMonitor,
+    _expected_consumer_groups_from_manifest,
     _worst,
 )
 from omnibase_infra.topics import topic_keys
@@ -49,6 +56,23 @@ def _make_manifest(contracts=5, errors=0, subscribe_topics=()):
     m.total_errors = errors
     m.all_subscribe_topics.return_value = subscribe_topics
     return m
+
+
+def _make_discovered_contract(
+    *,
+    name: str = "node_contract_sweep",
+    package_name: str = "omnimarket",
+    topic: str = "onex.cmd.omnimarket.contract-sweep-start.v1",
+) -> ModelDiscoveredContract:
+    return ModelDiscoveredContract(
+        name=name,
+        node_type="ORCHESTRATOR",
+        contract_version=ModelContractVersion(major=1, minor=2, patch=3),
+        contract_path=__file__,
+        entry_point_name=name,
+        package_name=package_name,
+        event_bus=ModelEventBusWiring(subscribe_topics=(topic,), publish_topics=()),
+    )
 
 
 # =============================================================================
@@ -267,6 +291,65 @@ class TestRunOnceWithKafka:
         assert event.status == "DEGRADED"
         degraded_dims = [d for d in event.dimensions if d.status == "DEGRADED"]
         assert any(d.name == "consumer_coverage" for d in degraded_dims)
+
+    @pytest.mark.asyncio
+    async def test_exact_expected_group_id_required_for_discovered_contracts(self):
+        contract = _make_discovered_contract()
+        manifest = ModelAutoWiringManifest(contracts=(contract,), errors=())
+        expected = _expected_consumer_groups_from_manifest(manifest)[0]
+        snapshots = self._mock_admin(
+            [
+                # Contains the topic, but is not the group ID EventBusKafka
+                # actually creates for auto-wired runtime subscriptions.
+                f"wrong-prefix.__t.{contract.event_bus.subscribe_topics[0]}",
+                expected.group_id,
+            ],
+            empty_groups=set(),
+        )
+        monitor = ServiceRuntimeHealthMonitor(bootstrap_servers="localhost:9092")
+
+        with (
+            patch(
+                "omnibase_infra.services.service_runtime_health_monitor._discover_contracts",
+                return_value=manifest,
+            ),
+            patch(
+                "omnibase_infra.services.service_runtime_health_monitor._list_consumer_group_snapshots",
+                return_value=snapshots,
+            ),
+        ):
+            event = await monitor.run_once()
+
+        assert event.uncovered_topic_count == 0
+        assert event.status == "HEALTHY"
+
+    @pytest.mark.asyncio
+    async def test_missing_exact_expected_group_reports_node_and_group(self):
+        contract = _make_discovered_contract(name="node_session_orchestrator")
+        manifest = ModelAutoWiringManifest(contracts=(contract,), errors=())
+        topic = contract.event_bus.subscribe_topics[0]
+        snapshots = self._mock_admin([f"wrong-prefix.__t.{topic}"], empty_groups=set())
+        monitor = ServiceRuntimeHealthMonitor(bootstrap_servers="localhost:9092")
+
+        with (
+            patch(
+                "omnibase_infra.services.service_runtime_health_monitor._discover_contracts",
+                return_value=manifest,
+            ),
+            patch(
+                "omnibase_infra.services.service_runtime_health_monitor._list_consumer_group_snapshots",
+                return_value=snapshots,
+            ),
+        ):
+            event = await monitor.run_once()
+
+        assert event.uncovered_topic_count == 1
+        degraded_dims = [d for d in event.dimensions if d.name == "topic_coverage"]
+        assert degraded_dims
+        assert "node_session_orchestrator" in degraded_dims[0].detail
+        assert "local.omnimarket.node_session_orchestrator.consume.1.2.3" in (
+            degraded_dims[0].detail
+        )
 
 
 # =============================================================================

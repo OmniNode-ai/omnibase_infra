@@ -30,8 +30,10 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
+from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.health.model_runtime_health_check_event import (
     ModelRuntimeHealthCheckEvent,
 )
@@ -43,6 +45,10 @@ from omnibase_infra.protocols.protocol_auto_wiring_manifest_like import (
     ProtocolAutoWiringManifestLike,
 )
 from omnibase_infra.topics import topic_keys
+from omnibase_infra.utils import (
+    apply_instance_discriminator,
+    compute_consumer_group_id,
+)
 from omnibase_infra.utils.correlation import generate_correlation_id
 
 if TYPE_CHECKING:
@@ -68,6 +74,15 @@ class ConsumerGroupSnapshot(NamedTuple):
 
     group_id: str
     state: str
+
+
+class ExpectedConsumerGroup(NamedTuple):
+    """Expected per-topic consumer group derived from discovered contracts."""
+
+    topic: str
+    group_id: str
+    node_name: str
+    package_name: str
 
 
 def _consumer_group_state_name(state: object) -> str:
@@ -124,6 +139,63 @@ def _list_consumer_group_snapshots(
             )
         )
     return snapshots
+
+
+def _expected_consumer_groups_from_manifest(
+    manifest: ProtocolAutoWiringManifestLike, instance_id: str | None = None
+) -> list[ExpectedConsumerGroup]:
+    """Derive the exact Kafka group IDs runtime wiring should create.
+
+    Runtime auto-wiring subscribes each contract topic with a node identity based
+    group and ``EventBusKafka`` appends the per-topic ``.__t.<topic>`` suffix.
+    The health monitor must compare against that exact shape; topic substring
+    matching lets unrelated groups mask missing runtime consumers.
+    """
+    expected: list[ExpectedConsumerGroup] = []
+    contracts = getattr(manifest, "contracts", ())
+    for contract in contracts:
+        event_bus = getattr(contract, "event_bus", None)
+        if event_bus is None:
+            continue
+        topics = tuple(getattr(event_bus, "subscribe_topics", ()) or ())
+        if not topics:
+            continue
+
+        node_name = str(getattr(contract, "name", "unknown"))
+        package_name = str(getattr(contract, "package_name", "unknown"))
+        version = str(getattr(contract, "contract_version", "0.0.0"))
+        identity = ModelNodeIdentity(
+            env=os.environ.get("ONEX_ENVIRONMENT", "local"),
+            service=package_name,
+            node_name=node_name,
+            version=version,
+        )
+        base_group_id = compute_consumer_group_id(
+            identity, EnumConsumerGroupPurpose.CONSUME
+        )
+        discriminated_group_id = apply_instance_discriminator(
+            base_group_id, instance_id
+        )
+        for topic in topics:
+            topic_str = str(topic)
+            expected.append(
+                ExpectedConsumerGroup(
+                    topic=topic_str,
+                    group_id=f"{discriminated_group_id}.__t.{topic_str}",
+                    node_name=node_name,
+                    package_name=package_name,
+                )
+            )
+    return expected
+
+
+def _topic_is_covered_by_legacy_group(topic: str, group_id: str) -> bool:
+    """Best-effort coverage check for manifests without contract records."""
+    return (
+        f".__t.{topic}" in group_id
+        or f"-{topic}-" in group_id
+        or group_id.endswith(f"-{topic}")
+    )
 
 
 _HealthStatus = Literal["HEALTHY", "DEGRADED", "CRITICAL"]
@@ -249,11 +321,15 @@ class ServiceRuntimeHealthMonitor:
         contract_count = 0
         discovery_error_count = 0
         subscribe_topics: set[str] = set()
+        expected_groups: list[ExpectedConsumerGroup] = []
         try:
             manifest = _discover_contracts()
             contract_count = manifest.total_discovered
             discovery_error_count = manifest.total_errors
             subscribe_topics = set(manifest.all_subscribe_topics())
+            expected_groups = _expected_consumer_groups_from_manifest(
+                manifest, os.environ.get("KAFKA_INSTANCE_ID")
+            )
 
             if discovery_error_count > 0:
                 dimensions.append(
@@ -307,21 +383,32 @@ class ServiceRuntimeHealthMonitor:
                 empty_consumer_group_count = len(empty_groups)
 
                 # Check which subscribe topics have a matching non-empty group.
-                # ONEX consumer group IDs embed the full topic name surrounded by
-                # "-" delimiters or at end-of-string (e.g. "onex-consumer-<topic>").
-                # A raw substring check would false-positive on prefix collisions
-                # like "orders.v1" matching "orders.v10-extra". We require the
-                # topic to appear as a complete token bounded by "-" or string end.
                 non_empty_groups = set(all_group_ids) - empty_groups
-                uncovered: list[str] = []
-                for topic in sorted(subscribe_topics):
-                    covered = any(
-                        f"-{topic}-" in grp or grp.endswith(f"-{topic}")
-                        for grp in non_empty_groups
-                    )
-                    if not covered:
-                        uncovered.append(topic)
-                uncovered_topic_count = len(uncovered)
+                if expected_groups:
+                    missing_expected = [
+                        expected
+                        for expected in expected_groups
+                        if expected.group_id not in non_empty_groups
+                    ]
+                    uncovered_topic_count = len(missing_expected)
+                    uncovered_details = [
+                        f"{expected.topic} ({expected.node_name}: {expected.group_id})"
+                        for expected in missing_expected
+                    ]
+                else:
+                    # Test doubles and older manifest protocols may only expose
+                    # topic names. Keep a bounded fallback, but production
+                    # manifests use exact expected group IDs above.
+                    uncovered_topics: list[str] = []
+                    for topic in sorted(subscribe_topics):
+                        covered = any(
+                            _topic_is_covered_by_legacy_group(topic, group_id)
+                            for group_id in non_empty_groups
+                        )
+                        if not covered:
+                            uncovered_topics.append(topic)
+                    uncovered_topic_count = len(uncovered_topics)
+                    uncovered_details = uncovered_topics
 
                 if empty_consumer_group_count > 0:
                     dimensions.append(
@@ -344,9 +431,9 @@ class ServiceRuntimeHealthMonitor:
                     )
 
                 if uncovered_topic_count > 0:
-                    detail_topics = ", ".join(uncovered[:5])
-                    if len(uncovered) > 5:
-                        detail_topics += f" … +{len(uncovered) - 5} more"
+                    detail_topics = ", ".join(uncovered_details[:5])
+                    if len(uncovered_details) > 5:
+                        detail_topics += f" … +{len(uncovered_details) - 5} more"
                     dimensions.append(
                         ModelRuntimeHealthDimension(
                             name="topic_coverage",
@@ -360,11 +447,19 @@ class ServiceRuntimeHealthMonitor:
                         )
                     )
                 else:
+                    coverage_target_count = (
+                        len(expected_groups)
+                        if expected_groups
+                        else len(subscribe_topics)
+                    )
                     dimensions.append(
                         ModelRuntimeHealthDimension(
                             name="topic_coverage",
                             status="HEALTHY",
-                            detail=f"All {len(subscribe_topics)} subscribe topics covered",
+                            detail=(
+                                f"All {coverage_target_count} expected "
+                                "consumer group(s) covered"
+                            ),
                         )
                     )
 
