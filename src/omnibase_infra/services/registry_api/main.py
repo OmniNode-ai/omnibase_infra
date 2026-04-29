@@ -42,10 +42,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.services.cost_api import router as cost_api_router
 from omnibase_infra.services.registry_api.routes import router
 from omnibase_infra.services.registry_api.service import ServiceRegistryDiscovery
 
 if TYPE_CHECKING:
+    import asyncpg
+
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
 logger = logging.getLogger(__name__)
@@ -112,6 +115,7 @@ def create_app(
     projection_reader: ProjectionReaderRegistration | None = None,
     widget_mapping_path: Path | None = None,
     cors_origins: list[str] | None = None,
+    cost_api_pool: asyncpg.Pool | None = None,
 ) -> FastAPI:
     """Create and configure the Registry API FastAPI application.
 
@@ -127,6 +131,7 @@ def create_app(
         cors_origins: Optional list of allowed CORS origins.
             If not provided, reads from CORS_ORIGINS environment variable.
             Raises ProtocolConfigurationError if neither is configured (fail-fast).
+        cost_api_pool: Optional asyncpg pool for LLM cost API routes.
 
     Returns:
         Configured FastAPI application.
@@ -194,9 +199,11 @@ def create_app(
         widget_mapping_path=widget_mapping_path,
     )
     app.state.registry_service = service
+    app.state.cost_api_pool = cost_api_pool
 
     # Include routes
     app.include_router(router)
+    app.include_router(cost_api_router)
 
     # Root endpoint
     @app.get("/", include_in_schema=False)

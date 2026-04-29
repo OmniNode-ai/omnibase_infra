@@ -1,0 +1,134 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""FastAPI routes for LLM cost and savings summaries."""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+
+from omnibase_infra.services.cost_api.handlers import (
+    fetch_cost_by_model,
+    fetch_cost_by_repo,
+    fetch_cost_summary,
+    fetch_cost_trend,
+    fetch_savings_summary,
+    fetch_token_usage,
+)
+from omnibase_infra.services.cost_api.models import (
+    AggregationWindow,
+    ModelCostBreakdown,
+    ModelCostSummary,
+    ModelCostTrend,
+    ModelSavingsSummary,
+    ModelTokenUsage,
+    TrendBucket,
+)
+
+router = APIRouter(tags=["costs"])
+
+
+def get_cost_api_pool(request: Request) -> object:
+    """Return the asyncpg pool configured by the registry app factory."""
+    pool = getattr(request.app.state, "cost_api_pool", None)
+    if pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Cost API database pool not configured",
+        )
+    return pool
+
+
+@router.get(
+    "/api/costs/summary",
+    response_model=ModelCostSummary,
+    summary="LLM Cost Summary",
+)
+async def get_cost_summary(
+    pool: Annotated[object, Depends(get_cost_api_pool)],
+    window: Annotated[
+        AggregationWindow,
+        Query(description="Rolling aggregate window to read."),
+    ] = "24h",
+) -> ModelCostSummary:
+    return await fetch_cost_summary(pool, window=window)  # type: ignore[arg-type]
+
+
+@router.get(
+    "/api/costs/trend",
+    response_model=ModelCostTrend,
+    summary="LLM Cost Trend",
+)
+async def get_cost_trend(
+    pool: Annotated[object, Depends(get_cost_api_pool)],
+    bucket: Annotated[
+        TrendBucket,
+        Query(description="Event-time bucket size for raw call metrics."),
+    ] = "day",
+    days: Annotated[
+        int,
+        Query(ge=1, le=365, description="Number of trailing days to include."),
+    ] = 30,
+) -> ModelCostTrend:
+    return await fetch_cost_trend(pool, bucket=bucket, days=days)  # type: ignore[arg-type]
+
+
+@router.get(
+    "/api/costs/by-model",
+    response_model=ModelCostBreakdown,
+    summary="LLM Cost By Model",
+)
+async def get_cost_by_model(
+    pool: Annotated[object, Depends(get_cost_api_pool)],
+    window: Annotated[
+        AggregationWindow,
+        Query(description="Rolling aggregate window to read."),
+    ] = "24h",
+) -> ModelCostBreakdown:
+    return await fetch_cost_by_model(pool, window=window)  # type: ignore[arg-type]
+
+
+@router.get(
+    "/api/costs/by-repo",
+    response_model=ModelCostBreakdown,
+    summary="LLM Cost By Repo",
+)
+async def get_cost_by_repo(
+    pool: Annotated[object, Depends(get_cost_api_pool)],
+    window: Annotated[
+        AggregationWindow,
+        Query(description="Rolling aggregate window to read."),
+    ] = "24h",
+) -> ModelCostBreakdown:
+    return await fetch_cost_by_repo(pool, window=window)  # type: ignore[arg-type]
+
+
+@router.get(
+    "/api/costs/token-usage",
+    response_model=ModelTokenUsage,
+    summary="LLM Token Usage",
+)
+async def get_token_usage(
+    pool: Annotated[object, Depends(get_cost_api_pool)],
+    window: Annotated[
+        AggregationWindow,
+        Query(description="Rolling aggregate window to read."),
+    ] = "24h",
+) -> ModelTokenUsage:
+    return await fetch_token_usage(pool, window=window)  # type: ignore[arg-type]
+
+
+@router.get(
+    "/api/savings/summary",
+    response_model=ModelSavingsSummary,
+    summary="Savings Summary",
+)
+async def get_savings_summary(
+    pool: Annotated[object, Depends(get_cost_api_pool)],
+    window: Annotated[
+        AggregationWindow,
+        Query(description="Trailing savings window to read."),
+    ] = "24h",
+) -> ModelSavingsSummary:
+    return await fetch_savings_summary(pool, window=window)  # type: ignore[arg-type]
