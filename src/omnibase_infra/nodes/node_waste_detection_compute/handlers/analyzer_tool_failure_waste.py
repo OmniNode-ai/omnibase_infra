@@ -14,6 +14,7 @@ from omnibase_infra.nodes.node_waste_detection_compute.handlers.analyzer_utils i
 from omnibase_infra.nodes.node_waste_detection_compute.models import (
     ModelWasteCall,
     ModelWasteFinding,
+    WasteSeverity,
 )
 
 RULE_ID = "tool_failure_waste"
@@ -42,7 +43,9 @@ def analyze_tool_failure_waste(
         ),
         "error_types": sorted({call.error_type for call in failed if call.error_type}),
     }
-    severity = "HIGH" if waste_cost_usd >= 0.1 or waste_tokens >= 10000 else "MEDIUM"
+    severity: WasteSeverity = (
+        "HIGH" if waste_cost_usd >= 0.1 or waste_tokens >= 10000 else "MEDIUM"
+    )
     return (
         build_finding(
             session_id=failed[0].session_id,

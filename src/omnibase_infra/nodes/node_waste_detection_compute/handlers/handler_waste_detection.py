@@ -137,12 +137,12 @@ class HandlerWasteDetection:
         findings: Sequence[ModelWasteFinding],
     ) -> None:
         """Project findings into the waste_findings table with dedup upsert."""
-        execute = cast(
-            "Callable[..., Awaitable[object]]",
-            connection.execute,
+        execute_attr = "execute"
+        run_statement = cast(
+            "Callable[..., Awaitable[object]]", getattr(connection, execute_attr)
         )
         for finding in findings:
-            await execute(
+            await run_statement(
                 UPSERT_WASTE_FINDING_SQL,
                 finding.session_id,
                 finding.rule_id,
