@@ -54,6 +54,35 @@ def test_valid_topic_passes() -> None:
 
 
 @pytest.mark.unit
+def test_valid_projection_snapshot_topic_passes() -> None:
+    """Projection snapshot topics may use a dotted snapshot name."""
+    result = lint_topic("onex.snapshot.projection.cost.token_usage.v1")
+    assert result.violations == []
+    assert result.is_valid is True
+
+
+@pytest.mark.unit
+def test_scan_contracts_accepts_projection_snapshot_publish_topic(
+    tmp_path: Path,
+) -> None:
+    """Contract scanning accepts projection snapshot publish topics."""
+    contracts_dir = tmp_path / "nodes"
+    contracts_dir.mkdir()
+    node_dir = contracts_dir / "snapshot-node"
+    node_dir.mkdir()
+    contract = {
+        "name": "snapshot-node",
+        "event_bus": {
+            "publish_topics": ["onex.snapshot.projection.cost.by_repo.v1"],
+        },
+    }
+    (node_dir / "contract.yaml").write_text(yaml.dump(contract), encoding="utf-8")
+
+    violations = scan_contracts(contracts_dir)
+    assert violations == []
+
+
+@pytest.mark.unit
 def test_invalid_kind_caught() -> None:
     """A topic with an invalid kind segment returns a violation."""
     result = lint_topic("onex.badkind.platform.foo.v1")
