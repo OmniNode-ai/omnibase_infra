@@ -1,0 +1,112 @@
+# docker-compose.stability-test.yml
+# OMN-10281: non-production stability-test runtime lane overlay.
+#
+# This file is a prep surface only. It defines isolated names and runtime
+# environment for a stability-test lane, but it does not install launch hooks,
+# cron jobs, systemd units, or deploy automation.
+#
+# Intended validation command:
+#   docker compose -f docker/docker-compose.infra.yml \
+#     -f docker/docker-compose.stability-test.yml \
+#     config
+#
+# Starting this lane is intentionally outside this PR's proof scope and requires
+# explicit operator approval.
+name: omnibase-infra-stability-test
+services:
+  postgres:
+    container_name: omnibase-infra-stability-test-postgres
+    ports:
+      - "${STABILITY_TEST_POSTGRES_EXTERNAL_PORT:-15436}:5432"
+  redpanda:
+    container_name: omnibase-infra-stability-test-redpanda
+    ports:
+      - "${STABILITY_TEST_REDPANDA_EXTERNAL_PORT:-39092}:9092"
+      - "${STABILITY_TEST_REDPANDA_ADMIN_PORT:-29644}:9644"
+  valkey:
+    container_name: omnibase-infra-stability-test-valkey
+    ports:
+      - "${STABILITY_TEST_VALKEY_EXTERNAL_PORT:-26379}:6379"
+  migration-gate:
+    container_name: omnibase-infra-stability-test-migration-gate
+    restart: "no"
+  omninode-runtime:
+    image: runtime:stability-test-workspace
+    container_name: omninode-stability-test-runtime
+    restart: "no"
+    environment:
+      BUILD_SOURCE: workspace
+      ONEX_ENVIRONMENT: stability-test
+      ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
+      ONEX_GROUP_ID: onex-stability-test-runtime-main
+      KAFKA_INSTANCE_ID: stability-test-main
+      OTEL_SERVICE_NAME: omninode-stability-test-runtime-main
+    ports:
+      - "${STABILITY_TEST_RUNTIME_MAIN_PORT:-18085}:8085"
+    volumes:
+      - runtime_logs:/app/logs
+      - runtime_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+    labels:
+      - "com.omninode.lane=stability-test"
+      - "com.omninode.ticket=OMN-10281"
+  runtime-effects:
+    image: runtime:stability-test-workspace
+    container_name: omninode-stability-test-runtime-effects
+    restart: "no"
+    environment:
+      BUILD_SOURCE: workspace
+      ONEX_ENVIRONMENT: stability-test
+      ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
+      ONEX_GROUP_ID: onex-stability-test-runtime-effects
+      KAFKA_INSTANCE_ID: stability-test-effects
+      OTEL_SERVICE_NAME: omninode-stability-test-runtime-effects
+    ports:
+      - "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:-18086}:8085"
+    volumes:
+      - effects_logs:/app/logs
+      - effects_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+    labels:
+      - "com.omninode.lane=stability-test"
+      - "com.omninode.ticket=OMN-10281"
+  runtime-worker:
+    image: runtime:stability-test-workspace
+    container_name: omninode-stability-test-runtime-worker
+    restart: "no"
+    environment:
+      BUILD_SOURCE: workspace
+      ONEX_ENVIRONMENT: stability-test
+      ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
+      ONEX_GROUP_ID: onex-stability-test-runtime-workers
+      KAFKA_INSTANCE_ID: stability-test-worker
+      OTEL_SERVICE_NAME: omninode-stability-test-runtime-worker
+    volumes:
+      - worker_logs:/app/logs
+      - stability_test_worker_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+    labels:
+      - "com.omninode.lane=stability-test"
+      - "com.omninode.ticket=OMN-10281"
+volumes:
+  postgres_data:
+    name: omnibase-infra-stability-test-postgres-data
+  redpanda_data:
+    name: omnibase-infra-stability-test-redpanda-data
+  valkey_data:
+    name: omnibase-infra-stability-test-valkey-data
+  runtime_data:
+    name: omninode-stability-test-runtime-data
+  runtime_logs:
+    name: omninode-stability-test-runtime-logs
+  effects_logs:
+    name: omninode-stability-test-effects-logs
+  effects_data:
+    name: omninode-stability-test-effects-data
+  worker_logs:
+    name: omninode-stability-test-worker-logs
+  stability_test_worker_data:
+    name: omninode-stability-test-worker-data
