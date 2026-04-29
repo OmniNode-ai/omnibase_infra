@@ -1,6 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-# no-migration: docstring-only AI-slop cleanup
 """PostgreSQL Writer for LLM cost aggregation.
 
 A PostgreSQL writer for persisting LLM cost aggregation
@@ -300,10 +299,11 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                                         estimated_cost_usd, latency_ms,
                                         usage_source, usage_is_estimated,
                                         usage_raw, input_hash,
-                                        code_version, contract_version, source
+                                        code_version, contract_version,
+                                        repo_name, machine_id, source
                                     ) VALUES (
                                         $1, $2, $3, $4, $5, $6, $7, $8, $9,
-                                        $10, $11, $12, $13, $14, $15, $16
+                                        $10, $11, $12, $13, $14, $15, $16, $17, $18
                                     )
                                     ON CONFLICT DO NOTHING
                                     """,
@@ -324,6 +324,8 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                                     ),
                                     str(event.get("code_version", ""))[:64] or None,
                                     str(event.get("contract_version", ""))[:64] or None,
+                                    _safe_varchar(event.get("repo_name"), 255),
+                                    _safe_varchar(event.get("machine_id"), 255),
                                     str(event.get("reporting_source", ""))[:255]
                                     or None,
                                 )
@@ -734,15 +736,15 @@ def _build_aggregation_rows(
                 f"{_KEY_PREFIX_MODEL}:{_sanitize_dimension_value(str(model_id))}"
             )
 
-        # Repo dimension (from extensions if available)
+        # Repo dimension (top-level field for new events, extensions fallback for old events)
+        repo = event.get("repo_name")
         extensions = event.get("extensions")
-        if isinstance(extensions, dict):
+        if not repo and isinstance(extensions, dict):
             repo = extensions.get("repo")
-            if repo:
-                keys.append(
-                    f"{_KEY_PREFIX_REPO}:{_sanitize_dimension_value(str(repo))}"
-                )
+        if repo:
+            keys.append(f"{_KEY_PREFIX_REPO}:{_sanitize_dimension_value(str(repo))}")
 
+        if isinstance(extensions, dict):
             # Pattern dimension
             pattern_id = extensions.get("pattern_id")
             if pattern_id:
@@ -991,6 +993,14 @@ def _postgres_inserted_row_count(status: object) -> int:
         return 1
 
     return int(match.group(1))
+
+
+def _safe_varchar(value: object, max_length: int) -> str | None:
+    """Safely convert a value to a bounded VARCHAR parameter."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text[:max_length] or None
 
 
 def _resolve_usage_source(event: dict[str, object]) -> str:
