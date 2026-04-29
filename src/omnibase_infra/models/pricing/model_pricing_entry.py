@@ -27,10 +27,13 @@ from __future__ import annotations
 
 import datetime
 import re
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+PricingConfidence = Literal["MEASURED", "LOW_CONFIDENCE"]
 
 
 class ModelPricingEntry(BaseModel):
@@ -80,6 +83,25 @@ class ModelPricingEntry(BaseModel):
         max_length=512,
         description="Optional human-readable note about this model's pricing.",
     )
+    confidence: PricingConfidence = Field(
+        default="LOW_CONFIDENCE",
+        description="Confidence level for the token pricing entry.",
+    )
+    source: str = Field(
+        default="FALLBACK_PROVIDER_DOCUMENTATION",
+        min_length=1,
+        max_length=128,
+        description="Pricing source; fallback sources are not authoritative.",
+    )
+    evidence: dict[str, object] = Field(
+        default_factory=dict,
+        description="Structured evidence for the pricing source.",
+    )
+    sample_count: int = Field(
+        default=0,
+        ge=0,
+        description="Number of API-reported rows used to compute the rate.",
+    )
 
     @field_validator("effective_date")
     @classmethod
@@ -106,4 +128,4 @@ class ModelPricingEntry(BaseModel):
         return v
 
 
-__all__: list[str] = ["ModelPricingEntry"]
+__all__: list[str] = ["ModelPricingEntry", "PricingConfidence"]

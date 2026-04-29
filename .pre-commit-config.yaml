@@ -92,6 +92,13 @@ repos:
         always_run: true
         pass_filenames: false
         stages: [pre-commit]
+      - id: lint-pricing-manifest
+        name: Lint pricing manifest seed keys
+        entry: uv run --frozen python scripts/lint_pricing_manifest.py
+        language: system
+        files: ^src/omnibase_infra/configs/pricing_manifest\.yaml$
+        pass_filenames: true
+        stages: [pre-commit]
   # ONEX Validation Hooks (infrastructure-specific)
   - repo: local
     hooks:
