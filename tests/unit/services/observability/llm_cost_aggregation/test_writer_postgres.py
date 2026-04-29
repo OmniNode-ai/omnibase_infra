@@ -31,6 +31,7 @@ import pytest
 from omnibase_infra.services.observability.llm_cost_aggregation.writer_postgres import (
     WriterLlmCostAggregationPostgres,
     _build_aggregation_rows,
+    _derive_stable_dedup_key,
     _postgres_inserted_row_count,
     _resolve_usage_source,
     _safe_decimal,
@@ -469,6 +470,17 @@ class TestSafeConversions:
         assert _postgres_inserted_row_count("INSERT 0 1") == 1
         assert _postgres_inserted_row_count("INSERT 0 0") == 0
 
+    @pytest.mark.unit
+    def test_dedup_key_matches_llm_call_metric_idempotency_contract(self) -> None:
+        event = {
+            "model_id": "gpt-4o",
+            "session_id": "session-1",
+            "run_id": None,
+            "input_hash": "sha256-same-input",
+        }
+
+        assert _derive_stable_dedup_key(event) == "gpt-4o|session-1||sha256-same-input"
+
 
 # =============================================================================
 # Tests: Writer Methods
@@ -511,6 +523,37 @@ class TestWriterCallMetrics:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
+    async def test_write_call_metrics_preserves_same_hash_for_different_identity(
+        self,
+        writer: WriterLlmCostAggregationPostgres,
+        mock_pool: MagicMock,
+        sample_event: dict[str, object],
+    ) -> None:
+        """Same input_hash can be valid for different model/session/run identities."""
+        event1 = {
+            **sample_event,
+            "model_id": "gpt-4o",
+            "session_id": "session-a",
+            "run_id": None,
+            "input_hash": "sha256-same-prompt",
+        }
+        event2 = {
+            **sample_event,
+            "model_id": "gpt-4o-mini",
+            "session_id": "session-b",
+            "run_id": "run-2",
+            "input_hash": "sha256-same-prompt",
+        }
+
+        result = await writer.write_call_metrics([event1, event2])
+
+        assert result == 2
+        conn = mock_pool.acquire.return_value.__aenter__.return_value
+        # SET LOCAL + 2 INSERT calls
+        assert conn.execute.call_count == 3
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
     async def test_write_call_metrics_handles_empty_after_dedup(
         self,
         writer: WriterLlmCostAggregationPostgres,
@@ -520,7 +563,7 @@ class TestWriterCallMetrics:
         event = {**sample_event, "input_hash": "sha256-already-seen"}
 
         # Pre-populate dedup cache (mark as already persisted)
-        writer._mark_seen("sha256-already-seen")
+        writer._mark_seen(_derive_stable_dedup_key(event))
 
         result = await writer.write_call_metrics([event])
         assert result == 0

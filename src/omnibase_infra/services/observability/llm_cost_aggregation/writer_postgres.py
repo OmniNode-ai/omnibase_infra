@@ -586,13 +586,14 @@ def _truncate_input_hash(value: str) -> str | None:
 def _derive_stable_dedup_key(event: dict[str, object]) -> str:
     """Derive a stable deduplication key from event fields.
 
-    When ``input_hash`` is present and at least 8 characters long, it is used
-    directly. Shorter values are considered unreliable (e.g., truncated or
+    When ``input_hash`` is present and at least 8 characters long, it is paired
+    with the same model/session/run identity used by migration 071's unique
+    index. Shorter values are considered unreliable (e.g., truncated or
     placeholder) and fall through to the composite hash path. Otherwise, a
     composite key is built from ``correlation_id``, ``model_id``, and
-    ``created_at`` (falling back to ``session_id``) and hashed with SHA-256
-    to produce a deterministic, replay-safe dedup key. This ensures events
-    without ``input_hash`` can still be deduplicated on consumer replay.
+    ``created_at`` (falling back to ``session_id``) and hashed with SHA-256 to
+    produce a deterministic, replay-safe dedup key. This ensures events without
+    ``input_hash`` can still be deduplicated on consumer replay.
 
     Note: If multiple events share the same (correlation_id, model_id) pair
     and lack created_at/session_id, they will produce identical dedup keys.
@@ -606,7 +607,14 @@ def _derive_stable_dedup_key(event: dict[str, object]) -> str:
     """
     input_hash = str(event.get("input_hash", "")).strip()
     if len(input_hash) >= 8:
-        return input_hash
+        return "|".join(
+            (
+                str(event.get("model_id", "")),
+                str(event.get("session_id") or ""),
+                str(event.get("run_id") or ""),
+                input_hash,
+            )
+        )
 
     if input_hash:
         logger.debug(
