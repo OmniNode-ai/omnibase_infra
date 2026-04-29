@@ -47,13 +47,26 @@ Render the config only:
 docker compose \
   -f docker/docker-compose.infra.yml \
   -f docker/docker-compose.stability-test.yml \
+  --profile runtime \
   config
+```
+
+List the rendered services and confirm the stability-test runtime services are
+present:
+
+```bash
+docker compose \
+  -f docker/docker-compose.infra.yml \
+  -f docker/docker-compose.stability-test.yml \
+  --profile runtime \
+  config --services
 ```
 
 Run static validation:
 
 ```bash
 uv run pytest tests/unit/infra/test_stability_test_runtime_lane.py -q
+uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render.py -q
 ```
 
 ## Explicit Non-Goals For This PR
