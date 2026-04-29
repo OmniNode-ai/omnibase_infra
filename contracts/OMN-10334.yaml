@@ -1,0 +1,34 @@
+# OMN-10334 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for the cost API route PR.
+schema_version: "1.0.0"
+ticket_id: "OMN-10334"
+title: "Add cost API routes"
+summary: "Expose cost summary, trend, token usage, and breakdown routes backed by LLM metric aggregate tables."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Focused route, migration, writer, and protocol ownership proofs pass locally."
+    command: "uv run pytest tests/integration/api/test_cost_api_routes.py tests/unit/db/test_migration_072.py tests/unit/services/observability/llm_cost_aggregation/test_writer_postgres.py tests/unit/contracts/test_protocol_ownership.py -q"
+  - kind: "manual"
+    description: "Post-merge runtime validation is required before claiming live cost API route availability."
+    command: "deploy: curl the registry API cost routes against the target runtime after rollout"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-001"
+    description: "Focused cost API route and protocol ownership test suite passes locally."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/api/test_cost_api_routes.py tests/unit/db/test_migration_072.py tests/unit/services/observability/llm_cost_aggregation/test_writer_postgres.py tests/unit/contracts/test_protocol_ownership.py -q"
+  - id: "dod-deploy"
+    description: "deploy gate evidence: pre-merge live deploy is not claimed; runtime validation remains post-merge."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "deploy: curl the registry API cost routes against the target runtime after rollout"

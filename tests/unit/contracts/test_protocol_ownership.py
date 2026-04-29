@@ -83,6 +83,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolTopicCatalogService": "services/protocol_topic_catalog_service.py",
     "ProtocolManifestPersistence": "services/corpus_capture.py",
     "ProtocolSessionAggregator": "services/session/protocol_session_aggregator.py",
+    "RowLookup": "services/cost_api/handlers.py",  # [DI] OMN-10334 narrow row adapter for asyncpg.Record/test rows
     # [DI] Publisher callable boundary for HandlerBaselinesBatchCompute (OMN-3039)
     "ProtocolPublisher": "nodes/node_baselines_batch_compute/handlers/handler_baselines_batch_compute.py",
     # === [MIXIN] Mixin host contracts ===
