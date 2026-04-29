@@ -31,7 +31,7 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, cast
 
 from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
     ProtocolEventBusSubscriber,
@@ -47,6 +47,7 @@ from omnibase_infra.runtime.auto_wiring.report import (
     ModelContractWiringResult,
     ModelDuplicateTopicOwnership,
 )
+from omnibase_spi.protocols.runtime import ProtocolHandleable
 
 if TYPE_CHECKING:
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
@@ -84,16 +85,6 @@ DispatcherFunc = Callable[
     ["ModelEventEnvelope[object]"],
     Awaitable["ModelDispatchResult | None"],
 ]
-
-
-@runtime_checkable
-class ProtocolHandleable(Protocol):
-    """Protocol for objects with a handle() method (auto-wired handlers)."""
-
-    async def handle(
-        self,
-        envelope: ModelEventEnvelope[object],
-    ) -> ModelDispatchResult | None: ...
 
 
 @dataclass
@@ -160,13 +151,20 @@ def _make_dispatch_callback(
     The callback calls ``handler_instance.handle(envelope)`` and returns the
     result. This matches the ``DispatcherFunc`` signature expected by
     ``MessageDispatchEngine.register_dispatcher``.
+
+    Note: ``ProtocolHandleable`` (from omnibase_spi) types ``handle`` as
+    ``(envelope: object) -> object | None`` to stay free of a dependency on
+    core/infra envelope + dispatch result models. Auto-wired handlers in this
+    engine always return ``ModelDispatchResult | None``; the cast below narrows
+    the structural return to the DispatcherFunc contract.
     """
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
     ) -> ModelDispatchResult | None:
         handle_method = handler_instance.handle
-        return await handle_method(envelope)
+        result = await handle_method(envelope)
+        return cast("ModelDispatchResult | None", result)
 
     return _callback
 

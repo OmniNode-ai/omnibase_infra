@@ -119,7 +119,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolRuntimeScheduler": "runtime/protocols/protocol_runtime_scheduler.py",
     "ProtocolSecretResolver": "runtime/config_discovery/models/protocol_secret_resolver.py",
     "ProtocolSecretResolverMetrics": "runtime/secret_resolver.py",
-    "ProtocolHandleable": "runtime/auto_wiring/handler_wiring.py",  # [RUNTIME] OMN-7656 auto-wiring dispatch
+    # ProtocolHandleable relocated to omnibase_spi.protocols.runtime in OMN-9197
     # === [OBS] Observability protocols ===
     "ProtocolEmissionCountSource": "observability/wiring_health/protocol_emission_count_source.py",
     "ProtocolConsumptionCountSource": "observability/wiring_health/protocol_consumption_count_source.py",
