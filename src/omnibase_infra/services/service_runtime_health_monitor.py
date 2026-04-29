@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import time
 from datetime import UTC, datetime
@@ -128,10 +129,17 @@ class ServiceRuntimeHealthMonitor:
             check_interval_seconds: How often to run a full check.
             topic_registry: Optional topic registry. Defaults to
                 ``ServiceTopicRegistry.from_defaults()``.
+            boot_grace_seconds: Seconds to suppress event emission after the
+                monitor starts, protecting boot from not-yet-provisioned topics.
         """
         if check_interval_seconds <= 0:
             raise ValueError(
                 f"check_interval_seconds must be positive, got {check_interval_seconds}"
+            )
+        if not math.isfinite(boot_grace_seconds) or boot_grace_seconds < 0:
+            raise ValueError(
+                "boot_grace_seconds must be finite and non-negative, "
+                f"got {boot_grace_seconds}"
             )
 
         if topic_registry is None:
@@ -152,9 +160,8 @@ class ServiceRuntimeHealthMonitor:
         self._task: asyncio.Task[None] | None = None
         self._running = False
         self._boot_grace_seconds = boot_grace_seconds
-        self._started_at: float = (
-            time.monotonic()
-        )  # grace window starts at construction
+        self._started_at: float | None = None
+        self._boot_grace_complete_logged = boot_grace_seconds == 0
 
     async def start(self) -> None:
         """Start the background health check loop. Idempotent.
@@ -165,6 +172,13 @@ class ServiceRuntimeHealthMonitor:
         if self._running:
             return
         self._running = True
+        self._started_at = time.monotonic()
+        self._boot_grace_complete_logged = self._boot_grace_seconds == 0
+        if self._boot_grace_seconds > 0:
+            logger.info(
+                "ServiceRuntimeHealthMonitor boot grace active for %.1fs",
+                self._boot_grace_seconds,
+            )
         # Run the first check immediately so callers get an initial health signal.
         try:
             await self.run_once()
@@ -492,6 +506,8 @@ class ServiceRuntimeHealthMonitor:
 
         # Suppress emit during boot grace window — a not-yet-provisioned health-check
         # topic must not trip the circuit breaker on first boot. (OMN-9552)
+        if self._started_at is None:
+            self._started_at = time.monotonic()
         elapsed = time.monotonic() - self._started_at
         if elapsed < self._boot_grace_seconds:
             logger.debug(
@@ -501,6 +517,9 @@ class ServiceRuntimeHealthMonitor:
                 self._boot_grace_seconds,
             )
             return
+        if not self._boot_grace_complete_logged:
+            logger.info("ServiceRuntimeHealthMonitor boot grace complete")
+            self._boot_grace_complete_logged = True
 
         envelope: ModelEventEnvelope[ModelRuntimeHealthCheckEvent] = ModelEventEnvelope(
             payload=event,

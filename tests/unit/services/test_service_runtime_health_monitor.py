@@ -393,6 +393,33 @@ class TestBootGracePeriod:
         monitor = ServiceRuntimeHealthMonitor(boot_grace_seconds=0.0)
         assert monitor._boot_grace_seconds == 0.0
 
+    def test_negative_boot_grace_rejected(self):
+        with pytest.raises(ValueError, match="boot_grace_seconds"):
+            ServiceRuntimeHealthMonitor(boot_grace_seconds=-1.0)
+
+    def test_boot_grace_not_started_at_construction(self):
+        monitor = ServiceRuntimeHealthMonitor(boot_grace_seconds=120.0)
+        assert monitor._started_at is None
+
+    @pytest.mark.asyncio
+    async def test_start_anchors_boot_grace_timer(self):
+        mock_bus = AsyncMock()
+        monitor = ServiceRuntimeHealthMonitor(
+            event_bus=mock_bus,
+            bootstrap_servers="",
+            boot_grace_seconds=9999.0,
+        )
+
+        with patch(
+            "omnibase_infra.services.service_runtime_health_monitor.time.monotonic",
+            return_value=1234.5,
+        ):
+            await monitor.start()
+        await monitor.stop()
+
+        assert monitor._started_at == 1234.5
+        mock_bus.publish_envelope.assert_not_called()
+
     @pytest.mark.asyncio
     async def test_emit_suppressed_during_grace(self):
         """_emit() must not call publish_envelope while inside the grace window."""
@@ -415,7 +442,7 @@ class TestBootGracePeriod:
         mock_bus = AsyncMock()
         monitor = ServiceRuntimeHealthMonitor(
             event_bus=mock_bus,
-            boot_grace_seconds=0.0,  # grace already expired at construction
+            boot_grace_seconds=0.0,  # grace already expired at first emit
         )
         ev = ModelRuntimeHealthCheckEvent(
             correlation_id=uuid4(),

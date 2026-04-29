@@ -1227,9 +1227,8 @@ class EventBusKafka(
                 last_exception = e
                 logger.warning(
                     "Topic not found on broker — skipping circuit failure record "
-                    "(attempt %d/%d): %s",
+                    "(attempt %d, no retry on configuration errors): %s",
                     attempt + 1,
-                    self._max_retry_attempts + 1,
                     topic,
                     extra={
                         "topic": topic,

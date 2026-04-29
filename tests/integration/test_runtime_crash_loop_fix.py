@@ -95,7 +95,7 @@ class TestBootGraceSuppressesEmit:
         monitor = ServiceRuntimeHealthMonitor(
             event_bus=bus,
             bootstrap_servers="",
-            boot_grace_seconds=0.0,  # already expired at construction
+            boot_grace_seconds=0.0,  # already expired at first emit
         )
         # Backdate so elapsed clearly exceeds 0.0 (avoids monotonic-clock races).
         monitor._started_at = time.monotonic() - 1.0
