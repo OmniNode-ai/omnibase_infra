@@ -63,8 +63,10 @@ class ModelKafkaProducerConfig(BaseModel):
         # A missing env var means the overlay was not applied — fail loudly.
         bootstrap = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
         try:
-            timeout_ms = os.getenv("KAFKA_REQUEST_TIMEOUT_MS", "10000")
-            acks_raw = os.getenv("KAFKA_ACKS", "all")
+            timeout_ms = os.getenv(
+                "KAFKA_REQUEST_TIMEOUT_MS", "10000"
+            )  # kafka-fallback-ok
+            acks_raw = os.getenv("KAFKA_ACKS", "all")  # kafka-fallback-ok
             max_request_size_raw = os.getenv(
                 "KAFKA_MAX_REQUEST_SIZE", str(4 * 1024 * 1024)
             )

@@ -293,3 +293,12 @@ class LocalStubProjectTracker:
             )[:limit]
             if isinstance(v, dict)
         ]
+
+    async def list_teams(self) -> list[dict[str, object]]:
+        return []
+
+    async def list_issue_labels(self, team: str) -> list[dict[str, object]]:
+        return []
+
+    async def list_issue_statuses(self, team: str) -> list[dict[str, object]]:
+        return []

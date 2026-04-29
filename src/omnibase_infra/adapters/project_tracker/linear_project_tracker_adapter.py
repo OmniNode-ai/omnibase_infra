@@ -44,7 +44,7 @@ def _parse_dt(value: object) -> datetime:
     return datetime.now(UTC)
 
 
-def _issue_from_mcp(d: dict[str, object]) -> ModelStubIssue:
+def _issue_from_mcp(d: dict[str, object]) -> ModelStubIssue:  # stub-ok
     """Translate a Linear MCP issue dict into ModelStubIssue wire shape."""
     state_raw = d.get("state")
     if isinstance(state_raw, dict):
@@ -152,7 +152,7 @@ def _project_from_mcp(d: dict[str, object]) -> ModelStubProject:
     )
 
 
-class LinearProjectTrackerAdapter:
+class AdapterProjectTrackerLinear:
     """MCP-backed ProtocolProjectTracker implementation for Linear.
 
     Constructor accepts optional callables for each MCP operation. When a
@@ -176,6 +176,9 @@ class LinearProjectTrackerAdapter:
         mcp_add_comment: Callable[..., dict[str, object]] | None = None,
         mcp_get_project: Callable[..., dict[str, object]] | None = None,
         mcp_list_projects: Callable[..., list[dict[str, object]]] | None = None,
+        mcp_list_teams: Callable[..., list[dict[str, object]]] | None = None,
+        mcp_list_issue_labels: Callable[..., list[dict[str, object]]] | None = None,
+        mcp_list_issue_statuses: Callable[..., list[dict[str, object]]] | None = None,
     ) -> None:
         self._mcp_get_issue = mcp_get_issue
         self._mcp_list_issues = mcp_list_issues
@@ -185,6 +188,9 @@ class LinearProjectTrackerAdapter:
         self._mcp_add_comment = mcp_add_comment
         self._mcp_get_project = mcp_get_project
         self._mcp_list_projects = mcp_list_projects
+        self._mcp_list_teams = mcp_list_teams
+        self._mcp_list_issue_labels = mcp_list_issue_labels
+        self._mcp_list_issue_statuses = mcp_list_issue_statuses
         self._connected = False
 
     # -- lifecycle --
@@ -212,7 +218,7 @@ class LinearProjectTrackerAdapter:
     ) -> Callable[..., object]:
         if callable_ is None:
             raise NotImplementedError(
-                f"LinearProjectTrackerAdapter: '{name}' callable not injected"
+                f"AdapterProjectTrackerLinear: '{name}' callable not injected"
             )
         return callable_
 
@@ -297,3 +303,24 @@ class LinearProjectTrackerAdapter:
         if not isinstance(result, list):
             return []
         return [_project_from_mcp(d) for d in result if isinstance(d, dict)]
+
+    async def list_teams(self) -> list[dict[str, object]]:
+        fn = self._require(self._mcp_list_teams, "mcp_list_teams")
+        result = fn()
+        if not isinstance(result, list):
+            return []
+        return [d for d in result if isinstance(d, dict)]
+
+    async def list_issue_labels(self, team: str) -> list[dict[str, object]]:
+        fn = self._require(self._mcp_list_issue_labels, "mcp_list_issue_labels")
+        result = fn(teamId=team)
+        if not isinstance(result, list):
+            return []
+        return [d for d in result if isinstance(d, dict)]
+
+    async def list_issue_statuses(self, team: str) -> list[dict[str, object]]:
+        fn = self._require(self._mcp_list_issue_statuses, "mcp_list_issue_statuses")
+        result = fn(teamId=team)
+        if not isinstance(result, list):
+            return []
+        return [d for d in result if isinstance(d, dict)]
