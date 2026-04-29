@@ -222,6 +222,39 @@ class TestAdapterLlmProviderOpenaiTranslation:
                 model_name="",
             )
 
+    def test_translate_request_propagates_explicit_timeout(self) -> None:
+        """Caller-supplied timeout_seconds reaches the infra request.
+
+        Regression guard for OMN-9869: prior behavior dropped the contract
+        timeout and inferred a 30s default at the inference layer, causing
+        long-running local-model calls to fail before the node-contract
+        timeout window.
+        """
+        adapter = AdapterLlmProviderOpenai(
+            base_url="http://localhost:8000",
+            default_model="qwen2.5-coder-14b",
+        )
+        spi_request = ModelLlmAdapterRequest(
+            prompt="Long-running prompt",
+            model_name="qwen2.5-coder-14b",
+            timeout_seconds=240.0,
+        )
+        infra_request = adapter._translate_request(spi_request)
+        assert infra_request.timeout_seconds == 240.0
+
+    def test_translate_request_uses_default_timeout(self) -> None:
+        """Omitting timeout_seconds yields the model default on the infra request."""
+        adapter = AdapterLlmProviderOpenai(
+            base_url="http://localhost:8000",
+            default_model="qwen2.5-coder-14b",
+        )
+        spi_request = ModelLlmAdapterRequest(
+            prompt="Hello",
+            model_name="qwen2.5-coder-14b",
+        )
+        infra_request = adapter._translate_request(spi_request)
+        assert infra_request.timeout_seconds == 30.0
+
 
 class TestAdapterLlmProviderOpenaiModelDiscovery:
     """Tests for model discovery behavior."""

@@ -104,3 +104,55 @@ class TestModelLlmAdapterRequest:
         assert isinstance(req.prompt, str)
         assert isinstance(req.model_name, str)
         assert isinstance(req.parameters, dict)
+
+    def test_default_timeout_seconds(self) -> None:
+        """timeout_seconds defaults to 30.0 when not provided.
+
+        Mirrors ModelLlmInferenceRequest.timeout_seconds default so that
+        the adapter does not silently shorten or lengthen the contract
+        timeout for callers that omit the field.
+        """
+        req = ModelLlmAdapterRequest(prompt="Hello", model_name="test")
+        assert req.timeout_seconds == 30.0
+
+    def test_explicit_timeout_seconds_preserved(self) -> None:
+        """Caller-provided timeout_seconds is preserved verbatim."""
+        req = ModelLlmAdapterRequest(
+            prompt="Hello",
+            model_name="test",
+            timeout_seconds=120.0,
+        )
+        assert req.timeout_seconds == 120.0
+
+    def test_timeout_seconds_lower_bound(self) -> None:
+        """timeout_seconds below 1.0 is rejected."""
+        with pytest.raises(ValidationError):
+            ModelLlmAdapterRequest(
+                prompt="Hello",
+                model_name="test",
+                timeout_seconds=0.5,
+            )
+
+    def test_timeout_seconds_upper_bound(self) -> None:
+        """timeout_seconds above 600.0 is rejected."""
+        with pytest.raises(ValidationError):
+            ModelLlmAdapterRequest(
+                prompt="Hello",
+                model_name="test",
+                timeout_seconds=600.1,
+            )
+
+    def test_timeout_seconds_boundary_values_accepted(self) -> None:
+        """Exact bounds 1.0 and 600.0 are accepted."""
+        req_min = ModelLlmAdapterRequest(
+            prompt="Hello",
+            model_name="test",
+            timeout_seconds=1.0,
+        )
+        req_max = ModelLlmAdapterRequest(
+            prompt="Hello",
+            model_name="test",
+            timeout_seconds=600.0,
+        )
+        assert req_min.timeout_seconds == 1.0
+        assert req_max.timeout_seconds == 600.0

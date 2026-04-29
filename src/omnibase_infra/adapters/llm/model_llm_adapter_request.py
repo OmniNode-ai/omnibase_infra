@@ -32,6 +32,11 @@ class ModelLlmAdapterRequest(BaseModel):
         parameters: Generation parameters as a JSON-compatible dictionary.
         max_tokens: Maximum tokens to generate, or None for default.
         temperature: Sampling temperature, or None for default.
+        timeout_seconds: HTTP request timeout in seconds applied to the
+            downstream inference call. Mirrors the bounds enforced on
+            ``ModelLlmInferenceRequest.timeout_seconds`` (1.0-600.0
+            inclusive, default 30.0). Owned by the calling node contract /
+            endpoint config -- never read from environment variables here.
 
     Warning:
         Dict fields (``parameters``) are shallowly mutable despite
@@ -76,6 +81,16 @@ class ModelLlmAdapterRequest(BaseModel):
         ge=0.0,
         le=2.0,
         description="Temperature for generation.",
+    )
+    timeout_seconds: float = Field(
+        default=30.0,
+        ge=1.0,
+        le=600.0,
+        description=(
+            "HTTP request timeout in seconds applied to the downstream "
+            "inference call. Bounds match ModelLlmInferenceRequest "
+            "(1.0-600.0). Contract-owned; do not source from env vars."
+        ),
     )
 
 
