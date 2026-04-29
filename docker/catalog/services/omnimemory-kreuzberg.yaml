@@ -1,0 +1,27 @@
+name: omnimemory-kreuzberg
+description: Kreuzberg document parser for OmniMemory text extraction
+image: ghcr.io/kreuzberg-dev/kreuzberg:core
+layer: infrastructure
+container_name: omnimemory-kreuzberg-parser
+required_env: []
+hardcoded_env: {}
+operational_defaults:
+  KREUZBERG_PORT: "8090"
+ports:
+  external: 8090
+  internal: 8000
+healthcheck:
+  test: curl -f http://localhost:8000/health
+  interval_s: 30
+  timeout_s: 10
+  retries: 3
+  start_period_s: 30
+volumes: []
+depends_on: []
+restart: unless-stopped
+resources: null
+extra_networks:
+  - omnimemory-network
+labels:
+  com.omninode.service: omnimemory-kreuzberg
+  com.omninode.layer: infrastructure

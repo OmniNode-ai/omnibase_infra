@@ -1,0 +1,35 @@
+name: omnimarket-projection-registration
+description: Kafka-to-DB projection consumer for registration events (OMN-7610)
+image: omnimarket-projection:latest
+layer: runtime
+container_name: omnimarket-projection-registration
+required_env:
+  - OMNIDASH_ANALYTICS_DB_URL
+hardcoded_env:
+  KAFKA_BROKERS: redpanda:9092
+  PYTHONUNBUFFERED: "1"
+operational_defaults:
+  KAFKA_CONSUMER_GROUP: omnimarket-projections-v1
+  ONEX_LOG_LEVEL: INFO
+ports: null
+healthcheck: null
+volumes: []
+depends_on:
+  - service: redpanda
+    condition: service_healthy
+  - service: postgres
+    condition: service_healthy
+restart: unless-stopped
+resources:
+  cpus: "0.5"
+  memory: 256M
+  cpus_reservation: "0.1"
+  memory_reservation: 64M
+stop_grace_period: 30s
+command:
+  - python
+  - -m
+  - omnimarket.nodes.node_projection_registration.handlers.handler_registration
+labels:
+  com.omninode.service: omnimarket-projection-registration
+  com.omninode.layer: runtime
