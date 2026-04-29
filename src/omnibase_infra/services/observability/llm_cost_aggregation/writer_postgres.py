@@ -605,7 +605,8 @@ def _derive_stable_dedup_key(event: dict[str, object]) -> str:
     Returns:
         A stable string suitable for dedup cache lookup.
     """
-    input_hash = str(event.get("input_hash", "")).strip()
+    raw_input_hash = str(event.get("input_hash", "")).strip()
+    input_hash = _truncate_input_hash(raw_input_hash) or ""
     if len(input_hash) >= 8:
         return "|".join(
             (
@@ -616,11 +617,11 @@ def _derive_stable_dedup_key(event: dict[str, object]) -> str:
             )
         )
 
-    if input_hash:
+    if raw_input_hash:
         logger.debug(
             "input_hash too short (%d chars) to be a reliable dedup key; "
             "falling through to composite hash",
-            len(input_hash),
+            len(raw_input_hash),
         )
 
     # Build a composite key from stable event fields

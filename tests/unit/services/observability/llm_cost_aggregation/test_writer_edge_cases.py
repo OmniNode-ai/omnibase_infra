@@ -610,6 +610,25 @@ class TestDedupKeyEdgeCases:
         assert key == "gpt-4o|session-1|run-1|sha256-abcdef0123456789"
 
     @pytest.mark.unit
+    def test_input_hash_is_truncated_before_dedup_key(self) -> None:
+        """In-memory dedup key matches the VARCHAR(71) value persisted to DB."""
+        raw_hash = "sha256-" + "a" * 100
+        persisted_hash = _truncate_input_hash(raw_hash)
+        event: dict[str, object] = {
+            "model_id": "gpt-4o",
+            "session_id": None,
+            "run_id": "run-1",
+            "input_hash": raw_hash,
+        }
+
+        key = _derive_stable_dedup_key(event)
+
+        assert persisted_hash is not None
+        assert len(persisted_hash) == 71
+        assert key == f"gpt-4o||run-1|{persisted_hash}"
+        assert raw_hash not in key
+
+    @pytest.mark.unit
     def test_short_input_hash_falls_through(self) -> None:
         """input_hash < 8 chars falls through to composite key."""
         event: dict[str, object] = {"input_hash": "short", "model_id": "test"}
