@@ -38,6 +38,9 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from omnibase_infra.models.pricing.model_compute_cost_entry import (
+    ModelComputeCostEntry,
+)
 from omnibase_infra.models.pricing.model_cost_estimate import ModelCostEstimate
 from omnibase_infra.models.pricing.model_pricing_entry import ModelPricingEntry
 
@@ -80,6 +83,10 @@ class ModelPricingTable(BaseModel):
     models: dict[str, ModelPricingEntry] = Field(
         default_factory=dict,
         description="Mapping from model identifier to pricing entry.",
+    )
+    compute_cost: dict[str, ModelComputeCostEntry] = Field(
+        default_factory=dict,
+        description="Mapping from GPU type to hourly compute cost policy.",
     )
 
     @model_validator(mode="after")
@@ -171,6 +178,40 @@ class ModelPricingTable(BaseModel):
         """
         return self.models.get(model_id)
 
+    def estimate_compute_cost(
+        self,
+        gpu_type: str,
+        gpu_seconds: float,
+        gpu_count: int,
+    ) -> float | None:
+        """Estimate compute cost from GPU usage evidence.
+
+        Args:
+            gpu_type: Manifest compute-cost key, e.g. ``"rtx_5090"``.
+            gpu_seconds: GPU wall-clock seconds.
+            gpu_count: Number of GPUs used.
+
+        Returns:
+            Rounded USD compute cost, or ``None`` when the GPU type is not
+            present in the manifest.
+        """
+        if gpu_seconds < 0:
+            raise ValueError("gpu_seconds must be non-negative")
+        if gpu_count < 0:
+            raise ValueError("gpu_count must be non-negative")
+
+        entry = self.compute_cost.get(gpu_type)
+        if entry is None:
+            logger.debug(
+                "GPU type %r not found in pricing manifest compute_cost; "
+                "returning null compute cost.",
+                gpu_type,
+            )
+            return None
+
+        cost = (gpu_seconds / 3600.0) * entry.total_per_hour * gpu_count
+        return round(cost, 10)
+
     @staticmethod
     def from_yaml(path: Path | str | None = None) -> ModelPricingTable:
         """Load a pricing table from a YAML manifest file.
@@ -240,7 +281,7 @@ class ModelPricingTable(BaseModel):
                 "Pricing manifest missing required field: 'schema_version'"
             )
 
-        allowed_keys = {"schema_version", "models"}
+        allowed_keys = {"schema_version", "models", "compute_cost"}
         extra_keys = set(data.keys()) - allowed_keys
         if extra_keys:
             raise ValueError(
@@ -263,9 +304,26 @@ class ModelPricingTable(BaseModel):
                 )
             entries[model_id] = ModelPricingEntry(**entry_data)
 
+        raw_compute_cost = data.get("compute_cost", {})
+        if not isinstance(raw_compute_cost, dict):
+            raise ValueError(
+                f"Pricing manifest 'compute_cost' must be a mapping, "
+                f"got: {type(raw_compute_cost).__name__}"
+            )
+
+        compute_entries: dict[str, ModelComputeCostEntry] = {}
+        for gpu_type, entry_data in raw_compute_cost.items():
+            if not isinstance(entry_data, dict):
+                raise ValueError(
+                    f"Compute cost entry for GPU {gpu_type!r} must be a mapping, "
+                    f"got: {type(entry_data).__name__}"
+                )
+            compute_entries[str(gpu_type)] = ModelComputeCostEntry(**entry_data)
+
         return ModelPricingTable(
             schema_version=str(schema_version),
             models=entries,
+            compute_cost=compute_entries,
         )
 
 

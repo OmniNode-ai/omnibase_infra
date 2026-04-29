@@ -380,6 +380,22 @@ class HandlerLlmOpenaiCompatible:
             # Compute input hash for reproducibility tracking.
             input_hash = _compute_input_hash(request)
 
+            extensions: dict[str, JsonType] = {}
+            if request.gpu_type is not None and request.gpu_count is not None:
+                compute_usage_source = request.compute_usage_source or (
+                    "API"
+                    if normalized.source is ContractEnumUsageSource.API
+                    else "ESTIMATED"
+                )
+                extensions.update(
+                    {
+                        "gpu_seconds": round(latency_ms / 1000.0, 3),
+                        "gpu_type": request.gpu_type,
+                        "gpu_count": request.gpu_count,
+                        "compute_usage_source": compute_usage_source,
+                    }
+                )
+
             # Build the metrics contract.
             metrics = ContractLlmCallMetrics(
                 model_id=request.model,
@@ -393,6 +409,7 @@ class HandlerLlmOpenaiCompatible:
                 input_hash=input_hash,
                 timestamp_iso=datetime.now(UTC).isoformat(),
                 reporting_source="handler-llm-openai-compatible",
+                extensions=extensions,
             )
 
             logger.debug(

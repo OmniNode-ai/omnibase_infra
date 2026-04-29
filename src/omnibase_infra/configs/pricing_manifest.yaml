@@ -20,6 +20,19 @@
 #
 # Schema version for compatibility checking.
 schema_version: "1.0.0"
+compute_cost:
+  rtx_5090:
+    electricity_per_hour: 0.12
+    amortization_per_hour: 0.28
+    note: "Local RTX 5090 GPU compute cost policy"
+  rtx_4090:
+    electricity_per_hour: 0.09
+    amortization_per_hour: 0.18
+    note: "Local RTX 4090 GPU compute cost policy"
+  m2_ultra:
+    electricity_per_hour: 0.04
+    amortization_per_hour: 0.12
+    note: "Local M2 Ultra compute cost policy"
 models:
   # --- Anthropic Claude models ---
   claude-opus-4-6:

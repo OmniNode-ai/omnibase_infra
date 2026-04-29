@@ -279,6 +279,25 @@ class TestMetricsEmission:
         UUID(second_corr_id)
         assert first_corr_id == second_corr_id
 
+    @pytest.mark.asyncio
+    async def test_gpu_evidence_is_flattened_into_published_payload(self) -> None:
+        """Published LLM event carries GPU evidence as top-level fields."""
+        transport = _make_transport()
+        transport._execute_llm_http_call.return_value = _make_response_with_usage()
+        service, _, publisher = _make_service(transport=transport)
+
+        await service.handle(
+            _make_chat_request(gpu_type="rtx_5090", gpu_count=1),
+            correlation_id=_CORRELATION_ID,
+        )
+        await asyncio.sleep(0)
+
+        payload = publisher.call_args_list[0][0][1]
+        assert payload["gpu_seconds"] >= 0
+        assert payload["gpu_type"] == "rtx_5090"
+        assert payload["gpu_count"] == 1
+        assert payload["compute_usage_source"] == "API"
+
 
 # ---------------------------------------------------------------------------
 # Infra-namespace topic emission tests
