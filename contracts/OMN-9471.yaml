@@ -3,13 +3,13 @@
 # contract carries deploy-gate evidence for runtime build-source selector work.
 schema_version: "1.0.0"
 ticket_id: "OMN-9471"
+title: "Define the canonical runtime build-source selector"
 summary: "feat(OMN-9471): add runtime BUILD_SOURCE selector contract"
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:
-  - deploy-agent-command
-  - docker-compose-runtime-build
-  - runtime-image-provenance
+  - events
+  - public_api
 evidence_requirements:
   - kind: tests
     description: Deploy-agent validates and forwards the runtime build-source selector
