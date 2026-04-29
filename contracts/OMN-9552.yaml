@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-9552
+title: "Runtime health monitor boot grace"
+summary: "Suppress runtime health monitor publishes during startup until Kafka topic provisioning has had a chance to complete."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: "Focused health-monitor and crash-loop tests pass."
+    command: "uv run pytest tests/unit/services/test_service_runtime_health_monitor.py tests/integration/test_runtime_crash_loop_fix.py -q"
+  - kind: manual
+    description: "Post-merge runtime validation must confirm clean import and stable RestartCount."
+    command: "deploy: docker exec omninode-runtime python - <<'PY'\nfrom omnibase_infra.runtime.service_kernel import ServiceKernel\nprint(ServiceKernel.__name__)\nPY"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-001
+    description: "Boot grace is anchored at start/first emit, not object construction."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/services/test_service_runtime_health_monitor.py tests/integration/test_runtime_crash_loop_fix.py -q"
+  - id: dod-deploy
+    description: "deploy gate evidence: PR body records post-merge runtime validation; pre-merge live RestartCount proof is not claimed."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "deploy: docker exec omninode-runtime python - <<'PY'\nfrom omnibase_infra.runtime.service_kernel import ServiceKernel\nprint(ServiceKernel.__name__)\nPY"
