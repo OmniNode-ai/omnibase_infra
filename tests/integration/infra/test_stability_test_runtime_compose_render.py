@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -19,6 +20,20 @@ REQUIRED_RUNTIME_SERVICES = {
     "omninode-runtime",
     "runtime-effects",
     "runtime-worker",
+}
+COMPOSE_RENDER_ENV = {
+    "INFISICAL_AUTH_SECRET": "render-only-infisical-auth-secret",
+    "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:postgres@postgres:5432/infisical",
+    "INFISICAL_ENCRYPTION_KEY": "render-only-infisical-encryption-key-32",
+    "INFISICAL_REDIS_URL": "redis://valkey:6379",
+    "LINEAR_API_KEY": "render-only-linear-api-key",
+    "LLM_CODER_FAST_URL": "http://llm-coder-fast.invalid",
+    "LLM_CODER_URL": "http://llm-coder.invalid",
+    "LLM_DEEPSEEK_R1_URL": "http://llm-deepseek.invalid",
+    "LLM_EMBEDDING_URL": "http://llm-embedding.invalid",
+    "ONEX_REGISTRATION_AUTO_ACK": "false",
+    "ONEX_SERVICE_CLIENT_SECRET": "render-only-client-secret",
+    "POSTGRES_PASSWORD": "postgres",
 }
 
 
@@ -36,6 +51,10 @@ def _docker_compose_command(*args: str) -> list[str]:
     ]
 
 
+def _compose_render_env() -> dict[str, str]:
+    return {**os.environ, **COMPOSE_RENDER_ENV}
+
+
 pytestmark = pytest.mark.skipif(
     shutil.which("docker") is None,
     reason="docker is required for non-mutating compose render validation",
@@ -49,6 +68,7 @@ def test_stability_lane_runtime_services_render_with_runtime_profile() -> None:
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
+        env=_compose_render_env(),
         text=True,
     )
 
@@ -64,6 +84,7 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
+        env=_compose_render_env(),
         text=True,
     )
 
