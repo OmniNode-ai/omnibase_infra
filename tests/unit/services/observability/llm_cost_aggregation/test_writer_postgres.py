@@ -481,6 +481,17 @@ class TestSafeConversions:
 
         assert _derive_stable_dedup_key(event) == "gpt-4o|session-1||sha256-same-input"
 
+    @pytest.mark.unit
+    def test_dedup_key_coalesces_null_session_id_like_unique_index(self) -> None:
+        event = {
+            "model_id": "gpt-4o",
+            "session_id": None,
+            "run_id": None,
+            "input_hash": "sha256-same-input",
+        }
+
+        assert _derive_stable_dedup_key(event) == "gpt-4o|||sha256-same-input"
+
 
 # =============================================================================
 # Tests: Writer Methods

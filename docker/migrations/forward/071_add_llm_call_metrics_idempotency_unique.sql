@@ -13,7 +13,7 @@
 CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_call_metrics_idempotency_unique
     ON llm_call_metrics (
         model_id,
-        session_id,
+        COALESCE(session_id, ''),
         COALESCE(run_id, ''),
         input_hash
     )
