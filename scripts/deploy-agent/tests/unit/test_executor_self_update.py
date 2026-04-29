@@ -175,7 +175,7 @@ class TestSelfUpdateWiredIntoRebuildScope:
         def fake_self_update(*, skip: bool = False) -> None:
             call_order.append("self_update")
 
-        def fake_build(scope: Scope, sha: str, cb) -> None:
+        def fake_build(scope: Scope, sha: str, cb, **kwargs) -> None:
             call_order.append("build")
 
         def fake_up(phase: Phase, scope: Scope, services: list[str], cb) -> None:
@@ -200,7 +200,7 @@ class TestSelfUpdateWiredIntoRebuildScope:
         def fake_self_update(*, skip: bool = False) -> None:
             received_skip.append(skip)
 
-        def fake_build(scope, sha, cb) -> None:
+        def fake_build(scope, sha, cb, **kwargs) -> None:
             pass
 
         def fake_up(phase, scope, services, cb) -> None:

@@ -26,6 +26,11 @@ class Scope(StrEnum):
     CORE = "core"
 
 
+class BuildSource(StrEnum):
+    WORKSPACE = "workspace"
+    RELEASE = "release"
+
+
 class Phase(StrEnum):
     PREFLIGHT = "preflight"
     GIT = "git"
@@ -82,6 +87,7 @@ class ModelRebuildRequested(BaseModel):
     correlation_id: UUID
     requested_by: str
     scope: Scope
+    build_source: BuildSource = BuildSource.RELEASE
     services: list[str] = Field(default_factory=list)
     git_ref: str = "origin/main"
 
