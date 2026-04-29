@@ -43,6 +43,13 @@ class FakeConnection:
 
     async def fetchrow(self, sql: str, *args: object) -> Mapping[str, object]:
         self.queries.append((sql, args))
+        if "FROM savings_estimates" in sql:
+            return {
+                "total_savings_usd": Decimal("5.000000"),
+                "local_cost_usd": Decimal("0.500000"),
+                "cloud_cost_usd": Decimal("5.500000"),
+                "session_count": 1,
+            }
         if "average_tokens_per_call" in sql:
             return {
                 "total_tokens": 6000,
@@ -58,6 +65,16 @@ class FakeConnection:
 
     async def fetch(self, sql: str, *args: object) -> list[Mapping[str, object]]:
         self.queries.append((sql, args))
+        if "FROM savings_estimates" in sql:
+            return [
+                {
+                    "model_local": "qwen3-coder-30b",
+                    "total_savings_usd": Decimal("5.000000"),
+                    "local_cost_usd": Decimal("0.500000"),
+                    "cloud_cost_usd": Decimal("5.500000"),
+                    "session_count": 1,
+                }
+            ]
         if "llm_call_metrics" in sql:
             return [
                 {
@@ -254,19 +271,36 @@ async def test_token_usage_response(app: Any, fake_conn: FakeConnection) -> None
     assert args == ("24h",)
 
 
-async def test_savings_summary_returns_stable_503_body(app: Any) -> None:
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
-        response = await client.get("/api/savings/summary")
+async def test_savings_summary_route_returns_seeded_value(
+    app: Any,
+    fake_conn: FakeConnection,
+) -> None:
+    body = await get_json(app, "/api/savings/summary?window=7d")
 
-    assert response.status_code == 503
-    assert response.json() == {
-        "status": "unavailable",
-        "code": "savings_summary_not_implemented",
-        "message": "Savings summary is not implemented yet for OMN-10334.",
+    assert body == {
+        "window": "7d",
+        "total_savings_usd": "5.000000",
+        "local_cost_usd": "0.500000",
+        "cloud_cost_usd": "5.500000",
+        "session_count": 1,
+        "items": [
+            {
+                "model_local": "qwen3-coder-30b",
+                "total_savings_usd": "5.000000",
+                "local_cost_usd": "0.500000",
+                "cloud_cost_usd": "5.500000",
+                "session_count": 1,
+            }
+        ],
     }
+    assert len(fake_conn.queries) >= 2
+    summary_sql, summary_args = fake_conn.queries[-2]
+    grouped_sql, grouped_args = fake_conn.queries[-1]
+    assert "FROM savings_estimates" in summary_sql
+    assert "FROM savings_estimates" in grouped_sql
+    assert "GROUP BY model_local" in grouped_sql
+    assert summary_args == ("7d",)
+    assert grouped_args == ("7d",)
 
 
 async def test_cost_pool_unavailable_response_carries_correlation_context() -> None:

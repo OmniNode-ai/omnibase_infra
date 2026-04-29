@@ -13,6 +13,10 @@ from omnibase_infra.services.cost_api.model_cost_trend import ModelCostTrend
 from omnibase_infra.services.cost_api.model_cost_trend_point import (
     ModelCostTrendPoint,
 )
+from omnibase_infra.services.cost_api.model_savings_summary import ModelSavingsSummary
+from omnibase_infra.services.cost_api.model_savings_summary_item import (
+    ModelSavingsSummaryItem,
+)
 from omnibase_infra.services.cost_api.model_savings_unavailable import (
     ModelSavingsUnavailable,
 )
@@ -27,6 +31,8 @@ __all__ = [
     "ModelCostTrend",
     "ModelCostTrendPoint",
     "ModelSavingsUnavailable",
+    "ModelSavingsSummary",
+    "ModelSavingsSummaryItem",
     "ModelTokenUsage",
     "TrendBucket",
 ]

@@ -8,7 +8,6 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext
@@ -17,6 +16,7 @@ from omnibase_infra.services.cost_api.handlers import (
     fetch_cost_by_repo,
     fetch_cost_summary,
     fetch_cost_trend,
+    fetch_savings_summary,
     fetch_token_usage,
 )
 from omnibase_infra.services.cost_api.models import (
@@ -24,7 +24,7 @@ from omnibase_infra.services.cost_api.models import (
     ModelCostBreakdown,
     ModelCostSummary,
     ModelCostTrend,
-    ModelSavingsUnavailable,
+    ModelSavingsSummary,
     ModelTokenUsage,
     TrendBucket,
 )
@@ -144,15 +144,14 @@ async def get_token_usage(
 
 @router.get(
     "/api/savings/summary",
-    response_model=ModelSavingsUnavailable,
+    response_model=ModelSavingsSummary,
     summary="Savings Summary",
-    responses={503: {"model": ModelSavingsUnavailable}},
 )
-async def get_savings_summary() -> JSONResponse:
-    body = ModelSavingsUnavailable(
-        message="Savings summary is not implemented yet for OMN-10334."
-    )
-    return JSONResponse(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        content=body.model_dump(mode="json"),
-    )
+async def get_savings_summary(
+    pool: Annotated[object, Depends(get_cost_api_pool)],
+    window: Annotated[
+        AggregationWindow,
+        Query(description="Trailing savings window to read."),
+    ] = "24h",
+) -> ModelSavingsSummary:
+    return await fetch_savings_summary(pool, window=window)  # type: ignore[arg-type]

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from decimal import Decimal
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, SupportsInt, cast
 
 from omnibase_infra.services.cost_api.models import (
     AggregationWindow,
@@ -15,6 +15,8 @@ from omnibase_infra.services.cost_api.models import (
     ModelCostSummary,
     ModelCostTrend,
     ModelCostTrendPoint,
+    ModelSavingsSummary,
+    ModelSavingsSummaryItem,
     ModelTokenUsage,
     TrendBucket,
 )
@@ -26,9 +28,7 @@ if TYPE_CHECKING:
 class RowLookup(Protocol):
     """Minimal row interface shared by asyncpg.Record and test rows."""
 
-    def __getitem__(self, key: str) -> object:
-        """Return the row value for a string key."""
-        raise NotImplementedError
+    def __getitem__(self, key: str) -> object: ...
 
 
 def _decimal(value: object, default: str = "0.000000") -> Decimal:
@@ -46,7 +46,7 @@ def _int(value: object) -> int:
         return value
     if isinstance(value, str | bytes | bytearray):
         return int(value)
-    return int(value)  # type: ignore[call-overload]
+    return int(cast("SupportsInt", value))
 
 
 def _row_get(row: RowLookup | None, key: str, default: object = None) -> object:
@@ -260,6 +260,71 @@ async def fetch_token_usage(
         total_tokens=_int(_row_get(row, "total_tokens")),
         call_count=_int(_row_get(row, "call_count")),
         average_tokens_per_call=_decimal(_row_get(row, "average_tokens_per_call")),
+    )
+
+
+async def fetch_savings_summary(
+    pool: asyncpg.Pool,
+    *,
+    window: AggregationWindow,
+) -> ModelSavingsSummary:
+    """Fetch savings totals for the requested trailing window."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT
+                COALESCE(SUM(savings_usd), 0)::numeric(14, 6) AS total_savings_usd,
+                COALESCE(SUM(local_cost_usd), 0)::numeric(14, 6) AS local_cost_usd,
+                COALESCE(SUM(cloud_cost_usd), 0)::numeric(14, 6) AS cloud_cost_usd,
+                COUNT(DISTINCT session_id)::bigint AS session_count
+            FROM savings_estimates
+            WHERE event_timestamp >= NOW() - (
+                CASE $1
+                    WHEN '24h' THEN INTERVAL '24 hours'
+                    WHEN '7d' THEN INTERVAL '7 days'
+                    WHEN '30d' THEN INTERVAL '30 days'
+                END
+            )
+            """,
+            window,
+        )
+        rows = await conn.fetch(
+            """
+            SELECT
+                model_local,
+                COALESCE(SUM(savings_usd), 0)::numeric(14, 6) AS total_savings_usd,
+                COALESCE(SUM(local_cost_usd), 0)::numeric(14, 6) AS local_cost_usd,
+                COALESCE(SUM(cloud_cost_usd), 0)::numeric(14, 6) AS cloud_cost_usd,
+                COUNT(DISTINCT session_id)::bigint AS session_count
+            FROM savings_estimates
+            WHERE event_timestamp >= NOW() - (
+                CASE $1
+                    WHEN '24h' THEN INTERVAL '24 hours'
+                    WHEN '7d' THEN INTERVAL '7 days'
+                    WHEN '30d' THEN INTERVAL '30 days'
+                END
+            )
+            GROUP BY model_local
+            ORDER BY total_savings_usd DESC, model_local ASC
+            """,
+            window,
+        )
+    return ModelSavingsSummary(
+        window=window,
+        total_savings_usd=_decimal(_row_get(row, "total_savings_usd")),
+        local_cost_usd=_decimal(_row_get(row, "local_cost_usd")),
+        cloud_cost_usd=_decimal(_row_get(row, "cloud_cost_usd")),
+        session_count=_int(_row_get(row, "session_count")),
+        items=[
+            ModelSavingsSummaryItem(
+                model_local=str(_row_get(item, "model_local", "unknown")),
+                total_savings_usd=_decimal(_row_get(item, "total_savings_usd")),
+                local_cost_usd=_decimal(_row_get(item, "local_cost_usd")),
+                cloud_cost_usd=_decimal(_row_get(item, "cloud_cost_usd")),
+                session_count=_int(_row_get(item, "session_count")),
+            )
+            for item in rows
+        ],
     )
 
 
