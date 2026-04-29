@@ -110,6 +110,10 @@ x-runtime-base: &runtime-base
   build:
     context: ..
     dockerfile: docker/Dockerfile.runtime
+    args:
+      BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+      EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-${BUILD_SOURCE:-release}}"
+      OMNI_HOME: "${OMNI_HOME:-}"
   networks:
     - omnibase-infra-network
   logging: *logging-defaults

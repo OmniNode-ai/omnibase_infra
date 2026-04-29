@@ -10,10 +10,11 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from deploy_agent.events import (
+    BuildSource,
     ModelHealthCheck,
     Phase,
     PhaseStatus,
@@ -52,6 +53,8 @@ RUNTIME_HEALTH_TARGETS: tuple[tuple[str, int], ...] = (
     ("runtime-effects", 8086),
 )
 
+_BUILD_SOURCE_ALLOWED = ", ".join(source.value for source in BuildSource)
+
 
 def _requested_services_for_up(scope: Scope, services: list[str]) -> list[str]:
     """Return the explicit service list compose should recreate for this scope.
@@ -74,6 +77,49 @@ def _requested_services_for_up(scope: Scope, services: list[str]) -> list[str]:
     if scope == Scope.RUNTIME:
         return services_for_scope(scope)
     return []
+
+
+def _coerce_build_source(value: BuildSource | str, *, layer: str) -> BuildSource:
+    try:
+        return BuildSource(value)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Invalid {layer} BUILD_SOURCE={value!r}; expected one of: {_BUILD_SOURCE_ALLOWED}"
+        ) from exc
+
+
+def _build_source_build_args(
+    build_source: BuildSource | str,
+    *,
+    expected_build_source: BuildSource | str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> list[str]:
+    """Return validated immutable build-source args for docker compose build."""
+    selected = _coerce_build_source(build_source, layer="deploy-agent")
+    expected = _coerce_build_source(
+        selected if expected_build_source is None else expected_build_source,
+        layer="expected",
+    )
+    if selected != expected:
+        raise RuntimeError(
+            "BUILD_SOURCE selector disagreement: "
+            f"deploy-agent selected {selected.value!r}, "
+            f"Dockerfile expected {expected.value!r}"
+        )
+
+    source_env = os.environ if env is None else env
+    omni_home = source_env.get("OMNI_HOME", "").strip()
+    if selected == BuildSource.WORKSPACE and not omni_home:
+        raise RuntimeError("BUILD_SOURCE=workspace requires OMNI_HOME before build")
+
+    return [
+        "--build-arg",
+        f"BUILD_SOURCE={selected.value}",
+        "--build-arg",
+        f"EXPECTED_BUILD_SOURCE={expected.value}",
+        "--build-arg",
+        f"OMNI_HOME={omni_home}",
+    ]
 
 
 def _run(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedProcess:
@@ -481,6 +527,7 @@ class DeployExecutor:
         on_phase_update: PhaseCallback,
         *,
         git_sha: str = "",
+        build_source: BuildSource | str = BuildSource.RELEASE,
         skip_self_update: bool = False,
     ) -> list[str]:
         self.self_update(skip=skip_self_update)
@@ -489,13 +536,17 @@ class DeployExecutor:
             # Build images first (both scopes), then bring them up.
             # _compose_build passes --build-arg GIT_SHA so Docker invalidates
             # the COPY src/ layer even when the file-system mtime is cached.
-            self._compose_build(Scope.CORE, git_sha, on_phase_update)
-            self._compose_build(Scope.RUNTIME, git_sha, on_phase_update)
+            self._compose_build(
+                Scope.CORE, git_sha, on_phase_update, build_source=build_source
+            )
+            self._compose_build(
+                Scope.RUNTIME, git_sha, on_phase_update, build_source=build_source
+            )
             self._compose_up(Phase.CORE, Scope.CORE, [], on_phase_update)
             self._compose_up(Phase.RUNTIME, Scope.RUNTIME, [], on_phase_update)
             return services_for_scope(Scope.FULL)
 
-        self._compose_build(scope, git_sha, on_phase_update)
+        self._compose_build(scope, git_sha, on_phase_update, build_source=build_source)
         self._compose_up(phase, scope, services, on_phase_update)
         return services if services else services_for_scope(scope)
 
@@ -504,6 +555,9 @@ class DeployExecutor:
         scope: Scope,
         git_sha: str,
         on_phase_update: PhaseCallback,
+        *,
+        build_source: BuildSource | str = BuildSource.RELEASE,
+        expected_build_source: BuildSource | str | None = None,
     ) -> None:
         """Build images with --build-arg GIT_SHA to bust the COPY src/ layer cache.
 
@@ -527,6 +581,12 @@ class DeployExecutor:
             "--build-arg",
             f"GIT_SHA={git_sha}",
         ]
+        cmd.extend(
+            _build_source_build_args(
+                build_source,
+                expected_build_source=expected_build_source,
+            )
+        )
         result = _run(cmd, timeout=timeout)
         if result.returncode != 0:
             raise RuntimeError(f"Docker compose build failed: {result.stderr}")

@@ -61,7 +61,7 @@ class TestCacheBust:
         git_sha = "abc1234def56"
         call_order: list[str] = []
 
-        def fake_build(scope: Scope, sha: str, cb) -> None:
+        def fake_build(scope: Scope, sha: str, cb, **kwargs) -> None:
             call_order.append("build")
 
         def fake_up(phase: Phase, scope: Scope, services: list[str], cb) -> None:
@@ -72,9 +72,10 @@ class TestCacheBust:
 
         executor.rebuild_scope(Scope.RUNTIME, [], _noop_phase_update, git_sha=git_sha)
 
-        assert call_order == ["build", "up"], (
-            f"_compose_build must precede _compose_up, got order: {call_order}"
-        )
+        assert call_order == [
+            "build",
+            "up",
+        ], f"_compose_build must precede _compose_up, got order: {call_order}"
 
     def test_compose_build_called_for_full_scope(self) -> None:
         """Full scope rebuild must call _compose_build for both core and runtime."""
@@ -82,7 +83,7 @@ class TestCacheBust:
         git_sha = "abc1234def56"
         build_scopes: list[Scope] = []
 
-        def fake_build(scope: Scope, sha: str, cb) -> None:
+        def fake_build(scope: Scope, sha: str, cb, **kwargs) -> None:
             build_scopes.append(scope)
 
         def fake_up(phase: Phase, scope: Scope, services: list[str], cb) -> None:
@@ -101,7 +102,7 @@ class TestCacheBust:
         executor = DeployExecutor()
         git_sha_seen_in_build: list[str] = []
 
-        def fake_build(scope: Scope, sha: str, cb) -> None:
+        def fake_build(scope: Scope, sha: str, cb, **kwargs) -> None:
             git_sha_seen_in_build.append(sha)
 
         def fake_up(phase: Phase, scope: Scope, services: list[str], cb) -> None:

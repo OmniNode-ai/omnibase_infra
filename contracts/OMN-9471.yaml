@@ -1,0 +1,45 @@
+# OMN-9471 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for runtime build-source selector work.
+schema_version: "1.0.0"
+ticket_id: "OMN-9471"
+summary: "feat(OMN-9471): add runtime BUILD_SOURCE selector contract"
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - deploy-agent-command
+  - docker-compose-runtime-build
+  - runtime-image-provenance
+evidence_requirements:
+  - kind: tests
+    description: Deploy-agent validates and forwards the runtime build-source selector
+    command: uv run --project scripts/deploy-agent pytest scripts/deploy-agent/tests/unit/test_executor_build_source.py scripts/deploy-agent/tests/unit/test_executor_cache_bust.py scripts/deploy-agent/tests/unit/test_executor_self_update.py -q
+  - kind: ci
+    description: Deploy-agent build-source files pass ruff
+    command: uv run --project scripts/deploy-agent ruff check scripts/deploy-agent/deploy_agent/events.py scripts/deploy-agent/deploy_agent/executor.py scripts/deploy-agent/deploy_agent/agent.py scripts/deploy-agent/tests/unit/test_executor_build_source.py scripts/deploy-agent/tests/unit/test_executor_cache_bust.py scripts/deploy-agent/tests/unit/test_executor_self_update.py
+  - kind: manual
+    description: Post-merge deploy validation confirms runtime containers expose BUILD_SOURCE
+    command: deploy omninode-runtime and runtime-effects after merge, then verify docker inspect environment contains BUILD_SOURCE=release or BUILD_SOURCE=workspace as requested
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-001
+    description: Deploy-agent selector validation and forwarding tests pass
+    source: generated
+    checks:
+      - check_type: command
+        check_value: "uv run --project scripts/deploy-agent pytest scripts/deploy-agent/tests/unit/test_executor_build_source.py scripts/deploy-agent/tests/unit/test_executor_cache_bust.py scripts/deploy-agent/tests/unit/test_executor_self_update.py -q"
+  - id: dod-002
+    description: Deploy-agent build-source files pass ruff
+    source: generated
+    checks:
+      - check_type: command
+        check_value: "uv run --project scripts/deploy-agent ruff check scripts/deploy-agent/deploy_agent/events.py scripts/deploy-agent/deploy_agent/executor.py scripts/deploy-agent/deploy_agent/agent.py scripts/deploy-agent/tests/unit/test_executor_build_source.py scripts/deploy-agent/tests/unit/test_executor_cache_bust.py scripts/deploy-agent/tests/unit/test_executor_self_update.py"
+  - id: dod-003
+    description: Runtime image build-source selector is deploy-validated after merge
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "deploy omninode-runtime and runtime-effects after merge; docker inspect omninode-runtime omninode-runtime-effects and verify BUILD_SOURCE matches the requested mode"
