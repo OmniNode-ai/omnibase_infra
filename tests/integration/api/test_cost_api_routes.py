@@ -12,6 +12,13 @@ import httpx
 import pytest
 
 from omnibase_core.container import ModelONEXContainer
+from omnibase_infra.services.cost_api.snapshot_cache import (
+    TOPIC_COST_BY_REPO,
+    TOPIC_COST_SUMMARY,
+    TOPIC_COST_TOKEN_USAGE,
+    clear_latest_snapshots,
+    store_latest_snapshot,
+)
 from omnibase_infra.services.registry_api.main import create_app
 
 pytestmark = pytest.mark.asyncio
@@ -124,6 +131,7 @@ class FakeConnection:
 
 @pytest.fixture
 def fake_conn() -> FakeConnection:
+    clear_latest_snapshots()
     return FakeConnection()
 
 
@@ -256,6 +264,110 @@ async def test_token_usage_response(app: Any) -> None:
         "total_tokens": 6000,
         "call_count": 3,
         "average_tokens_per_call": "2000.000000",
+    }
+
+
+async def test_cost_summary_prefers_latest_projection_snapshot(app: Any) -> None:
+    store_latest_snapshot(
+        TOPIC_COST_SUMMARY,
+        "24h",
+        {
+            "window": "24h",
+            "total_cost_usd": "9.000000",
+            "total_savings_usd": "3.500000",
+            "total_tokens": 9000,
+            "session_count": 4,
+            "snapshot_timestamp": "2026-04-29T12:00:00Z",
+        },
+    )
+
+    body = await get_json(app, "/api/costs/summary")
+
+    assert body == {
+        "window": "24h",
+        "total_cost_usd": "9.000000",
+        "total_tokens": 9000,
+        "call_count": 4,
+        "estimated_coverage_pct": None,
+    }
+
+
+async def test_cost_by_repo_prefers_latest_projection_snapshot(app: Any) -> None:
+    store_latest_snapshot(
+        TOPIC_COST_BY_REPO,
+        "24h",
+        {
+            "window": "24h",
+            "rows": [
+                {
+                    "repo_name": "omnibase_core",
+                    "cost_usd": "0.750000",
+                    "call_count": 1,
+                },
+                {
+                    "repo_name": "unknown",
+                    "cost_usd": "0.100000",
+                    "call_count": 1,
+                },
+            ],
+            "snapshot_timestamp": "2026-04-29T12:00:00Z",
+        },
+    )
+
+    body = await get_json(app, "/api/costs/by-repo")
+
+    assert body == {
+        "window": "24h",
+        "items": [
+            {
+                "name": "omnibase_core",
+                "total_cost_usd": "0.750000",
+                "total_tokens": 0,
+                "call_count": 1,
+            },
+            {
+                "name": "unknown",
+                "total_cost_usd": "0.100000",
+                "total_tokens": 0,
+                "call_count": 1,
+            },
+        ],
+    }
+
+
+async def test_token_usage_prefers_latest_projection_snapshot(app: Any) -> None:
+    store_latest_snapshot(
+        TOPIC_COST_TOKEN_USAGE,
+        "24h",
+        {
+            "window": "24h",
+            "rows": [
+                {
+                    "bucket_timestamp": "2026-04-29T10:00:00Z",
+                    "model_id": "gpt-4.1",
+                    "prompt_tokens": 100,
+                    "completion_tokens": 50,
+                    "total_tokens": 150,
+                },
+                {
+                    "bucket_timestamp": "2026-04-29T11:00:00Z",
+                    "model_id": "gpt-4.1-mini",
+                    "prompt_tokens": 200,
+                    "completion_tokens": 100,
+                    "total_tokens": 300,
+                },
+            ],
+            "snapshot_timestamp": "2026-04-29T12:00:00Z",
+        },
+    )
+
+    body = await get_json(app, "/api/costs/token-usage")
+
+    assert body == {
+        "window": "24h",
+        "total_tokens": 450,
+        "call_count": 2,
+        "average_tokens_per_call": "225.000000",
     }
 
 
