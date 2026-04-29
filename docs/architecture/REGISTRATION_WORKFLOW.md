@@ -10,7 +10,7 @@
 2. [Complete Flow Diagram](#complete-flow-diagram)
 3. [Node Responsibilities](#node-responsibilities)
 4. [Phase 1: Introspection and Registration Initiation](#phase-1-introspection-and-registration-initiation)
-5. [Phase 2: Effect Execution (Consul + PostgreSQL)](#phase-2-effect-execution-consul-postgresql)
+5. [Phase 2: Effect Execution (Consul + PostgreSQL)](#phase-2-effect-execution-consul--postgresql)
 6. [Phase 3: Node Acknowledgment](#phase-3-node-acknowledgment)
 7. [Phase 4: Heartbeat and Liveness](#phase-4-heartbeat-and-liveness)
 8. [RegistrationReducerService: Decision Methods](#registrationreducerservice-decision-methods)
