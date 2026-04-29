@@ -21,6 +21,7 @@ from deploy_agent.executor import DeployExecutor
 from pydantic import ValidationError
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+pytestmark = pytest.mark.unit
 
 
 def _noop_phase_update(phase: Phase, status: PhaseStatus) -> None:
@@ -156,11 +157,8 @@ def test_runtime_compose_passes_build_source_args() -> None:
     build_args = compose["x-runtime-base"]["build"]["args"]
 
     assert build_args["BUILD_SOURCE"] == "${BUILD_SOURCE:-release}"
-    assert (
-        build_args["EXPECTED_BUILD_SOURCE"]
-        == "${EXPECTED_BUILD_SOURCE:-${BUILD_SOURCE:-release}}"
-    )
-    assert build_args["OMNI_HOME"] == "${OMNI_HOME:-}"
+    assert build_args["EXPECTED_BUILD_SOURCE"] == "${EXPECTED_BUILD_SOURCE:-release}"
+    assert "OMNI_HOME" not in build_args
 
 
 def test_runtime_dockerfile_validates_and_stamps_build_source() -> None:
