@@ -23,7 +23,7 @@
 #   - scripts/register-repo.py seed-shared  (seed /shared/* in Infisical)
 #
 # version: increment minor when adding keys, major on breaking structural changes.
-version: "1.0"
+version: "1.1"
 # Keys written to /shared/<transport>/ in Infisical.
 shared:
   "/shared/db/":
@@ -87,6 +87,11 @@ shared:
     # a dedicated platform transport rather than /shared/llm/.
     - ONEX_TREE_SERVICE_URL
     - METADATA_STAMPING_SERVICE_URL
+    # HMAC-SHA256 shared secret used by MixinLlmHttpTransport to sign requests to
+    # the local inference server (.201). Both the client (ONEX runtime) and the
+    # inference server must hold the same value.
+    # Rotation: generate a new random 32-byte hex secret and update both sides atomically.
+    - LOCAL_LLM_SHARED_SECRET
   # NOT prefetched by ConfigPrefetcher — no EnumInfraTransportType.AUTH entry; keys resolved via shell env fallback.
   "/shared/auth/":
     - OPENAI_API_KEY
@@ -96,6 +101,39 @@ shared:
     - Z_AI_API_URL
     - SERVICE_AUTH_TOKEN
     - GH_PAT
+    # Linear project management API key — used by ticket adapters, merge-gate effect,
+    # and CI scripts that create/update Linear issues.
+    # Rotation: rotate via Linear workspace settings; no automatic rotation policy.
+    - LINEAR_API_KEY
+    # Anthropic Claude API key — used by delegation routing handler (claude tier),
+    # validate_env.py, and any node that falls back to cloud LLM inference.
+    # Rotation: rotate via Anthropic console; no automatic rotation policy.
+    - ANTHROPIC_API_KEY
+  # CI relay bearer-token auth — presented by GitHub Actions webhooks to the ci-relay
+  # service. Shared here as the platform-wide default; per-service override is mandatory
+  # in production (each environment must generate its own token).
+  # NOT prefetched by ConfigPrefetcher — no EnumInfraTransportType.CI entry; keys resolved via shell env fallback.
+  "/shared/ci/":
+    # Bearer token validated by omniclaude/services/ci_relay/app.py on every webhook call.
+    # Rotation: generate a new random token and update both Infisical and the GitHub
+    # Actions secret CI_CALLBACK_TOKEN in the target repos.
+    - CI_CALLBACK_TOKEN
+  # Observability credentials — Logfire (Pydantic observability SaaS).
+  # NOT prefetched by ConfigPrefetcher — no EnumInfraTransportType.OBSERVABILITY entry; keys resolved via shell env fallback.
+  "/shared/observability/":
+    # Logfire write token — used by omniintelligence and any service instrumented
+    # with the logfire SDK. Obtain from the Logfire project settings page.
+    # Rotation: rotate via Logfire project settings; no automatic rotation policy.
+    - LOGFIRE_TOKEN
+  # MCP (Model Context Protocol) transport credentials.
+  # NOT prefetched by ConfigPrefetcher — EnumInfraTransportType.MCP exists but
+  # ConfigPrefetcher does not yet call prefetch_for_contracts() for MCP paths;
+  # keys resolve via shell env fallback.
+  "/shared/mcp/":
+    # API key presented by the runtime to authenticated MCP servers.
+    # Used by service_runtime_host_process.py when establishing MCP sessions.
+    # Rotation: rotate by generating a new key and updating all MCP server configs.
+    - MCP_API_KEY
   # NOT prefetched by ConfigPrefetcher — the prefetch pipeline is not yet wired
   # to call prefetch_for_contracts() at runtime, so VALKEY keys resolve via shell
   # env fallback only.  (EnumInfraTransportType.VALKEY and the transport_config_map
