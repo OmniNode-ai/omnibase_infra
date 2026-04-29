@@ -599,10 +599,15 @@ class TestDedupKeyEdgeCases:
 
     @pytest.mark.unit
     def test_input_hash_used_when_long_enough(self) -> None:
-        """input_hash >= 8 chars is used directly as dedup key."""
-        event: dict[str, object] = {"input_hash": "sha256-abcdef0123456789"}
+        """input_hash >= 8 chars is paired with model/session/run identity."""
+        event: dict[str, object] = {
+            "model_id": "gpt-4o",
+            "session_id": "session-1",
+            "run_id": "run-1",
+            "input_hash": "sha256-abcdef0123456789",
+        }
         key = _derive_stable_dedup_key(event)
-        assert key == "sha256-abcdef0123456789"
+        assert key == "gpt-4o|session-1|run-1|sha256-abcdef0123456789"
 
     @pytest.mark.unit
     def test_short_input_hash_falls_through(self) -> None:
