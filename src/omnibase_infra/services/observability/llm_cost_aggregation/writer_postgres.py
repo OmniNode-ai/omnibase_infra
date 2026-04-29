@@ -292,7 +292,7 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                             # abort the entire transaction.  asyncpg's nested
                             # conn.transaction() emits SAVEPOINT / RELEASE.
                             async with conn.transaction():
-                                await conn.execute(
+                                status = await conn.execute(
                                     """
                                     INSERT INTO llm_call_metrics (
                                         correlation_id, session_id, run_id, model_id,
@@ -305,7 +305,7 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                                         $1, $2, $3, $4, $5, $6, $7, $8, $9,
                                         $10, $11, $12, $13, $14, $15, $16
                                     )
-                                    ON CONFLICT (id) DO NOTHING
+                                    ON CONFLICT DO NOTHING
                                     """,
                                     _safe_uuid(event.get("correlation_id")),
                                     event.get("session_id") or None,
@@ -327,11 +327,13 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                                     str(event.get("reporting_source", ""))[:255]
                                     or None,
                                 )
-                            # SAVEPOINT released -- row is persisted within the
-                            # outer transaction. Record the dedup key for
-                            # post-commit cache insertion.
-                            written += 1
-                            persisted_dedup_keys.append(event_id)
+                            inserted_rows = _postgres_inserted_row_count(status)
+                            if inserted_rows > 0:
+                                # SAVEPOINT released -- row is persisted within
+                                # the outer transaction. Record the dedup key
+                                # for post-commit cache insertion.
+                                written += inserted_rows
+                                persisted_dedup_keys.append(event_id)
                         except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                             logger.warning(
                                 "Failed to insert call metric row, skipping",
@@ -964,6 +966,22 @@ def _safe_jsonb(value: object) -> str | None:
         except Exception:  # noqa: BLE001 — boundary: returns degraded response
             return None
     return None
+
+
+def _postgres_inserted_row_count(status: object) -> int:
+    """Parse asyncpg INSERT status into an inserted row count.
+
+    ``INSERT ... ON CONFLICT DO NOTHING`` returns ``INSERT 0 0`` when a
+    uniqueness constraint deduplicates the row.
+    """
+    if not isinstance(status, str):
+        return 1
+
+    match = re.fullmatch(r"INSERT\s+\d+\s+(\d+)", status)
+    if match is None:
+        return 1
+
+    return int(match.group(1))
 
 
 def _resolve_usage_source(event: dict[str, object]) -> str:

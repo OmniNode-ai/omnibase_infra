@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+# no-migration: test-only writer behavior proof
 """Unit tests for WriterLlmCostAggregationPostgres.
 
 Tests:
@@ -30,6 +31,7 @@ import pytest
 from omnibase_infra.services.observability.llm_cost_aggregation.writer_postgres import (
     WriterLlmCostAggregationPostgres,
     _build_aggregation_rows,
+    _postgres_inserted_row_count,
     _resolve_usage_source,
     _safe_decimal,
     _safe_int,
@@ -462,6 +464,11 @@ class TestSafeConversions:
     def test_safe_jsonb_none(self) -> None:
         assert _safe_jsonb(None) is None
 
+    @pytest.mark.unit
+    def test_postgres_inserted_row_count_parses_conflict_status(self) -> None:
+        assert _postgres_inserted_row_count("INSERT 0 1") == 1
+        assert _postgres_inserted_row_count("INSERT 0 0") == 0
+
 
 # =============================================================================
 # Tests: Writer Methods
@@ -517,6 +524,46 @@ class TestWriterCallMetrics:
 
         result = await writer.write_call_metrics([event])
         assert result == 0
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_write_call_metrics_db_conflict_is_not_counted(
+        self,
+        mock_pool: MagicMock,
+        sample_event: dict[str, object],
+    ) -> None:
+        """Database idempotency conflicts are handled without duplicate counts."""
+        event = {
+            **sample_event,
+            "model_id": "gpt-4o",
+            "session_id": "session-same",
+            "run_id": None,
+            "input_hash": "sha256-same-logical-input",
+        }
+        conn = mock_pool.acquire.return_value.__aenter__.return_value
+        conn.execute.side_effect = [
+            "SET",
+            "INSERT 0 1",
+            "SET",
+            "INSERT 0 0",
+        ]
+        writer_a = WriterLlmCostAggregationPostgres(pool=mock_pool)
+        writer_b = WriterLlmCostAggregationPostgres(pool=mock_pool)
+
+        first = await writer_a.write_call_metrics([event])
+        second = await writer_b.write_call_metrics([event])
+
+        assert first == 1
+        assert second == 0
+
+        insert_sql = [
+            call.args[0]
+            for call in conn.execute.call_args_list
+            if "INSERT INTO llm_call_metrics" in call.args[0]
+        ]
+        assert len(insert_sql) == 2
+        assert "ON CONFLICT DO NOTHING" in insert_sql[0]
+        assert "ON CONFLICT (id) DO NOTHING" not in insert_sql[0]
 
 
 class TestWriterCostAggregates:
