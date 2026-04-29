@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+# no-migration: test-only writer behavior proof
 """Unit tests for WriterLlmCostAggregationPostgres.
 
 Tests:
@@ -30,6 +31,8 @@ import pytest
 from omnibase_infra.services.observability.llm_cost_aggregation.writer_postgres import (
     WriterLlmCostAggregationPostgres,
     _build_aggregation_rows,
+    _derive_stable_dedup_key,
+    _postgres_inserted_row_count,
     _resolve_usage_source,
     _safe_decimal,
     _safe_int,
@@ -462,6 +465,33 @@ class TestSafeConversions:
     def test_safe_jsonb_none(self) -> None:
         assert _safe_jsonb(None) is None
 
+    @pytest.mark.unit
+    def test_postgres_inserted_row_count_parses_conflict_status(self) -> None:
+        assert _postgres_inserted_row_count("INSERT 0 1") == 1
+        assert _postgres_inserted_row_count("INSERT 0 0") == 0
+
+    @pytest.mark.unit
+    def test_dedup_key_matches_llm_call_metric_idempotency_contract(self) -> None:
+        event = {
+            "model_id": "gpt-4o",
+            "session_id": "session-1",
+            "run_id": None,
+            "input_hash": "sha256-same-input",
+        }
+
+        assert _derive_stable_dedup_key(event) == "gpt-4o|session-1||sha256-same-input"
+
+    @pytest.mark.unit
+    def test_dedup_key_coalesces_null_session_id_like_unique_index(self) -> None:
+        event = {
+            "model_id": "gpt-4o",
+            "session_id": None,
+            "run_id": None,
+            "input_hash": "sha256-same-input",
+        }
+
+        assert _derive_stable_dedup_key(event) == "gpt-4o|||sha256-same-input"
+
 
 # =============================================================================
 # Tests: Writer Methods
@@ -504,6 +534,37 @@ class TestWriterCallMetrics:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
+    async def test_write_call_metrics_preserves_same_hash_for_different_identity(
+        self,
+        writer: WriterLlmCostAggregationPostgres,
+        mock_pool: MagicMock,
+        sample_event: dict[str, object],
+    ) -> None:
+        """Same input_hash can be valid for different model/session/run identities."""
+        event1 = {
+            **sample_event,
+            "model_id": "gpt-4o",
+            "session_id": "session-a",
+            "run_id": None,
+            "input_hash": "sha256-same-prompt",
+        }
+        event2 = {
+            **sample_event,
+            "model_id": "gpt-4o-mini",
+            "session_id": "session-b",
+            "run_id": "run-2",
+            "input_hash": "sha256-same-prompt",
+        }
+
+        result = await writer.write_call_metrics([event1, event2])
+
+        assert result == 2
+        conn = mock_pool.acquire.return_value.__aenter__.return_value
+        # SET LOCAL + 2 INSERT calls
+        assert conn.execute.call_count == 3
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
     async def test_write_call_metrics_handles_empty_after_dedup(
         self,
         writer: WriterLlmCostAggregationPostgres,
@@ -513,10 +574,50 @@ class TestWriterCallMetrics:
         event = {**sample_event, "input_hash": "sha256-already-seen"}
 
         # Pre-populate dedup cache (mark as already persisted)
-        writer._mark_seen("sha256-already-seen")
+        writer._mark_seen(_derive_stable_dedup_key(event))
 
         result = await writer.write_call_metrics([event])
         assert result == 0
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_write_call_metrics_db_conflict_is_not_counted(
+        self,
+        mock_pool: MagicMock,
+        sample_event: dict[str, object],
+    ) -> None:
+        """Database idempotency conflicts are handled without duplicate counts."""
+        event = {
+            **sample_event,
+            "model_id": "gpt-4o",
+            "session_id": "session-same",
+            "run_id": None,
+            "input_hash": "sha256-same-logical-input",
+        }
+        conn = mock_pool.acquire.return_value.__aenter__.return_value
+        conn.execute.side_effect = [
+            "SET",
+            "INSERT 0 1",
+            "SET",
+            "INSERT 0 0",
+        ]
+        writer_a = WriterLlmCostAggregationPostgres(pool=mock_pool)
+        writer_b = WriterLlmCostAggregationPostgres(pool=mock_pool)
+
+        first = await writer_a.write_call_metrics([event])
+        second = await writer_b.write_call_metrics([event])
+
+        assert first == 1
+        assert second == 0
+
+        insert_sql = [
+            call.args[0]
+            for call in conn.execute.call_args_list
+            if "INSERT INTO llm_call_metrics" in call.args[0]
+        ]
+        assert len(insert_sql) == 2
+        assert "ON CONFLICT DO NOTHING" in insert_sql[0]
+        assert "ON CONFLICT (id) DO NOTHING" not in insert_sql[0]
 
 
 class TestWriterCostAggregates:

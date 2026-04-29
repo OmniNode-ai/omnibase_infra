@@ -1,0 +1,34 @@
+# OMN-10332 contract file for omnibase_infra deploy-gate (OMN-8912).
+# The canonical ticket contract lives in onex_change_control; this repo-local
+# contract carries deploy-gate evidence for the LLM metric writer/migration PR.
+schema_version: "1.0.0"
+ticket_id: OMN-10332
+title: "Enforce LLM call metric idempotency"
+summary: "Add database and writer idempotency for replayed LLM call metric events."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: "Migration and writer behavior tests prove duplicate logical metric writes collapse."
+    command: "uv run pytest tests/ci/test_llm_call_metrics_idempotency_migration.py tests/integration/observability/test_llm_call_metrics_idempotency.py tests/unit/services/observability/llm_cost_aggregation/test_writer_postgres.py -q"
+  - kind: manual
+    description: "Post-merge runtime validation confirms the deployed writer imports and migration 071 is applied before enabling runtime-dependent claims."
+    command: "deploy: docker exec omninode-runtime python - <<'PY'\nfrom omnibase_infra.services.observability.llm_cost_aggregation.writer_postgres import WriterLlmCostAggregationPostgres\nprint(WriterLlmCostAggregationPostgres.__name__)\nPY"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-001
+    description: "Focused migration, integration, and writer behavior proof passes locally."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/ci/test_llm_call_metrics_idempotency_migration.py tests/integration/observability/test_llm_call_metrics_idempotency.py tests/unit/services/observability/llm_cost_aggregation/test_writer_postgres.py -q"
+  - id: dod-deploy
+    description: "deploy gate evidence: post-merge runtime validation is required before claiming live runtime completion; pre-merge live deploy is not claimed."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "deploy: docker exec omninode-runtime python - <<'PY'\nfrom omnibase_infra.services.observability.llm_cost_aggregation.writer_postgres import WriterLlmCostAggregationPostgres\nprint(WriterLlmCostAggregationPostgres.__name__)\nPY"

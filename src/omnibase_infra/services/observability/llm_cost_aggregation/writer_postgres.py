@@ -292,7 +292,7 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                             # abort the entire transaction.  asyncpg's nested
                             # conn.transaction() emits SAVEPOINT / RELEASE.
                             async with conn.transaction():
-                                await conn.execute(
+                                status = await conn.execute(
                                     """
                                     INSERT INTO llm_call_metrics (
                                         correlation_id, session_id, run_id, model_id,
@@ -305,7 +305,7 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                                         $1, $2, $3, $4, $5, $6, $7, $8, $9,
                                         $10, $11, $12, $13, $14, $15, $16
                                     )
-                                    ON CONFLICT (id) DO NOTHING
+                                    ON CONFLICT DO NOTHING
                                     """,
                                     _safe_uuid(event.get("correlation_id")),
                                     event.get("session_id") or None,
@@ -327,11 +327,13 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                                     str(event.get("reporting_source", ""))[:255]
                                     or None,
                                 )
-                            # SAVEPOINT released -- row is persisted within the
-                            # outer transaction. Record the dedup key for
-                            # post-commit cache insertion.
-                            written += 1
-                            persisted_dedup_keys.append(event_id)
+                            inserted_rows = _postgres_inserted_row_count(status)
+                            if inserted_rows > 0:
+                                # SAVEPOINT released -- row is persisted within
+                                # the outer transaction. Record the dedup key
+                                # for post-commit cache insertion.
+                                written += inserted_rows
+                                persisted_dedup_keys.append(event_id)
                         except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
                             logger.warning(
                                 "Failed to insert call metric row, skipping",
@@ -584,13 +586,14 @@ def _truncate_input_hash(value: str) -> str | None:
 def _derive_stable_dedup_key(event: dict[str, object]) -> str:
     """Derive a stable deduplication key from event fields.
 
-    When ``input_hash`` is present and at least 8 characters long, it is used
-    directly. Shorter values are considered unreliable (e.g., truncated or
+    When ``input_hash`` is present and at least 8 characters long, it is paired
+    with the same model/session/run identity used by migration 071's unique
+    index. Shorter values are considered unreliable (e.g., truncated or
     placeholder) and fall through to the composite hash path. Otherwise, a
     composite key is built from ``correlation_id``, ``model_id``, and
-    ``created_at`` (falling back to ``session_id``) and hashed with SHA-256
-    to produce a deterministic, replay-safe dedup key. This ensures events
-    without ``input_hash`` can still be deduplicated on consumer replay.
+    ``created_at`` (falling back to ``session_id``) and hashed with SHA-256 to
+    produce a deterministic, replay-safe dedup key. This ensures events without
+    ``input_hash`` can still be deduplicated on consumer replay.
 
     Note: If multiple events share the same (correlation_id, model_id) pair
     and lack created_at/session_id, they will produce identical dedup keys.
@@ -602,15 +605,23 @@ def _derive_stable_dedup_key(event: dict[str, object]) -> str:
     Returns:
         A stable string suitable for dedup cache lookup.
     """
-    input_hash = str(event.get("input_hash", "")).strip()
+    raw_input_hash = str(event.get("input_hash", "")).strip()
+    input_hash = _truncate_input_hash(raw_input_hash) or ""
     if len(input_hash) >= 8:
-        return input_hash
+        return "|".join(
+            (
+                str(event.get("model_id", "")),
+                str(event.get("session_id") or ""),
+                str(event.get("run_id") or ""),
+                input_hash,
+            )
+        )
 
-    if input_hash:
+    if raw_input_hash:
         logger.debug(
             "input_hash too short (%d chars) to be a reliable dedup key; "
             "falling through to composite hash",
-            len(input_hash),
+            len(raw_input_hash),
         )
 
     # Build a composite key from stable event fields
@@ -964,6 +975,22 @@ def _safe_jsonb(value: object) -> str | None:
         except Exception:  # noqa: BLE001 — boundary: returns degraded response
             return None
     return None
+
+
+def _postgres_inserted_row_count(status: object) -> int:
+    """Parse asyncpg INSERT status into an inserted row count.
+
+    ``INSERT ... ON CONFLICT DO NOTHING`` returns ``INSERT 0 0`` when a
+    uniqueness constraint deduplicates the row.
+    """
+    if not isinstance(status, str):
+        return 1
+
+    match = re.fullmatch(r"INSERT\s+\d+\s+(\d+)", status)
+    if match is None:
+        return 1
+
+    return int(match.group(1))
 
 
 def _resolve_usage_source(event: dict[str, object]) -> str:
