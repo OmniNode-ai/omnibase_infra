@@ -3,17 +3,16 @@
 # contract carries evidence for the non-deploying stability-test lane prep PR.
 schema_version: "1.0.0"
 ticket_id: "OMN-10281"
+title: "Define stability-test runtime lane"
 summary: "prep(OMN-10281): define stability-test runtime lane"
 is_seam_ticket: false
-interface_change: true
-interfaces_touched:
-  - runtime_config
-  - deployment_config
+interface_change: false
+interfaces_touched: []
 evidence_requirements:
   - kind: "tests"
     description: "Static checks prove the stability-test lane does not reuse production runtime names, groups, or state volumes"
     command: "uv run pytest tests/unit/infra/test_stability_test_runtime_lane.py -q"
-  - kind: "static"
+  - kind: "ci"
     description: "Compose overlay renders as YAML for config-only validation"
     command: "python - <<'PY'\nfrom pathlib import Path\nimport yaml\nfor path in ['docker/docker-compose.infra.yml', 'docker/docker-compose.stability-test.yml']:\n    data = yaml.safe_load(Path(path).read_text())\n    assert isinstance(data, dict), path\nprint('compose yaml ok')\nPY"
 emergency_bypass:
@@ -37,5 +36,5 @@ dod_evidence:
     description: "No live runtime mutation is included in this PR"
     source: "manual"
     checks:
-      - check_type: "manual"
+      - check_type: "command"
         check_value: "PR body states no deploy/restart/.201 mutation was performed and that runtime health is not proven"
