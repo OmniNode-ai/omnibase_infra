@@ -1,0 +1,134 @@
+[
+  {
+    "session_id": "sess-task-10-waste",
+    "rule_id": "agent_loop",
+    "severity": "MEDIUM",
+    "waste_tokens": 200,
+    "waste_cost_usd": 0.002,
+    "evidence": {
+      "signature": "bash:same-loop-command",
+      "repeat_count": 3,
+      "window_seconds": 8,
+      "correlation_ids": [
+        "loop-1",
+        "loop-2",
+        "loop-3"
+      ]
+    },
+    "evidence_hash": "7b959fde2cd27a48e9b2b45beafc917b09c9c3c518d4f7f55c91d3ab7463cd08",
+    "dedup_key": "sess-task-10-waste:agent_loop:7b959fde2cd27a48e9b2b45beafc917b09c9c3c518d4f7f55c91d3ab7463cd08",
+    "recommendation": "Collapse repeated agent actions into one call or add loop termination.",
+    "repo_name": "omnibase_infra",
+    "machine_id": "devbox-1",
+    "detected_at": "2026-04-29T12:01:00Z"
+  },
+  {
+    "session_id": "sess-task-10-waste",
+    "rule_id": "high_output",
+    "severity": "MEDIUM",
+    "waste_tokens": 4000,
+    "waste_cost_usd": 0.08,
+    "evidence": {
+      "call_count": 1,
+      "max_output_tokens": 5000,
+      "correlation_ids": [
+        "high-output"
+      ]
+    },
+    "evidence_hash": "bba21543f057ecae7acf0fb9d44bb8946153975724903dc88c4aafa62e0b6d22",
+    "dedup_key": "sess-task-10-waste:high_output:bba21543f057ecae7acf0fb9d44bb8946153975724903dc88c4aafa62e0b6d22",
+    "recommendation": "Constrain response length or request structured, bounded output.",
+    "repo_name": "omnibase_infra",
+    "machine_id": "devbox-1",
+    "detected_at": "2026-04-29T12:01:00Z"
+  },
+  {
+    "session_id": "sess-task-10-waste",
+    "rule_id": "low_cache",
+    "severity": "MEDIUM",
+    "waste_tokens": 4900,
+    "waste_cost_usd": 0.049,
+    "evidence": {
+      "call_count": 1,
+      "total_input_tokens": 10000,
+      "total_cache_read_tokens": 100,
+      "correlation_ids": [
+        "low-cache"
+      ]
+    },
+    "evidence_hash": "1ec94459aad5b7db483c7376edf9c6908bae3ef9ccd6c49689490af0b5375db6",
+    "dedup_key": "sess-task-10-waste:low_cache:1ec94459aad5b7db483c7376edf9c6908bae3ef9ccd6c49689490af0b5375db6",
+    "recommendation": "Enable prompt caching or avoid resending stable context.",
+    "repo_name": "omnibase_infra",
+    "machine_id": "devbox-1",
+    "detected_at": "2026-04-29T12:01:00Z"
+  },
+  {
+    "session_id": "sess-task-10-waste",
+    "rule_id": "model_overkill",
+    "severity": "LOW",
+    "waste_tokens": 400,
+    "waste_cost_usd": 0.015,
+    "evidence": {
+      "call_count": 1,
+      "models": [
+        "claude-opus-4-6"
+      ],
+      "request_types": [
+        "classification"
+      ],
+      "correlation_ids": [
+        "overkill"
+      ]
+    },
+    "evidence_hash": "0d0f607f1ce73eed73c7a4fd38cba70461641c189d74e061c2eea3e105b4333b",
+    "dedup_key": "sess-task-10-waste:model_overkill:0d0f607f1ce73eed73c7a4fd38cba70461641c189d74e061c2eea3e105b4333b",
+    "recommendation": "Route small deterministic requests to a cheaper model tier.",
+    "repo_name": "omnibase_infra",
+    "machine_id": "devbox-1",
+    "detected_at": "2026-04-29T12:01:00Z"
+  },
+  {
+    "session_id": "sess-task-10-waste",
+    "rule_id": "retry_waste",
+    "severity": "MEDIUM",
+    "waste_tokens": 600,
+    "waste_cost_usd": 0.012,
+    "evidence": {
+      "signature": "claude-sonnet-4-5:read:same-file",
+      "retry_count": 1,
+      "first_correlation_id": "retry-first",
+      "retry_correlation_ids": [
+        "retry-second"
+      ]
+    },
+    "evidence_hash": "a1773af1ad93d44a4db513f337cb02d09a734d02856954418f6f6eb976173887",
+    "dedup_key": "sess-task-10-waste:retry_waste:a1773af1ad93d44a4db513f337cb02d09a734d02856954418f6f6eb976173887",
+    "recommendation": "Use idempotency and retry budgets before resubmitting identical LLM requests.",
+    "repo_name": "omnibase_infra",
+    "machine_id": "devbox-1",
+    "detected_at": "2026-04-29T12:01:00Z"
+  },
+  {
+    "session_id": "sess-task-10-waste",
+    "rule_id": "tool_failure_waste",
+    "severity": "MEDIUM",
+    "waste_tokens": 500,
+    "waste_cost_usd": 0.02,
+    "evidence": {
+      "failed_call_count": 1,
+      "correlation_ids": [
+        "failed-1"
+      ],
+      "error_types": [
+        "tool_exit_1"
+      ]
+    },
+    "evidence_hash": "412b5cb9d67b7dc3a4cf2e47e6a1b5c620bda4982b9c18cfe10cbadd10785755",
+    "dedup_key": "sess-task-10-waste:tool_failure_waste:412b5cb9d67b7dc3a4cf2e47e6a1b5c620bda4982b9c18cfe10cbadd10785755",
+    "recommendation": "Fix failing tool calls before retrying LLM-backed work.",
+    "repo_name": "omnibase_infra",
+    "machine_id": "devbox-1",
+    "detected_at": "2026-04-29T12:01:00Z"
+  }
+]

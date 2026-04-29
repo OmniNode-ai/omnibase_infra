@@ -19,3 +19,4 @@ class EnumOmniintelligenceTopic(str, Enum):
     Members are sorted by (kind, event_name, version).
     """
     EVT_LLM_CALL_COMPLETED_V1 = "onex.evt.omniintelligence.llm-call-completed.v1"  # onex.evt.omniintelligence.llm-call-completed.v1
+    EVT_WASTE_DETECTED_V1 = "onex.evt.omniintelligence.waste-detected.v1"  # onex.evt.omniintelligence.waste-detected.v1
