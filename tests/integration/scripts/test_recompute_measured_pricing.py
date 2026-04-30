@@ -153,3 +153,23 @@ def test_recompute_measured_pricing_updates_manifest_from_fixture(
     assert fallback["output_cost_per_1k"] == 0.002
     assert fallback["source"] == "FALLBACK_PROVIDER_DOCUMENTATION"
     assert fallback["evidence"]["authoritative"] is False
+
+
+@pytest.mark.integration
+def test_load_dotenv_sets_database_url_without_overriding_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_recompute_module()
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        'DATABASE_URL="postgresql://from-file"\nOTHER_VALUE=from-file\n',
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("OTHER_VALUE", "from-env")
+
+    module.load_dotenv(env_file)
+
+    assert module.os.environ["DATABASE_URL"] == "postgresql://from-file"
+    assert module.os.environ["OTHER_VALUE"] == "from-env"

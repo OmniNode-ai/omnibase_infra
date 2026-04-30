@@ -10,7 +10,10 @@ import re
 import sys
 from pathlib import Path
 
-_SEED_KEY_RE = re.compile(r"^\s*seed_[A-Za-z0-9_-]*\s*:", re.MULTILINE)
+_SEED_KEY_RE = re.compile(
+    r"""^\s*(?P<quote>["']?)seed_[A-Za-z0-9_-]*(?P=quote)\s*:""",
+    re.MULTILINE,
+)
 
 
 def lint_pricing_manifest(path: Path) -> list[str]:

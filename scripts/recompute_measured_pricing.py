@@ -18,6 +18,7 @@ from typing import Protocol, cast
 import yaml
 
 DEFAULT_MANIFEST = Path("src/omnibase_infra/configs/pricing_manifest.yaml")
+DEFAULT_ENV_FILE = Path.home() / ".omnibase" / ".env"
 LOW_CONFIDENCE = "LOW_CONFIDENCE"
 MEASURED = "MEASURED"
 MEASURED_SOURCE = "API_REPORTED_COST_ROLLING_7D"
@@ -263,7 +264,27 @@ def _fallback_source(entry: dict[str, object]) -> str:
     return FALLBACK_SOURCE
 
 
+def load_dotenv(path: Path = DEFAULT_ENV_FILE) -> None:
+    """Load KEY=VALUE pairs from a dotenv file without overriding the environment."""
+    if not path.exists():
+        return
+
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, raw_value = line.split("=", 1)
+        key = key.strip()
+        if not key or key in os.environ:
+            continue
+        value = raw_value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        os.environ[key] = value
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    load_dotenv()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     parser.add_argument("--output", type=Path)

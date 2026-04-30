@@ -85,6 +85,26 @@ def test_lint_pricing_manifest_blocks_seed_keys(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_lint_pricing_manifest_blocks_quoted_seed_keys(tmp_path: Path) -> None:
+    module = _load_lint_module()
+    manifest = tmp_path / "pricing_manifest.yaml"
+    manifest.write_text(
+        "schema_version: '1.0.0'\n"
+        "models:\n"
+        "  bad:\n"
+        "    'seed_price': 1\n"
+        '    "seed_source": fallback\n',
+        encoding="utf-8",
+    )
+
+    errors = module.lint_pricing_manifest(manifest)
+
+    assert len(errors) == 2
+    assert "'seed_price'" in errors[0]
+    assert '"seed_source"' in errors[1]
+
+
+@pytest.mark.unit
 def test_lint_pricing_manifest_allows_non_seed_manifest(tmp_path: Path) -> None:
     module = _load_lint_module()
     manifest = tmp_path / "pricing_manifest.yaml"
