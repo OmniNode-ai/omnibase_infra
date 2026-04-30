@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILES = (
@@ -89,10 +90,20 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
     )
 
     rendered_config = result.stdout
+    rendered = yaml.safe_load(rendered_config)
+    services = rendered["services"]
+    main_ports = services["omninode-runtime"]["ports"]
+    effects_ports = services["runtime-effects"]["ports"]
+    networks = rendered["networks"]
 
     assert "container_name: omninode-stability-test-runtime" in rendered_config
     assert "container_name: omninode-stability-test-runtime-effects" in rendered_config
     assert "container_name: omninode-stability-test-runtime-worker" in rendered_config
+    assert (
+        "container_name: omnibase-infra-stability-test-forward-migration"
+        in rendered_config
+    )
+    assert "container_name: omnibase-forward-migration" not in rendered_config
     assert "ONEX_ENVIRONMENT: stability-test" in rendered_config
     assert "ONEX_BOX_ID: omninode-pc" in rendered_config
     assert (
@@ -128,3 +139,14 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
     assert "com.omninode.runtime.id: stability-test-effects" in rendered_config
     assert "com.omninode.runtime.id: stability-test-worker" in rendered_config
     assert "image: runtime:stability-test-workspace" in rendered_config
+    assert {port["published"] for port in main_ports} == {"18085"}
+    assert {port["published"] for port in effects_ports} == {"18086"}
+    assert 'published: "8085"' not in rendered_config
+    assert 'published: "8086"' not in rendered_config
+    assert networks["omnibase-infra-network"]["name"] == (
+        "omnibase-infra-stability-test-network"
+    )
+    assert networks["omnimemory-network"]["name"] == (
+        "omnibase-infra-stability-test-omnimemory-network"
+    )
+    assert networks["omnimemory-network"].get("external", False) is False

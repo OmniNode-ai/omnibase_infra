@@ -30,6 +30,8 @@ services:
   migration-gate:
     container_name: omnibase-infra-stability-test-migration-gate
     restart: "no"
+  forward-migration:
+    container_name: omnibase-infra-stability-test-forward-migration
   omninode-runtime:
     image: runtime:stability-test-workspace
     container_name: omninode-stability-test-runtime
@@ -45,7 +47,7 @@ services:
       ONEX_GROUP_ID: onex-stability-test-runtime-main
       KAFKA_INSTANCE_ID: stability-test-main
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-main
-    ports:
+    ports: !override
       - "${STABILITY_TEST_RUNTIME_MAIN_PORT:-18085}:8085"
     volumes:
       - runtime_logs:/app/logs
@@ -72,7 +74,7 @@ services:
       ONEX_GROUP_ID: onex-stability-test-runtime-effects
       KAFKA_INSTANCE_ID: stability-test-effects
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-effects
-    ports:
+    ports: !override
       - "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:-18086}:8085"
     volumes:
       - effects_logs:/app/logs
@@ -128,3 +130,9 @@ volumes:
     name: omninode-stability-test-worker-logs
   stability_test_worker_data:
     name: omninode-stability-test-worker-data
+networks:
+  omnibase-infra-network:
+    name: omnibase-infra-stability-test-network
+  omnimemory-network:
+    name: omnibase-infra-stability-test-omnimemory-network
+    external: false

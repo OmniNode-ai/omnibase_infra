@@ -21,6 +21,11 @@ PRODUCTION_CONTAINER_NAMES = {
     "omnibase-infra-postgres",
     "omnibase-infra-redpanda",
     "omnibase-infra-valkey",
+    "omnibase-forward-migration",
+}
+PRODUCTION_NETWORK_NAMES = {
+    "omnibase-infra-network",
+    "omnimemory-network",
 }
 PRODUCTION_GROUP_IDS = {
     "onex-runtime-main",
@@ -40,8 +45,11 @@ PRODUCTION_VOLUME_NAMES = {
 
 
 def _load_overlay() -> dict:
-    with OVERLAY_FILE.open(encoding="utf-8") as handle:
-        overlay = yaml.safe_load(handle)
+    overlay_text = OVERLAY_FILE.read_text(encoding="utf-8").replace(
+        ": !override",
+        ":",
+    )
+    overlay = yaml.safe_load(overlay_text)
     assert isinstance(overlay, dict)
     return overlay
 
@@ -124,14 +132,46 @@ def test_stability_lane_runtime_services_have_unique_addresses() -> None:
 
 
 @pytest.mark.unit
+def test_stability_lane_runtime_ports_override_production_bindings() -> None:
+    overlay = _load_overlay()
+    services = overlay["services"]
+
+    assert services["omninode-runtime"]["ports"] == [
+        "${STABILITY_TEST_RUNTIME_MAIN_PORT:-18085}:8085"
+    ]
+    assert services["runtime-effects"]["ports"] == [
+        "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:-18086}:8085"
+    ]
+
+
+@pytest.mark.unit
 def test_stability_lane_core_infra_names_are_distinct() -> None:
     overlay = _load_overlay()
     services = overlay["services"]
 
-    for service_name in ("postgres", "redpanda", "valkey", "migration-gate"):
+    for service_name in (
+        "postgres",
+        "redpanda",
+        "valkey",
+        "migration-gate",
+        "forward-migration",
+    ):
         container_name = services[service_name]["container_name"]
         assert "stability-test" in container_name
         assert container_name not in PRODUCTION_CONTAINER_NAMES
+
+
+@pytest.mark.unit
+def test_stability_lane_networks_do_not_reuse_production_names() -> None:
+    overlay = _load_overlay()
+    networks = overlay["networks"]
+
+    for network_name, network_config in networks.items():
+        concrete_name = network_config["name"]
+        assert concrete_name not in PRODUCTION_NETWORK_NAMES, network_name
+        assert "stability-test" in concrete_name, network_name
+
+    assert networks["omnimemory-network"]["external"] is False
 
 
 @pytest.mark.unit
