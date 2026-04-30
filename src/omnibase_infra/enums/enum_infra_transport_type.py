@@ -58,6 +58,7 @@ class EnumInfraTransportType(str, Enum):
 
     HTTP = "http"
     DATABASE = "db"
+    POSTGRES = "postgres"
     KAFKA = "kafka"
     INFISICAL = "infisical"
     VALKEY = "valkey"

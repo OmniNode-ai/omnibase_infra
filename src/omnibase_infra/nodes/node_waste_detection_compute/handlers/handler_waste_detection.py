@@ -6,10 +6,17 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable, Sequence
 from datetime import datetime
+from uuid import UUID, uuid4
 
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
+from omnibase_infra.errors import ModelInfraErrorContext, RepositoryExecutionError
 from omnibase_infra.nodes.node_waste_detection_compute.analyzers.analyzer_agent_loop import (
     analyze_agent_loop,
 )
@@ -33,11 +40,13 @@ from omnibase_infra.nodes.node_waste_detection_compute.models import (
     ModelWasteDetectionInput,
     ModelWasteFinding,
 )
+from omnibase_infra.utils import sanitize_error_message
 
 Analyzer = Callable[
     [tuple[ModelWasteCall, ...], datetime], tuple[ModelWasteFinding, ...]
 ]
 
+logger = logging.getLogger(__name__)
 
 ANALYZERS: tuple[Analyzer, ...] = (
     analyze_tool_failure_waste,
@@ -134,26 +143,61 @@ class HandlerWasteDetection:
         self,
         connection: object,
         findings: Sequence[ModelWasteFinding],
+        correlation_id: UUID | None = None,
     ) -> None:
         """Project findings into the waste_findings table with dedup upsert."""
+        correlation_id = correlation_id or uuid4()
         execute_attr = "execute"
-        run_statement = getattr(connection, execute_attr)
-        for finding in findings:
-            await run_statement(
-                UPSERT_WASTE_FINDING_SQL,
-                finding.session_id,
-                finding.rule_id,
-                finding.severity,
-                finding.waste_tokens,
-                finding.waste_cost_usd,
-                json.dumps(finding.evidence, sort_keys=True, separators=(",", ":")),
-                finding.evidence_hash,
-                finding.dedup_key,
-                finding.recommendation,
-                finding.repo_name,
-                finding.machine_id,
-                finding.detected_at,
+        try:
+            run_statement = getattr(connection, execute_attr)
+            for finding in findings:
+                await run_statement(
+                    UPSERT_WASTE_FINDING_SQL,
+                    finding.session_id,
+                    finding.rule_id,
+                    finding.severity,
+                    finding.waste_tokens,
+                    finding.waste_cost_usd,
+                    json.dumps(
+                        finding.evidence,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    finding.evidence_hash,
+                    finding.dedup_key,
+                    finding.recommendation,
+                    finding.repo_name,
+                    finding.machine_id,
+                    finding.detected_at,
+                )
+        except Exception as exc:
+            sanitized_error = sanitize_error_message(exc)
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.POSTGRES,
+                operation="project_findings",
+                original_error_type=type(exc).__name__,
             )
+            logger.warning(
+                "Waste finding projection failed",
+                extra={
+                    "correlation_id": str(context.correlation_id),
+                    "operation": "project_findings",
+                    "transport_type": EnumInfraTransportType.POSTGRES.value,
+                    "execute_attr": execute_attr,
+                    "sql_reference": "UPSERT_WASTE_FINDING_SQL",
+                    "error_message": sanitized_error,
+                },
+            )
+            raise RepositoryExecutionError(
+                f"postgres project_findings failed: {sanitized_error}",
+                op_name="project_findings",
+                table="waste_findings",
+                sql_fingerprint="UPSERT_WASTE_FINDING_SQL",
+                context=context,
+                execute_attr=execute_attr,
+                sql_reference="UPSERT_WASTE_FINDING_SQL",
+            ) from exc
 
 
 __all__ = [

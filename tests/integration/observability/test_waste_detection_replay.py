@@ -9,9 +9,12 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import RepositoryExecutionError
 from omnibase_infra.nodes.node_waste_detection_compute.handlers.handler_waste_detection import (
     HandlerWasteDetection,
 )
@@ -70,6 +73,11 @@ class FakeConnection:
                 else args[11],
             }
         )
+
+
+class FailingConnection:
+    async def execute(self, _query: str, *_args: object) -> None:
+        raise RuntimeError("connection failed with password=secret")
 
 
 def _load_calls() -> tuple[ModelWasteCall, ...]:
@@ -132,3 +140,30 @@ async def test_project_findings_upserts_waste_findings_rows() -> None:
         assert row["dedup_key"] == (
             f"{row['session_id']}:{row['rule_id']}:{row['evidence_hash']}"
         )
+
+
+@pytest.mark.integration
+async def test_project_findings_wraps_execute_errors_with_sanitized_context() -> None:
+    detection_input = ModelWasteDetectionInput(
+        session_id="sess-task-10-waste",
+        calls=_load_calls(),
+        detected_at=DETECTED_AT,
+    )
+    handler = HandlerWasteDetection()
+    finding = handler.detect(detection_input)[0]
+    correlation_id = uuid4()
+
+    with pytest.raises(RepositoryExecutionError) as exc_info:
+        await handler.project_findings(
+            FailingConnection(),
+            (finding,),
+            correlation_id=correlation_id,
+        )
+
+    err = exc_info.value
+    assert err.model.correlation_id == correlation_id
+    assert err.model.context["transport_type"] == EnumInfraTransportType.POSTGRES
+    assert err.model.context["operation"] == "project_findings"
+    assert err.model.context["original_error_type"] == "RuntimeError"
+    assert "secret" not in err.model.message
+    assert err.model.context["sql_fingerprint"] == "UPSERT_WASTE_FINDING_SQL"
