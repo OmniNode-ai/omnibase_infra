@@ -3,6 +3,7 @@
 # contract carries deploy-gate evidence for the router runtime catalog change.
 schema_version: '1.0.0'
 ticket_id: OMN-7841
+title: 'Remove seed cost and speed values from the model registry'
 summary: 'feat(router): remove seed cost/speed from model registry'
 is_seam_ticket: false
 interface_change: false
