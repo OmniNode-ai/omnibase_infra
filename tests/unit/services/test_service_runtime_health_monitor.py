@@ -362,7 +362,9 @@ class TestEventEmission:
     async def test_emits_to_event_bus(self):
         bus = AsyncMock()
         manifest = _make_manifest()
-        monitor = ServiceRuntimeHealthMonitor(event_bus=bus, bootstrap_servers="")
+        monitor = ServiceRuntimeHealthMonitor(
+            event_bus=bus, bootstrap_servers="", boot_grace_seconds=0.0
+        )
 
         with patch(
             "omnibase_infra.services.service_runtime_health_monitor._discover_contracts",
@@ -381,7 +383,9 @@ class TestEventEmission:
         bus = AsyncMock()
         bus.publish_envelope.side_effect = RuntimeError("kafka down")
         manifest = _make_manifest()
-        monitor = ServiceRuntimeHealthMonitor(event_bus=bus, bootstrap_servers="")
+        monitor = ServiceRuntimeHealthMonitor(
+            event_bus=bus, bootstrap_servers="", boot_grace_seconds=0.0
+        )
 
         with patch(
             "omnibase_infra.services.service_runtime_health_monitor._discover_contracts",
@@ -465,3 +469,83 @@ class TestTopicKey:
         registry = ServiceTopicRegistry.from_defaults()
         topic = registry.resolve(topic_keys.RUNTIME_HEALTH_CHECK)
         assert topic == "onex.evt.omnibase-infra.runtime-health-check.v1"
+
+
+# =============================================================================
+# Boot grace period — OMN-9552
+# =============================================================================
+
+
+class TestBootGracePeriod:
+    """_emit() is suppressed while time.monotonic() - _started_at < boot_grace_seconds."""
+
+    def test_default_boot_grace_is_positive(self):
+        monitor = ServiceRuntimeHealthMonitor()
+        assert monitor._boot_grace_seconds > 0
+
+    def test_custom_boot_grace_accepted(self):
+        monitor = ServiceRuntimeHealthMonitor(boot_grace_seconds=120.0)
+        assert monitor._boot_grace_seconds == 120.0
+
+    def test_zero_boot_grace_accepted(self):
+        monitor = ServiceRuntimeHealthMonitor(boot_grace_seconds=0.0)
+        assert monitor._boot_grace_seconds == 0.0
+
+    def test_negative_boot_grace_rejected(self):
+        with pytest.raises(ValueError, match="boot_grace_seconds"):
+            ServiceRuntimeHealthMonitor(boot_grace_seconds=-1.0)
+
+    def test_boot_grace_not_started_at_construction(self):
+        monitor = ServiceRuntimeHealthMonitor(boot_grace_seconds=120.0)
+        assert monitor._started_at is None
+
+    @pytest.mark.asyncio
+    async def test_start_anchors_boot_grace_timer(self):
+        mock_bus = AsyncMock()
+        monitor = ServiceRuntimeHealthMonitor(
+            event_bus=mock_bus,
+            bootstrap_servers="",
+            boot_grace_seconds=9999.0,
+        )
+
+        with patch(
+            "omnibase_infra.services.service_runtime_health_monitor.time.monotonic",
+            return_value=1234.5,
+        ):
+            await monitor.start()
+        await monitor.stop()
+
+        assert monitor._started_at == 1234.5
+        mock_bus.publish_envelope.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_emit_suppressed_during_grace(self):
+        """_emit() must not call publish_envelope while inside the grace window."""
+        mock_bus = AsyncMock()
+        monitor = ServiceRuntimeHealthMonitor(
+            event_bus=mock_bus,
+            boot_grace_seconds=9999.0,  # effectively infinite
+        )
+        ev = ModelRuntimeHealthCheckEvent(
+            correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
+            status="HEALTHY",
+        )
+        await monitor._emit(ev)
+        mock_bus.publish_envelope.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_emit_fires_after_grace_expires(self):
+        """_emit() must call publish_envelope once the grace window has passed."""
+        mock_bus = AsyncMock()
+        monitor = ServiceRuntimeHealthMonitor(
+            event_bus=mock_bus,
+            boot_grace_seconds=0.0,  # grace already expired at first emit
+        )
+        ev = ModelRuntimeHealthCheckEvent(
+            correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
+            status="HEALTHY",
+        )
+        await monitor._emit(ev)
+        mock_bus.publish_envelope.assert_awaited_once()

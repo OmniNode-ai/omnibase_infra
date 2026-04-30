@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-9554
+title: "Wire runtime health boot grace configuration through service kernel"
+summary: "Expose RUNTIME_HEALTH_BOOT_GRACE_SECONDS as the runtime health monitor boot-grace selector in ServiceKernel."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: "Focused health-monitor tests pass."
+    command: "uv run pytest tests/unit/services/test_service_runtime_health_monitor.py -q"
+  - kind: manual
+    description: "Post-merge runtime validation must confirm clean import and stable RestartCount."
+    command: "deploy: docker exec omninode-runtime python - <<'PY'\nimport os\nprint(os.environ.get('RUNTIME_HEALTH_BOOT_GRACE_SECONDS', '120'))\nPY"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-001
+    description: "ServiceKernel wires RUNTIME_HEALTH_BOOT_GRACE_SECONDS into ServiceRuntimeHealthMonitor."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/services/test_service_runtime_health_monitor.py -q"
+  - id: dod-deploy
+    description: "deploy gate evidence: PR body records post-merge runtime validation; pre-merge live RestartCount proof is not claimed."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "deploy: docker exec omninode-runtime python - <<'PY'\nimport os\nprint(os.environ.get('RUNTIME_HEALTH_BOOT_GRACE_SECONDS', '120'))\nPY"
