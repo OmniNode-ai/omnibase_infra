@@ -2,7 +2,7 @@
 
 # ONEX Architecture Overview
 
-This document provides a high-level overview of the ONEX (OmniNode Execution) architecture used in `omnibase_infra`.
+This document provides a high-level overview of the ONEX (OmniNode eXecution) architecture used in `omnibase_infra`.
 
 ## Design Philosophy
 
