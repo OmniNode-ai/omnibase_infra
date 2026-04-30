@@ -16,6 +16,7 @@ Architecture:
 
 Consumed topics:
     - onex.evt.omniintelligence.llm-call-completed.v1
+    - onex.evt.omniintelligence.dispatch-outcome-evaluated.v1
     - onex.evt.omniclaude.session-outcome.v1
     - onex.evt.omniclaude.hook-context-injected.v1
     - onex.evt.omniclaude.validator-catch.v1

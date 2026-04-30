@@ -73,6 +73,9 @@ MANIFEST_INJECTION_FAILED: Final[str] = "MANIFEST_INJECTION_FAILED"
 LLM_CALL_COMPLETED: Final[str] = "LLM_CALL_COMPLETED"
 """LLM call completed metrics from omniintelligence."""
 
+DISPATCH_OUTCOME_EVALUATED: Final[str] = "DISPATCH_OUTCOME_EVALUATED"
+"""Dispatch worker outcome evaluations from omniintelligence."""
+
 LLM_CALL_COMPLETED_INFRA: Final[str] = "LLM_CALL_COMPLETED_INFRA"
 """LLM call completed event from omnibase-infra inference effect."""
 
@@ -262,6 +265,7 @@ __all__: list[str] = [
     "CIRCUIT_BREAKER_STATE",
     "CONSUMER_HEALTH",
     "CONSUMER_RESTART_CMD",
+    "DISPATCH_OUTCOME_EVALUATED",
     "EFFECTIVENESS_INVALIDATION",
     "ERROR_TRIAGED",
     "EVAL_COMPLETED",
