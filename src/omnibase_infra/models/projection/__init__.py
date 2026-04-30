@@ -29,6 +29,9 @@ Related Tickets:
 from omnibase_core.models.projectors.model_projection_intent import (
     ModelProjectionIntent,
 )
+from omnibase_infra.models.projection.enum_projection_ordering_direction import (
+    EnumProjectionOrderingDirection,
+)
 from omnibase_infra.models.projection.model_capability_fields import (
     ModelCapabilityFields,
 )
@@ -37,6 +40,12 @@ from omnibase_infra.models.projection.model_contract_projection import (
 )
 from omnibase_infra.models.projection.model_projected_flag_meta import (
     ModelProjectedFlagMeta,
+)
+from omnibase_infra.models.projection.model_projection_ordering_contract import (
+    DISPATCH_EVAL_RESULTS_ORDERING_CONTRACT,
+    PROJECTION_ORDERING_CONTRACTS,
+    ModelProjectionOrderingContract,
+    get_projection_ordering_contract,
 )
 from omnibase_infra.models.projection.model_registration_projection import (
     ModelRegistrationProjection,
@@ -55,11 +64,16 @@ from omnibase_infra.models.projection.model_topic_projection import (
 __all__ = [
     "ModelCapabilityFields",
     "ModelContractProjection",
+    "DISPATCH_EVAL_RESULTS_ORDERING_CONTRACT",
+    "EnumProjectionOrderingDirection",
     "ModelProjectedFlagMeta",
     "ModelProjectionIntent",
+    "ModelProjectionOrderingContract",
+    "PROJECTION_ORDERING_CONTRACTS",
     "ModelRegistrationProjection",
     "ModelRegistrationSnapshot",
     "ModelSequenceInfo",
     "ModelSnapshotTopicConfig",
     "ModelTopicProjection",
+    "get_projection_ordering_contract",
 ]
