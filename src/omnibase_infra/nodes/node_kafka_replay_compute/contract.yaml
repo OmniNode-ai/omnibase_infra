@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Kafka Replay Compute
+#
+# Ticket: OMN-10392
+name: "node_kafka_replay_compute"
+node_type: "COMPUTE_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Compute node that replays Kafka event-bus envelopes from an explicitly injected target Kafka/Redpanda bootstrap for deterministic projection-equality proofs. The node never reads production bootstrap configuration or mutates runtime .201.
+
+input_model:
+  name: "ModelKafkaReplayInput"
+  module: "omnibase_infra.nodes.node_kafka_replay_compute.models"
+  description: "Typed replay command with injected bootstrap, topics, offset bounds, replay mode, and optional resume sequence info."
+output_model:
+  name: "ModelKafkaReplayOutput"
+  module: "omnibase_infra.nodes.node_kafka_replay_compute.models"
+  description: "Replay result with event count, offset progress, correlation chain, and failed deserialization offsets."
+definitions:
+  progress_model:
+    name: "ModelKafkaReplayProgress"
+    module: "omnibase_infra.nodes.node_kafka_replay_compute.models"
+    description: "Per topic-partition progress emitted during replay."
+event_bus:
+  subscribe_topics: []
+  publish_topics: []
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "kafka.replay"
+      handler:
+        name: "HandlerKafkaReplay"
+        module: "omnibase_infra.nodes.node_kafka_replay_compute.handlers.handler_replay"
+metadata:
+  description: "Typed Kafka replay primitive for deterministic proof workflows"
+  author: "OmniNode Team"
+  created: "2026-04-30"
+  tags:
+    - "compute"
+    - "kafka"
+    - "replay"
+    - "deterministic-replay"
