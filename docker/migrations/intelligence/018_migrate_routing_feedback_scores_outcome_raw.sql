@@ -43,9 +43,19 @@ ALTER TABLE routing_feedback_scores
 -- Step 3: Add the new (session_id) unique constraint
 -- ============================================================================
 
-ALTER TABLE routing_feedback_scores
-    ADD CONSTRAINT uq_routing_feedback_scores_session
-        UNIQUE (session_id);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'uq_routing_feedback_scores_session'
+          AND conrelid = 'routing_feedback_scores'::regclass
+    ) THEN
+        ALTER TABLE routing_feedback_scores
+            ADD CONSTRAINT uq_routing_feedback_scores_session
+                UNIQUE (session_id);
+    END IF;
+END $$;
 
 -- ============================================================================
 -- Step 4: Drop deprecated columns (correlation_id, stage, outcome)

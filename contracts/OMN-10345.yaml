@@ -1,10 +1,10 @@
 # OMN-10345 contract file for omnibase_infra deploy-gate (OMN-8912).
 # The canonical ticket contract lives in onex_change_control; this repo-local
-# contract carries evidence for the non-deploying runtime address prep PR.
+# contract carries deploy-gate evidence for the isolated stability runtime lane.
 schema_version: "1.0.0"
 ticket_id: "OMN-10345"
-title: "Add runtime addresses to stability-test lane"
-summary: "prep(OMN-10345): add addressable stability-test runtimes"
+title: "Add addressable stability runtime lane"
+summary: "fix(OMN-10345): add addressable stability runtime with isolated runtime proof"
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -15,6 +15,9 @@ evidence_requirements:
   - kind: "ci"
     description: "Compose overlay remains valid YAML for config-only validation"
     command: "python - <<'PY'\nfrom pathlib import Path\nimport yaml\nfor path in ['docker/docker-compose.infra.yml', 'docker/docker-compose.stability-test.yml']:\n    data = yaml.safe_load(Path(path).read_text())\n    assert isinstance(data, dict), path\nprint('compose yaml ok')\nPY"
+  - kind: "manual"
+    description: "Isolated .201 stability lane Redpanda settings can be verified without mutating production runtime"
+    command: "docker exec omnibase-infra-stability-test-redpanda rpk cluster config get topic_partitions_per_shard && docker exec omnibase-infra-stability-test-redpanda rpk cluster config get topic_memory_per_partition"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -33,8 +36,14 @@ dod_evidence:
       - check_type: "command"
         check_value: "rg -n \"ONEX_RUNTIME_ADDRESS|runtime://omninode-pc/stability-test/(main|effects|worker)|does not deploy, restart, or change \\.201\" docker/docker-compose.stability-test.yml docs/runbooks/stability-test-runtime-lane.md"
   - id: "dod-003"
-    description: "No live runtime mutation is included in this PR"
+    description: "Production runtime guardrail stayed healthy during isolated .201 stability-lane proof"
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "PR body states no deploy/restart/.201 mutation was performed and that runtime health is not proven"
+        check_value: "curl -sf http://localhost:8085/health && curl -sf http://localhost:8086/health before and after isolated stability runtime start"
+  - id: "dod-004"
+    description: "Isolated .201 stability lane Redpanda deploy proof"
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec omnibase-infra-stability-test-redpanda rpk cluster config get topic_partitions_per_shard && docker exec omnibase-infra-stability-test-redpanda rpk cluster config get topic_memory_per_partition"

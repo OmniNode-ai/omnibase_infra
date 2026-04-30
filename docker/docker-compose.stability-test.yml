@@ -50,6 +50,21 @@ services:
     ports: !override
       - "${STABILITY_TEST_REDPANDA_EXTERNAL_PORT:-39092}:19092"
       - "${STABILITY_TEST_REDPANDA_ADMIN_PORT:-29644}:9644"
+  redpanda-partition-cap:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-stability-test-redpanda-partition-cap
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_partitions_per_shard 7000
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_memory_per_partition 1048576
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks:
+      - omnibase-infra-network
+    restart: "no"
   valkey:
     container_name: omnibase-infra-stability-test-valkey
     ports: !override
@@ -59,12 +74,22 @@ services:
     restart: "no"
   forward-migration:
     container_name: omnibase-infra-stability-test-forward-migration
+  intelligence-migration:
+    container_name: omnibase-infra-stability-test-intelligence-migration
   omninode-runtime:
     image: runtime:stability-test-workspace
     container_name: omninode-stability-test-runtime
     restart: "no"
+    depends_on:
+      redpanda-partition-cap:
+        condition: service_completed_successfully
     environment:
       BUILD_SOURCE: workspace
+      # Keep PluginMemory inactive in stability lane:
+      # - blank legacy flag
+      # - blank Memgraph host override
+      OMNIMEMORY_ENABLED: ""
+      OMNIMEMORY_MEMGRAPH_HOST: ""
       ONEX_ENVIRONMENT: stability-test
       ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
       ONEX_BOX_ID: omninode-pc
@@ -91,6 +116,11 @@ services:
     restart: "no"
     environment:
       BUILD_SOURCE: workspace
+      # Keep PluginMemory inactive in stability lane:
+      # - blank legacy flag
+      # - blank Memgraph host override
+      OMNIMEMORY_ENABLED: ""
+      OMNIMEMORY_MEMGRAPH_HOST: ""
       ONEX_ENVIRONMENT: stability-test
       ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
       ONEX_BOX_ID: omninode-pc
@@ -117,6 +147,11 @@ services:
     restart: "no"
     environment:
       BUILD_SOURCE: workspace
+      # Keep PluginMemory inactive in stability lane:
+      # - blank legacy flag
+      # - blank Memgraph host override
+      OMNIMEMORY_ENABLED: ""
+      OMNIMEMORY_MEMGRAPH_HOST: ""
       ONEX_ENVIRONMENT: stability-test
       ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
       ONEX_BOX_ID: omninode-pc

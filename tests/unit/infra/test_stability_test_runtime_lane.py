@@ -22,6 +22,7 @@ PRODUCTION_CONTAINER_NAMES = {
     "omnibase-infra-redpanda",
     "omnibase-infra-valkey",
     "omnibase-forward-migration",
+    "omnibase-intelligence-migration",
 }
 PRODUCTION_NETWORK_NAMES = {
     "omnibase-infra-network",
@@ -155,6 +156,44 @@ def test_stability_lane_runtime_ports_override_production_bindings() -> None:
 
 
 @pytest.mark.unit
+def test_stability_lane_sets_redpanda_partition_capacity_before_runtime() -> None:
+    overlay = _load_overlay()
+    services = overlay["services"]
+    partition_cap_service = services["redpanda-partition-cap"]
+    command = partition_cap_service["command"][0]
+
+    assert partition_cap_service["container_name"] == (
+        "omnibase-infra-stability-test-redpanda-partition-cap"
+    )
+    assert partition_cap_service["entrypoint"] == ["/bin/sh", "-c"]
+    assert "set -eu" in command
+    assert "topic_partitions_per_shard" in command
+    assert "7000" in command
+    assert "topic_memory_per_partition" in command
+    assert "1048576" in command
+    assert partition_cap_service["depends_on"]["redpanda"]["condition"] == (
+        "service_healthy"
+    )
+    assert (
+        services["omninode-runtime"]["depends_on"]["redpanda-partition-cap"][
+            "condition"
+        ]
+        == "service_completed_successfully"
+    )
+
+
+@pytest.mark.unit
+def test_stability_lane_explicitly_leaves_omnimemory_inactive() -> None:
+    overlay = _load_overlay()
+    services = overlay["services"]
+
+    for service_name in RUNTIME_SERVICES:
+        environment = services[service_name]["environment"]
+        assert environment["OMNIMEMORY_ENABLED"] == ""
+        assert environment["OMNIMEMORY_MEMGRAPH_HOST"] == ""
+
+
+@pytest.mark.unit
 def test_stability_lane_runtime_services_preserve_image_runtime_contracts() -> None:
     overlay = _load_overlay()
     services = overlay["services"]
@@ -177,10 +216,21 @@ def test_stability_lane_core_infra_names_are_distinct() -> None:
         "valkey",
         "migration-gate",
         "forward-migration",
+        "intelligence-migration",
     ):
         container_name = services[service_name]["container_name"]
         assert "stability-test" in container_name
         assert container_name not in PRODUCTION_CONTAINER_NAMES
+
+
+@pytest.mark.unit
+def test_stability_lane_intelligence_migration_is_isolated() -> None:
+    overlay = _load_overlay()
+    services = overlay["services"]
+
+    assert services["intelligence-migration"]["container_name"] == (
+        "omnibase-infra-stability-test-intelligence-migration"
+    )
 
 
 @pytest.mark.unit

@@ -605,6 +605,8 @@ services:
     depends_on:
       migration-gate:
         condition: service_healthy
+      intelligence-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       valkey:

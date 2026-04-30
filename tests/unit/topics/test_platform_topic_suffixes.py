@@ -55,6 +55,7 @@ from omnibase_infra.topics import (
     SUFFIX_REGISTRY_REQUEST_INTROSPECTION,
     SUFFIX_REQUEST_INTROSPECTION,
     SUFFIX_RESOLUTION_DECIDED,
+    SUFFIX_RUNTIME_HEALTH_CHECK,
     SUFFIX_RUNTIME_TICK,
     SUFFIX_SERVICE_HEARTBEAT,
     SUFFIX_TOPIC_CATALOG_CHANGED,
@@ -402,6 +403,12 @@ class TestOmnibaseInfraTopicSuffixes:
 
         suffixes = {spec.suffix for spec in ALL_OMNIBASE_INFRA_TOPIC_SPECS}
         assert SUFFIX_BASELINES_COMPUTED in suffixes
+
+    @pytest.mark.unit
+    def test_runtime_health_check_in_omnibase_infra_specs(self) -> None:
+        """runtime-health-check spec must be in ALL_OMNIBASE_INFRA_TOPIC_SPECS."""
+        suffixes = {spec.suffix for spec in ALL_OMNIBASE_INFRA_TOPIC_SPECS}
+        assert SUFFIX_RUNTIME_HEALTH_CHECK in suffixes
 
 
 class TestProvisionedTopicSpecs:

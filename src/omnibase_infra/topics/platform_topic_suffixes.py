@@ -598,6 +598,15 @@ Producer: ConsumerHealthEmitter (EventBusKafka, standalone consumers via MixinCo
 Consumer: NodeConsumerHealthTriageEffect, omnidash /consumer-health dashboard
 """
 
+SUFFIX_RUNTIME_HEALTH_CHECK: str = "onex.evt.omnibase-infra.runtime-health-check.v1"
+"""Topic suffix for runtime health check snapshots.
+
+Published by ServiceRuntimeHealthMonitor after each runtime health check cycle.
+
+Producer: ServiceRuntimeHealthMonitor
+Consumer: runtime health projections and operator diagnostics
+"""
+
 SUFFIX_CONSUMER_RESTART_CMD: str = "onex.cmd.omnibase-infra.consumer-restart.v1"
 """Topic suffix for consumer restart commands.
 
@@ -823,6 +832,15 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(
         suffix=SUFFIX_CONSUMER_HEALTH,
         partitions=3,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
+    # Runtime health monitor snapshots (1 partition — low-throughput, OMN-8623)
+    ModelTopicSpec(
+        suffix=SUFFIX_RUNTIME_HEALTH_CHECK,
+        partitions=1,
         kafka_config={
             "retention.ms": "604800000",
             "cleanup.policy": "delete",

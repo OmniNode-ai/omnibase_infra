@@ -42,9 +42,19 @@ ALTER TABLE learned_patterns
 
 -- Unique constraint for signature_hash + domain + version (mirrors pattern_signature constraint)
 -- Note: This constraint ensures no duplicate patterns with the same hash within a domain version.
-ALTER TABLE learned_patterns
-    ADD CONSTRAINT unique_signature_hash_domain_version
-    UNIQUE (domain_id, signature_hash, version);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'unique_signature_hash_domain_version'
+          AND conrelid = 'learned_patterns'::regclass
+    ) THEN
+        ALTER TABLE learned_patterns
+            ADD CONSTRAINT unique_signature_hash_domain_version
+            UNIQUE (domain_id, signature_hash, version);
+    END IF;
+END $$;
 
 -- ============================================================================
 -- Indexes
