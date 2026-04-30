@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Protocol
 
@@ -327,6 +328,7 @@ async def fetch_savings_summary(
     window: AggregationWindow,
 ) -> ModelSavingsSummary:
     """Fetch savings totals for the requested trailing window."""
+    anchor_ts = datetime.now(tz=UTC)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
@@ -336,15 +338,17 @@ async def fetch_savings_summary(
                 COALESCE(SUM(cloud_cost_usd), 0)::numeric(14, 6) AS cloud_cost_usd,
                 COUNT(DISTINCT session_id)::bigint AS session_count
             FROM savings_estimates
-            WHERE event_timestamp >= NOW() - (
+            WHERE event_timestamp >= $2::timestamptz - (
                 CASE $1
                     WHEN '24h' THEN INTERVAL '24 hours'
                     WHEN '7d' THEN INTERVAL '7 days'
                     WHEN '30d' THEN INTERVAL '30 days'
                 END
             )
+              AND event_timestamp <= $2::timestamptz
             """,
             window,
+            anchor_ts,
         )
         rows = await conn.fetch(
             """
@@ -355,17 +359,19 @@ async def fetch_savings_summary(
                 COALESCE(SUM(cloud_cost_usd), 0)::numeric(14, 6) AS cloud_cost_usd,
                 COUNT(DISTINCT session_id)::bigint AS session_count
             FROM savings_estimates
-            WHERE event_timestamp >= NOW() - (
+            WHERE event_timestamp >= $2::timestamptz - (
                 CASE $1
                     WHEN '24h' THEN INTERVAL '24 hours'
                     WHEN '7d' THEN INTERVAL '7 days'
                     WHEN '30d' THEN INTERVAL '30 days'
                 END
             )
+              AND event_timestamp <= $2::timestamptz
             GROUP BY model_local
             ORDER BY total_savings_usd DESC, model_local ASC
             """,
             window,
+            anchor_ts,
         )
     return ModelSavingsSummary(
         window=window,

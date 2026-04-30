@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -415,8 +416,14 @@ async def test_savings_summary_route_returns_seeded_value(
     assert "FROM savings_estimates" in summary_sql
     assert "FROM savings_estimates" in grouped_sql
     assert "GROUP BY model_local" in grouped_sql
-    assert summary_args == ("7d",)
-    assert grouped_args == ("7d",)
+    assert "NOW()" not in summary_sql
+    assert "NOW()" not in grouped_sql
+    assert "event_timestamp <= $2::timestamptz" in summary_sql
+    assert "event_timestamp <= $2::timestamptz" in grouped_sql
+    assert summary_args[0] == "7d"
+    assert grouped_args[0] == "7d"
+    assert isinstance(summary_args[1], datetime)
+    assert grouped_args[1] == summary_args[1]
 
 
 async def test_cost_pool_unavailable_response_carries_correlation_context() -> None:
