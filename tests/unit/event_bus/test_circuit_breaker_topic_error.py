@@ -11,8 +11,10 @@ Related Tickets:
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -90,6 +92,22 @@ class TestCircuitBreakerTopicError:
 
         assert bus._circuit_breaker_failures == before, (
             "UnknownTopicOrPartitionError must not increment circuit breaker failure counter"
+        )
+
+        healthy_send = asyncio.Future()
+        healthy_send.set_result(SimpleNamespace(partition=0, offset=1))
+        bus._producer.send = AsyncMock(return_value=healthy_send)
+
+        await bus._publish_with_retry(
+            topic="onex.evt.healthy.v1",
+            key=None,
+            value=b"test",
+            kafka_headers=[],
+            headers=headers,
+        )
+
+        assert bus._circuit_breaker_failures == before, (
+            "Healthy publishes after topic-not-found must not be blocked by the circuit breaker"
         )
 
     @pytest.mark.asyncio
