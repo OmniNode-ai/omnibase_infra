@@ -38,7 +38,6 @@ from omnibase_infra.nodes.node_waste_detection_compute.models import (
 Analyzer = Callable[
     [tuple[ModelWasteCall, ...], datetime], tuple[ModelWasteFinding, ...]
 ]
-AsyncExecute = Callable[..., Awaitable[object]]
 
 
 ANALYZERS: tuple[Analyzer, ...] = (
@@ -139,7 +138,9 @@ class HandlerWasteDetection:
     ) -> None:
         """Project findings into the waste_findings table with dedup upsert."""
         execute_attr = "execute"
-        run_statement = cast("AsyncExecute", getattr(connection, execute_attr))
+        run_statement = cast(
+            "Callable[..., Awaitable[object]]", getattr(connection, execute_attr)
+        )
         for finding in findings:
             await run_statement(
                 UPSERT_WASTE_FINDING_SQL,
