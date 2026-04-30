@@ -155,6 +155,18 @@ def test_stability_lane_runtime_ports_override_production_bindings() -> None:
 
 
 @pytest.mark.unit
+def test_stability_lane_runtime_services_preserve_image_runtime_contracts() -> None:
+    overlay = _load_overlay()
+    services = overlay["services"]
+
+    for service_name in RUNTIME_SERVICES:
+        volumes = services[service_name]["volumes"]
+        assert "../contracts:/app/contracts:ro" not in volumes
+        assert all(":/app/contracts" not in volume for volume in volumes)
+        assert any(volume.endswith(":/app/skills:ro") for volume in volumes)
+
+
+@pytest.mark.unit
 def test_stability_lane_core_infra_names_are_distinct() -> None:
     overlay = _load_overlay()
     services = overlay["services"]
